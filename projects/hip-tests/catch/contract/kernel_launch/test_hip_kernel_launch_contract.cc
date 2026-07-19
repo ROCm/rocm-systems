@@ -172,7 +172,15 @@ HIP_TEST_CASE(Contract_KernelLaunch_GetSymbolAddress_NullSymbol_IsRejected) {
 }
 
 // @asserts: hipLaunchKernelEx - a minimal extended-launch configuration executes the kernel and publishes the expected value
+// PLATFORM-DIFF: hipLaunchKernelEx is not exported from the Windows HIP runtime
+// (absent from amdhip.def.in), so referencing it is an unresolved external at link
+// time on Windows. The contract is exercised only where the symbol is exported
+// (non-Windows). This gate can be removed once the Windows runtime exports it.
 HIP_TEST_CASE(Contract_KernelLaunch_LaunchKernelEx_WritesExpectedValue) {
+#if defined(_WIN32)
+  HIP_SKIP_TEST("hipLaunchKernelEx is not exported from the Windows HIP runtime; the "
+                "extended-launch contract cannot be linked or exercised there.");
+#else
   hip::contract::ContractCleanup cleanup;
   int* device_value = nullptr;
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
@@ -194,6 +202,7 @@ HIP_TEST_CASE(Contract_KernelLaunch_LaunchKernelEx_WritesExpectedValue) {
   HIP_CHECK(hipDeviceSynchronize());
 
   REQUIRE(ReadDeviceInt(device_value) == kExpectedValue);
+#endif  // _WIN32
 }
 
 // BACKEND-DIFF: hipExtLaunchKernel is an AMD extension with no NVIDIA equivalent,

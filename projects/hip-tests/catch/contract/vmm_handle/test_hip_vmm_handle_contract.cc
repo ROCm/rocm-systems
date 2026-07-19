@@ -182,7 +182,16 @@ HIP_TEST_CASE(Contract_VmmHandle_GetAllocationProperties_RoundTripsFromHandle) {
 }
 
 // @asserts: hipMemGetHandleForAddressRange - a dma-buf fd export yields a non-negative descriptor when supported, else reports non-success and skips
+// PLATFORM-DIFF: hipMemGetHandleForAddressRange is not exported from the Windows
+// HIP runtime (absent from amdhip.def.in), so referencing it is an unresolved
+// external at link time on Windows; the dma-buf fd export it queries is a
+// Linux/driver concept in any case. The contract is exercised only on non-Windows.
+// This gate can be removed once the Windows runtime exports the symbol.
 HIP_TEST_CASE(Contract_VmmHandle_GetHandleForAddressRange_DmaBufFd_IsQueryableWhenSupported) {
+#if defined(_WIN32)
+  HIP_SKIP_TEST("hipMemGetHandleForAddressRange is not exported from the Windows HIP runtime; the "
+                "dma-buf handle-export contract cannot be linked or exercised there.");
+#else
   SkipIfVmmUnsupported();
   // alloc must be declared BEFORE cleanup: the cleanup guard's teardown lambdas
   // capture &alloc and read its fields (handle/address/mapped) as they run. Locals
@@ -208,6 +217,7 @@ HIP_TEST_CASE(Contract_VmmHandle_GetHandleForAddressRange_DmaBufFd_IsQueryableWh
   }
   cleanup.Add([fd] { CloseFd(fd); });
   REQUIRE(fd >= 0);
+#endif  // _WIN32
 }
 
 // @asserts: hipMemExportToShareableHandle - an exported POSIX-fd shareable handle imports back into a usable allocation handle within the same process

@@ -16,7 +16,16 @@
 // cudaOccupancyMaxPotentialBlockSize with a mismatched parameter list under CUDA
 // 13.1, so the whole translation unit builds only on AMD. Parity would require
 // the NVIDIA-backend occupancy wrappers to match the CUDA template signatures.
-#if HT_AMD
+//
+// PLATFORM-DIFF: hipOccupancyMaxPotentialBlockSizeWithFlags,
+// hipOccupancyMaxPotentialBlockSizeVariableSMem, and
+// hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags are not exported from the
+// Windows HIP runtime (absent from amdhip.def.in), so every case here is an
+// unresolved external at link time on Windows. The whole translation unit is
+// therefore additionally gated off on Windows (compiling to an empty test binary,
+// exactly as it already does on the NVIDIA backend). This platform gate can be
+// removed once the Windows runtime exports these symbols.
+#if HT_AMD && !defined(_WIN32)
 
 namespace {
 __global__ void OccupancyVariableKernel(int* output) {
@@ -96,4 +105,4 @@ HIP_TEST_CASE(Contract_OccupancyVariable_VariableSMemWithFlags_ReturnsUsableValu
   REQUIRE(min_grid_size >= 0);
   REQUIRE(block_size > 0);
 }
-#endif  // HT_AMD
+#endif  // HT_AMD && !defined(_WIN32)

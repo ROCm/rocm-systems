@@ -19,7 +19,10 @@ bool IsDeviceMemoryType(unsigned int type) {
 
 // BACKEND-DIFF: helper for the AMD-only hipPointerSetAttribute tests below; see
 // the marked gate before Contract_PointerQuery_MemPtrGetInfo.
-#if HT_AMD
+// PLATFORM-DIFF: hipPointerSetAttribute is not exported from the Windows HIP
+// runtime (absent from amdhip.def.in), so this helper and its two callers are
+// additionally gated off on Windows to avoid an unresolved external at link time.
+#if HT_AMD && !defined(_WIN32)
 bool PointerSetAttributeOrSkip(const void* value, hipPointer_attribute attribute, hipDeviceptr_t ptr) {
   const hipError_t status = hipPointerSetAttribute(value, attribute, ptr);
   if (status == hipErrorNotSupported) {
@@ -28,7 +31,7 @@ bool PointerSetAttributeOrSkip(const void* value, hipPointer_attribute attribute
   HIP_CHECK(status);
   return true;
 }
-#endif  // HT_AMD
+#endif  // HT_AMD && !defined(_WIN32)
 }  // namespace
 
 // @asserts: hipDrvPointerGetAttributes - a device allocation reports device memory type and the owning device ordinal
@@ -113,7 +116,13 @@ HIP_TEST_CASE(Contract_PointerQuery_MemPtrGetInfo_ReturnsAllocationSize) {
 }
 
 // @asserts: hipPointerSetAttribute - setting SYNC_MEMOPS on a device pointer is accepted-or-unsupported
+// PLATFORM-DIFF: hipPointerSetAttribute is not exported from the Windows HIP
+// runtime, so this case is skipped there (see the helper gate above).
 HIP_TEST_CASE(Contract_PointerQuery_SetAttribute_SyncMemops_SucceedsWhenSupported) {
+#if defined(_WIN32)
+  HIP_SKIP_TEST("hipPointerSetAttribute is not exported from the Windows HIP runtime; the "
+                "SYNC_MEMOPS set contract cannot be linked or exercised there.");
+#else
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
   HIP_CHECK(hipMalloc(&data, kAllocationBytes));
@@ -124,10 +133,17 @@ HIP_TEST_CASE(Contract_PointerQuery_SetAttribute_SyncMemops_SucceedsWhenSupporte
                                  reinterpret_cast<hipDeviceptr_t>(data))) {
     HIP_SKIP_TEST("HIP_POINTER_ATTRIBUTE_SYNC_MEMOPS is not supported by this runtime path.");
   }
+#endif  // _WIN32
 }
 
 // @asserts: hipPointerSetAttribute - rejects null value, an unknown attribute enum, and a null pointer with a non-success status
+// PLATFORM-DIFF: hipPointerSetAttribute is not exported from the Windows HIP
+// runtime, so this case is skipped there (see the helper gate above).
 HIP_TEST_CASE(Contract_PointerQuery_SetAttribute_InvalidArgs_AreRejected) {
+#if defined(_WIN32)
+  HIP_SKIP_TEST("hipPointerSetAttribute is not exported from the Windows HIP runtime; the "
+                "invalid-argument rejection contract cannot be linked or exercised there.");
+#else
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
   HIP_CHECK(hipMalloc(&data, kAllocationBytes));
@@ -140,5 +156,6 @@ HIP_TEST_CASE(Contract_PointerQuery_SetAttribute_InvalidArgs_AreRejected) {
                                  reinterpret_cast<hipDeviceptr_t>(data)) != hipSuccess);
   REQUIRE(hipPointerSetAttribute(&value, HIP_POINTER_ATTRIBUTE_SYNC_MEMOPS, nullptr) !=
           hipSuccess);
+#endif  // _WIN32
 }
 #endif  // HT_AMD
