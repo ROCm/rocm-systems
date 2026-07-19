@@ -17,6 +17,25 @@ The LLVM parity map is used as a regression checklist for known wait patterns,
 not as a requirement that kernels came from LLVM. See
 [`../waitcheck-llvm-parity.md`](../waitcheck-llvm-parity.md).
 
+## Support Matrix
+
+Both the offline CLI and HSA tools hook support every target below.
+
+| Target | ISA family | Validation |
+|---|---|---|
+| `gfx942` | CDNA3 | PyTorch corpus |
+| `gfx950` | CDNA4 | PyTorch samples, Tensile, IREE |
+| `gfx1100` | RDNA3 | PyTorch corpus |
+| `gfx1150` | RDNA3.5 | PyTorch corpus |
+| `gfx1151` | RDNA3.5 | Focused tests |
+| `gfx1200` | RDNA4 | Focused tests |
+| `gfx1201` | RDNA4 | PyTorch corpus |
+| `gfx1250` | — | PyTorch corpus |
+
+“PyTorch corpus” means an exhaustive sweep completed successfully with no known
+waitcheck false positives. It does not mean the corpus contained no real
+hazards.
+
 ## Build from Source
 
 With Git, `uv`, CMake, Ninja, and the zlib/zstd development packages installed,
@@ -540,9 +559,6 @@ gfx1150/gfx1151/RDNA3.5, and gfx12 object-visible wait behavior including:
 - legacy CDNA3/CDNA4 VMcnt/LGKMcnt/EXPcnt waits and RDNA3/RDNA3.5's separate
   VScnt;
 - gfx1100 SOPK single-counter wait forms.
-
-Supported targets are `gfx942`, `gfx950`, `gfx1100`, `gfx1150`, `gfx1151`,
-`gfx1200`, `gfx1201`, and `gfx1250`.
 
 The `RjWaitcheck.LlvmKernel.*` tests compile the same ordinary HIP vector-add
 kernel with AMD Clang for gfx942 and gfx1100 and require both resulting code

@@ -884,6 +884,30 @@ void append_gfx1100_v_mov_b32_v3_v2(std::vector<uint32_t> &program) {
   program.push_back(0x7E060302u);
 }
 
+void append_gfx1150_ds_load_u8_d16_hi_v1_v1(std::vector<uint32_t> &program) {
+  program.push_back(0xDA8C0000u);
+  program.push_back(0x01000001u);
+}
+
+void append_gfx1150_ds_load_u8_d16_hi_v1_v6(std::vector<uint32_t> &program) {
+  program.push_back(0xDA8C0000u);
+  program.push_back(0x01000006u);
+}
+
+void append_gfx1150_ds_load_u8_d16_v1_v5_offset512(std::vector<uint32_t> &program) {
+  program.push_back(0xDA880200u);
+  program.push_back(0x01000005u);
+}
+
+void append_gfx1150_s_waitcnt_lgkmcnt_1(std::vector<uint32_t> &program) {
+  program.push_back(0xBF89FC17u);
+}
+
+void append_gfx1150_global_store_d16_hi_b8_v2_v1(std::vector<uint32_t> &program) {
+  program.push_back(0xDC920000u);
+  program.push_back(0x007C0102u);
+}
+
 constexpr uint32_t kOverflowQueueSize = 40;
 constexpr uint32_t kOverflowRequiredCount = kOverflowQueueSize - 1;
 constexpr uint32_t kOverflowBaseVgpr = 32;
@@ -1266,6 +1290,36 @@ TEST(WaitcheckTest, Rdna35ReportsMissingVmcntBeforeGlobalLoadUse) {
   EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
   EXPECT_EQ(report.diagnostics[0].required_count, 0u);
   EXPECT_NE(report.diagnostics[0].message.find("s_waitcnt vmcnt(0)"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Rdna35AcceptsPendingD16LoadToOppositeVgprHalf) {
+  std::vector<uint32_t> program;
+  append_gfx1150_ds_load_u8_d16_hi_v1_v1(program);
+  append_gfx1150_ds_load_u8_d16_v1_v5_offset512(program);
+  append_gfx1150_s_waitcnt_lgkmcnt_1(program);
+  append_gfx1150_global_store_d16_hi_b8_v2_v1(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA3_5);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Rdna35ReportsPendingD16LoadToSameVgprHalf) {
+  std::vector<uint32_t> program;
+  append_gfx1150_ds_load_u8_d16_v1_v5_offset512(program);
+  append_gfx1150_ds_load_u8_d16_hi_v1_v6(program);
+  append_gfx1150_s_waitcnt_lgkmcnt_1(program);
+  append_gfx1150_global_store_d16_hi_b8_v2_v1(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA3_5);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 1, 1}));
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
 }
 
 TEST(WaitcheckTest, Gfx1100AcceptsLegacySWaitcntVmcntZeroBeforeGlobalLoadUse) {

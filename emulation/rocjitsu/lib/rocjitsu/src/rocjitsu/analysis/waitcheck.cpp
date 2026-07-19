@@ -419,11 +419,25 @@ struct ClassifiedEvent {
   bool check_program_end = false;
 };
 
+inline constexpr uint8_t kVgprLow16Mask = 0x1;
+inline constexpr uint8_t kVgprHigh16Mask = 0x2;
+inline constexpr uint8_t kVgprFull32Mask = kVgprLow16Mask | kVgprHigh16Mask;
+
+struct PartialRegisterAccess {
+  RegisterRef reg;
+  uint8_t mask = kVgprFull32Mask;
+};
+
 struct PendingEvent {
   WaitCounterKind counter = WaitCounterKind::Load;
   WaitEventKind kind = WaitEventKind::Unknown;
   RegisterSet regs;
   RegisterSet old_value_regs;
+  // LLVM tracks the low/high 16-bit physical subregisters used by D16 memory
+  // operations independently. Keep the exceptional partial destination
+  // sparse: almost every event still covers whole 32-bit register lanes.
+  std::optional<RegisterRef> partial_reg;
+  uint8_t partial_reg_mask = kVgprFull32Mask;
   std::optional<RegisterRef> special_reg;
   std::optional<int64_t> barrier_id;
   bool produces_regs = false;
@@ -932,6 +946,7 @@ private:
 
   [[nodiscard]] static bool same_event_identity(const PendingEvent &lhs, const PendingEvent &rhs) {
     return lhs.counter == rhs.counter && lhs.kind == rhs.kind && lhs.regs == rhs.regs &&
+           lhs.partial_reg == rhs.partial_reg && lhs.partial_reg_mask == rhs.partial_reg_mask &&
            lhs.special_reg == rhs.special_reg && lhs.barrier_id == rhs.barrier_id &&
            lhs.produces_regs == rhs.produces_regs && lhs.check_uses == rhs.check_uses &&
            lhs.check_defs == rhs.check_defs && lhs.check_exec_defs == rhs.check_exec_defs &&
@@ -977,6 +992,10 @@ private:
       return lhs_key < rhs_key;
     if (register_ref_key(lhs.special_reg) != register_ref_key(rhs.special_reg))
       return register_ref_key(lhs.special_reg) < register_ref_key(rhs.special_reg);
+    if (register_ref_key(lhs.partial_reg) != register_ref_key(rhs.partial_reg))
+      return register_ref_key(lhs.partial_reg) < register_ref_key(rhs.partial_reg);
+    if (lhs.partial_reg_mask != rhs.partial_reg_mask)
+      return lhs.partial_reg_mask < rhs.partial_reg_mask;
     return register_set_less(lhs.regs, rhs.regs);
   }
 
@@ -2361,6 +2380,105 @@ private:
     return events;
   }
 
+  [[nodiscard]] static bool tracks_d16_subregisters(rj_code_arch_t arch) {
+    // GFX11 uses LLVM's VGPR_LO16/VGPR_HI16 register units for memory
+    // operations. The D16Writes32BitVgpr feature still makes VALU and some
+    // mixed-event cases conservative, but ordinary memory operations on
+    // disjoint halves remain independent.
+    return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+  }
+
+  [[nodiscard]] static std::optional<PartialRegisterAccess>
+  partial_d16_load_def(const Instruction &inst, rj_code_arch_t arch) {
+    if (!tracks_d16_subregisters(arch) || !inst.is_memory_op())
+      return std::nullopt;
+
+    const std::string_view mnemonic = inst.mnemonic();
+    if (mnemonic.find("load") == std::string_view::npos ||
+        mnemonic.find("d16") == std::string_view::npos)
+      return std::nullopt;
+
+    const Operand *dst = inst.dst_operand(0);
+    if (!dst)
+      return std::nullopt;
+    auto ref = dst->to_register_ref();
+    if (!ref || ref->cls != RegClass::VGPR || ref->width != 1)
+      return std::nullopt;
+
+    const uint8_t mask =
+        mnemonic.find("d16_hi") != std::string_view::npos ? kVgprHigh16Mask : kVgprLow16Mask;
+    return PartialRegisterAccess{*ref, mask};
+  }
+
+  [[nodiscard]] static bool is_low_half_memory_store(std::string_view mnemonic) {
+    return mnemonic.find("store_b8") != std::string_view::npos ||
+           mnemonic.find("store_b16") != std::string_view::npos ||
+           mnemonic.find("store_byte") != std::string_view::npos ||
+           mnemonic.find("store_short") != std::string_view::npos ||
+           mnemonic.find("write_b8") != std::string_view::npos ||
+           mnemonic.find("write_b16") != std::string_view::npos;
+  }
+
+  [[nodiscard]] static std::optional<PartialRegisterAccess>
+  partial_memory_store_use(const Instruction &inst, rj_code_arch_t arch) {
+    if (!tracks_d16_subregisters(arch) || !inst.is_memory_op())
+      return std::nullopt;
+
+    const std::string_view mnemonic = inst.mnemonic();
+    if (mnemonic.find("store") == std::string_view::npos &&
+        mnemonic.find("write") == std::string_view::npos)
+      return std::nullopt;
+
+    uint8_t mask = kVgprFull32Mask;
+    if (mnemonic.find("d16_hi") != std::string_view::npos)
+      mask = kVgprHigh16Mask;
+    else if (is_low_half_memory_store(mnemonic))
+      mask = kVgprLow16Mask;
+    else
+      return std::nullopt;
+
+    const int data_operand_index = starts_with(mnemonic, "buffer_store") ||
+                                           starts_with(mnemonic, "tbuffer_store") ||
+                                           starts_with(mnemonic, "image_store")
+                                       ? 0
+                                       : 1;
+    const Operand *data = inst.src_operand(data_operand_index);
+    if (!data)
+      return std::nullopt;
+    auto ref = data->to_register_ref();
+    if (!ref || ref->cls != RegClass::VGPR || ref->width != 1)
+      return std::nullopt;
+    return PartialRegisterAccess{*ref, mask};
+  }
+
+  [[nodiscard]] static uint8_t pending_register_mask(const PendingEvent &event, RegisterRef ref) {
+    return event.partial_reg && *event.partial_reg == ref ? event.partial_reg_mask
+                                                          : kVgprFull32Mask;
+  }
+
+  [[nodiscard]] static uint8_t instruction_register_mask(const Instruction &inst, RegisterRef ref,
+                                                         WaitcheckAccessKind access,
+                                                         rj_code_arch_t arch) {
+    const auto partial = access == WaitcheckAccessKind::Def   ? partial_d16_load_def(inst, arch)
+                         : access == WaitcheckAccessKind::Use ? partial_memory_store_use(inst, arch)
+                                                              : std::nullopt;
+    return partial && partial->reg == ref ? partial->mask : kVgprFull32Mask;
+  }
+
+  [[nodiscard]] static std::optional<RegisterRef>
+  first_dependency_intersection(const PendingEvent &event, const RegisterSet &pending_regs,
+                                const Instruction &inst, const RegisterSet &current_regs,
+                                WaitcheckAccessKind access, rj_code_arch_t arch) {
+    std::optional<RegisterRef> result;
+    pending_regs.for_each([&](RegisterRef ref) {
+      if (!result && current_regs.contains(ref) &&
+          (pending_register_mask(event, ref) &
+           instruction_register_mask(inst, ref, access, arch)) != 0)
+        result = ref;
+    });
+    return result;
+  }
+
   [[nodiscard]] static std::optional<RegisterRef> first_intersection(const RegisterSet &lhs,
                                                                      const RegisterSet &rhs) {
     std::optional<RegisterRef> result;
@@ -3155,13 +3273,15 @@ private:
           // exists. Definitions are handled separately below because CDNA also
           // supports synchronous overlays of the visible generation.
           const RegisterSet pending_only_regs = event.regs - event.old_value_regs;
-          reg = first_intersection(pending_only_regs, du.uses);
+          reg = first_dependency_intersection(event, pending_only_regs, inst, du.uses,
+                                              WaitcheckAccessKind::Use, arch);
         }
         if (!reg && event.check_defs) {
           RegisterSet pending_only_regs = event.regs - event.old_value_regs;
           if (creates_immediate_overlay_generation(arch, inst, current_events))
             pending_only_regs -= du.defs;
-          reg = first_intersection(pending_only_regs, du.defs);
+          reg = first_dependency_intersection(event, pending_only_regs, inst, du.defs,
+                                              WaitcheckAccessKind::Def, arch);
           access = WaitcheckAccessKind::Def;
         }
         if (!reg && event.special_reg) {
@@ -3479,6 +3599,13 @@ private:
     event.counter = classification.counter;
     event.kind = classification.kind;
     event.regs = registers_for_event(inst, du, classification, state.vgpr_msb, arch);
+    if (classification.registers == TrackedRegisterSource::Defs) {
+      if (const auto partial = partial_d16_load_def(inst, arch);
+          partial && event.regs.contains(partial->reg)) {
+        event.partial_reg = partial->reg;
+        event.partial_reg_mask = partial->mask;
+      }
+    }
     event.produces_regs = tracks_committed_vgpr_generations(arch) &&
                           classification.registers == TrackedRegisterSource::Defs;
     if (event.produces_regs)
