@@ -423,6 +423,12 @@ struct KmqMetadata {
   uint32_t syncobj_handle = 0;
   PDICache pdi_cache;
   CmdBOPool cmd_bo_pool;
+
+  // Scratch buffers reused across SubmitCmdChain calls to avoid reallocating on every submission.
+  // Instruction and arguments BOs (performance hint: up to 3 argument BOs per packet).
+  std::vector<uint32_t> bo_handles;
+  // Commands to be submitted.
+  std::vector<XdnaDriver::BOHandle> cmd_bo_handles;
 };
 
 /**
@@ -940,6 +946,9 @@ hsa_status_t XdnaDriver::CreateKernelModeQueue(size_t queue_size, void** queue_m
     return err;
   }
 
+  kmq_metadata->bo_handles.reserve(queue_size * 4);
+  kmq_metadata->cmd_bo_handles.reserve(queue_size);
+
   *queue_metadata = kmq_metadata.release();
   return HSA_STATUS_SUCCESS;
 }
@@ -1207,12 +1216,13 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
                                         uint32_t num_core_tiles, const core::Agent& agent) {
   auto kmq_metadata = static_cast<KmqMetadata*>(queue_metadata);
 
-  // Instruction and arguments BOs (performance hint: up to 3 argument BOs per packet).
-  std::vector<uint32_t> bo_handles;
+  // Reuse cached scratch buffers to avoid reallocating on every submission.
+  std::vector<uint32_t>& bo_handles = kmq_metadata->bo_handles;
+  bo_handles.clear();
   bo_handles.reserve(num_pkts * 4);
 
-  // Commands to be submitted.
-  std::vector<BOHandle> cmd_bo_handles;
+  std::vector<BOHandle>& cmd_bo_handles = kmq_metadata->cmd_bo_handles;
+  cmd_bo_handles.clear();
   cmd_bo_handles.reserve(num_pkts);
 
   // Flag to reconfigure the hardware context because of a new PDI.
@@ -1255,7 +1265,10 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
       return err;
     }
     bo_handles.push_back(instr_handle);
-    FlushCpuCache(insts_addr, 0, pkt->insts_size);
+    if (reconfigure_queue) {
+      // Flush instruction sequence cache only if the hardware context is being reconfigured.
+      FlushCpuCache(insts_addr, 0, pkt->insts_size);
+    }
 
     // Add the argument BO handles to bo_handles.
     auto* kernarg_address = static_cast<uint64_t*>(pkt->kernarg_address);
