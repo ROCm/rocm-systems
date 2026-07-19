@@ -231,7 +231,7 @@ void L2Cache::flush_all(uint32_t vmid) {
   (void)vmid;
   auto locks = lock_all_sets();
   uint32_t dirty_count = 0;
-  uint64_t min_addr = UINT64_MAX, max_addr = 0;
+  uint64_t min_addr = std::numeric_limits<uint64_t>::max(), max_addr = 0;
   cache_.for_each_dirty([this, &dirty_count, &min_addr,
                          &max_addr](simdojo::CacheTag &tag, uint64_t line_addr, uint8_t *data) {
     // Each dirty line is written back under its own owning vmid.
