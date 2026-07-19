@@ -866,6 +866,16 @@ void append_gfx1100_s_mov_b32_s8_s4(std::vector<uint32_t> &program) {
   program.push_back(0xBE880004u);
 }
 
+void append_gfx1100_v_add_co_u32_v0_s1_s4_v0(std::vector<uint32_t> &program) {
+  program.push_back(0xD7000100u);
+  program.push_back(0x02020004u);
+}
+
+void append_gfx1100_v_add_co_ci_u32_v2_null_s25_0_s1(std::vector<uint32_t> &program) {
+  program.push_back(0xD5207C02u);
+  program.push_back(0x00050019u);
+}
+
 void append_gfx1100_v_mov_b32_v1_v0(std::vector<uint32_t> &program) {
   program.push_back(0x7E020300u);
 }
@@ -1328,6 +1338,68 @@ TEST(WaitcheckTest, Gfx1100AcceptsSopkSWaitcntLgkmcntZeroBeforeScalarLoadUse) {
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1100Wave32Vop3CarryOutDoesNotDefineAdjacentSgpr) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(2, 0));
+  append_gfx1100_v_add_co_u32_v0_s1_s4_v0(program);
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1100, true);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA3);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1100Wave64Vop3CarryOutDefinesBothMaskSgprs) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(2, 0));
+  append_gfx1100_v_add_co_u32_v0_s1_s4_v0(program);
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1100);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA3);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::SGPR, 2, 1}));
+}
+
+TEST(WaitcheckTest, Gfx1100Wave32Vop3CarryInDoesNotUseAdjacentSgpr) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(2, 0));
+  append_gfx1100_v_add_co_ci_u32_v2_null_s25_0_s1(program);
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1100, true);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA3);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1100Wave64Vop3CarryInUsesBothMaskSgprs) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(2, 0));
+  append_gfx1100_v_add_co_ci_u32_v2_null_s25_0_s1(program);
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1100);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA3);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::SGPR, 2, 1}));
 }
 
 TEST(WaitcheckTest, Gfx950ReportsMissingVmcntBeforeBufferLoadUse) {

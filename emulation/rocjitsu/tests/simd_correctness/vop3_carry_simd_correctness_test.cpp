@@ -96,8 +96,8 @@ const uint64_t kVccPatterns[] = {
     0x5555555555555555ULL, 0x0123456789ABCDEFULL,
 };
 
-// The cin word comes from an SGPR-pair (src2), which can hold *any* 64-bit
-// pattern — so sweep cin independently from VCC. Same set as VCC; the
+// The cin word comes from the wave-sized BoolRC src2, so sweep cin
+// independently from VCC. Same set as VCC; the
 // orthogonal sweep catches cases where the glue accidentally reads VCC
 // instead of src2 (or vice-versa).
 const uint64_t kCinPatterns[] = {
@@ -361,6 +361,28 @@ TEST(Vop3CarrySimdCorrectness, Cdna4PartialExecMask) {
     return;
   }
   run_cdna4(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
+}
+
+TEST(Vop3CarrySimdCorrectness, RdnaWave32CarryInIgnoresAdjacentSgpr) {
+  WaveFixture<32> fx("vop3_carry_wave32_mem", "vop3_carry_wave32_l2", "cu_vop3_carry_wave32",
+                     ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_NE(fx.cu, nullptr);
+  ASSERT_NE(fx.wf, nullptr);
+  ASSERT_EQ(fx.wf->wf_size(), 32u);
+
+  const uint32_t sb = fx.wf->sgpr_alloc().base;
+  const uint32_t cin = sb + 2u;
+  uint32_t words[2] = {0u, 0u};
+  vop3_sdstenc_encode(/*op=*/288, /*vdst=*/2, /*sdst=*/sb,
+                      /*src0=*/256, /*src1=*/257, /*src2=*/cin, kRdna3Encoding, words);
+  std::unique_ptr<Instruction> inst(fx.decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_NE(inst->src_operand(2), nullptr);
+  ASSERT_EQ(inst->src_operand(2)->size_bits(), 64u);
+
+  fx.cu->write_sgpr(cin, 0x12345678u);
+  fx.cu->write_sgpr(cin + 1u, 0xDEADBEEFu);
+  EXPECT_EQ(amdgpu::read_wave_mask_scalar(*inst->src_operand(2), *fx.wf), 0x12345678u);
 }
 
 TEST(Vop3CarrySimdCorrectness, RdnaFullExecMask) {
