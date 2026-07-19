@@ -376,6 +376,7 @@ add_executable(
     shared_infra_test.cpp
     transcendental_test.cpp
     analysis/liveness_test.cpp
+    analysis/waitcheck_c_api_test.cpp
     analysis/waitcheck_test.cpp
     patch/spill_manager_test.cpp
     patch/instruction_builder_test.cpp
@@ -487,6 +488,13 @@ rj_configure_target(rocjitsu_tests TEST)
 # default ctest run (invoke them directly via
 # ./rocjitsu_tests --gtest_filter='*Benchmark*').
 rj_add_gtest_tests(rocjitsu_tests TEST_FILTER -*Benchmark*)
+
+# Compile and link the public waitcheck header as C, independently of the C++
+# unit tests that exercise its behavior.
+add_executable(waitcheck_c_header_test analysis/waitcheck_c_header_test.c)
+target_link_libraries(waitcheck_c_header_test PRIVATE rocjitsu_shared)
+rj_configure_target(waitcheck_c_header_test PRIVATE_INCLUDES WARNINGS)
+rj_add_test(NAME RjWaitcheck.CHeader COMMAND waitcheck_c_header_test LABELS waitcheck)
 
 # --- DBI probe fixture test ---
 # Loads a real amdclang++-compiled rj_nop_probe device ELF and exercises the

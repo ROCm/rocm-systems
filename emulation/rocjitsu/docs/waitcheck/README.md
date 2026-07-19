@@ -36,12 +36,13 @@ rocm-sdk init
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DROCM_PATH="$(rocm-sdk path --root)" \
   -DCMAKE_PREFIX_PATH="$(rocm-sdk path --cmake)"
-cmake --build build --target rj_waitcheck rocjitsu_waitcheck_hooks
+cmake --build build --target rj_waitcheck rocjitsu_waitcheck_hooks rocjitsu_shared
 ```
 
 This produces `build/tools/rj_waitcheck` and
-`build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_waitcheck_hooks.so`. See
-[`../building.md`](../building.md) for prerequisites and other build options.
+`build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_waitcheck_hooks.so`, plus the
+programmatic API in `build/librocjitsu.so`. See [`../building.md`](../building.md)
+for prerequisites and other build options.
 
 ## Quick Start: gfx1250
 
@@ -148,6 +149,46 @@ missing_wait:gfx1250[0]:.text+0x10: missing s_wait_kmcnt <= 0 before use of s4
 The HSA tool reports the same information with a `rocjitsu-waitcheck:` prefix
 and includes the dispatched kernel name. The `.text` offsets can be passed to
 `rj_co --disassemble-window` when a larger ISA window is needed.
+
+## Programmatic C API
+
+Kernel generators and compilers that already hold a final HSA code object in
+memory can check it before publishing or loading it. The call is synchronous,
+single-threaded, and infers the GPU target from the ELF header:
+
+```c
+#include <rocjitsu/analysis/rj_waitcheck.h>
+
+#include <stdio.h>
+
+static void report(const rj_waitcheck_diagnostic_t *diagnostic, void *unused) {
+  (void)unused;
+  fprintf(stderr, "%s\n", diagnostic->message);
+}
+
+int validate_code_object(const void *bytes, size_t size, uint64_t kernel_entry) {
+  rj_waitcheck_options_t options;
+  rj_waitcheck_options_init(&options);
+  options.kernel_entry_offset = kernel_entry; /* .text byte offset; zero is valid. */
+  options.diagnostic_callback = report;
+
+  rj_waitcheck_result_t result;
+  rj_status_t status = rj_waitcheck_analyze(bytes, size, &options, &result);
+  if (status != ROCJITSU_STATUS_SUCCESS)
+    return -1; /* Malformed, unsupported, or incompletely analyzed object. */
+  return result.passed ? 0 : 1;
+}
+```
+
+Use `ROCJITSU_WAITCHECK_ALL_KERNELS` instead of an entry offset to check every
+kernel in the code object. The input buffer only needs to remain valid until
+the call returns. A hazard is not an API failure: the call returns
+`ROCJITSU_STATUS_SUCCESS`, sets `result.passed` to zero, and reports structured
+producer/consumer diagnostics through the callback. `result.diagnostics_observed`
+is complete with the default unlimited callback delivery. If no callback is
+installed, `max_diagnostics` limits delivery, or checking stops early,
+`result.diagnostics_truncated` is set and the observed count is a lower bound.
+Link the installed library with `-lrocjitsu`.
 
 ## Offline CLI
 
