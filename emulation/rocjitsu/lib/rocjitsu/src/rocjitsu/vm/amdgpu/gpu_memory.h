@@ -375,7 +375,7 @@ private:
 
   template <typename F> bool with_host_ptr(uint64_t addr, uint32_t vmid, F &&fn) const {
     if (vmid == 0) {
-      if (!passthrough_)
+      if (!passthrough_ || addr >= kUserSpaceLimit)
         return false;
       fn(reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK));
       return true;

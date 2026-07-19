@@ -247,10 +247,12 @@ private:
 
   class SetRangeLocks {
   public:
-    SetRangeLocks(std::array<std::mutex, NUM_SETS> &mutexes, uint64_t line_start, uint64_t end)
+    SetRangeLocks(std::array<std::mutex, NUM_SETS> &mutexes, uint64_t line_start,
+                  uint64_t line_count)
         : mutexes_(mutexes) {
       std::array<bool, NUM_SETS> seen{};
-      for (uint64_t line_addr = line_start; line_addr < end; line_addr += LINE_SIZE) {
+      for (uint64_t i = 0; i < line_count; ++i) {
+        const uint64_t line_addr = line_start + i * LINE_SIZE;
         uint32_t set = CacheStore::set_index(line_addr);
         if (!seen[set]) {
           seen[set] = true;
@@ -290,8 +292,8 @@ private:
   };
 
   AllSetLocks lock_all_sets() const { return AllSetLocks(set_mutexes_); }
-  SetRangeLocks lock_sets_for_range(uint64_t line_start, uint64_t end) const {
-    return SetRangeLocks(set_mutexes_, line_start, end);
+  SetRangeLocks lock_sets_for_range(uint64_t line_start, uint64_t line_count) const {
+    return SetRangeLocks(set_mutexes_, line_start, line_count);
   }
 
   void ensure_line(uint64_t addr, uint32_t vmid = 0);

@@ -12,6 +12,7 @@
 #include <barrier>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <span>
 #include <thread>
 #include <vector>
@@ -237,6 +238,31 @@ TEST(L2CacheThreadingTest, ConcurrentFlushAllPreservesDirtyWritebacks) {
       EXPECT_EQ(actual, expected) << "addr=0x" << std::hex << addr;
     }
   }
+}
+
+TEST(L2CacheTest, InvalidateRangeClampsAtAddressSpaceEnd) {
+  GpuMemory memory("memory");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+
+  constexpr uint64_t kLineAddr = std::numeric_limits<uint64_t>::max() - (L2Cache::LINE_SIZE - 1);
+  constexpr uint64_t kRangeAddr =
+      std::numeric_limits<uint64_t>::max() - (L2Cache::LINE_SIZE / 2 - 1);
+  std::array<uint8_t, L2Cache::LINE_SIZE> initial{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> replacement{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> actual{};
+  initial.fill(0x11);
+  replacement.fill(0x22);
+
+  memory.write_block(kLineAddr, std::span<const uint8_t>(initial));
+  l2.read(kLineAddr, actual.data(), actual.size());
+  ASSERT_EQ(actual, initial);
+
+  memory.write_block(kLineAddr, std::span<const uint8_t>(replacement));
+  l2.invalidate_range(kRangeAddr, L2Cache::LINE_SIZE);
+  l2.read(kLineAddr, actual.data(), actual.size());
+
+  EXPECT_EQ(actual, replacement);
 }
 
 

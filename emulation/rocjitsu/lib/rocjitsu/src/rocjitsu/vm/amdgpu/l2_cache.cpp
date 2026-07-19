@@ -9,6 +9,7 @@
 #include <bit>
 #include <cassert>
 #include <cstring>
+#include <limits>
 #include <span>
 
 namespace rocjitsu {
@@ -251,11 +252,15 @@ void L2Cache::flush_all(uint32_t vmid) {
 void L2Cache::invalidate_range(uint64_t addr, uint32_t size) {
   if (size == 0)
     return;
-  uint64_t line_start = CacheStore::line_address(addr);
-  uint64_t end = addr + size;
-  auto locks = lock_sets_for_range(line_start, end);
-  for (uint64_t la = line_start; la < end; la += LINE_SIZE)
-    cache_.invalidate_all_vmids(la);
+  const uint64_t line_start = CacheStore::line_address(addr);
+  const uint64_t requested_lines =
+      (static_cast<uint64_t>(CacheStore::line_offset(addr)) + size + LINE_SIZE - 1) / LINE_SIZE;
+  const uint64_t addressable_lines =
+      (std::numeric_limits<uint64_t>::max() - line_start) / LINE_SIZE + 1;
+  const uint64_t line_count = std::min(requested_lines, addressable_lines);
+  auto locks = lock_sets_for_range(line_start, line_count);
+  for (uint64_t i = 0; i < line_count; ++i)
+    cache_.invalidate_all_vmids(line_start + i * LINE_SIZE);
 }
 
 } // namespace amdgpu

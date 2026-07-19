@@ -583,6 +583,16 @@ TEST(GpuMemoryTest, RegisteredVmidPassthroughMissRespectsUserSpaceLimit) {
   EXPECT_EQ(memory.resolve_host_ptr(0x4000, kPid), reinterpret_cast<uint8_t *>(0x4000));
 }
 
+TEST(GpuMemoryTest, UnregisteredVmidPassthroughRespectsUserSpaceLimit) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint64_t kUserSpaceLimit = 0x800000000000ULL;
+
+  EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit), nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit + 0x123), nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(0x4000), reinterpret_cast<uint8_t *>(0x4000));
+}
+
 TEST(GpuMemoryTest, RegisteredVmidBlockMissUsesClientMemory) {
   amdgpu::GpuMemory memory("memory");
   constexpr uint32_t kPid = 7;
