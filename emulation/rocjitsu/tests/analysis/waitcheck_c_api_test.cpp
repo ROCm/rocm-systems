@@ -59,11 +59,10 @@ void capture_error(const char *message, void *user_data) {
   return options;
 }
 
-TEST(WaitcheckCApiTest, DefaultOptionsAnalyzeEveryKernelWithoutStoppingEarly) {
+TEST(WaitcheckCApiTest, DefaultOptionsReportEveryDiagnosticWithoutStoppingEarly) {
   rj_waitcheck_options_t options{};
   rj_waitcheck_options_init(&options);
 
-  EXPECT_EQ(options.kernel_entry_offset, ROCJITSU_WAITCHECK_ALL_KERNELS);
   EXPECT_EQ(options.max_diagnostics, 0u);
   EXPECT_EQ(options.max_reachability_cache_bytes, 0u);
   EXPECT_EQ(options.stop_after_first_diagnostic, 0u);
@@ -141,10 +140,10 @@ TEST(WaitcheckCApiTest, SelectsOneKernelByTextEntryOffset) {
 
   CallbackState state;
   rj_waitcheck_options_t options = callback_options(state);
-  options.kernel_entry_offset = hazardous.size() * sizeof(uint32_t);
   rj_waitcheck_result_t result{};
 
-  ASSERT_EQ(rj_waitcheck_analyze(image.data(), image.size(), &options, &result),
+  ASSERT_EQ(rj_waitcheck_analyze_kernel(image.data(), image.size(),
+                                        hazardous.size() * sizeof(uint32_t), &options, &result),
             ROCJITSU_STATUS_SUCCESS);
   EXPECT_EQ(result.passed, 1u);
   EXPECT_EQ(result.kernels_discovered, 2u);
@@ -153,8 +152,7 @@ TEST(WaitcheckCApiTest, SelectsOneKernelByTextEntryOffset) {
   EXPECT_TRUE(state.diagnostics.empty());
   EXPECT_TRUE(state.errors.empty());
 
-  options.kernel_entry_offset = 0;
-  ASSERT_EQ(rj_waitcheck_analyze(image.data(), image.size(), &options, &result),
+  ASSERT_EQ(rj_waitcheck_analyze_kernel(image.data(), image.size(), 0, &options, &result),
             ROCJITSU_STATUS_SUCCESS);
   EXPECT_EQ(result.passed, 0u);
   EXPECT_EQ(result.kernels_analyzed, 1u);
@@ -177,6 +175,8 @@ TEST(WaitcheckCApiTest, DiagnosticLimitReportsTruncationAndPreservesFailure) {
   ASSERT_EQ(rj_waitcheck_analyze(image.data(), image.size(), &options, &result),
             ROCJITSU_STATUS_SUCCESS);
   EXPECT_EQ(result.passed, 0u);
+  EXPECT_EQ(result.kernels_discovered, 2u);
+  EXPECT_EQ(result.kernels_analyzed, 2u);
   EXPECT_EQ(result.diagnostics_observed, 1u);
   EXPECT_EQ(result.diagnostics_reported, 1u);
   EXPECT_EQ(result.diagnostics_truncated, 1u);
@@ -195,8 +195,7 @@ TEST(WaitcheckCApiTest, RejectsMalformedBufferAndUnknownKernelOffset) {
   EXPECT_NE(state.errors.back().find("valid AMDGPU HSA code object"), std::string::npos);
 
   const auto image = rocjitsu::waitcheck_test::make_gfx1200_correct_wait_code_object();
-  options.kernel_entry_offset = 0x12345678;
-  EXPECT_EQ(rj_waitcheck_analyze(image.data(), image.size(), &options, &result),
+  EXPECT_EQ(rj_waitcheck_analyze_kernel(image.data(), image.size(), 0x12345678, &options, &result),
             ROCJITSU_STATUS_INVALID_ARGUMENT);
   ASSERT_EQ(state.errors.size(), 2u);
   EXPECT_NE(state.errors.back().find("kernel entry offset"), std::string::npos);
