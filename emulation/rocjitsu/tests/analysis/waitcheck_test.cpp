@@ -4596,6 +4596,51 @@ TEST(WaitcheckTest, ObjectAnalysisIgnoresUnreachableSkippedUse) {
   EXPECT_TRUE(report.diagnostics.empty());
 }
 
+TEST(WaitcheckTest, Gfx950KernelAnalysisIgnoresHazardInUnreachableBlock) {
+  const std::vector<uint32_t> program{
+      0xBF820004u,              // 0x00: s_branch to s_endpgm.
+      0xC00E0A00u, 0x00000050u, // 0x04: dead s_load_dwordx8 s[40:47], s[0:1], 0x50.
+      0xC0020B40u, 0x0000008Cu, // 0x0c: dead s_load_dword s45, s[0:1], 0x8c.
+      0xBF810000u,              // 0x14: s_endpgm.
+  };
+  const auto image = rocjitsu::waitcheck_test::make_gfx_multi_kernel_code_object(
+      {{"dead_block", program}}, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  EXPECT_EQ(report.instructions_analyzed, 2u);
+  EXPECT_EQ(report.memory_events_tracked, 0u);
+}
+
+TEST(WaitcheckTest, Gfx950KernelAnalysisAttributesRank1HazardToReachableProducer) {
+  const std::vector<uint32_t> program{
+      0xBF068205u,              // 0x00: s_cmp_eq_u32 s5, 2.
+      0xBF850003u,              // 0x04: s_cbranch_scc1 to the alternate path.
+      0xC00E0A00u, 0x00000050u, // 0x08: fallthrough s_load_dwordx8 s[40:47].
+      0xBF820004u,              // 0x10: s_branch to the join.
+      0xC00E0A00u, 0x00000050u, // 0x14: reachable s_load_dwordx8 s[40:47].
+      0xC0020B40u, 0x0000008Cu, // 0x1c: s_load_dword s45 overlaps the reachable load.
+      0xBF8CC07Fu,              // 0x24: s_waitcnt lgkmcnt(0).
+      0xBF810000u,              // 0x28: s_endpgm.
+  };
+  const auto image = rocjitsu::waitcheck_test::make_gfx_multi_kernel_code_object(
+      {{"rank1_branch", program}}, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
+  EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::SGPR);
+  EXPECT_EQ(report.diagnostics[0].reg.index, 45u);
+  EXPECT_EQ(report.diagnostics[0].producer_section_offset, 0x14u);
+  EXPECT_EQ(report.diagnostics[0].section_offset, 0x1cu);
+}
+
 TEST(WaitcheckTest, ObjectAnalysisReportsPathThatSkipsWaitAtJoin) {
   std::vector<uint32_t> program;
   append_inst(program, global_load_b32(0));
