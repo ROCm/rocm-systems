@@ -42,11 +42,21 @@ void RequireNamesKernel(const char* name) {
 
 // hipKernelNameRefByPtr resolves a host function pointer to its kernel name
 // without any module load; the returned string must name the kernel.
+// PLATFORM-DIFF: hipKernelNameRefByPtr is not exported from the Windows HIP
+// runtime - amdhip.def.in lists hipKernelNameRef but omits hipKernelNameRefByPtr
+// - so referencing it there is an unresolved external at link time. The contract
+// is therefore exercised only where the symbol is exported (non-Windows). The
+// sibling hipKernelNameRef below is exported on Windows and is not gated.
 // @asserts: hipKernelNameRefByPtr - resolves a host kernel function pointer to a non-empty name mentioning the kernel identifier
 HIP_TEST_CASE(Contract_KernelNameRef_ByPtr_NamesHostKernel) {
+#if defined(_WIN32)
+  HIP_SKIP_TEST("hipKernelNameRefByPtr is not exported from the Windows HIP runtime; the "
+                "name-reflection contract cannot be linked or exercised there.");
+#else
   const char* name =
       hipKernelNameRefByPtr(reinterpret_cast<const void*>(KernelNameRefProbe), nullptr);
   RequireNamesKernel(name);
+#endif  // _WIN32
 }
 
 // hipKernelNameRef resolves a hipFunction_t (obtained from the host symbol via
