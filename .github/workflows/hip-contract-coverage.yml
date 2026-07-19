@@ -6,8 +6,8 @@ name: HIP contract-test coverage
 #      projects/hip/include/hip/hip_runtime_api.h) ships without a corresponding
 #      contract test and is not on the intentionally-uncovered allowlist
 #      (projects/hip-tests/catch/contract/uncovered_apis.txt).
-#   2. Test plan: fails when catch/contract/TEST_PLAN.md is out of date with the
-#      test sources (a case was added, renamed, or removed, or an @asserts tag
+#   2. Test plan: fails when catch/TEST_PLAN.md is out of date with the test
+#      sources (a case was added, renamed, or removed, or an @asserts tag
 #      changed, without regenerating the plan).
 #
 # See projects/hip-tests/catch/contract/AUTHORING.md for how to add a contract
@@ -20,6 +20,8 @@ on:
       - "projects/hip/include/hip/**"
       - "projects/hip-tests/catch/contract/**"
       - "projects/hip-tests/catch/config/configs/contract.yaml"
+      - "projects/hip-tests/catch/tools/**"
+      - "projects/hip-tests/catch/TEST_PLAN.md"
 
 jobs:
   contract-coverage:
@@ -39,4 +41,4 @@ jobs:
 
       - name: Check test plan is up to date
         run: |
-          python projects/hip-tests/catch/contract/tools/gen_test_plan.py --check
+          python projects/hip-tests/catch/tools/gen_test_plan.py --check
