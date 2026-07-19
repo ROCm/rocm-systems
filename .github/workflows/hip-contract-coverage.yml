@@ -1,0 +1,34 @@
+name: HIP contract-test coverage
+
+# Fails a PR when a newly-added public HIP runtime API (declared in
+# projects/hip/include/hip/hip_runtime_api.h) ships without a corresponding
+# contract test and is not listed in the intentionally-uncovered allowlist
+# (projects/hip-tests/catch/contract/uncovered_apis.txt).
+#
+# This is a pure static-analysis check (no ROCm, GPU, or build required), so it
+# runs quickly as an always-on gate. See
+# projects/hip-tests/catch/contract/AUTHORING.md for how to add a contract test.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "projects/hip/include/hip/**"
+      - "projects/hip-tests/catch/contract/**"
+      - "projects/hip-tests/catch/config/configs/contract.yaml"
+
+jobs:
+  contract-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Check contract-test coverage
+        run: |
+          python projects/hip-tests/catch/contract/tools/check_contract_coverage.py --check

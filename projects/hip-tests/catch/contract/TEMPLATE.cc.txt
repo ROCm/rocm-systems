@@ -1,0 +1,47 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+// Contract-test skeleton. Copy to contract/<domain>/test_hip_<domain>_contract.cc,
+// then: add CMakeLists.txt, add_subdirectory in contract/CMakeLists.txt, add a
+// YAML entry per HIP_TEST_CASE name in catch/config/configs/contract.yaml, and
+// re-run CMake configure. See AUTHORING.md for the full checklist.
+
+#include <hip/hip_runtime_api.h>
+#include <hip_test_common.hh>
+#include <contract_cleanup.hh>
+
+namespace {
+// Helpers local to this domain go here (small, pure, no global state).
+}  // namespace
+
+// One or two sentences: which public API this pins and what portable guarantee
+// the case asserts (round-trip / accepted-or-unsupported / invalid-input
+// rejection). Name the case Contract_<Area>_<Behavior>.
+HIP_TEST_CASE(Contract_Area_Behavior) {
+  hip::contract::ContractCleanup cleanup;
+
+  void* ptr = nullptr;
+  HIP_CHECK(hipMalloc(&ptr, 256));
+  cleanup.Add([ptr] { (void)hipFree(ptr); });  // capture BY VALUE, not [&]
+
+  // --- Round-trip example ---
+  // HIP_CHECK(hipSomeSetter(ptr, value));
+  // ReadType out{};
+  // HIP_CHECK(hipSomeGetter(&out, ptr));
+  // REQUIRE(out == value);
+
+  // --- Accepted-or-unsupported example ---
+  // const hipError_t status = hipSomeApi(/* well-formed args */);
+  // if (status == hipErrorNotSupported) {
+  //   HIP_SKIP_TEST("Not supported by this device/runtime path.");
+  // }
+  // HIP_CHECK(status);
+
+  // --- Invalid-input rejection example ---
+  // const hipError_t status = hipSomeApi(/* null/zero/reserved */);
+  // REQUIRE(status != hipSuccess);
+  // (void)hipGetLastError();  // clear sticky error so it does not leak
+}

@@ -134,6 +134,23 @@ cmake --build <build-dir> --target contract_tests
 ctest --test-dir <build-dir> -L contract --output-on-failure
 ```
 
+## Adding a contract test / keeping coverage honest
+
+To add a contract test, follow [`AUTHORING.md`](AUTHORING.md) (conventions, a
+step-by-step add procedure, and a copyable skeleton in `TEMPLATE.cc.txt`).
+
+Coverage drift is guarded automatically: `tools/check_contract_coverage.py`
+compares the public APIs declared in `projects/hip/include/hip/hip_runtime_api.h`
+against the APIs exercised by the contract sources and the intentionally-uncovered
+allowlist [`uncovered_apis.txt`](uncovered_apis.txt). The
+`.github/workflows/hip-contract-coverage.yml` PR check runs it with `--check` and
+**fails** when a newly-added HIP API has neither a contract test nor an allowlist
+entry. It needs no ROCm/GPU/build — run it locally the same way:
+
+```bash
+python3 projects/hip-tests/catch/contract/tools/check_contract_coverage.py
+```
+
 ## Backend coverage
 
 The contract suite is portable across the AMD (ROCm/HIP) backend and the NVIDIA
