@@ -27,17 +27,44 @@
 // to the tuned default. Env: RCCL_DDA_LL128_AR_THREADS.
 RCCL_PARAM(DdaLL128ArThreads, "DDA_LL128_AR_THREADS", 1024);
 
+// ---- Phase-0 graph-mode debug probes (all default OFF) ----
+// Try ONE at a time; each isolates a distinct hypothesis for the LL128 AR
+// graph-mode failure.
+//   RCCL_DDA_LL128_AR_FENCE=1        -> #3 ordering: add release/acquire fences
+//                                       to the (otherwise unfenced) flag protocol.
+//   RCCL_DDA_LL128_AR_FIXED_STRIDE=1 -> #4 layout: use a fixed, message-independent
+//                                       slot stride (32 MiB cap) instead of the
+//                                       compact per-message stride, so every call
+//                                       uses an identical scratch layout.
+// (#1 cross-path aliasing is probed from collectives.cc via
+//  RCCL_DDA_FABRIC_SIMPLE_DISABLE.)
+RCCL_PARAM(DdaLL128ArFence, "DDA_LL128_AR_FENCE", 0);
+RCCL_PARAM(DdaLL128ArFixedStride, "DDA_LL128_AR_FIXED_STRIDE", 0);
+
 namespace {
 
+using meta::comms::ddaLL128NumLines;
 using meta::comms::kDdaLL128ArMaxBytes;
 using meta::comms::kDdaLL128DataElems;
 using meta::comms::kDdaLL128Lanes;
 using meta::comms::LLLine128;
 
+// Fixed slot stride cap for the RCCL_DDA_LL128_AR_FIXED_STRIDE probe: sized for
+// the 32 MiB LL128 tier default so every eligible AR call shares one layout.
+constexpr size_t kDdaLL128ArFixedStrideBytes = 33554432; // 32 MiB
+
 // Per-call slot stride in 128B lines for a message of `numLines` lines. The
 // stride matches the message exactly (compact layout) so small all-reduces keep
-// their scratch slots close together for good L2/TLB locality.
+// their scratch slots close together for good L2/TLB locality. The fixed-stride
+// probe overrides this with a message-independent stride (never smaller than the
+// actual message, so a slot can always hold the payload).
 static inline size_t ddaLL128ArSlotLines(size_t numLines) {
+  if (rcclParamDdaLL128ArFixedStride()) {
+    const size_t fixed = ddaLL128NumLines(kDdaLL128ArFixedStrideBytes >> 3);
+    if (fixed >= numLines) {
+      return fixed;
+    }
+  }
   return numLines;
 }
 
@@ -94,28 +121,29 @@ static ncclResult_t ncclAllReduceDdaFabricLL128Typed(
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
+  const bool useFence = rcclParamDdaLL128ArFence() != 0;
 
   INFO(
       NCCL_COLL,
-      "DDA fabric AllReduce LL128: nRanks=%d bytes=%zu numLines=%zu grid=%u block=%u",
-      nRanks, bytes, numLines, grid.x, block.x);
+      "DDA fabric AllReduce LL128: nRanks=%d bytes=%zu numLines=%zu grid=%u block=%u slotLines=%zu fence=%d",
+      nRanks, bytes, numLines, grid.x, block.x, slotStrideLines, (int)useFence);
 
   // NRANKS_CT 4/8: unrolled reduce loop; 0: runtime fallback.
   switch (nRanks) {
   case 4:
     meta::comms::ddaAllReduceFlatLL128<T, 4><<<grid, block, 0, stream>>>(
         peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines);
+        count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines, useFence);
     break;
   case 8:
     meta::comms::ddaAllReduceFlatLL128<T, 8><<<grid, block, 0, stream>>>(
         peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines);
+        count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines, useFence);
     break;
   default:
     meta::comms::ddaAllReduceFlatLL128<T, 0><<<grid, block, 0, stream>>>(
         peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines);
+        count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines, useFence);
     break;
   }
 

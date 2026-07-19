@@ -142,6 +142,13 @@ RCCL_PARAM(DdaLL, "DDA_LL", 1);
 RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(32768));       // 32 KiB
 RCCL_PARAM(DdaLL128, "DDA_LL128", 1);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(33554432)); // 32 MiB
+// Phase-0 graph-mode debug probe (#1 cross-path scratch aliasing): when set,
+// disable the Simple/VMM DDA fabric AllReduce path on gfx1250 so the shared
+// ddaScratch is only ever written by the flag-protocol (LL/LL128) tiers. Larger
+// AllReduces fall back to the generic RCCL path (own buffers). If the LL128 AR
+// graph-mode corruption disappears with this set, the cause is the flag-less
+// Simple path leaving payload the LL128 poll misreads. Default OFF.
+RCCL_PARAM(DdaFabricSimpleDisable, "DDA_FABRIC_SIMPLE_DISABLE", 0);
 
 // Returns true when the DDA fast path should be attempted for a collective
 // with the given total byte count.  gfx942Default is the per-collective
@@ -614,7 +621,8 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
             stream));
         return ncclSuccess;
       }
-      if (ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+      if (!rcclParamDdaFabricSimpleDisable() &&
+          ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         INFO(NCCL_COLL,
              "AllReduce: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
              comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));

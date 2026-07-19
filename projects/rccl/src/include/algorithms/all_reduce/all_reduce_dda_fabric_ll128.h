@@ -59,7 +59,8 @@ __global__ void ddaAllReduceFlatLL128(
     int nRanksRt,
     uint32_t* __restrict__ epochDev,       // per-block LL epoch cells (shared AG+AR)
     int epochLen,                          // number of cells in epochDev
-    size_t slotStrideLines) {              // per-call lines/slot (from host)
+    size_t slotStrideLines,                // per-call lines/slot (from host)
+    bool useFence) {                       // Phase-0 probe: fence flag protocol
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = count * sizeof(T);
@@ -99,8 +100,11 @@ __global__ void ddaAllReduceFlatLL128(
       if (lane < kDdaLL128DataElems) {
         ddaLL128StoreWord(&dst[ln].w[lane], v);
       }
-      // Unfenced: the payload store above precedes this flag store in warp
-      // program order; gfx1250 preserves the visibility order.
+      // Unfenced default: the payload store above precedes this flag store in
+      // warp program order; gfx1250 preserves the visibility order. Probe
+      // (useFence): all lanes release-fence so payload is globally visible
+      // before lane 15 publishes the flag.
+      ddaLL128FenceSystem(useFence);
       if (lane == kDdaLL128FlagElem) {
         ddaLL128StoreWord(&dst[ln].w[kDdaLL128FlagElem], (uint64_t)flag);
       }
@@ -119,9 +123,12 @@ __global__ void ddaAllReduceFlatLL128(
     for (int r = 1; r < nRanks; ++r) {
       const int peer = (selfRank + r) % nRanks;
       LLLine128* src = myBase + (size_t)peer * slot;
-      // All 16 lanes poll the shared flag word (broadcast); unfenced.
+      // All 16 lanes poll the shared flag word (broadcast); unfenced default.
       while (ddaLL128LoadWord(&src[ln].w[kDdaLL128FlagElem]) != (uint64_t)flag) {
       }
+      // Probe (useFence): acquire-fence after observing the flag so the payload
+      // loads below cannot be hoisted before the flag observation.
+      ddaLL128FenceSystem(useFence);
       if (hasWord) {
         const uint64_t d = ddaLL128LoadWord(&src[ln].w[lane]);
         acc = ddaLL128AddWord<T>(acc, d);

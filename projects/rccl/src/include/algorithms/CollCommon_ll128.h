@@ -72,6 +72,20 @@ __device__ __forceinline__ uint64_t ddaLL128LoadWord(const uint64_t* p) {
       (u64_gptr)const_cast<uint64_t*>(p), __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
 }
 
+// ---- Phase-0 probe: optional system-scope fence for the flag protocol ----
+// The default LL128 protocol is UNFENCED and relies on gfx1250 preserving
+// per-lane program-order visibility of system-scope RELAXED stores (payload
+// before flag). This probe inserts an explicit release fence (writer, between
+// payload and flag) / acquire fence (reader, after observing the flag) so we can
+// A/B whether that unfenced assumption is the cause of graph-mode corruption.
+// Gated per-launch by RCCL_DDA_LL128_AR_FENCE (passed as a kernel arg); no cost
+// when disabled. See dda_all_reduce_fabric_ll128.cu.
+__device__ __forceinline__ void ddaLL128FenceSystem(bool enable) {
+  if (enable) {
+    __threadfence_system();
+  }
+}
+
 // Element-wise add of the T-elements packed into two 8B payload words. An 8B
 // word holds 2 x fp32 or 4 x fp16/bf16; each 4B half is folded with the shared
 // vecElementAdd<T> (which handles the per-type packing), then recombined.
