@@ -20,6 +20,7 @@ Decoder *create_decoder_for_target(rj_code_target_id_t target) {
   static thread_local std::unique_ptr<Decoder> cdna3_decoder;
   static thread_local std::unique_ptr<Decoder> cdna4_decoder;
   static thread_local std::unique_ptr<Decoder> rdna3_decoder;
+  static thread_local std::unique_ptr<Decoder> rdna3_5_decoder;
   static thread_local std::unique_ptr<Decoder> rdna4_decoder;
   static thread_local std::unique_ptr<Decoder> gfx1250_decoder;
 
@@ -40,6 +41,11 @@ Decoder *create_decoder_for_target(rj_code_target_id_t target) {
     if (!rdna3_decoder)
       rdna3_decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
     return rdna3_decoder.get();
+  case ROCJITSU_CODE_TARGET_GFX1150:
+  case ROCJITSU_CODE_TARGET_GFX1151:
+    if (!rdna3_5_decoder)
+      rdna3_5_decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+    return rdna3_5_decoder.get();
   case ROCJITSU_CODE_TARGET_GFX1200:
   case ROCJITSU_CODE_TARGET_GFX1201:
     if (!rdna4_decoder)
@@ -62,6 +68,11 @@ rj_code_arch_t arch_for_target(rj_code_target_id_t target) {
     return ROCJITSU_CODE_ARCH_CDNA3;
   case ROCJITSU_CODE_TARGET_GFX950:
     return ROCJITSU_CODE_ARCH_CDNA4;
+  case ROCJITSU_CODE_TARGET_GFX1100:
+    return ROCJITSU_CODE_ARCH_RDNA3;
+  case ROCJITSU_CODE_TARGET_GFX1150:
+  case ROCJITSU_CODE_TARGET_GFX1151:
+    return ROCJITSU_CODE_ARCH_RDNA3_5;
   case ROCJITSU_CODE_TARGET_GFX1200:
   case ROCJITSU_CODE_TARGET_GFX1201:
     return ROCJITSU_CODE_ARCH_RDNA4;

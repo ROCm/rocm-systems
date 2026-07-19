@@ -486,6 +486,29 @@ target_link_libraries(waitcheck_c_header_test PRIVATE rocjitsu_shared)
 rj_configure_target(waitcheck_c_header_test PRIVATE_INCLUDES WARNINGS)
 rj_add_test(NAME RjWaitcheck.CHeader COMMAND waitcheck_c_header_test LABELS waitcheck)
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(waitcheck_dlopen_test analysis/waitcheck_dlopen_test.cpp)
+    target_link_libraries(
+        waitcheck_dlopen_test
+        PRIVATE ${CMAKE_DL_LIBS} Threads::Threads GTest::gtest_main
+    )
+    target_compile_definitions(
+        waitcheck_dlopen_test
+        PRIVATE
+            ROCJITSU_WAITCHECK_LIBRARY_PATH="$<TARGET_FILE:rocjitsu_waitcheck>"
+    )
+    add_dependencies(waitcheck_dlopen_test rocjitsu_waitcheck)
+    rj_configure_target(waitcheck_dlopen_test PRIVATE_INCLUDES WARNINGS)
+    rj_add_test(
+        NAME RjWaitcheck.DlopenUnload
+        COMMAND waitcheck_dlopen_test
+        ENVIRONMENT
+            "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1"
+            "LSAN_OPTIONS=exitcode=23"
+        LABELS waitcheck
+    )
+endif()
+
 # --- DBI probe fixture test ---
 # Loads a real amdclang++-compiled rj_nop_probe device ELF and exercises the
 # probe symbol resolver against it. Needs the compiled fixture (amdclang++ +

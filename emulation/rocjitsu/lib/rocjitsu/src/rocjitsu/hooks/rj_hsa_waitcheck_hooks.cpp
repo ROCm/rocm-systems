@@ -165,6 +165,10 @@ void print_summary_once() {
     return "gfx950";
   case ROCJITSU_CODE_TARGET_GFX1100:
     return "gfx1100";
+  case ROCJITSU_CODE_TARGET_GFX1150:
+    return "gfx1150";
+  case ROCJITSU_CODE_TARGET_GFX1151:
+    return "gfx1151";
   case ROCJITSU_CODE_TARGET_GFX1200:
     return "gfx1200";
   case ROCJITSU_CODE_TARGET_GFX1201:

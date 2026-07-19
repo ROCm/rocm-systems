@@ -24,6 +24,7 @@ include(rj_default_compiler)
 project(rocm_jit_suite VERSION 0.2.0)
 
 include(rj_version)
+include(rj_configure_target)
 
 # Generate compile_commands.json for clangd, clang-tidy, and other tooling that
 # needs the exact compiler invocations from the configured build tree.
@@ -275,6 +276,103 @@ add_subdirectory(lib/simdojo)
 add_subdirectory(lib/rocjitsu)
 add_subdirectory(lib/rocjitsu/src/rocjitsu/vm/plugins)
 
+# Dedicated decode-only waitcheck library. Keep this target independent of the
+# simulator, KMD interposer, ROCR, hooks, and configuration subsystems so it is
+# safe for compiler processes that repeatedly load and unload it.
+set(_rj_waitcheck_sources
+    ${ROCJITSU_SRC_DIR}/rocjitsu/analysis/def_use_chain.cpp
+    ${ROCJITSU_SRC_DIR}/rocjitsu/analysis/indirect_branch_discovery.cpp
+    ${ROCJITSU_SRC_DIR}/rocjitsu/analysis/rj_waitcheck.cpp
+    ${ROCJITSU_SRC_DIR}/rocjitsu/analysis/waitcheck.cpp
+    ${ROCJITSU_SRC_DIR}/rocjitsu/code/amdgpu_code_object.cpp
+    ${ROCJITSU_SRC_DIR}/rocjitsu/code/basic_block.cpp
+    ${ROCJITSU_SRC_DIR}/rocjitsu/code/file_io.cpp
+    ${ROCJITSU_SRC_DIR}/rocjitsu/code/kernel_symbol.cpp
+    ${ROCJITSU_SRC_DIR}/rocjitsu/isa/operand.cpp
+    ${ROCJITSU_SRC_DIR}/rocjitsu/isa/register_set.cpp
+    ${ROCJITSU_SRC_DIR}/rocjitsu/isa/waitcheck_decoder.cpp
+)
+
+# Reuse the generated source lists for the architectures supported by
+# waitcheck, but compile private decode-only copies. ROCJITSU_DECODE_ONLY makes
+# instruction constructors omit simulator execute-function references, and
+# section GC removes the now-unreachable execute implementations.
+function(_rj_append_waitcheck_target_sources target)
+    get_target_property(_target_source_dir ${target} SOURCE_DIR)
+    get_target_property(_target_sources ${target} SOURCES)
+    foreach(_source IN LISTS _target_sources)
+        if(IS_ABSOLUTE "${_source}")
+            list(APPEND _rj_waitcheck_sources "${_source}")
+        elseif(NOT _source MATCHES "^\\$<")
+            list(
+                APPEND _rj_waitcheck_sources
+                "${_target_source_dir}/${_source}"
+            )
+        endif()
+    endforeach()
+    set(_rj_waitcheck_sources "${_rj_waitcheck_sources}" PARENT_SCOPE)
+endfunction()
+
+_rj_append_waitcheck_target_sources(rocjitsu_isa_cdna3)
+_rj_append_waitcheck_target_sources(rocjitsu_isa_cdna4)
+_rj_append_waitcheck_target_sources(rocjitsu_isa_rdna3)
+_rj_append_waitcheck_target_sources(rocjitsu_isa_rdna3_5)
+_rj_append_waitcheck_target_sources(rocjitsu_isa_rdna4)
+_rj_append_waitcheck_target_sources(rocjitsu_isa_gfx1250)
+
+add_library(rocjitsu_waitcheck_objects OBJECT ${_rj_waitcheck_sources})
+rj_configure_target(
+    rocjitsu_waitcheck_objects
+    PRIVATE_INCLUDES
+    WARNINGS
+    HIDDEN
+)
+target_compile_definitions(
+    rocjitsu_waitcheck_objects
+    PRIVATE ROCJITSU_DECODE_ONLY=1
+)
+target_include_directories(
+    rocjitsu_waitcheck_objects
+    PRIVATE ${PROJECT_SOURCE_DIR}/lib/simdojo/include
+)
+target_link_libraries(rocjitsu_waitcheck_objects PRIVATE util)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+    target_compile_options(
+        rocjitsu_waitcheck_objects
+        PRIVATE -ffunction-sections -fdata-sections
+    )
+endif()
+
+add_library(rocjitsu_waitcheck SHARED)
+set_target_properties(
+    rocjitsu_waitcheck
+    PROPERTIES OUTPUT_NAME rocjitsu_waitcheck VERSION 1.0.0 SOVERSION 1
+)
+target_link_libraries(
+    rocjitsu_waitcheck
+    PRIVATE rocjitsu_waitcheck_objects util
+)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(_rj_waitcheck_linker_options "--gc-sections,--exclude-libs,ALL")
+    # Instrumented DSOs resolve ASAN hooks from the instrumented host process.
+    # Production builds remain fully checked for unresolved symbols.
+    if(NOT RJ_ENABLE_ASAN)
+        string(APPEND _rj_waitcheck_linker_options ",--no-undefined")
+    endif()
+    target_link_options(
+        rocjitsu_waitcheck
+        PRIVATE
+            "LINKER:${_rj_waitcheck_linker_options}"
+            "LINKER:--version-script=${ROCJITSU_SRC_DIR}/rocjitsu/analysis/rocjitsu_waitcheck.map"
+    )
+    set_target_properties(
+        rocjitsu_waitcheck
+        PROPERTIES
+            LINK_DEPENDS
+                "${ROCJITSU_SRC_DIR}/rocjitsu/analysis/rocjitsu_waitcheck.map"
+    )
+endif()
+
 # Main shared library - assembles all object libraries.
 add_library(rocjitsu_shared SHARED)
 set_target_properties(rocjitsu_shared PROPERTIES OUTPUT_NAME rocjitsu)
@@ -357,7 +455,11 @@ install(
 
 # Libraries: lib/
 install(
-    TARGETS rocjitsu_shared rocjitsu_hooks rocjitsu_waitcheck_hooks
+    TARGETS
+        rocjitsu_shared
+        rocjitsu_waitcheck
+        rocjitsu_hooks
+        rocjitsu_waitcheck_hooks
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 

@@ -1,0 +1,6 @@
+ROCJITSU_WAITCHECK_1.0 {
+  global:
+    rj_waitcheck_*;
+  local:
+    *;
+};

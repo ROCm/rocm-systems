@@ -51,13 +51,13 @@ static_assert(sizeof(KernelDescriptor) == 64, "AMDHSA kernel descriptor size cha
 
 [[nodiscard]] bool is_supported_waitcheck_arch(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
-         arch == ROCJITSU_CODE_ARCH_GFX1250;
+         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250;
 }
 
 [[nodiscard]] uint32_t default_wavefront_size(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
-                 arch == ROCJITSU_CODE_ARCH_GFX1250
+  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+                 arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250
              ? 32
              : 64;
 }
@@ -87,6 +87,7 @@ enum class WaitcntModel { LegacyNoVscnt, LegacyVscnt, SplitGfx12 };
   case ROCJITSU_CODE_ARCH_CDNA4:
     return WaitcntModel::LegacyNoVscnt;
   case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
     return WaitcntModel::LegacyVscnt;
   default:
     return WaitcntModel::SplitGfx12;
@@ -153,8 +154,9 @@ struct LegacyWaitcnt {
 }
 
 [[nodiscard]] LegacyWaitcnt decode_legacy_waitcnt(uint32_t value, rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA3 ? decode_gfx11_waitcnt(value)
-                                          : decode_legacy_waitcnt(value);
+  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5
+             ? decode_gfx11_waitcnt(value)
+             : decode_legacy_waitcnt(value);
 }
 
 [[nodiscard]] std::string wait_expression(WaitCounterKind counter, uint32_t required_count,
@@ -579,6 +581,7 @@ struct Analyzer {
 
   void analyze_stream(std::span<const uint32_t> words, rj_code_arch_t arch,
                       std::string section_name, uint64_t file_offset_base) {
+    current_kernel_ = nullptr;
     wavefront_size_ = default_wavefront_size(arch);
     auto decoder = Decoder::create(arch);
     if (!decoder) {
@@ -875,6 +878,8 @@ struct Analyzer {
     clear_cfg_path_filter();
   }
 
+  void set_kernel_context(const WaitcheckKernelInfo *kernel) { current_kernel_ = kernel; }
+
 private:
   [[nodiscard]] static size_t counter_index(WaitCounterKind counter) {
     return static_cast<size_t>(counter);
@@ -890,7 +895,10 @@ private:
     case WaitCounterKind::Store:
       return 62;
     case WaitCounterKind::Ds:
-      return uses_legacy_waitcnt(arch) && arch != ROCJITSU_CODE_ARCH_RDNA3 ? 14 : 62;
+      return uses_legacy_waitcnt(arch) && arch != ROCJITSU_CODE_ARCH_RDNA3 &&
+                     arch != ROCJITSU_CODE_ARCH_RDNA3_5
+                 ? 14
+                 : 62;
     case WaitCounterKind::Km:
       return 30;
     case WaitCounterKind::Sample:
@@ -1024,6 +1032,11 @@ private:
   }
 
   void record_diagnostic(WaitcheckDiagnostic diag) {
+    if (current_kernel_) {
+      diag.has_kernel = true;
+      diag.kernel_name = current_kernel_->name;
+      diag.kernel_entry_offset = current_kernel_->entry_offset;
+    }
     const auto key =
         std::make_tuple(diag.counter, diag.access, diag.reg.cls, diag.reg.index, diag.reg.width,
                         diag.section_name, diag.section_offset, diag.file_offset,
@@ -2428,6 +2441,7 @@ private:
       return;
 
     WaitcheckDiagnostic diag;
+    diag.kind = WaitcheckDiagnosticKind::WaitCounter;
     diag.counter = event.counter;
     diag.access = access;
     diag.reg = reg;
@@ -2457,6 +2471,7 @@ private:
                                    RegisterRef reg, std::string_view depctr_field,
                                    uint64_t section_offset, uint64_t file_offset) {
     WaitcheckDiagnostic diag;
+    diag.kind = WaitcheckDiagnosticKind::SgprDepctr;
     diag.counter = WaitCounterKind::Depctr;
     diag.access = WaitcheckAccessKind::Use;
     diag.reg = reg;
@@ -2482,6 +2497,8 @@ private:
                                           bool missing_after_barrier, uint64_t section_offset,
                                           uint64_t file_offset) {
     WaitcheckDiagnostic diag;
+    diag.kind = missing_after_barrier ? WaitcheckDiagnosticKind::AsyncBarrierPostWait
+                                      : WaitcheckDiagnosticKind::AsyncBarrierPreWait;
     diag.counter = WaitCounterKind::VmVsrc;
     diag.access = WaitcheckAccessKind::MemoryOrder;
     diag.reg = RegisterRef{RegClass::PC, 0, 1};
@@ -2504,6 +2521,7 @@ private:
                                       uint32_t required_wait, uint64_t section_offset,
                                       uint64_t file_offset) {
     WaitcheckDiagnostic diag;
+    diag.kind = WaitcheckDiagnosticKind::VaVdst;
     diag.counter = WaitCounterKind::VaVdst;
     diag.access = WaitcheckAccessKind::Def;
     diag.reg = reg;
@@ -3606,6 +3624,7 @@ private:
 
   WaitcheckReport &report_;
   WaitcheckOptions options_;
+  const WaitcheckKernelInfo *current_kernel_ = nullptr;
   uint32_t wavefront_size_ = 64;
   std::set<
       std::tuple<WaitCounterKind, WaitcheckAccessKind, RegClass, uint16_t, uint16_t, std::string,
@@ -3660,6 +3679,9 @@ rj_code_arch_t waitcheck_arch_for_target(rj_code_target_id_t target) {
     return ROCJITSU_CODE_ARCH_CDNA3;
   case ROCJITSU_CODE_TARGET_GFX1100:
     return ROCJITSU_CODE_ARCH_RDNA3;
+  case ROCJITSU_CODE_TARGET_GFX1150:
+  case ROCJITSU_CODE_TARGET_GFX1151:
+    return ROCJITSU_CODE_ARCH_RDNA3_5;
   case ROCJITSU_CODE_TARGET_GFX1200:
   case ROCJITSU_CODE_TARGET_GFX1201:
     return ROCJITSU_CODE_ARCH_RDNA4;
@@ -3755,6 +3777,7 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
           BasicBlock::build_reachable(code_object, *decoder, arch, entry, entry_size);
       const uint32_t wavefront_size =
           is_kernel ? kernel_it->wavefront_size : default_wavefront_size(arch);
+      analyzer.set_kernel_context(is_kernel ? &*kernel_it : nullptr);
       analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch, wavefront_size, entry);
       if (is_kernel && report.supported && !report.stopped_early) {
         ++report.kernels_analyzed;
@@ -3768,6 +3791,7 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
     } else if (kernels.empty() && function_entries.empty()) {
       std::vector<std::unique_ptr<BasicBlock>> blocks =
           BasicBlock::build(code_object, *decoder, arch);
+      analyzer.set_kernel_context(nullptr);
       analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch, default_wavefront_size(arch));
     } else {
       // Analyze each kernel independently. Building one combined CFG for a
@@ -3780,6 +3804,7 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
         const auto start = std::chrono::steady_clock::now();
         std::vector<std::unique_ptr<BasicBlock>> blocks =
             BasicBlock::build_reachable(code_object, *decoder, arch, entry, entry_size);
+        analyzer.set_kernel_context(kernel);
         analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch, wavefront_size, entry);
         if (kernel && report.supported && !report.stopped_early) {
           ++report.kernels_analyzed;

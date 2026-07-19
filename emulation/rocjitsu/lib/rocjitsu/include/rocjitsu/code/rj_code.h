@@ -116,6 +116,10 @@ typedef enum rj_code_target_id_t {
   ROCJITSU_CODE_TARGET_GFX1250,
   /// @brief gfx1100 target ID (RDNA3).
   ROCJITSU_CODE_TARGET_GFX1100,
+  /// @brief gfx1150 target ID (RDNA3.5).
+  ROCJITSU_CODE_TARGET_GFX1150,
+  /// @brief gfx1151 target ID (RDNA3.5).
+  ROCJITSU_CODE_TARGET_GFX1151,
   /*
    * \NPI every new GPU needs a target id here (one per distinct gfxNNNN \
    * variant); keep INVALID last.
