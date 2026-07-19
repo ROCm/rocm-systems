@@ -42,6 +42,8 @@
 
 #include "core/inc/amd_kfd_driver.h"
 
+#include <cstring>
+
 #if defined(__linux__)
 #include <amdgpu_drm.h>
 #include <link.h>
@@ -295,8 +297,7 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
              : kmt_alloc_flags.ui32.Contiguous);
   }
 
-  //// Only allow using the suballocator for ordinary VRAM.
-  if (m_region.IsLocalMemory() && !kmt_alloc_flags.ui32.NoAddress) {
+  if (!kmt_alloc_flags.ui32.NoAddress) {
     bool subAllocEnabled =
         !core::Runtime::runtime_singleton_->flag().disable_fragment_alloc();
     // Avoid modifying executable or queue allocations.
@@ -306,6 +307,17 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
 
     if (useSubAlloc) {
       mem = m_region.fragment_alloc(size);
+
+      // Suballocated fragments may hold stale data from previously freed
+      // fragments, unlike dedicated BOs which are backed by fresh (zeroed)
+      // kernel pages. Zero system-memory fragments so callers that rely on a
+      // freshly allocated buffer being zero-initialized (e.g. an hipHostMalloc
+      // buffer used as an atomic accumulator) behave as they do with a
+      // dedicated BO. Local (device) memory is not host-writable here and is
+      // left untouched (matching pre-existing VRAM suballocation behavior).
+      if (m_region.IsSystem()) {
+        memset(mem, 0, size);
+      }
 
       if ((alloc_flags & core::MemoryRegion::AllocateAsan) &&
           HSAKMT_CALL(hsaKmtReplaceAsanHeaderPage(mem)) != HSAKMT_STATUS_SUCCESS) {
