@@ -142,7 +142,7 @@ public:
   /// populated. Also used to rebuild after shutdown(). Calls
   /// initialize_components() so that components can set up ports and handlers
   /// before run() or step() starts them. Event self-scheduling is deferred: the
-  /// Clocked/Functional mixins enqueue their first event in startup() (run to by the
+  /// Clocked/Functional mixins enqueue their first event in startup() (invoked by the
   /// first run()/step() call), not here, so no events exist until execution begins.
   void create();
 

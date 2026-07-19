@@ -180,6 +180,17 @@ private:
 
   void handle_doorbell(simdojo::Tick timestamp);
 
+  /// @brief Re-arm a re-check of a queue stalled on an unsatisfied external wait
+  /// (barrier/dependency signal, or an SDMA VA not yet translatable).
+  /// @details Runs on the engine thread. When a doorbell poll thread is monitoring
+  /// this CP (host-accessible/KFD queues), it sets stall_pending_ so the poll thread
+  /// re-nudges the idle engine at its 100us cadence — the engine must NOT reschedule
+  /// the doorbell on the main event queue, which models simulated timing and would
+  /// spin millions of ticks while wall-clock RPC latency elapses. Internal test
+  /// queues have no poll thread and are driven by engine->run()/step(), so there the
+  /// re-check must be kept alive by rescheduling the doorbell event at @p now + 1.
+  void arm_stall_recheck(simdojo::Tick now);
+
   /// @brief Fetch AQL packets from a single HW queue.
   void fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdojo::Tick now);
 
@@ -329,6 +340,17 @@ private:
   std::unique_ptr<CompletionTracker> completion_;
 
   std::atomic<bool> invalid_pending_{false};
+
+  // Set when a queue stalls on an unsatisfied barrier/dependency signal (or an
+  // SDMA VA not yet translatable) — a wait on progress that is external to the
+  // current engine pass (a peer rank's kernel completion arriving via the daemon,
+  // or a producer on another queue). Re-checking such a stall by rescheduling the
+  // doorbell event at now+1 spins the main event queue (which models simulated
+  // timing) millions of times per collective, pegging a core while wall-clock RPC
+  // latency elapses. Instead, like invalid_pending_, the doorbell poll thread
+  // re-nudges the (idle) engine at its 100us cadence so the stall is re-evaluated
+  // without a busy simulated-time spin.
+  std::atomic<bool> stall_pending_{false};
 
   void doorbell_poll_loop(std::stop_token stop);
   std::jthread doorbell_thread_;

@@ -545,14 +545,19 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
   while (!stop.stop_requested()) {
     bool doorbell_changed = scan_doorbells();
     // Retry on a pending INVALID packet (the runtime has not finished writing it
-    // yet) even when no doorbell value changed. Pace those retries with the same
-    // 100us idle wait rather than spinning: a real doorbell change fires the event
-    // immediately (latency-sensitive), but an INVALID retry only needs to poll
-    // until the runtime finalizes the header, so it should not burn a core.
-    bool invalid_retry = !doorbell_changed && invalid_pending_.load(std::memory_order_acquire);
+    // yet) OR a pending barrier/dependency stall (waiting on a signal a peer rank
+    // or another queue will write) even when no doorbell value changed. Pace those
+    // retries with the same 100us idle wait rather than spinning: a real doorbell
+    // change fires the event immediately (latency-sensitive), but a pending retry
+    // only needs to poll until the awaited state changes, so it must not burn a
+    // core. Rescheduling these on the main event queue (now+1) instead would spin
+    // simulated time millions of ticks per collective while wall-clock RPC latency
+    // elapses — the RCCL slowdown this replaces.
+    bool retry = !doorbell_changed && (invalid_pending_.load(std::memory_order_acquire) ||
+                                       stall_pending_.load(std::memory_order_acquire));
     if (doorbell_changed)
       engine()->schedule_event_now(&doorbell_event_);
-    else if (invalid_retry) {
+    else if (retry) {
       std::this_thread::sleep_for(100us);
       engine()->schedule_event_now(&doorbell_event_);
     } else
@@ -1217,6 +1222,17 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   qs.entries.push_back(std::move(dp));
 }
 
+void CommandProcessor::arm_stall_recheck(simdojo::Tick now) {
+  // A doorbell poll thread runs only for host-accessible (KFD) queues; it re-checks
+  // stall_pending_ at its 100us cadence, so the engine can idle instead of spinning.
+  // Internal test queues have no poll thread — they are driven by engine->run()/
+  // step() — so there the re-check must be kept alive on the main event queue.
+  if (has_kfd_queues())
+    stall_pending_.store(true, std::memory_order_release);
+  else
+    schedule_event(&doorbell_event_, now + 1);
+}
+
 void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdojo::Tick now) {
   if (!memory_)
     return;
@@ -1358,8 +1374,11 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
                           is_and ? "AND" : "OR", deps_satisfied, has_deps);
       });
       if (!deps_satisfied) {
+        // Stall this queue until the dependency signal is satisfied (by an SDMA
+        // queue on this engine, or a peer rank's completion arriving via the
+        // daemon). arm_stall_recheck() re-arms without spinning simulated time.
         process_limit = read_idx;
-        schedule_event(&doorbell_event_, now + 1);
+        arm_stall_recheck(now);
         break;
       }
 
@@ -1412,15 +1431,12 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
         }
 
         if (!condition_satisfied) {
-          // The packet stalls this queue, but other queues (notably SDMA) must
-          // keep running so they can satisfy the dependency. fetch_from_queue runs
-          // on the engine thread (via handle_doorbell), so reschedule with
-          // schedule_event(now + 1) — advancing the tick per re-check — like the
-          // sibling barrier/vendor-dep retries. schedule_event_now() is only for the
-          // external doorbell poll thread; using it here would collapse re-checks
-          // onto one tick and take the async queue's lock needlessly.
+          // The barrier-value packet stalls this queue until the awaited signal
+          // reaches its target value (written by another queue on this engine or a
+          // peer rank via the daemon). arm_stall_recheck() re-arms the re-check
+          // without spinning simulated time.
           process_limit = read_idx;
-          schedule_event(&doorbell_event_, now + 1);
+          arm_stall_recheck(now);
           break;
         }
 
@@ -1443,8 +1459,10 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
                               ext.dep_signal.handle, v);
           });
           if (v != 0) {
+            // Vendor kernel-dispatch dependency not yet satisfied: re-arm the
+            // re-check via arm_stall_recheck() without spinning simulated time.
             process_limit = read_idx;
-            schedule_event(&doorbell_event_, now + 1);
+            arm_stall_recheck(now);
             break;
           }
         }
@@ -1508,10 +1526,12 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
 }
 
 void CommandProcessor::handle_doorbell(simdojo::Tick now) {
-  // Release so the doorbell poll thread's acquire-load (invalid_retry) cannot
-  // observe a stale "pending" after this handler has re-fetched; pairs with the
-  // release-store at the INVALID-packet site.
+  // Release so the doorbell poll thread's acquire-load cannot observe a stale
+  // "pending" after this handler has re-fetched; pairs with the release-stores at
+  // the INVALID-packet and barrier/dependency stall sites. A site that is still
+  // unsatisfied on this pass re-sets its flag below, re-arming the paced re-check.
   invalid_pending_.store(false, std::memory_order_release);
+  stall_pending_.store(false, std::memory_order_release);
   util::Logger::cp(
       [&](auto &os) { os << std::format("{}: DOORBELL queues={}", name(), hw_queues_.size()); });
 
@@ -1860,7 +1880,9 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
   // write below to incorrectly advance past the pending packet.
   auto stop_and_retry_current_packet = [&] {
     write_read_ptr();
-    schedule_event(&doorbell_event_, now + 1);
+    // Wait/poll SDMA packet, or a packet whose translated VA is not yet ready:
+    // arm_stall_recheck() re-arms the re-check without spinning simulated time.
+    arm_stall_recheck(now);
   };
 
   while (rpos < wpos) {
