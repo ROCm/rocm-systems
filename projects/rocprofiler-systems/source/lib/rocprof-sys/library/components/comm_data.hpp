@@ -79,9 +79,23 @@ struct comm_data : base<comm_data, void>
 #if defined(ROCPROFSYS_USE_MPI)
     static int mpi_type_size(MPI_Datatype _datatype)
     {
+        // A profiler must not affect the correctness or stability of the
+        // application it observes.  RCCL can pass MPI_DATATYPE_NULL as a
+        // legitimate "no data" sentinel; calling PMPI_Type_size on it would
+        // trigger MPI's fatal error handler and abort the job.  Return 0
+        // (nothing to measure) instead.
+        if(_datatype == MPI_DATATYPE_NULL) return 0;
+        // Temporarily switch to MPI_ERRORS_RETURN so that any other invalid
+        // datatype produces a return code rather than a fatal abort, then
+        // restore the application's original error handler unconditionally.
+        MPI_Errhandler _prev = MPI_ERRHANDLER_NULL;
+        PMPI_Comm_get_errhandler(MPI_COMM_WORLD, &_prev);
+        PMPI_Comm_set_errhandler(MPI_COMM_WORLD, MPI_ERRORS_RETURN);
         int _size = 0;
-        PMPI_Type_size(_datatype, &_size);
-        return _size;
+        int _ret  = PMPI_Type_size(_datatype, &_size);
+        PMPI_Comm_set_errhandler(MPI_COMM_WORLD, _prev);
+        PMPI_Errhandler_free(&_prev);
+        return (_ret == MPI_SUCCESS) ? _size : 0;
     }
 
     // MPI_Send

@@ -220,6 +220,11 @@ class BaseRunner(ABC):
         self.environment.set_user_environment()
 
         self.env = self.environment.get_merged_environment(config)
+        # OpenMPI >= 2.0 refuses to run as root unless these are set.
+        # Required when running tests inside a container as root.
+        if os.getuid() == 0:
+            self.env.setdefault("OMPI_ALLOW_RUN_AS_ROOT", "1")
+            self.env.setdefault("OMPI_ALLOW_RUN_AS_ROOT_CONFIRM", "1")
 
     @abstractmethod
     def build_command(self) -> list[str]:
