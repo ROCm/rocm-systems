@@ -45,6 +45,11 @@ namespace {
 std::string make_tagged_dir(const char *kind) {
   std::error_code ec;
   std::string root = rpc_default_runtime_dir();
+  // Fail closed on an empty root: an empty base would make tmpl "/rocjitsu_..._XXXXXX"
+  // and try to mkdtemp scratch dirs in the filesystem root. rpc_default_runtime_dir()
+  // already treats a set-but-empty $ROCJITSU_RUNTIME_DIR as unset; guard defensively.
+  if (root.empty())
+    return {};
   // Errors from create_directories are intentionally not checked here: if the root
   // could not be created, mkdtemp below fails and returns empty, which both callers
   // already treat as "no synthetic tree" via an empty-string early return.
@@ -68,6 +73,11 @@ void reap_stale_sysfs_dirs() {
   // best-effort cleanup path. Best-effort — any filesystem error just ends the scan.
   std::error_code ec;
   std::string root = rpc_default_runtime_dir();
+  // Never scan an empty root: directory_iterator("") walks the CWD, and this loop
+  // remove_all's matching entries. rpc_default_runtime_dir() already maps a set-but-
+  // empty $ROCJITSU_RUNTIME_DIR to a real path; guard here too since we delete.
+  if (root.empty())
+    return;
   fs::directory_iterator it(root, ec);
   const fs::directory_iterator end;
   for (; !ec && it != end; it.increment(ec)) {

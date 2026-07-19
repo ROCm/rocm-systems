@@ -47,7 +47,8 @@ struct WavefrontSnapshot {
   uint8_t vgpr_msb_mode = 0;      ///< Decoded s_set_vgpr_msb layout at halt.
   uint64_t lds_size_bytes = 0;    ///< Size of the LDS region visible to this wave.
   simdojo::ComponentID cu_id = 0; ///< Originating CU component id (for per-CU grouping).
-  std::vector<uint32_t> sgprs;    ///< [num_sgprs]
+  std::vector<uint32_t> sgprs;    ///< Full physical SGPR block (sgprs_per_wf), so TTMP
+                                  ///< slots past num_sgprs remain visible to tests.
   std::vector<uint32_t> vgprs;    ///< [vgpr_block * wf_size], row-major by physical reg.
 
   /// @brief Read a captured SGPR by architectural index.

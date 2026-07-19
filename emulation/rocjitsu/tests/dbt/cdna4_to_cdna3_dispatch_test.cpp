@@ -40,6 +40,16 @@ namespace {
 using test::kernel_hsaco_path;
 using test::kernel_path;
 
+// Upper bound on how long to block for a dispatch's completion signal. This is a
+// correctness guard against a stuck dispatch, NOT a performance budget: the real
+// hang guard is the ctest-level TIMEOUT (120-300s). Under CI's `ctest -j`, these
+// CPU-bound DBT matmul simulations are starved and a correct dispatch can take far
+// longer in wall time than it does when run alone, so a tight per-signal budget
+// (the old 5-10s) produced false "dispatch timed out" failures. Keep it generously
+// below the ctest TIMEOUT so a genuine hang still surfaces as a signal-wait failure
+// rather than a hard ctest kill.
+constexpr uint64_t kDispatchSignalWaitTimeoutNs = 120'000'000'000ULL;
+
 std::vector<uint8_t> load_kernel_hsaco_bytes(const char *name) {
   std::ifstream file(kernel_hsaco_path(name), std::ios::binary);
   if (!file)
@@ -510,7 +520,7 @@ void run_dynamic_copy_loop(const std::vector<uint8_t> &elf_bytes, const Dispatch
     hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
 
     const hsa_signal_value_t val = hsa_signal_wait_scacquire(
-        signal, HSA_SIGNAL_CONDITION_LT, 1, 5'000'000'000ULL, HSA_WAIT_STATE_BLOCKED);
+        signal, HSA_SIGNAL_CONDITION_LT, 1, kDispatchSignalWaitTimeoutNs, HSA_WAIT_STATE_BLOCKED);
     ASSERT_EQ(val, 0) << "Kernel dispatch timed out or failed";
 
     ASSERT_EQ(hsa_memory_copy(dst_host.data(), dst_dev, kMaxBytes), HSA_STATUS_SUCCESS);
@@ -691,8 +701,9 @@ void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const DispatchTarg
   __atomic_store_n(reinterpret_cast<uint16_t *>(aql), header, __ATOMIC_RELEASE);
   hsa_signal_store_relaxed(resources.queue->doorbell_signal, write_idx);
 
-  const hsa_signal_value_t val = hsa_signal_wait_scacquire(
-      resources.signal, HSA_SIGNAL_CONDITION_LT, 1, 5'000'000'000ULL, HSA_WAIT_STATE_BLOCKED);
+  const hsa_signal_value_t val =
+      hsa_signal_wait_scacquire(resources.signal, HSA_SIGNAL_CONDITION_LT, 1,
+                                kDispatchSignalWaitTimeoutNs, HSA_WAIT_STATE_BLOCKED);
   ASSERT_EQ(val, 0) << "Kernel dispatch timed out or failed";
 
   ASSERT_EQ(hsa_memory_copy(c_host.data(), c_dev, kCBytes), HSA_STATUS_SUCCESS);
@@ -865,7 +876,7 @@ void run_buffer_async_triton_matmul(const std::vector<uint8_t> &elf_bytes,
   hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
 
   const hsa_signal_value_t val = hsa_signal_wait_scacquire(
-      signal, HSA_SIGNAL_CONDITION_LT, 1, 10'000'000'000ULL, HSA_WAIT_STATE_BLOCKED);
+      signal, HSA_SIGNAL_CONDITION_LT, 1, kDispatchSignalWaitTimeoutNs, HSA_WAIT_STATE_BLOCKED);
   ASSERT_EQ(val, 0) << "Kernel dispatch timed out or failed";
 
   ASSERT_EQ(hsa_memory_copy(c_host.data(), c_dev, kCBytes), HSA_STATUS_SUCCESS);
@@ -1021,7 +1032,7 @@ void run_flash_attention_triton(const std::vector<uint8_t> &elf_bytes, const Dis
   hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
 
   const hsa_signal_value_t val = hsa_signal_wait_scacquire(
-      signal, HSA_SIGNAL_CONDITION_LT, 1, 10'000'000'000ULL, HSA_WAIT_STATE_BLOCKED);
+      signal, HSA_SIGNAL_CONDITION_LT, 1, kDispatchSignalWaitTimeoutNs, HSA_WAIT_STATE_BLOCKED);
   ASSERT_EQ(val, 0) << "Kernel dispatch timed out or failed";
 
   ASSERT_EQ(hsa_memory_copy(o_host.data(), o_dev, kOBytes), HSA_STATUS_SUCCESS);

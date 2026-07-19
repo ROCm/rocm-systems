@@ -476,11 +476,18 @@ void cleanup_runtime_files(pid_t pid) {
 // Each numeric <pid> subdir of the runtime root is removed if that PID is no
 // longer alive, so a recycled PID cannot inherit a stale config_path/daemon.sock.
 void reap_stale_runtime_dirs() {
+  // Never iterate an empty root: directory_iterator("") scans the CWD, which would
+  // let this reaper remove_all unrelated numeric directories. rpc_default_runtime_dir()
+  // already treats a set-but-empty $ROCJITSU_RUNTIME_DIR as unset, but guard here too
+  // since the loop body deletes.
+  const std::string root = rpc_default_runtime_dir();
+  if (root.empty())
+    return;
   // Advance the iterator with an error_code (not the throwing operator++): another
   // launcher may remove_all an entry concurrently, and a throw here would abort the
   // launcher before exec. Best-effort — any filesystem error just ends the scan.
   std::error_code ec;
-  std::filesystem::directory_iterator it(rpc_default_runtime_dir(), ec);
+  std::filesystem::directory_iterator it(root, ec);
   const std::filesystem::directory_iterator end;
   for (; !ec && it != end; it.increment(ec)) {
     // Only real per-PID directories are reapable. Use symlink_status() (which does

@@ -240,11 +240,14 @@ inline bool rpc_send_exact(int sock, const void *buffer, size_t total_bytes) {
 /// @brief Per-user runtime directory for rocjitsu state files.
 /// @details Checks $ROCJITSU_RUNTIME_DIR first (used by test infrastructure
 /// for per-process isolation), then $XDG_RUNTIME_DIR/rocjitsu, falling back
-/// to /tmp/rocjitsu-<uid>.
+/// to /tmp/rocjitsu-<uid>. An env var that is SET BUT EMPTY is treated as unset:
+/// returning "" would root every derived path (socket, config, per-PID dirs) at
+/// the filesystem root and make the reapers iterate/delete from "/" or CWD, so we
+/// never return an empty string.
 inline std::string rpc_default_runtime_dir() {
-  if (const char *rj = getenv("ROCJITSU_RUNTIME_DIR"))
+  if (const char *rj = getenv("ROCJITSU_RUNTIME_DIR"); rj && *rj)
     return rj;
-  if (const char *xdg = getenv("XDG_RUNTIME_DIR"))
+  if (const char *xdg = getenv("XDG_RUNTIME_DIR"); xdg && *xdg)
     return std::string(xdg) + "/rocjitsu";
   return "/tmp/rocjitsu-" + std::to_string(getuid());
 }
