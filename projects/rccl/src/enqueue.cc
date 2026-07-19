@@ -3606,10 +3606,11 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
   
       bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
 
-      // CE collectives are not graph-capture-safe (hipMemcpyBatchAsync and the
-      // cross-rank memop barrier deadlock on graph replay), so skip CE entirely
-      // while the stream is capturing and fall through to the graph-safe
-      // DDA/symmetric/kernel paths.
+      // Data-movement CE collectives (AllGather/AlltoAll/Scatter/Gather) are
+      // graph-capture-safe via the per-op memcpy fallback + reset barrier in
+      // ncclCeLaunchBatchOps, matching NCCL. CE AllReduce (RCCL-only 2-shot) is
+      // NOT: its host-side toggle/seq state desyncs across the eager<->captured
+      // boundary and async plan reclaim, so it stays gated by the graph latch.
       bool ceCapturing, ceArGraphAllowed;
       if (info->ceGraphDecisionValid) {
         // Already computed by ncclAllReduce_impl() for this call.
@@ -3646,7 +3647,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       bool ceAllReduceFits = true;
       ncclSymRegType_t winRegType;
       NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
-      bool ceAvailable = !ceCapturing && ncclCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
+      // AR alone is blocked during/after capture via the latch (ceArGraphAllowed).
+      bool ceAvailable = ncclCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
       if (info->coll == ncclFuncAllReduce) {
         if (!ceArGraphAllowed || !rcclUseCeAllReduce(comm, info->count, info->datatype, info->op)) {
           ceAvailable = false;
@@ -3661,7 +3663,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       }
 
       // Append CE collective task if CE is supported and requested by user
-      bool CeScratchAvailable = !ceCapturing && ncclCeScratchAvailable(comm, info->coll, info->op, info->datatype, winRegType);
+      // Scratch/DDA path is data-movement only (AR excluded below), so it is safe under capture.
+      bool CeScratchAvailable = ncclCeScratchAvailable(comm, info->coll, info->op, info->datatype, winRegType);
       size_t recvBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
       if (rcclParamForceCe() && CeScratchAvailable && winRegType != ncclSymSendRegRecvReg && winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment && comm->ddaScratch != nullptr && recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce) {
         INFO(NCCL_TUNING, "Using DDA scratch for CE collective, count=%zu, recvBytes=%zu", info->count, recvBytes);      

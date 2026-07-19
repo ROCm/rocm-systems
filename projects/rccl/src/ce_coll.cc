@@ -491,6 +491,13 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeCollArgs* 
         NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
       }
     }
+    // Force an even sync count so useCompletePtr returns to its pre-launch
+    // state; an odd count leaves the toggle flipped and desyncs the next
+    // ready/complete barrier on graph replay. (ported from NCCL)
+    if (params->intraBatchSync &&
+        ((params->numOps + comm->ceColl.intraBatchSyncFreq - 1) / comm->ceColl.intraBatchSyncFreq) % 2 == 0) {
+      NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
+    }
   }
   //--------------No graph capture--------------
   else {
