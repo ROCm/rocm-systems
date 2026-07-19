@@ -155,6 +155,7 @@ public:
   /// @brief Check whether this CU has no active wavefronts.
   /// @retval true No wavefronts are actively executing.
   /// @retval false At least one wavefront is active.
+  /// @warning NOT thread-safe (see has_active_wfs()): engine-thread only.
   virtual bool is_idle() const { return !has_active_wfs(); }
 
   /// @brief Register a callback invoked when this CU becomes idle.
@@ -359,6 +360,9 @@ public:
   /// @brief Check whether any wavefront slot is actively executing.
   /// @retval true At least one wavefront is not halted.
   /// @retval false All wavefronts are halted.
+  /// @warning NOT thread-safe: reads the non-atomic per-wave state_. Safe only on the
+  ///   shared partition engine thread (CP and its CUs share one partition, asserted in
+  ///   CommandProcessor::startup()); callers on any other thread would race a halt().
   bool has_active_wfs() const {
     for (const auto &w : wfs_)
       if (!w->is_halted())

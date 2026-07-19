@@ -37,6 +37,11 @@ namespace {
 /// rpc_default_runtime_dir() (tmpfs, reaped at logout) and carry the owning PID
 /// in their name (rocjitsu_<kind>_<pid>_XXXXXX) so reap_stale_sysfs_dirs() can
 /// remove the trees an earlier SIGKILL/crash orphaned. Returns empty on failure.
+/// @note The PID tag makes reaping best-effort, not exact: PID reuse means a
+/// recycled-but-live PID can keep a genuinely-orphaned tree from being reaped (a
+/// bounded leak until logout clears the tmpfs), and the mkdtemp XXXXXX suffix keeps
+/// two same-PID generations from colliding. This matches the launcher reaper
+/// (main.cpp reap_stale_runtime_dirs); the tmpfs backstop bounds any leak.
 std::string make_tagged_dir(const char *kind) {
   std::error_code ec;
   std::string root = rpc_default_runtime_dir();

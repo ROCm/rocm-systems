@@ -70,6 +70,7 @@ typedef struct rj_vm_map_t {
   uint32_t prot;        ///< Memory protection flags.
   uint32_t flags;       ///< Mapping flags.
   uint64_t mapped_addr; ///< [out] Address the mapping was placed at.
+  int32_t map_errno;    ///< [out] errno captured at the failing mmap (0 on success).
 } rj_vm_map_t;
 
 /// @brief Device memory unmapping descriptor.

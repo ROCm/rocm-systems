@@ -42,6 +42,7 @@
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -85,9 +86,23 @@ void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::stop_token
 
     switch (hdr.opcode) {
     case RPC_HANDSHAKE: {
+      // One connection opens exactly one device. A second HANDSHAKE would overwrite
+      // process_id without closing the first, leaking that daemon-side process (its
+      // allocations, queues, CP callbacks) until the connection tears down. Treat a
+      // repeat handshake as a protocol violation and drop the connection.
+      if (process_id != 0) {
+        RpcHeader resp{};
+        resp.opcode = hdr.opcode;
+        resp.request_id = hdr.request_id;
+        resp.result = -1;
+        rpc_send_exact(client_fd, &resp, sizeof(resp));
+        connected = false;
+        break;
+      }
       auto open_rc = rj_vm_device_open(vm, client_pid, &process_id);
       if (open_rc != ROCJITSU_STATUS_SUCCESS) {
         RpcHeader resp{};
+        resp.opcode = hdr.opcode;
         resp.request_id = hdr.request_id;
         resp.result = -1;
         rpc_send_exact(client_fd, &resp, sizeof(resp));
@@ -107,6 +122,7 @@ void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::stop_token
       auto drm_len = drm ? std::strlen(drm) : 0;
 
       RpcHeader resp{};
+      resp.opcode = hdr.opcode;
       resp.request_id = hdr.request_id;
 
       RpcHandshakeResponse hs{};
@@ -130,6 +146,7 @@ void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::stop_token
       rj_vm_device_close(vm, process_id);
       process_id = 0;
       RpcHeader resp{};
+      resp.opcode = hdr.opcode;
       resp.request_id = hdr.request_id;
       rpc_send_exact(client_fd, &resp, sizeof(resp));
       connected = false;
@@ -152,8 +169,12 @@ void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::stop_token
       rj_vm_device_map_as(vm, process_id, &map);
 
       RpcHeader resp{};
+      resp.opcode = hdr.opcode;
       resp.request_id = hdr.request_id;
-      resp.result = (reinterpret_cast<void *>(map.mapped_addr) == MAP_FAILED) ? -errno : 0;
+      // Relay the errno captured inside rj_vm_device_map_as at the failing mmap, not
+      // this thread's errno — bookkeeping syscalls between the mmap and here could
+      // have clobbered it, sending the client a misleading error code.
+      resp.result = (reinterpret_cast<void *>(map.mapped_addr) == MAP_FAILED) ? -map.map_errno : 0;
       resp.payload_bytes = sizeof(RpcMmapResponse);
 
       RpcMmapResponse mresp{.mapped_addr = map.mapped_addr};
@@ -182,6 +203,7 @@ void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::stop_token
       rj_vm_device_unmap_as(vm, process_id, &unmap);
 
       RpcHeader resp{};
+      resp.opcode = hdr.opcode;
       resp.request_id = hdr.request_id;
       rpc_send_exact(client_fd, &resp, sizeof(resp));
       break;
@@ -214,7 +236,7 @@ void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::stop_token
         ::close(cmd.in_handle);
 
       RpcHeader resp{};
-      resp.opcode = RPC_IOCTL;
+      resp.opcode = hdr.opcode;
       resp.request_id = hdr.request_id;
       resp.result = cmd.result;
       resp.payload_bytes = static_cast<uint32_t>(cmd.buf_size);
@@ -281,9 +303,16 @@ int run_daemon_server(const char *config_path, const std::string &socket_path = 
   }
 
   std::stop_source stop_source;
-  std::vector<std::jthread> client_threads;
-  std::vector<int> active_client_fds;
+  // Per-connection threads keyed by a monotonic id (never a recyclable fd number).
+  // active_fds tracks each live connection's fd for shutdown-on-teardown; a finished
+  // client removes its own fd here (its handle_client already ::close'd it) so we
+  // never shutdown() a closed-and-possibly-recycled fd. finished_ids lets the accept
+  // loop reap completed threads instead of accumulating them until server shutdown.
+  std::unordered_map<uint64_t, std::jthread> client_threads;
+  std::unordered_map<uint64_t, int> active_fds;
+  std::vector<uint64_t> finished_ids;
   std::mutex client_threads_mutex;
+  uint64_t next_conn_id = 1;
 
   std::signal(SIGINT, [](int) {
     int fd = g_listen_fd;
@@ -298,6 +327,18 @@ int run_daemon_server(const char *config_path, const std::string &socket_path = 
       shutdown(fd, SHUT_RDWR);
   });
 
+  // Join and erase any threads that finished since the last accept. Caller holds
+  // client_threads_mutex. Draining a moved-out jthread list under the lock is safe:
+  // each id in finished_ids belongs to a thread that has run to completion and only
+  // needs its handle joined (the jthread destructor does that on erase).
+  auto reap_finished = [&]() {
+    for (uint64_t id : finished_ids) {
+      active_fds.erase(id);
+      client_threads.erase(id);
+    }
+    finished_ids.clear();
+  };
+
   while (g_listen_fd >= 0) {
     int client = accept(listen_fd, nullptr, nullptr);
     if (client < 0)
@@ -305,16 +346,36 @@ int run_daemon_server(const char *config_path, const std::string &socket_path = 
 
     pid_t peer_pid = peer_pid_for_socket(client);
     std::lock_guard<std::mutex> lock(client_threads_mutex);
-    active_client_fds.push_back(client);
-    client_threads.emplace_back(handle_client, client, vm, peer_pid, stop_source.get_token());
+    reap_finished();
+    uint64_t conn_id = next_conn_id++;
+    active_fds[conn_id] = client;
+    client_threads[conn_id] =
+        std::jthread([&client_threads_mutex, &active_fds, &finished_ids, conn_id, client, vm,
+                      peer_pid, token = stop_source.get_token()]() {
+          handle_client(client, vm, peer_pid, token);
+          // Record completion: drop our (now-closed) fd from the active set and mark
+          // ourselves for reaping by the accept loop / teardown.
+          std::lock_guard<std::mutex> done_lock(client_threads_mutex);
+          active_fds.erase(conn_id);
+          finished_ids.push_back(conn_id);
+        });
   }
 
   stop_source.request_stop();
   {
-    std::lock_guard<std::mutex> lock(client_threads_mutex);
-    for (int fd : active_client_fds)
-      shutdown(fd, SHUT_RDWR);
-    client_threads.clear();
+    std::unordered_map<uint64_t, std::jthread> to_join;
+    {
+      std::lock_guard<std::mutex> lock(client_threads_mutex);
+      reap_finished();
+      for (const auto &[conn_id, fd] : active_fds)
+        shutdown(fd, SHUT_RDWR);
+      // Move the threads OUT and join them below without holding the mutex: a client
+      // thread's completion lambda takes client_threads_mutex, so joining while
+      // holding it would deadlock against a thread mid-completion.
+      to_join = std::move(client_threads);
+      client_threads.clear();
+    }
+    to_join.clear(); // ~jthread joins each, off-lock.
   }
   ::close(listen_fd);
   unlink(sock_path.c_str());

@@ -869,7 +869,11 @@ endforeach()
 foreach(
     _interposer_gem_test
     IN
-    ITEMS ReusedDmabufFdMintsDistinctHandles UnmapWithWrongHandleFails
+    ITEMS
+        ReusedDmabufFdMintsDistinctHandles
+        UnmapWithWrongHandleFails
+        MapSucceedsAfterExportFdClosed
+        ReplaceEvictsOverlappingDifferentSizeRange
 )
     rj_add_test(
         NAME "InterposerGemTest.${_interposer_gem_test}"

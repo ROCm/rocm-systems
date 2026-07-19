@@ -62,6 +62,7 @@ RJ_DIAGNOSTIC_POP
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <pthread.h>
 #include <signal.h>
 #include <sstream>
 #include <string>
@@ -251,8 +252,24 @@ public:
       ctx.invocation_runtime_dir_ = dir;
     else
       ctx.invocation_runtime_dir_ = rocjitsu::rpc_invocation_runtime_dir(getpid());
+    // Reset child state on ANY glibc fork-family primitive, not just the
+    // interposed fork() symbol. system()/popen()/posix_spawn() and libraries that
+    // call fork() through a path that doesn't bind to our exported fork() would
+    // otherwise leave the child with mutexes locked-by-a-dead-thread and a live
+    // remote_ aliasing the parent's daemon connection — the next interposed
+    // open()/ioctl()/close() in that child would then deadlock or corrupt the
+    // parent's connection. pthread_atfork's child handler runs inside libc fork,
+    // covering every fork that goes through glibc. (vfork/posix_spawn children run
+    // no atfork handlers by design, but they may only exec/_exit, so there is no
+    // interposer state for them to corrupt.) reset_after_fork() is idempotent and
+    // async-signal-safe (store/clear/placement-new only), as an atfork child
+    // handler requires.
+    pthread_atfork(nullptr, nullptr, &InterposerContext::atfork_child);
     real().resolve();
   }
+
+  /// @brief pthread_atfork child handler: reset interposer state in the child.
+  static void atfork_child() { ctx.reset_after_fork(); }
 
   /// @brief Reset interposer state in a forked child process.
   /// @details After fork(), the child inherits the parent's address space but
@@ -890,9 +907,11 @@ public:
   /// closed — ROCr closes that fd immediately after GEM_VA returns, while the GPU
   /// mapping must stay live for the caller. Because handles are not fd-derived, a
   /// recycled dmabuf fd number can never resolve to a still-live handle and tear
-  /// down an unrelated BO. `dmabuf_fd` is retained only for the lazy backing mmap
-  /// (the fd is still open at GEM_VA time); `drm_fd` scopes the handle to its DRM
-  /// file so a file close reaps any handles the caller never GEM_CLOSE'd.
+  /// down an unrelated BO. `dmabuf_fd` is a PRIVATE dup taken at PRIME time and held
+  /// only for the lazy backing mmap, so the backing stays valid even if the caller
+  /// closes the export fd before GEM_VA (the fd number cannot be recycled out from
+  /// under us); `drm_fd` scopes the handle to its DRM file so a file close reaps any
+  /// handles the caller never GEM_CLOSE'd.
   /// installed_vas holds the GPU VA ranges mapped from this BO so teardown can
   /// remove the page-table entries before munmapping cpu_ptr.
   ///
@@ -907,11 +926,18 @@ public:
     uint64_t va_address = 0;
     uint64_t map_size = 0;
     bool operator==(const GemMapping &) const = default;
+    /// @brief True if this VA interval intersects @p other. Half-open [va, va+size).
+    /// map_size is already bounds-checked non-zero and non-overflowing in gem_map().
+    [[nodiscard]] bool overlaps(const GemMapping &other) const {
+      return va_address < other.va_address + other.map_size &&
+             other.va_address < va_address + map_size;
+    }
   };
 
   struct GemEntry {
-    int dmabuf_fd = -1; ///< Backing dmabuf fd for the lazy mmap (open at GEM_VA time).
-    int drm_fd = -1;    ///< Owning DRM file; the entry is reaped when it closes.
+    int dmabuf_fd = -1;          ///< Private dup of the backing dmabuf fd for the lazy mmap.
+    bool owns_dmabuf_fd = false; ///< True if dmabuf_fd is our dup (close at teardown).
+    int drm_fd = -1;             ///< Owning DRM file; the entry is reaped when it closes.
     uint64_t size = 0;
     uint32_t alloc_flags = 0;
     void *cpu_ptr = nullptr;
@@ -956,6 +982,15 @@ public:
       alloc_flags = it->second;
       pending_gem_flags_.erase(it);
     }
+    // Pin the backing to the HANDLE's lifetime by dup'ing the dmabuf fd now, rather
+    // than storing the caller's fd number for a later lazy mmap. ROCr closes the
+    // export fd right after GEM_VA returns, but nothing in the DRM ABI forbids a
+    // client from closing it between PRIME and a deferred GEM_VA MAP; the fd number
+    // could then be recycled and the lazy mmap in gem_map() would map an unrelated
+    // file. The dup keeps the same dmabuf open under a private fd until the handle is
+    // torn down. Falls back to the raw fd if dup fails (best effort; the common
+    // fd-still-open case is unaffected).
+    int backing_fd = InterposerContext::real().fcntl(dmabuf_fd, F_DUPFD_CLOEXEC, 0);
     // Mint the next free handle. Skip 0 ("no handle") and any handle still live, so a
     // uint32 wrap after a very long-lived process cannot silently overwrite an
     // in-use entry (which would detach its PTEs from a future GEM_CLOSE).
@@ -964,7 +999,8 @@ public:
       handle = next_gem_handle_++;
     GemEntry &gem = gem_entries_[handle];
     gem = {};
-    gem.dmabuf_fd = dmabuf_fd;
+    gem.dmabuf_fd = (backing_fd >= 0) ? backing_fd : dmabuf_fd;
+    gem.owns_dmabuf_fd = (backing_fd >= 0);
     gem.drm_fd = drm_fd;
     gem.size = size;
     gem.alloc_flags = alloc_flags;
@@ -981,10 +1017,10 @@ public:
   /// bounds-checks the request against the BO size, records the range, and installs
   /// the PTEs. The lock order fd_mutex_ -> driver page-table lock matches
   /// teardown_gem_entry_locked, so there is no inversion.
-  /// @param replace When true (AMDGPU_VA_OP_REPLACE), first evict any existing exact
-  ///   {va_address, map_size} range — from whatever handle currently owns it — so the
-  ///   old owner's bookkeeping does not later tear down the replacement's PTEs. When
-  ///   false (AMDGPU_VA_OP_MAP), a pre-existing range at that VA is a conflict.
+  /// @param replace When true (AMDGPU_VA_OP_REPLACE), first evict any existing range
+  ///   that OVERLAPS {va_address, map_size} — from whatever handle currently owns it —
+  ///   so the old owner's bookkeeping does not later tear down the replacement's PTEs.
+  ///   When false (AMDGPU_VA_OP_MAP), an overlapping pre-existing range is a conflict.
   /// @retval true the range was installed.
   /// @retval false unknown handle, out-of-bounds request, failed mmap, no driver, or
   ///   (MAP only) the range is already mapped.
@@ -1074,12 +1110,13 @@ public:
   }
 
   /// @brief Clear a GEM_VA range from the GPU page table (CLEAR).
-  /// @details CLEAR is handle-agnostic: it tears down the exact {va_address,
-  /// map_size} range wherever it is currently recorded, updating the owning entry's
-  /// bookkeeping so a later GEM_CLOSE does not double-unmap it. Fails if no entry
-  /// owns that exact range (so the ioctl reports EINVAL instead of a phantom clear).
-  /// @retval true the range was found and cleared.
-  /// @retval false no driver, or no entry owns that exact range.
+  /// @details CLEAR is handle-agnostic: it tears down every recorded range that
+  /// OVERLAPS {va_address, map_size} wherever it is currently recorded, updating the
+  /// owning entries' bookkeeping so a later GEM_CLOSE does not double-unmap them.
+  /// Fails if no recorded range overlaps (so the ioctl reports EINVAL instead of a
+  /// phantom clear).
+  /// @retval true at least one overlapping range was found and cleared.
+  /// @retval false no driver, or no recorded range overlaps.
   [[nodiscard]] bool gem_clear(uint64_t va_address, uint64_t map_size) {
     std::lock_guard lock(fd_mutex_);
     auto *drv = dynamic_cast<SimulatedKfd *>(driver());
@@ -1281,42 +1318,57 @@ private:
       InterposerContext::real().munmap(gem.cpu_ptr, gem.size);
     gem.cpu_ptr = nullptr;
     gem.installed_vas.clear();
+    // Release our private dup of the backing dmabuf (taken in prime_import) now that
+    // no lazy mmap can reference it. Close through the passthrough table so we don't
+    // re-enter our own close() hook and its GEM/dup bookkeeping.
+    if (gem.owns_dmabuf_fd && gem.dmabuf_fd >= 0)
+      InterposerContext::real().close(gem.dmabuf_fd);
+    gem.dmabuf_fd = -1;
+    gem.owns_dmabuf_fd = false;
   }
 
-  /// @brief Remove the exact @p range from whatever GEM entry currently owns it.
+  /// @brief Evict every recorded range that OVERLAPS @p range, across all handles.
   /// @details Caller holds fd_mutex_ and passes the live simulated @p drv. Used by
-  /// GEM_VA REPLACE (evict the prior mapping before installing the new one) and CLEAR
-  /// (handle-agnostic teardown). Removes the PTEs through the owning driver and drops
-  /// the range from that entry's bookkeeping so a later GEM_CLOSE cannot double-unmap
-  /// it. The host mmap is left intact — the owning handle still exists and other
-  /// ranges may reference it; it is munmapped only at GEM_CLOSE / reap.
-  /// @param allow_missing When true, a range that no entry owns is a success (a MAP
-  ///   onto a free VA has nothing to evict); when false (REPLACE/CLEAR), a missing
-  ///   range is a failure so the ioctl reports EINVAL.
-  /// @retval true nothing needed evicting (allow_missing) or the range was evicted.
-  /// @retval false the range was not owned (only when !allow_missing) or the unmap
-  ///   failed.
+  /// GEM_VA REPLACE (evict prior mappings before installing the new one) and CLEAR
+  /// (handle-agnostic teardown). Matching is by interval intersection, not exact
+  /// equality: a REPLACE at a VA previously mapped with a DIFFERENT size (or a
+  /// sub/super-range) must still evict the old mapping, otherwise its stale
+  /// bookkeeping would later double-unmap or leak the new PTEs. Each overlapping
+  /// range is unmapped by its OWN {va_address, map_size} extent (not @p range's) so
+  /// the page-table removal matches what was installed, then dropped from its entry's
+  /// bookkeeping. The host mmap is left intact — the owning handle still exists and
+  /// other ranges may reference it; it is munmapped only at GEM_CLOSE / reap.
+  /// @param allow_missing When true, no overlap is a success (a MAP onto a free VA has
+  ///   nothing to evict); when false (REPLACE/CLEAR), no overlap is a failure so the
+  ///   ioctl reports EINVAL.
+  /// @retval true nothing overlapped (allow_missing) or all overlaps were evicted.
+  /// @retval false nothing overlapped (only when !allow_missing) or an unmap failed.
   [[nodiscard]] bool evict_range_locked(SimulatedKfd *drv, const GemMapping &range,
                                         bool allow_missing) {
+    bool evicted_any = false;
     for (auto &[handle, gem] : gem_entries_) {
-      auto vit = std::find(gem.installed_vas.begin(), gem.installed_vas.end(), range);
-      if (vit == gem.installed_vas.end())
-        continue;
-      if (!drv->gem_va_unmap(range.va_address, range.map_size))
-        return false;
-      gem.installed_vas.erase(vit);
-      return true;
+      for (auto vit = gem.installed_vas.begin(); vit != gem.installed_vas.end();) {
+        if (!vit->overlaps(range)) {
+          ++vit;
+          continue;
+        }
+        if (!drv->gem_va_unmap(vit->va_address, vit->map_size))
+          return false;
+        vit = gem.installed_vas.erase(vit);
+        evicted_any = true;
+      }
     }
-    return allow_missing;
+    return evicted_any || allow_missing;
   }
 
-  /// @brief Whether any GEM entry currently owns the exact @p range. Caller holds
-  /// fd_mutex_. Used by plain MAP to reject a double-map over an existing range.
+  /// @brief Whether any GEM entry owns a range OVERLAPPING @p range. Caller holds
+  /// fd_mutex_. Used by plain MAP to reject a map that would collide with (not just
+  /// exactly duplicate) an existing range's PTEs.
   [[nodiscard]] bool range_is_mapped_locked(const GemMapping &range) const {
     for (const auto &[handle, gem] : gem_entries_)
-      if (std::find(gem.installed_vas.begin(), gem.installed_vas.end(), range) !=
-          gem.installed_vas.end())
-        return true;
+      for (const auto &existing : gem.installed_vas)
+        if (existing.overlaps(range))
+          return true;
     return false;
   }
 
@@ -2618,12 +2670,9 @@ RJ_INTERPOSER_EXPORT int __lxstat64(int ver, const char *path, struct stat64 *bu
   return real_lxstat64(ver, actual, buf);
 }
 
-RJ_INTERPOSER_EXPORT pid_t fork() {
-  assert(InterposerContext::real().ready());
-  pid_t pid = InterposerContext::real().fork();
-  if (pid == 0)
-    InterposerContext::ctx.reset_after_fork();
-  return pid;
-}
+// fork() is intentionally NOT interposed: the child reset is registered via
+// pthread_atfork() in InterposerContext::init(), which libc runs for every
+// fork-family primitive that goes through glibc (fork/system/popen), not just an
+// interposed fork() symbol. A passthrough wrapper here would double-run the reset.
 
 } // extern "C"

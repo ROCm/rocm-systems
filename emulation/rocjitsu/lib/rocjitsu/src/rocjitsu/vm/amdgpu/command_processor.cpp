@@ -567,13 +567,22 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
     // signal. Re-broadcasting every ~10ms ensures late-created events see
     // the idle state within a bounded window.
     if (poll_count % 100 == 0) {
-      std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-      for (size_t i = 0; i < hw_queues_.size(); ++i) {
-        if (new_queue_states_[i].entries.empty() && hw_queues_[i].process_id != 0) {
-          if (interrupt_cb_)
-            interrupt_cb_(hw_queues_[i].process_id, 0);
+      // Snapshot the idle queues' process ids under the lock, then fire interrupt_cb_
+      // OUTSIDE it. interrupt_cb_ is an external KFD-layer callback whose internal
+      // locking is opaque to the CP; invoking it while holding hw_queue_mutex_ risks a
+      // lock-order inversion if that callback ever takes a lock held elsewhere while
+      // acquiring hw_queue_mutex_.
+      std::vector<uint32_t> idle_pids;
+      {
+        std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+        for (size_t i = 0; i < hw_queues_.size(); ++i) {
+          if (new_queue_states_[i].entries.empty() && hw_queues_[i].process_id != 0)
+            idle_pids.push_back(hw_queues_[i].process_id);
         }
       }
+      if (interrupt_cb_)
+        for (uint32_t pid : idle_pids)
+          interrupt_cb_(pid, 0);
     }
 
     if (poll_count % 5000 == 1) {
@@ -754,32 +763,34 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     }
     ComputeUnitCore *cu = placement.cu;
     uint32_t lds_base = placement.lds_base;
-    // Reserve all waves BEFORE committing WG-completion bookkeeping. begin_workgroup()
-    // installs the WG refcount and register_cluster_workgroup() installs the LDS pin;
-    // both are released only via release_wf() when the waves halt. Committing them
-    // first and then failing mid-workgroup (a dispatch_wf null) would orphan the
-    // refcount and pin, permanently blocking maybe_reset_lds_alloc() on this CU.
-    // Placement is already gated on can_accept_workgroup()/cluster planning, so this
-    // dry allocation cannot actually fail — but doing it up front makes the commit
-    // below all-or-nothing.
+    // Reserve AND fully initialize all waves BEFORE committing WG-completion
+    // bookkeeping. begin_workgroup() installs the WG refcount and
+    // register_cluster_workgroup() installs the LDS pin; both are released only via
+    // release_wf() when the waves halt. Committing them first and then failing
+    // mid-workgroup would orphan the refcount and pin, permanently blocking
+    // maybe_reset_lds_alloc() on this CU. Two failure modes are covered by doing all
+    // fallible work up front: a dispatch_wf() null (placement gating makes this
+    // unreachable, but the assert is compiled out in release), and a throw from
+    // init_wavefront_regs() (malformed kernarg-preload / undersized TTMP SGPR block).
+    // On either, halt the reserved-but-uncommitted waves — release_wf() is a no-op
+    // for a WG with no active_wgs_ entry — and fail/rethrow without having touched
+    // the WG refcount or cluster pin.
     std::vector<Wavefront *> wg_wavefronts;
     wg_wavefronts.reserve(entry.wfs_per_workgroup);
+    const auto halt_reserved = [&wg_wavefronts]() {
+      for (auto *claimed : wg_wavefronts)
+        claimed->halt();
+    };
     for (uint32_t w = 0; w < entry.wfs_per_workgroup; ++w) {
       Wavefront *wf = cu->dispatch_wf(global_wg_id, entry.kernel_entry_pc, entry.sgprs_per_wf,
                                       entry.vgprs_per_wf);
       if (!wf) {
-        // Unreachable given the placement gating; free any waves already claimed for
-        // this WG and fail without having touched the WG refcount / cluster pin.
         assert(false && "dispatch_wf failed after placement was reserved");
-        for (auto *claimed : wg_wavefronts)
-          claimed->halt();
+        halt_reserved();
         return false;
       }
       wg_wavefronts.push_back(wf);
     }
-    cu->begin_workgroup(entry.dispatch_id, global_wg_id, entry.wfs_per_workgroup);
-    register_cluster_workgroup(entry, local_wg_id, global_wg_id, cu, lds_base);
-
     for (uint32_t w = 0; w < entry.wfs_per_workgroup; ++w) {
       Wavefront *wf = wg_wavefronts[w];
       wf->set_lds_base(lds_base);
@@ -788,8 +799,18 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       wf->set_process_id(entry.process_id);
       wf->set_exec(initial_exec_mask_for_wave(entry, global_wg_id, w, cu->wf_size()));
       wf->set_cluster_info(entry.cluster_rank_for_local_wg(local_wg_id), entry.cluster_size());
-      init_wavefront_regs(cu, wf, entry, global_wg_id, w);
+      try {
+        init_wavefront_regs(cu, wf, entry, global_wg_id, w);
+      } catch (...) {
+        halt_reserved();
+        throw;
+      }
     }
+
+    // All fallible per-wave work succeeded: commit WG bookkeeping and the cluster pin.
+    cu->begin_workgroup(entry.dispatch_id, global_wg_id, entry.wfs_per_workgroup);
+    register_cluster_workgroup(entry, local_wg_id, global_wg_id, cu, lds_base);
+
     plugin_group_->onAmdgpuWorkgroupDispatched(entry.dispatch_id, global_wg_id,
                                                cu->vgpr_allocation_block_size(), entry.sgprs_per_wf,
                                                std::span<Wavefront *>(wg_wavefronts));
@@ -1657,7 +1678,7 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
 
   util::Logger::cp([&](auto &os) {
     os << std::format("{}: TEARDOWN_CHECK all_done={} kfd={} primary={} release={}", name(),
-                      all_done, kfd, is_primary_, should_release);
+                      all_done, kfd, is_primary_.load(), should_release);
   });
 
   // CRITICAL: must unlock before stop_doorbell_monitor() — the doorbell poll

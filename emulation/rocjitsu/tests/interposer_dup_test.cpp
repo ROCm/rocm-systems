@@ -486,3 +486,128 @@ TEST(InterposerGemTest, UnmapWithWrongHandleFails) {
   EXPECT_EQ(close(drm), 0);
   EXPECT_EQ(close(kfd), 0);
 }
+
+// PRIME_FD_TO_HANDLE dups the export fd internally, so the caller may close its
+// export fd BEFORE GEM_VA MAP and the deferred lazy backing mmap must still succeed
+// (the handle owns a private dup of the dmabuf that outlives the caller's fd).
+TEST(InterposerGemTest, MapSucceedsAfterExportFdClosed) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  constexpr size_t kBoSize = 0x1000;
+  int dmabuf = make_sized_memfd(kBoSize);
+  ASSERT_GE(dmabuf, 0);
+  uint32_t handle = 0;
+  ASSERT_TRUE(prime_import(drm, dmabuf, &handle));
+  ASSERT_NE(handle, 0u);
+
+  // Close the export fd BEFORE mapping. Under the old scheme (store the raw fd for a
+  // later lazy mmap) this would either fail or map an unrelated recycled fd. Force a
+  // recycle of the number so a lingering raw-fd dependency would be caught.
+  const int reused_number = dmabuf;
+  ASSERT_EQ(close(dmabuf), 0);
+  int filler = make_sized_memfd(kBoSize);
+  ASSERT_GE(filler, 0);
+  if (filler != reused_number) {
+    ASSERT_EQ(dup2(filler, reused_number), reused_number);
+    ASSERT_EQ(close(filler), 0);
+  }
+
+  const unsigned long gem_va = DRM_AMDGPU_GEM_VA_request();
+  const uint64_t va = 0x1000000000ULL;
+  drm_amdgpu_gem_va map{};
+  map.handle = handle;
+  map.operation = AMDGPU_VA_OP_MAP;
+  map.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  map.va_address = va;
+  map.map_size = kBoSize;
+  EXPECT_EQ(ioctl(drm, gem_va, &map), 0)
+      << "GEM_VA MAP must succeed via the handle's private dmabuf dup after the "
+         "caller closed (and recycled) its export fd";
+
+  drm_amdgpu_gem_va unmap{};
+  unmap.handle = handle;
+  unmap.operation = AMDGPU_VA_OP_UNMAP;
+  unmap.va_address = va;
+  unmap.map_size = kBoSize;
+  EXPECT_EQ(ioctl(drm, gem_va, &unmap), 0);
+  EXPECT_EQ(gem_close(drm, handle), 0);
+  EXPECT_EQ(close(reused_number), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+// AMDGPU_VA_OP_REPLACE at a VA that overlaps an existing mapping of a DIFFERENT size
+// must evict the old mapping (by its own extent), not silently install overlapping
+// PTEs. After a REPLACE, the old owner's stale range must be gone: its handle's UNMAP
+// of the original range must fail, and no double-unmap can occur.
+TEST(InterposerGemTest, ReplaceEvictsOverlappingDifferentSizeRange) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  constexpr size_t kBigBo = 0x4000;
+  constexpr size_t kSmallBo = 0x1000;
+  const unsigned long gem_va = DRM_AMDGPU_GEM_VA_request();
+  const uint64_t va = 0x1000000000ULL;
+
+  int dmabuf_a = make_sized_memfd(kBigBo);
+  ASSERT_GE(dmabuf_a, 0);
+  int dmabuf_b = make_sized_memfd(kSmallBo);
+  ASSERT_GE(dmabuf_b, 0);
+  uint32_t handle_a = 0, handle_b = 0;
+  ASSERT_TRUE(prime_import(drm, dmabuf_a, &handle_a));
+  ASSERT_TRUE(prime_import(drm, dmabuf_b, &handle_b));
+
+  // A maps a large range at va.
+  drm_amdgpu_gem_va map_a{};
+  map_a.handle = handle_a;
+  map_a.operation = AMDGPU_VA_OP_MAP;
+  map_a.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  map_a.va_address = va;
+  map_a.map_size = kBigBo;
+  ASSERT_EQ(ioctl(drm, gem_va, &map_a), 0);
+
+  // B REPLACEs a SMALLER range at the same base va. This overlaps A's range but is
+  // not identical; it must still evict A's mapping.
+  drm_amdgpu_gem_va replace_b{};
+  replace_b.handle = handle_b;
+  replace_b.operation = AMDGPU_VA_OP_REPLACE;
+  replace_b.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  replace_b.va_address = va;
+  replace_b.map_size = kSmallBo;
+  EXPECT_EQ(ioctl(drm, gem_va, &replace_b), 0)
+      << "REPLACE overlapping a different-size range must succeed and evict it";
+
+  // A's original range is gone: A's UNMAP of it must now fail (the record was evicted
+  // by the overlap-aware REPLACE, so A cannot double-unmap B's new PTEs).
+  drm_amdgpu_gem_va unmap_a{};
+  unmap_a.handle = handle_a;
+  unmap_a.operation = AMDGPU_VA_OP_UNMAP;
+  unmap_a.va_address = va;
+  unmap_a.map_size = kBigBo;
+  EXPECT_EQ(ioctl(drm, gem_va, &unmap_a), -1)
+      << "A's overlapping range must have been evicted by B's REPLACE";
+
+  // B's new range is live and its UNMAP succeeds exactly once.
+  drm_amdgpu_gem_va unmap_b{};
+  unmap_b.handle = handle_b;
+  unmap_b.operation = AMDGPU_VA_OP_UNMAP;
+  unmap_b.va_address = va;
+  unmap_b.map_size = kSmallBo;
+  EXPECT_EQ(ioctl(drm, gem_va, &unmap_b), 0);
+
+  EXPECT_EQ(gem_close(drm, handle_a), 0);
+  EXPECT_EQ(gem_close(drm, handle_b), 0);
+  EXPECT_EQ(close(dmabuf_a), 0);
+  EXPECT_EQ(close(dmabuf_b), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}

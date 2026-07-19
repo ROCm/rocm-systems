@@ -32,6 +32,7 @@
 #include "simdojo/sim/component.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -275,7 +276,13 @@ private:
 
   size_t next_cu_ = 0;
   size_t next_queue_idx_ = 0;
-  bool is_primary_ = false;
+  // Almost always accessed under hw_queue_mutex_, but the teardown path in
+  // handle_doorbell() must clear it AFTER unlocking (stop_doorbell_monitor() joins
+  // the poll thread, which takes hw_queue_mutex_). Atomic so that lock-held reads in
+  // register_queue() cannot data-race that one unlocked write. Only the internal
+  // test-queue path (!has_kfd_queues()) ever sets it; KFD queues anchor the primary
+  // at the VM level (rj_vm.cpp).
+  std::atomic<bool> is_primary_ = false;
   uint32_t workgroup_id_offset_ = 0;
   uint32_t vgpr_granularity_ = 8;
   bool packed_tid_ = false;

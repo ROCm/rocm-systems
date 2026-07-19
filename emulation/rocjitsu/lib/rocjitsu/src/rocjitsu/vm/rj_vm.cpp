@@ -15,10 +15,12 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_ioctl.h"
 RJ_DIAGNOSTIC_POP
 
+#include <cerrno>
 #include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 
 using namespace rocjitsu;
 
@@ -360,6 +362,10 @@ rj_status_t rj_vm_device_map_as(rj_vm_t *vm, uint32_t process_id, rj_vm_map_t *m
   auto *result = vm->vm->driver()->mmap(
       process_id, reinterpret_cast<void *>(map->addr), static_cast<size_t>(map->length),
       static_cast<int>(map->prot), static_cast<int>(map->flags), static_cast<off_t>(map->offset));
+  // Capture errno HERE, immediately after the driver mmap, before any bookkeeping
+  // syscall on the way back out can clobber it. Callers (the daemon RPC path) relay
+  // this to the client rather than reading their own errno across the API boundary.
+  map->map_errno = (result == MAP_FAILED) ? errno : 0;
   map->mapped_addr = reinterpret_cast<uint64_t>(result);
   return ROCJITSU_STATUS_SUCCESS;
 }

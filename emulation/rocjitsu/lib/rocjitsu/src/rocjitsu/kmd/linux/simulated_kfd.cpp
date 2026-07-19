@@ -89,6 +89,23 @@ void *safe_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
   return libc_passthrough().mmap(addr, length, prot, flags, fd, offset);
 }
 
+/// @brief fstat via the real libc, bypassing the interposer.
+/// @details Like safe_mmap: the interposer exports fstat with default visibility,
+/// so a bare fstat() from this TU binds to our own hook (which takes fd_mutex_ via
+/// is_drm()). Routing through the passthrough table keeps "the driver never
+/// re-enters the interposer" total and avoids acquiring fd_mutex_ under a held
+/// per-process lock (alloc_mutex_/etc.).
+int safe_fstat(int fd, struct stat *st) { return libc_passthrough().fstat_fn(fd, st); }
+
+/// @brief fcntl via the real libc, bypassing the interposer.
+/// @details The interposer's fcntl hook takes fd_mutex_ on F_DUPFD paths; calling
+/// it from the driver while holding a per-process lock is a latent lock-order
+/// inversion. The passthrough table's fcntl is variadic; the int-arg forms
+/// (F_DUPFD_CLOEXEC, F_ADD_SEALS, F_GETFL/no-arg) used here forward cleanly.
+template <typename... Args> int safe_fcntl(int fd, int cmd, Args... args) {
+  return libc_passthrough().fcntl(fd, cmd, args...);
+}
+
 } // namespace
 
 std::shared_ptr<KfdProcess> SimulatedKfd::find_process(uint32_t process_id) const {
@@ -813,7 +830,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
       off_t cur_size = 0;
       {
         struct stat st {};
-        if (fstat(doorbell_fd, &st) == 0)
+        if (safe_fstat(doorbell_fd, &st) == 0)
           cur_size = st.st_size;
       }
       if (static_cast<off_t>(length) > cur_size) {
@@ -891,7 +908,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
       auto raw_events_fd = memfd_create("rocjitsu_events", MFD_CLOEXEC | MFD_ALLOW_SEALING);
       if (raw_events_fd < 0)
         return MAP_FAILED;
-      proc.event_state_.memfd = fcntl(raw_events_fd, F_DUPFD_CLOEXEC, 4096);
+      proc.event_state_.memfd = safe_fcntl(raw_events_fd, F_DUPFD_CLOEXEC, 4096);
       if (proc.event_state_.memfd < 0)
         proc.event_state_.memfd = raw_events_fd;
       else
@@ -919,7 +936,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
           libc_passthrough().munmap(init_ptr, length);
         }
       }
-      fcntl(proc.event_state_.memfd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW);
+      safe_fcntl(proc.event_state_.memfd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW);
     }
     int mflags = MAP_SHARED;
     if (flags & MAP_FIXED)
@@ -1241,7 +1258,7 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   } else if (daemon_mode_ || !user_provided_va) {
     auto raw_fd = memfd_create("rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING);
     if (raw_fd >= 0) {
-      alloc.memfd = fcntl(raw_fd, F_DUPFD_CLOEXEC, 4096);
+      alloc.memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, 4096);
       if (alloc.memfd < 0)
         alloc.memfd = raw_fd;
       else
@@ -1253,7 +1270,7 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
       if (alloc.memfd >= 0) {
         [[maybe_unused]] auto ft_rc = ftruncate(alloc.memfd, static_cast<off_t>(alloc.size));
         fallocate(alloc.memfd, 0, 0, static_cast<off_t>(alloc.size));
-        fcntl(alloc.memfd, F_ADD_SEALS, F_SEAL_SHRINK);
+        safe_fcntl(alloc.memfd, F_ADD_SEALS, F_SEAL_SHRINK);
 
         if (daemon_mode_ && !is_doorbell) {
           auto *mapped =
@@ -1314,7 +1331,7 @@ bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va
   if (raw_fd < 0)
     return false;
 
-  int memfd = fcntl(raw_fd, F_DUPFD_CLOEXEC, 4096);
+  int memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, 4096);
   if (memfd < 0)
     memfd = raw_fd;
   else
@@ -1603,11 +1620,11 @@ int SimulatedKfd::import_dmabuf_ioctl(KfdProcess &proc, void *arg) {
     return -EINVAL;
 
   struct stat st {};
-  if (fstat(args->dmabuf_fd, &st) != 0)
+  if (safe_fstat(args->dmabuf_fd, &st) != 0)
     return -errno;
   uint64_t size = static_cast<uint64_t>(st.st_size);
 
-  int dupfd = fcntl(args->dmabuf_fd, F_DUPFD_CLOEXEC, 0);
+  int dupfd = safe_fcntl(args->dmabuf_fd, F_DUPFD_CLOEXEC, 0);
   if (dupfd < 0)
     return -errno;
 
@@ -1654,7 +1671,7 @@ int SimulatedKfd::export_dmabuf_ioctl(KfdProcess &proc, void *arg) {
   const auto &alloc = it->second;
   if (alloc.memfd < 0)
     return -EINVAL;
-  int dupfd = fcntl(alloc.memfd, F_DUPFD_CLOEXEC, 0);
+  int dupfd = safe_fcntl(alloc.memfd, F_DUPFD_CLOEXEC, 0);
   if (dupfd < 0)
     return -errno;
   args->dmabuf_fd = dupfd;
@@ -1751,7 +1768,7 @@ int SimulatedKfd::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
     alloc_size = alloc.size;
     alloc_flags = alloc.flags;
     alloc_gpu_id = alloc.gpu_id;
-    dup_fd = fcntl(alloc.memfd, F_DUPFD_CLOEXEC, 0);
+    dup_fd = safe_fcntl(alloc.memfd, F_DUPFD_CLOEXEC, 0);
   }
 
   if (dup_fd < 0)
@@ -1802,7 +1819,7 @@ int SimulatedKfd::ipc_import_handle_ioctl(KfdProcess &proc, void *arg) {
     alloc_size = it->second.allocation_size;
     alloc_flags = it->second.allocation_flags;
     source_gpu_id = it->second.source_gpu_id;
-    dup_fd = fcntl(it->second.backing_memfd, F_DUPFD_CLOEXEC, 0);
+    dup_fd = safe_fcntl(it->second.backing_memfd, F_DUPFD_CLOEXEC, 0);
   }
 
   if (args->gpu_id != 0 && args->gpu_id != source_gpu_id) {
@@ -1890,7 +1907,7 @@ int SimulatedKfd::get_dmabuf_info_ioctl(KfdProcess &proc, void *arg) {
 
   if (!found) {
     struct stat st {};
-    if (fstat(args->dmabuf_fd, &st) != 0)
+    if (safe_fstat(args->dmabuf_fd, &st) != 0)
       return -errno;
     size = static_cast<uint64_t>(st.st_size);
   }
@@ -2070,11 +2087,11 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     // received via SCM_RIGHTS and already substituted into our fd space; in
     // local mode it is the debugger's own descriptor. Either way the driver
     // *writes* to it to wake the debugger, so it must be a live, writable
-    // descriptor. fcntl(F_GETFL) both proves the fd is open (EBADF otherwise)
+    // descriptor. safe_fcntl(F_GETFL) both proves the fd is open (EBADF otherwise)
     // and reports its access mode, so a read-only or otherwise unusable fd —
     // e.g. one a client passed over SCM_RIGHTS that is not a real event target —
     // is rejected instead of being stored on the session.
-    const int fl = fcntl(dbg_fd, F_GETFL);
+    const int fl = safe_fcntl(dbg_fd, F_GETFL);
     if (fl == -1 || (fl & O_ACCMODE) == O_RDONLY)
       return -EBADF;
 

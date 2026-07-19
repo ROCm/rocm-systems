@@ -312,6 +312,11 @@ private:
   std::unordered_map<uint32_t, EventState *> event_dispatch_;
 
   /// @brief Process ID for local-mode (interposer). Set once in open().
+  /// @details Written under process_mutex_ in open(), then read lock-free from the
+  /// ioctl/mmap/munmap/gem paths. Safe only under the local-mode contract: the app
+  /// opens /dev/kfd before issuing any ioctl and never re-opens concurrently, so the
+  /// single publishing write happens-before every read. Not for use outside that
+  /// single-primary-fd local path.
   uint32_t local_process_id_ = 0;
 
   static constexpr kfd_process_device_apertures default_apertures_{
