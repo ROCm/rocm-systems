@@ -195,6 +195,21 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id) {
   maybe_reset_lds_alloc();
 }
 
+void ComputeUnitCore::abort_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
+  // Roll back a workgroup that was committed via begin_workgroup() but whose peers
+  // in the same clustered dispatch failed to fully dispatch. Unlike release_wf(),
+  // this fires no completion hook and no CP notify — the WG never executed. Free any
+  // resident (not-yet-halted) waves belonging to this WG, drop the refcount entry,
+  // and reclaim LDS if the CU is now idle and unpinned. The caller unpins the cluster
+  // LDS separately (the pin is CP-side bookkeeping).
+  for (const auto &w : wfs_) {
+    if (!w->is_halted() && w->dispatch_id() == dispatch_id && w->wg_id() == wg_id)
+      free_wavefront_resources(*w);
+  }
+  active_wgs_.erase(wg_key(dispatch_id, wg_id));
+  maybe_reset_lds_alloc();
+}
+
 bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes) const {
   // Count free wavefront slots.
   uint32_t free_slots = 0;

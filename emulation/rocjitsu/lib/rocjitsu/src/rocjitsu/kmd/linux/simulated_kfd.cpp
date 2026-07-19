@@ -486,6 +486,25 @@ uint32_t SimulatedKfd::local_open_ref_count() const {
 
 int SimulatedKfd::close() { return close(local_process_id_); }
 
+void SimulatedKfd::close_all_processes() {
+  // Snapshot the live process ids under process_mutex_, then close each with the lock
+  // RELEASED (close() takes process_mutex_ itself). Closing a process fires
+  // notify_closing()/signal_page_shutdown(), which wakes any client thread parked in
+  // an infinite-timeout WAIT_EVENTS — the daemon teardown path relies on this to
+  // unblock such threads so their jthread joins can complete instead of hanging
+  // forever. A client that races us to its own rj_vm_device_close() just finds the
+  // process already gone and no-ops.
+  std::vector<uint32_t> pids;
+  {
+    std::lock_guard<std::mutex> lk(process_mutex_);
+    pids.reserve(processes_.size());
+    for (const auto &[pid, proc] : processes_)
+      pids.push_back(pid);
+  }
+  for (uint32_t pid : pids)
+    close(pid);
+}
+
 int SimulatedKfd::close(uint32_t process_id) {
   std::shared_ptr<KfdProcess> extracted;
   std::vector<uint32_t> queue_ids;

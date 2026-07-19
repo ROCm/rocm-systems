@@ -253,6 +253,12 @@ RJ_API_EXPORT rj_status_t rj_vm_device_open(rj_vm_t *vm, rj_client_pid_t client_
 /// @param[in] process_id The process ID to close (0 closes the local process).
 RJ_API_EXPORT rj_status_t rj_vm_device_close(rj_vm_t *vm, uint32_t process_id);
 
+/// @brief Close every registered KFD process, waking any parked event waiters.
+/// @details Daemon-teardown helper: closes all live processes so client threads
+/// blocked in an infinite-timeout WAIT_EVENTS unblock and can be joined.
+/// @param[in] vm VM handle.
+RJ_API_EXPORT rj_status_t rj_vm_close_all_devices(rj_vm_t *vm);
+
 /// @brief Map device memory (local mode).
 /// @param[in] vm VM handle.
 /// @param[in,out] map Mapping descriptor; mapped_addr is set on success.

@@ -105,6 +105,13 @@ public:
   void *mmap(uint32_t process_id, void *addr, size_t length, int prot, int flags, off_t offset);
   int munmap(uint32_t process_id, void *addr, size_t length);
   int close(uint32_t process_id);
+
+  /// @brief Close every registered process, waking any parked event waiters.
+  /// @details Daemon-teardown helper: iterates all live processes and closes each,
+  /// firing notify_closing() so client threads blocked in an infinite-timeout
+  /// WAIT_EVENTS unblock and their jthread joins can complete.
+  void close_all_processes();
+
   [[nodiscard]] int get_mmap_memfd(uint32_t process_id, off_t offset) const;
   /// @}
 

@@ -53,23 +53,31 @@ constexpr uint64_t kAllocSize = 4096;
 //   2. <$ROCJITSU_RUNTIME_DIR>/<pid>/ (the per-PID tier the reader probes next;
 //      the test and the hook share this process, so getpid() matches), then
 //   3. <$ROCJITSU_RUNTIME_DIR>/ (the well-known location for the no-launcher case).
-// Return the first tier whose config_path handoff exists, else the highest-priority
-// writable tier so install_inline_dbt_config() writes where the reader will look.
-// This must mirror load_dbt_guest_config_from_runtime_config()'s resolution order
-// exactly: $ROCJITSU_INVOCATION_DIR, then the per-PID default runtime dir, then the
-// base default runtime dir. rpc_default_runtime_dir() already treats an unset OR
-// empty $ROCJITSU_RUNTIME_DIR as "use $XDG_RUNTIME_DIR/rocjitsu or /tmp/rocjitsu-
-// <uid>", so this never returns nullopt on that account — otherwise the test would
-// write nowhere while the runtime hook still reads the default location.
+// The reader opens the FIRST tier whose config_path handoff actually exists, so this
+// must probe them in the same order rather than short-circuiting on tier 1 merely
+// being set: an $ROCJITSU_INVOCATION_DIR pointing at a dir without config_path must
+// still fall through to the per-PID/base tiers a valid handoff may live in. When no
+// tier has a handoff yet, return the highest-priority writable tier so
+// install_inline_dbt_config() writes where the reader looks first.
+// rpc_default_runtime_dir() already treats an unset OR empty $ROCJITSU_RUNTIME_DIR as
+// "use $XDG_RUNTIME_DIR/rocjitsu or /tmp/rocjitsu-<uid>", so this never returns
+// nullopt on that account — otherwise the test would write nowhere while the runtime
+// hook still reads the default location.
 std::optional<std::filesystem::path> config_handoff_dir() {
+  std::vector<std::filesystem::path> tiers;
   if (const char *inv = std::getenv("ROCJITSU_INVOCATION_DIR"); inv && *inv)
-    return std::filesystem::path(inv);
+    tiers.emplace_back(inv);
   const std::filesystem::path base(rocjitsu::rpc_default_runtime_dir());
-  const std::filesystem::path per_pid = base / std::to_string(getpid());
+  tiers.push_back(base / std::to_string(getpid()));
+  tiers.push_back(base);
+
   std::error_code ec;
-  if (std::filesystem::exists(per_pid / "config_path", ec))
-    return per_pid;
-  return base;
+  for (const auto &tier : tiers) {
+    if (std::filesystem::exists(tier / "config_path", ec))
+      return tier;
+  }
+  // No handoff exists yet: install into the highest-priority tier the reader probes.
+  return tiers.front();
 }
 
 std::optional<std::string> read_active_config_json() {

@@ -197,6 +197,14 @@ public:
   /// and the CP is notified via notify_wg_complete.
   void release_wf(uint32_t dispatch_id, uint32_t wg_id);
 
+  /// @brief Roll back a committed-but-never-run workgroup on a dispatch error.
+  /// @details Used to unwind an already-committed cluster peer when a later peer in
+  /// the same clustered dispatch fails. Frees the WG's resident waves and drops its
+  /// refcount WITHOUT firing the completion hook or CP notify (the WG never executed),
+  /// then reclaims LDS if the CU is now idle and unpinned. The caller is responsible
+  /// for unpinning any CP-side cluster LDS pin.
+  void abort_workgroup(uint32_t dispatch_id, uint32_t wg_id);
+
   /// @brief Set the execution plugin group (shared ownership).
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();

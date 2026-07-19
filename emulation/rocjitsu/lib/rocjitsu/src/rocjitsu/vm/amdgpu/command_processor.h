@@ -241,6 +241,7 @@ private:
   void register_cluster_workgroup(const DispatchEntry &entry, uint32_t local_wg_id,
                                   uint32_t global_wg_id, ComputeUnitCore *cu, uint32_t lds_base);
   void mark_cluster_workgroup_complete(uint32_t dispatch_id, uint32_t wg_id);
+  void erase_cluster_workgroup(uint32_t dispatch_id, uint32_t wg_id);
   void erase_cluster_workgroups(uint32_t dispatch_id);
 
   /// @brief Asynchronous Compute Engine (ACE): dispatch workgroups from all

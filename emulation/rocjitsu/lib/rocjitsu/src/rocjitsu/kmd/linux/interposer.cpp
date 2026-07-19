@@ -2001,8 +2001,14 @@ namespace {
 // Then the replacement is recorded on the reserved source backend.
 void reconcile_dup_target(int newfd, std::optional<InterposerContext::DupBackend> reserved) {
   InterposerContext::ctx.untrack_sysfs(newfd);
-  // dup2/dup3 atomically close whatever newfd was, bypassing the close() hook. If
-  // newfd was a DRM render fd still owning live GEM handles, reap them here just as
+  // dup2/dup3 atomically close whatever newfd was, bypassing the close() hook, so
+  // every per-fd cleanup close() performs must be mirrored here. Drop any transient
+  // EXPORT_DMABUF flags for newfd: a dmabuf export fd overwritten before a
+  // PRIME_FD_TO_HANDLE would otherwise leave a stale fd→flags record that a later
+  // PRIME on the recycled fd number could misapply as the wrong PTE MTYPE. No-op for
+  // non-dmabuf fds.
+  InterposerContext::ctx.drop_pending_gem_flags(newfd);
+  // If newfd was a DRM render fd still owning live GEM handles, reap them here just as
   // close() does (untrack_drm + reap_gem_for_drm_fd) — otherwise those GemEntry
   // objects (keyed by drm_fd == newfd) leak their PTEs, host mmap, and dup'd dmabuf
   // fd, and a later commit_dup could re-tag the same number as a KFD dup.

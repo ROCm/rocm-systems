@@ -396,6 +396,14 @@ int run_daemon_server(const char *config_path, const std::string &socket_path = 
   }
 
   stop_source.request_stop();
+  // Wake any client thread parked in an infinite-timeout WAIT_EVENTS ioctl before we
+  // join below. request_stop() is only observed at the top of handle_client's loop and
+  // shutdown(fd) only interrupts a thread blocked in recv() — neither unblocks a thread
+  // stuck inside a blocking ioctl on a condition variable. Closing every process fires
+  // notify_closing(), which wakes those waiters so their jthread joins can complete
+  // instead of hanging until the client happens to disconnect. A client that closes its
+  // own device concurrently just finds the process already gone.
+  rj_vm_close_all_devices(vm);
   {
     std::unordered_map<uint64_t, std::jthread> to_join;
     {

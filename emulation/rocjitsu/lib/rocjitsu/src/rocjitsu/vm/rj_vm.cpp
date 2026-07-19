@@ -345,6 +345,13 @@ rj_status_t rj_vm_device_close(rj_vm_t *vm, uint32_t process_id) {
   return ROCJITSU_STATUS_SUCCESS;
 }
 
+rj_status_t rj_vm_close_all_devices(rj_vm_t *vm) {
+  if (!vm || !vm->vm || !vm->vm->driver())
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  vm->vm->driver()->close_all_processes();
+  return ROCJITSU_STATUS_SUCCESS;
+}
+
 rj_status_t rj_vm_device_map(rj_vm_t *vm, rj_vm_map_t *map) {
   if (!vm || !map || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;

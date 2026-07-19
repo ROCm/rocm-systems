@@ -699,6 +699,18 @@ void CommandProcessor::mark_cluster_workgroup_complete(uint32_t dispatch_id, uin
     cluster_wg_placements_.erase(wg_key(dispatch_id, peer_wg_id));
 }
 
+void CommandProcessor::erase_cluster_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
+  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+  auto it = cluster_wg_placements_.find(wg_key(dispatch_id, wg_id));
+  if (it == cluster_wg_placements_.end())
+    return;
+  if (it->second.cu) {
+    it->second.cu->unpin_lds_for_cluster(it->second.cluster_key);
+    it->second.cu->maybe_reset_lds_alloc();
+  }
+  cluster_wg_placements_.erase(it);
+}
+
 void CommandProcessor::erase_cluster_workgroups(uint32_t dispatch_id) {
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
   for (auto it = cluster_wg_placements_.begin(); it != cluster_wg_placements_.end();) {
@@ -881,11 +893,32 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
         break;
       }
       next_cu_ = planned_next_cu;
-      for (const auto &wg : plan) {
-        ShaderProcessorInput::WorkgroupPlacement placement{
-            wg.cu, &wg.cu->lds(), wg.cu->allocate_lds(entry.group_segment_fixed_size)};
-        if (!dispatch_to_placement(wg.local_wg_id, wg.global_wg_id, placement))
-          throw std::runtime_error("dispatch_wf failed after cluster placement was reserved");
+      // A cluster is all-or-nothing: dispatch_to_placement() commits each peer's WG
+      // bookkeeping (begin_workgroup) and LDS cluster pin (register_cluster_workgroup)
+      // as it succeeds. If a later peer fails (dispatch_wf null or an init_wavefront_regs
+      // throw), the already-committed peers would otherwise keep their refcount and pin
+      // forever, permanently blocking maybe_reset_lds_alloc() on those CUs. Track the
+      // committed peers and roll them back on any failure before propagating the error.
+      std::vector<std::pair<ComputeUnitCore *, uint32_t>> committed_peers;
+      committed_peers.reserve(plan.size());
+      try {
+        for (const auto &wg : plan) {
+          ShaderProcessorInput::WorkgroupPlacement placement{
+              wg.cu, &wg.cu->lds(), wg.cu->allocate_lds(entry.group_segment_fixed_size)};
+          if (!dispatch_to_placement(wg.local_wg_id, wg.global_wg_id, placement))
+            throw std::runtime_error("dispatch_wf failed after cluster placement was reserved");
+          committed_peers.emplace_back(wg.cu, wg.global_wg_id);
+        }
+      } catch (...) {
+        // Roll back the peers committed before the failure (dispatch_to_placement
+        // already unwound its own reserved-but-uncommitted waves). erase_cluster_workgroup
+        // unpins that peer's cluster LDS and drops its placement; abort_workgroup frees
+        // its resident waves and clears the WG refcount without a completion notify.
+        for (const auto &[cu, gwg] : committed_peers) {
+          erase_cluster_workgroup(entry.dispatch_id, gwg);
+          cu->abort_workgroup(entry.dispatch_id, gwg);
+        }
+        throw;
       }
       continue;
     }
