@@ -412,23 +412,31 @@ ncclResult_t ncclMemOpSync(struct ncclComm* comm, struct ncclCeCollArgs* args, c
     NCCLCHECKGOTO(ncclPrepUCSync(comm, comm->ceColl.useCompletePtr, batchParams, &opIdx, stream), ret, fail);
   }
 
-  // For CUDA graph capture, add reset operation
+  // Execute the wait batch first and let it fully drain. The reset-to-0 ops
+  // MUST run strictly after every wait is satisfied: if they share one batch
+  // with the waits, ROCm's hipStreamBatchMemOp does not guarantee the resets
+  // wait for the wait ops, so a reset can clobber a peer's flag mid-barrier
+  // and hang graph replay. Issuing them as a separate, stream-ordered batch
+  // forces reset-after-wait.
+  CUCHECKGOTO(hipStreamBatchMemOp(stream, opIdx, batchParams, 0), ret, fail);
+
+  // For graph capture, reset our flag array to 0 in a separate batch so the
+  // fixed-value barrier can be replayed.
   if (ncclCudaGraphValid(comm->planner.capturingGraph)) {
+    size_t resetIdx = 0;
     for (int i = 0; i < comm->nRanks; i++) {
-      batchParams[opIdx] = {};
-      batchParams[opIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
-      batchParams[opIdx].writeValue.address = (CUdeviceptr)(comm->ceColl.useCompletePtr ? (void*)&completePtrs[i] : (void*)&readyPtrs[i]);
-      batchParams[opIdx].writeValue.value = 0;
+      batchParams[resetIdx] = {};
+      batchParams[resetIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
+      batchParams[resetIdx].writeValue.address = (CUdeviceptr)(comm->ceColl.useCompletePtr ? (void*)&completePtrs[i] : (void*)&readyPtrs[i]);
+      batchParams[resetIdx].writeValue.value = 0;
       // CU_STREAM_WRITE_VALUE_DEFAULT is a CUDA-specific constant with no HIP equivalent.
       // This field must be initialized to satisfy the CUDA-compatible struct definition,
       // but the HIP runtime does not use this flag and treats it as 0.
-      batchParams[opIdx].writeValue.flags = 0;
-      opIdx++;
+      batchParams[resetIdx].writeValue.flags = 0;
+      resetIdx++;
     }
+    CUCHECKGOTO(hipStreamBatchMemOp(stream, resetIdx, batchParams, 0), ret, fail);
   }
-
-  // Execute all memory operations in a single batch
-  CUCHECKGOTO(hipStreamBatchMemOp(stream, opIdx, batchParams, 0), ret, fail);
 
   // Toggle the flag for next call
   comm->ceColl.useCompletePtr = !comm->ceColl.useCompletePtr;
