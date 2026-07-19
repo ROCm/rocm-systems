@@ -922,6 +922,11 @@ TEST(WaitcheckTest, MapsGfx1100TargetToRdna3) {
   EXPECT_EQ(waitcheck_arch_for_target(ROCJITSU_CODE_TARGET_GFX1100), ROCJITSU_CODE_ARCH_RDNA3);
 }
 
+TEST(WaitcheckTest, MapsGfx1150AndGfx1151TargetsToRdna35) {
+  EXPECT_EQ(waitcheck_arch_for_target(ROCJITSU_CODE_TARGET_GFX1150), ROCJITSU_CODE_ARCH_RDNA3_5);
+  EXPECT_EQ(waitcheck_arch_for_target(ROCJITSU_CODE_TARGET_GFX1151), ROCJITSU_CODE_ARCH_RDNA3_5);
+}
+
 TEST(WaitcheckTest, DecodesRdna4CombinedStoreDsWait) {
   std::vector<uint32_t> program;
   append_inst(program, sopp(73, 0));
@@ -974,6 +979,7 @@ TEST(WaitcheckTest, ReportsMissingLoadcntBeforeUse) {
 
   ASSERT_TRUE(report.supported);
   ASSERT_EQ(report.diagnostics.size(), 1u);
+  EXPECT_EQ(report.diagnostics[0].kind, WaitcheckDiagnosticKind::WaitCounter);
   EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
   EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
   EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::VGPR);
@@ -1234,6 +1240,20 @@ TEST(WaitcheckTest, Gfx1100ReportsMissingVmcntBeforeGlobalLoadUse) {
   EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
   EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::VGPR);
   EXPECT_EQ(report.diagnostics[0].reg.index, 0u);
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+  EXPECT_NE(report.diagnostics[0].message.find("s_waitcnt vmcnt(0)"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Rdna35ReportsMissingVmcntBeforeGlobalLoadUse) {
+  std::vector<uint32_t> program;
+  append_gfx1100_global_load_b32_v0_v8_s0(program);
+  append_gfx1100_v_mov_b32_v1_v0(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA3_5);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
   EXPECT_EQ(report.diagnostics[0].required_count, 0u);
   EXPECT_NE(report.diagnostics[0].message.find("s_waitcnt vmcnt(0)"), std::string::npos);
 }
@@ -1539,6 +1559,7 @@ TEST(WaitcheckTest, ReportsMissingWaitAluVmVsrcBeforeVmemSourceOverwrite) {
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].kind, WaitcheckDiagnosticKind::WaitCounter);
   EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::VmVsrc);
   EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
   EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::VGPR);
@@ -2038,6 +2059,7 @@ TEST(WaitcheckTest, Gfx1250ReportsMissingVmVsrcWaitBeforeAsyncBarrierArrive) {
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].kind, WaitcheckDiagnosticKind::AsyncBarrierPreWait);
   EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::VmVsrc);
   EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::MemoryOrder);
   EXPECT_NE(report.diagnostics[0].message.find("immediately before"), std::string::npos);
@@ -2054,6 +2076,7 @@ TEST(WaitcheckTest, Gfx1250ReportsMissingVmVsrcWaitAfterAsyncBarrierArrive) {
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].kind, WaitcheckDiagnosticKind::AsyncBarrierPostWait);
   EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::VmVsrc);
   EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::MemoryOrder);
   EXPECT_NE(report.diagnostics[0].message.find("immediately after"), std::string::npos);
@@ -2573,6 +2596,7 @@ TEST(WaitcheckTest, ReportsMissingWaitAluSaSdstBeforeValuReadsTrackedSgpr) {
 
   ASSERT_TRUE(report.supported);
   ASSERT_EQ(report.diagnostics.size(), 1u);
+  EXPECT_EQ(report.diagnostics[0].kind, WaitcheckDiagnosticKind::SgprDepctr);
   EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Depctr);
   EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
   EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::SGPR);
@@ -4271,6 +4295,7 @@ TEST(WaitcheckTest, ReportsMissingWaitVaVdstBeforeDsParamLoadAfterImmediateValuR
 
   ASSERT_TRUE(report.supported);
   ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].kind, WaitcheckDiagnosticKind::VaVdst);
   EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::VaVdst);
   EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
   EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::VGPR);

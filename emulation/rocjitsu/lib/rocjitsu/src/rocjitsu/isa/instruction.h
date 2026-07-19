@@ -314,9 +314,13 @@ public:
   ///   AddInst(...) : RType("add", raw, make_exec_fn<AddInst>()) {}
   /// @endcode
   template <typename Derived> static constexpr ExecuteFn make_exec_fn() {
+#ifdef ROCJITSU_DECODE_ONLY
+    return nullptr;
+#else
     return [](Instruction &self, void *ctx) {
       static_cast<Derived &>(self).execute_impl(*static_cast<typename Isa::Context *>(ctx));
     };
+#endif
   }
 };
 

@@ -53,8 +53,21 @@ enum class WaitcheckAccessKind : uint8_t {
   ProgramEnd,
 };
 
+/// @brief Stable semantic family for one waitcheck diagnostic.
+enum class WaitcheckDiagnosticKind : uint8_t {
+  WaitCounter = 1,
+  SgprDepctr = 2,
+  AsyncBarrierPreWait = 3,
+  AsyncBarrierPostWait = 4,
+  VaVdst = 5,
+};
+
 /// @brief One static waitcnt hazard diagnostic.
 struct WaitcheckDiagnostic {
+  bool has_kernel = false;
+  std::string kernel_name;
+  uint64_t kernel_entry_offset = 0;
+  WaitcheckDiagnosticKind kind = WaitcheckDiagnosticKind::WaitCounter;
   WaitCounterKind counter = WaitCounterKind::Load;
   WaitcheckAccessKind access = WaitcheckAccessKind::Use;
   RegisterRef reg{RegClass::VGPR, 0, 1};

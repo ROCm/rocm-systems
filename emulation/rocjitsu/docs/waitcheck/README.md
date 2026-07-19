@@ -36,13 +36,13 @@ rocm-sdk init
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DROCM_PATH="$(rocm-sdk path --root)" \
   -DCMAKE_PREFIX_PATH="$(rocm-sdk path --cmake)"
-cmake --build build --target rj_waitcheck rocjitsu_waitcheck_hooks rocjitsu_shared
+cmake --build build --target rj_waitcheck rocjitsu_waitcheck_hooks rocjitsu_waitcheck
 ```
 
 This produces `build/tools/rj_waitcheck` and
 `build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_waitcheck_hooks.so`, plus the
-programmatic API in `build/librocjitsu.so`. See [`../building.md`](../building.md)
-for prerequisites and other build options.
+programmatic API in `build/librocjitsu_waitcheck.so`. See
+[`../building.md`](../building.md) for prerequisites and other build options.
 
 ## Quick Start: gfx1250
 
@@ -154,7 +154,8 @@ and includes the dispatched kernel name. The `.text` offsets can be passed to
 
 Kernel generators and compilers that already hold a final HSA code object in
 memory can check it before publishing or loading it. The call is synchronous,
-single-threaded, and infers the GPU target from the ELF header:
+uses only its calling thread, and infers the GPU target from the ELF header.
+Independent calls may run concurrently on different threads:
 
 ```c
 #include <rocjitsu/analysis/rj_waitcheck.h>
@@ -163,15 +164,20 @@ single-threaded, and infers the GPU target from the ELF header:
 
 static void report(const rj_waitcheck_diagnostic_t *diagnostic, void *unused) {
   (void)unused;
-  fprintf(stderr, "%s\n", diagnostic->message);
+  fprintf(stderr, "%s: %s\n",
+          rj_waitcheck_diagnostic_code_name(diagnostic->code),
+          diagnostic->message);
 }
 
 int validate_code_object(const void *bytes, size_t size) {
   rj_waitcheck_options_t options;
-  rj_waitcheck_options_init(&options);
+  if (rj_waitcheck_options_init(&options, sizeof(options)) != ROCJITSU_STATUS_SUCCESS)
+    return -1;
   options.diagnostic_callback = report;
 
   rj_waitcheck_result_t result;
+  if (rj_waitcheck_result_init(&result, sizeof(result)) != ROCJITSU_STATUS_SUCCESS)
+    return -1;
   rj_status_t status = rj_waitcheck_analyze(bytes, size, &options, &result);
   if (status != ROCJITSU_STATUS_SUCCESS)
     return -1; /* Malformed, unsupported, or incompletely analyzed object. */
@@ -182,14 +188,28 @@ int validate_code_object(const void *bytes, size_t size) {
 `rj_waitcheck_analyze()` always checks every kernel in the code object; no
 environment variable or sentinel value is involved. To check one kernel, call
 `rj_waitcheck_analyze_kernel()` with its `.text` byte offset. The input buffer
-only needs to remain valid until the call returns. A hazard is not an API
-failure: the call returns `ROCJITSU_STATUS_SUCCESS`, sets `result.passed` to
-zero, and reports structured
-producer/consumer diagnostics through the callback. `result.diagnostics_observed`
-is complete with the default unlimited callback delivery. If no callback is
-installed, `max_diagnostics` limits delivery, or checking stops early,
+only needs to remain valid until the call returns. Options, results, and
+callback diagnostics carry `struct_size` and `abi_version`; initialize each
+caller-owned structure with its actual allocation size. Every kernel diagnostic
+includes `kernel_name` and `kernel_entry_offset`, and `result.target` records
+the inferred ISA target. `diagnostic.code` is a stable machine-readable reason;
+the English `message` is explanatory text and should not be parsed.
+
+A hazard is not an API failure: the call returns `ROCJITSU_STATUS_SUCCESS`,
+sets `result.passed` to zero, and reports structured producer/consumer
+diagnostics through the callback. `result.diagnostics_observed` is complete
+with the default unlimited callback delivery. If no callback is installed,
+`max_diagnostics` limits delivery, or checking stops early,
 `result.diagnostics_truncated` is set and the observed count is a lower bound.
-Link the installed library with `-lrocjitsu`.
+Link the installed dedicated library with `-lrocjitsu_waitcheck`.
+
+`librocjitsu_waitcheck.so.1` contains only the decode and analysis path. It does
+not initialize ROCR or the rocJITsu VM, install atexit handlers, or create
+background threads. After all analysis calls and callbacks have returned, it is
+safe to discard borrowed strings and repeat `dlopen` / analysis / `dlclose`.
+No process or thread-local analysis state is retained across unload. The C API
+also remains available from the full `librocjitsu.so` for compatibility, but
+consumers that need this unload contract should use the dedicated library.
 
 ## Offline CLI
 
@@ -270,7 +290,7 @@ Useful options:
 
 | Option | Meaning |
 | --- | --- |
-| `--target gfx942|gfx950|gfx1100|gfx1200|gfx1201|gfx1250` | Select one supported target from an executable input. |
+| `--target gfx942|gfx950|gfx1100|gfx1150|gfx1151|gfx1200|gfx1201|gfx1250` | Select one supported target from an executable input. |
 | `--code-object-index N` | Select the Nth code object for the selected target. |
 | `--kernel-entry OFFSET` | Analyze only the descriptor whose `.text` entry byte offset matches `OFFSET`. Use this to mirror dispatch-lazy runtime checking on a massive code object. |
 | `--all-code-objects` | Analyze all supported code objects in each input. |
@@ -503,8 +523,8 @@ load. This timing lets an inner waitcheck layer inspect the replacement reader
 created by an outer DBT or DBI tool rather than checking only the original
 input.
 
-The current analyzer models gfx942/CDNA3, gfx950/CDNA4, gfx1100/RDNA3, and
-gfx12 object-visible wait behavior including:
+The current analyzer models gfx942/CDNA3, gfx950/CDNA4, gfx1100/RDNA3,
+gfx1150/gfx1151/RDNA3.5, and gfx12 object-visible wait behavior including:
 
 - split `loadcnt`, `storecnt`, `dscnt`, `kmcnt`, `samplecnt`, `bvhcnt`, and
   `expcnt` hazards;
@@ -517,11 +537,12 @@ gfx12 object-visible wait behavior including:
 - VINTERP embedded `wait_exp`;
 - gfx1250 `s_set_vgpr_msb` high-VGPR bank selection;
 - CFG joins, skipped paths, and loop-carried hazards;
-- legacy CDNA3/CDNA4 VMcnt/LGKMcnt/EXPcnt waits and RDNA3's separate VScnt;
+- legacy CDNA3/CDNA4 VMcnt/LGKMcnt/EXPcnt waits and RDNA3/RDNA3.5's separate
+  VScnt;
 - gfx1100 SOPK single-counter wait forms.
 
-Supported targets are `gfx942`, `gfx950`, `gfx1100`, `gfx1200`, `gfx1201`, and
-`gfx1250`.
+Supported targets are `gfx942`, `gfx950`, `gfx1100`, `gfx1150`, `gfx1151`,
+`gfx1200`, `gfx1201`, and `gfx1250`.
 
 The `RjWaitcheck.LlvmKernel.*` tests compile the same ordinary HIP vector-add
 kernel with AMD Clang for gfx942 and gfx1100 and require both resulting code
@@ -549,8 +570,8 @@ Known boundaries:
 - Compiler-specific questions such as whether LLVM preserved, removed, or
   intentionally avoided a redundant wait are not modeled. Correct final waits
   are accepted; missing final waits are reported.
-- Targets outside gfx942/CDNA3, gfx950/CDNA4, gfx1100/RDNA3, and gfx12/RDNA4
-  are out of scope for this prototype.
+- Targets outside gfx942/CDNA3, gfx950/CDNA4, gfx1100/RDNA3,
+  gfx1150/gfx1151/RDNA3.5, and gfx12/RDNA4 are out of scope for this prototype.
 - Unsupported or undecodable code objects are analysis failures. For corpus
   measurement, use `--skip-unsupported`; for runtime enforcement, supported
   analysis failures fail only when `ROCJITSU_WAITCHECK_FAIL=1`.

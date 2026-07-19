@@ -1,13 +1,14 @@
 # Waitcheck LLVM Parity Map
 
-`rj_waitcheck` is an object-code checker for gfx12 wait hazards. It does
+`rj_waitcheck` is an object-code checker for AMDGPU wait hazards. It does
 not run LLVM's `si-insert-waitcnts` or `post-RA-hazard-rec` passes, so parity is
 defined as detecting the same missing waits that LLVM would insert for hazards
 that still have enough information in assembled code.
 
 ## Current Scope
 
-- Supported targets: `gfx1200`, `gfx1201`, and `gfx1250`.
+- Supported targets: `gfx942`, `gfx950`, `gfx1100`, `gfx1150`, `gfx1151`,
+  `gfx1200`, `gfx1201`, and `gfx1250`.
 - Analysis input: decoded executable code-object sections and kernel descriptor
   entry points.
 - Output: diagnostics for missing or too-weak waits; no code rewriting.
@@ -35,7 +36,7 @@ extension table get the same offset-size reader hook. Analysis runs from the
 `hsa_executable_load_agent_code_object` wrapper, so a waitcheck tool installed
 before DBT or DBI sees the final replacement reader passed toward ROCR.
 `ROCJITSU_WAITCHECK=0` disables the checker. With `ROCJITSU_WAITCHECK_FAIL=1`,
-missing waits and supported-gfx12 analysis failures return
+missing waits and supported-target analysis failures return
 `HSA_STATUS_ERROR_INVALID_CODE_OBJECT`; otherwise the tool reports diagnostics to
 stderr and chains to the real runtime reader.
 
@@ -68,7 +69,7 @@ below records how to handle those cases when expanding the RocJITsu corpus.
 | MIR-only meta, pseudo, bundle, and debug placement | `waitcnt-meta-instructions.mir`, `waitcnt-skip-meta.mir`, `waitcnt-debug-non-first-terminators.mir`, `hazard-recognizer-meta-insts.mir`, `hazard-pseudo-machineinstrs.mir`, `hazard-kill.mir`, `hazard-in-bundle.mir`, and `hazard-hidden-bundle.mir`. | Not object-code-verifiable after assembly removes pseudo/meta instructions and bundle/debug placement. Add fixtures only if the final bytes still contain a real wait hazard. |
 | Wait preservation and redundancy optimization | `waitcnt-preexisting*.mir`, `waitcnt-no-redundant.mir`, and `preserve-user-waitcnt.ll`. | Treat correct final waits as accepted and missing final waits as diagnostics. Do not require the checker to prove whether LLVM preserved, removed, or avoided redundant waits. |
 | Scheduler latency and non-waitcnt hazard recognizer cases | `wmma-hazards*.mir`, `wmma-coexecution-valu-hazards.mir`, `trans-forwarding-hazards.mir`, `partial-forwarding-hazards.mir`, `gfx11-sgpr-hazard-latency.mir`, and `hazard-buffer-store-v-interp.mir`. | Mostly out of scope for the gfx12 wait-counter checker because the observable fix may be instruction scheduling, `s_nop`, or `s_delay_alu`, not a waitcnt counter. Promote only cases that leave an object-visible wait-like dependency. |
-| Non-gfx12 or non-RDNA4 hazards | GFX9/GFX10/GFX11 hazard files, `mai-hazards-gfx90a.mir`, `mai-hazards-gfx942.mir`, `mai-hazards-gfx950.mir`, and GWS/LDS-DMA tests without a gfx12 wait-counter analogue. | Out of current scope. Revisit when waitcheck grows architecture-specific modes outside `gfx1200`, `gfx1201`, and `gfx1250`. |
+| Hazards without an object-visible wait-counter analogue | GFX9/GFX10 and scheduler-only GFX11 hazard files, `mai-hazards-gfx90a.mir`, and GWS/LDS-DMA tests without a modeled wait-counter analogue. | Out of current scope. Legacy wait-counter analysis is supported for gfx942, gfx950, gfx1100, gfx1150, and gfx1151, but spacing and scheduling hazards remain outside waitcheck. |
 | IR/codegen tests that incidentally print waits | `call-waitcnt.ll`, `call-waw-waitcnt.mir`, `insert-waitcnts-crash.ll`, `statepoint-insert-waitcnts.mir`, memory legalizer tests, and other lowering tests whose checks include `s_waitcnt`. | Use only when the final object can be reduced to an explicit correct-wait or missing-wait fixture. The broader lowering behavior belongs to LLVM tests, not the runtime checker. |
 
 ## Corpus Evidence To Track

@@ -3,6 +3,14 @@
 
 /// @file rj_waitcheck.h
 /// @brief C API for synchronous wait-hazard analysis of in-memory AMDGPU code objects.
+///
+/// @details The dedicated `librocjitsu_waitcheck.so.1` implements this API
+/// without initializing ROCR or rocJITsu's VM, registering atexit handlers, or
+/// creating background threads. Once all calls and callbacks have returned,
+/// callers may safely discard borrowed pointers and unload the library. The
+/// library retains no process or thread-local analysis state across calls or
+/// after `dlclose()`. The full `librocjitsu.so` also exports these symbols for
+/// compatibility, but only the dedicated library carries this unload contract.
 
 #ifndef ROCJITSU_ANALYSIS_RJ_WAITCHECK_H_
 #define ROCJITSU_ANALYSIS_RJ_WAITCHECK_H_
@@ -19,6 +27,44 @@ extern "C" {
 
 /// @addtogroup analysis
 /// @{
+
+/// @brief Current ABI version for the append-only waitcheck C structures.
+#define ROCJITSU_WAITCHECK_ABI_VERSION 1U
+
+/// @brief AMDGPU target inferred from a code object's ELF machine flags.
+///
+/// @details Values are stable ABI constants. A target may use a compatible
+/// waitcheck model while retaining its distinct identity here.
+typedef enum rj_waitcheck_target_e {
+  ROCJITSU_WAITCHECK_TARGET_UNKNOWN = 0,
+  ROCJITSU_WAITCHECK_TARGET_GFX90A = 1,
+  ROCJITSU_WAITCHECK_TARGET_GFX942 = 2,
+  ROCJITSU_WAITCHECK_TARGET_GFX950 = 3,
+  ROCJITSU_WAITCHECK_TARGET_GFX1100 = 4,
+  ROCJITSU_WAITCHECK_TARGET_GFX1200 = 5,
+  ROCJITSU_WAITCHECK_TARGET_GFX1201 = 6,
+  ROCJITSU_WAITCHECK_TARGET_GFX1250 = 7,
+  ROCJITSU_WAITCHECK_TARGET_GFX1150 = 8,
+  ROCJITSU_WAITCHECK_TARGET_GFX1151 = 9
+} rj_waitcheck_target_t;
+
+/// @brief Stable machine-readable waitcheck diagnostic code.
+///
+/// @details Values are stable ABI constants. The counter, access, and register
+/// fields provide the instruction-specific detail for each code.
+typedef enum rj_waitcheck_diagnostic_code_e {
+  ROCJITSU_WAITCHECK_DIAGNOSTIC_UNKNOWN = 0,
+  /// @brief An ordinary wait counter was missing or too weak.
+  ROCJITSU_WAITCHECK_DIAGNOSTIC_WAIT_COUNTER = 1,
+  /// @brief An SGPR dependency requires an s_wait_alu depctr wait.
+  ROCJITSU_WAITCHECK_DIAGNOSTIC_SGPR_DEPCTR = 2,
+  /// @brief depctr_vm_vsrc(0) is required immediately before async barrier arrival.
+  ROCJITSU_WAITCHECK_DIAGNOSTIC_ASYNC_BARRIER_PRE_WAIT = 3,
+  /// @brief depctr_vm_vsrc(0) is required immediately after async barrier arrival.
+  ROCJITSU_WAITCHECK_DIAGNOSTIC_ASYNC_BARRIER_POST_WAIT = 4,
+  /// @brief The encoded wait_va_vdst value is too weak.
+  ROCJITSU_WAITCHECK_DIAGNOSTIC_VA_VDST = 5
+} rj_waitcheck_diagnostic_code_t;
 
 /// @brief Hardware wait counter associated with a diagnostic.
 typedef enum rj_waitcheck_counter_e {
@@ -75,6 +121,16 @@ typedef struct rj_waitcheck_register_s {
 /// @details String pointers are borrowed and remain valid only for the duration
 /// of the diagnostic callback.
 typedef struct rj_waitcheck_diagnostic_s {
+  /// @brief Size of this structure supplied by the library.
+  size_t struct_size;
+  /// @brief ABI version used to populate this structure.
+  uint32_t abi_version;
+  /// @brief Nonzero when this diagnostic is attributed to a kernel descriptor.
+  uint32_t has_kernel;
+  /// @brief Kernel symbol name, or NULL when no kernel identity is available.
+  const char *kernel_name;
+  /// @brief Kernel entry-point byte offset in `.text`.
+  uint64_t kernel_entry_offset;
   rj_waitcheck_counter_t counter;
   rj_waitcheck_access_t access;
   rj_waitcheck_register_t reg;
@@ -87,6 +143,8 @@ typedef struct rj_waitcheck_diagnostic_s {
   const char *producer_instruction;
   uint32_t required_count;
   const char *message;
+  /// @brief Stable machine-readable diagnostic code.
+  rj_waitcheck_diagnostic_code_t code;
 } rj_waitcheck_diagnostic_t;
 
 /// @brief Receives one wait-hazard diagnostic during a synchronous analysis call.
@@ -101,6 +159,10 @@ typedef void (*rj_waitcheck_error_callback_t)(const char *message, void *user_da
 
 /// @brief Options for one synchronous waitcheck analysis.
 typedef struct rj_waitcheck_options_s {
+  /// @brief Caller allocation size, initialized by rj_waitcheck_options_init().
+  size_t struct_size;
+  /// @brief ABI version, initialized by rj_waitcheck_options_init().
+  uint32_t abi_version;
   /// @brief Maximum diagnostic callbacks. Zero means unlimited.
   size_t max_diagnostics;
   /// @brief Reachability-cache budget in bytes. Zero selects the library default.
@@ -117,6 +179,12 @@ typedef struct rj_waitcheck_options_s {
 
 /// @brief Aggregate result of one successful waitcheck analysis.
 typedef struct rj_waitcheck_result_s {
+  /// @brief Caller allocation size, initialized by rj_waitcheck_result_init().
+  size_t struct_size;
+  /// @brief ABI version used to populate this structure.
+  uint32_t abi_version;
+  /// @brief Target inferred from the code object, including on later analysis errors.
+  rj_waitcheck_target_t target;
   size_t instructions_analyzed;
   size_t memory_events_tracked;
   size_t kernels_discovered;
@@ -136,23 +204,61 @@ typedef struct rj_waitcheck_result_s {
 /// @brief Initialize waitcheck options to their defaults.
 ///
 /// @details The defaults retain an implementation-defined reachability cache,
-/// report every diagnostic, and do not stop early. Passing NULL is a no-op.
-RJ_API_EXPORT void rj_waitcheck_options_init(rj_waitcheck_options_t *options);
+/// report every diagnostic, and do not stop early. Structures are append-only
+/// within an ABI version. Callers must pass their allocation size and call this
+/// initializer before analysis.
+///
+/// @retval ROCJITSU_STATUS_SUCCESS The structure was initialized.
+/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT @p options is NULL or
+/// @p options_size is too small for this ABI version.
+RJ_API_EXPORT rj_status_t rj_waitcheck_options_init(rj_waitcheck_options_t *options,
+                                                    size_t options_size);
+
+/// @brief Initialize a caller-owned result before analysis.
+///
+/// @details Callers must pass their allocation size and call this initializer
+/// before each result is first used. The analysis functions reset the result
+/// while preserving its caller-supplied allocation size.
+///
+/// @retval ROCJITSU_STATUS_SUCCESS The structure was initialized.
+/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT @p result is NULL or
+/// @p result_size is too small for this ABI version.
+RJ_API_EXPORT rj_status_t rj_waitcheck_result_init(rj_waitcheck_result_t *result,
+                                                   size_t result_size);
+
+/// @brief Return the stable lowercase spelling of a waitcheck target.
+///
+/// @details The returned static string is owned by the library. Unknown enum
+/// values return `"unknown"`. Copy it before unloading the library if it must
+/// outlive the call sequence.
+RJ_API_EXPORT const char *rj_waitcheck_target_name(rj_waitcheck_target_t target);
+
+/// @brief Return the stable lowercase spelling of a diagnostic code.
+///
+/// @details The returned static string is owned by the library. Unknown enum
+/// values return `"unknown"`. Copy it before unloading the library if it must
+/// outlive the call sequence.
+RJ_API_EXPORT const char *rj_waitcheck_diagnostic_code_name(rj_waitcheck_diagnostic_code_t code);
 
 /// @brief Synchronously analyze every kernel in an in-memory AMDGPU HSA code object.
 ///
 /// @details The target is inferred from the ELF header. The function copies any
 /// bytes it needs before returning, invokes callbacks on the calling thread, and
-/// does not create worker threads. The input buffer need only remain valid until
-/// the function returns. A reported wait hazard is a successful analysis with
-/// result->passed set to zero, not an API error.
+/// does not create worker threads. Independent calls are reentrant and may run
+/// concurrently on different threads; each call invokes its callbacks on its
+/// calling thread. Callers must externally synchronize any state shared between
+/// calls. The input buffer need only remain valid until the function returns. A
+/// reported wait hazard is a successful analysis with result->passed set to
+/// zero, not an API error.
 ///
 /// @param[in] code_object AMDGPU HSA ELF image in memory.
 /// @param[in] code_object_size Size of @p code_object in bytes.
-/// @param[in] options Analysis options, or NULL for defaults.
-/// @param[out] result Aggregate analysis result. Its contents are unspecified on error.
+/// @param[in] options Initialized analysis options, or NULL for defaults.
+/// @param[in,out] result Initialized aggregate analysis result. The inferred
+/// target is retained when parsing succeeds but later analysis fails.
 /// @retval ROCJITSU_STATUS_SUCCESS Analysis completed, with or without hazards.
-/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL.
+/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL or a
+/// caller-owned structure was not initialized for this ABI version.
 /// @retval ROCJITSU_STATUS_INVALID_CODE_OBJECT The buffer is malformed, is not a
 /// final AMDGPU HSA code object, targets an unsupported architecture, or cannot
 /// be decoded completely.
@@ -172,8 +278,9 @@ RJ_API_EXPORT rj_status_t rj_waitcheck_analyze(const void *code_object, size_t c
 /// @param[in] code_object_size Size of @p code_object in bytes.
 /// @param[in] kernel_entry_offset Kernel entry-point byte offset in `.text`.
 /// Offset zero is valid.
-/// @param[in] options Analysis options, or NULL for defaults.
-/// @param[out] result Aggregate analysis result. Its contents are unspecified on error.
+/// @param[in] options Initialized analysis options, or NULL for defaults.
+/// @param[in,out] result Initialized aggregate analysis result. The inferred
+/// target is retained when parsing succeeds but later analysis fails.
 /// @retval ROCJITSU_STATUS_SUCCESS Analysis completed, with or without hazards.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL or
 /// @p kernel_entry_offset is not present.

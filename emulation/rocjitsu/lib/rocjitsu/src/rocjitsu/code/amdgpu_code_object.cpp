@@ -66,6 +66,10 @@ rj_code_target_id_t target_from_machine_flags(uint32_t flags) {
     return ROCJITSU_CODE_TARGET_GFX950;
   if (mach == EF_AMDGPU_MACH_AMDGCN_GFX1100)
     return ROCJITSU_CODE_TARGET_GFX1100;
+  if (mach == EF_AMDGPU_MACH_AMDGCN_GFX1150)
+    return ROCJITSU_CODE_TARGET_GFX1150;
+  if (mach == EF_AMDGPU_MACH_AMDGCN_GFX1151)
+    return ROCJITSU_CODE_TARGET_GFX1151;
   if (mach == EF_AMDGPU_MACH_AMDGCN_GFX1200)
     return ROCJITSU_CODE_TARGET_GFX1200;
   if (mach == EF_AMDGPU_MACH_AMDGCN_GFX1201)
@@ -84,6 +88,10 @@ rj_code_target_id_t target_from_triple(const std::string &triple) {
     return ROCJITSU_CODE_TARGET_GFX950;
   if (triple == "gfx1100")
     return ROCJITSU_CODE_TARGET_GFX1100;
+  if (triple == "gfx1150")
+    return ROCJITSU_CODE_TARGET_GFX1150;
+  if (triple == "gfx1151")
+    return ROCJITSU_CODE_TARGET_GFX1151;
   if (triple == "gfx1200")
     return ROCJITSU_CODE_TARGET_GFX1200;
   if (triple == "gfx1201")
