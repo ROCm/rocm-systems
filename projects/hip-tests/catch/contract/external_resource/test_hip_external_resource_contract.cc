@@ -89,9 +89,11 @@ HIP_TEST_CASE(Contract_ExternalResource_SignalSemaphore_NullHandle_IsRejected) {
   // cudaSignalExternalSemaphoresAsync, which does not validate the semaphore
   // handle and dereferences it - a null handle faults (SIGSEGV) instead of
   // returning a defined error - so the rejection contract cannot be evaluated
-  // safely there. (The matching wait API does validate its handle, so
-  // WaitSemaphore_NullHandle stays cross-backend.) Parity would require matching
-  // null-handle validation on the signal path.
+  // safely there, across all tested CUDA versions. (The matching wait path is
+  // version-dependent - it validates on CUDA >= 13.0 but faults on older CUDA -
+  // so WaitSemaphore_NullHandle is guarded on CUDA_VERSION rather than skipped on
+  // all NVIDIA; see below.) Parity would require null-handle validation on the
+  // signal path.
 #if HT_AMD
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
@@ -111,6 +113,15 @@ HIP_TEST_CASE(Contract_ExternalResource_SignalSemaphore_NullHandle_IsRejected) {
 
 // @asserts: hipWaitExternalSemaphoresAsync - rejects a batch containing a null semaphore handle with a non-success status
 HIP_TEST_CASE(Contract_ExternalResource_WaitSemaphore_NullHandle_IsRejected) {
+  // BACKEND-DIFF: On AMD the wait path validates the handle and rejects null. On
+  // NVIDIA the behavior is CUDA-version-dependent: CUDA 13.x validates the handle
+  // and returns cudaErrorInvalidValue (probe-confirmed on H100/CUDA 13.1), but
+  // CUDA 12.x dereferences the null handle and faults (SIGSEGV, probe-confirmed on
+  // V100/CUDA 12.9) - the same non-validating behavior as the signal path above.
+  // The rejection contract can therefore be exercised on AMD and on NVIDIA with
+  // CUDA >= 13.0, but must be skipped on older CUDA where it cannot be evaluated
+  // safely. Parity would require null-handle validation in CUDA < 13.
+#if HT_AMD || (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
@@ -121,6 +132,11 @@ HIP_TEST_CASE(Contract_ExternalResource_WaitSemaphore_NullHandle_IsRejected) {
   hipExternalSemaphore_t semaphores[1] = {nullptr};
   hipExternalSemaphoreWaitParams params[1] = {};
   RequireRejected(hipWaitExternalSemaphoresAsync(semaphores, params, 1, stream));
+#else
+  HIP_SKIP_TEST("hipWaitExternalSemaphoresAsync does not validate the semaphore handle on the "
+                "NVIDIA backend before CUDA 13.0; the null-handle rejection contract cannot be "
+                "exercised safely.");
+#endif  // HT_AMD || CUDA_VERSION >= 13000
 }
 
 // @asserts: hipExternalMemoryGetMappedMipmappedArray - rejects a null external-memory handle with a non-success status and no array
