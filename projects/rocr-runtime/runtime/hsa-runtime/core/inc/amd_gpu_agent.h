@@ -1069,6 +1069,13 @@ class GpuAgent : public GpuAgentInt {
   // Check if SDMA engine by ID is free
   bool DmaEngineIsFree(uint32_t engine_id);
 
+  // @brief Opt-in cross-process SDMA engine spread (HSA_SDMA_ROUND_ROBIN*,
+  // HSA_SDMA_ENGINE_ID_OFFSET, HSA_SDMA_D2H_ENGINE_LIMIT) layered on top of the
+  // stateless NthSdmaEngine() per-copy selection. Returns a 1-indexed blit
+  // engine index for gfx94x host<->device copies, or 0 when no spread applies
+  // (caller keeps its stock NthSdmaEngine pick). See the definition for details.
+  uint32_t CrossProcessSdmaEngine(bool is_h2d, uint32_t k);
+
   std::map<uint64_t,unsigned int> gang_peers_info_;
 
   std::map<uint64_t, uint32_t> rec_sdma_eng_id_peers_info_;

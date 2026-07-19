@@ -1244,6 +1244,56 @@ static bool GangCopyCompleteHandler(hsa_signal_value_t, void *arg ) {
   return false;
 }
 
+// Cross-process SDMA engine spread for gfx94x host<->device copies (opt-in).
+//
+// #8456 selects the per-copy engine via NthSdmaEngine(mask, k) with a
+// per-copy/per-entry index k. That spreads engines *within* a single copy but
+// is identical across processes. This helper re-introduces the PR #8565
+// cross-process spreading on top of that stateless model: it widens the engine
+// mask (PCIe-only, or PCIe + xGMI) and shifts the rotation by a per-process
+// seed so concurrent processes/streams land on different engines instead of
+// contending on the stock single pick.
+//
+// Returns a 1-indexed blit engine index (suitable for GetBlitObject), or 0 when
+// the spread does not apply -- in which case the caller keeps its stock
+// NthSdmaEngine(rec_mask, k) pick. Only gfx94x (ISA major 9, minor >= 4)
+// host<->device copies are affected; gfx125+, P2P and D2D paths return 0. When
+// no HSA_SDMA_* flag is set the function also returns 0, so behavior is
+// bit-for-bit identical to stock.
+uint32_t GpuAgent::CrossProcessSdmaEngine(bool is_h2d, uint32_t k) {
+  if (!(supported_isas()[0]->GetMajorVersion() == 9 && supported_isas()[0]->GetMinorVersion() >= 4))
+    return 0;
+
+  const Flag& rt_flag = core::Runtime::runtime_singleton_->flag();
+  const bool pcie_xgmi = rt_flag.sdma_round_robin_pcie_xgmi() == Flag::SDMA_ENABLE;
+  const bool round_robin = rt_flag.sdma_round_robin() == Flag::SDMA_ENABLE;
+  const int64_t d2h_limit = rt_flag.sdma_d2h_engine_limit();
+  const bool limit_d2h = (!is_h2d && d2h_limit > 0);
+
+  // Nothing opted in -> stock behavior (caller's k=0 / k=d pick is unchanged).
+  if (!pcie_xgmi && !round_robin && !limit_d2h) return 0;
+
+  // Build the spread mask over blit engine indices. HSA_SDMA_ROUND_ROBIN_PCIE_XGMI
+  // widens to all SDMA engines and takes precedence over HSA_SDMA_ROUND_ROBIN.
+  uint32_t spread_mask = pcie_xgmi ? (1u << (num_h2d_d2h_engines_ + num_p2p_engines_)) - 1
+                                   : (1u << num_h2d_d2h_engines_) - 1;
+
+  // Method D: cap D2H to the first N engines of the mask (near-AID subset).
+  // N is clamped to the available engine count; H2D is never limited.
+  if (limit_d2h) {
+    const uint32_t count = static_cast<uint32_t>(rocr::os::Popcount(spread_mask));
+    const uint32_t keep = std::min<uint32_t>(count, static_cast<uint32_t>(d2h_limit));
+    spread_mask &= (1u << keep) - 1;
+  }
+  if (!spread_mask) return 0;
+
+  // Per-process seed: explicit offset > launcher local-rank > PortableGetpid().
+  const int64_t seed_off = rt_flag.sdma_seed_offset();
+  const uint32_t seed =
+      (seed_off >= 0) ? static_cast<uint32_t>(seed_off) : static_cast<uint32_t>(PortableGetpid());
+  return NthSdmaEngine(spread_mask, seed + k);
+}
+
 hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
                                const void* src, core::Agent& src_agent,
                                size_t size,
@@ -1253,6 +1303,17 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
   uint32_t rec_mask = 0;
   DmaPreferredEngine(dst_agent, src_agent, &rec_mask);
   uint32_t rec_sdma_eng = NthSdmaEngine(rec_mask, 0);
+  // Opt-in cross-process SDMA spread for gfx94x host<->device single copies.
+  {
+    const bool is_h2d = src_agent.device_type() == core::Agent::kAmdCpuDevice &&
+        dst_agent.device_type() == core::Agent::kAmdGpuDevice;
+    const bool is_d2h = dst_agent.device_type() == core::Agent::kAmdCpuDevice &&
+        src_agent.device_type() == core::Agent::kAmdGpuDevice;
+    if (is_h2d || is_d2h) {
+      uint32_t spread_eng = CrossProcessSdmaEngine(is_h2d, 0);
+      if (spread_eng) rec_sdma_eng = spread_eng;
+    }
+  }
   if (rec_sdma_eng)
     return DmaCopyOnEngine(dst, dst_agent, src, src_agent, size,
                            dep_signals, out_signal, rec_sdma_eng, false);
@@ -1616,6 +1677,14 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
         uint32_t rec_mask = 0;
         DmaPreferredEngine(*dst_agent, *this, &rec_mask);
         int rec_eng = NthSdmaEngine(rec_mask, d);
+        // Opt-in cross-process SDMA spread: the source here is the local GPU,
+        // so a CPU destination is a D2H host<->device copy. Overlay the
+        // per-process seed on top of the per-entry index d, keeping #8456's
+        // in-copy fan-out while separating concurrent processes.
+        if (dst_agent->device_type() == core::Agent::kAmdCpuDevice) {
+          uint32_t spread_eng = CrossProcessSdmaEngine(/*is_h2d=*/false, d);
+          if (spread_eng) rec_eng = static_cast<int>(spread_eng);
+        }
         if (rec_eng) {
           lazy_ptr<core::Blit>& blit = GetBlitObject(rec_eng);
           if (blit->isSDMA()) {
@@ -2179,6 +2248,18 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
         uint32_t rec_mask = 0;
         DmaPreferredEngine(*dst_agent, *src_agent, &rec_mask);
         uint32_t engine_offset = NthSdmaEngine(rec_mask, 0);
+        // Opt-in cross-process SDMA spread for gfx94x host<->device single-entry
+        // batch copies (same treatment as DmaCopy).
+        {
+          const bool is_h2d = src_agent->device_type() == core::Agent::kAmdCpuDevice &&
+              dst_agent->device_type() == core::Agent::kAmdGpuDevice;
+          const bool is_d2h = dst_agent->device_type() == core::Agent::kAmdCpuDevice &&
+              src_agent->device_type() == core::Agent::kAmdGpuDevice;
+          if (is_h2d || is_d2h) {
+            uint32_t spread_eng = CrossProcessSdmaEngine(is_h2d, 0);
+            if (spread_eng) engine_offset = spread_eng;
+          }
+        }
         if (!engine_offset) {
           bool is_h2d = (src_agent->device_type() == core::Agent::kAmdCpuDevice &&
                          dst_agent->device_type() == core::Agent::kAmdGpuDevice);
