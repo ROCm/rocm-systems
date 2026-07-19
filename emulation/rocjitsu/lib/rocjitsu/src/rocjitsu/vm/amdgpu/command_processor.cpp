@@ -542,6 +542,13 @@ bool CommandProcessor::scan_doorbells() {
 void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
   using namespace std::chrono_literals;
   uint64_t poll_count = 0;
+  // INVARIANT: this loop must re-read invalid_pending_/stall_pending_ (below) on
+  // EVERY iteration, unconditionally. Those flags are level-triggered — the engine
+  // clears them at handle_doorbell entry and re-sets them if a stall is still
+  // unsatisfied — so this unconditional 100us heartbeat re-check is what guarantees a
+  // pending stall is eventually retried. A future change that lets the loop skip the
+  // flag re-read on some iterations (an early continue before the retry check) would
+  // reintroduce a lost-wakeup.
   while (!stop.stop_requested()) {
     bool doorbell_changed = scan_doorbells();
     // Retry on a pending INVALID packet (the runtime has not finished writing it
@@ -783,12 +790,18 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     // "completed" wave. free_wavefront_resources() frees the SGPR/VGPR blocks and
     // resets the slot without the hook or a CP completion notify — and since
     // begin_workgroup() has not run, there is no active_wgs_ entry / cluster pin to
-    // unwind either.
+    // unwind either. Also reclaim the placement's LDS bump: the SPI already advanced
+    // the CU's next_lds_alloc_ (allocate_lds) before this call, and normally only a
+    // WG completing via release_wf() resets it; on this failure path
+    // maybe_reset_lds_alloc() rolls it back iff the CU is now idle (freeing these
+    // waves left no active waves) and unpinned, so a leaked bump cannot starve later
+    // placements. It correctly no-ops when peers of the same dispatch are resident.
     std::vector<Wavefront *> wg_wavefronts;
     wg_wavefronts.reserve(entry.wfs_per_workgroup);
     const auto free_reserved = [&wg_wavefronts, cu]() {
       for (auto *claimed : wg_wavefronts)
         cu->free_wavefront_resources(*claimed);
+      cu->maybe_reset_lds_alloc();
     };
     for (uint32_t w = 0; w < entry.wfs_per_workgroup; ++w) {
       Wavefront *wf = cu->dispatch_wf(global_wg_id, entry.kernel_entry_pc, entry.sgprs_per_wf,
@@ -1334,6 +1347,13 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
                           queue.queue_id, slot, read_idx, pkt_addr);
       });
       process_limit = read_idx;
+      // The runtime has not finished writing this packet's header. invalid_pending_
+      // mirrors the barrier/dependency stalls' stall_pending_: the KFD poll thread
+      // re-checks at its 100us cadence (both flags gate the same poll-loop nudge).
+      // Unlike those stalls this has no internal-test-queue fallback because a test
+      // writes the whole packet before ringing the doorbell, so a test queue never
+      // observes an in-flight INVALID header (the only writer that leaves one is the
+      // real runtime racing the doorbell, which always has a poll thread).
       invalid_pending_.store(true, std::memory_order_release);
       break;
     }

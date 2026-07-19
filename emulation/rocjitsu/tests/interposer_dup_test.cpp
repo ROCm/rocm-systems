@@ -648,6 +648,20 @@ TEST(InterposerGemTest, ReplaceTransfersOwnershipAcrossOldOwnerClose) {
   replace_b.operation = AMDGPU_VA_OP_REPLACE;
   ASSERT_EQ(ioctl(drm, gem_va, &replace_b), 0);
 
+  // Ownership of the VA transferred to B: A must no longer own the range, so A's
+  // UNMAP of it fails. This is the load-bearing assertion — gem_va_unmap() reports
+  // success purely on process existence, not PTE presence, so without this negative
+  // check the later "B's UNMAP succeeds" alone could pass even if REPLACE had failed
+  // to evict A's record (A's close would then quietly tear down the shared PTE while
+  // B's bookkeeping stayed intact).
+  drm_amdgpu_gem_va unmap_a{};
+  unmap_a.handle = handle_a;
+  unmap_a.operation = AMDGPU_VA_OP_UNMAP;
+  unmap_a.va_address = va;
+  unmap_a.map_size = kBoSize;
+  EXPECT_EQ(ioctl(drm, gem_va, &unmap_a), -1)
+      << "A must not own the range after REPLACE transferred it to B";
+
   // Close A entirely. Its GEM_CLOSE reap must not unmap va — B owns it now.
   EXPECT_EQ(gem_close(drm, handle_a), 0);
   EXPECT_EQ(close(dmabuf_a), 0);
