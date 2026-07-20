@@ -63,6 +63,11 @@ void TestReverseSerialNumber::Run() {
   }
 
   for (size_t i = 0; i < device_handles_.size(); ++i) {
+    char device_node[256] = {0};
+    uint32_t node_len = sizeof(device_node);
+    amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_DEVICE_PATH, device_node,
+                                  &node_len);
+
     uint64_t serial_number = 0;
     uint32_t length = sizeof(serial_number);
     amdcuid_status_t status = amdcuid_query_device_property(
@@ -129,10 +134,11 @@ void TestReverseSerialNumber::Run() {
     uint64_t extracted_serial = 0;
     memcpy(&extracted_serial, raw_bits, sizeof(extracted_serial));
 
-    EXPECT_EQ(serial_number, extracted_serial) << "Serial number mismatch for device " << i;
+    EXPECT_EQ(serial_number, extracted_serial)
+        << "Serial number mismatch for device " << device_node;
 
     IF_VERB(1) {
-      printf("  Device [%zu] serial: 0x%016llx (extracted: 0x%016llx)\n", i,
+      printf("  Device [%s] serial: 0x%016llx (extracted: 0x%016llx)\n", device_node,
              (unsigned long long)serial_number, (unsigned long long)extracted_serial);
     }
   }
@@ -155,6 +161,11 @@ void TestReverseVendorId::Run() {
   }
 
   for (size_t i = 0; i < device_handles_.size(); ++i) {
+    char device_node[256] = {0};
+    uint32_t node_len = sizeof(device_node);
+    amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_DEVICE_PATH, device_node,
+                                  &node_len);
+
     amdcuid_id_t primary_id;
     uint32_t length = sizeof(primary_id);
     amdcuid_status_t status = amdcuid_query_device_property(
@@ -171,9 +182,9 @@ void TestReverseVendorId::Run() {
     status = amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_VENDOR_ID,
                                            &queried_vendor, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
-    EXPECT_EQ(extracted_vendor, queried_vendor) << "Vendor ID mismatch for device " << i;
+    EXPECT_EQ(extracted_vendor, queried_vendor) << "Vendor ID mismatch for device " << device_node;
 
-    IF_VERB(1) { printf("  Device [%zu] vendor_id: 0x%04x\n", i, queried_vendor); }
+    IF_VERB(1) { printf("  Device [%s] vendor_id: 0x%04x\n", device_node, queried_vendor); }
   }
 }
 
@@ -194,6 +205,11 @@ void TestReverseDeviceId::Run() {
   }
 
   for (size_t i = 0; i < device_handles_.size(); ++i) {
+    char device_node[256] = {0};
+    uint32_t node_len = sizeof(device_node);
+    amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_DEVICE_PATH, device_node,
+                                  &node_len);
+
     amdcuid_id_t primary_id;
     uint32_t length = sizeof(primary_id);
     amdcuid_status_t status = amdcuid_query_device_property(
@@ -213,9 +229,10 @@ void TestReverseDeviceId::Run() {
       continue;
     }
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
-    EXPECT_EQ(extracted_device_id, queried_device_id) << "Device ID mismatch for device " << i;
+    EXPECT_EQ(extracted_device_id, queried_device_id)
+        << "Device ID mismatch for device " << device_node;
 
-    IF_VERB(1) { printf("  Device [%zu] device_id: 0x%04x\n", i, queried_device_id); }
+    IF_VERB(1) { printf("  Device [%s] device_id: 0x%04x\n", device_node, queried_device_id); }
   }
 }
 
@@ -236,6 +253,11 @@ void TestReverseRevisionId::Run() {
   }
 
   for (size_t i = 0; i < device_handles_.size(); ++i) {
+    char device_node[256] = {0};
+    uint32_t node_len = sizeof(device_node);
+    amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_DEVICE_PATH, device_node,
+                                  &node_len);
+
     amdcuid_id_t primary_id;
     uint32_t length = sizeof(primary_id);
     amdcuid_status_t status = amdcuid_query_device_property(
@@ -254,9 +276,10 @@ void TestReverseRevisionId::Run() {
       continue;
     }
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
-    EXPECT_EQ(extracted_revision, queried_revision) << "Revision ID mismatch for device " << i;
+    EXPECT_EQ(extracted_revision, queried_revision)
+        << "Revision ID mismatch for device " << device_node;
 
-    IF_VERB(1) { printf("  Device [%zu] revision_id: 0x%04x\n", i, queried_revision); }
+    IF_VERB(1) { printf("  Device [%s] revision_id: 0x%04x\n", device_node, queried_revision); }
   }
 }
 
@@ -277,6 +300,11 @@ void TestReverseUnitId::Run() {
   }
 
   for (size_t i = 0; i < device_handles_.size(); ++i) {
+    char device_node[256] = {0};
+    uint32_t node_len = sizeof(device_node);
+    amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_DEVICE_PATH, device_node,
+                                  &node_len);
+
     amdcuid_id_t primary_id;
     uint32_t length = sizeof(primary_id);
     amdcuid_status_t status = amdcuid_query_device_property(
@@ -298,9 +326,9 @@ void TestReverseUnitId::Run() {
       continue;
     }
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
-    EXPECT_EQ(extracted_unit_id, queried_unit_id) << "Unit ID mismatch for device " << i;
+    EXPECT_EQ(extracted_unit_id, queried_unit_id) << "Unit ID mismatch for device " << device_node;
 
-    IF_VERB(1) { printf("  Device [%zu] unit_id: 0x%04x\n", i, queried_unit_id); }
+    IF_VERB(1) { printf("  Device [%s] unit_id: 0x%04x\n", device_node, queried_unit_id); }
   }
 }
 
@@ -321,6 +349,11 @@ void TestReverseDeviceType::Run() {
   }
 
   for (size_t i = 0; i < device_handles_.size(); ++i) {
+    char device_node[256] = {0};
+    uint32_t node_len = sizeof(device_node);
+    amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_DEVICE_PATH, device_node,
+                                  &node_len);
+
     amdcuid_id_t primary_id;
     uint32_t length = sizeof(primary_id);
     amdcuid_status_t status = amdcuid_query_device_property(
@@ -340,10 +373,10 @@ void TestReverseDeviceType::Run() {
                                            &queried_type, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
     EXPECT_EQ(static_cast<amdcuid_device_type_t>(extracted_type), queried_type)
-        << "Device type mismatch for device " << i;
+        << "Device type mismatch for device " << device_node;
 
     IF_VERB(1) {
-      printf("  Device [%zu] device_type: %u\n", i, static_cast<unsigned>(queried_type));
+      printf("  Device [%s] device_type: %u\n", device_node, static_cast<unsigned>(queried_type));
     }
   }
 }
