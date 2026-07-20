@@ -497,7 +497,7 @@ uint64_t AqlQueue::AddWriteIndexRelease(uint64_t value) {
 
 void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
 #ifdef ROCR_HOTSWAP_COMGR_ADAPTER
-  if (value >= 0 && rocr::amd::hsa::loader::ShouldCheckHotSwapDispatchKernelObjects()) {
+  if (rocr::amd::hsa::loader::ShouldCheckHotSwapDispatchKernelObjects()) {
     std::lock_guard<std::mutex> lock(hotswap_dispatch_lock_);
     // HotSwap's dispatch intercept relies on seeing every published dispatch
     // before the CP does. It is only valid for producers that ring the doorbell
