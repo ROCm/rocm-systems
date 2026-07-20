@@ -7,6 +7,7 @@
 #include <hip/hip_runtime.h>
 #include "hip_internal.hpp"
 #include "platform/command_utils.hpp"
+#include <unordered_set>
 
 namespace hip {
 hipError_t ihipBatchMemOperation(hipStream_t stream, cl_command_type cmdType, unsigned int count,
@@ -34,10 +35,47 @@ hipError_t ihipBatchMemOperation(hipStream_t stream, cl_command_type cmdType, un
   hip::Stream* hip_stream = hip::getStream(stream);
   amd::Command::EventWaitList waitList;
 
-  amd::BatchMemoryOperationCommand* command = new amd::BatchMemoryOperationCommand(
-      *hip_stream, cmdType, count, flags, waitList, paramArray, sizeof(hipStreamBatchMemOpParams));
-  command->enqueue();
-  command->release();
+  // The batch mem-op kernel runs every op in the batch concurrently (one work-item per op)
+  // with no ordering between them. A write to an address that an earlier op in the SAME batch
+  // waits on (e.g. a barrier that writes flag=1, waits flag==1, then resets flag=0) therefore
+  // races that wait: the reset can clear the flag before the waiting work-item observes the
+  // set value, so the wait spins forever and the stream deadlocks (AIRUNTIME-2528). Split the
+  // batch at each such write-after-wait dependency and enqueue the pieces in stream order, so a
+  // segment's waits complete before a later segment writes the waited addresses. Batches with
+  // no write-after-wait dependency are still issued as a single op (no behavior change).
+  auto op_is_write = [](const hipStreamBatchMemOpParams& p) {
+    return p.operation == hipStreamMemOpWriteValue32 ||
+           p.operation == hipStreamMemOpWriteValue64;
+  };
+  auto op_is_wait = [](const hipStreamBatchMemOpParams& p) {
+    return p.operation == hipStreamMemOpWaitValue32 ||
+           p.operation == hipStreamMemOpWaitValue64;
+  };
+  auto op_addr = [&](const hipStreamBatchMemOpParams& p) -> const void* {
+    return op_is_write(p) ? p.writeValue.address : p.waitValue.address;
+  };
+
+  auto enqueue_segment = [&](unsigned int start, unsigned int n) {
+    amd::BatchMemoryOperationCommand* seg = new amd::BatchMemoryOperationCommand(
+        *hip_stream, cmdType, n, flags, waitList, &paramArray[start],
+        sizeof(hipStreamBatchMemOpParams));
+    seg->enqueue();
+    seg->release();
+  };
+
+  unsigned int segStart = 0;
+  std::unordered_set<const void*> waitedAddrs;
+  for (unsigned int i = 0; i < count; i++) {
+    if (op_is_write(paramArray[i]) && waitedAddrs.count(op_addr(paramArray[i])) != 0) {
+      enqueue_segment(segStart, i - segStart);
+      segStart = i;
+      waitedAddrs.clear();
+    }
+    if (op_is_wait(paramArray[i])) {
+      waitedAddrs.insert(op_addr(paramArray[i]));
+    }
+  }
+  enqueue_segment(segStart, count - segStart);
   HIP_RETURN(hipSuccess);
 }
 
