@@ -459,22 +459,46 @@ static std::string JsonEscape(const std::string& s) {
   return os.str();
 }
 
+// Proof logging is a process-run decision: cache the selected path so all proof
+// emission uses the same destination even if the environment changes later.
+static const std::string& HotSwapProofLogPath() {
+  static const std::string Path = [] {
+    constexpr char EnvName[] = "HSA_HOTSWAP_PROOF_LOG";
+    if (!rocr::os::IsEnvVarSet(EnvName)) return std::string();
+    return rocr::os::GetEnvVar(EnvName);
+  }();
+  return Path;
+}
+
+// Keep call sites cheap and explicit without repeating the path lookup rule.
+static bool HotSwapProofLogEnabled() {
+  return !HotSwapProofLogPath().empty();
+}
+
 // Appends one JSON object (the given comma-separated fields) as a line to the
 // file named by HSA_HOTSWAP_PROOF_LOG. Best-effort and inert when unset; used to
 // prove which kernels were translated/dispatched during a run.
 static void AppendHotSwapProofJson(const std::string& jsonFields) {
-  const char* path = std::getenv("HSA_HOTSWAP_PROOF_LOG");
-  if (!path || !path[0]) return;
+  const std::string& Path = HotSwapProofLogPath();
+  if (Path.empty()) return;
   static std::mutex ProofLogMutex;
   std::lock_guard<std::mutex> Guard(ProofLogMutex);
-  std::ofstream out(path, std::ios::app);
-  if (!out) {
-    std::cerr << "hotswap: failed to open proof log '" << path << "' for append\n";
+  static std::ofstream Out;
+  if (!Out.is_open()) {
+    Out.clear();
+    Out.open(Path, std::ios::app);
+  }
+  if (!Out) {
+    std::cerr << "hotswap: failed to open proof log '" << Path
+              << "' for append\n";
     return;
   }
-  out << "{" << jsonFields << "}\n";
-  if (!out) {
-    std::cerr << "hotswap: failed to write proof log '" << path << "'\n";
+  Out << "{" << jsonFields << "}\n";
+  Out.flush();
+  if (!Out) {
+    std::cerr << "hotswap: failed to write proof log '" << Path << "'\n";
+    Out.close();
+    Out.clear();
   }
 }
 
@@ -610,8 +634,7 @@ static bool GetComgrResultInfo(amd_comgr_hotswap_transpile_result_t result,
 static void AppendHotSwapComgrProof(const char* event, amd_comgr_hotswap_transpile_result_t result,
                                     size_t elfSize = 0, const char* overrideFailReason = nullptr,
                                     const char* overrideFailDetail = nullptr) {
-  const char* path = std::getenv("HSA_HOTSWAP_PROOF_LOG");
-  if (!path || !path[0]) return;
+  if (!HotSwapProofLogEnabled()) return;
 
   bool success = false;
   bool cacheHit = false;
@@ -2156,7 +2179,7 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
 #endif
 
 #ifdef ROCR_HOTSWAP_COMGR_ADAPTER
-  if (std::getenv("HSA_HOTSWAP_PROOF_LOG")) {
+  if (HotSwapProofLogEnabled()) {
     std::ostringstream proof;
     proof << "\"event\":\"hsa_load_code_object\""
           << ",\"code_isa\":\"" << JsonEscape(codeIsa) << "\""
