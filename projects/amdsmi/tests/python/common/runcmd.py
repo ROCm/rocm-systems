@@ -10,7 +10,6 @@ the thin subprocess plumbing the CLI tests use to invoke the installed
 tests; it has no amdsmi or unittest dependencies.
 """
 
-import argparse
 import datetime
 import locale
 import os
@@ -223,35 +222,3 @@ class Util:
 
         rc, std_out, std_err, proc = self._RunCmd(cmd, use_shell, msg_in, time_out=None, wait=False)
         return (rc, std_out, std_err, proc)
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Utility")
-    parser.add_argument(
-        "--version", action="version", version=version_number, help="Show version and exit"
-    )
-    parser.add_argument("--build", action="version", version=build_date, help="Show build and exit")
-    parser.add_argument(
-        "--verbose",
-        choices=verbose_choices,
-        type=str,
-        default="WARNING",
-        help="Level of information to output, default=%(default)s",
-    )
-    parser.add_argument("--cmd", type=str, default=None, help="Run cmd, default=%(default)s")
-    args = parser.parse_args()
-
-    util = Util(args.verbose)
-
-    if args.cmd:
-        cmd = args.cmd
-    else:
-        cmd = "amd-smi"
-
-    (rc, std_out, std_err) = util.RunCmdSync(cmd)
-    print(f"output:{cmd}")
-    print(f"\trc={rc}")
-    print(f"\tstd_out={std_out}")
-    print(f"\tstd_err={std_err}")
-
-    sys.exit(rc)
