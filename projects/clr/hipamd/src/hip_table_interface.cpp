@@ -656,38 +656,61 @@ hipError_t hipDrvPointerGetAttributes(unsigned int numAttributes, hipPointer_att
   CATCH;
 }
 hipError_t hipEventCreate(hipEvent_t* event) {
+  rocm_trace_emit_hipEventCreate_enter(); /* __ROCM_CURATED__: hipEventCreate */
   TRY;
-  return hip::GetHipDispatchTable()->hipEventCreate_fn(event);
+  ROCM_TRACE_RET_STATUS_CURATED(hipEventCreate, hip::GetHipDispatchTable()->hipEventCreate_fn(event), event);
   CATCH;
 }
 hipError_t hipEventCreateWithFlags(hipEvent_t* event, unsigned flags) {
+  auto const __rocm_in_flags = flags;
+  rocm_trace_emit_hipEventCreateWithFlags_enter(
+      (__rocm_in_flags)); /* __ROCM_CURATED__: hipEventCreateWithFlags */
   TRY;
-  return hip::GetHipDispatchTable()->hipEventCreateWithFlags_fn(event, flags);
+  ROCM_TRACE_RET_STATUS_CURATED(hipEventCreateWithFlags, hip::GetHipDispatchTable()->hipEventCreateWithFlags_fn(event, flags), event);
   CATCH;
 }
 hipError_t hipEventDestroy(hipEvent_t event) {
+  auto const __rocm_in_event = event;
+  rocm_trace_emit_hipEventDestroy_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_event)); /* __ROCM_CURATED__: hipEventDestroy */
   TRY;
-  return hip::GetHipDispatchTable()->hipEventDestroy_fn(event);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipEventDestroy, hip::GetHipDispatchTable()->hipEventDestroy_fn(event));
   CATCH;
 }
 hipError_t hipEventElapsedTime(float* ms, hipEvent_t start, hipEvent_t stop) {
+  auto const __rocm_in_start = start;
+  auto const __rocm_in_stop = stop;
+  rocm_trace_emit_hipEventElapsedTime_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_start),
+      (uint64_t)(uintptr_t)(__rocm_in_stop)); /* __ROCM_CURATED__: hipEventElapsedTime */
   TRY;
-  return hip::GetHipDispatchTable()->hipEventElapsedTime_fn(ms, start, stop);
+  ROCM_TRACE_RET_STATUS_CURATED(hipEventElapsedTime, hip::GetHipDispatchTable()->hipEventElapsedTime_fn(ms, start, stop), ms);
   CATCH;
 }
 hipError_t hipEventQuery(hipEvent_t event) {
+  auto const __rocm_in_event = event;
+  rocm_trace_emit_hipEventQuery_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_event)); /* __ROCM_CURATED__: hipEventQuery */
   TRY;
-  return hip::GetHipDispatchTable()->hipEventQuery_fn(event);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipEventQuery, hip::GetHipDispatchTable()->hipEventQuery_fn(event));
   CATCH;
 }
 hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) {
+  auto const __rocm_in_event = event;
+  auto const __rocm_in_stream = stream;
+  rocm_trace_emit_hipEventRecord_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_event),
+      (uint64_t)(uintptr_t)(__rocm_in_stream)); /* __ROCM_CURATED__: hipEventRecord */
   TRY;
-  return hip::GetHipDispatchTable()->hipEventRecord_fn(event, stream);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipEventRecord, hip::GetHipDispatchTable()->hipEventRecord_fn(event, stream));
   CATCH;
 }
 hipError_t hipEventSynchronize(hipEvent_t event) {
+  auto const __rocm_in_event = event;
+  rocm_trace_emit_hipEventSynchronize_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_event)); /* __ROCM_CURATED__: hipEventSynchronize */
   TRY;
-  return hip::GetHipDispatchTable()->hipEventSynchronize_fn(event);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipEventSynchronize, hip::GetHipDispatchTable()->hipEventSynchronize_fn(event));
   CATCH;
 }
 hipError_t hipExtGetLinkTypeAndHopCount(int device1, int device2, uint32_t* linktype,
@@ -4226,8 +4249,13 @@ hipError_t hipStreamAddCallback_spt(hipStream_t stream, hipStreamCallback_t call
   CATCH;
 }
 hipError_t hipEventRecord_spt(hipEvent_t event, hipStream_t stream) {
+  auto const __rocm_in_event = event;
+  auto const __rocm_in_stream = stream;
+  rocm_trace_emit_hipEventRecord_spt_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_event),
+      (uint64_t)(uintptr_t)(__rocm_in_stream)); /* __ROCM_CURATED__: hipEventRecord_spt */
   TRY;
-  return hip::GetHipDispatchTable()->hipEventRecord_spt_fn(event, stream);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipEventRecord_spt, hip::GetHipDispatchTable()->hipEventRecord_spt_fn(event, stream));
   CATCH;
 }
 hipError_t hipLaunchCooperativeKernel_spt(const void* f, dim3 gridDim, dim3 blockDim,
@@ -4573,8 +4601,15 @@ hipError_t hipGraphExecBatchMemOpNodeSetParams(hipGraphExec_t hGraphExec, hipGra
   CATCH;
 }
 hipError_t hipEventRecordWithFlags(hipEvent_t event, hipStream_t stream, unsigned int flags) {
+  auto const __rocm_in_event = event;
+  auto const __rocm_in_stream = stream;
+  auto const __rocm_in_flags = flags;
+  rocm_trace_emit_hipEventRecordWithFlags_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_event),
+      (uint64_t)(uintptr_t)(__rocm_in_stream),
+      (__rocm_in_flags)); /* __ROCM_CURATED__: hipEventRecordWithFlags */
   TRY;
-  return hip::GetHipDispatchTable()->hipEventRecordWithFlags_fn(event, stream, flags);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipEventRecordWithFlags, hip::GetHipDispatchTable()->hipEventRecordWithFlags_fn(event, stream, flags));
   CATCH;
 }
 

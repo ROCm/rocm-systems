@@ -643,3 +643,33 @@
 
 - api: hipStreamWriteValue64
   args: [stream, ptr, value, flags]
+
+- api: hipEventCreate
+  args: [event]
+  out: [event]
+
+- api: hipEventCreateWithFlags
+  args: [event, flags]
+  out: [event]
+
+- api: hipEventDestroy
+  args: [event]
+
+- api: hipEventRecord
+  args: [event, stream]
+
+- api: hipEventSynchronize
+  args: [event]
+
+- api: hipEventQuery
+  args: [event]
+
+- api: hipEventElapsedTime
+  args: [ms, start, stop]
+  out: [ms]
+
+- api: hipEventRecordWithFlags
+  args: [event, stream, flags]
+
+- api: hipEventRecord_spt
+  args: [event, stream]

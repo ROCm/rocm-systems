@@ -10,6 +10,15 @@ hipDrvMemcpy2DUnaligned	STATUS	hipError_t
 hipDrvMemcpy3D	STATUS	hipError_t
 hipDrvMemcpy3DAsync	STATUS	hipError_t
 hipDrvPointerGetAttributes	STATUS	hipError_t
+hipEventCreate	STATUS	hipError_t
+hipEventCreateWithFlags	STATUS	hipError_t
+hipEventDestroy	STATUS	hipError_t
+hipEventElapsedTime	STATUS	hipError_t
+hipEventQuery	STATUS	hipError_t
+hipEventRecord	STATUS	hipError_t
+hipEventRecordWithFlags	STATUS	hipError_t
+hipEventRecord_spt	STATUS	hipError_t
+hipEventSynchronize	STATUS	hipError_t
 hipExtMallocWithFlags	STATUS	hipError_t
 hipExtStreamCreateWithCUMask	STATUS	hipError_t
 hipExtStreamGetCUMask	STATUS	hipError_t
