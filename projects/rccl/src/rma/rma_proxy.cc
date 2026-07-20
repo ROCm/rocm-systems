@@ -93,26 +93,19 @@ fail:
 // Check if the RMA plugin supports DMA-BUF, if so we can try to get the DMA-BUF handle from CUDA,
 // if that fails we fallback to non-DMA-BUF
 static ncclResult_t ncclRmaProxyRegMrSym(ncclRma_t* rmaComm, void* rmaCollComm, ncclNetProperties_t props, void* addr,
-                                         size_t size, int type, int mr_flags, void** mhandle) {
+                                         size_t size, int type, int mr_flags, void** mhandle, bool sym_buffer = false) {
   if (type == NCCL_PTR_HOST) {
     NCCLCHECK(rmaComm->regMrSym(rmaCollComm, addr, size, type, mr_flags, mhandle));
   } else if (type == NCCL_PTR_CUDA) {
     ncclResult_t dmabufResult = ncclInvalidUsage;
     if (ncclParamDmaBufEnable() && (props.ptrSupport & NCCL_PTR_DMABUF)) {
-      ncclResult_t registrationResult = ncclSuccess;
       int dmabufFd = -1;
-      dmabufResult = getDmaBufFd(addr, size, &dmabufFd);
+      // [RCCL] sym_buffer selects the cuMem (VMM) dmabuf export used for symmetric
+      // windows; plain (hipExtMalloc) allocations use the ROCr portable export.
+      dmabufResult = getDmaBufFd(addr, size, &dmabufFd, sym_buffer);
       if (dmabufResult == ncclSuccess) {
-        registrationResult = rmaComm->regMrSymDmaBuf(rmaCollComm, addr, size, type, 0, dmabufFd, mr_flags, mhandle);
+        NCCLCHECK(rmaComm->regMrSymDmaBuf(rmaCollComm, addr, size, type, 0, dmabufFd, mr_flags, mhandle));
         close(dmabufFd);
-      }
-      if (registrationResult != ncclSuccess) {
-        dmabufFd = -1;
-        dmabufResult = getDmaBufFd(addr, size, &dmabufFd, true);
-        if (dmabufResult == ncclSuccess) {
-          NCCLCHECK(rmaComm->regMrSymDmaBuf(rmaCollComm, addr, size, type, 0, dmabufFd, mr_flags, mhandle));
-          close(dmabufFd);
-        }
       }
     }
     // Fallback to non-DMA-BUF if the DMA-BUF handle is not supported
@@ -373,8 +366,21 @@ ncclResult_t ncclRmaProxyRegister(struct ncclComm* comm, void* address, size_t s
                                   void* rmaHostWins[NCCL_RMA_MAX_CONNECTIONS]) {
   struct ncclRmaProxyState* rmaProxyState = &comm->rmaState.rmaProxyState;
   for (int n = 0; n < rmaProxyState->rmaCommCount; n++) {
-    NCCLCHECK(ncclRmaProxyRegMrSym(rmaProxyState->ncclRma, rmaProxyState->rmaComms[n], rmaProxyState->props[n], address,
-                                   size, NCCL_PTR_CUDA, 0, &rmaHostWins[n]));
+    // [RCCL] Symmetric windows are cuMem/VMM allocations; export their dmabuf via
+    // cuMemGetHandleForAddressRange (sym_buffer=true) instead of the ROCr export,
+    // which fails with INVALID_ALLOCATION on VMM memory.
+    ncclNetProperties_t props_tmp = rmaProxyState->props[n];
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
+    if (!ncclCuMemEnable()) {
+      props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
+    }
+#else
+    if (rcclParamRmaProxyUseDMABUF() == 0) {
+      props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
+    }
+#endif
+    NCCLCHECK(ncclRmaProxyRegMrSym(rmaProxyState->ncclRma, rmaProxyState->rmaComms[n], props_tmp, address,
+                                   size, NCCL_PTR_CUDA, 0, &rmaHostWins[n], true));
     if (rmaHostWins[n] == NULL) {
       WARN("rank %d - RMA Symmetric register failed: buff %p, size %ld", comm->rank, address, size);
       return ncclSystemError;

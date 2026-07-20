@@ -209,8 +209,17 @@ static void initPluginLibsOnceFunc() {
     strcpy(pluginLibs[pluginCounter++].name, ncclGetPluginLibName(ncclPluginTypeRma));
   }
 
-  // Add internal ib plugin
-  pluginLibs[pluginCounter].ncclRma = &ncclRmaIbProxy;
+  // Add internal ib plugin. IB-CAST uses its own RMA backend layered on the CAST
+  // transport (also backs GIN over IB-CAST via the generic ncclGinProxy); all other
+  // cases use the default IB RMA proxy.
+  {
+    const char* envNet = ncclGetEnv("NCCL_NET");
+    if (envNet && strcasecmp(envNet, "IB-CAST") == 0) {
+      pluginLibs[pluginCounter].ncclRma = &IbCastRmaIbProxy;
+    } else {
+      pluginLibs[pluginCounter].ncclRma = &ncclRmaIbProxy;
+    }
+  }
   pluginLibs[pluginCounter].state = ncclRmaPluginStateInitReady;
   pluginLibs[pluginCounter].version = ncclRmaVersion[0];
   pluginCounter++;

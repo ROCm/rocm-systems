@@ -604,8 +604,8 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
     mem->ginSegmentInfos[0].memType = CU_MEM_LOCATION_TYPE_DEVICE;
     mem->ginSegmentInfos[0].segmentSize = mem->size;
     for (int i = 0; i < NCCL_GIN_MAX_CONNECTIONS; i++) {
-      mem->ginDevWins[i] = mem->ginSegmentInfos[0].ginDevWins[i];
-      mem->ginHostWins[i] = mem->ginSegmentInfos[0].ginHostWins[i];
+      mem->ginSegmentInfos[0].ginDevWins[i] = mem->ginDevWins[i];
+      mem->ginSegmentInfos[0].ginHostWins[i] = mem->ginHostWins[i];
     }
     mem->numGinSegments = 1;
   } else {

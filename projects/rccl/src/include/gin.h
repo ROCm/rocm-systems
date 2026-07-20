@@ -17,6 +17,7 @@ ncclResult_t ncclGinFinalize(struct ncclComm* comm);
 
 extern ncclGin_t ncclGinIbGdaki;
 
-extern ncclGin_t IbCastGinIb;
-extern ncclGin_t IbCastGinIbProxy;
+#ifdef RCCL_NET_IB_CAST_ENABLE_GDAKI
+extern ncclGin_t IbCastGinIbGdaki;
+#endif
 #endif

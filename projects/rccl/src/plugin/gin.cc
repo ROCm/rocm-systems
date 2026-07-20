@@ -268,20 +268,23 @@ static void initPluginLibsOnceFunc() {
   pluginLibs[pluginCounter].state = ncclGinPluginStateInitReady;
   pluginLibs[pluginCounter].version = ncclGinVersion[0];
   pluginCounter++;
-#endif // !defined(__HIP_PLATFORM_AMD__)
-  // [RCCL] IB-CAST: when NCCL_NET=IB-CAST, register the IB-CAST GIN backend.
-  // IbCastGinIb (declared in gin.h) is a self-contained ncclGin_t dispatcher that
-  // selects its own proxy path internally, so under the v14 GIN/RMA split it needs
-  // no separate RMA-side registration.
+#else
+  // [RCCL] IB-CAST: register the device-initiated GDAKI GIN backend when it is built
+  // (RCCL_NET_IB_CAST_ENABLE_GDAKI). Under the v14 GIN/RMA split, proxy GIN over
+  // IB-CAST is provided by the generic ncclGinProxy (registered below) layered on top
+  // of the IB-CAST RMA backend (IbCastRmaIbProxy, registered in plugin/rma.cc)
+#ifdef RCCL_NET_IB_CAST_ENABLE_GDAKI
   {
     const char* envNet = ncclGetEnv("NCCL_NET");
     if (envNet && strcasecmp(envNet, "IB-CAST") == 0) {
-      pluginLibs[pluginCounter].ncclGin = &IbCastGinIb;
+      pluginLibs[pluginCounter].ncclGin = &IbCastGinIbGdaki;
       pluginLibs[pluginCounter].state = ncclGinPluginStateInitReady;
       pluginLibs[pluginCounter].version = ncclGinVersion[0];
       pluginCounter++;
     }
   }
+#endif
+#endif
   // Add gin proxy as fallback
   pluginLibs[pluginCounter].ncclGin = &ncclGinProxy;
   pluginLibs[pluginCounter].state = ncclGinPluginStateInitReady;
