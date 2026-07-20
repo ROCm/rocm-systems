@@ -75,7 +75,15 @@ hsa_signal_cas_relaxed	I64	hsa_signal_value_t
 hsa_signal_cas_scacquire	I64	hsa_signal_value_t
 hsa_signal_cas_screlease	I64	hsa_signal_value_t
 hsa_signal_cas_scacq_screl	I64	hsa_signal_value_t
+hsa_isa_from_name	STATUS	hsa_status_t
 hsa_agent_iterate_isas	STATUS	hsa_status_t
+hsa_isa_get_info	STATUS	hsa_status_t
+hsa_isa_get_info_alt	STATUS	hsa_status_t
+hsa_isa_get_exception_policies	STATUS	hsa_status_t
+hsa_isa_get_round_method	STATUS	hsa_status_t
+hsa_wavefront_get_info	STATUS	hsa_status_t
+hsa_isa_iterate_wavefronts	STATUS	hsa_status_t
+hsa_isa_compatible	STATUS	hsa_status_t
 hsa_code_object_serialize	STATUS	hsa_status_t
 hsa_code_object_deserialize	STATUS	hsa_status_t
 hsa_code_object_destroy	STATUS	hsa_status_t

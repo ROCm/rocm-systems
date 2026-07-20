@@ -570,3 +570,28 @@
 
 - api: hsa_executable_iterate_program_symbols
   args: [executable, callback, data]
+
+- api: hsa_isa_from_name
+  args: [name, isa]
+  strings: [name]
+
+- api: hsa_isa_get_info
+  args: [isa, attribute, index, value]
+
+- api: hsa_isa_get_info_alt
+  args: [isa, attribute, value]
+
+- api: hsa_isa_get_exception_policies
+  args: [isa, profile, mask]
+
+- api: hsa_isa_get_round_method
+  args: [isa, fp_type, flush_mode, round_method]
+
+- api: hsa_wavefront_get_info
+  args: [wavefront, attribute, value]
+
+- api: hsa_isa_iterate_wavefronts
+  args: [isa, callback, data]
+
+- api: hsa_isa_compatible
+  args: [code_object_isa, agent_isa, result]

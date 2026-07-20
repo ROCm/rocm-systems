@@ -1040,10 +1040,13 @@ hsa_signal_value_t HSA_API hsa_signal_cas_scacq_screl(hsa_signal_t signal,
 
 //===--- Instruction Set Architecture -------------------------------------===//
 
-hsa_status_t HSA_API hsa_isa_from_name(
-    const char *name,
-    hsa_isa_t *isa) {
-  return coreApiTable->hsa_isa_from_name_fn(name, isa);
+hsa_status_t HSA_API hsa_isa_from_name(const char* name, hsa_isa_t* isa) {
+  auto const __rocm_in_name = name;
+  auto const __rocm_in_isa = isa;
+  rocm_trace_emit_hsa_isa_from_name_enter(
+      (const char*)(__rocm_in_name),
+      (const void*)(uintptr_t)(__rocm_in_isa)); /* __ROCM_CURATED__: hsa_isa_from_name */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_isa_from_name, coreApiTable->hsa_isa_from_name_fn(name, isa));
 }
 
 hsa_status_t HSA_API hsa_agent_iterate_isas(hsa_agent_t agent,
@@ -1059,58 +1062,92 @@ hsa_status_t HSA_API hsa_agent_iterate_isas(hsa_agent_t agent,
   ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_agent_iterate_isas, coreApiTable->hsa_agent_iterate_isas_fn(agent, callback, data));
 }
 
-/* deprecated */ hsa_status_t HSA_API hsa_isa_get_info(
-    hsa_isa_t isa,
-    hsa_isa_info_t attribute,
-    uint32_t index,
-    void *value) {
-  return coreApiTable->hsa_isa_get_info_fn(isa, attribute, index, value);
+/* deprecated */ hsa_status_t HSA_API hsa_isa_get_info(hsa_isa_t isa, hsa_isa_info_t attribute,
+                                                       uint32_t index, void* value) {
+  auto const __rocm_in_isa = isa;
+  auto const __rocm_in_attribute = attribute;
+  auto const __rocm_in_index = index;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hsa_isa_get_info_enter(
+      (uint64_t)((__rocm_in_isa).handle),
+      (int32_t)(__rocm_in_attribute),
+      (__rocm_in_index),
+      (const void*)(uintptr_t)(__rocm_in_value)); /* __ROCM_CURATED__: hsa_isa_get_info */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_isa_get_info, coreApiTable->hsa_isa_get_info_fn(isa, attribute, index, value));
 }
 
-hsa_status_t HSA_API hsa_isa_get_info_alt(
-    hsa_isa_t isa,
-    hsa_isa_info_t attribute,
-    void *value) {
-  return coreApiTable->hsa_isa_get_info_alt_fn(isa, attribute, value);
+hsa_status_t HSA_API hsa_isa_get_info_alt(hsa_isa_t isa, hsa_isa_info_t attribute, void* value) {
+  auto const __rocm_in_isa = isa;
+  auto const __rocm_in_attribute = attribute;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hsa_isa_get_info_alt_enter(
+      (uint64_t)((__rocm_in_isa).handle),
+      (int32_t)(__rocm_in_attribute),
+      (const void*)(uintptr_t)(__rocm_in_value)); /* __ROCM_CURATED__: hsa_isa_get_info_alt */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_isa_get_info_alt, coreApiTable->hsa_isa_get_info_alt_fn(isa, attribute, value));
 }
 
-hsa_status_t HSA_API hsa_isa_get_exception_policies(
-    hsa_isa_t isa,
-    hsa_profile_t profile,
-    uint16_t *mask) {
-  return coreApiTable->hsa_isa_get_exception_policies_fn(isa, profile, mask);
+hsa_status_t HSA_API hsa_isa_get_exception_policies(hsa_isa_t isa, hsa_profile_t profile,
+                                                    uint16_t* mask) {
+  auto const __rocm_in_isa = isa;
+  auto const __rocm_in_profile = profile;
+  auto const __rocm_in_mask = mask;
+  rocm_trace_emit_hsa_isa_get_exception_policies_enter(
+      (uint64_t)((__rocm_in_isa).handle),
+      (int32_t)(__rocm_in_profile),
+      (const void*)(uintptr_t)(__rocm_in_mask)); /* __ROCM_CURATED__: hsa_isa_get_exception_policies */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_isa_get_exception_policies, coreApiTable->hsa_isa_get_exception_policies_fn(isa, profile, mask));
 }
 
-hsa_status_t HSA_API hsa_isa_get_round_method(
-    hsa_isa_t isa,
-    hsa_fp_type_t fp_type,
-    hsa_flush_mode_t flush_mode,
-    hsa_round_method_t *round_method) {
-  return coreApiTable->hsa_isa_get_round_method_fn(
-      isa, fp_type, flush_mode, round_method);
+hsa_status_t HSA_API hsa_isa_get_round_method(hsa_isa_t isa, hsa_fp_type_t fp_type,
+                                              hsa_flush_mode_t flush_mode,
+                                              hsa_round_method_t* round_method) {
+  auto const __rocm_in_isa = isa;
+  auto const __rocm_in_fp_type = fp_type;
+  auto const __rocm_in_flush_mode = flush_mode;
+  auto const __rocm_in_round_method = round_method;
+  rocm_trace_emit_hsa_isa_get_round_method_enter(
+      (uint64_t)((__rocm_in_isa).handle),
+      (int32_t)(__rocm_in_fp_type),
+      (int32_t)(__rocm_in_flush_mode),
+      (const void*)(uintptr_t)(__rocm_in_round_method)); /* __ROCM_CURATED__: hsa_isa_get_round_method */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_isa_get_round_method, coreApiTable->hsa_isa_get_round_method_fn(isa, fp_type, flush_mode, round_method));
 }
 
-hsa_status_t HSA_API hsa_wavefront_get_info(
-    hsa_wavefront_t wavefront,
-    hsa_wavefront_info_t attribute,
-    void *value) {
-  return coreApiTable->hsa_wavefront_get_info_fn(wavefront, attribute, value);
+hsa_status_t HSA_API hsa_wavefront_get_info(hsa_wavefront_t wavefront,
+                                            hsa_wavefront_info_t attribute, void* value) {
+  auto const __rocm_in_wavefront = wavefront;
+  auto const __rocm_in_attribute = attribute;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hsa_wavefront_get_info_enter(
+      (uint64_t)((__rocm_in_wavefront).handle),
+      (int32_t)(__rocm_in_attribute),
+      (const void*)(uintptr_t)(__rocm_in_value)); /* __ROCM_CURATED__: hsa_wavefront_get_info */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_wavefront_get_info, coreApiTable->hsa_wavefront_get_info_fn(wavefront, attribute, value));
 }
 
 hsa_status_t HSA_API hsa_isa_iterate_wavefronts(
-    hsa_isa_t isa,
-    hsa_status_t (*callback)(hsa_wavefront_t wavefront,
-                             void *data),
-    void *data) {
-  return coreApiTable->hsa_isa_iterate_wavefronts_fn(isa, callback, data);
+    hsa_isa_t isa, hsa_status_t (*callback)(hsa_wavefront_t wavefront, void* data), void* data) {
+  auto const __rocm_in_isa = isa;
+  auto const __rocm_in_callback = callback;
+  auto const __rocm_in_data = data;
+  rocm_trace_emit_hsa_isa_iterate_wavefronts_enter(
+      (uint64_t)((__rocm_in_isa).handle),
+      (const void*)(uintptr_t)(__rocm_in_callback),
+      (const void*)(uintptr_t)(__rocm_in_data)); /* __ROCM_CURATED__: hsa_isa_iterate_wavefronts */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_isa_iterate_wavefronts, coreApiTable->hsa_isa_iterate_wavefronts_fn(isa, callback, data));
 }
 
-/* deprecated */ hsa_status_t HSA_API hsa_isa_compatible(
-    hsa_isa_t code_object_isa,
-    hsa_isa_t agent_isa,
-    bool *result) {
-  return coreApiTable->hsa_isa_compatible_fn(
-      code_object_isa, agent_isa, result);
+/* deprecated */ hsa_status_t HSA_API hsa_isa_compatible(hsa_isa_t code_object_isa,
+                                                         hsa_isa_t agent_isa, bool* result) {
+  auto const __rocm_in_code_object_isa = code_object_isa;
+  auto const __rocm_in_agent_isa = agent_isa;
+  auto const __rocm_in_result = result;
+  rocm_trace_emit_hsa_isa_compatible_enter(
+      (uint64_t)((__rocm_in_code_object_isa).handle),
+      (uint64_t)((__rocm_in_agent_isa).handle),
+      (const void*)(uintptr_t)(__rocm_in_result)); /* __ROCM_CURATED__: hsa_isa_compatible */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_isa_compatible, coreApiTable->hsa_isa_compatible_fn(code_object_isa, agent_isa, result));
 }
 
 //===--- Code Objects (deprecated) ----------------------------------------===//
