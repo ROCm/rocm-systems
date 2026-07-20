@@ -3572,7 +3572,7 @@ TEST(ConSanMoi, AtomicRecordForcedSpillUsesPlannedPrivateWindow) {
   const auto fence_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
     return item.kind == ConSanPatchKind::TrampolineMoiFenceRecord;
   });
-  EXPECT_EQ(fence_patch, result.patches.end());
+  EXPECT_NE(fence_patch, result.patches.end());
   EXPECT_EQ(std::ranges::find_if(
                 result.warnings,
                 [](const std::string &warning) {
@@ -3581,13 +3581,13 @@ TEST(ConSanMoi, AtomicRecordForcedSpillUsesPlannedPrivateWindow) {
                              "pass") != std::string::npos;
                 }),
             result.warnings.end());
-  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+  EXPECT_FALSE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("fence record patch rejected communication address: "
                         "scratch-operand-alias") != std::string::npos;
   }));
   EXPECT_EQ(result.resource_plan_summary.spill_plans, 2u);
-  EXPECT_EQ(result.resource_plan_summary.emitted_spill_patches, 1u);
-  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 12u);
+  EXPECT_EQ(result.resource_plan_summary.emitted_spill_patches, 2u);
+  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 24u);
 }
 
 TEST(ConSanMoi, Cdna4AtomicRecordForcedSpillUsesNativePrivateWindow) {
@@ -3643,16 +3643,16 @@ TEST(ConSanMoi, Cdna4AtomicRecordForcedSpillUsesNativePrivateWindow) {
   ASSERT_TRUE(plan->scratch_vgpr);
   EXPECT_EQ(*plan->scratch_vgpr % 2u, 0u);
   EXPECT_EQ(result.resource_plan_summary.spill_plans, 3u);
-  EXPECT_EQ(result.resource_plan_summary.emitted_spill_patches, 1u);
-  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 12u);
+  EXPECT_EQ(result.resource_plan_summary.emitted_spill_patches, 2u);
+  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 24u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
                                &ConSanPatchInfo::kind),
-            0u);
+            1u);
   EXPECT_FALSE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("does not support spill resources across the second text-growth pass") !=
            std::string::npos;
   }));
-  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+  EXPECT_FALSE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("fence record patch rejected communication address: "
                         "scratch-operand-alias") != std::string::npos;
   }));
@@ -3669,7 +3669,7 @@ TEST(ConSanMoi, Cdna4AtomicRecordForcedSpillUsesNativePrivateWindow) {
                                          ConSanSiteLoweringReason::InstrumentationPatchMissing &&
                                      site.resource_reason == ConSanRegisterPlanReason::None;
                             }),
-      2);
+      1);
 }
 
 TEST(ConSanMoi, AtomicRecordPrunesIsolatedNoReturnReleaseButKeepsAccessReplayNonvacuous) {

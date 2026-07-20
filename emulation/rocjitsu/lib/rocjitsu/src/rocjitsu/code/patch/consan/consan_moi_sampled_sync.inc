@@ -1481,7 +1481,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         existing ? *existing
                  : plan_moi_resource_site(resource_state, options, ConSanResourceSiteKind::Atomic,
                                           index, site.text_offset,
-                                          candidate.atomic.kernel_descriptor_file_offset, 10u);
+                                          candidate.atomic.kernel_descriptor_file_offset, 10u,
+                                          nullptr, &site);
     if (!existing)
       result.resource_plans.push_back(plan);
     const auto resources = resolve_moi_scratch_plan(plan, options, 10u);

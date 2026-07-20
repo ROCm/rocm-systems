@@ -309,12 +309,18 @@ TEST(ConSanMoi, SharedHelperAtomicSpillUsesOneLayoutForEveryOwner) {
   EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
   EXPECT_EQ(plan.original_private_segment_size, 20u);
   ASSERT_EQ(plan.owner_descriptor_file_offsets.size(), 2u);
-  ASSERT_EQ(result.patches.size(), 1u);
-  const ConSanPatchInfo &patch = result.patches.front();
+  const auto patch_it = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiAtomicRecord;
+  });
+  ASSERT_NE(patch_it, result.patches.end());
+  const ConSanPatchInfo &patch = *patch_it;
   EXPECT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAtomicRecord);
   EXPECT_EQ(patch.spilled_vgpr_count, 3u);
   EXPECT_EQ(patch.required_private_segment_size, 44u);
   EXPECT_EQ(patch.owner_descriptor_file_offsets, plan.owner_descriptor_file_offsets);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
+                               &ConSanPatchInfo::kind),
+            1u);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -323,7 +329,7 @@ TEST(ConSanMoi, SharedHelperAtomicSpillUsesOneLayoutForEveryOwner) {
     std::memcpy(&descriptor, result.elf_bytes.data() + kernel.descriptor_file_offset,
                 sizeof(descriptor));
     if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1")
-      EXPECT_EQ(descriptor.private_segment_fixed_size, 44u);
+      EXPECT_EQ(descriptor.private_segment_fixed_size, 60u);
     else if (kernel.name == "unrelated_kernel")
       EXPECT_EQ(descriptor.private_segment_fixed_size, 0u);
   }

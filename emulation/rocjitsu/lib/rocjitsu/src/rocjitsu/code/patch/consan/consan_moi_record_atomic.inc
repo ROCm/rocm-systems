@@ -108,7 +108,8 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
             ? *existing_plan
             : plan_moi_resource_site(resource_state, options, ConSanResourceSiteKind::Atomic,
                                      candidate_index, site.text_offset,
-                                     candidate.kernel_descriptor_file_offset, scratch_count);
+                                     candidate.kernel_descriptor_file_offset, scratch_count,
+                                     nullptr, &site);
     if (!existing_plan)
       result.resource_plans.push_back(plan);
     const auto resources = resolve_moi_scratch_plan(plan, options, scratch_count);

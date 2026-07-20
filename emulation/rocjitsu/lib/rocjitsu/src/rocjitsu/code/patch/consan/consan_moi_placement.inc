@@ -909,8 +909,8 @@ struct MoiResourcePlanningState {
 plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &options,
                        ConSanResourceSiteKind site_kind, size_t candidate_index,
                        uint64_t text_offset, std::optional<uint64_t> kernel_descriptor_file_offset,
-                       uint16_t scratch_count,
-                       const ConSanMoiCandidate *access_candidate = nullptr) {
+                       uint16_t scratch_count, const ConSanMoiCandidate *access_candidate = nullptr,
+                       const ConSanAtomicSite *atomic_site = nullptr) {
   ConSanCandidateResourcePlan plan;
   plan.site_kind = site_kind;
   plan.candidate_index = candidate_index;
@@ -1014,6 +1014,23 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
     if (access_candidate->second_data_vgpr) {
       request.forbidden.expand({RegClass::VGPR, *access_candidate->second_data_vgpr, data_count});
     }
+  }
+  // Atomic address/payload widths come from ConSan's decoded atomic site.
+  // Reserve them explicitly: generic def/use can understate native two-address
+  // operations, and rejecting an overlap only during emission invalidates the
+  // whole code-object transform instead of selecting another scratch window.
+  if (atomic_site != nullptr) {
+    if (atomic_site->addr_vgpr) {
+      const uint8_t address_count =
+          atomic_site->mnemonic.starts_with("buffer_") || atomic_site->mnemonic.starts_with("ds_")
+              ? 1u
+              : 2u;
+      request.forbidden.expand({RegClass::VGPR, *atomic_site->addr_vgpr, address_count});
+    }
+    if (atomic_site->data_vgpr)
+      request.forbidden.expand({RegClass::VGPR, *atomic_site->data_vgpr, 1});
+    if (atomic_site->dst_vgpr)
+      request.forbidden.expand({RegClass::VGPR, *atomic_site->dst_vgpr, 1});
   }
   if (!options.moi_owner_vgpr && options.moi_persistent_vgpr_assignments.empty() &&
       options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId)

@@ -87,7 +87,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
             ? *existing_plan
             : plan_moi_resource_site(resource_state, options, ConSanResourceSiteKind::Fence,
                                      candidate_index, fence.text_offset,
-                                     candidate.kernel_descriptor_file_offset, scratch_count);
+                                     candidate.kernel_descriptor_file_offset, scratch_count,
+                                     nullptr, &candidate.communication_site);
     if (!existing_plan)
       result.resource_plans.push_back(plan);
     const auto resources = resolve_moi_scratch_plan(plan, options, scratch_count);
@@ -432,7 +433,7 @@ void append_moi_operational_resource_plans(std::span<const uint8_t> bytes,
               : inline_atomic_scratch_count(candidate.site);
       result.resource_plans.push_back(plan_moi_resource_site(
           state, options, ConSanResourceSiteKind::Atomic, index, candidate.site.text_offset,
-          candidate.kernel_descriptor_file_offset, scratch_count));
+          candidate.kernel_descriptor_file_offset, scratch_count, nullptr, &candidate.site));
     }
   }
   if (options.moi_track_atomics && options.moi_engine == ConSanMoiEngine::RecordReplay) {
@@ -449,7 +450,8 @@ void append_moi_operational_resource_plans(std::span<const uint8_t> bytes,
       result.resource_plans.push_back(plan_moi_resource_site(
           state, options, ConSanResourceSiteKind::Fence, index, candidate.fence.text_offset,
           candidate.kernel_descriptor_file_offset,
-          inline_atomic_scratch_count(candidate.communication_site)));
+          inline_atomic_scratch_count(candidate.communication_site), nullptr,
+          &candidate.communication_site));
     }
   }
 }
