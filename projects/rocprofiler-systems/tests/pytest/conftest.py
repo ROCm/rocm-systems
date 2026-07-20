@@ -1364,20 +1364,31 @@ def _generate_rocprofsys_config_header() -> list[str]:
     an immediate non-zero exit (see :func:`_config_timeout_handler`).
     """
     _watchdog_active = hasattr(signal, "SIGALRM")  # False on non-POSIX platforms
+    _previous_handler = None
     if _watchdog_active:
-        _previous_handler = signal.signal(signal.SIGALRM, _config_timeout_handler)
-        signal.alarm(CONFIG_TIMEOUT)
+        try:
+            _previous_handler = signal.signal(signal.SIGALRM, _config_timeout_handler)
+            signal.alarm(CONFIG_TIMEOUT)
+        except ValueError:
+            # signal handlers can only be installed from the main thread of the main
+            # interpreter; if config probing runs elsewhere, skip the watchdog rather
+            # than crash the probe.
+            _watchdog_active = False
 
-    def _cancel_watchdog() -> None:
+    try:
+        return _build_rocprofsys_config_header()
+    finally:
         if _watchdog_active:
             signal.alarm(0)
             signal.signal(signal.SIGALRM, _previous_handler)
 
+
+def _build_rocprofsys_config_header() -> list[str]:
+    """Collect system configuration and format it as printable header lines."""
     try:
         rocprof_config = get_rocprof_config()
         cap = rocprof_config.capabilities
     except Exception as e:
-        _cancel_watchdog()
         return [f"{e}"]
 
     gpu_info = get_gpu_info()
@@ -1541,7 +1552,6 @@ def _generate_rocprofsys_config_header() -> list[str]:
     for key, value in environment.fundamental_system_environment().items():
         header.append(_row(f"{key}:", value))
     header.extend(["=" * 70, ""])
-    _cancel_watchdog()
     return header
 
 
