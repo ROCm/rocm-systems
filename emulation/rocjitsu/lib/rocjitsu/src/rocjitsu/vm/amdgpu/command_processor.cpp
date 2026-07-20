@@ -465,19 +465,15 @@ void CommandProcessor::register_queue(HwQueue queue) {
       engine()->primary_release();
       is_primary_ = false;
     }
-    // Start the doorbell poll thread for KFD (host-accessible) queues under the
-    // same lock that guards doorbell_thread_'s companion state. Internal test
-    // queues inject doorbell events directly via schedule_event_now(). Starting the
-    // jthread while holding hw_queue_mutex_ is safe: the new thread's first action
-    // (scan_doorbells) takes hw_queue_mutex_, so it simply blocks until this scope
-    // releases. Holding the lock also removes a data race on doorbell_thread_ if a
-    // second register_queue ever runs concurrently.
-    if (start_poll && !doorbell_thread_.joinable()) {
-      util::Logger::cp(
-          [&](auto &os) { os << std::format("{}: STARTING doorbell thread", name()); });
-      doorbell_thread_ = std::jthread([this](std::stop_token stop) { doorbell_poll_loop(stop); });
-    }
   }
+  // Start (or restart) the doorbell poll thread for KFD (host-accessible) queues
+  // AFTER releasing hw_queue_mutex_. ensure_doorbell_monitor() serializes on its
+  // own doorbell_thread_mutex_ and may join a monitor that self-exited when the
+  // previous last queue was destroyed; joining while holding hw_queue_mutex_ could
+  // deadlock against that exiting monitor's final scan. Internal test queues inject
+  // doorbell events directly via schedule_event_now() and need no monitor.
+  if (start_poll)
+    ensure_doorbell_monitor();
 }
 
 void CommandProcessor::unregister_queue(uint32_t queue_id, uint32_t process_id) {
@@ -515,11 +511,39 @@ void CommandProcessor::set_doorbell_base(uint32_t process_id, void *base) {
   }
 }
 
-void CommandProcessor::stop_doorbell_monitor() {
+void CommandProcessor::ensure_doorbell_monitor() {
+  std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
+  // A monitor is already servicing this CP's queues — nothing to do. (The
+  // register→ring window is fine: the live monitor scans every registered queue
+  // each pass, so it will pick up the queue this call just added.)
+  if (doorbell_running_)
+    return;
+  // No monitor is running. If a previous one self-exited (it saw the last
+  // host-accessible queue destroyed) its jthread is joinable-but-finished; join it
+  // here before launching a fresh one so the handle does not leak. request_stop()
+  // is harmless on an already-returned thread and makes the join immediate.
   if (doorbell_thread_.joinable()) {
     doorbell_thread_.request_stop();
     doorbell_thread_.join();
   }
+  util::Logger::cp([&](auto &os) { os << std::format("{}: STARTING doorbell thread", name()); });
+  // Construct the thread BEFORE setting doorbell_running_: if the jthread
+  // constructor throws (std::system_error on thread-creation failure) the flag
+  // must stay false so a later ensure_doorbell_monitor() retries instead of
+  // no-oping forever. We still hold doorbell_thread_mutex_, and the loop's
+  // self-exit path only clears the flag under a TRY-lock of that mutex, so the
+  // new thread cannot observe or clear doorbell_running_ until we release here.
+  doorbell_thread_ = std::jthread([this](std::stop_token stop) { doorbell_poll_loop(stop); });
+  doorbell_running_ = true;
+}
+
+void CommandProcessor::stop_doorbell_monitor() {
+  std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
+  if (doorbell_thread_.joinable()) {
+    doorbell_thread_.request_stop();
+    doorbell_thread_.join();
+  }
+  doorbell_running_ = false;
 }
 
 uint64_t CommandProcessor::read_gpu_u64(uint64_t va, uint32_t vmid) const {
@@ -593,6 +617,53 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
   // flag re-read on some iterations (an early continue before the retry check) would
   // reintroduce a lost-wakeup.
   while (!stop.stop_requested()) {
+    // Self-exit once this CP owns no host-accessible queue. Destroying the last
+    // such queue does NOT join this thread (that join could deadlock against a
+    // monitor mid-iteration inside engine/event code), so the monitor must retire
+    // itself instead of idling forever at the 100us cadence.
+    //
+    // Acquire doorbell_thread_mutex_ with TRY-lock, never a blocking lock: a
+    // concurrent stop_doorbell_monitor() holds that mutex while it join()s this very
+    // thread, so a blocking acquire here would deadlock (it waits for the mutex; the
+    // joiner waits for us to return). A failed try means another lifecycle path owns
+    // the mutex right now — either stop_doorbell_monitor() (which has already issued
+    // request_stop(), so the top-of-loop stop check retires us next turn) or
+    // ensure_doorbell_monitor() (which is only inspecting/starting the monitor). In
+    // both cases deferring this exit check one 100us iteration is harmless. When the
+    // try succeeds and the queue set has no host-accessible queue and no retry is
+    // pending (a stall/invalid retry is still in-flight work), clear doorbell_running_
+    // and return; the lock releases as the stack unwinds. A later
+    // ensure_doorbell_monitor() reaps this exited jthread and starts a fresh one.
+    {
+      std::unique_lock<std::mutex> tlock(doorbell_thread_mutex_, std::try_to_lock);
+      if (tlock.owns_lock()) {
+        // has_kfd_queues() is the dominant exit guard: it is read under
+        // hw_queue_mutex_, atomically with the queue vector that register_queue()/
+        // unregister_queue() mutate, so the monitor never retires while a
+        // host-accessible queue is live. The two retry flags are a conservative
+        // backstop read in the same critical section. Their SETTERS run under
+        // hw_queue_mutex_ (invalid_pending_ in fetch_from_queue; stall_pending_ via
+        // arm_stall_recheck, itself gated on has_kfd_queues()), but handle_doorbell
+        // CLEARS them at entry without the lock, so a flag read here is not perfectly
+        // serialized against a clear. That is harmless: while any queue is live the
+        // has_kfd_queues() term keeps should_exit false regardless of the flags, and
+        // once no host-accessible queue remains no further retry can be armed, so
+        // dropping a stale pending flag at exit forfeits nothing real.
+        bool should_exit;
+        {
+          std::lock_guard<std::recursive_mutex> qlock(hw_queue_mutex_);
+          should_exit = !has_kfd_queues() && !invalid_pending_.load(std::memory_order_acquire) &&
+                        !stall_pending_.load(std::memory_order_acquire);
+        }
+        if (should_exit) {
+          util::Logger::cp([&](auto &os) {
+            os << std::format("{}: doorbell monitor self-exit (no KFD queues)", name());
+          });
+          doorbell_running_ = false;
+          return;
+        }
+      }
+    }
     bool doorbell_changed = scan_doorbells();
     // Retry on a pending INVALID packet (the runtime has not finished writing it
     // yet) OR a pending barrier/dependency stall (waiting on a signal a peer rank
