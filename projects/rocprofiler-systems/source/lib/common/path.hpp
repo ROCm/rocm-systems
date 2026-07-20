@@ -104,8 +104,8 @@ is_text_file(const std::string& filename) ROCPROFSYS_INTERNAL_API;
 inline bool
 is_link(const std::string& _path) ROCPROFSYS_INTERNAL_API;
 
-inline std::string
-readlink(const std::string& _path) ROCPROFSYS_INTERNAL_API;
+[[nodiscard]] inline std::string
+read_symlink(const std::string& path) ROCPROFSYS_INTERNAL_API;
 
 inline std::string
 get_rocprofsys_root() ROCPROFSYS_INTERNAL_API;
@@ -268,32 +268,17 @@ is_link(const std::string& _path)
     return false;
 }
 
-std::string
-readlink(const std::string& _path)
+/** @brief Read the symbolic link target.
+ *  @param path The filesystem path to inspect.
+ *  @return The link target as a string, or @p path unchanged if @p path is not
+ *          a symbolic link or if any filesystem error occurs.
+ */
+[[nodiscard]] std::string
+read_symlink(const std::string& path)
 {
-    constexpr size_t MaxLen = PATH_MAX;
-    // if not a symbolic link, just return the path
-    if(!is_link(_path)) return _path;
-
-    char    _buffer[MaxLen];
-    ssize_t _buffer_len = MaxLen;
-    _buffer_len         = ::readlink(_path.c_str(), _buffer, _buffer_len);
-    if(_buffer_len < 0 || _buffer_len == (MaxLen))
-    {
-        auto* _path_rp = ::realpath(_path.c_str(), nullptr);
-        if(_path_rp)
-        {
-            auto _ret = std::string{ _path_rp };
-            free(_path_rp);
-            return _ret;
-        }
-    }
-    else
-    {
-        _buffer[_buffer_len] = '\0';
-        return _buffer;
-    }
-    return _path;
+    std::error_code error;
+    auto            target = std::filesystem::read_symlink(path, error);
+    return (error) ? path : target.string();
 }
 
 /**
