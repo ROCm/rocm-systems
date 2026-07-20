@@ -200,15 +200,15 @@ top:
       snprintf((*kv)[*kvnum].name, sizeof((*kv)[*kvnum].name), "%s", table[x].field_name);
       if (table[x].field_arr_size > 1) {
         snprintf((*kv)[*kvnum].name + strlen((*kv)[*kvnum].name),
-                 sizeof((*kv)[*kvnum].name) - strlen((*kv)[*kvnum].name), "[%" PRId64 "]", y);
+                 sizeof((*kv)[*kvnum].name) - strlen((*kv)[*kvnum].name), "[%" PRIu64 "]", y);
       }
       if (x >= instance_start)
         snprintf((*kv)[*kvnum].name + strlen((*kv)[*kvnum].name),
-                 sizeof((*kv)[*kvnum].name) - strlen((*kv)[*kvnum].name), ".instance[%" PRId64 "]",
+                 sizeof((*kv)[*kvnum].name) - strlen((*kv)[*kvnum].name), ".instance[%" PRIu64 "]",
                  cur_instance);
       if (x >= smn_start)
         snprintf((*kv)[*kvnum].name + strlen((*kv)[*kvnum].name),
-                 sizeof((*kv)[*kvnum].name) - strlen((*kv)[*kvnum].name), ".smn[%" PRId64 "]",
+                 sizeof((*kv)[*kvnum].name) - strlen((*kv)[*kvnum].name), ".smn[%" PRIu64 "]",
                  cur_smn);
       (*kv)[*kvnum].value = v;
       ++(*kvnum);
