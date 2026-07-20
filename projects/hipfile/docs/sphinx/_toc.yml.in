@@ -12,6 +12,8 @@ subtrees:
         title: Set up a local NVMe drive
       - file: install/setup-nvmeof
         title: Set up an NVMeoF disk
+      - file: install/setup-nfsordma
+        title: Set up an NFSoRDMA share
   - caption: How to
     entries:
       - file: how-to/register-file-and-buffer
