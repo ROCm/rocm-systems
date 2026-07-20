@@ -140,10 +140,13 @@ def spm_perfetto_env() -> dict[str, str]:
 class TestSPMPerfetto(RocprofsysTest):
     """Validate that SPM emits SQ_WAVES samples to Perfetto when supported."""
 
-    def test_sq_waves_trace(self, rocprof_config, spm_perfetto_env):
+    def test_sq_waves_trace(self, rocprof_config, gpu_info, spm_perfetto_env):
         available, reason = _spm_sq_waves_available(rocprof_config.rocm_path)
         if not available:
             pytest.skip(reason)
+
+        if any(arch.startswith("gfx95") for arch in gpu_info.architectures):
+            pytest.skip("SDK SPM collection currently times out on gfx95 CI")
 
         result = self.run_test(
             "sys_run",
