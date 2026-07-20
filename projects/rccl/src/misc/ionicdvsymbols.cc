@@ -24,25 +24,27 @@ ncclResult_t buildIonicdvSymbols(struct ncclIonicdvSymbols* ionicdvSymbols) {
     }
   }
 
-#define LOAD_SYM(handle, symbol, funcptr) do {           \
-    cast = (void**)&funcptr;                             \
-    tmp = dlvsym(handle, symbol, IONIC_VERSION);       \
-    if (tmp == NULL) {                                   \
-      WARN("dlvsym failed on %s - %s version %s", symbol, dlerror(), IONIC_VERSION);  \
-      goto teardown;                                     \
-    } else {                                             \
-      WARN("dlvsym loaded successfully for %s - version %s", symbol, IONIC_VERSION);  \
-    }                                                    \
-    *cast = tmp;                                         \
+#define LOAD_SYM(handle, symbol, funcptr) \
+  do { \
+    cast = (void**)&funcptr; \
+    tmp = dlvsym(handle, symbol, IONIC_VERSION); \
+    if (tmp == NULL) { \
+      WARN("dlvsym failed on %s - %s version %s", symbol, dlerror(), IONIC_VERSION); \
+      goto teardown; \
+    } else { \
+      WARN("dlvsym loaded successfully for %s - version %s", symbol, IONIC_VERSION); \
+    } \
+    *cast = tmp; \
   } while (0)
 
 // Attempt to load a specific symbol version - fail silently
-#define LOAD_SYM_VERSION(handle, symbol, funcptr, version) do {  \
-    cast = (void**)&funcptr;                                     \
-    *cast = dlvsym(handle, symbol, version);                     \
-    if (*cast == NULL) {                                         \
-      INFO(NCCL_NET, "dlvsym failed on %s - %s version %s", symbol, dlerror(), version);  \
-    }                                                            \
+#define LOAD_SYM_VERSION(handle, symbol, funcptr, version) \
+  do { \
+    cast = (void**)&funcptr; \
+    *cast = dlvsym(handle, symbol, version); \
+    if (*cast == NULL) { \
+      INFO(NCCL_NET, "dlvsym failed on %s - %s version %s", symbol, dlerror(), version); \
+    } \
   } while (0)
 
   LOAD_SYM(ionicdvhandle, "ionic_dv_qp_set_gda", ionicdvSymbols->ionicdv_internal_qp_set_gda);

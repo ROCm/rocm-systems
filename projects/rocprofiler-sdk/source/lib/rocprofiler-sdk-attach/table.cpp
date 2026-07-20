@@ -54,6 +54,8 @@ dispatch_table_init()
     table->rocprofiler_attach_remove_code_object_cb = &rocprofiler_attach_remove_code_object_cb;
     table->rocprofiler_attach_add_queue_cb          = &rocprofiler_attach_add_queue_cb;
     table->rocprofiler_attach_remove_queue_cb       = &rocprofiler_attach_remove_queue_cb;
+    table->rocprofiler_attach_lookup_memory_codeobj_data =
+        &rocprofiler_attach_lookup_memory_codeobj_data;
 }
 }  // namespace attach
 }  // namespace rocprofiler

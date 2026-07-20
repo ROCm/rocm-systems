@@ -10,7 +10,11 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "rocjitsu/base/rj_compiler.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_NESTED_ANON_TYPES
 #include <libdrm/amdgpu_drm.h>
+RJ_DIAGNOSTIC_POP
 
 namespace {
 

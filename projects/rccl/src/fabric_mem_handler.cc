@@ -22,17 +22,9 @@ struct FabricExchEntry {
 };
 } // namespace
 
-ncclFabricMemHandler::ncclFabricMemHandler(
-    void* bootstrap, int rank, int nranks, struct ncclMemManager* manager)
-    : bootstrap_(bootstrap),
-      rank_(rank),
-      nranks_(nranks),
-      manager_(manager),
-      selfPtr_(nullptr),
-      selfHandle_{},
-      selfSize_(0),
-      memPtrs_(static_cast<size_t>(nranks), nullptr),
-      exchanged_(false) {}
+ncclFabricMemHandler::ncclFabricMemHandler(void* bootstrap, int rank, int nranks, struct ncclMemManager* manager)
+  : bootstrap_(bootstrap), rank_(rank), nranks_(nranks), manager_(manager), selfPtr_(nullptr), selfHandle_{},
+    selfSize_(0), memPtrs_(static_cast<size_t>(nranks), nullptr), exchanged_(false) {}
 
 ncclFabricMemHandler::~ncclFabricMemHandler() {
   // Free any imported peer mappings even if exchangeMemPtrs() failed partway
@@ -48,8 +40,8 @@ ncclFabricMemHandler::~ncclFabricMemHandler() {
   }
 }
 
-ncclResult_t ncclFabricMemHandler::addSelfDeviceMem(
-    void* deviceMemPtr, CUmemGenericAllocationHandle handle, size_t size) {
+ncclResult_t ncclFabricMemHandler::addSelfDeviceMem(void* deviceMemPtr, CUmemGenericAllocationHandle handle,
+                                                    size_t size) {
   selfPtr_ = deviceMemPtr;
   selfHandle_ = handle;
   selfSize_ = size;
@@ -70,30 +62,22 @@ ncclResult_t ncclFabricMemHandler::exchangeMemPtrs() {
   memset(entries.data(), 0, entries.size() * sizeof(FabricExchEntry));
 
   // Export this rank's allocation handle into an opaque fabric descriptor.
-  CUCHECK(cuMemExportToShareableHandle(
-      &entries[static_cast<size_t>(rank_)].desc,
-      selfHandle_,
-      ncclCuMemHandleType,
-      0));
+  CUCHECK(cuMemExportToShareableHandle(&entries[static_cast<size_t>(rank_)].desc, selfHandle_, ncclCuMemHandleType, 0));
   entries[static_cast<size_t>(rank_)].size = selfSize_;
 
-  NCCLCHECK(bootstrapAllGather(
-      bootstrap_, entries.data(), static_cast<int>(sizeof(FabricExchEntry))));
+  NCCLCHECK(bootstrapAllGather(bootstrap_, entries.data(), static_cast<int>(sizeof(FabricExchEntry))));
 
   for (int i = 0; i < nranks_; ++i) {
     if (i == rank_) {
       continue;
     }
     CUmemGenericAllocationHandle peerHandle{};
-    CUCHECK(cuMemImportFromShareableHandle(
-        &peerHandle,
-        (void*)&entries[static_cast<size_t>(i)].desc,
-        ncclCuMemHandleType));
+    CUCHECK(cuMemImportFromShareableHandle(&peerHandle, (void*)&entries[static_cast<size_t>(i)].desc,
+                                           ncclCuMemHandleType));
 
     // Reserve + map + set access for the imported handle
     void* peerPtr = nullptr;
-    ncclResult_t res = ncclCuMemAllocAddr(
-        &peerPtr, &peerHandle, entries[static_cast<size_t>(i)].size);
+    ncclResult_t res = ncclCuMemAllocAddr(&peerPtr, &peerHandle, entries[static_cast<size_t>(i)].size);
     if (res != ncclSuccess) {
       (void)cuMemRelease(peerHandle);
       WARN("ncclFabricMemHandler::exchangeMemPtrs: ncclCuMemAllocAddr failed for peer %d", i);
@@ -109,8 +93,7 @@ ncclResult_t ncclFabricMemHandler::exchangeMemPtrs() {
   return ncclSuccess;
 }
 
-ncclResult_t ncclFabricMemHandler::getPeerDeviceMemPtr(
-    int peerRank, void** outPeerPtr) const {
+ncclResult_t ncclFabricMemHandler::getPeerDeviceMemPtr(int peerRank, void** outPeerPtr) const {
   if (!exchanged_) {
     WARN("ncclFabricMemHandler::getPeerDeviceMemPtr: handles not exchanged yet");
     return ncclInvalidUsage;

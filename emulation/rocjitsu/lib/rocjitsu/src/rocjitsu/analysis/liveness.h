@@ -64,6 +64,14 @@ struct LivenessAnalysisOptions {
   /// while scratch allocation can be forced above a descriptor-declared VGPR
   /// range to test whether semantic lowerings clobber guest registers.
   uint16_t min_free_vgpr = 0;
+
+  /// @brief Exclusive destination-ISA limit for VGPR scratch allocation.
+  ///
+  /// @details RegisterSet may track more VGPR indices than a particular
+  /// destination encoding can name. Keeping this allocation ceiling separate
+  /// prevents 8-bit destination fields from truncating v256 and above.
+  uint16_t max_free_vgpr = static_cast<uint16_t>(
+      std::min(amdgpu::CdnaIsaBase::MAX_VGPRS_PER_WF, amdgpu::RdnaIsaBase::MAX_VGPRS_PER_WF));
 };
 
 /// @brief Reverse-post-order traversal of one kernel's implicit CFG.
@@ -120,6 +128,7 @@ private:
   void analyze(KernelBlockScope blocks, std::span<const ScopedCfgEdge> extra_edges);
 
   uint16_t min_free_vgpr_ = 0;
+  uint16_t max_free_vgpr_ = 0;
   std::vector<BlockLiveness> liveness_;
   std::unordered_map<const BasicBlock *, size_t> block_index_;
   std::unordered_map<const Instruction *, RegisterSet> live_before_;

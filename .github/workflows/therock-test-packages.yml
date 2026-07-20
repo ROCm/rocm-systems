@@ -1,10 +1,40 @@
 name: TheRock Test Packages
 
 on:
+  workflow_dispatch:
+    inputs:
+      projects_to_test:
+        type: string
+        description: "Comma-separated list of projects to test"
+      test_type:
+        type: string
+        default: "standard"
+        description: "Test type (quick, standard, comprehensive, full)"
+      amdgpu_families:
+        type: string
+        description: "GPU family to test (e.g., gfx94X-dcgpu, gfx125X-dcgpu)"
+      test_runs_on:
+        type: string
+        description: "Runner label to use for tests"
+      platform:
+        type: string
+        default: "linux"
+        description: "Platform (linux or windows)"
+      artifact_run_id:
+        type: string
+        default: ""
+        description: "Run ID to fetch artifacts from (leave empty for current run)"
+      sanity_check_only_for_family:
+        type: boolean
+        default: false
+        description: "Run only sanity check for this family"
   workflow_call:
     inputs:
       projects_to_test:
         type: string
+      test_type:
+        type: string
+        default: "standard"
       amdgpu_families:
         type: string
       test_runs_on:
