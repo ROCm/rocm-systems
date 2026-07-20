@@ -137,6 +137,7 @@ jobs:
           projects/rocprofiler-sdk
           projects/aqlprofile
           projects/rocprofiler-register
+          projects/rocprof-trace-decoder
           projects/rocr-runtime
           projects/clr
           projects/hip
