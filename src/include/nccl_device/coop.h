@@ -146,8 +146,8 @@ struct ncclCoopWarpSpan {
   }
 
   NCCL_DEVICE_INLINE void sync() {
-    // asm volatile("barrier.sync %0, %1;" :: "r"(1+id), "r"(32*nWarps) : "memory");
-    __barrier_sync_count(1 + id, 32 * nWarps);
+    asm volatile("barrier.sync.aligned %0, %1;" ::"r"(1 + id), "r"(32 * nWarps) : "memory");
+    // __barrier_sync_count(1 + id, 32 * nWarps);
   }
 };
 #endif
