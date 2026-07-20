@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "reader_impl.hpp"
+#include "interval_layout.hpp"
 #include "json_serializers.hpp"
 #include "profiler-hub/reader.hpp"
 #include "profiler-hub/storage.hpp"
@@ -13,12 +14,42 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <set>
 #include <stdexcept>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
 namespace profiler_hub
 {
+
+namespace
+{
+// DESIGN DECISION (gap #2, 2026-07-20): the per-track nesting_model assignment. Region
+// (cpu_thread) is the ONLY track whose overlapping intervals are a genuine synchronous
+// call tree (HIP->HSA API nesting) -> `stack`, so its events carry a containment parent.
+// Every other track's overlaps are concurrency, not containment (a kernel dispatch
+// overlapping another is not its child; memory copies, streams, PMC/memory-activity
+// samples likewise) -> `lane`, parent always no-parent. Per draft principle #4/#6.
+// Open for Anthony review — see design/draft_api_2026-06-22.md §4-6.
+reader_types::nesting_model_t
+nesting_for(reader_types::track_type_t t)
+{
+    switch(t)
+    {
+        case reader_types::track_type_t::cpu_thread:
+            return reader_types::nesting_model_t::stack;
+        case reader_types::track_type_t::gpu_queue:
+        case reader_types::track_type_t::dma:
+        case reader_types::track_type_t::memory:
+        case reader_types::track_type_t::stream:
+        case reader_types::track_type_t::counter:
+        case reader_types::track_type_t::kernel_dispatch_pmc:
+        case reader_types::track_type_t::memory_activity:
+        default: return reader_types::nesting_model_t::lane;
+    }
+}
+}  // namespace
 
 reader_t::impl::impl(std::unique_ptr<profiler_hub::storage_t> storage)
 : m_storage(storage ? std::move(storage)
@@ -87,6 +118,14 @@ reader_t::impl::initialize_all_info_lists()
     m_queue_info_list         = get_all_queues();
     m_pmc_info_list           = get_all_pmc_infos();
     m_track_info_list         = get_all_tracks();
+
+    // Stamp each track's nesting_model from its type once the full list is built (covers
+    // both v3 synthesis and v4 build_v4_tracks). max_lane is filled lazily on first
+    // get_interval_track (see below).
+    for(auto& t : m_track_info_list)
+    {
+        if(t) t->nesting = nesting_for(t->type);
+    }
 }
 
 reader_types::node_info_list_t
@@ -2063,39 +2102,6 @@ reader_t::impl::get_event_counts(const reader_types::time_window_t& window)
 
 namespace
 {
-// Assigns level + parent_id over a start-ordered interval list using a containment
-// stack. "Strictly contains" = parent.start <= child.start (guaranteed by sort) AND
-// parent.end >= child.end; overlapping-but-not-nested events get level 0 / no parent.
-void
-compute_interval_nesting(reader_types::interval_event_list_t& events)
-{
-    std::stable_sort(events.begin(), events.end(), [](const auto& a, const auto& b) {
-        if(a.start != b.start) return a.start < b.start;
-        return a.end > b.end;
-    });
-
-    std::vector<size_t> stack;
-    for(size_t i = 0; i < events.size(); ++i)
-    {
-        while(!stack.empty() && events[stack.back()].end <= events[i].start)
-        {
-            stack.pop_back();
-        }
-        if(!stack.empty() && events[stack.back()].end >= events[i].end)
-        {
-            events[i].level = events[stack.back()].level + 1;
-            events[i].parent_id =
-                reader_types::detail::event_id_access::row_id(events[stack.back()].id);
-        }
-        else
-        {
-            events[i].level     = 0;
-            events[i].parent_id = std::nullopt;
-        }
-        stack.push_back(i);
-    }
-}
-
 // Event type of a homogeneous interval track, i.e. which per-type table its row ids
 // index. Stream tracks are heterogeneous and resolve type per row from op_kind instead.
 reader_types::event_type_t
@@ -2363,9 +2369,14 @@ reader_t::impl::get_interval_track(size_t                              track_id,
         events.push_back(std::move(ev));
     }
 
-    // Rows arrive ORDER BY start ascending. Compute nesting over the full track so the
-    // levels are stable regardless of any time-window filter applied afterwards.
-    compute_interval_nesting(events);
+    // Rows arrive ORDER BY start ascending. Compute lane packing (all tracks) +
+    // containment (stack tracks only) over the full track so lanes/levels are stable
+    // regardless of any time-window filter applied afterwards. Cache peak concurrency on
+    // the track so height consumers can read it via get_all_tracks() (Optiq
+    // level->max_lane migration target).
+    const auto max_lane = detail::compute_interval_layout(events, nesting_for(qi.type));
+    auto       tit      = m_track_info_utility.find(track_id);
+    if(tit != m_track_info_utility.end()) tit->second->max_lane = max_lane;
 
     // Optional time-window filter (containment: start >= window.start, end <=
     // window.end).
@@ -2706,38 +2717,244 @@ reader_t::impl::get_flows(const reader_types::event_filter_t& filter)
     const size_t lo = filter.time_window.start.value_or(0);
     const size_t hi = filter.time_window.end.value_or(std::numeric_limits<size_t>::max());
 
+    // De-duplicate each unordered endpoint pair to ONE directed edge. The same-type sets
+    // (region->region, kd/mc/ma siblings) emit both (a,b) and (b,a); cross-type sets emit
+    // one direction. Key is the endpoint pair normalized to (min,max) so both orderings
+    // collapse. Insertion order into `flows` follows the run() call order below.
+    std::set<std::pair<reader_types::event_id_t, reader_types::event_id_t>> seen;
+
     auto run = [&](const data_storage::read_statements_base::flow_statement_set& set,
                    reader_types::event_type_t source_type,
-                   reader_types::event_type_t dest_type) {
+                   reader_types::event_type_t dest_type,
+                   reader_types::flow_kind_t  kind) {
         auto rows =
             has_window ? set.time_filtered(lo, hi).to_vector() : set.base().to_vector();
-        flows.reserve(flows.size() + rows.size());
         for(const auto& r : rows)
         {
+            const auto a =
+                reader_types::detail::event_id_access::make(source_type, r.source_id);
+            const auto b =
+                reader_types::detail::event_id_access::make(dest_type, r.dest_id);
+
+            const auto key = (a < b) ? std::make_pair(a, b) : std::make_pair(b, a);
+            if(!seen.insert(key).second) continue;
+
+            // DESIGN DECISION (gap #3, 2026-07-20): direction. Prefer parent_stack_id
+            // lineage — the endpoint whose stack_id equals the other's parent_stack_id is
+            // the parent (src). The clique join constrains both endpoints to the SAME
+            // stack_id, so this only fires on a self-parent row and in practice yields to
+            // the start-ts fallback (earlier start = src; ties broken by handle order for
+            // determinism). Reversible. Open for Anthony review — design/draft_api §5-6.
+            reader_types::event_id_t src{};
+            reader_types::event_id_t dst{};
+            if(r.dest_parent.has_value() && *r.dest_parent == r.stack_id)
+            {
+                src = a;  // source endpoint is the parent of the dest endpoint
+                dst = b;
+            }
+            else if(r.source_parent.has_value() && *r.source_parent == r.stack_id)
+            {
+                src = b;  // dest endpoint is the parent of the source endpoint
+                dst = a;
+            }
+            else if(r.source_start != r.dest_start)
+            {
+                const bool a_first = r.source_start < r.dest_start;
+                src                = a_first ? a : b;
+                dst                = a_first ? b : a;
+            }
+            else
+            {
+                src = key.first;  // equal starts: deterministic tie-break by handle order
+                dst = key.second;
+            }
+
+            // DESIGN DECISION (gap #3, 2026-07-20): flow_id groups a causal chain. All
+            // edges of one stack_id clique share flow_id = that stack_id, so a multi-hop
+            // lineage is recoverable by grouping on flow_id and sorting by src start.
+            // Reversible. Open for Anthony review — design/draft_api §5-6.
             flows.push_back(reader_types::flow_t{
-                reader_types::detail::event_id_access::make(source_type, r.source_id),
-                reader_types::detail::event_id_access::make(dest_type, r.dest_id) });
+                src, dst, reader_types::detail::flow_id_access::make(r.stack_id), kind });
         }
     };
 
+    // DESIGN DECISION (gap #3, 2026-07-20): kind is fixed by each set's endpoint-type
+    // pairing (order-independent, so orientation never changes it). Reversible mapping.
+    // Open for Anthony review — design/draft_api_2026-06-22.md §5-6.
     using et = reader_types::event_type_t;
+    using fk = reader_types::flow_kind_t;
     run(m_read_statements->region_to_kernel_dispatch_flows(),
         et::region,
-        et::kernel_dispatch);
-    run(m_read_statements->region_to_memory_copy_flows(), et::region, et::memory_copy);
+        et::kernel_dispatch,
+        fk::launch_to_dispatch);
+    run(m_read_statements->region_to_memory_copy_flows(),
+        et::region,
+        et::memory_copy,
+        fk::copy_submit_to_exec);
     run(m_read_statements->region_to_memory_allocate_flows(),
         et::region,
-        et::memory_allocate);
-    run(m_read_statements->region_to_region_flows(), et::region, et::region);
+        et::memory_allocate,
+        fk::copy_submit_to_exec);
+    run(m_read_statements->region_to_region_flows(), et::region, et::region, fk::generic);
     run(m_read_statements->kernel_dispatch_sibling_flows(),
         et::kernel_dispatch,
-        et::kernel_dispatch);
-    run(m_read_statements->memory_copy_sibling_flows(), et::memory_copy, et::memory_copy);
+        et::kernel_dispatch,
+        fk::stream_dependency);
+    run(m_read_statements->memory_copy_sibling_flows(),
+        et::memory_copy,
+        et::memory_copy,
+        fk::stream_dependency);
     run(m_read_statements->memory_allocate_sibling_flows(),
         et::memory_allocate,
-        et::memory_allocate);
+        et::memory_allocate,
+        fk::stream_dependency);
 
     return flows;
+}
+
+reader_types::flow_list_t
+reader_t::impl::get_flows_for_event(const reader_types::event_id_t& id)
+{
+    // Adjacent edges: those with `id` as either endpoint. Cheap post-filter over the
+    // full built edge list (the clique join is not indexable by a single endpoint).
+    reader_types::flow_list_t out;
+    for(auto& f : get_flows({}))
+        if(f.source == id || f.dest == id) out.push_back(f);
+    return out;
+}
+
+reader_types::flow_list_t
+reader_t::impl::get_flows_for_chain(const reader_types::flow_id_t& flow_id)
+{
+    // Chain members: every edge sharing this flow_id. Cheap post-filter over the full
+    // built edge list (flow_id is assigned during the clique build, not a query key).
+    reader_types::flow_list_t out;
+    for(auto& f : get_flows({}))
+        if(f.flow_id == flow_id) out.push_back(f);
+    return out;
+}
+
+reader_types::flow_list_t
+reader_t::impl::get_flows_in_window(const std::vector<size_t>&         tracks,
+                                    const reader_types::time_window_t& window,
+                                    uint32_t                           max_edges)
+{
+    // DESIGN DECISION (gap #3 windowed selector, 2026-07-20): signature keeps the
+    // reader's raw size_t track-id spelling and the existing time_window_t, NOT the
+    // draft's track_id_t struct (unused by this reader). Reversible. Open for Anthony
+    // review — see design/draft_api_2026-06-22.md §6.
+    auto edges = get_flows({});
+    if(edges.empty()) return edges;
+
+    // A flow_t carries no timestamps and no track_id, so this selector cannot post-filter
+    // get_flows({}) the way the adjacency/chain selectors do. Flow endpoints are always
+    // interval events (region/kd/mc/ma), so resolve each endpoint's (start, end) and its
+    // track membership by sweeping the interval tracks once. This goes through
+    // get_interval_track, which already hides the v3-synthesized-vs-v4-column track-id
+    // difference, so both backends yield identical selector semantics.
+    struct endpoint_geom
+    {
+        reader_types::timestamp_ns_t start{};
+        reader_types::timestamp_ns_t end{};
+        bool                         seen{ false };
+    };
+    std::unordered_map<reader_types::event_id_t, endpoint_geom>       geom;
+    std::unordered_map<reader_types::event_id_t, std::vector<size_t>> on_tracks;
+    for(const auto& t : get_all_tracks())
+    {
+        if(!t) continue;
+        switch(t->type)
+        {
+            case reader_types::track_type_t::counter:
+            case reader_types::track_type_t::memory_activity: continue;  // scalar-only
+            default: break;
+        }
+        for(const auto& ev : get_interval_track(t->id, {}))
+        {
+            auto& g = geom[ev.id];
+            if(!g.seen)
+            {
+                g.start = ev.start;
+                g.end   = ev.end;
+                g.seen  = true;
+            }
+            on_tracks[ev.id].push_back(
+                t->id);  // multi-track: kd is on gpu_queue + pmc + stream
+        }
+    }
+
+    const std::set<size_t> track_set(tracks.begin(), tracks.end());
+    const bool has_window = window.start.has_value() || window.end.has_value();
+    const auto wlo        = window.start.value_or(0);
+    const auto whi =
+        window.end.value_or(std::numeric_limits<reader_types::timestamp_ns_t>::max());
+
+    reader_types::flow_list_t filtered;
+    for(const auto& e : edges)
+    {
+        const auto& gs = geom[e.source];
+        const auto& gd = geom[e.dest];
+
+        // DESIGN DECISION (gap #3 windowed selector, 2026-07-20): window overlap uses the
+        // edge's full temporal extent [min(src.start,dst.start), max(src.end,dst.end)]
+        // (conservative superset of the src.end->dst.start arrow), included iff it
+        // intersects the window; empty window = no filter. Reversible. Open for Anthony
+        // review — see design/draft_api_2026-06-22.md §6.
+        if(has_window)
+        {
+            const auto elo = std::min(gs.start, gd.start);
+            const auto ehi = std::max(gs.end, gd.end);
+            if(elo > whi || ehi < wlo) continue;
+        }
+
+        // DESIGN DECISION (gap #3 windowed selector, 2026-07-20): an edge is kept iff AT
+        // LEAST ONE endpoint sits on a listed track, so a cross-track arrow with one
+        // endpoint off-screen still surfaces its visible half; empty tracks = all.
+        // Reversible. Open for Anthony review — see design/draft_api_2026-06-22.md §6.
+        if(!track_set.empty())
+        {
+            bool touches = false;
+            for(auto id : { e.source, e.dest })
+            {
+                for(auto tid : on_tracks[id])
+                    if(track_set.count(tid))
+                    {
+                        touches = true;
+                        break;
+                    }
+                if(touches) break;
+            }
+            if(!touches) continue;
+        }
+
+        filtered.push_back(e);
+    }
+
+    // DESIGN DECISION (gap #3 windowed selector, 2026-07-20): decimation keeps the
+    // highest arrow-span-latency (dst.start - src.end, clamped at 0) edges, tie-broken by
+    // (source, dest) handle order so an identical window yields an identical ranking
+    // (stable across pans); max_edges==0 = uncapped. This answers draft §10's open
+    // "decimation contract" question (renderer LOD depends on it) with a reversible
+    // default — the primary Anthony-review decision. Open for Anthony review — see
+    // design/draft_api_2026-06-22.md §6, §10.
+    if(max_edges == 0 || filtered.size() <= max_edges) return filtered;
+
+    auto latency = [&](const reader_types::flow_t& e) -> reader_types::timestamp_ns_t {
+        const auto& gs = geom[e.source];
+        const auto& gd = geom[e.dest];
+        return gd.start > gs.end ? gd.start - gs.end : 0;  // clamp: size_t is unsigned
+    };
+    std::sort(filtered.begin(),
+              filtered.end(),
+              [&](const reader_types::flow_t& a, const reader_types::flow_t& b) {
+                  const auto la = latency(a);
+                  const auto lb = latency(b);
+                  if(la != lb) return la > lb;
+                  if(!(a.source == b.source)) return a.source < b.source;
+                  return a.dest < b.dest;
+              });
+    filtered.resize(max_edges);
+    return filtered;
 }
 
 // ============================================================================

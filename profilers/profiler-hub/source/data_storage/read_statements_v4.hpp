@@ -1124,23 +1124,38 @@ private:
                                  const std::string& source_alias,
                                  const std::string& dest_table,
                                  const std::string& dest_alias) -> flow_statement_set {
-            const auto base_sql =
-                fmt::format("SELECT {s}.id, {d}.id "
-                            "FROM {st}_{u} {s} "
-                            "JOIN rocpd_event_{u} E{s} ON {s}.event_id = E{s}.id "
-                            "JOIN rocpd_event_{u} E{d} "
-                            "  ON E{d}.stack_id = E{s}.stack_id AND E{d}.id != E{s}.id "
-                            "JOIN {dt}_{u} {d} ON {d}.event_id = E{d}.id "
-                            "WHERE E{s}.stack_id IS NOT NULL AND E{s}.stack_id != 0",
-                            fmt::arg("u", u),
-                            fmt::arg("s", source_alias),
-                            fmt::arg("st", source_table),
-                            fmt::arg("d", dest_alias),
-                            fmt::arg("dt", dest_table));
+            // Surface each endpoint's start + parent_stack_id and the shared clique
+            // stack_id so get_flows can orient the directed edge (parent lineage else
+            // start-ts) and derive its flow_id. v4 resolves start through the
+            // rocpd_timestamp spine (start_id), so both starts are correlated subqueries.
+            // Column order matches the member-pointer binding order below.
+            const auto base_sql = fmt::format(
+                "SELECT {s}.id, {d}.id, "
+                "(SELECT value FROM rocpd_timestamp_{u} WHERE id = {s}.start_id), "
+                "(SELECT value FROM rocpd_timestamp_{u} WHERE id = {d}.start_id), "
+                "E{s}.stack_id, E{s}.parent_stack_id, E{d}.parent_stack_id "
+                "FROM {st}_{u} {s} "
+                "JOIN rocpd_event_{u} E{s} ON {s}.event_id = E{s}.id "
+                "JOIN rocpd_event_{u} E{d} "
+                "  ON E{d}.stack_id = E{s}.stack_id AND E{d}.id != E{s}.id "
+                "JOIN {dt}_{u} {d} ON {d}.event_id = E{d}.id "
+                "WHERE E{s}.stack_id IS NOT NULL AND E{s}.stack_id != 0",
+                fmt::arg("u", u),
+                fmt::arg("s", source_alias),
+                fmt::arg("st", source_table),
+                fmt::arg("d", dest_alias),
+                fmt::arg("dt", dest_table));
 
             flow_statement_set out;
             out.base = m_backend->create_read_statement_executor<flow_row_result>(
-                base_sql, &flow_row_result::source_id, &flow_row_result::dest_id);
+                base_sql,
+                &flow_row_result::source_id,
+                &flow_row_result::dest_id,
+                &flow_row_result::source_start,
+                &flow_row_result::dest_start,
+                &flow_row_result::stack_id,
+                &flow_row_result::source_parent,
+                &flow_row_result::dest_parent);
 
             // Optional time window applied to the SOURCE event's start timestamp,
             // resolved via the rocpd_timestamp spine.
@@ -1154,7 +1169,14 @@ private:
             out.time_filtered =
                 m_backend->create_read_statement_executor<flow_row_result,
                                                           bind_types<size_t, size_t>>(
-                    time_sql, &flow_row_result::source_id, &flow_row_result::dest_id);
+                    time_sql,
+                    &flow_row_result::source_id,
+                    &flow_row_result::dest_id,
+                    &flow_row_result::source_start,
+                    &flow_row_result::dest_start,
+                    &flow_row_result::stack_id,
+                    &flow_row_result::source_parent,
+                    &flow_row_result::dest_parent);
             return out;
         };
 

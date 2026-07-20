@@ -336,6 +336,28 @@ enum class region_track_kind_t
     sample,  ///< Region events that have an associated rocpd_sample row.
 };
 
+/**
+ * @brief How a track's overlapping intervals should be interpreted vertically.
+ *
+ * Splits the historically overloaded interval `level` into two concepts: a
+ * containment `parent` edge (valid only when a track is a genuine synchronous call
+ * stack) and a geometric packing `lane` (always valid). @ref nesting_model_t is the
+ * per-track metadata that tells a renderer which applies.
+ */
+enum class nesting_model_t
+{
+    // DESIGN DECISION (gap #2, 2026-07-20): a track is `stack` only when its overlaps
+    // are true synchronous containment (region = HIP->HSA API call nesting); every
+    // concurrency track (gpu_queue/dma/memory/stream/kernel_dispatch_pmc) is `lane`,
+    // where overlap means concurrency, not a parent/child edge. Only `stack` tracks
+    // populate interval_event_t::parent. Per draft principle #4/#6 + §5.
+    // Open for Anthony review — see design/draft_api_2026-06-22.md §4-6.
+    stack,  ///< Overlaps are true containment: interval_event_t::parent is populated and
+            ///< `lane` coincides with call depth on real (non-overlapping-sibling) data.
+    lane,   ///< Overlaps are concurrency: interval_event_t::parent is always no-parent;
+            ///< only `lane` (the packing row) is meaningful.
+};
+
 struct track_info_t
 {
     size_t
@@ -359,6 +381,18 @@ struct track_info_t
     std::shared_ptr<queue_info_t>  queue_info;   ///< gpu_queue, memory.
     std::shared_ptr<stream_info_t> stream_info;  ///< stream.
     std::shared_ptr<pmc_info_t>    pmc_info;     ///< counter, kernel_dispatch_pmc.
+
+    // DESIGN DECISION (gap #2, 2026-07-20): nesting_model gates whether
+    // interval_event_t::parent is populated for this track's events (stack only);
+    // max_lane exposes the track's peak concurrency so height consumers can migrate off
+    // the deprecated interval_event_t::level. Open for Anthony review — see
+    // design/draft_api_2026-06-22.md §4-6.
+    nesting_model_t nesting{
+        nesting_model_t::lane
+    };  ///< stack = containment (parent populated); lane = concurrency (no parent).
+    uint32_t max_lane{};  ///< Peak concurrency / stack depth = number of packing lanes.
+                          ///< 0 until the track is first read via get_interval_track();
+                          ///< scalar-only tracks stay 0.
 
     /// v4 only. True when this track_id appeared in both the counter (rocpd_sample/pmc)
     /// and memory-allocate (rocpd_memory_allocate) discovery sets — an ambiguous schema
@@ -601,7 +635,8 @@ using counter_timeline_event_list_t = std::vector<counter_timeline_event_t>;
 namespace detail
 {
 struct event_id_access;
-}
+struct flow_id_access;
+}  // namespace detail
 
 /**
  * @brief Opaque, ProfilerHub-minted event handle.
@@ -672,10 +707,22 @@ struct interval_event_t
     std::string    display_name;  ///< Human-readable label for the bar.
     std::string    category;      ///< Event category display string (e.g. "rocm_hip_api",
                            ///< "timer_sampling"); empty when the event carries none.
-    int level{};  ///< Nesting depth; 0 = outermost. Computed in-reader.
-    std::optional<size_t>
-        parent_id{};  ///< Row id of the enclosing event when truly nested;
-                      ///< nullopt when overlapping-but-not-nested.
+    // DESIGN DECISION (gap #2, 2026-07-20): `level` and `parent_id` were one overloaded
+    // concept; split per draft principle #4/§5. `lane` is the geometric packing row and
+    // is ALWAYS valid; `parent_id` is a true containment edge, populated only on `stack`
+    // tracks (track_info_t::nesting == stack) and carrying the opaque event_id_t (task
+    // 028), never a raw row id. `level` is retained for backward compatibility (Optiq
+    // reads it for height) — stack tracks: containment depth; lane tracks: == lane.
+    // Height consumers should migrate to track_info_t::max_lane. Open for Anthony review
+    // — see design/draft_api_2026-06-22.md §4-5.
+    int level{};      ///< Deprecated. Nesting depth on stack tracks; == lane on lane
+                      ///< tracks. Prefer `lane` (row) + `parent_id` (containment).
+    uint32_t lane{};  ///< Geometric packing row so overlapping intervals never collide.
+                      ///< Always valid, every interval track. 0 = first row.
+    std::optional<event_id_t>
+        parent_id{};  ///< Containment parent's opaque handle; populated only on `stack`
+                      ///< tracks, and only when this event is truly enclosed. nullopt on
+                      ///< lane tracks and for top-level events.
 };
 
 using interval_event_list_t = std::vector<interval_event_t>;
@@ -689,13 +736,71 @@ struct scalar_event_t
 
 using scalar_event_list_t = std::vector<scalar_event_t>;
 
-struct flow_t
+// DESIGN DECISION (gap #3, 2026-07-20): the flow-edge kind, tagged from the endpoint-type
+// pairing. Reversible mapping (see get_flows). Open for Anthony review — see
+// design/draft_api_2026-06-22.md §5-6.
+enum class flow_kind_t
 {
-    event_id_t source{};  ///< Opaque handle of the originating event (e.g. CPU region).
-    event_id_t dest{};    ///< Opaque handle of the destination event (e.g. GPU kernel
-                          ///< dispatch).
+    launch_to_dispatch,   ///< region -> kernel_dispatch (CPU launch to GPU dispatch).
+    copy_submit_to_exec,  ///< region -> memory_copy / memory_allocate (submit to exec).
+    stream_dependency,    ///< same-type GPU siblings (kd->kd, mc->mc, ma->ma).
+    generic,              ///< region -> region and anything else.
 };
 
+/**
+ * @brief Opaque handle grouping the edges of one flow / chain.
+ *
+ * All edges derived from a single causal chain share one flow_id_t; a multi-hop chain
+ * A -> B -> C is two edges carrying the same flow_id. Treat it as opaque: the only
+ * supported operations are equality, ordering, and hashing (so it can key a map). The
+ * internal encoding is private and may change; consumers must never depend on it.
+ */
+class flow_id_t
+{
+public:
+    flow_id_t() = default;
+
+    bool operator==(const flow_id_t& o) const noexcept { return m_value == o.m_value; }
+    bool operator!=(const flow_id_t& o) const noexcept { return m_value != o.m_value; }
+    bool operator<(const flow_id_t& o) const noexcept { return m_value < o.m_value; }
+
+private:
+    friend struct detail::flow_id_access;
+
+    uint64_t m_value{};  ///< Opaque group key. Never exposed publicly.
+};
+
+namespace detail
+{
+/// Reader-internal minting/decoding of flow_id_t. NOT part of the consumer contract --
+/// the reader derives the group key; consumers must treat flow_id_t as opaque.
+struct flow_id_access
+{
+    static flow_id_t make(uint64_t value)
+    {
+        flow_id_t h;
+        h.m_value = value;
+        return h;
+    }
+    static uint64_t value(const flow_id_t& h) { return h.m_value; }
+};
+}  // namespace detail
+
+// DESIGN DECISION (gap #3, 2026-07-20): flow is a DIRECTED, TYPED, chain-grouped edge,
+// not the old undirected/untyped {source,dest} pair. Each unordered clique pair yields
+// ONE directed edge (source -> dest); `flow_id` groups the edges of one stack lineage;
+// `kind` classifies the edge. Endpoints stay opaque event_id_t. The source/dest field
+// names are kept (over the draft's src/dst) for backward compatibility. Open for Anthony
+// review -- see design/draft_api_2026-06-22.md §5-6.
+struct flow_t
+{
+    event_id_t  source{};   ///< Opaque handle of the source event (arrow tail).
+    event_id_t  dest{};     ///< Opaque handle of the destination event (arrow head).
+    flow_id_t   flow_id{};  ///< Edges sharing this id form one flow / chain.
+    flow_kind_t kind{ flow_kind_t::generic };  ///< Semantic class of the edge.
+};
+
+using flow_edge_t = flow_t;  ///< Draft §6 spelling; same 4-field semantics.
 using flow_list_t = std::vector<flow_t>;
 
 struct track_stats_t
@@ -724,6 +829,16 @@ struct hash<profiler_hub::reader_types::event_id_t>
         mix(std::hash<int>{}(static_cast<int>(rt::detail::event_id_access::type(h))));
         mix(std::hash<size_t>{}(rt::detail::event_id_access::row_id(h)));
         return seed;
+    }
+};
+
+template <>
+struct hash<profiler_hub::reader_types::flow_id_t>
+{
+    size_t operator()(const profiler_hub::reader_types::flow_id_t& h) const noexcept
+    {
+        namespace rt = profiler_hub::reader_types;
+        return std::hash<uint64_t>{}(rt::detail::flow_id_access::value(h));
     }
 };
 }  // namespace std

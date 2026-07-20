@@ -122,6 +122,26 @@ reader_t::get_flows(const reader_types::event_filter_t& filter) const
     return m_impl->get_flows(filter);
 }
 
+reader_types::flow_list_t
+reader_t::get_flows_for_event(const reader_types::event_id_t& id) const
+{
+    return m_impl->get_flows_for_event(id);
+}
+
+reader_types::flow_list_t
+reader_t::get_flows_for_chain(const reader_types::flow_id_t& flow_id) const
+{
+    return m_impl->get_flows_for_chain(flow_id);
+}
+
+reader_types::flow_list_t
+reader_t::get_flows_in_window(const std::vector<size_t>&         tracks,
+                              const reader_types::time_window_t& window,
+                              uint32_t                           max_edges) const
+{
+    return m_impl->get_flows_in_window(tracks, window, max_edges);
+}
+
 std::optional<reader_types::region_data_t>
 reader_t::get_region_details(const reader_types::timeline_event_t& event) const
 {

@@ -157,9 +157,11 @@ struct reader_t
      *                 kernel_dispatch_pmc. counter and memory_activity are
      *                 scalar-only; they return empty — use get_scalar_track().
      * @param filter Optional time-window / pagination filter
-     * @return Interval events ordered by start ascending, with level and
-     *         parent_id precomputed and per-event category resolved. Empty
-     *         (not an error) if track_id is unknown or scalar-only.
+     * @return Interval events ordered by start ascending, with lane (always
+     *         valid packing row), level, and parent_id (containment; opaque
+     *         handle, populated only on stack tracks) precomputed and per-event
+     *         category resolved. Empty (not an error) if track_id is unknown or
+     *         scalar-only.
      */
     [[nodiscard]] reader_types::interval_event_list_t get_interval_track(
         size_t                              track_id,
@@ -205,6 +207,48 @@ struct reader_t
      */
     [[nodiscard]] reader_types::flow_list_t get_flows(
         const reader_types::event_filter_t& filter = {}) const;
+
+    /**
+     * @brief Get the directed flow edges adjacent to a single event.
+     * @param id Event handle to match against either endpoint of each edge.
+     * @return Every edge whose source or dest equals @p id. Post-filter over
+     *         get_flows({}); cheap, no additional query.
+     */
+    [[nodiscard]] reader_types::flow_list_t get_flows_for_event(
+        const reader_types::event_id_t& id) const;
+
+    /**
+     * @brief Get every edge in one causal chain (flow_id group).
+     * @param flow_id Chain handle grouping edges that share a source stack_id.
+     * @return Every edge whose flow_id equals @p flow_id. Sorting the result by
+     *         source start recovers the chain's linear order. Post-filter over
+     *         get_flows({}); cheap, no additional query.
+     */
+    [[nodiscard]] reader_types::flow_list_t get_flows_for_chain(
+        const reader_types::flow_id_t& flow_id) const;
+
+    /**
+     * @brief Get the flow edges visible in a viewport, capped for dense views.
+     * @param tracks Track ids in view. An edge is kept iff AT LEAST ONE endpoint sits on
+     * a listed track (so a cross-track arrow with one endpoint just off-screen still
+     * surfaces its visible half). An empty vector applies no track filter (all tracks).
+     * @param window Time range. An edge is kept iff its temporal extent
+     *               [min(src.start,dst.start), max(src.end,dst.end)] intersects
+     *               [window.start or 0, window.end or +inf]. An empty window (both fields
+     *               nullopt) applies no time filter.
+     * @param max_edges Cap on the result. When >0 and the in-window/in-track set exceeds
+     *               it, edges are decimated to the @p max_edges highest
+     * arrow-span-latency (dst.start - src.end, clamped at 0) edges, tie-broken by
+     * (source, dest) handle order so the kept set is STABLE across pans. 0 = no cap.
+     * @return The kept edges. A returned edge still carries NO timestamps — endpoint
+     *         geometry is used internally only to filter and rank; the emitted flow_t
+     * shape (source, dest, flow_id, kind) is unchanged. Every returned edge is a member
+     *         of get_flows({}).
+     */
+    [[nodiscard]] reader_types::flow_list_t get_flows_in_window(
+        const std::vector<size_t>&         tracks,
+        const reader_types::time_window_t& window,
+        uint32_t                           max_edges) const;
 
     /**
      *@section Event Details (On-Demand Query by db_id)

@@ -1909,8 +1909,13 @@ private:
                                  const std::string& source_alias,
                                  const std::string& dest_table,
                                  const std::string& dest_alias) -> flow_statement_set {
+            // Surface each endpoint's start + parent_stack_id and the shared clique
+            // stack_id so get_flows can orient the directed edge (parent lineage else
+            // start-ts) and derive its flow_id. Column order matches the member-pointer
+            // binding order below.
             const auto base_sql =
-                fmt::format("SELECT {s}.id, {d}.id "
+                fmt::format("SELECT {s}.id, {d}.id, {s}.start, {d}.start, "
+                            "E{s}.stack_id, E{s}.parent_stack_id, E{d}.parent_stack_id "
                             "FROM {st}_{u} {s} "
                             "JOIN rocpd_event_{u} E{s} ON {s}.event_id = E{s}.id "
                             "JOIN rocpd_event_{u} E{d} "
@@ -1925,7 +1930,14 @@ private:
 
             flow_statement_set out;
             out.base = m_backend->create_read_statement_executor<flow_row_result>(
-                base_sql, &flow_row_result::source_id, &flow_row_result::dest_id);
+                base_sql,
+                &flow_row_result::source_id,
+                &flow_row_result::dest_id,
+                &flow_row_result::source_start,
+                &flow_row_result::dest_start,
+                &flow_row_result::stack_id,
+                &flow_row_result::source_parent,
+                &flow_row_result::dest_parent);
 
             // Optional time window applied to the SOURCE event's start timestamp.
             out.time_filtered =
@@ -1934,7 +1946,12 @@ private:
                     base_sql + fmt::format(" AND {s}.start >= ? AND {s}.start <= ?",
                                            fmt::arg("s", source_alias)),
                     &flow_row_result::source_id,
-                    &flow_row_result::dest_id);
+                    &flow_row_result::dest_id,
+                    &flow_row_result::source_start,
+                    &flow_row_result::dest_start,
+                    &flow_row_result::stack_id,
+                    &flow_row_result::source_parent,
+                    &flow_row_result::dest_parent);
             return out;
         };
 

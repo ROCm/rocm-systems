@@ -383,11 +383,18 @@ struct track_stats_result
     size_t                count{};
 };
 
-/// A single causal link (source event id -> destination event id).
+/// A single candidate flow leg from the stack-clique join. Carries both endpoints' row
+/// ids plus the fields get_flows needs to orient and group the directed edge: each
+/// endpoint's start, the shared clique stack_id, and each endpoint's parent_stack_id.
 struct flow_row_result
 {
-    size_t source_id{};
-    size_t dest_id{};
+    size_t                source_id{};
+    size_t                dest_id{};
+    size_t                source_start{};   ///< SQL source endpoint start timestamp.
+    size_t                dest_start{};     ///< SQL dest endpoint start timestamp.
+    size_t                stack_id{};       ///< Shared clique stack_id (both endpoints).
+    std::optional<size_t> source_parent{};  ///< SQL source endpoint parent_stack_id.
+    std::optional<size_t> dest_parent{};    ///< SQL dest endpoint parent_stack_id.
 };
 
 /// Distinct gpu_queue topology context synthesized from rocpd_kernel_dispatch.
