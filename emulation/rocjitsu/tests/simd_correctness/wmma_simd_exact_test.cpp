@@ -26,6 +26,11 @@ constexpr uint32_t INDEX_ENTRIES = 16, INDEX_KEY = 0;
 constexpr uint32_t CONST_ONE = 0x3F800000u;
 constexpr uint32_t SCALE_A = 100, SCALE_B = 104;
 
+using WmmaF32SpecFn = void (*)(amdgpu::ComputeUnitCore &, uint32_t, uint32_t, uint32_t, uint32_t,
+                               uint32_t, uint32_t);
+using WmmaF16SpecFn = void (*)(amdgpu::ComputeUnitCore &, uint32_t, uint32_t, uint32_t, uint32_t,
+                               uint32_t);
+
 struct WmmaFixture : ExactFixture {
   WmmaFixture() : ExactFixture(ROCJITSU_CODE_ARCH_GFX1250, WF) {}
 };
@@ -163,12 +168,12 @@ TEST(WmmaSimdExact, F8Dense) {
 // all four A/B format pairs, K=64 and K=128, f32 and f16 output. ---
 TEST(WmmaSimdExact, F8SpecDense) {
   SKIP_IF_NO_SIMD();
-  auto spec_f32 = [](auto fn, Fmt fmt, const char *label) {
+  auto spec_f32 = [](WmmaF32SpecFn fn, Fmt fmt, const char *label) {
     run_case(label, fmt, Fmt::F32, [fn](WmmaFixture &fx, uint32_t ca) {
       fn(*fx.cu, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, ca, 0);
     });
   };
-  auto spec_f16 = [](auto fn, Fmt fmt, const char *label) {
+  auto spec_f16 = [](WmmaF16SpecFn fn, Fmt fmt, const char *label) {
     run_case(label, fmt, Fmt::F16, [fn](WmmaFixture &fx, uint32_t ca) {
       fn(*fx.cu, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, ca);
     });
