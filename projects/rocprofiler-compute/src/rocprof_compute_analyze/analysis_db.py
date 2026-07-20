@@ -26,7 +26,7 @@ from utils import schema, utils_analysis
 from utils.analysis_orm import Database
 from utils.file_io import (
     load_pc_sampling_results,
-    process_pc_sampling_kernel_trace,
+    process_pc_sampling_kernel_traces,
 )
 from utils.logger import (
     console_debug,
@@ -166,6 +166,7 @@ class db_analysis(OmniAnalyze_Base):
                 Database.get_session().add(
                     orm.Dispatch(
                         dispatch_id=dispatch.dispatch_id,
+                        pid=dispatch.pid,
                         gpu_id=dispatch.gpu_id,
                         start_timestamp=dispatch.start_timestamp,
                         end_timestamp=dispatch.end_timestamp,
@@ -978,6 +979,7 @@ class db_analysis(OmniAnalyze_Base):
                 dispatch_data_per_workload[workload_path] = pd.DataFrame([
                     {
                         "dispatch_id": row.Dispatch_ID,
+                        "pid": getattr(row, "PID", None),
                         "kernel_name": row.Kernel_Name,
                         "gpu_id": row.GPU_ID,
                         "start_timestamp": row.Start_Timestamp,
@@ -1030,35 +1032,24 @@ class db_analysis(OmniAnalyze_Base):
     ) -> pd.DataFrame:
         columns = [
             "dispatch_id",
+            "pid",
             "kernel_name",
             "gpu_id",
             "start_timestamp",
             "end_timestamp",
         ]
-        if not tool_data_records:
-            process_pc_sampling_kernel_trace(None)
-            return pd.DataFrame(columns=columns)
-
-        trace_df = pd.concat(
-            [
-                process_pc_sampling_kernel_trace(tool_data)
-                for tool_data in tool_data_records
-            ],
-            ignore_index=True,
-        )
+        trace_df = process_pc_sampling_kernel_traces(tool_data_records)
         if trace_df.empty:
             return pd.DataFrame(columns=columns)
 
         dispatch_df = pd.DataFrame({
             "dispatch_id": trace_df["Dispatch_Id"],
+            "pid": trace_df["PID"],
             "kernel_name": trace_df["Kernel_Name"],
             "gpu_id": trace_df["GPU_ID"],
             "start_timestamp": trace_df["Start_Timestamp"],
             "end_timestamp": trace_df["End_Timestamp"],
         })
-        # A legacy one-file workload retains every original dispatch row.
-        if len(tool_data_records) > 1:
-            dispatch_df = dispatch_df.drop_duplicates("kernel_name")
         return dispatch_df.reset_index(drop=True)
 
     def apply_pmc_filters(self) -> dict[str, pd.DataFrame]:

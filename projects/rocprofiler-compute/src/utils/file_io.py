@@ -111,6 +111,8 @@ def create_df_kernel_top_stats(
 
     # First, create a dispatches file used to populate global vars
     dispatch_columns = ["Kernel_Name", "GPU_ID"]
+    if "PID" in df.columns:
+        dispatch_columns.insert(0, "PID")
     if "Dispatch_ID" in df.columns:
         dispatch_columns.insert(0, "Dispatch_ID")
 
@@ -247,7 +249,25 @@ def load_pc_sampling_results(workload_path: str) -> list[dict[str, Any]]:
         if tool_record is None:
             continue
         tool_records.append(tool_record)
+    _validate_pc_sampling_process_ids(tool_records)
     return tool_records
+
+
+def process_pc_sampling_kernel_traces(
+    tool_data_records: list[dict[str, Any]],
+) -> pd.DataFrame:
+    """Build one dispatch trace containing every PC-sampling tool record."""
+    if not tool_data_records:
+        return process_pc_sampling_kernel_trace(None)
+
+    _validate_pc_sampling_process_ids(tool_data_records)
+    return pd.concat(
+        [
+            process_pc_sampling_kernel_trace(tool_data)
+            for tool_data in tool_data_records
+        ],
+        ignore_index=True,
+    )
 
 
 def process_pc_sampling_kernel_trace(
@@ -265,6 +285,7 @@ def process_pc_sampling_kernel_trace(
     """
     columns = [
         "Dispatch_Id",
+        "PID",
         "Kernel_Name",
         "Start_Timestamp",
         "End_Timestamp",
@@ -274,6 +295,7 @@ def process_pc_sampling_kernel_trace(
         console_warning("PC sampling results not found. Cannot build dispatch data.")
         return pd.DataFrame(columns=columns)
 
+    process_id = tool_data.get("metadata", {}).get("pid")
     dispatches = tool_data["buffer_records"]["kernel_dispatch"]
     kernel_id_to_name = {
         symbol["kernel_id"]: symbol["formatted_kernel_name"]
@@ -284,6 +306,7 @@ def process_pc_sampling_kernel_trace(
     rows = [
         {
             "Dispatch_Id": dispatch["dispatch_info"]["dispatch_id"],
+            "PID": process_id,
             "Kernel_Name": kernel_id_to_name.get(
                 dispatch["dispatch_info"]["kernel_id"]
             ),
@@ -436,6 +459,25 @@ def _select_pc_sampling_result_files(
         None,
     )
     return (legacy_result_file,) if legacy_result_file is not None else ()
+
+
+def _validate_pc_sampling_process_ids(
+    tool_data_records: list[dict[str, Any]],
+) -> None:
+    """Require unique process IDs when combining PC-sampling tool records."""
+    if len(tool_data_records) <= 1:
+        return
+
+    process_ids = [
+        tool_data.get("metadata", {}).get("pid") for tool_data in tool_data_records
+    ]
+    if any(process_id is None for process_id in process_ids):
+        console_error("PC sampling: multiple result records require metadata.pid.")
+
+    if len(set(process_ids)) != len(process_ids):
+        console_error(
+            "PC sampling: multiple result records require unique metadata.pid values."
+        )
 
 
 def _parse_pc_sampling_result_file(json_path: Path) -> Optional[dict[str, Any]]:

@@ -26,6 +26,7 @@ from utils.file_io import (
     build_agent_to_gpu_map_from_json,
     load_pc_sampling_results,
     process_pc_sampling_kernel_trace,
+    process_pc_sampling_kernel_traces,
 )
 from utils.parser import (
     PMC_DISPATCH_INFO_TABLE_ID,
@@ -1276,6 +1277,7 @@ def test_process_pc_sampling_none_returns_empty() -> None:
     assert df.empty
     assert list(df.columns) == [
         "Dispatch_Id",
+        "PID",
         "Kernel_Name",
         "Start_Timestamp",
         "End_Timestamp",
@@ -1303,6 +1305,7 @@ def test_process_pc_sampling_with_agent_info() -> None:
             make_agent(handle=20, node_id=2, agent_type=2),
             make_agent(handle=30, node_id=3, agent_type=2),
         ],
+        pid=42,
     )
 
     df = process_pc_sampling_kernel_trace(tool_data)
@@ -1311,6 +1314,7 @@ def test_process_pc_sampling_with_agent_info() -> None:
     assert len(df) == 3
     assert list(df.columns) == [
         "Dispatch_Id",
+        "PID",
         "Kernel_Name",
         "Start_Timestamp",
         "End_Timestamp",
@@ -1319,6 +1323,7 @@ def test_process_pc_sampling_with_agent_info() -> None:
 
     # Multi-GPU mapping: handle 20 -> GPU 0, handle 30 -> GPU 1, unknown -> 0
     assert df["GPU_ID"].tolist() == [0, 1, 0]
+    assert df["PID"].tolist() == [42, 42, 42]
     assert df["Kernel_Name"].tolist() == ["vecCopy", "vecAdd", "vecMul"]
 
     # Timestamps passed through unchanged
@@ -1348,6 +1353,33 @@ def test_process_pc_sampling_unmapped_kernel_id() -> None:
     df = process_pc_sampling_kernel_trace(tool_data)
     assert len(df) == 1
     assert df.iloc[0]["Kernel_Name"] is None
+
+
+@pytest.mark.parametrize(
+    "process_ids",
+    [
+        pytest.param([101, None], id="missing_pid"),
+        pytest.param([101, 101], id="duplicate_pid"),
+    ],
+)
+def test_process_pc_sampling_multiple_records_require_unique_process_ids(
+    process_ids: list[int | None],
+) -> None:
+    tool_data_records = [make_tool_data(pid=process_id) for process_id in process_ids]
+
+    with pytest.raises(SystemExit):
+        process_pc_sampling_kernel_traces(tool_data_records)
+
+
+def test_process_pc_sampling_single_record_allows_missing_process_id() -> None:
+    tool_data = make_tool_data(
+        kernel_symbols=[make_kernel_symbol(12, 2, "vecCopy")],
+        kernel_dispatch=[make_dispatch(1, 12)],
+    )
+
+    dispatch_trace = process_pc_sampling_kernel_traces([tool_data])
+
+    assert dispatch_trace["PID"].tolist() == [None]
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1400,6 +1432,24 @@ def make_db_analysis(workload_path: str) -> db_analysis:
     return instance
 
 
+def make_multiprocess_dispatch_tool_data() -> list[dict]:
+    """Build colliding process-local dispatch IDs for one shared kernel."""
+    first_tool_data = make_tool_data(
+        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
+        kernel_dispatch=[
+            make_dispatch(0, 100, start=10, end=20),
+            make_dispatch(1, 100, start=30, end=50),
+        ],
+        pid=101,
+    )
+    second_tool_data = make_tool_data(
+        kernel_symbols=[make_kernel_symbol(200, 7, "vecCopy")],
+        kernel_dispatch=[make_dispatch(0, 200, start=60, end=90)],
+        pid=202,
+    )
+    return [first_tool_data, second_tool_data]
+
+
 def test_load_pc_sampling_tool_data_gate(tmp_path: Path) -> None:
     """Tool data loads whenever PC sampling was collected, else returns empty."""
     write_results_json(tmp_path / "ps_file_results.json", **sample_tool_data_kwargs())
@@ -1419,16 +1469,17 @@ def test_load_pc_sampling_tool_data_gate(tmp_path: Path) -> None:
     assert instance.load_pc_sampling_tool_data(str(tmp_path)) == []
 
 
-def test_pc_sampling_single_result_preserves_legacy_analysis_scaffolding(
+def test_pc_sampling_single_result_preserves_analysis_statistics(
     tmp_path: Path,
 ) -> None:
-    """Repeated legacy dispatches retain their top-kernel and dispatch rows."""
+    """Repeated single-process dispatches retain their statistics and PID."""
     tool_data = make_tool_data(
         kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
         kernel_dispatch=[
             make_dispatch(1, 100, start=10, end=20),
             make_dispatch(2, 100, start=30, end=50),
         ],
+        pid=42,
     )
     workload = schema.Workload()
     args = argparse.Namespace(time_unit="ns", kernel_verbose=5)
@@ -1442,8 +1493,62 @@ def test_pc_sampling_single_result_preserves_legacy_analysis_scaffolding(
     )
 
     assert workload.raw_pmc["Dispatch_ID"].tolist() == [1, 2]
+    assert workload.raw_pmc["PID"].tolist() == [42, 42]
     assert workload.dfs[PMC_KERNEL_TOP_TABLE_ID].iloc[0]["Count"] == 2
-    assert workload.dfs[PMC_DISPATCH_INFO_TABLE_ID]["Dispatch_ID"].tolist() == [1, 2]
+    dispatch_info = workload.dfs[PMC_DISPATCH_INFO_TABLE_ID]
+    assert list(dispatch_info.columns) == [
+        "Dispatch_ID",
+        "PID",
+        "Kernel_Name",
+        "GPU_ID",
+    ]
+    assert dispatch_info["Dispatch_ID"].tolist() == [1, 2]
+
+
+def test_pc_sampling_multiprocess_dispatch_statistics_include_every_row(
+    tmp_path: Path,
+) -> None:
+    workload = schema.Workload()
+    args = argparse.Namespace(time_unit="ns", kernel_verbose=5)
+    instance = make_db_analysis(str(tmp_path))
+
+    instance.build_pc_sampling_only_workload(
+        workload,
+        str(tmp_path),
+        args,
+        make_multiprocess_dispatch_tool_data(),
+    )
+
+    assert workload.raw_pmc["Dispatch_ID"].tolist() == [0, 1, 0]
+    assert workload.raw_pmc["PID"].tolist() == [101, 101, 202]
+    kernel_top = workload.dfs[PMC_KERNEL_TOP_TABLE_ID].iloc[0]
+    assert kernel_top["Count"] == 3
+    assert kernel_top["Sum(ns)"] == 60
+    dispatch_info = workload.dfs[PMC_DISPATCH_INFO_TABLE_ID]
+    assert dispatch_info["Dispatch_ID"].tolist() == [0, 1, 0]
+    assert dispatch_info["PID"].tolist() == [101, 101, 202]
+
+
+def test_pc_sampling_dispatch_filter_matches_every_process(
+    tmp_path: Path,
+) -> None:
+    workload = schema.Workload(filter_dispatch_ids=["0"])
+    args = argparse.Namespace(time_unit="ns", kernel_verbose=5)
+    instance = make_db_analysis(str(tmp_path))
+
+    instance.build_pc_sampling_only_workload(
+        workload,
+        str(tmp_path),
+        args,
+        make_multiprocess_dispatch_tool_data(),
+    )
+
+    kernel_top = workload.dfs[PMC_KERNEL_TOP_TABLE_ID].iloc[0]
+    assert kernel_top["Count"] == 2
+    assert kernel_top["Sum(ns)"] == 40
+    dispatch_info = workload.dfs[PMC_DISPATCH_INFO_TABLE_ID]
+    assert dispatch_info["Dispatch_ID"].tolist() == [0, 0]
+    assert dispatch_info["PID"].tolist() == [101, 202]
 
 
 def test_load_table_data_forwards_pc_sampling_tool_data() -> None:
@@ -1672,12 +1777,14 @@ def test_calc_dispatch_data_uses_provided_tool_data(tmp_path: Path) -> None:
     df = result[str(tmp_path)]
     assert list(df.columns) == [
         "dispatch_id",
+        "pid",
         "kernel_name",
         "gpu_id",
         "start_timestamp",
         "end_timestamp",
     ]
     assert df.iloc[0]["kernel_name"] == "vecCopy"
+    assert df.iloc[0]["pid"] is None
     assert df.iloc[0]["gpu_id"] == 0
 
 
@@ -1719,28 +1826,17 @@ def test_pc_sampling_empty_results_preserve_legacy_db_behavior(
 def test_calc_dispatch_data_stitches_pc_sampling_tool_records(
     tmp_path: Path,
 ) -> None:
-    first_tool_data = make_tool_data(
-        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
-        kernel_dispatch=[make_dispatch(0, 100, agent_handle=20, start=10, end=20)],
-        agents=[make_agent(handle=20, node_id=2, agent_type=2)],
-        pid=101,
-    )
-    second_tool_data = make_tool_data(
-        kernel_symbols=[make_kernel_symbol(200, 7, "vecAdd")],
-        kernel_dispatch=[make_dispatch(1, 200, agent_handle=30, start=30, end=40)],
-        agents=[make_agent(handle=30, node_id=3, agent_type=2)],
-        pid=202,
-    )
     instance = make_db_analysis(str(tmp_path))
     instance._profiling_config = {"filter_blocks": ["21"]}
 
     result = instance.calc_dispatch_data({
-        str(tmp_path): [first_tool_data, second_tool_data]
+        str(tmp_path): make_multiprocess_dispatch_tool_data()
     })
 
     df = result[str(tmp_path)]
-    assert set(df["kernel_name"]) == {"vecCopy", "vecAdd"}
-    assert set(df["dispatch_id"]) == {0, 1}
+    assert df["kernel_name"].tolist() == ["vecCopy", "vecCopy", "vecCopy"]
+    assert df["dispatch_id"].tolist() == [0, 1, 0]
+    assert df["pid"].tolist() == [101, 101, 202]
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1891,6 +1987,9 @@ def test_pc_sampling_single_result_preserves_legacy_database(
             db_dispatch_count = conn.execute(
                 "SELECT dispatch_count FROM compute_kernel_view"
             ).fetchone()[0]
+            db_dispatch_process_ids = conn.execute(
+                "SELECT DISTINCT pid FROM compute_dispatch"
+            ).fetchall()
         finally:
             conn.close()
         assert counts["compute_code_object_store"] > 0
@@ -1909,6 +2008,7 @@ def test_pc_sampling_single_result_preserves_legacy_database(
         assert len(db_pc_sampling) == 14
         assert db_pc_sampling["count"].sum() == 390
         assert db_dispatch_count == 3
+        assert db_dispatch_process_ids == [(1429079,)]
     finally:
         common.clean_output_dir(True, str(workload_dir))
 

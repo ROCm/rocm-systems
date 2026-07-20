@@ -121,14 +121,15 @@ class KernelRooflineData(Base):
 
 class Dispatch(Base):
     __tablename__ = f"{PREFIX}dispatch"
-    # dispatch_id is unique within a kernel.
-    __table_args__ = (UniqueConstraint("kernel_uuid", "dispatch_id"),)
+    # dispatch_id is unique within a kernel and process.
+    __table_args__ = (UniqueConstraint("kernel_uuid", "pid", "dispatch_id"),)
 
     dispatch_uuid = Column(Integer, primary_key=True)
     kernel_uuid = Column(
         Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False
     )
     dispatch_id = Column(Integer)
+    pid = Column(Integer)
     gpu_id = Column(Integer)
     start_timestamp = Column(Integer)
     end_timestamp = Column(Integer)
