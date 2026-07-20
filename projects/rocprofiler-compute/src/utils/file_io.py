@@ -222,7 +222,9 @@ def discover_pc_sampling_result_files(
         direct_child_files: tuple[Path, ...] = ()
     else:
         direct_child_files = tuple(
-            child_path for child_path in workload_path.iterdir() if child_path.is_file()
+            child_path
+            for child_path in workload_path.iterdir()
+            if not child_path.is_symlink() and child_path.is_file()
         )
 
     return _select_pc_sampling_result_files(direct_child_files)
@@ -407,7 +409,15 @@ def _select_pc_sampling_result_files(
         pid_result_candidates.append(candidate_path)
 
     if pid_result_candidates:
-        return tuple(pid_result_candidates)
+        return tuple(
+            sorted(
+                pid_result_candidates,
+                key=lambda candidate_path: (
+                    int(candidate_path.name[: -len(results_filename_suffix)]),
+                    candidate_path.name,
+                ),
+            )
+        )
 
     legacy_result_file = next(
         (
