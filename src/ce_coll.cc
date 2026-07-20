@@ -159,9 +159,13 @@ bool ncclCeImplemented(ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType
 }
 
 bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
-                     ncclSymRegType_t winRegType) {
+                     ncclSymRegType_t winRegType, struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin) {
   if (!ncclCeImplemented(coll, red, ty)) {
     TRACE(NCCL_TUNING, "Skipping CE collective: not implemented");
+    return false;
+  }
+  if (ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin)) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: host-backed cuMem segments are not supported");
     return false;
   }
   if (ncclTeamLsa(comm).nRanks < comm->nRanks) {
@@ -783,9 +787,13 @@ fail:
 }
 
 bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
-                         ncclSymRegType_t winRegType) {
+                         ncclSymRegType_t winRegType, struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin) {
   if (!ncclCeImplemented(coll, red, ty)) {
     TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: not implemented");
+    return false;
+  }
+  if (ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin)) {
+    TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: host-backed cuMem segments are not supported");
     return false;
   }
   if (coll != ncclFuncAllGather && coll != ncclFuncAlltoAll) {

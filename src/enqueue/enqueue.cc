@@ -3286,9 +3286,9 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // Append CE collective task if CE is supported and requested by user
       ncclSymRegType_t winRegType;
       NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
-      bool ceAvailable = ncclCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
-      bool hierCeAvailable = ncclHierCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
-      bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
+      bool ceAvailable = ncclCeAvailable(comm, info->coll, info->op, info->datatype, winRegType, sendWin, recvWin);
+      bool hierCeAvailable =
+        ncclHierCeAvailable(comm, info->coll, info->op, info->datatype, winRegType, sendWin, recvWin);
 
       // CTA policy: resolve the effective per-call value in place (info->collConfig is our private
       // copy). An unset or invalid value, or an NCCL_CTA_POLICY env override (already folded into
@@ -3298,8 +3298,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       int perCall = info->collConfig.CTAPolicy;
       bool envOverridden = ncclGetEnvCtaPolicy() != NCCL_CONFIG_UNDEF_INT;
       info->collConfig.CTAPolicy = ncclCollConfigResolveCTAPolicy(perCall, comm->config.CTAPolicy, envOverridden);
-      if ((info->collConfig.CTAPolicy & NCCL_CTA_POLICY_ZERO) && (ceAvailable || hierCeAvailable) &&
-          !hasSysmemSegment) {
+      if ((info->collConfig.CTAPolicy & NCCL_CTA_POLICY_ZERO) && (ceAvailable || hierCeAvailable)) {
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, opDev));
       }
       // Append kernel-based collective

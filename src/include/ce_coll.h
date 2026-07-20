@@ -71,10 +71,10 @@ struct ncclCeBatchOpsParams {
 };
 
 bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
-                     ncclSymRegType_t winRegType);
+                     ncclSymRegType_t winRegType, struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin);
 
 bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
-                         ncclSymRegType_t winRegType);
+                         ncclSymRegType_t winRegType, struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin);
 
 ncclResult_t ncclCeInit(struct ncclComm* comm);
 
