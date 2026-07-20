@@ -321,8 +321,9 @@ static hsa_status_t build_lightweight_coredump_ranges(MemoryRegionFilter& filter
       // Same goes for the ring buffer.
       debug_print("Added ring buffer range: %#p - %#p (size: %zu)\n",
                   aql_queue->amd_queue_.hsa_queue.base_address,
-                  static_cast<void*>(aql_queue->amd_queue_.hsa_queue.base_address)
-                    + aql_queue->amd_queue_.hsa_queue.size * sizeof(hsa_kernel_dispatch_packet_t),
+                  reinterpret_cast<void*>(
+                    reinterpret_cast<uint64_t>(aql_queue->amd_queue_.hsa_queue.base_address)
+                    + aql_queue->amd_queue_.hsa_queue.size * sizeof(hsa_kernel_dispatch_packet_t)),
                   aql_queue->amd_queue_.hsa_queue.size * sizeof(hsa_kernel_dispatch_packet_t));
       filter.add_range(reinterpret_cast<uint64_t>(aql_queue->amd_queue_.hsa_queue.base_address),
                        aql_queue->amd_queue_.hsa_queue.size * sizeof(hsa_kernel_dispatch_packet_t));
@@ -336,7 +337,8 @@ static hsa_status_t build_lightweight_coredump_ranges(MemoryRegionFilter& filter
 
       debug_print("Added CWSR area range: %#p - %#p (size: %zu)\n",
                   queue_info.SaveAreaHeader,
-                  static_cast<void*>(queue_info.SaveAreaHeader) + queue_info.SaveAreaSizeInBytes,
+                  reinterpret_cast<void*>(
+                    reinterpret_cast<uint64_t>(queue_info.SaveAreaHeader) + queue_info.SaveAreaSizeInBytes),
                   queue_info.SaveAreaSizeInBytes);
       filter.add_range(reinterpret_cast<uint64_t>(queue_info.SaveAreaHeader),
                        queue_info.SaveAreaSizeInBytes);
