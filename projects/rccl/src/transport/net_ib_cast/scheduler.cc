@@ -450,6 +450,42 @@ extern "C" ncclResult_t ncclIbCastGetSchedState(void* sendComm, struct ncclIbCas
   return ncclSuccess;
 }
 
+// ncclIbCastGetGrhState — read per-QP global-addressing state out of a sendComm.
+// For each active QP, copies rtrAttr.linkLayer and queries the live QP via
+// ibv_query_qp to read back the driver-programmed ah_attr.is_global. Reading it
+// back from the driver (rather than from our intended attrs) makes this a true
+// end-to-end check of what was actually programmed at RTR.
+// Returns ncclInvalidArgument if sendComm or out is null.
+extern "C" ncclResult_t ncclIbCastGetGrhState(void* sendComm, struct ncclIbCastGrhState* out) {
+  if (!sendComm || !out) return ncclInvalidArgument;
+  // Zero the whole struct so entries beyond nqps are well-defined even if the
+  // caller passed an uninitialized stack struct.
+  memset(out, 0, sizeof(*out));
+  struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
+  struct ncclIbNetCommBase* base = &comm->base;
+
+  int n = (base->nqps < NCCL_IB_MAX_QPS) ? base->nqps : NCCL_IB_MAX_QPS;
+  if (n < 0) n = 0;
+  out->nqps = n;
+
+  for (int i = 0; i < n; i++) {
+    struct ncclIbQp* qp = base->activeQps[i];
+    out->linkLayer[i] = qp ? qp->rtrAttr.linkLayer : 0;
+    if (qp && qp->qp) {
+      struct ibv_qp_attr attr;
+      struct ibv_qp_init_attr initAttr;
+      memset(&attr, 0, sizeof(attr));
+      memset(&initAttr, 0, sizeof(initAttr));
+      if (wrap_ibv_query_qp(qp->qp, &attr, IBV_QP_AV, &initAttr) == ncclSuccess) {
+        out->isGlobal[i] = attr.ah_attr.is_global;
+        out->queryOk[i] = true;
+      }
+    }
+  }
+
+  return ncclSuccess;
+}
+
 // ncclIbCastSetTokens — force-initialize the WRR token table for testing.
 // Bypasses the RTT-based IbCastQpSchedUpdateTx; immediately arms the scheduler.
 // qpTokens must have nqps entries; totTokens is computed as their sum.
