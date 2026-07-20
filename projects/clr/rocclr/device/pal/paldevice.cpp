@@ -2665,7 +2665,22 @@ bool Device::GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const {
     return false;
   }
 
-  device::Memory* phys_dev_mem = phys_mem_obj->getDeviceMemory(*this);
+  // Query this device's backing without allocating. On multi-GPU the same VA can be
+  // probed on a device that does not physically back the allocation (e.g. hipMemUnmap
+  // iterates every device, or hipMemGetAccess queries a non-owning device). Passing
+  // alloc=false avoids an allocate-on-query side effect; getDeviceMemory() would
+  // otherwise return nullptr for such a device, which was dereferenced below and crashed.
+  device::Memory* phys_dev_mem = phys_mem_obj->getDeviceMemory(*this, false);
+  if (phys_dev_mem == nullptr) {
+    // The VA is a valid mapped allocation, it is just not backed on this device, so it
+    // has no access here. Report "no access" (not an error) to match the documented
+    // hipMemGetAccess semantics (Unit_hipMemSetAccess_SetGet expects ProtNone for a
+    // device without access) and to keep the hipMemUnmap probe loop working.
+    LogPrintfInfo("Virtual address 0x%x is not backed on device index %d; reporting no access\n",
+                  va_addr, index());
+    *access_flags_ptr = static_cast<VmmAccess>(device::Memory::MemAccess::kMemAccessNone);
+    return true;
+  }
   device::Memory::MemAccess mem_access = phys_dev_mem->GetAccess();
   *access_flags_ptr = static_cast<VmmAccess>(mem_access);
 

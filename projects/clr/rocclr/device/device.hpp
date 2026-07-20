@@ -1379,7 +1379,6 @@ class VirtualDevice : public amd::ReferenceCountedObject {
                                           const std::vector<uint32_t>& validFullHeaders,
                                           amd::AccumulateCommand* vcmd = nullptr,
                                           bool attach_signal = false,
-                                          const std::vector<const std::string*>* kernelNames = nullptr,
                                           bool pre_patched = false,
                                           bool blocking = false,
                                           const std::vector<uint8_t>* flatMetadataData = nullptr) {
@@ -2254,6 +2253,12 @@ class Device : public RuntimeObject {
     uint8_t* flat_packet; // pointer into flatPacketData (patched directly at launch)
     int hw_event_index;
     int dep_slot;  // kCompletionSignal, kExtDispatchDepSignal, or 0-4 for barrier dep_signal[slot]
+    // Segment that owns this patch (set at BuildSyncPlan time). At launch the
+    // graph layer resolves it to the actual stream's vGPU index into queue_index.
+    int segment_id = -1;
+    // vGPU (queue) index resolved at launch from segment_id. Read by
+    // ApplyHwEventPatches to attribute the signal to its execution stream.
+    uint32_t queue_index = std::numeric_limits<uint32_t>::max();
   };
 
   virtual uint8_t* CreateBarrierPacket() const { return nullptr; }
