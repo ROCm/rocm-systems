@@ -391,9 +391,9 @@ struct __hipext_ocp_fp8x2_e4m3 {
       uint32_t ui32;
       __amd_fp8x2_storage_t fp8x2[2];
     } u{0};
-    u.ui32 = from_float<float, Encoding::E4M3, true>(b, scale);
+    u.ui32 = from_float<float, Encoding::E4M3Mx, true>(b, scale);
     u.ui32 <<= 8;
-    u.ui32 |= from_float<float, Encoding::E4M3, true>(a, scale);
+    u.ui32 |= from_float<float, Encoding::E4M3Mx, true>(a, scale);
     __x = u.fp8x2[0];
 #endif
   }
@@ -420,9 +420,9 @@ struct __hipext_ocp_fp8x2_e4m3 {
       uint32_t ui32;
       __amd_fp8x2_storage_t fp8x2[2];
     } u{0};
-    u.ui32 = from_float<__amd_fp16_storage_t, Encoding::E4M3, true>(in[1], scale);
+    u.ui32 = from_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(in[1], scale);
     u.ui32 <<= 8;
-    u.ui32 |= from_float<__amd_fp16_storage_t, Encoding::E4M3, true>(in[0], scale);
+    u.ui32 |= from_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(in[0], scale);
     __x = u.fp8x2[0];
 #endif
   }
@@ -444,9 +444,9 @@ struct __hipext_ocp_fp8x2_e4m3 {
       uint32_t ui32;
       __amd_fp8x2_storage_t fp8x2[2];
     } u{0};
-    u.ui32 = from_float<__amd_bf16_storage_t, Encoding::E4M3, true>(in[1], scale);
+    u.ui32 = from_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(in[1], scale);
     u.ui32 <<= 8;
-    u.ui32 |= from_float<__amd_bf16_storage_t, Encoding::E4M3, true>(in[0], scale);
+    u.ui32 |= from_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(in[0], scale);
     __x = u.fp8x2[0];
 #endif
   }
@@ -463,8 +463,8 @@ struct __hipext_ocp_fp8x2_e4m3 {
 #else
     using namespace fcbx;
     __amd_fp16x2_storage_t ret;
-    ret[0] = to_float<__amd_fp16_storage_t, Encoding::E4M3, true>(__x & 0xFF, scale);
-    ret[1] = to_float<__amd_fp16_storage_t, Encoding::E4M3, true>(__x >> 8, scale);
+    ret[0] = to_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(__x & 0xFF, scale);
+    ret[1] = to_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(__x >> 8, scale);
     return ret;
 #endif
   }
@@ -481,8 +481,8 @@ struct __hipext_ocp_fp8x2_e4m3 {
 #else
     using namespace fcbx;
     __amd_bf16x2_storage_t ret;
-    ret[0] = to_float<__amd_bf16_storage_t, Encoding::E4M3, true>(__x & 0xFF, scale);
-    ret[1] = to_float<__amd_bf16_storage_t, Encoding::E4M3, true>(__x >> 8, scale);
+    ret[0] = to_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(__x & 0xFF, scale);
+    ret[1] = to_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(__x >> 8, scale);
     return ret;
 #endif
   }
@@ -494,8 +494,8 @@ struct __hipext_ocp_fp8x2_e4m3 {
 #else
     using namespace fcbx;
     __amd_floatx2_storage_t ret;
-    ret[0] = to_float<float, Encoding::E4M3, true>(__x & 0xFF, scale);
-    ret[1] = to_float<float, Encoding::E4M3, true>(__x >> 8, scale);
+    ret[0] = to_float<float, Encoding::E4M3Mx, true>(__x & 0xFF, scale);
+    ret[1] = to_float<float, Encoding::E4M3Mx, true>(__x >> 8, scale);
     return ret;
 #endif
   }
@@ -563,9 +563,9 @@ struct __hipext_ocp_fp8x2_e5m2 {
       uint32_t ui32;
       __amd_fp8x2_storage_t fp8x2[2];
     } u{0};
-    u.ui32 = from_float<float, Encoding::E5M2, true>(b, scale);
+    u.ui32 = from_float<float, Encoding::E5M2Mx, true>(b, scale);
     u.ui32 <<= 8;
-    u.ui32 |= from_float<float, Encoding::E5M2, true>(a, scale);
+    u.ui32 |= from_float<float, Encoding::E5M2Mx, true>(a, scale);
     __x = u.fp8x2[0];
 #endif
   }
@@ -591,9 +591,9 @@ struct __hipext_ocp_fp8x2_e5m2 {
       uint32_t ui32;
       __amd_fp8x2_storage_t fp8x2[2];
     } u{0};
-    u.ui32 = from_float<__amd_fp16_storage_t, Encoding::E5M2, true>(in[1], scale);
+    u.ui32 = from_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(in[1], scale);
     u.ui32 <<= 8;
-    u.ui32 |= from_float<__amd_fp16_storage_t, Encoding::E5M2, true>(in[0], scale);
+    u.ui32 |= from_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(in[0], scale);
     __x = u.fp8x2[0];
 #endif
   }
@@ -615,9 +615,9 @@ struct __hipext_ocp_fp8x2_e5m2 {
       uint32_t ui32;
       __amd_fp8x2_storage_t fp8x2[2];
     } u{0};
-    u.ui32 = from_float<__amd_bf16_storage_t, Encoding::E5M2, true>(in[1], scale);
+    u.ui32 = from_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(in[1], scale);
     u.ui32 <<= 8;
-    u.ui32 |= from_float<__amd_bf16_storage_t, Encoding::E5M2, true>(in[0], scale);
+    u.ui32 |= from_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(in[0], scale);
     __x = u.fp8x2[0];
 #endif
   }
@@ -634,8 +634,8 @@ struct __hipext_ocp_fp8x2_e5m2 {
 #else
     using namespace fcbx;
     __amd_fp16x2_storage_t ret;
-    ret[0] = to_float<__amd_fp16_storage_t, Encoding::E5M2, true>(__x & 0xFF, scale);
-    ret[1] = to_float<__amd_fp16_storage_t, Encoding::E5M2, true>(__x >> 8, scale);
+    ret[0] = to_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(__x & 0xFF, scale);
+    ret[1] = to_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(__x >> 8, scale);
     return ret;
 #endif
   }
@@ -652,8 +652,8 @@ struct __hipext_ocp_fp8x2_e5m2 {
 #else
     using namespace fcbx;
     __amd_bf16x2_storage_t ret;
-    ret[0] = to_float<__amd_bf16_storage_t, Encoding::E5M2, true>(__x & 0xFF, scale);
-    ret[1] = to_float<__amd_bf16_storage_t, Encoding::E5M2, true>(__x >> 8, scale);
+    ret[0] = to_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(__x & 0xFF, scale);
+    ret[1] = to_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(__x >> 8, scale);
     return ret;
 #endif
   }
@@ -665,8 +665,8 @@ struct __hipext_ocp_fp8x2_e5m2 {
 #else
     using namespace fcbx;
     __amd_floatx2_storage_t ret;
-    ret[0] = to_float<float, Encoding::E5M2, true>(__x & 0xFF, scale);
-    ret[1] = to_float<float, Encoding::E5M2, true>(__x >> 8, scale);
+    ret[0] = to_float<float, Encoding::E5M2Mx, true>(__x & 0xFF, scale);
+    ret[1] = to_float<float, Encoding::E5M2Mx, true>(__x >> 8, scale);
     return ret;
 #endif
   }
