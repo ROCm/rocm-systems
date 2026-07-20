@@ -43,6 +43,7 @@ enum ncclDiagP2pReason {
   ncclDiagP2pReasonReadLaunch = 6,
   ncclDiagP2pReasonReadMismatch = 7,
   ncclDiagP2pReasonTopo = 8,
+  ncclDiagP2pReasonLocalCuda = 9,
 };
 
 static constexpr int kDiagP2pBarrierWrote = 0xd1a601;
@@ -179,6 +180,8 @@ static const char* ncclDiagP2pReasonName(int reason) {
     return "readMismatch";
   case ncclDiagP2pReasonTopo:
     return "topo";
+  case ncclDiagP2pReasonLocalCuda:
+    return "localCuda";
   default:
     return "none";
   }
@@ -186,6 +189,48 @@ static const char* ncclDiagP2pReasonName(int reason) {
 
 static const char* ncclDiagP2pPathName(int pathType) {
   return (pathType >= PATH_LOC && pathType <= PATH_DIS) ? topoPathTypeStr[pathType] : "UNK";
+}
+
+static bool ncclDiagP2pIsFabricEdge(const struct ncclDiagP2pEdgeInfo* edge) {
+  // MNNVL edges use a fabric handle even when their topology path is reported as NVLink.
+  return edge->handleType == ncclDiagP2pHandleCuMemFabric || edge->pathType == PATH_NET;
+}
+
+static const char* ncclDiagP2pEdgeAdvice(const struct ncclDiagP2pEdgeInfo* edge) {
+  if (ncclDiagP2pIsFabricEdge(edge)) {
+    return "check the IMEX domain with 'nvidia-imex-ctl -H -N' (nodes READY, connectivity C) and verify access to "
+           "/dev/nvidia-caps-imex-channels/channel*";
+  }
+
+  switch (edge->pathType) {
+  case PATH_NVL:
+  case PATH_NVB:
+    return "check the single-node NVLink topology and peer-access state with 'nvidia-smi topo -m' and "
+           "'nvidia-smi topo -p2p n'";
+  case PATH_PIX:
+  case PATH_PXB:
+  case PATH_PHB:
+  case PATH_SYS:
+    return "check the affected pair with 'nvidia-smi topo -p2p p', then check Linux bare-metal IOMMU mode and PCIe "
+           "ACS settings";
+  default:
+    return "inspect the affected GPU pair with 'nvidia-smi topo -m' and the applicable 'nvidia-smi topo -p2p' check";
+  }
+}
+
+static const char* ncclDiagP2pImportAdvice(const struct ncclDiagP2pEdgeInfo* edge) {
+  if (ncclDiagP2pIsFabricEdge(edge)) return ncclDiagP2pEdgeAdvice(edge);
+
+  switch (edge->handleType) {
+  case ncclDiagP2pHandleDirect:
+    return "inspect preceding CUDA peer-access or virtual-memory mapping errors on the source rank";
+  case ncclDiagP2pHandleLegacyIpc:
+    return "check CUDA IPC support, GPU visibility, and process or container isolation";
+  case ncclDiagP2pHandleCuMemPosixFd:
+    return "check cuMem POSIX-FD sharing support and process or container permissions";
+  default:
+    return "check CUDA virtual-memory handle support and permissions between the processes";
+  }
 }
 
 static int ncclDiagP2pPathType(struct ncclComm* comm, int srcRank, int dstRank) {
@@ -251,33 +296,49 @@ static void ncclDiagP2pReport(struct ncclComm* comm, int srcRank, int dstRank, c
   char edgeFields[256];
   ncclDiagP2pFormatPeerFields(comm, srcRank, dstRank, edge, edgeFields, sizeof(edgeFields));
 
-  if (result->reason == ncclDiagP2pReasonNoDescriptor || result->reason == ncclDiagP2pReasonImport) {
-    DIAG_PRINT("NCCL DIAG [INFO] p2p: IPC handle export/import failed %s reason=%s", edgeFields,
-               ncclDiagP2pReasonName(result->reason));
+  if (result->reason == ncclDiagP2pReasonNoDescriptor) {
+    DIAG_PRINT("NCCL DIAG [INFO] p2p: destination buffer unavailable %s reason=%s; inspect earlier allocation, export, "
+               "or initialization errors on the destination rank, then %s",
+               edgeFields, ncclDiagP2pReasonName(result->reason), ncclDiagP2pEdgeAdvice(edge));
+    return;
+  }
+
+  if (result->reason == ncclDiagP2pReasonLocalCuda) {
+    DIAG_PRINT("NCCL DIAG [INFO] p2p: local CUDA setup failed %s reason=%s; inspect preceding device, stream, "
+               "allocation, or initialization errors on the source rank",
+               edgeFields, ncclDiagP2pReasonName(result->reason));
+    return;
+  }
+
+  if (result->reason == ncclDiagP2pReasonImport) {
+    DIAG_PRINT("NCCL DIAG [INFO] p2p: peer-memory import failed %s reason=%s; %s", edgeFields,
+               ncclDiagP2pReasonName(result->reason), ncclDiagP2pImportAdvice(edge));
     return;
   }
 
   if (result->reason == ncclDiagP2pReasonWriteMismatch) {
-    DIAG_PRINT("NCCL DIAG [INFO] p2p: write mismatch %s expected=0x%016llx got=0x%016llx verify=0x%016llx", edgeFields,
-               (unsigned long long)ncclDiagP2pWritePattern(srcRank, dstRank), (unsigned long long)result->writeGot,
-               (unsigned long long)result->verifyGot);
+    DIAG_PRINT("NCCL DIAG [INFO] p2p: write mismatch %s expected=0x%016llx got=0x%016llx verify=0x%016llx; %s",
+               edgeFields, (unsigned long long)ncclDiagP2pWritePattern(srcRank, dstRank),
+               (unsigned long long)result->writeGot, (unsigned long long)result->verifyGot,
+               ncclDiagP2pEdgeAdvice(edge));
     return;
   }
 
   if (result->reason == ncclDiagP2pReasonReadMismatch) {
-    DIAG_PRINT("NCCL DIAG [INFO] p2p: read mismatch %s expected=0x%016llx got=0x%016llx", edgeFields,
-               (unsigned long long)ncclDiagP2pReadPattern(dstRank, srcRank), (unsigned long long)result->readGot);
+    DIAG_PRINT("NCCL DIAG [INFO] p2p: read mismatch %s expected=0x%016llx got=0x%016llx; %s", edgeFields,
+               (unsigned long long)ncclDiagP2pReadPattern(dstRank, srcRank), (unsigned long long)result->readGot,
+               ncclDiagP2pEdgeAdvice(edge));
     return;
   }
 
   if (result->reason == ncclDiagP2pReasonTopo) {
-    DIAG_PRINT("NCCL DIAG [INFO] p2p: topology check failed %s reason=%s", edgeFields,
-               ncclDiagP2pReasonName(result->reason));
+    DIAG_PRINT("NCCL DIAG [INFO] p2p: topology check failed %s reason=%s; inspect preceding topology records, then %s",
+               edgeFields, ncclDiagP2pReasonName(result->reason), ncclDiagP2pEdgeAdvice(edge));
     return;
   }
 
-  DIAG_PRINT("NCCL DIAG [INFO] p2p: launch/check failed %s reason=%s", edgeFields,
-             ncclDiagP2pReasonName(result->reason));
+  DIAG_PRINT("NCCL DIAG [INFO] p2p: launch/check failed %s reason=%s; inspect preceding CUDA or NCCL warnings, then %s",
+             edgeFields, ncclDiagP2pReasonName(result->reason), ncclDiagP2pEdgeAdvice(edge));
 }
 
 static void ncclDiagP2pBuildGroupSummary(int nRanks, const struct ncclDiagP2pEdgeResult* allResults,
@@ -483,7 +544,7 @@ static void ncclDiagP2pImportMappings(struct ncclComm* comm, const int* ranks, i
     const struct ncclDiagP2pEdgeInfo* edge = edgeMatrix + rank * nRanks + dstSlot;
     struct ncclDiagP2pEdgeResult* result = allResults + rank * nRanks + dstSlot;
     if (!cudaUsable || stream == nullptr) {
-      ncclDiagP2pSetReason(result, ncclDiagP2pReasonImport);
+      ncclDiagP2pSetReason(result, ncclDiagP2pReasonLocalCuda);
       ncclDiagP2pLogEdge(comm, "import", comm->rank, dst, edge, "import=0 reason=localCuda");
       continue;
     }
