@@ -2,7 +2,7 @@
  * Do not edit by hand — regenerate instead (see command below).
  *
  * SHA256(curated_apis.yaml) at generation:
- * adb004e5795b642c33fee303ed62bfe766622680b824d0195f2722ad2a84ea20
+ * f0a4b94c6de44532820e4ef54369c1cfb66f5233e07d9b99e4d9a0ceb7b7d46c
  *
  * Per-API typed emit helpers for curated parameter capture. Every
  * helper takes (<captured-args...>, <status_type> status); status is
@@ -4451,6 +4451,1958 @@ static inline void rocm_trace_emit_hipSetupArgument_exit(hipError_t status) {
   }
 }
 
+static inline void rocm_trace_emit_hipGraphCreate_enter(uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphCreate)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphCreate, (int32_t)0, 0, (uint32_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphCreate_exit(hipGraph_t* pGraph_out_ptr,
+                                                       hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphCreate)) {
+    const uint64_t pGraph_val = (status == hipSuccess && pGraph_out_ptr != NULL)
+                                    ? (uint64_t)((uint64_t)(uintptr_t)(*pGraph_out_ptr))
+                                    : 0ULL;
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphCreate, (int32_t)1, pGraph_val, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphDestroy_enter(uint64_t graph) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphDestroy)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphDestroy, (int32_t)0, (uint64_t)(uintptr_t)(graph), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphDestroy_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphDestroy)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphDestroy, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphInstantiate_enter(uint64_t graph, const void* pErrorNode,
+                                                             const void* pLogBuffer,
+                                                             size_t bufferSize) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphInstantiate)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphInstantiate, (int32_t)0, 0,
+                            (uint64_t)(uintptr_t)(graph), (uint64_t)(uintptr_t)(pErrorNode),
+                            (uint64_t)(uintptr_t)(pLogBuffer), (uint64_t)(bufferSize), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphInstantiate_exit(hipGraphExec_t* pGraphExec_out_ptr,
+                                                            hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphInstantiate)) {
+    const uint64_t pGraphExec_val = (status == hipSuccess && pGraphExec_out_ptr != NULL)
+                                        ? (uint64_t)((uint64_t)(uintptr_t)(*pGraphExec_out_ptr))
+                                        : 0ULL;
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphInstantiate, (int32_t)1, pGraphExec_val, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecDestroy_enter(uint64_t graphExec) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecDestroy)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecDestroy, (int32_t)0,
+                            (uint64_t)(uintptr_t)(graphExec), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecDestroy_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecDestroy)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecDestroy, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddKernelNode_enter(uint64_t graph,
+                                                               const void* pDependencies,
+                                                               size_t numDependencies,
+                                                               const void* pNodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddKernelNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddKernelNode, (int32_t)0, 0,
+                            (uint64_t)(uintptr_t)(graph), (uint64_t)(uintptr_t)(pDependencies),
+                            (uint64_t)(numDependencies), (uint64_t)(uintptr_t)(pNodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddKernelNode_exit(hipGraphNode_t* pGraphNode_out_ptr,
+                                                              hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddKernelNode)) {
+    const uint64_t pGraphNode_val = (status == hipSuccess && pGraphNode_out_ptr != NULL)
+                                        ? (uint64_t)((uint64_t)(uintptr_t)(*pGraphNode_out_ptr))
+                                        : 0ULL;
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddKernelNode, (int32_t)1, pGraphNode_val, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddMemcpyNode_enter(uint64_t graph,
+                                                               const void* pDependencies,
+                                                               size_t numDependencies,
+                                                               const void* pCopyParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemcpyNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddMemcpyNode, (int32_t)0, 0,
+                            (uint64_t)(uintptr_t)(graph), (uint64_t)(uintptr_t)(pDependencies),
+                            (uint64_t)(numDependencies), (uint64_t)(uintptr_t)(pCopyParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddMemcpyNode_exit(hipGraphNode_t* pGraphNode_out_ptr,
+                                                              hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemcpyNode)) {
+    const uint64_t pGraphNode_val = (status == hipSuccess && pGraphNode_out_ptr != NULL)
+                                        ? (uint64_t)((uint64_t)(uintptr_t)(*pGraphNode_out_ptr))
+                                        : 0ULL;
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddMemcpyNode, (int32_t)1, pGraphNode_val, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddMemsetNode_enter(uint64_t graph,
+                                                               const void* pDependencies,
+                                                               size_t numDependencies,
+                                                               const void* pMemsetParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemsetNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddMemsetNode, (int32_t)0, 0,
+                            (uint64_t)(uintptr_t)(graph), (uint64_t)(uintptr_t)(pDependencies),
+                            (uint64_t)(numDependencies), (uint64_t)(uintptr_t)(pMemsetParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddMemsetNode_exit(hipGraphNode_t* pGraphNode_out_ptr,
+                                                              hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemsetNode)) {
+    const uint64_t pGraphNode_val = (status == hipSuccess && pGraphNode_out_ptr != NULL)
+                                        ? (uint64_t)((uint64_t)(uintptr_t)(*pGraphNode_out_ptr))
+                                        : 0ULL;
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddMemsetNode, (int32_t)1, pGraphNode_val, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddEventRecordNode_enter(uint64_t graph,
+                                                                    const void* pDependencies,
+                                                                    size_t numDependencies,
+                                                                    uint64_t event) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddEventRecordNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddEventRecordNode, (int32_t)0, 0,
+                            (uint64_t)(uintptr_t)(graph), (uint64_t)(uintptr_t)(pDependencies),
+                            (uint64_t)(numDependencies), (uint64_t)(uintptr_t)(event), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddEventRecordNode_exit(
+    hipGraphNode_t* pGraphNode_out_ptr, hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddEventRecordNode)) {
+    const uint64_t pGraphNode_val = (status == hipSuccess && pGraphNode_out_ptr != NULL)
+                                        ? (uint64_t)((uint64_t)(uintptr_t)(*pGraphNode_out_ptr))
+                                        : 0ULL;
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddEventRecordNode, (int32_t)1, pGraphNode_val, 0, 0,
+                            0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddEventWaitNode_enter(uint64_t graph,
+                                                                  const void* pDependencies,
+                                                                  size_t numDependencies,
+                                                                  uint64_t event) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddEventWaitNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddEventWaitNode, (int32_t)0, 0,
+                            (uint64_t)(uintptr_t)(graph), (uint64_t)(uintptr_t)(pDependencies),
+                            (uint64_t)(numDependencies), (uint64_t)(uintptr_t)(event), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddEventWaitNode_exit(hipGraphNode_t* pGraphNode_out_ptr,
+                                                                 hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddEventWaitNode)) {
+    const uint64_t pGraphNode_val = (status == hipSuccess && pGraphNode_out_ptr != NULL)
+                                        ? (uint64_t)((uint64_t)(uintptr_t)(*pGraphNode_out_ptr))
+                                        : 0ULL;
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddEventWaitNode, (int32_t)1, pGraphNode_val, 0, 0, 0,
+                            0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddDependencies_enter(uint64_t graph, const void* from,
+                                                                 const void* to,
+                                                                 size_t numDependencies) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddDependencies)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddDependencies, (int32_t)0,
+                            (uint64_t)(uintptr_t)(graph), (uint64_t)(uintptr_t)(from),
+                            (uint64_t)(uintptr_t)(to), (uint64_t)(numDependencies), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddDependencies_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddDependencies)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddDependencies, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphLaunch_enter(uint64_t graphExec, uint64_t stream) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphLaunch)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphLaunch, (int32_t)0, (uint64_t)(uintptr_t)(graphExec),
+                            (uint64_t)(uintptr_t)(stream), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphLaunch_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphLaunch)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphLaunch, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecKernelNodeSetParams_enter(uint64_t hGraphExec,
+                                                                         uint64_t node,
+                                                                         const void* pNodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecKernelNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecKernelNodeSetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hGraphExec), (uint64_t)(uintptr_t)(node),
+                            (uint64_t)(uintptr_t)(pNodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecKernelNodeSetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecKernelNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecKernelNodeSetParams, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecMemcpyNodeSetParams1D_enter(
+    uint64_t hGraphExec, uint64_t node, const void* dst, const void* src, size_t count,
+    int32_t kind) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecMemcpyNodeSetParams1D)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecMemcpyNodeSetParams1D, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hGraphExec), (uint64_t)(uintptr_t)(node),
+                            (uint64_t)(uintptr_t)(dst), (uint64_t)(uintptr_t)(src),
+                            (uint64_t)(count), (int32_t)(kind), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecMemcpyNodeSetParams1D_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecMemcpyNodeSetParams1D)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecMemcpyNodeSetParams1D, (int32_t)1, 0, 0, 0, 0, 0,
+                            0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDrvGraphAddMemFreeNode_enter(const void* phGraphNode,
+                                                                   uint64_t hGraph,
+                                                                   const void* dependencies,
+                                                                   size_t numDependencies,
+                                                                   uint64_t dptr) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDrvGraphAddMemFreeNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDrvGraphAddMemFreeNode, (int32_t)0,
+                            (uint64_t)(uintptr_t)(phGraphNode), (uint64_t)(uintptr_t)(hGraph),
+                            (uint64_t)(uintptr_t)(dependencies), (uint64_t)(numDependencies),
+                            (uint64_t)(dptr), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDrvGraphAddMemFreeNode_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDrvGraphAddMemFreeNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDrvGraphAddMemFreeNode, (int32_t)1, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDrvGraphAddMemcpyNode_enter(
+    const void* phGraphNode, uint64_t hGraph, const void* dependencies, size_t numDependencies,
+    const void* copyParams, const void* ctx) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDrvGraphAddMemcpyNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDrvGraphAddMemcpyNode, (int32_t)0,
+                            (uint64_t)(uintptr_t)(phGraphNode), (uint64_t)(uintptr_t)(hGraph),
+                            (uint64_t)(uintptr_t)(dependencies), (uint64_t)(numDependencies),
+                            (uint64_t)(uintptr_t)(copyParams), (uint64_t)(uintptr_t)(ctx), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDrvGraphAddMemcpyNode_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDrvGraphAddMemcpyNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDrvGraphAddMemcpyNode, (int32_t)1, 0, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDrvGraphAddMemsetNode_enter(
+    const void* phGraphNode, uint64_t hGraph, const void* dependencies, size_t numDependencies,
+    const void* memsetParams, const void* ctx) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDrvGraphAddMemsetNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDrvGraphAddMemsetNode, (int32_t)0,
+                            (uint64_t)(uintptr_t)(phGraphNode), (uint64_t)(uintptr_t)(hGraph),
+                            (uint64_t)(uintptr_t)(dependencies), (uint64_t)(numDependencies),
+                            (uint64_t)(uintptr_t)(memsetParams), (uint64_t)(uintptr_t)(ctx), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDrvGraphAddMemsetNode_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDrvGraphAddMemsetNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDrvGraphAddMemsetNode, (int32_t)1, 0, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDrvGraphExecMemcpyNodeSetParams_enter(uint64_t hGraphExec,
+                                                                            uint64_t hNode,
+                                                                            const void* copyParams,
+                                                                            const void* ctx) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDrvGraphExecMemcpyNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDrvGraphExecMemcpyNodeSetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hGraphExec), (uint64_t)(uintptr_t)(hNode),
+                            (uint64_t)(uintptr_t)(copyParams), (uint64_t)(uintptr_t)(ctx), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDrvGraphExecMemcpyNodeSetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDrvGraphExecMemcpyNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDrvGraphExecMemcpyNodeSetParams, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDrvGraphExecMemsetNodeSetParams_enter(
+    uint64_t hGraphExec, uint64_t hNode, const void* memsetParams, const void* ctx) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDrvGraphExecMemsetNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDrvGraphExecMemsetNodeSetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hGraphExec), (uint64_t)(uintptr_t)(hNode),
+                            (uint64_t)(uintptr_t)(memsetParams), (uint64_t)(uintptr_t)(ctx), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDrvGraphExecMemsetNodeSetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDrvGraphExecMemsetNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDrvGraphExecMemsetNodeSetParams, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDrvGraphMemcpyNodeGetParams_enter(uint64_t hNode,
+                                                                        const void* nodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDrvGraphMemcpyNodeGetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDrvGraphMemcpyNodeGetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hNode), (uint64_t)(uintptr_t)(nodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDrvGraphMemcpyNodeGetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDrvGraphMemcpyNodeGetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDrvGraphMemcpyNodeGetParams, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDrvGraphMemcpyNodeSetParams_enter(uint64_t hNode,
+                                                                        const void* nodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDrvGraphMemcpyNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDrvGraphMemcpyNodeSetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hNode), (uint64_t)(uintptr_t)(nodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDrvGraphMemcpyNodeSetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDrvGraphMemcpyNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDrvGraphMemcpyNodeSetParams, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddBatchMemOpNode_enter(const void* pGraphNode,
+                                                                   uint64_t graph,
+                                                                   const void* dependencies,
+                                                                   size_t numDependencies,
+                                                                   const void* nodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddBatchMemOpNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddBatchMemOpNode, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pGraphNode), (uint64_t)(uintptr_t)(graph),
+                            (uint64_t)(uintptr_t)(dependencies), (uint64_t)(numDependencies),
+                            (uint64_t)(uintptr_t)(nodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddBatchMemOpNode_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddBatchMemOpNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddBatchMemOpNode, (int32_t)1, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddChildGraphNode_enter(const void* pGraphNode,
+                                                                   uint64_t graph,
+                                                                   const void* pDependencies,
+                                                                   size_t numDependencies,
+                                                                   uint64_t childGraph) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddChildGraphNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddChildGraphNode, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pGraphNode), (uint64_t)(uintptr_t)(graph),
+                            (uint64_t)(uintptr_t)(pDependencies), (uint64_t)(numDependencies),
+                            (uint64_t)(uintptr_t)(childGraph), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddChildGraphNode_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddChildGraphNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddChildGraphNode, (int32_t)1, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddEmptyNode_enter(const void* pGraphNode,
+                                                              uint64_t graph,
+                                                              const void* pDependencies,
+                                                              size_t numDependencies) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddEmptyNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddEmptyNode, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pGraphNode), (uint64_t)(uintptr_t)(graph),
+                            (uint64_t)(uintptr_t)(pDependencies), (uint64_t)(numDependencies), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddEmptyNode_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddEmptyNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddEmptyNode, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddExternalSemaphoresSignalNode_enter(
+    const void* pGraphNode, uint64_t graph, const void* pDependencies, size_t numDependencies,
+    const void* nodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddExternalSemaphoresSignalNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddExternalSemaphoresSignalNode, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pGraphNode), (uint64_t)(uintptr_t)(graph),
+                            (uint64_t)(uintptr_t)(pDependencies), (uint64_t)(numDependencies),
+                            (uint64_t)(uintptr_t)(nodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddExternalSemaphoresSignalNode_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddExternalSemaphoresSignalNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddExternalSemaphoresSignalNode, (int32_t)1, 0, 0, 0,
+                            0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddExternalSemaphoresWaitNode_enter(
+    const void* pGraphNode, uint64_t graph, const void* pDependencies, size_t numDependencies,
+    const void* nodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddExternalSemaphoresWaitNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddExternalSemaphoresWaitNode, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pGraphNode), (uint64_t)(uintptr_t)(graph),
+                            (uint64_t)(uintptr_t)(pDependencies), (uint64_t)(numDependencies),
+                            (uint64_t)(uintptr_t)(nodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddExternalSemaphoresWaitNode_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddExternalSemaphoresWaitNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddExternalSemaphoresWaitNode, (int32_t)1, 0, 0, 0, 0,
+                            0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddHostNode_enter(const void* pGraphNode, uint64_t graph,
+                                                             const void* pDependencies,
+                                                             size_t numDependencies,
+                                                             const void* pNodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddHostNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddHostNode, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pGraphNode), (uint64_t)(uintptr_t)(graph),
+                            (uint64_t)(uintptr_t)(pDependencies), (uint64_t)(numDependencies),
+                            (uint64_t)(uintptr_t)(pNodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddHostNode_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddHostNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddHostNode, (int32_t)1, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddMemAllocNode_enter(const void* pGraphNode,
+                                                                 uint64_t graph,
+                                                                 const void* pDependencies,
+                                                                 size_t numDependencies,
+                                                                 const void* pNodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemAllocNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddMemAllocNode, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pGraphNode), (uint64_t)(uintptr_t)(graph),
+                            (uint64_t)(uintptr_t)(pDependencies), (uint64_t)(numDependencies),
+                            (uint64_t)(uintptr_t)(pNodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddMemAllocNode_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemAllocNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddMemAllocNode, (int32_t)1, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddMemFreeNode_enter(const void* pGraphNode,
+                                                                uint64_t graph,
+                                                                const void* pDependencies,
+                                                                size_t numDependencies,
+                                                                const void* dev_ptr) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemFreeNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddMemFreeNode, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pGraphNode), (uint64_t)(uintptr_t)(graph),
+                            (uint64_t)(uintptr_t)(pDependencies), (uint64_t)(numDependencies),
+                            (uint64_t)(uintptr_t)(dev_ptr), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddMemFreeNode_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemFreeNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddMemFreeNode, (int32_t)1, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddMemcpyNode1D_enter(
+    const void* pGraphNode, uint64_t graph, const void* pDependencies, size_t numDependencies,
+    const void* dst, const void* src, size_t count, int32_t kind) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemcpyNode1D)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddMemcpyNode1D, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pGraphNode), (uint64_t)(uintptr_t)(graph),
+                            (uint64_t)(uintptr_t)(pDependencies), (uint64_t)(numDependencies),
+                            (uint64_t)(uintptr_t)(dst), (uint64_t)(uintptr_t)(src),
+                            (uint64_t)(count), (int32_t)(kind), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddMemcpyNode1D_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemcpyNode1D)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddMemcpyNode1D, (int32_t)1, 0, 0, 0, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddMemcpyNodeFromSymbol_enter(
+    const void* pGraphNode, uint64_t graph, const void* pDependencies, size_t numDependencies,
+    const void* dst, const void* symbol, size_t count, size_t offset, int32_t kind) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemcpyNodeFromSymbol) ||
+      lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemcpyNodeFromSymbol_2)) {
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemcpyNodeFromSymbol)) {
+      lttng_ust_do_tracepoint(rocm_hip, hipGraphAddMemcpyNodeFromSymbol, (int32_t)0,
+                              (uint64_t)(uintptr_t)(pGraphNode), (uint64_t)(uintptr_t)(graph),
+                              (uint64_t)(uintptr_t)(pDependencies), (uint64_t)(numDependencies),
+                              (uint64_t)(uintptr_t)(dst), (uint64_t)(uintptr_t)(symbol),
+                              (uint64_t)(count), (uint64_t)(offset), (int32_t)(kind));
+    }
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemcpyNodeFromSymbol_2)) {
+      lttng_ust_do_tracepoint(rocm_hip, hipGraphAddMemcpyNodeFromSymbol_2, (int32_t)0, 0);
+    }
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddMemcpyNodeFromSymbol_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemcpyNodeFromSymbol) ||
+      lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemcpyNodeFromSymbol_2)) {
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemcpyNodeFromSymbol)) {
+      lttng_ust_do_tracepoint(rocm_hip, hipGraphAddMemcpyNodeFromSymbol, (int32_t)1, 0, 0, 0, 0, 0,
+                              0, 0, 0, 0);
+    }
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemcpyNodeFromSymbol_2)) {
+      lttng_ust_do_tracepoint(rocm_hip, hipGraphAddMemcpyNodeFromSymbol_2, (int32_t)1,
+                              (int32_t)status);
+    }
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddMemcpyNodeToSymbol_enter(
+    const void* pGraphNode, uint64_t graph, const void* pDependencies, size_t numDependencies,
+    const void* symbol, const void* src, size_t count, size_t offset, int32_t kind) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemcpyNodeToSymbol) ||
+      lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemcpyNodeToSymbol_2)) {
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemcpyNodeToSymbol)) {
+      lttng_ust_do_tracepoint(rocm_hip, hipGraphAddMemcpyNodeToSymbol, (int32_t)0,
+                              (uint64_t)(uintptr_t)(pGraphNode), (uint64_t)(uintptr_t)(graph),
+                              (uint64_t)(uintptr_t)(pDependencies), (uint64_t)(numDependencies),
+                              (uint64_t)(uintptr_t)(symbol), (uint64_t)(uintptr_t)(src),
+                              (uint64_t)(count), (uint64_t)(offset), (int32_t)(kind));
+    }
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemcpyNodeToSymbol_2)) {
+      lttng_ust_do_tracepoint(rocm_hip, hipGraphAddMemcpyNodeToSymbol_2, (int32_t)0, 0);
+    }
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddMemcpyNodeToSymbol_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemcpyNodeToSymbol) ||
+      lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemcpyNodeToSymbol_2)) {
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemcpyNodeToSymbol)) {
+      lttng_ust_do_tracepoint(rocm_hip, hipGraphAddMemcpyNodeToSymbol, (int32_t)1, 0, 0, 0, 0, 0, 0,
+                              0, 0, 0);
+    }
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddMemcpyNodeToSymbol_2)) {
+      lttng_ust_do_tracepoint(rocm_hip, hipGraphAddMemcpyNodeToSymbol_2, (int32_t)1,
+                              (int32_t)status);
+    }
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddNode_enter(const void* pGraphNode, uint64_t graph,
+                                                         const void* pDependencies,
+                                                         size_t numDependencies,
+                                                         const void* nodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddNode, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pGraphNode), (uint64_t)(uintptr_t)(graph),
+                            (uint64_t)(uintptr_t)(pDependencies), (uint64_t)(numDependencies),
+                            (uint64_t)(uintptr_t)(nodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphAddNode_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphAddNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphAddNode, (int32_t)1, 0, 0, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphBatchMemOpNodeGetParams_enter(
+    uint64_t hNode, const void* nodeParams_out) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphBatchMemOpNodeGetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphBatchMemOpNodeGetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hNode), (uint64_t)(uintptr_t)(nodeParams_out), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphBatchMemOpNodeGetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphBatchMemOpNodeGetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphBatchMemOpNodeGetParams, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphBatchMemOpNodeSetParams_enter(uint64_t hNode,
+                                                                         const void* nodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphBatchMemOpNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphBatchMemOpNodeSetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hNode), (uint64_t)(uintptr_t)(nodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphBatchMemOpNodeSetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphBatchMemOpNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphBatchMemOpNodeSetParams, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphChildGraphNodeGetGraph_enter(uint64_t node,
+                                                                        const void* pGraph) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphChildGraphNodeGetGraph)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphChildGraphNodeGetGraph, (int32_t)0,
+                            (uint64_t)(uintptr_t)(node), (uint64_t)(uintptr_t)(pGraph), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphChildGraphNodeGetGraph_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphChildGraphNodeGetGraph)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphChildGraphNodeGetGraph, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphClone_enter(const void* pGraphClone,
+                                                       uint64_t originalGraph) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphClone)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphClone, (int32_t)0, (uint64_t)(uintptr_t)(pGraphClone),
+                            (uint64_t)(uintptr_t)(originalGraph), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphClone_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphClone)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphClone, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphDebugDotPrint_enter(uint64_t graph, const char* path,
+                                                               uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphDebugDotPrint)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphDebugDotPrint, (int32_t)0,
+                            (uint64_t)(uintptr_t)(graph), (path ? path : ""), (uint32_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphDebugDotPrint_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphDebugDotPrint)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphDebugDotPrint, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphDestroyNode_enter(uint64_t node) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphDestroyNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphDestroyNode, (int32_t)0, (uint64_t)(uintptr_t)(node),
+                            0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphDestroyNode_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphDestroyNode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphDestroyNode, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphEventRecordNodeGetEvent_enter(uint64_t node,
+                                                                         const void* event_out) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphEventRecordNodeGetEvent)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphEventRecordNodeGetEvent, (int32_t)0,
+                            (uint64_t)(uintptr_t)(node), (uint64_t)(uintptr_t)(event_out), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphEventRecordNodeGetEvent_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphEventRecordNodeGetEvent)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphEventRecordNodeGetEvent, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphEventRecordNodeSetEvent_enter(uint64_t node,
+                                                                         uint64_t event) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphEventRecordNodeSetEvent)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphEventRecordNodeSetEvent, (int32_t)0,
+                            (uint64_t)(uintptr_t)(node), (uint64_t)(uintptr_t)(event), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphEventRecordNodeSetEvent_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphEventRecordNodeSetEvent)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphEventRecordNodeSetEvent, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphEventWaitNodeGetEvent_enter(uint64_t node,
+                                                                       const void* event_out) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphEventWaitNodeGetEvent)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphEventWaitNodeGetEvent, (int32_t)0,
+                            (uint64_t)(uintptr_t)(node), (uint64_t)(uintptr_t)(event_out), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphEventWaitNodeGetEvent_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphEventWaitNodeGetEvent)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphEventWaitNodeGetEvent, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphEventWaitNodeSetEvent_enter(uint64_t node,
+                                                                       uint64_t event) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphEventWaitNodeSetEvent)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphEventWaitNodeSetEvent, (int32_t)0,
+                            (uint64_t)(uintptr_t)(node), (uint64_t)(uintptr_t)(event), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphEventWaitNodeSetEvent_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphEventWaitNodeSetEvent)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphEventWaitNodeSetEvent, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecBatchMemOpNodeSetParams_enter(
+    uint64_t hGraphExec, uint64_t hNode, const void* nodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecBatchMemOpNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecBatchMemOpNodeSetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hGraphExec), (uint64_t)(uintptr_t)(hNode),
+                            (uint64_t)(uintptr_t)(nodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecBatchMemOpNodeSetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecBatchMemOpNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecBatchMemOpNodeSetParams, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecChildGraphNodeSetParams_enter(uint64_t hGraphExec,
+                                                                             uint64_t node,
+                                                                             uint64_t childGraph) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecChildGraphNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecChildGraphNodeSetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hGraphExec), (uint64_t)(uintptr_t)(node),
+                            (uint64_t)(uintptr_t)(childGraph), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecChildGraphNodeSetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecChildGraphNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecChildGraphNodeSetParams, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecEventRecordNodeSetEvent_enter(uint64_t hGraphExec,
+                                                                             uint64_t hNode,
+                                                                             uint64_t event) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecEventRecordNodeSetEvent)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecEventRecordNodeSetEvent, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hGraphExec), (uint64_t)(uintptr_t)(hNode),
+                            (uint64_t)(uintptr_t)(event), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecEventRecordNodeSetEvent_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecEventRecordNodeSetEvent)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecEventRecordNodeSetEvent, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecEventWaitNodeSetEvent_enter(uint64_t hGraphExec,
+                                                                           uint64_t hNode,
+                                                                           uint64_t event) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecEventWaitNodeSetEvent)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecEventWaitNodeSetEvent, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hGraphExec), (uint64_t)(uintptr_t)(hNode),
+                            (uint64_t)(uintptr_t)(event), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecEventWaitNodeSetEvent_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecEventWaitNodeSetEvent)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecEventWaitNodeSetEvent, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecExternalSemaphoresSignalNodeSetParams_enter(
+    uint64_t hGraphExec, uint64_t hNode, const void* nodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecExternalSemaphoresSignalNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecExternalSemaphoresSignalNodeSetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hGraphExec), (uint64_t)(uintptr_t)(hNode),
+                            (uint64_t)(uintptr_t)(nodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecExternalSemaphoresSignalNodeSetParams_exit(
+    hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecExternalSemaphoresSignalNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecExternalSemaphoresSignalNodeSetParams, (int32_t)1,
+                            0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecExternalSemaphoresWaitNodeSetParams_enter(
+    uint64_t hGraphExec, uint64_t hNode, const void* nodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecExternalSemaphoresWaitNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecExternalSemaphoresWaitNodeSetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hGraphExec), (uint64_t)(uintptr_t)(hNode),
+                            (uint64_t)(uintptr_t)(nodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecExternalSemaphoresWaitNodeSetParams_exit(
+    hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecExternalSemaphoresWaitNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecExternalSemaphoresWaitNodeSetParams, (int32_t)1,
+                            0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecGetFlags_enter(uint64_t graphExec,
+                                                              const void* flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecGetFlags)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecGetFlags, (int32_t)0,
+                            (uint64_t)(uintptr_t)(graphExec), (uint64_t)(uintptr_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecGetFlags_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecGetFlags)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecGetFlags, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecHostNodeSetParams_enter(uint64_t hGraphExec,
+                                                                       uint64_t node,
+                                                                       const void* pNodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecHostNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecHostNodeSetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hGraphExec), (uint64_t)(uintptr_t)(node),
+                            (uint64_t)(uintptr_t)(pNodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecHostNodeSetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecHostNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecHostNodeSetParams, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecMemcpyNodeSetParams_enter(uint64_t hGraphExec,
+                                                                         uint64_t node,
+                                                                         const void* pNodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecMemcpyNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecMemcpyNodeSetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hGraphExec), (uint64_t)(uintptr_t)(node),
+                            (uint64_t)(uintptr_t)(pNodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecMemcpyNodeSetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecMemcpyNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecMemcpyNodeSetParams, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecMemcpyNodeSetParamsFromSymbol_enter(
+    uint64_t hGraphExec, uint64_t node, const void* dst, const void* symbol, size_t count,
+    size_t offset, int32_t kind) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecMemcpyNodeSetParamsFromSymbol)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecMemcpyNodeSetParamsFromSymbol, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hGraphExec), (uint64_t)(uintptr_t)(node),
+                            (uint64_t)(uintptr_t)(dst), (uint64_t)(uintptr_t)(symbol),
+                            (uint64_t)(count), (uint64_t)(offset), (int32_t)(kind), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecMemcpyNodeSetParamsFromSymbol_exit(
+    hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecMemcpyNodeSetParamsFromSymbol)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecMemcpyNodeSetParamsFromSymbol, (int32_t)1, 0, 0,
+                            0, 0, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecMemcpyNodeSetParamsToSymbol_enter(
+    uint64_t hGraphExec, uint64_t node, const void* symbol, const void* src, size_t count,
+    size_t offset, int32_t kind) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecMemcpyNodeSetParamsToSymbol)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecMemcpyNodeSetParamsToSymbol, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hGraphExec), (uint64_t)(uintptr_t)(node),
+                            (uint64_t)(uintptr_t)(symbol), (uint64_t)(uintptr_t)(src),
+                            (uint64_t)(count), (uint64_t)(offset), (int32_t)(kind), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecMemcpyNodeSetParamsToSymbol_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecMemcpyNodeSetParamsToSymbol)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecMemcpyNodeSetParamsToSymbol, (int32_t)1, 0, 0, 0,
+                            0, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecMemsetNodeSetParams_enter(uint64_t hGraphExec,
+                                                                         uint64_t node,
+                                                                         const void* pNodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecMemsetNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecMemsetNodeSetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hGraphExec), (uint64_t)(uintptr_t)(node),
+                            (uint64_t)(uintptr_t)(pNodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecMemsetNodeSetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecMemsetNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecMemsetNodeSetParams, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecNodeSetParams_enter(uint64_t hGraphExec,
+                                                                   uint64_t node,
+                                                                   const void* nodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecNodeSetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hGraphExec), (uint64_t)(uintptr_t)(node),
+                            (uint64_t)(uintptr_t)(nodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecNodeSetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecNodeSetParams, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecUpdate_enter(uint64_t hGraphExec, uint64_t hGraph,
+                                                            const void* hErrorNode_out,
+                                                            const void* updateResult_out) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecUpdate)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecUpdate, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hGraphExec), (uint64_t)(uintptr_t)(hGraph),
+                            (uint64_t)(uintptr_t)(hErrorNode_out),
+                            (uint64_t)(uintptr_t)(updateResult_out), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExecUpdate_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExecUpdate)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExecUpdate, (int32_t)1, 0, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExternalSemaphoresSignalNodeGetParams_enter(
+    uint64_t hNode, const void* params_out) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExternalSemaphoresSignalNodeGetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExternalSemaphoresSignalNodeGetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hNode), (uint64_t)(uintptr_t)(params_out), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExternalSemaphoresSignalNodeGetParams_exit(
+    hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExternalSemaphoresSignalNodeGetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExternalSemaphoresSignalNodeGetParams, (int32_t)1, 0,
+                            0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExternalSemaphoresSignalNodeSetParams_enter(
+    uint64_t hNode, const void* nodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExternalSemaphoresSignalNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExternalSemaphoresSignalNodeSetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hNode), (uint64_t)(uintptr_t)(nodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExternalSemaphoresSignalNodeSetParams_exit(
+    hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExternalSemaphoresSignalNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExternalSemaphoresSignalNodeSetParams, (int32_t)1, 0,
+                            0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExternalSemaphoresWaitNodeGetParams_enter(
+    uint64_t hNode, const void* params_out) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExternalSemaphoresWaitNodeGetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExternalSemaphoresWaitNodeGetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hNode), (uint64_t)(uintptr_t)(params_out), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExternalSemaphoresWaitNodeGetParams_exit(
+    hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExternalSemaphoresWaitNodeGetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExternalSemaphoresWaitNodeGetParams, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExternalSemaphoresWaitNodeSetParams_enter(
+    uint64_t hNode, const void* nodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExternalSemaphoresWaitNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExternalSemaphoresWaitNodeSetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hNode), (uint64_t)(uintptr_t)(nodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphExternalSemaphoresWaitNodeSetParams_exit(
+    hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphExternalSemaphoresWaitNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphExternalSemaphoresWaitNodeSetParams, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphGetEdges_enter(uint64_t graph, const void* from,
+                                                          const void* to, const void* numEdges) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphGetEdges)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphGetEdges, (int32_t)0, (uint64_t)(uintptr_t)(graph),
+                            (uint64_t)(uintptr_t)(from), (uint64_t)(uintptr_t)(to),
+                            (uint64_t)(uintptr_t)(numEdges), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphGetEdges_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphGetEdges)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphGetEdges, (int32_t)1, 0, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphGetNodes_enter(uint64_t graph, const void* nodes,
+                                                          const void* numNodes) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphGetNodes)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphGetNodes, (int32_t)0, (uint64_t)(uintptr_t)(graph),
+                            (uint64_t)(uintptr_t)(nodes), (uint64_t)(uintptr_t)(numNodes), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphGetNodes_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphGetNodes)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphGetNodes, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphGetRootNodes_enter(uint64_t graph,
+                                                              const void* pRootNodes,
+                                                              const void* pNumRootNodes) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphGetRootNodes)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphGetRootNodes, (int32_t)0,
+                            (uint64_t)(uintptr_t)(graph), (uint64_t)(uintptr_t)(pRootNodes),
+                            (uint64_t)(uintptr_t)(pNumRootNodes), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphGetRootNodes_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphGetRootNodes)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphGetRootNodes, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphHostNodeGetParams_enter(uint64_t node,
+                                                                   const void* pNodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphHostNodeGetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphHostNodeGetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(node), (uint64_t)(uintptr_t)(pNodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphHostNodeGetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphHostNodeGetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphHostNodeGetParams, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphHostNodeSetParams_enter(uint64_t node,
+                                                                   const void* pNodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphHostNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphHostNodeSetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(node), (uint64_t)(uintptr_t)(pNodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphHostNodeSetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphHostNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphHostNodeSetParams, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphInstantiateWithFlags_enter(const void* pGraphExec,
+                                                                      uint64_t graph,
+                                                                      uint64_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphInstantiateWithFlags)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphInstantiateWithFlags, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pGraphExec), (uint64_t)(uintptr_t)(graph),
+                            (uint64_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphInstantiateWithFlags_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphInstantiateWithFlags)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphInstantiateWithFlags, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphInstantiateWithParams_enter(
+    const void* pGraphExec, uint64_t graph, const void* instantiateParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphInstantiateWithParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphInstantiateWithParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pGraphExec), (uint64_t)(uintptr_t)(graph),
+                            (uint64_t)(uintptr_t)(instantiateParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphInstantiateWithParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphInstantiateWithParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphInstantiateWithParams, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphKernelNodeCopyAttributes_enter(uint64_t hSrc,
+                                                                          uint64_t hDst) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphKernelNodeCopyAttributes)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphKernelNodeCopyAttributes, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hSrc), (uint64_t)(uintptr_t)(hDst), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphKernelNodeCopyAttributes_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphKernelNodeCopyAttributes)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphKernelNodeCopyAttributes, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphKernelNodeGetAttribute_enter(uint64_t hNode,
+                                                                        int32_t attr,
+                                                                        const void* value) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphKernelNodeGetAttribute)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphKernelNodeGetAttribute, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hNode), (int32_t)(attr),
+                            (uint64_t)(uintptr_t)(value), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphKernelNodeGetAttribute_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphKernelNodeGetAttribute)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphKernelNodeGetAttribute, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphKernelNodeGetParams_enter(uint64_t node,
+                                                                     const void* pNodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphKernelNodeGetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphKernelNodeGetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(node), (uint64_t)(uintptr_t)(pNodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphKernelNodeGetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphKernelNodeGetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphKernelNodeGetParams, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphKernelNodeSetAttribute_enter(uint64_t hNode,
+                                                                        int32_t attr,
+                                                                        const void* value) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphKernelNodeSetAttribute)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphKernelNodeSetAttribute, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hNode), (int32_t)(attr),
+                            (uint64_t)(uintptr_t)(value), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphKernelNodeSetAttribute_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphKernelNodeSetAttribute)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphKernelNodeSetAttribute, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphKernelNodeSetParams_enter(uint64_t node,
+                                                                     const void* pNodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphKernelNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphKernelNodeSetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(node), (uint64_t)(uintptr_t)(pNodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphKernelNodeSetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphKernelNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphKernelNodeSetParams, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphLaunch_spt_enter(uint64_t graphExec, uint64_t stream) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphLaunch_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphLaunch_spt, (int32_t)0,
+                            (uint64_t)(uintptr_t)(graphExec), (uint64_t)(uintptr_t)(stream), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphLaunch_spt_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphLaunch_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphLaunch_spt, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphMemAllocNodeGetParams_enter(uint64_t node,
+                                                                       const void* pNodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphMemAllocNodeGetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphMemAllocNodeGetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(node), (uint64_t)(uintptr_t)(pNodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphMemAllocNodeGetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphMemAllocNodeGetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphMemAllocNodeGetParams, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphMemFreeNodeGetParams_enter(uint64_t node,
+                                                                      const void* dev_ptr) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphMemFreeNodeGetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphMemFreeNodeGetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(node), (uint64_t)(uintptr_t)(dev_ptr), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphMemFreeNodeGetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphMemFreeNodeGetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphMemFreeNodeGetParams, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphMemcpyNodeGetParams_enter(uint64_t node,
+                                                                     const void* pNodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphMemcpyNodeGetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphMemcpyNodeGetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(node), (uint64_t)(uintptr_t)(pNodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphMemcpyNodeGetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphMemcpyNodeGetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphMemcpyNodeGetParams, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphMemcpyNodeSetParams_enter(uint64_t node,
+                                                                     const void* pNodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphMemcpyNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphMemcpyNodeSetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(node), (uint64_t)(uintptr_t)(pNodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphMemcpyNodeSetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphMemcpyNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphMemcpyNodeSetParams, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphMemcpyNodeSetParams1D_enter(uint64_t node,
+                                                                       const void* dst,
+                                                                       const void* src,
+                                                                       size_t count, int32_t kind) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphMemcpyNodeSetParams1D)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphMemcpyNodeSetParams1D, (int32_t)0,
+                            (uint64_t)(uintptr_t)(node), (uint64_t)(uintptr_t)(dst),
+                            (uint64_t)(uintptr_t)(src), (uint64_t)(count), (int32_t)(kind), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphMemcpyNodeSetParams1D_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphMemcpyNodeSetParams1D)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphMemcpyNodeSetParams1D, (int32_t)1, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphMemcpyNodeSetParamsFromSymbol_enter(
+    uint64_t node, const void* dst, const void* symbol, size_t count, size_t offset, int32_t kind) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphMemcpyNodeSetParamsFromSymbol)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphMemcpyNodeSetParamsFromSymbol, (int32_t)0,
+                            (uint64_t)(uintptr_t)(node), (uint64_t)(uintptr_t)(dst),
+                            (uint64_t)(uintptr_t)(symbol), (uint64_t)(count), (uint64_t)(offset),
+                            (int32_t)(kind), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphMemcpyNodeSetParamsFromSymbol_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphMemcpyNodeSetParamsFromSymbol)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphMemcpyNodeSetParamsFromSymbol, (int32_t)1, 0, 0, 0, 0,
+                            0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphMemcpyNodeSetParamsToSymbol_enter(
+    uint64_t node, const void* symbol, const void* src, size_t count, size_t offset, int32_t kind) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphMemcpyNodeSetParamsToSymbol)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphMemcpyNodeSetParamsToSymbol, (int32_t)0,
+                            (uint64_t)(uintptr_t)(node), (uint64_t)(uintptr_t)(symbol),
+                            (uint64_t)(uintptr_t)(src), (uint64_t)(count), (uint64_t)(offset),
+                            (int32_t)(kind), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphMemcpyNodeSetParamsToSymbol_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphMemcpyNodeSetParamsToSymbol)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphMemcpyNodeSetParamsToSymbol, (int32_t)1, 0, 0, 0, 0,
+                            0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphMemsetNodeGetParams_enter(uint64_t node,
+                                                                     const void* pNodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphMemsetNodeGetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphMemsetNodeGetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(node), (uint64_t)(uintptr_t)(pNodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphMemsetNodeGetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphMemsetNodeGetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphMemsetNodeGetParams, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphMemsetNodeSetParams_enter(uint64_t node,
+                                                                     const void* pNodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphMemsetNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphMemsetNodeSetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(node), (uint64_t)(uintptr_t)(pNodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphMemsetNodeSetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphMemsetNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphMemsetNodeSetParams, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphNodeFindInClone_enter(const void* pNode,
+                                                                 uint64_t originalNode,
+                                                                 uint64_t clonedGraph) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphNodeFindInClone)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphNodeFindInClone, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pNode), (uint64_t)(uintptr_t)(originalNode),
+                            (uint64_t)(uintptr_t)(clonedGraph), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphNodeFindInClone_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphNodeFindInClone)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphNodeFindInClone, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphNodeGetDependencies_enter(uint64_t node,
+                                                                     const void* pDependencies,
+                                                                     const void* pNumDependencies) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphNodeGetDependencies)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphNodeGetDependencies, (int32_t)0,
+                            (uint64_t)(uintptr_t)(node), (uint64_t)(uintptr_t)(pDependencies),
+                            (uint64_t)(uintptr_t)(pNumDependencies), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphNodeGetDependencies_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphNodeGetDependencies)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphNodeGetDependencies, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphNodeGetDependentNodes_enter(
+    uint64_t node, const void* pDependentNodes, const void* pNumDependentNodes) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphNodeGetDependentNodes)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphNodeGetDependentNodes, (int32_t)0,
+                            (uint64_t)(uintptr_t)(node), (uint64_t)(uintptr_t)(pDependentNodes),
+                            (uint64_t)(uintptr_t)(pNumDependentNodes), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphNodeGetDependentNodes_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphNodeGetDependentNodes)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphNodeGetDependentNodes, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphNodeGetEnabled_enter(uint64_t hGraphExec, uint64_t hNode,
+                                                                const void* isEnabled) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphNodeGetEnabled)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphNodeGetEnabled, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hGraphExec), (uint64_t)(uintptr_t)(hNode),
+                            (uint64_t)(uintptr_t)(isEnabled), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphNodeGetEnabled_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphNodeGetEnabled)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphNodeGetEnabled, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphNodeGetType_enter(uint64_t node, const void* pType) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphNodeGetType)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphNodeGetType, (int32_t)0, (uint64_t)(uintptr_t)(node),
+                            (uint64_t)(uintptr_t)(pType), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphNodeGetType_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphNodeGetType)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphNodeGetType, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphNodeSetEnabled_enter(uint64_t hGraphExec, uint64_t hNode,
+                                                                uint32_t isEnabled) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphNodeSetEnabled)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphNodeSetEnabled, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hGraphExec), (uint64_t)(uintptr_t)(hNode),
+                            (uint32_t)(isEnabled), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphNodeSetEnabled_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphNodeSetEnabled)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphNodeSetEnabled, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphNodeSetParams_enter(uint64_t node,
+                                                               const void* nodeParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphNodeSetParams, (int32_t)0,
+                            (uint64_t)(uintptr_t)(node), (uint64_t)(uintptr_t)(nodeParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphNodeSetParams_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphNodeSetParams)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphNodeSetParams, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphReleaseUserObject_enter(uint64_t graph,
+                                                                   const void* object,
+                                                                   uint32_t count) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphReleaseUserObject)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphReleaseUserObject, (int32_t)0,
+                            (uint64_t)(uintptr_t)(graph), (uint64_t)(uintptr_t)(object),
+                            (uint32_t)(count), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphReleaseUserObject_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphReleaseUserObject)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphReleaseUserObject, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphRemoveDependencies_enter(uint64_t graph,
+                                                                    const void* from,
+                                                                    const void* to,
+                                                                    size_t numDependencies) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphRemoveDependencies)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphRemoveDependencies, (int32_t)0,
+                            (uint64_t)(uintptr_t)(graph), (uint64_t)(uintptr_t)(from),
+                            (uint64_t)(uintptr_t)(to), (uint64_t)(numDependencies), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphRemoveDependencies_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphRemoveDependencies)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphRemoveDependencies, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphRetainUserObject_enter(uint64_t graph,
+                                                                  const void* object,
+                                                                  uint32_t count, uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphRetainUserObject)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphRetainUserObject, (int32_t)0,
+                            (uint64_t)(uintptr_t)(graph), (uint64_t)(uintptr_t)(object),
+                            (uint32_t)(count), (uint32_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphRetainUserObject_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphRetainUserObject)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphRetainUserObject, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphUpload_enter(uint64_t graphExec, uint64_t stream) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphUpload)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphUpload, (int32_t)0, (uint64_t)(uintptr_t)(graphExec),
+                            (uint64_t)(uintptr_t)(stream), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphUpload_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphUpload)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphUpload, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphicsGLRegisterBuffer_enter(const void* resource,
+                                                                     uint32_t buffer,
+                                                                     uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphicsGLRegisterBuffer)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphicsGLRegisterBuffer, (int32_t)0,
+                            (uint64_t)(uintptr_t)(resource), (uint32_t)(buffer), (uint32_t)(flags),
+                            0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphicsGLRegisterBuffer_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphicsGLRegisterBuffer)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphicsGLRegisterBuffer, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphicsGLRegisterImage_enter(const void* resource,
+                                                                    uint32_t image, uint32_t target,
+                                                                    uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphicsGLRegisterImage)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphicsGLRegisterImage, (int32_t)0,
+                            (uint64_t)(uintptr_t)(resource), (uint32_t)(image), (uint32_t)(target),
+                            (uint32_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphicsGLRegisterImage_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphicsGLRegisterImage)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphicsGLRegisterImage, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphicsMapResources_enter(int32_t count,
+                                                                 const void* resources,
+                                                                 uint64_t stream) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphicsMapResources)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphicsMapResources, (int32_t)0, (int32_t)(count),
+                            (uint64_t)(uintptr_t)(resources), (uint64_t)(uintptr_t)(stream), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphicsMapResources_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphicsMapResources)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphicsMapResources, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphicsResourceGetMappedPointer_enter(const void* devPtr,
+                                                                             const void* size,
+                                                                             const void* resource) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphicsResourceGetMappedPointer)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphicsResourceGetMappedPointer, (int32_t)0,
+                            (uint64_t)(uintptr_t)(devPtr), (uint64_t)(uintptr_t)(size),
+                            (uint64_t)(uintptr_t)(resource), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphicsResourceGetMappedPointer_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphicsResourceGetMappedPointer)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphicsResourceGetMappedPointer, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphicsSubResourceGetMappedArray_enter(const void* array,
+                                                                              const void* resource,
+                                                                              uint32_t arrayIndex,
+                                                                              uint32_t mipLevel) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphicsSubResourceGetMappedArray)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphicsSubResourceGetMappedArray, (int32_t)0,
+                            (uint64_t)(uintptr_t)(array), (uint64_t)(uintptr_t)(resource),
+                            (uint32_t)(arrayIndex), (uint32_t)(mipLevel), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphicsSubResourceGetMappedArray_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphicsSubResourceGetMappedArray)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphicsSubResourceGetMappedArray, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphicsUnmapResources_enter(int32_t count,
+                                                                   const void* resources,
+                                                                   uint64_t stream) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphicsUnmapResources)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphicsUnmapResources, (int32_t)0, (int32_t)(count),
+                            (uint64_t)(uintptr_t)(resources), (uint64_t)(uintptr_t)(stream), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphicsUnmapResources_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphicsUnmapResources)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphicsUnmapResources, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphicsUnregisterResource_enter(const void* resource) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphicsUnregisterResource)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphicsUnregisterResource, (int32_t)0,
+                            (uint64_t)(uintptr_t)(resource), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGraphicsUnregisterResource_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGraphicsUnregisterResource)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGraphicsUnregisterResource, (int32_t)1, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipThreadExchangeStreamCaptureMode_enter(const void* mode) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipThreadExchangeStreamCaptureMode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipThreadExchangeStreamCaptureMode, (int32_t)0,
+                            (uint64_t)(uintptr_t)(mode), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipThreadExchangeStreamCaptureMode_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipThreadExchangeStreamCaptureMode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipThreadExchangeStreamCaptureMode, (int32_t)1, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipUserObjectCreate_enter(const void* object_out,
+                                                             const void* ptr, const void* destroy,
+                                                             uint32_t initialRefcount,
+                                                             uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipUserObjectCreate)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipUserObjectCreate, (int32_t)0,
+                            (uint64_t)(uintptr_t)(object_out), (uint64_t)(uintptr_t)(ptr),
+                            (uint64_t)(uintptr_t)(destroy), (uint32_t)(initialRefcount),
+                            (uint32_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipUserObjectCreate_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipUserObjectCreate)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipUserObjectCreate, (int32_t)1, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipUserObjectRelease_enter(const void* object, uint32_t count) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipUserObjectRelease)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipUserObjectRelease, (int32_t)0,
+                            (uint64_t)(uintptr_t)(object), (uint32_t)(count), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipUserObjectRelease_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipUserObjectRelease)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipUserObjectRelease, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipUserObjectRetain_enter(const void* object, uint32_t count) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipUserObjectRetain)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipUserObjectRetain, (int32_t)0,
+                            (uint64_t)(uintptr_t)(object), (uint32_t)(count), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipUserObjectRetain_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipUserObjectRetain)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipUserObjectRetain, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
 
 #else /* HIP_ENABLE_LTTNG_UST not defined — all helpers are no-ops */
 
@@ -5097,6 +7049,297 @@ static inline void rocm_trace_emit_hipOccupancyMaxPotentialClusterSize_enter(con
 static inline void rocm_trace_emit_hipOccupancyMaxPotentialClusterSize_exit(hipError_t) {}
 static inline void rocm_trace_emit_hipSetupArgument_enter(const void*, size_t, size_t) {}
 static inline void rocm_trace_emit_hipSetupArgument_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphCreate_enter(uint32_t) {}
+static inline void rocm_trace_emit_hipGraphCreate_exit(hipGraph_t*, hipError_t) {}
+static inline void rocm_trace_emit_hipGraphDestroy_enter(uint64_t) {}
+static inline void rocm_trace_emit_hipGraphDestroy_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphInstantiate_enter(uint64_t, const void*, const void*,
+                                                             size_t) {}
+static inline void rocm_trace_emit_hipGraphInstantiate_exit(hipGraphExec_t*, hipError_t) {}
+static inline void rocm_trace_emit_hipGraphExecDestroy_enter(uint64_t) {}
+static inline void rocm_trace_emit_hipGraphExecDestroy_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphAddKernelNode_enter(uint64_t, const void*, size_t,
+                                                               const void*) {}
+static inline void rocm_trace_emit_hipGraphAddKernelNode_exit(hipGraphNode_t*, hipError_t) {}
+static inline void rocm_trace_emit_hipGraphAddMemcpyNode_enter(uint64_t, const void*, size_t,
+                                                               const void*) {}
+static inline void rocm_trace_emit_hipGraphAddMemcpyNode_exit(hipGraphNode_t*, hipError_t) {}
+static inline void rocm_trace_emit_hipGraphAddMemsetNode_enter(uint64_t, const void*, size_t,
+                                                               const void*) {}
+static inline void rocm_trace_emit_hipGraphAddMemsetNode_exit(hipGraphNode_t*, hipError_t) {}
+static inline void rocm_trace_emit_hipGraphAddEventRecordNode_enter(uint64_t, const void*, size_t,
+                                                                    uint64_t) {}
+static inline void rocm_trace_emit_hipGraphAddEventRecordNode_exit(hipGraphNode_t*, hipError_t) {}
+static inline void rocm_trace_emit_hipGraphAddEventWaitNode_enter(uint64_t, const void*, size_t,
+                                                                  uint64_t) {}
+static inline void rocm_trace_emit_hipGraphAddEventWaitNode_exit(hipGraphNode_t*, hipError_t) {}
+static inline void rocm_trace_emit_hipGraphAddDependencies_enter(uint64_t, const void*, const void*,
+                                                                 size_t) {}
+static inline void rocm_trace_emit_hipGraphAddDependencies_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphLaunch_enter(uint64_t, uint64_t) {}
+static inline void rocm_trace_emit_hipGraphLaunch_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphExecKernelNodeSetParams_enter(uint64_t, uint64_t,
+                                                                         const void*) {}
+static inline void rocm_trace_emit_hipGraphExecKernelNodeSetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphExecMemcpyNodeSetParams1D_enter(uint64_t, uint64_t,
+                                                                           const void*, const void*,
+                                                                           size_t, int32_t) {}
+static inline void rocm_trace_emit_hipGraphExecMemcpyNodeSetParams1D_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDrvGraphAddMemFreeNode_enter(const void*, uint64_t,
+                                                                   const void*, size_t, uint64_t) {}
+static inline void rocm_trace_emit_hipDrvGraphAddMemFreeNode_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDrvGraphAddMemcpyNode_enter(const void*, uint64_t,
+                                                                  const void*, size_t, const void*,
+                                                                  const void*) {}
+static inline void rocm_trace_emit_hipDrvGraphAddMemcpyNode_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDrvGraphAddMemsetNode_enter(const void*, uint64_t,
+                                                                  const void*, size_t, const void*,
+                                                                  const void*) {}
+static inline void rocm_trace_emit_hipDrvGraphAddMemsetNode_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDrvGraphExecMemcpyNodeSetParams_enter(uint64_t, uint64_t,
+                                                                            const void*,
+                                                                            const void*) {}
+static inline void rocm_trace_emit_hipDrvGraphExecMemcpyNodeSetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDrvGraphExecMemsetNodeSetParams_enter(uint64_t, uint64_t,
+                                                                            const void*,
+                                                                            const void*) {}
+static inline void rocm_trace_emit_hipDrvGraphExecMemsetNodeSetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDrvGraphMemcpyNodeGetParams_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipDrvGraphMemcpyNodeGetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDrvGraphMemcpyNodeSetParams_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipDrvGraphMemcpyNodeSetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphAddBatchMemOpNode_enter(const void*, uint64_t,
+                                                                   const void*, size_t,
+                                                                   const void*) {}
+static inline void rocm_trace_emit_hipGraphAddBatchMemOpNode_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphAddChildGraphNode_enter(const void*, uint64_t,
+                                                                   const void*, size_t, uint64_t) {}
+static inline void rocm_trace_emit_hipGraphAddChildGraphNode_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphAddEmptyNode_enter(const void*, uint64_t, const void*,
+                                                              size_t) {}
+static inline void rocm_trace_emit_hipGraphAddEmptyNode_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphAddExternalSemaphoresSignalNode_enter(
+    const void*, uint64_t, const void*, size_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphAddExternalSemaphoresSignalNode_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphAddExternalSemaphoresWaitNode_enter(const void*,
+                                                                               uint64_t,
+                                                                               const void*, size_t,
+                                                                               const void*) {}
+static inline void rocm_trace_emit_hipGraphAddExternalSemaphoresWaitNode_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphAddHostNode_enter(const void*, uint64_t, const void*,
+                                                             size_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphAddHostNode_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphAddMemAllocNode_enter(const void*, uint64_t, const void*,
+                                                                 size_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphAddMemAllocNode_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphAddMemFreeNode_enter(const void*, uint64_t, const void*,
+                                                                size_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphAddMemFreeNode_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphAddMemcpyNode1D_enter(const void*, uint64_t, const void*,
+                                                                 size_t, const void*, const void*,
+                                                                 size_t, int32_t) {}
+static inline void rocm_trace_emit_hipGraphAddMemcpyNode1D_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphAddMemcpyNodeFromSymbol_enter(const void*, uint64_t,
+                                                                         const void*, size_t,
+                                                                         const void*, const void*,
+                                                                         size_t, size_t, int32_t) {}
+static inline void rocm_trace_emit_hipGraphAddMemcpyNodeFromSymbol_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphAddMemcpyNodeToSymbol_enter(const void*, uint64_t,
+                                                                       const void*, size_t,
+                                                                       const void*, const void*,
+                                                                       size_t, size_t, int32_t) {}
+static inline void rocm_trace_emit_hipGraphAddMemcpyNodeToSymbol_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphAddNode_enter(const void*, uint64_t, const void*, size_t,
+                                                         const void*) {}
+static inline void rocm_trace_emit_hipGraphAddNode_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphBatchMemOpNodeGetParams_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphBatchMemOpNodeGetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphBatchMemOpNodeSetParams_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphBatchMemOpNodeSetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphChildGraphNodeGetGraph_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphChildGraphNodeGetGraph_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphClone_enter(const void*, uint64_t) {}
+static inline void rocm_trace_emit_hipGraphClone_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphDebugDotPrint_enter(uint64_t, const char*, uint32_t) {}
+static inline void rocm_trace_emit_hipGraphDebugDotPrint_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphDestroyNode_enter(uint64_t) {}
+static inline void rocm_trace_emit_hipGraphDestroyNode_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphEventRecordNodeGetEvent_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphEventRecordNodeGetEvent_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphEventRecordNodeSetEvent_enter(uint64_t, uint64_t) {}
+static inline void rocm_trace_emit_hipGraphEventRecordNodeSetEvent_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphEventWaitNodeGetEvent_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphEventWaitNodeGetEvent_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphEventWaitNodeSetEvent_enter(uint64_t, uint64_t) {}
+static inline void rocm_trace_emit_hipGraphEventWaitNodeSetEvent_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphExecBatchMemOpNodeSetParams_enter(uint64_t, uint64_t,
+                                                                             const void*) {}
+static inline void rocm_trace_emit_hipGraphExecBatchMemOpNodeSetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphExecChildGraphNodeSetParams_enter(uint64_t, uint64_t,
+                                                                             uint64_t) {}
+static inline void rocm_trace_emit_hipGraphExecChildGraphNodeSetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphExecEventRecordNodeSetEvent_enter(uint64_t, uint64_t,
+                                                                             uint64_t) {}
+static inline void rocm_trace_emit_hipGraphExecEventRecordNodeSetEvent_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphExecEventWaitNodeSetEvent_enter(uint64_t, uint64_t,
+                                                                           uint64_t) {}
+static inline void rocm_trace_emit_hipGraphExecEventWaitNodeSetEvent_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphExecExternalSemaphoresSignalNodeSetParams_enter(
+    uint64_t, uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphExecExternalSemaphoresSignalNodeSetParams_exit(
+    hipError_t) {}
+static inline void rocm_trace_emit_hipGraphExecExternalSemaphoresWaitNodeSetParams_enter(
+    uint64_t, uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphExecExternalSemaphoresWaitNodeSetParams_exit(
+    hipError_t) {}
+static inline void rocm_trace_emit_hipGraphExecGetFlags_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphExecGetFlags_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphExecHostNodeSetParams_enter(uint64_t, uint64_t,
+                                                                       const void*) {}
+static inline void rocm_trace_emit_hipGraphExecHostNodeSetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphExecMemcpyNodeSetParams_enter(uint64_t, uint64_t,
+                                                                         const void*) {}
+static inline void rocm_trace_emit_hipGraphExecMemcpyNodeSetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphExecMemcpyNodeSetParamsFromSymbol_enter(
+    uint64_t, uint64_t, const void*, const void*, size_t, size_t, int32_t) {}
+static inline void rocm_trace_emit_hipGraphExecMemcpyNodeSetParamsFromSymbol_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphExecMemcpyNodeSetParamsToSymbol_enter(
+    uint64_t, uint64_t, const void*, const void*, size_t, size_t, int32_t) {}
+static inline void rocm_trace_emit_hipGraphExecMemcpyNodeSetParamsToSymbol_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphExecMemsetNodeSetParams_enter(uint64_t, uint64_t,
+                                                                         const void*) {}
+static inline void rocm_trace_emit_hipGraphExecMemsetNodeSetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphExecNodeSetParams_enter(uint64_t, uint64_t,
+                                                                   const void*) {}
+static inline void rocm_trace_emit_hipGraphExecNodeSetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphExecUpdate_enter(uint64_t, uint64_t, const void*,
+                                                            const void*) {}
+static inline void rocm_trace_emit_hipGraphExecUpdate_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphExternalSemaphoresSignalNodeGetParams_enter(
+    uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphExternalSemaphoresSignalNodeGetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphExternalSemaphoresSignalNodeSetParams_enter(
+    uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphExternalSemaphoresSignalNodeSetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphExternalSemaphoresWaitNodeGetParams_enter(uint64_t,
+                                                                                     const void*) {}
+static inline void rocm_trace_emit_hipGraphExternalSemaphoresWaitNodeGetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphExternalSemaphoresWaitNodeSetParams_enter(uint64_t,
+                                                                                     const void*) {}
+static inline void rocm_trace_emit_hipGraphExternalSemaphoresWaitNodeSetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphGetEdges_enter(uint64_t, const void*, const void*,
+                                                          const void*) {}
+static inline void rocm_trace_emit_hipGraphGetEdges_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphGetNodes_enter(uint64_t, const void*, const void*) {}
+static inline void rocm_trace_emit_hipGraphGetNodes_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphGetRootNodes_enter(uint64_t, const void*, const void*) {}
+static inline void rocm_trace_emit_hipGraphGetRootNodes_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphHostNodeGetParams_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphHostNodeGetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphHostNodeSetParams_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphHostNodeSetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphInstantiateWithFlags_enter(const void*, uint64_t,
+                                                                      uint64_t) {}
+static inline void rocm_trace_emit_hipGraphInstantiateWithFlags_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphInstantiateWithParams_enter(const void*, uint64_t,
+                                                                       const void*) {}
+static inline void rocm_trace_emit_hipGraphInstantiateWithParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphKernelNodeCopyAttributes_enter(uint64_t, uint64_t) {}
+static inline void rocm_trace_emit_hipGraphKernelNodeCopyAttributes_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphKernelNodeGetAttribute_enter(uint64_t, int32_t,
+                                                                        const void*) {}
+static inline void rocm_trace_emit_hipGraphKernelNodeGetAttribute_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphKernelNodeGetParams_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphKernelNodeGetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphKernelNodeSetAttribute_enter(uint64_t, int32_t,
+                                                                        const void*) {}
+static inline void rocm_trace_emit_hipGraphKernelNodeSetAttribute_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphKernelNodeSetParams_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphKernelNodeSetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphLaunch_spt_enter(uint64_t, uint64_t) {}
+static inline void rocm_trace_emit_hipGraphLaunch_spt_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphMemAllocNodeGetParams_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphMemAllocNodeGetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphMemFreeNodeGetParams_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphMemFreeNodeGetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphMemcpyNodeGetParams_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphMemcpyNodeGetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphMemcpyNodeSetParams_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphMemcpyNodeSetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphMemcpyNodeSetParams1D_enter(uint64_t, const void*,
+                                                                       const void*, size_t,
+                                                                       int32_t) {}
+static inline void rocm_trace_emit_hipGraphMemcpyNodeSetParams1D_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphMemcpyNodeSetParamsFromSymbol_enter(uint64_t,
+                                                                               const void*,
+                                                                               const void*, size_t,
+                                                                               size_t, int32_t) {}
+static inline void rocm_trace_emit_hipGraphMemcpyNodeSetParamsFromSymbol_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphMemcpyNodeSetParamsToSymbol_enter(uint64_t, const void*,
+                                                                             const void*, size_t,
+                                                                             size_t, int32_t) {}
+static inline void rocm_trace_emit_hipGraphMemcpyNodeSetParamsToSymbol_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphMemsetNodeGetParams_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphMemsetNodeGetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphMemsetNodeSetParams_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphMemsetNodeSetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphNodeFindInClone_enter(const void*, uint64_t, uint64_t) {}
+static inline void rocm_trace_emit_hipGraphNodeFindInClone_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphNodeGetDependencies_enter(uint64_t, const void*,
+                                                                     const void*) {}
+static inline void rocm_trace_emit_hipGraphNodeGetDependencies_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphNodeGetDependentNodes_enter(uint64_t, const void*,
+                                                                       const void*) {}
+static inline void rocm_trace_emit_hipGraphNodeGetDependentNodes_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphNodeGetEnabled_enter(uint64_t, uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphNodeGetEnabled_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphNodeGetType_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphNodeGetType_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphNodeSetEnabled_enter(uint64_t, uint64_t, uint32_t) {}
+static inline void rocm_trace_emit_hipGraphNodeSetEnabled_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphNodeSetParams_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipGraphNodeSetParams_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphReleaseUserObject_enter(uint64_t, const void*,
+                                                                   uint32_t) {}
+static inline void rocm_trace_emit_hipGraphReleaseUserObject_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphRemoveDependencies_enter(uint64_t, const void*,
+                                                                    const void*, size_t) {}
+static inline void rocm_trace_emit_hipGraphRemoveDependencies_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphRetainUserObject_enter(uint64_t, const void*, uint32_t,
+                                                                  uint32_t) {}
+static inline void rocm_trace_emit_hipGraphRetainUserObject_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphUpload_enter(uint64_t, uint64_t) {}
+static inline void rocm_trace_emit_hipGraphUpload_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphicsGLRegisterBuffer_enter(const void*, uint32_t,
+                                                                     uint32_t) {}
+static inline void rocm_trace_emit_hipGraphicsGLRegisterBuffer_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphicsGLRegisterImage_enter(const void*, uint32_t, uint32_t,
+                                                                    uint32_t) {}
+static inline void rocm_trace_emit_hipGraphicsGLRegisterImage_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphicsMapResources_enter(int32_t, const void*, uint64_t) {}
+static inline void rocm_trace_emit_hipGraphicsMapResources_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphicsResourceGetMappedPointer_enter(const void*,
+                                                                             const void*,
+                                                                             const void*) {}
+static inline void rocm_trace_emit_hipGraphicsResourceGetMappedPointer_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphicsSubResourceGetMappedArray_enter(const void*,
+                                                                              const void*, uint32_t,
+                                                                              uint32_t) {}
+static inline void rocm_trace_emit_hipGraphicsSubResourceGetMappedArray_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphicsUnmapResources_enter(int32_t, const void*, uint64_t) {
+}
+static inline void rocm_trace_emit_hipGraphicsUnmapResources_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGraphicsUnregisterResource_enter(const void*) {}
+static inline void rocm_trace_emit_hipGraphicsUnregisterResource_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipThreadExchangeStreamCaptureMode_enter(const void*) {}
+static inline void rocm_trace_emit_hipThreadExchangeStreamCaptureMode_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipUserObjectCreate_enter(const void*, const void*, const void*,
+                                                             uint32_t, uint32_t) {}
+static inline void rocm_trace_emit_hipUserObjectCreate_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipUserObjectRelease_enter(const void*, uint32_t) {}
+static inline void rocm_trace_emit_hipUserObjectRelease_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipUserObjectRetain_enter(const void*, uint32_t) {}
+static inline void rocm_trace_emit_hipUserObjectRetain_exit(hipError_t) {}
 
 #endif /* HIP_ENABLE_LTTNG_UST */
 

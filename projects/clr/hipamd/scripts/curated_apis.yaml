@@ -761,3 +761,323 @@
 
 - api: hipSetupArgument
   args: [arg, size, offset]
+
+- api: hipGraphCreate
+  args: [pGraph, flags]
+  out: [pGraph]
+
+- api: hipGraphDestroy
+  args: [graph]
+
+- api: hipGraphInstantiate
+  args: [pGraphExec, graph, pErrorNode, pLogBuffer, bufferSize]
+  out: [pGraphExec]
+
+- api: hipGraphExecDestroy
+  args: [graphExec]
+
+- api: hipGraphAddKernelNode
+  args: [pGraphNode, graph, pDependencies, numDependencies, pNodeParams]
+  out: [pGraphNode]
+
+- api: hipGraphAddMemcpyNode
+  args: [pGraphNode, graph, pDependencies, numDependencies, pCopyParams]
+  out: [pGraphNode]
+
+- api: hipGraphAddMemsetNode
+  args: [pGraphNode, graph, pDependencies, numDependencies, pMemsetParams]
+  out: [pGraphNode]
+
+- api: hipGraphAddEventRecordNode
+  args: [pGraphNode, graph, pDependencies, numDependencies, event]
+  out: [pGraphNode]
+
+- api: hipGraphAddEventWaitNode
+  args: [pGraphNode, graph, pDependencies, numDependencies, event]
+  out: [pGraphNode]
+
+- api: hipGraphAddDependencies
+  args: [graph, from, to, numDependencies]
+
+- api: hipGraphLaunch
+  args: [graphExec, stream]
+
+- api: hipGraphExecKernelNodeSetParams
+  args: [hGraphExec, node, pNodeParams]
+
+- api: hipGraphExecMemcpyNodeSetParams1D
+  args: [hGraphExec, node, dst, src, count, kind]
+
+- api: hipDrvGraphAddMemFreeNode
+  args: [phGraphNode, hGraph, dependencies, numDependencies, dptr]
+
+- api: hipDrvGraphAddMemcpyNode
+  args: [phGraphNode, hGraph, dependencies, numDependencies, copyParams, ctx]
+
+- api: hipDrvGraphAddMemsetNode
+  args: [phGraphNode, hGraph, dependencies, numDependencies, memsetParams, ctx]
+
+- api: hipDrvGraphExecMemcpyNodeSetParams
+  args: [hGraphExec, hNode, copyParams, ctx]
+
+- api: hipDrvGraphExecMemsetNodeSetParams
+  args: [hGraphExec, hNode, memsetParams, ctx]
+
+- api: hipDrvGraphMemcpyNodeGetParams
+  args: [hNode, nodeParams]
+
+- api: hipDrvGraphMemcpyNodeSetParams
+  args: [hNode, nodeParams]
+
+- api: hipGraphAddBatchMemOpNode
+  args: [pGraphNode, graph, dependencies, numDependencies, nodeParams]
+
+- api: hipGraphAddChildGraphNode
+  args: [pGraphNode, graph, pDependencies, numDependencies, childGraph]
+
+- api: hipGraphAddEmptyNode
+  args: [pGraphNode, graph, pDependencies, numDependencies]
+
+- api: hipGraphAddExternalSemaphoresSignalNode
+  args: [pGraphNode, graph, pDependencies, numDependencies, nodeParams]
+
+- api: hipGraphAddExternalSemaphoresWaitNode
+  args: [pGraphNode, graph, pDependencies, numDependencies, nodeParams]
+
+- api: hipGraphAddHostNode
+  args: [pGraphNode, graph, pDependencies, numDependencies, pNodeParams]
+
+- api: hipGraphAddMemAllocNode
+  args: [pGraphNode, graph, pDependencies, numDependencies, pNodeParams]
+
+- api: hipGraphAddMemFreeNode
+  args: [pGraphNode, graph, pDependencies, numDependencies, dev_ptr]
+
+- api: hipGraphAddMemcpyNode1D
+  args: [pGraphNode, graph, pDependencies, numDependencies, dst, src, count, kind]
+
+- api: hipGraphAddMemcpyNodeFromSymbol
+  args: [pGraphNode, graph, pDependencies, numDependencies, dst, symbol, count, offset, kind]
+
+- api: hipGraphAddMemcpyNodeToSymbol
+  args: [pGraphNode, graph, pDependencies, numDependencies, symbol, src, count, offset, kind]
+
+- api: hipGraphAddNode
+  args: [pGraphNode, graph, pDependencies, numDependencies, nodeParams]
+
+- api: hipGraphBatchMemOpNodeGetParams
+  args: [hNode, nodeParams_out]
+
+- api: hipGraphBatchMemOpNodeSetParams
+  args: [hNode, nodeParams]
+
+- api: hipGraphChildGraphNodeGetGraph
+  args: [node, pGraph]
+
+- api: hipGraphClone
+  args: [pGraphClone, originalGraph]
+
+- api: hipGraphDebugDotPrint
+  args: [graph, path, flags]
+  strings: [path]
+
+- api: hipGraphDestroyNode
+  args: [node]
+
+- api: hipGraphEventRecordNodeGetEvent
+  args: [node, event_out]
+
+- api: hipGraphEventRecordNodeSetEvent
+  args: [node, event]
+
+- api: hipGraphEventWaitNodeGetEvent
+  args: [node, event_out]
+
+- api: hipGraphEventWaitNodeSetEvent
+  args: [node, event]
+
+- api: hipGraphExecBatchMemOpNodeSetParams
+  args: [hGraphExec, hNode, nodeParams]
+
+- api: hipGraphExecChildGraphNodeSetParams
+  args: [hGraphExec, node, childGraph]
+
+- api: hipGraphExecEventRecordNodeSetEvent
+  args: [hGraphExec, hNode, event]
+
+- api: hipGraphExecEventWaitNodeSetEvent
+  args: [hGraphExec, hNode, event]
+
+- api: hipGraphExecExternalSemaphoresSignalNodeSetParams
+  args: [hGraphExec, hNode, nodeParams]
+
+- api: hipGraphExecExternalSemaphoresWaitNodeSetParams
+  args: [hGraphExec, hNode, nodeParams]
+
+- api: hipGraphExecGetFlags
+  args: [graphExec, flags]
+
+- api: hipGraphExecHostNodeSetParams
+  args: [hGraphExec, node, pNodeParams]
+
+- api: hipGraphExecMemcpyNodeSetParams
+  args: [hGraphExec, node, pNodeParams]
+
+- api: hipGraphExecMemcpyNodeSetParamsFromSymbol
+  args: [hGraphExec, node, dst, symbol, count, offset, kind]
+
+- api: hipGraphExecMemcpyNodeSetParamsToSymbol
+  args: [hGraphExec, node, symbol, src, count, offset, kind]
+
+- api: hipGraphExecMemsetNodeSetParams
+  args: [hGraphExec, node, pNodeParams]
+
+- api: hipGraphExecNodeSetParams
+  args: [hGraphExec, node, nodeParams]
+
+- api: hipGraphExecUpdate
+  args: [hGraphExec, hGraph, hErrorNode_out, updateResult_out]
+
+- api: hipGraphExternalSemaphoresSignalNodeGetParams
+  args: [hNode, params_out]
+
+- api: hipGraphExternalSemaphoresSignalNodeSetParams
+  args: [hNode, nodeParams]
+
+- api: hipGraphExternalSemaphoresWaitNodeGetParams
+  args: [hNode, params_out]
+
+- api: hipGraphExternalSemaphoresWaitNodeSetParams
+  args: [hNode, nodeParams]
+
+- api: hipGraphGetEdges
+  args: [graph, from, to, numEdges]
+
+- api: hipGraphGetNodes
+  args: [graph, nodes, numNodes]
+
+- api: hipGraphGetRootNodes
+  args: [graph, pRootNodes, pNumRootNodes]
+
+- api: hipGraphHostNodeGetParams
+  args: [node, pNodeParams]
+
+- api: hipGraphHostNodeSetParams
+  args: [node, pNodeParams]
+
+- api: hipGraphInstantiateWithFlags
+  args: [pGraphExec, graph, flags]
+
+- api: hipGraphInstantiateWithParams
+  args: [pGraphExec, graph, instantiateParams]
+
+- api: hipGraphKernelNodeCopyAttributes
+  args: [hSrc, hDst]
+
+- api: hipGraphKernelNodeGetAttribute
+  args: [hNode, attr, value]
+
+- api: hipGraphKernelNodeGetParams
+  args: [node, pNodeParams]
+
+- api: hipGraphKernelNodeSetAttribute
+  args: [hNode, attr, value]
+
+- api: hipGraphKernelNodeSetParams
+  args: [node, pNodeParams]
+
+- api: hipGraphLaunch_spt
+  args: [graphExec, stream]
+
+- api: hipGraphMemAllocNodeGetParams
+  args: [node, pNodeParams]
+
+- api: hipGraphMemFreeNodeGetParams
+  args: [node, dev_ptr]
+
+- api: hipGraphMemcpyNodeGetParams
+  args: [node, pNodeParams]
+
+- api: hipGraphMemcpyNodeSetParams
+  args: [node, pNodeParams]
+
+- api: hipGraphMemcpyNodeSetParams1D
+  args: [node, dst, src, count, kind]
+
+- api: hipGraphMemcpyNodeSetParamsFromSymbol
+  args: [node, dst, symbol, count, offset, kind]
+
+- api: hipGraphMemcpyNodeSetParamsToSymbol
+  args: [node, symbol, src, count, offset, kind]
+
+- api: hipGraphMemsetNodeGetParams
+  args: [node, pNodeParams]
+
+- api: hipGraphMemsetNodeSetParams
+  args: [node, pNodeParams]
+
+- api: hipGraphNodeFindInClone
+  args: [pNode, originalNode, clonedGraph]
+
+- api: hipGraphNodeGetDependencies
+  args: [node, pDependencies, pNumDependencies]
+
+- api: hipGraphNodeGetDependentNodes
+  args: [node, pDependentNodes, pNumDependentNodes]
+
+- api: hipGraphNodeGetEnabled
+  args: [hGraphExec, hNode, isEnabled]
+
+- api: hipGraphNodeGetType
+  args: [node, pType]
+
+- api: hipGraphNodeSetEnabled
+  args: [hGraphExec, hNode, isEnabled]
+
+- api: hipGraphNodeSetParams
+  args: [node, nodeParams]
+
+- api: hipGraphReleaseUserObject
+  args: [graph, object, count]
+
+- api: hipGraphRemoveDependencies
+  args: [graph, from, to, numDependencies]
+
+- api: hipGraphRetainUserObject
+  args: [graph, object, count, flags]
+
+- api: hipGraphUpload
+  args: [graphExec, stream]
+
+- api: hipGraphicsGLRegisterBuffer
+  args: [resource, buffer, flags]
+
+- api: hipGraphicsGLRegisterImage
+  args: [resource, image, target, flags]
+
+- api: hipGraphicsMapResources
+  args: [count, resources, stream]
+
+- api: hipGraphicsResourceGetMappedPointer
+  args: [devPtr, size, resource]
+
+- api: hipGraphicsSubResourceGetMappedArray
+  args: [array, resource, arrayIndex, mipLevel]
+
+- api: hipGraphicsUnmapResources
+  args: [count, resources, stream]
+
+- api: hipGraphicsUnregisterResource
+  args: [resource]
+
+- api: hipThreadExchangeStreamCaptureMode
+  args: [mode]
+
+- api: hipUserObjectCreate
+  args: [object_out, ptr, destroy, initialRefcount, flags]
+
+- api: hipUserObjectRelease
+  args: [object, count]
+
+- api: hipUserObjectRetain
+  args: [object, count]

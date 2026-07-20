@@ -637,9 +637,22 @@ hipError_t hipDrvGetErrorString(hipError_t hipError, const char** errorString) {
 hipError_t hipDrvGraphAddMemcpyNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph,
                                     const hipGraphNode_t* dependencies, size_t numDependencies,
                                     const HIP_MEMCPY3D* copyParams, hipCtx_t ctx) {
+  auto const __rocm_in_phGraphNode = phGraphNode;
+  auto const __rocm_in_hGraph = hGraph;
+  auto const __rocm_in_dependencies = dependencies;
+  auto const __rocm_in_numDependencies = numDependencies;
+  auto const __rocm_in_copyParams = copyParams;
+  auto const __rocm_in_ctx = ctx;
+  rocm_trace_emit_hipDrvGraphAddMemcpyNode_enter(
+      (const void*)(uintptr_t)(__rocm_in_phGraphNode),
+      (uint64_t)(uintptr_t)(__rocm_in_hGraph),
+      (const void*)(uintptr_t)(__rocm_in_dependencies),
+      (__rocm_in_numDependencies),
+      (const void*)(uintptr_t)(__rocm_in_copyParams),
+      (const void*)(uintptr_t)(__rocm_in_ctx)); /* __ROCM_CURATED__: hipDrvGraphAddMemcpyNode */
   TRY;
-  return hip::GetHipDispatchTable()->hipDrvGraphAddMemcpyNode_fn(phGraphNode, hGraph, dependencies,
-                                                                 numDependencies, copyParams, ctx);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipDrvGraphAddMemcpyNode, hip::GetHipDispatchTable()->hipDrvGraphAddMemcpyNode_fn(phGraphNode, hGraph, dependencies,
+                                                              numDependencies, copyParams, ctx));
   CATCH;
 }
 hipError_t hipDrvMemcpy2DUnaligned(const hip_Memcpy2D* pCopy) {
@@ -1030,95 +1043,229 @@ hipError_t hipGetTextureReference(const textureReference** texref, const void* s
 hipError_t hipGraphAddChildGraphNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                      const hipGraphNode_t* pDependencies, size_t numDependencies,
                                      hipGraph_t childGraph) {
+  auto const __rocm_in_pGraphNode = pGraphNode;
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_pDependencies = pDependencies;
+  auto const __rocm_in_numDependencies = numDependencies;
+  auto const __rocm_in_childGraph = childGraph;
+  rocm_trace_emit_hipGraphAddChildGraphNode_enter(
+      (const void*)(uintptr_t)(__rocm_in_pGraphNode),
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_pDependencies),
+      (__rocm_in_numDependencies),
+      (uint64_t)(uintptr_t)(__rocm_in_childGraph)); /* __ROCM_CURATED__: hipGraphAddChildGraphNode */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphAddChildGraphNode_fn(pGraphNode, graph, pDependencies,
-                                                                  numDependencies, childGraph);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphAddChildGraphNode, hip::GetHipDispatchTable()->hipGraphAddChildGraphNode_fn(pGraphNode, graph, pDependencies,
+                                                               numDependencies, childGraph));
   CATCH;
 }
 hipError_t hipGraphAddDependencies(hipGraph_t graph, const hipGraphNode_t* from,
                                    const hipGraphNode_t* to, size_t numDependencies) {
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_from = from;
+  auto const __rocm_in_to = to;
+  auto const __rocm_in_numDependencies = numDependencies;
+  rocm_trace_emit_hipGraphAddDependencies_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_from),
+      (const void*)(uintptr_t)(__rocm_in_to),
+      (__rocm_in_numDependencies)); /* __ROCM_CURATED__: hipGraphAddDependencies */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphAddDependencies_fn(graph, from, to, numDependencies);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphAddDependencies, hip::GetHipDispatchTable()->hipGraphAddDependencies_fn(graph, from, to, numDependencies));
   CATCH;
 }
 hipError_t hipGraphAddEmptyNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                 const hipGraphNode_t* pDependencies, size_t numDependencies) {
+  auto const __rocm_in_pGraphNode = pGraphNode;
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_pDependencies = pDependencies;
+  auto const __rocm_in_numDependencies = numDependencies;
+  rocm_trace_emit_hipGraphAddEmptyNode_enter(
+      (const void*)(uintptr_t)(__rocm_in_pGraphNode),
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_pDependencies),
+      (__rocm_in_numDependencies)); /* __ROCM_CURATED__: hipGraphAddEmptyNode */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphAddEmptyNode_fn(pGraphNode, graph, pDependencies,
-                                                             numDependencies);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphAddEmptyNode, hip::GetHipDispatchTable()->hipGraphAddEmptyNode_fn(pGraphNode, graph, pDependencies,
+                                                          numDependencies));
   CATCH;
 }
 hipError_t hipGraphAddEventRecordNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                       const hipGraphNode_t* pDependencies, size_t numDependencies,
                                       hipEvent_t event) {
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_pDependencies = pDependencies;
+  auto const __rocm_in_numDependencies = numDependencies;
+  auto const __rocm_in_event = event;
+  rocm_trace_emit_hipGraphAddEventRecordNode_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_pDependencies),
+      (__rocm_in_numDependencies),
+      (uint64_t)(uintptr_t)(__rocm_in_event)); /* __ROCM_CURATED__: hipGraphAddEventRecordNode */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphAddEventRecordNode_fn(pGraphNode, graph, pDependencies,
-                                                                   numDependencies, event);
+  ROCM_TRACE_RET_STATUS_CURATED(hipGraphAddEventRecordNode, hip::GetHipDispatchTable()->hipGraphAddEventRecordNode_fn(
+                                    pGraphNode, graph, pDependencies, numDependencies, event), pGraphNode);
   CATCH;
 }
 hipError_t hipGraphAddEventWaitNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                     const hipGraphNode_t* pDependencies, size_t numDependencies,
                                     hipEvent_t event) {
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_pDependencies = pDependencies;
+  auto const __rocm_in_numDependencies = numDependencies;
+  auto const __rocm_in_event = event;
+  rocm_trace_emit_hipGraphAddEventWaitNode_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_pDependencies),
+      (__rocm_in_numDependencies),
+      (uint64_t)(uintptr_t)(__rocm_in_event)); /* __ROCM_CURATED__: hipGraphAddEventWaitNode */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphAddEventWaitNode_fn(pGraphNode, graph, pDependencies,
-                                                                 numDependencies, event);
+  ROCM_TRACE_RET_STATUS_CURATED(hipGraphAddEventWaitNode, hip::GetHipDispatchTable()->hipGraphAddEventWaitNode_fn(
+                                    pGraphNode, graph, pDependencies, numDependencies, event), pGraphNode);
   CATCH;
 }
 hipError_t hipGraphAddHostNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                const hipGraphNode_t* pDependencies, size_t numDependencies,
                                const hipHostNodeParams* pNodeParams) {
+  auto const __rocm_in_pGraphNode = pGraphNode;
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_pDependencies = pDependencies;
+  auto const __rocm_in_numDependencies = numDependencies;
+  auto const __rocm_in_pNodeParams = pNodeParams;
+  rocm_trace_emit_hipGraphAddHostNode_enter(
+      (const void*)(uintptr_t)(__rocm_in_pGraphNode),
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_pDependencies),
+      (__rocm_in_numDependencies),
+      (const void*)(uintptr_t)(__rocm_in_pNodeParams)); /* __ROCM_CURATED__: hipGraphAddHostNode */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphAddHostNode_fn(pGraphNode, graph, pDependencies,
-                                                            numDependencies, pNodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphAddHostNode, hip::GetHipDispatchTable()->hipGraphAddHostNode_fn(pGraphNode, graph, pDependencies,
+                                                         numDependencies, pNodeParams));
   CATCH;
 }
 hipError_t hipGraphAddKernelNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                  const hipGraphNode_t* pDependencies, size_t numDependencies,
                                  const hipKernelNodeParams* pNodeParams) {
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_pDependencies = pDependencies;
+  auto const __rocm_in_numDependencies = numDependencies;
+  auto const __rocm_in_pNodeParams = pNodeParams;
+  rocm_trace_emit_hipGraphAddKernelNode_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_pDependencies),
+      (__rocm_in_numDependencies),
+      (const void*)(uintptr_t)(__rocm_in_pNodeParams)); /* __ROCM_CURATED__: hipGraphAddKernelNode */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphAddKernelNode_fn(pGraphNode, graph, pDependencies,
-                                                              numDependencies, pNodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED(hipGraphAddKernelNode, hip::GetHipDispatchTable()->hipGraphAddKernelNode_fn(
+                                    pGraphNode, graph, pDependencies, numDependencies, pNodeParams), pGraphNode);
   CATCH;
 }
 hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                    const hipGraphNode_t* pDependencies, size_t numDependencies,
                                    hipMemAllocNodeParams* pNodeParams) {
+  auto const __rocm_in_pGraphNode = pGraphNode;
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_pDependencies = pDependencies;
+  auto const __rocm_in_numDependencies = numDependencies;
+  auto const __rocm_in_pNodeParams = pNodeParams;
+  rocm_trace_emit_hipGraphAddMemAllocNode_enter(
+      (const void*)(uintptr_t)(__rocm_in_pGraphNode),
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_pDependencies),
+      (__rocm_in_numDependencies),
+      (const void*)(uintptr_t)(__rocm_in_pNodeParams)); /* __ROCM_CURATED__: hipGraphAddMemAllocNode */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphAddMemAllocNode_fn(pGraphNode, graph, pDependencies,
-                                                                numDependencies, pNodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphAddMemAllocNode, hip::GetHipDispatchTable()->hipGraphAddMemAllocNode_fn(pGraphNode, graph, pDependencies,
+                                                             numDependencies, pNodeParams));
   CATCH;
 }
 hipError_t hipGraphAddMemFreeNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                   const hipGraphNode_t* pDependencies, size_t numDependencies,
                                   void* dev_ptr) {
+  auto const __rocm_in_pGraphNode = pGraphNode;
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_pDependencies = pDependencies;
+  auto const __rocm_in_numDependencies = numDependencies;
+  auto const __rocm_in_dev_ptr = dev_ptr;
+  rocm_trace_emit_hipGraphAddMemFreeNode_enter(
+      (const void*)(uintptr_t)(__rocm_in_pGraphNode),
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_pDependencies),
+      (__rocm_in_numDependencies),
+      (const void*)(uintptr_t)(__rocm_in_dev_ptr)); /* __ROCM_CURATED__: hipGraphAddMemFreeNode */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphAddMemFreeNode_fn(pGraphNode, graph, pDependencies,
-                                                               numDependencies, dev_ptr);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphAddMemFreeNode, hip::GetHipDispatchTable()->hipGraphAddMemFreeNode_fn(pGraphNode, graph, pDependencies,
+                                                            numDependencies, dev_ptr));
   CATCH;
 }
 hipError_t hipGraphAddMemcpyNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                  const hipGraphNode_t* pDependencies, size_t numDependencies,
                                  const hipMemcpy3DParms* pCopyParams) {
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_pDependencies = pDependencies;
+  auto const __rocm_in_numDependencies = numDependencies;
+  auto const __rocm_in_pCopyParams = pCopyParams;
+  rocm_trace_emit_hipGraphAddMemcpyNode_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_pDependencies),
+      (__rocm_in_numDependencies),
+      (const void*)(uintptr_t)(__rocm_in_pCopyParams)); /* __ROCM_CURATED__: hipGraphAddMemcpyNode */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphAddMemcpyNode_fn(pGraphNode, graph, pDependencies,
-                                                              numDependencies, pCopyParams);
+  ROCM_TRACE_RET_STATUS_CURATED(hipGraphAddMemcpyNode, hip::GetHipDispatchTable()->hipGraphAddMemcpyNode_fn(
+                                    pGraphNode, graph, pDependencies, numDependencies, pCopyParams), pGraphNode);
   CATCH;
 }
 hipError_t hipGraphAddMemcpyNode1D(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                    const hipGraphNode_t* pDependencies, size_t numDependencies,
                                    void* dst, const void* src, size_t count, hipMemcpyKind kind) {
+  auto const __rocm_in_pGraphNode = pGraphNode;
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_pDependencies = pDependencies;
+  auto const __rocm_in_numDependencies = numDependencies;
+  auto const __rocm_in_dst = dst;
+  auto const __rocm_in_src = src;
+  auto const __rocm_in_count = count;
+  auto const __rocm_in_kind = kind;
+  rocm_trace_emit_hipGraphAddMemcpyNode1D_enter(
+      (const void*)(uintptr_t)(__rocm_in_pGraphNode),
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_pDependencies),
+      (__rocm_in_numDependencies),
+      (const void*)(uintptr_t)(__rocm_in_dst),
+      (const void*)(uintptr_t)(__rocm_in_src),
+      (__rocm_in_count),
+      (int32_t)(__rocm_in_kind)); /* __ROCM_CURATED__: hipGraphAddMemcpyNode1D */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphAddMemcpyNode1D_fn(
-      pGraphNode, graph, pDependencies, numDependencies, dst, src, count, kind);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphAddMemcpyNode1D, hip::GetHipDispatchTable()->hipGraphAddMemcpyNode1D_fn(
+          pGraphNode, graph, pDependencies, numDependencies, dst, src, count, kind));
   CATCH;
 }
 hipError_t hipGraphAddMemcpyNodeFromSymbol(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                            const hipGraphNode_t* pDependencies,
                                            size_t numDependencies, void* dst, const void* symbol,
                                            size_t count, size_t offset, hipMemcpyKind kind) {
+  auto const __rocm_in_pGraphNode = pGraphNode;
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_pDependencies = pDependencies;
+  auto const __rocm_in_numDependencies = numDependencies;
+  auto const __rocm_in_dst = dst;
+  auto const __rocm_in_symbol = symbol;
+  auto const __rocm_in_count = count;
+  auto const __rocm_in_offset = offset;
+  auto const __rocm_in_kind = kind;
+  rocm_trace_emit_hipGraphAddMemcpyNodeFromSymbol_enter(
+      (const void*)(uintptr_t)(__rocm_in_pGraphNode),
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_pDependencies),
+      (__rocm_in_numDependencies),
+      (const void*)(uintptr_t)(__rocm_in_dst),
+      (const void*)(uintptr_t)(__rocm_in_symbol),
+      (__rocm_in_count),
+      (__rocm_in_offset),
+      (int32_t)(__rocm_in_kind)); /* __ROCM_CURATED__: hipGraphAddMemcpyNodeFromSymbol */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphAddMemcpyNodeFromSymbol_fn(
-      pGraphNode, graph, pDependencies, numDependencies, dst, symbol, count, offset, kind);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphAddMemcpyNodeFromSymbol, hip::GetHipDispatchTable()->hipGraphAddMemcpyNodeFromSymbol_fn(
+          pGraphNode, graph, pDependencies, numDependencies, dst, symbol, count, offset, kind));
   CATCH;
 }
 hipError_t hipGraphAddMemcpyNodeToSymbol(hipGraphNode_t* pGraphNode, hipGraph_t graph,
@@ -1126,394 +1273,860 @@ hipError_t hipGraphAddMemcpyNodeToSymbol(hipGraphNode_t* pGraphNode, hipGraph_t 
                                          size_t numDependencies, const void* symbol,
                                          const void* src, size_t count, size_t offset,
                                          hipMemcpyKind kind) {
+  auto const __rocm_in_pGraphNode = pGraphNode;
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_pDependencies = pDependencies;
+  auto const __rocm_in_numDependencies = numDependencies;
+  auto const __rocm_in_symbol = symbol;
+  auto const __rocm_in_src = src;
+  auto const __rocm_in_count = count;
+  auto const __rocm_in_offset = offset;
+  auto const __rocm_in_kind = kind;
+  rocm_trace_emit_hipGraphAddMemcpyNodeToSymbol_enter(
+      (const void*)(uintptr_t)(__rocm_in_pGraphNode),
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_pDependencies),
+      (__rocm_in_numDependencies),
+      (const void*)(uintptr_t)(__rocm_in_symbol),
+      (const void*)(uintptr_t)(__rocm_in_src),
+      (__rocm_in_count),
+      (__rocm_in_offset),
+      (int32_t)(__rocm_in_kind)); /* __ROCM_CURATED__: hipGraphAddMemcpyNodeToSymbol */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphAddMemcpyNodeToSymbol_fn(
-      pGraphNode, graph, pDependencies, numDependencies, symbol, src, count, offset, kind);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphAddMemcpyNodeToSymbol, hip::GetHipDispatchTable()->hipGraphAddMemcpyNodeToSymbol_fn(
+          pGraphNode, graph, pDependencies, numDependencies, symbol, src, count, offset, kind));
   CATCH;
 }
 hipError_t hipGraphAddMemsetNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                  const hipGraphNode_t* pDependencies, size_t numDependencies,
                                  const hipMemsetParams* pMemsetParams) {
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_pDependencies = pDependencies;
+  auto const __rocm_in_numDependencies = numDependencies;
+  auto const __rocm_in_pMemsetParams = pMemsetParams;
+  rocm_trace_emit_hipGraphAddMemsetNode_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_pDependencies),
+      (__rocm_in_numDependencies),
+      (const void*)(uintptr_t)(__rocm_in_pMemsetParams)); /* __ROCM_CURATED__: hipGraphAddMemsetNode */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphAddMemsetNode_fn(pGraphNode, graph, pDependencies,
-                                                              numDependencies, pMemsetParams);
+  ROCM_TRACE_RET_STATUS_CURATED(hipGraphAddMemsetNode, hip::GetHipDispatchTable()->hipGraphAddMemsetNode_fn(pGraphNode, graph, pDependencies,
+                                                           numDependencies, pMemsetParams), pGraphNode);
   CATCH;
 }
 hipError_t hipGraphAddNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                            const hipGraphNode_t* pDependencies, size_t numDependencies,
                            hipGraphNodeParams* nodeParams) {
+  auto const __rocm_in_pGraphNode = pGraphNode;
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_pDependencies = pDependencies;
+  auto const __rocm_in_numDependencies = numDependencies;
+  auto const __rocm_in_nodeParams = nodeParams;
+  rocm_trace_emit_hipGraphAddNode_enter(
+      (const void*)(uintptr_t)(__rocm_in_pGraphNode),
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_pDependencies),
+      (__rocm_in_numDependencies),
+      (const void*)(uintptr_t)(__rocm_in_nodeParams)); /* __ROCM_CURATED__: hipGraphAddNode */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphAddNode_fn(pGraphNode, graph, pDependencies,
-                                                        numDependencies, nodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphAddNode, hip::GetHipDispatchTable()->hipGraphAddNode_fn(pGraphNode, graph, pDependencies,
+                                                     numDependencies, nodeParams));
   CATCH;
 }
 hipError_t hipGraphChildGraphNodeGetGraph(hipGraphNode_t node, hipGraph_t* pGraph) {
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_pGraph = pGraph;
+  rocm_trace_emit_hipGraphChildGraphNodeGetGraph_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_pGraph)); /* __ROCM_CURATED__: hipGraphChildGraphNodeGetGraph */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphChildGraphNodeGetGraph_fn(node, pGraph);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphChildGraphNodeGetGraph, hip::GetHipDispatchTable()->hipGraphChildGraphNodeGetGraph_fn(node, pGraph));
   CATCH;
 }
 hipError_t hipGraphClone(hipGraph_t* pGraphClone, hipGraph_t originalGraph) {
+  auto const __rocm_in_pGraphClone = pGraphClone;
+  auto const __rocm_in_originalGraph = originalGraph;
+  rocm_trace_emit_hipGraphClone_enter(
+      (const void*)(uintptr_t)(__rocm_in_pGraphClone),
+      (uint64_t)(uintptr_t)(__rocm_in_originalGraph)); /* __ROCM_CURATED__: hipGraphClone */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphClone_fn(pGraphClone, originalGraph);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphClone, hip::GetHipDispatchTable()->hipGraphClone_fn(pGraphClone, originalGraph));
   CATCH;
 }
 hipError_t hipGraphCreate(hipGraph_t* pGraph, unsigned int flags) {
+  auto const __rocm_in_flags = flags;
+  rocm_trace_emit_hipGraphCreate_enter(
+      (__rocm_in_flags)); /* __ROCM_CURATED__: hipGraphCreate */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphCreate_fn(pGraph, flags);
+  ROCM_TRACE_RET_STATUS_CURATED(hipGraphCreate, hip::GetHipDispatchTable()->hipGraphCreate_fn(pGraph, flags), pGraph);
   CATCH;
 }
 hipError_t hipGraphDebugDotPrint(hipGraph_t graph, const char* path, unsigned int flags) {
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_path = path;
+  auto const __rocm_in_flags = flags;
+  rocm_trace_emit_hipGraphDebugDotPrint_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const char*)(__rocm_in_path),
+      (__rocm_in_flags)); /* __ROCM_CURATED__: hipGraphDebugDotPrint */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphDebugDotPrint_fn(graph, path, flags);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphDebugDotPrint, hip::GetHipDispatchTable()->hipGraphDebugDotPrint_fn(graph, path, flags));
   CATCH;
 }
 hipError_t hipGraphDestroy(hipGraph_t graph) {
+  auto const __rocm_in_graph = graph;
+  rocm_trace_emit_hipGraphDestroy_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_graph)); /* __ROCM_CURATED__: hipGraphDestroy */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphDestroy_fn(graph);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphDestroy, hip::GetHipDispatchTable()->hipGraphDestroy_fn(graph));
   CATCH;
 }
 hipError_t hipGraphDestroyNode(hipGraphNode_t node) {
+  auto const __rocm_in_node = node;
+  rocm_trace_emit_hipGraphDestroyNode_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_node)); /* __ROCM_CURATED__: hipGraphDestroyNode */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphDestroyNode_fn(node);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphDestroyNode, hip::GetHipDispatchTable()->hipGraphDestroyNode_fn(node));
   CATCH;
 }
 hipError_t hipGraphEventRecordNodeGetEvent(hipGraphNode_t node, hipEvent_t* event_out) {
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_event_out = event_out;
+  rocm_trace_emit_hipGraphEventRecordNodeGetEvent_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_event_out)); /* __ROCM_CURATED__: hipGraphEventRecordNodeGetEvent */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphEventRecordNodeGetEvent_fn(node, event_out);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphEventRecordNodeGetEvent, hip::GetHipDispatchTable()->hipGraphEventRecordNodeGetEvent_fn(node, event_out));
   CATCH;
 }
 hipError_t hipGraphEventRecordNodeSetEvent(hipGraphNode_t node, hipEvent_t event) {
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_event = event;
+  rocm_trace_emit_hipGraphEventRecordNodeSetEvent_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (uint64_t)(uintptr_t)(__rocm_in_event)); /* __ROCM_CURATED__: hipGraphEventRecordNodeSetEvent */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphEventRecordNodeSetEvent_fn(node, event);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphEventRecordNodeSetEvent, hip::GetHipDispatchTable()->hipGraphEventRecordNodeSetEvent_fn(node, event));
   CATCH;
 }
 hipError_t hipGraphEventWaitNodeGetEvent(hipGraphNode_t node, hipEvent_t* event_out) {
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_event_out = event_out;
+  rocm_trace_emit_hipGraphEventWaitNodeGetEvent_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_event_out)); /* __ROCM_CURATED__: hipGraphEventWaitNodeGetEvent */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphEventWaitNodeGetEvent_fn(node, event_out);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphEventWaitNodeGetEvent, hip::GetHipDispatchTable()->hipGraphEventWaitNodeGetEvent_fn(node, event_out));
   CATCH;
 }
 hipError_t hipGraphEventWaitNodeSetEvent(hipGraphNode_t node, hipEvent_t event) {
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_event = event;
+  rocm_trace_emit_hipGraphEventWaitNodeSetEvent_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (uint64_t)(uintptr_t)(__rocm_in_event)); /* __ROCM_CURATED__: hipGraphEventWaitNodeSetEvent */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphEventWaitNodeSetEvent_fn(node, event);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphEventWaitNodeSetEvent, hip::GetHipDispatchTable()->hipGraphEventWaitNodeSetEvent_fn(node, event));
   CATCH;
 }
 hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node,
                                                hipGraph_t childGraph) {
+  auto const __rocm_in_hGraphExec = hGraphExec;
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_childGraph = childGraph;
+  rocm_trace_emit_hipGraphExecChildGraphNodeSetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hGraphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (uint64_t)(uintptr_t)(__rocm_in_childGraph)); /* __ROCM_CURATED__: hipGraphExecChildGraphNodeSetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphExecChildGraphNodeSetParams_fn(hGraphExec, node,
-                                                                            childGraph);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphExecChildGraphNodeSetParams, hip::GetHipDispatchTable()->hipGraphExecChildGraphNodeSetParams_fn(
+                                    hGraphExec, node, childGraph));
   CATCH;
 }
 hipError_t hipGraphExecNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node,
                                      hipGraphNodeParams* nodeParams) {
+  auto const __rocm_in_hGraphExec = hGraphExec;
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_nodeParams = nodeParams;
+  rocm_trace_emit_hipGraphExecNodeSetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hGraphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_nodeParams)); /* __ROCM_CURATED__: hipGraphExecNodeSetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphExecNodeSetParams_fn(hGraphExec, node, nodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphExecNodeSetParams, hip::GetHipDispatchTable()->hipGraphExecNodeSetParams_fn(hGraphExec, node, nodeParams));
   CATCH;
 }
 hipError_t hipGraphExecDestroy(hipGraphExec_t graphExec) {
+  auto const __rocm_in_graphExec = graphExec;
+  rocm_trace_emit_hipGraphExecDestroy_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_graphExec)); /* __ROCM_CURATED__: hipGraphExecDestroy */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphExecDestroy_fn(graphExec);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphExecDestroy, hip::GetHipDispatchTable()->hipGraphExecDestroy_fn(graphExec));
   CATCH;
 }
 hipError_t hipGraphExecEventRecordNodeSetEvent(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
                                                hipEvent_t event) {
+  auto const __rocm_in_hGraphExec = hGraphExec;
+  auto const __rocm_in_hNode = hNode;
+  auto const __rocm_in_event = event;
+  rocm_trace_emit_hipGraphExecEventRecordNodeSetEvent_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hGraphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_hNode),
+      (uint64_t)(uintptr_t)(__rocm_in_event)); /* __ROCM_CURATED__: hipGraphExecEventRecordNodeSetEvent */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphExecEventRecordNodeSetEvent_fn(hGraphExec, hNode,
-                                                                            event);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphExecEventRecordNodeSetEvent, hip::GetHipDispatchTable()->hipGraphExecEventRecordNodeSetEvent_fn(hGraphExec, hNode, event));
   CATCH;
 }
 hipError_t hipGraphExecEventWaitNodeSetEvent(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
                                              hipEvent_t event) {
+  auto const __rocm_in_hGraphExec = hGraphExec;
+  auto const __rocm_in_hNode = hNode;
+  auto const __rocm_in_event = event;
+  rocm_trace_emit_hipGraphExecEventWaitNodeSetEvent_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hGraphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_hNode),
+      (uint64_t)(uintptr_t)(__rocm_in_event)); /* __ROCM_CURATED__: hipGraphExecEventWaitNodeSetEvent */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphExecEventWaitNodeSetEvent_fn(hGraphExec, hNode, event);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphExecEventWaitNodeSetEvent, hip::GetHipDispatchTable()->hipGraphExecEventWaitNodeSetEvent_fn(hGraphExec, hNode, event));
   CATCH;
 }
 hipError_t hipGraphExecHostNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node,
                                          const hipHostNodeParams* pNodeParams) {
+  auto const __rocm_in_hGraphExec = hGraphExec;
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_pNodeParams = pNodeParams;
+  rocm_trace_emit_hipGraphExecHostNodeSetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hGraphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_pNodeParams)); /* __ROCM_CURATED__: hipGraphExecHostNodeSetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphExecHostNodeSetParams_fn(hGraphExec, node,
-                                                                      pNodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphExecHostNodeSetParams, hip::GetHipDispatchTable()->hipGraphExecHostNodeSetParams_fn(hGraphExec, node, pNodeParams));
   CATCH;
 }
 hipError_t hipGraphExecKernelNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node,
                                            const hipKernelNodeParams* pNodeParams) {
+  auto const __rocm_in_hGraphExec = hGraphExec;
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_pNodeParams = pNodeParams;
+  rocm_trace_emit_hipGraphExecKernelNodeSetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hGraphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_pNodeParams)); /* __ROCM_CURATED__: hipGraphExecKernelNodeSetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphExecKernelNodeSetParams_fn(hGraphExec, node,
-                                                                        pNodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphExecKernelNodeSetParams, hip::GetHipDispatchTable()->hipGraphExecKernelNodeSetParams_fn(hGraphExec, node, pNodeParams));
   CATCH;
 }
 hipError_t hipGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node,
                                            hipMemcpy3DParms* pNodeParams) {
+  auto const __rocm_in_hGraphExec = hGraphExec;
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_pNodeParams = pNodeParams;
+  rocm_trace_emit_hipGraphExecMemcpyNodeSetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hGraphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_pNodeParams)); /* __ROCM_CURATED__: hipGraphExecMemcpyNodeSetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphExecMemcpyNodeSetParams_fn(hGraphExec, node,
-                                                                        pNodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphExecMemcpyNodeSetParams, hip::GetHipDispatchTable()->hipGraphExecMemcpyNodeSetParams_fn(hGraphExec, node, pNodeParams));
   CATCH;
 }
 hipError_t hipGraphExecMemcpyNodeSetParams1D(hipGraphExec_t hGraphExec, hipGraphNode_t node,
                                              void* dst, const void* src, size_t count,
                                              hipMemcpyKind kind) {
+  auto const __rocm_in_hGraphExec = hGraphExec;
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_dst = dst;
+  auto const __rocm_in_src = src;
+  auto const __rocm_in_count = count;
+  auto const __rocm_in_kind = kind;
+  rocm_trace_emit_hipGraphExecMemcpyNodeSetParams1D_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hGraphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_dst),
+      (const void*)(uintptr_t)(__rocm_in_src),
+      (__rocm_in_count),
+      (int32_t)(__rocm_in_kind)); /* __ROCM_CURATED__: hipGraphExecMemcpyNodeSetParams1D */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphExecMemcpyNodeSetParams1D_fn(hGraphExec, node, dst,
-                                                                          src, count, kind);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphExecMemcpyNodeSetParams1D, hip::GetHipDispatchTable()->hipGraphExecMemcpyNodeSetParams1D_fn(hGraphExec, node, dst, src,
+                                                                       count, kind));
   CATCH;
 }
 hipError_t hipGraphExecMemcpyNodeSetParamsFromSymbol(hipGraphExec_t hGraphExec, hipGraphNode_t node,
                                                      void* dst, const void* symbol, size_t count,
                                                      size_t offset, hipMemcpyKind kind) {
+  auto const __rocm_in_hGraphExec = hGraphExec;
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_dst = dst;
+  auto const __rocm_in_symbol = symbol;
+  auto const __rocm_in_count = count;
+  auto const __rocm_in_offset = offset;
+  auto const __rocm_in_kind = kind;
+  rocm_trace_emit_hipGraphExecMemcpyNodeSetParamsFromSymbol_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hGraphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_dst),
+      (const void*)(uintptr_t)(__rocm_in_symbol),
+      (__rocm_in_count),
+      (__rocm_in_offset),
+      (int32_t)(__rocm_in_kind)); /* __ROCM_CURATED__: hipGraphExecMemcpyNodeSetParamsFromSymbol */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphExecMemcpyNodeSetParamsFromSymbol_fn(
-      hGraphExec, node, dst, symbol, count, offset, kind);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphExecMemcpyNodeSetParamsFromSymbol, hip::GetHipDispatchTable()->hipGraphExecMemcpyNodeSetParamsFromSymbol_fn(
+          hGraphExec, node, dst, symbol, count, offset, kind));
   CATCH;
 }
 hipError_t hipGraphExecMemcpyNodeSetParamsToSymbol(hipGraphExec_t hGraphExec, hipGraphNode_t node,
                                                    const void* symbol, const void* src,
                                                    size_t count, size_t offset,
                                                    hipMemcpyKind kind) {
+  auto const __rocm_in_hGraphExec = hGraphExec;
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_symbol = symbol;
+  auto const __rocm_in_src = src;
+  auto const __rocm_in_count = count;
+  auto const __rocm_in_offset = offset;
+  auto const __rocm_in_kind = kind;
+  rocm_trace_emit_hipGraphExecMemcpyNodeSetParamsToSymbol_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hGraphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_symbol),
+      (const void*)(uintptr_t)(__rocm_in_src),
+      (__rocm_in_count),
+      (__rocm_in_offset),
+      (int32_t)(__rocm_in_kind)); /* __ROCM_CURATED__: hipGraphExecMemcpyNodeSetParamsToSymbol */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphExecMemcpyNodeSetParamsToSymbol_fn(
-      hGraphExec, node, symbol, src, count, offset, kind);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphExecMemcpyNodeSetParamsToSymbol, hip::GetHipDispatchTable()->hipGraphExecMemcpyNodeSetParamsToSymbol_fn(
+          hGraphExec, node, symbol, src, count, offset, kind));
   CATCH;
 }
 hipError_t hipGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node,
                                            const hipMemsetParams* pNodeParams) {
+  auto const __rocm_in_hGraphExec = hGraphExec;
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_pNodeParams = pNodeParams;
+  rocm_trace_emit_hipGraphExecMemsetNodeSetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hGraphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_pNodeParams)); /* __ROCM_CURATED__: hipGraphExecMemsetNodeSetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphExecMemsetNodeSetParams_fn(hGraphExec, node,
-                                                                        pNodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphExecMemsetNodeSetParams, hip::GetHipDispatchTable()->hipGraphExecMemsetNodeSetParams_fn(hGraphExec, node, pNodeParams));
   CATCH;
 }
 hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
                               hipGraphNode_t* hErrorNode_out,
                               hipGraphExecUpdateResult* updateResult_out) {
+  auto const __rocm_in_hGraphExec = hGraphExec;
+  auto const __rocm_in_hGraph = hGraph;
+  auto const __rocm_in_hErrorNode_out = hErrorNode_out;
+  auto const __rocm_in_updateResult_out = updateResult_out;
+  rocm_trace_emit_hipGraphExecUpdate_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hGraphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_hGraph),
+      (const void*)(uintptr_t)(__rocm_in_hErrorNode_out),
+      (const void*)(uintptr_t)(__rocm_in_updateResult_out)); /* __ROCM_CURATED__: hipGraphExecUpdate */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphExecUpdate_fn(hGraphExec, hGraph, hErrorNode_out,
-                                                           updateResult_out);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphExecUpdate, hip::GetHipDispatchTable()->hipGraphExecUpdate_fn(
+                                    hGraphExec, hGraph, hErrorNode_out, updateResult_out));
   CATCH;
 }
 hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode_t* to,
                             size_t* numEdges) {
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_from = from;
+  auto const __rocm_in_to = to;
+  auto const __rocm_in_numEdges = numEdges;
+  rocm_trace_emit_hipGraphGetEdges_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_from),
+      (const void*)(uintptr_t)(__rocm_in_to),
+      (const void*)(uintptr_t)(__rocm_in_numEdges)); /* __ROCM_CURATED__: hipGraphGetEdges */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphGetEdges_fn(graph, from, to, numEdges);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphGetEdges, hip::GetHipDispatchTable()->hipGraphGetEdges_fn(graph, from, to, numEdges));
   CATCH;
 }
 hipError_t hipGraphGetNodes(hipGraph_t graph, hipGraphNode_t* nodes, size_t* numNodes) {
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_nodes = nodes;
+  auto const __rocm_in_numNodes = numNodes;
+  rocm_trace_emit_hipGraphGetNodes_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_nodes),
+      (const void*)(uintptr_t)(__rocm_in_numNodes)); /* __ROCM_CURATED__: hipGraphGetNodes */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphGetNodes_fn(graph, nodes, numNodes);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphGetNodes, hip::GetHipDispatchTable()->hipGraphGetNodes_fn(graph, nodes, numNodes));
   CATCH;
 }
 hipError_t hipGraphGetRootNodes(hipGraph_t graph, hipGraphNode_t* pRootNodes,
                                 size_t* pNumRootNodes) {
-  return hip::GetHipDispatchTable()->hipGraphGetRootNodes_fn(graph, pRootNodes, pNumRootNodes);
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_pRootNodes = pRootNodes;
+  auto const __rocm_in_pNumRootNodes = pNumRootNodes;
+  rocm_trace_emit_hipGraphGetRootNodes_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_pRootNodes),
+      (const void*)(uintptr_t)(__rocm_in_pNumRootNodes)); /* __ROCM_CURATED__: hipGraphGetRootNodes */
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphGetRootNodes, hip::GetHipDispatchTable()->hipGraphGetRootNodes_fn(graph, pRootNodes, pNumRootNodes));
 }
 hipError_t hipGraphHostNodeGetParams(hipGraphNode_t node, hipHostNodeParams* pNodeParams) {
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_pNodeParams = pNodeParams;
+  rocm_trace_emit_hipGraphHostNodeGetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_pNodeParams)); /* __ROCM_CURATED__: hipGraphHostNodeGetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphHostNodeGetParams_fn(node, pNodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphHostNodeGetParams, hip::GetHipDispatchTable()->hipGraphHostNodeGetParams_fn(node, pNodeParams));
   CATCH;
 }
 hipError_t hipGraphHostNodeSetParams(hipGraphNode_t node, const hipHostNodeParams* pNodeParams) {
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_pNodeParams = pNodeParams;
+  rocm_trace_emit_hipGraphHostNodeSetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_pNodeParams)); /* __ROCM_CURATED__: hipGraphHostNodeSetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphHostNodeSetParams_fn(node, pNodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphHostNodeSetParams, hip::GetHipDispatchTable()->hipGraphHostNodeSetParams_fn(node, pNodeParams));
   CATCH;
 }
 hipError_t hipGraphInstantiate(hipGraphExec_t* pGraphExec, hipGraph_t graph,
                                hipGraphNode_t* pErrorNode, char* pLogBuffer, size_t bufferSize) {
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_pErrorNode = pErrorNode;
+  auto const __rocm_in_pLogBuffer = pLogBuffer;
+  auto const __rocm_in_bufferSize = bufferSize;
+  rocm_trace_emit_hipGraphInstantiate_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_pErrorNode),
+      (const void*)(uintptr_t)(__rocm_in_pLogBuffer),
+      (__rocm_in_bufferSize)); /* __ROCM_CURATED__: hipGraphInstantiate */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphInstantiate_fn(pGraphExec, graph, pErrorNode,
-                                                            pLogBuffer, bufferSize);
+  ROCM_TRACE_RET_STATUS_CURATED(hipGraphInstantiate, hip::GetHipDispatchTable()->hipGraphInstantiate_fn(
+                                    pGraphExec, graph, pErrorNode, pLogBuffer, bufferSize), pGraphExec);
   CATCH;
 }
 hipError_t hipGraphInstantiateWithFlags(hipGraphExec_t* pGraphExec, hipGraph_t graph,
                                         unsigned long long flags) {
+  auto const __rocm_in_pGraphExec = pGraphExec;
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_flags = flags;
+  rocm_trace_emit_hipGraphInstantiateWithFlags_enter(
+      (const void*)(uintptr_t)(__rocm_in_pGraphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (__rocm_in_flags)); /* __ROCM_CURATED__: hipGraphInstantiateWithFlags */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphInstantiateWithFlags_fn(pGraphExec, graph, flags);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphInstantiateWithFlags, hip::GetHipDispatchTable()->hipGraphInstantiateWithFlags_fn(pGraphExec, graph, flags));
   CATCH;
 }
 hipError_t hipGraphInstantiateWithParams(hipGraphExec_t* pGraphExec, hipGraph_t graph,
                                          hipGraphInstantiateParams* instantiateParams) {
+  auto const __rocm_in_pGraphExec = pGraphExec;
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_instantiateParams = instantiateParams;
+  rocm_trace_emit_hipGraphInstantiateWithParams_enter(
+      (const void*)(uintptr_t)(__rocm_in_pGraphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_instantiateParams)); /* __ROCM_CURATED__: hipGraphInstantiateWithParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphInstantiateWithParams_fn(pGraphExec, graph,
-                                                                      instantiateParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphInstantiateWithParams, hip::GetHipDispatchTable()->hipGraphInstantiateWithParams_fn(
+                                    pGraphExec, graph, instantiateParams));
   CATCH;
 }
 hipError_t hipGraphKernelNodeCopyAttributes(hipGraphNode_t hSrc, hipGraphNode_t hDst) {
+  auto const __rocm_in_hSrc = hSrc;
+  auto const __rocm_in_hDst = hDst;
+  rocm_trace_emit_hipGraphKernelNodeCopyAttributes_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hSrc),
+      (uint64_t)(uintptr_t)(__rocm_in_hDst)); /* __ROCM_CURATED__: hipGraphKernelNodeCopyAttributes */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphKernelNodeCopyAttributes_fn(hSrc, hDst);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphKernelNodeCopyAttributes, hip::GetHipDispatchTable()->hipGraphKernelNodeCopyAttributes_fn(hSrc, hDst));
   CATCH;
 }
 hipError_t hipGraphKernelNodeGetAttribute(hipGraphNode_t hNode, hipKernelNodeAttrID attr,
                                           hipKernelNodeAttrValue* value) {
-  return hip::GetHipDispatchTable()->hipGraphKernelNodeGetAttribute_fn(hNode, attr, value);
+  auto const __rocm_in_hNode = hNode;
+  auto const __rocm_in_attr = attr;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hipGraphKernelNodeGetAttribute_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hNode),
+      (int32_t)(__rocm_in_attr),
+      (const void*)(uintptr_t)(__rocm_in_value)); /* __ROCM_CURATED__: hipGraphKernelNodeGetAttribute */
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphKernelNodeGetAttribute, hip::GetHipDispatchTable()->hipGraphKernelNodeGetAttribute_fn(hNode, attr, value));
 }
 hipError_t hipGraphKernelNodeGetParams(hipGraphNode_t node, hipKernelNodeParams* pNodeParams) {
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_pNodeParams = pNodeParams;
+  rocm_trace_emit_hipGraphKernelNodeGetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_pNodeParams)); /* __ROCM_CURATED__: hipGraphKernelNodeGetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphKernelNodeGetParams_fn(node, pNodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphKernelNodeGetParams, hip::GetHipDispatchTable()->hipGraphKernelNodeGetParams_fn(node, pNodeParams));
   CATCH;
 }
 hipError_t hipGraphKernelNodeSetAttribute(hipGraphNode_t hNode, hipKernelNodeAttrID attr,
                                           const hipKernelNodeAttrValue* value) {
+  auto const __rocm_in_hNode = hNode;
+  auto const __rocm_in_attr = attr;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hipGraphKernelNodeSetAttribute_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hNode),
+      (int32_t)(__rocm_in_attr),
+      (const void*)(uintptr_t)(__rocm_in_value)); /* __ROCM_CURATED__: hipGraphKernelNodeSetAttribute */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphKernelNodeSetAttribute_fn(hNode, attr, value);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphKernelNodeSetAttribute, hip::GetHipDispatchTable()->hipGraphKernelNodeSetAttribute_fn(hNode, attr, value));
   CATCH;
 }
 hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
                                        const hipKernelNodeParams* pNodeParams) {
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_pNodeParams = pNodeParams;
+  rocm_trace_emit_hipGraphKernelNodeSetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_pNodeParams)); /* __ROCM_CURATED__: hipGraphKernelNodeSetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphKernelNodeSetParams_fn(node, pNodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphKernelNodeSetParams, hip::GetHipDispatchTable()->hipGraphKernelNodeSetParams_fn(node, pNodeParams));
   CATCH;
 }
 hipError_t hipGraphLaunch(hipGraphExec_t graphExec, hipStream_t stream) {
+  auto const __rocm_in_graphExec = graphExec;
+  auto const __rocm_in_stream = stream;
+  rocm_trace_emit_hipGraphLaunch_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_graphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_stream)); /* __ROCM_CURATED__: hipGraphLaunch */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphLaunch_fn(graphExec, stream);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphLaunch, hip::GetHipDispatchTable()->hipGraphLaunch_fn(graphExec, stream));
   CATCH;
 }
 hipError_t hipGraphMemAllocNodeGetParams(hipGraphNode_t node, hipMemAllocNodeParams* pNodeParams) {
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_pNodeParams = pNodeParams;
+  rocm_trace_emit_hipGraphMemAllocNodeGetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_pNodeParams)); /* __ROCM_CURATED__: hipGraphMemAllocNodeGetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphMemAllocNodeGetParams_fn(node, pNodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphMemAllocNodeGetParams, hip::GetHipDispatchTable()->hipGraphMemAllocNodeGetParams_fn(node, pNodeParams));
   CATCH;
 }
 hipError_t hipGraphMemFreeNodeGetParams(hipGraphNode_t node, void* dev_ptr) {
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_dev_ptr = dev_ptr;
+  rocm_trace_emit_hipGraphMemFreeNodeGetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_dev_ptr)); /* __ROCM_CURATED__: hipGraphMemFreeNodeGetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphMemFreeNodeGetParams_fn(node, dev_ptr);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphMemFreeNodeGetParams, hip::GetHipDispatchTable()->hipGraphMemFreeNodeGetParams_fn(node, dev_ptr));
   CATCH;
 }
 hipError_t hipGraphMemcpyNodeGetParams(hipGraphNode_t node, hipMemcpy3DParms* pNodeParams) {
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_pNodeParams = pNodeParams;
+  rocm_trace_emit_hipGraphMemcpyNodeGetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_pNodeParams)); /* __ROCM_CURATED__: hipGraphMemcpyNodeGetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphMemcpyNodeGetParams_fn(node, pNodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphMemcpyNodeGetParams, hip::GetHipDispatchTable()->hipGraphMemcpyNodeGetParams_fn(node, pNodeParams));
   CATCH;
 }
 hipError_t hipGraphMemcpyNodeSetParams(hipGraphNode_t node, const hipMemcpy3DParms* pNodeParams) {
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_pNodeParams = pNodeParams;
+  rocm_trace_emit_hipGraphMemcpyNodeSetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_pNodeParams)); /* __ROCM_CURATED__: hipGraphMemcpyNodeSetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphMemcpyNodeSetParams_fn(node, pNodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphMemcpyNodeSetParams, hip::GetHipDispatchTable()->hipGraphMemcpyNodeSetParams_fn(node, pNodeParams));
   CATCH;
 }
 hipError_t hipGraphMemcpyNodeSetParams1D(hipGraphNode_t node, void* dst, const void* src,
                                          size_t count, hipMemcpyKind kind) {
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_dst = dst;
+  auto const __rocm_in_src = src;
+  auto const __rocm_in_count = count;
+  auto const __rocm_in_kind = kind;
+  rocm_trace_emit_hipGraphMemcpyNodeSetParams1D_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_dst),
+      (const void*)(uintptr_t)(__rocm_in_src),
+      (__rocm_in_count),
+      (int32_t)(__rocm_in_kind)); /* __ROCM_CURATED__: hipGraphMemcpyNodeSetParams1D */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphMemcpyNodeSetParams1D_fn(node, dst, src, count, kind);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphMemcpyNodeSetParams1D, hip::GetHipDispatchTable()->hipGraphMemcpyNodeSetParams1D_fn(node, dst, src, count, kind));
   CATCH;
 }
 hipError_t hipGraphMemcpyNodeSetParamsFromSymbol(hipGraphNode_t node, void* dst, const void* symbol,
                                                  size_t count, size_t offset, hipMemcpyKind kind) {
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_dst = dst;
+  auto const __rocm_in_symbol = symbol;
+  auto const __rocm_in_count = count;
+  auto const __rocm_in_offset = offset;
+  auto const __rocm_in_kind = kind;
+  rocm_trace_emit_hipGraphMemcpyNodeSetParamsFromSymbol_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_dst),
+      (const void*)(uintptr_t)(__rocm_in_symbol),
+      (__rocm_in_count),
+      (__rocm_in_offset),
+      (int32_t)(__rocm_in_kind)); /* __ROCM_CURATED__: hipGraphMemcpyNodeSetParamsFromSymbol */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphMemcpyNodeSetParamsFromSymbol_fn(node, dst, symbol,
-                                                                              count, offset, kind);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphMemcpyNodeSetParamsFromSymbol, hip::GetHipDispatchTable()->hipGraphMemcpyNodeSetParamsFromSymbol_fn(node, dst, symbol, count,
+                                                                           offset, kind));
   CATCH;
 }
 hipError_t hipGraphMemcpyNodeSetParamsToSymbol(hipGraphNode_t node, const void* symbol,
                                                const void* src, size_t count, size_t offset,
                                                hipMemcpyKind kind) {
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_symbol = symbol;
+  auto const __rocm_in_src = src;
+  auto const __rocm_in_count = count;
+  auto const __rocm_in_offset = offset;
+  auto const __rocm_in_kind = kind;
+  rocm_trace_emit_hipGraphMemcpyNodeSetParamsToSymbol_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_symbol),
+      (const void*)(uintptr_t)(__rocm_in_src),
+      (__rocm_in_count),
+      (__rocm_in_offset),
+      (int32_t)(__rocm_in_kind)); /* __ROCM_CURATED__: hipGraphMemcpyNodeSetParamsToSymbol */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphMemcpyNodeSetParamsToSymbol_fn(node, symbol, src,
-                                                                            count, offset, kind);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphMemcpyNodeSetParamsToSymbol, hip::GetHipDispatchTable()->hipGraphMemcpyNodeSetParamsToSymbol_fn(
+                                    node, symbol, src, count, offset, kind));
   CATCH;
 }
 hipError_t hipGraphMemsetNodeGetParams(hipGraphNode_t node, hipMemsetParams* pNodeParams) {
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_pNodeParams = pNodeParams;
+  rocm_trace_emit_hipGraphMemsetNodeGetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_pNodeParams)); /* __ROCM_CURATED__: hipGraphMemsetNodeGetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphMemsetNodeGetParams_fn(node, pNodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphMemsetNodeGetParams, hip::GetHipDispatchTable()->hipGraphMemsetNodeGetParams_fn(node, pNodeParams));
   CATCH;
 }
 hipError_t hipGraphMemsetNodeSetParams(hipGraphNode_t node, const hipMemsetParams* pNodeParams) {
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_pNodeParams = pNodeParams;
+  rocm_trace_emit_hipGraphMemsetNodeSetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_pNodeParams)); /* __ROCM_CURATED__: hipGraphMemsetNodeSetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphMemsetNodeSetParams_fn(node, pNodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphMemsetNodeSetParams, hip::GetHipDispatchTable()->hipGraphMemsetNodeSetParams_fn(node, pNodeParams));
   CATCH;
 }
 hipError_t hipGraphNodeFindInClone(hipGraphNode_t* pNode, hipGraphNode_t originalNode,
                                    hipGraph_t clonedGraph) {
+  auto const __rocm_in_pNode = pNode;
+  auto const __rocm_in_originalNode = originalNode;
+  auto const __rocm_in_clonedGraph = clonedGraph;
+  rocm_trace_emit_hipGraphNodeFindInClone_enter(
+      (const void*)(uintptr_t)(__rocm_in_pNode),
+      (uint64_t)(uintptr_t)(__rocm_in_originalNode),
+      (uint64_t)(uintptr_t)(__rocm_in_clonedGraph)); /* __ROCM_CURATED__: hipGraphNodeFindInClone */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphNodeFindInClone_fn(pNode, originalNode, clonedGraph);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphNodeFindInClone, hip::GetHipDispatchTable()->hipGraphNodeFindInClone_fn(pNode, originalNode, clonedGraph));
   CATCH;
 }
 hipError_t hipGraphNodeGetDependencies(hipGraphNode_t node, hipGraphNode_t* pDependencies,
                                        size_t* pNumDependencies) {
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_pDependencies = pDependencies;
+  auto const __rocm_in_pNumDependencies = pNumDependencies;
+  rocm_trace_emit_hipGraphNodeGetDependencies_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_pDependencies),
+      (const void*)(uintptr_t)(__rocm_in_pNumDependencies)); /* __ROCM_CURATED__: hipGraphNodeGetDependencies */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphNodeGetDependencies_fn(node, pDependencies,
-                                                                    pNumDependencies);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphNodeGetDependencies, hip::GetHipDispatchTable()->hipGraphNodeGetDependencies_fn(
+                                    node, pDependencies, pNumDependencies));
   CATCH;
 }
 hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node, hipGraphNode_t* pDependentNodes,
                                          size_t* pNumDependentNodes) {
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_pDependentNodes = pDependentNodes;
+  auto const __rocm_in_pNumDependentNodes = pNumDependentNodes;
+  rocm_trace_emit_hipGraphNodeGetDependentNodes_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_pDependentNodes),
+      (const void*)(uintptr_t)(__rocm_in_pNumDependentNodes)); /* __ROCM_CURATED__: hipGraphNodeGetDependentNodes */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphNodeGetDependentNodes_fn(node, pDependentNodes,
-                                                                      pNumDependentNodes);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphNodeGetDependentNodes, hip::GetHipDispatchTable()->hipGraphNodeGetDependentNodes_fn(
+                                    node, pDependentNodes, pNumDependentNodes));
   CATCH;
 }
 hipError_t hipGraphNodeGetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
                                   unsigned int* isEnabled) {
+  auto const __rocm_in_hGraphExec = hGraphExec;
+  auto const __rocm_in_hNode = hNode;
+  auto const __rocm_in_isEnabled = isEnabled;
+  rocm_trace_emit_hipGraphNodeGetEnabled_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hGraphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_hNode),
+      (const void*)(uintptr_t)(__rocm_in_isEnabled)); /* __ROCM_CURATED__: hipGraphNodeGetEnabled */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphNodeGetEnabled_fn(hGraphExec, hNode, isEnabled);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphNodeGetEnabled, hip::GetHipDispatchTable()->hipGraphNodeGetEnabled_fn(hGraphExec, hNode, isEnabled));
   CATCH;
 }
 hipError_t hipGraphNodeGetType(hipGraphNode_t node, hipGraphNodeType* pType) {
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_pType = pType;
+  rocm_trace_emit_hipGraphNodeGetType_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_pType)); /* __ROCM_CURATED__: hipGraphNodeGetType */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphNodeGetType_fn(node, pType);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphNodeGetType, hip::GetHipDispatchTable()->hipGraphNodeGetType_fn(node, pType));
   CATCH;
 }
 hipError_t hipGraphNodeSetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
                                   unsigned int isEnabled) {
-  return hip::GetHipDispatchTable()->hipGraphNodeSetEnabled_fn(hGraphExec, hNode, isEnabled);
+  auto const __rocm_in_hGraphExec = hGraphExec;
+  auto const __rocm_in_hNode = hNode;
+  auto const __rocm_in_isEnabled = isEnabled;
+  rocm_trace_emit_hipGraphNodeSetEnabled_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hGraphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_hNode),
+      (__rocm_in_isEnabled)); /* __ROCM_CURATED__: hipGraphNodeSetEnabled */
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphNodeSetEnabled, hip::GetHipDispatchTable()->hipGraphNodeSetEnabled_fn(hGraphExec, hNode, isEnabled));
 }
 hipError_t hipGraphReleaseUserObject(hipGraph_t graph, hipUserObject_t object, unsigned int count) {
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_object = object;
+  auto const __rocm_in_count = count;
+  rocm_trace_emit_hipGraphReleaseUserObject_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_object),
+      (__rocm_in_count)); /* __ROCM_CURATED__: hipGraphReleaseUserObject */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphReleaseUserObject_fn(graph, object, count);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphReleaseUserObject, hip::GetHipDispatchTable()->hipGraphReleaseUserObject_fn(graph, object, count));
   CATCH;
 }
 hipError_t hipGraphRemoveDependencies(hipGraph_t graph, const hipGraphNode_t* from,
                                       const hipGraphNode_t* to, size_t numDependencies) {
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_from = from;
+  auto const __rocm_in_to = to;
+  auto const __rocm_in_numDependencies = numDependencies;
+  rocm_trace_emit_hipGraphRemoveDependencies_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_from),
+      (const void*)(uintptr_t)(__rocm_in_to),
+      (__rocm_in_numDependencies)); /* __ROCM_CURATED__: hipGraphRemoveDependencies */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphRemoveDependencies_fn(graph, from, to,
-                                                                   numDependencies);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphRemoveDependencies, hip::GetHipDispatchTable()->hipGraphRemoveDependencies_fn(graph, from, to, numDependencies));
   CATCH;
 }
 hipError_t hipGraphRetainUserObject(hipGraph_t graph, hipUserObject_t object, unsigned int count,
                                     unsigned int flags) {
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_object = object;
+  auto const __rocm_in_count = count;
+  auto const __rocm_in_flags = flags;
+  rocm_trace_emit_hipGraphRetainUserObject_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_object),
+      (__rocm_in_count),
+      (__rocm_in_flags)); /* __ROCM_CURATED__: hipGraphRetainUserObject */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphRetainUserObject_fn(graph, object, count, flags);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphRetainUserObject, hip::GetHipDispatchTable()->hipGraphRetainUserObject_fn(graph, object, count, flags));
   CATCH;
 }
 hipError_t hipGraphUpload(hipGraphExec_t graphExec, hipStream_t stream) {
+  auto const __rocm_in_graphExec = graphExec;
+  auto const __rocm_in_stream = stream;
+  rocm_trace_emit_hipGraphUpload_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_graphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_stream)); /* __ROCM_CURATED__: hipGraphUpload */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphUpload_fn(graphExec, stream);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphUpload, hip::GetHipDispatchTable()->hipGraphUpload_fn(graphExec, stream));
   CATCH;
 }
 hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint buffer,
                                        unsigned int flags) {
+  auto const __rocm_in_resource = resource;
+  auto const __rocm_in_buffer = buffer;
+  auto const __rocm_in_flags = flags;
+  rocm_trace_emit_hipGraphicsGLRegisterBuffer_enter(
+      (const void*)(uintptr_t)(__rocm_in_resource),
+      (__rocm_in_buffer),
+      (__rocm_in_flags)); /* __ROCM_CURATED__: hipGraphicsGLRegisterBuffer */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphicsGLRegisterBuffer_fn(resource, buffer, flags);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphicsGLRegisterBuffer, hip::GetHipDispatchTable()->hipGraphicsGLRegisterBuffer_fn(resource, buffer, flags));
   CATCH;
 }
 hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint image, GLenum target,
                                       unsigned int flags) {
+  auto const __rocm_in_resource = resource;
+  auto const __rocm_in_image = image;
+  auto const __rocm_in_target = target;
+  auto const __rocm_in_flags = flags;
+  rocm_trace_emit_hipGraphicsGLRegisterImage_enter(
+      (const void*)(uintptr_t)(__rocm_in_resource),
+      (__rocm_in_image),
+      (__rocm_in_target),
+      (__rocm_in_flags)); /* __ROCM_CURATED__: hipGraphicsGLRegisterImage */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphicsGLRegisterImage_fn(resource, image, target, flags);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphicsGLRegisterImage, hip::GetHipDispatchTable()->hipGraphicsGLRegisterImage_fn(resource, image, target, flags));
   CATCH;
 }
 hipError_t hipGraphicsMapResources(int count, hipGraphicsResource_t* resources,
                                    hipStream_t stream) {
+  auto const __rocm_in_count = count;
+  auto const __rocm_in_resources = resources;
+  auto const __rocm_in_stream = stream;
+  rocm_trace_emit_hipGraphicsMapResources_enter(
+      (__rocm_in_count),
+      (const void*)(uintptr_t)(__rocm_in_resources),
+      (uint64_t)(uintptr_t)(__rocm_in_stream)); /* __ROCM_CURATED__: hipGraphicsMapResources */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphicsMapResources_fn(count, resources, stream);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphicsMapResources, hip::GetHipDispatchTable()->hipGraphicsMapResources_fn(count, resources, stream));
   CATCH;
 }
 hipError_t hipGraphicsResourceGetMappedPointer(void** devPtr, size_t* size,
                                                hipGraphicsResource_t resource) {
+  auto const __rocm_in_devPtr = devPtr;
+  auto const __rocm_in_size = size;
+  auto const __rocm_in_resource = resource;
+  rocm_trace_emit_hipGraphicsResourceGetMappedPointer_enter(
+      (const void*)(uintptr_t)(__rocm_in_devPtr),
+      (const void*)(uintptr_t)(__rocm_in_size),
+      (const void*)(uintptr_t)(__rocm_in_resource)); /* __ROCM_CURATED__: hipGraphicsResourceGetMappedPointer */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphicsResourceGetMappedPointer_fn(devPtr, size, resource);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphicsResourceGetMappedPointer, hip::GetHipDispatchTable()->hipGraphicsResourceGetMappedPointer_fn(devPtr, size, resource));
   CATCH;
 }
 hipError_t hipGraphicsSubResourceGetMappedArray(hipArray_t* array, hipGraphicsResource_t resource,
                                                 unsigned int arrayIndex, unsigned int mipLevel) {
+  auto const __rocm_in_array = array;
+  auto const __rocm_in_resource = resource;
+  auto const __rocm_in_arrayIndex = arrayIndex;
+  auto const __rocm_in_mipLevel = mipLevel;
+  rocm_trace_emit_hipGraphicsSubResourceGetMappedArray_enter(
+      (const void*)(uintptr_t)(__rocm_in_array),
+      (const void*)(uintptr_t)(__rocm_in_resource),
+      (__rocm_in_arrayIndex),
+      (__rocm_in_mipLevel)); /* __ROCM_CURATED__: hipGraphicsSubResourceGetMappedArray */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphicsSubResourceGetMappedArray_fn(array, resource,
-                                                                             arrayIndex, mipLevel);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphicsSubResourceGetMappedArray, hip::GetHipDispatchTable()->hipGraphicsSubResourceGetMappedArray_fn(
+                                    array, resource, arrayIndex, mipLevel));
   CATCH;
 }
 hipError_t hipGraphicsUnmapResources(int count, hipGraphicsResource_t* resources,
                                      hipStream_t stream) {
+  auto const __rocm_in_count = count;
+  auto const __rocm_in_resources = resources;
+  auto const __rocm_in_stream = stream;
+  rocm_trace_emit_hipGraphicsUnmapResources_enter(
+      (__rocm_in_count),
+      (const void*)(uintptr_t)(__rocm_in_resources),
+      (uint64_t)(uintptr_t)(__rocm_in_stream)); /* __ROCM_CURATED__: hipGraphicsUnmapResources */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphicsUnmapResources_fn(count, resources, stream);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphicsUnmapResources, hip::GetHipDispatchTable()->hipGraphicsUnmapResources_fn(count, resources, stream));
   CATCH;
 }
 hipError_t hipGraphicsUnregisterResource(hipGraphicsResource_t resource) {
+  auto const __rocm_in_resource = resource;
+  rocm_trace_emit_hipGraphicsUnregisterResource_enter(
+      (const void*)(uintptr_t)(__rocm_in_resource)); /* __ROCM_CURATED__: hipGraphicsUnregisterResource */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphicsUnregisterResource_fn(resource);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphicsUnregisterResource, hip::GetHipDispatchTable()->hipGraphicsUnregisterResource_fn(resource));
   CATCH;
 }
 hipError_t hipHostAlloc(void** ptr, size_t size, unsigned int flags) {
@@ -1603,9 +2216,22 @@ hipError_t hipImportExternalSemaphore(hipExternalSemaphore_t* extSem_out,
 hipError_t hipDrvGraphAddMemsetNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph,
                                     const hipGraphNode_t* dependencies, size_t numDependencies,
                                     const hipMemsetParams* memsetParams, hipCtx_t ctx) {
+  auto const __rocm_in_phGraphNode = phGraphNode;
+  auto const __rocm_in_hGraph = hGraph;
+  auto const __rocm_in_dependencies = dependencies;
+  auto const __rocm_in_numDependencies = numDependencies;
+  auto const __rocm_in_memsetParams = memsetParams;
+  auto const __rocm_in_ctx = ctx;
+  rocm_trace_emit_hipDrvGraphAddMemsetNode_enter(
+      (const void*)(uintptr_t)(__rocm_in_phGraphNode),
+      (uint64_t)(uintptr_t)(__rocm_in_hGraph),
+      (const void*)(uintptr_t)(__rocm_in_dependencies),
+      (__rocm_in_numDependencies),
+      (const void*)(uintptr_t)(__rocm_in_memsetParams),
+      (const void*)(uintptr_t)(__rocm_in_ctx)); /* __ROCM_CURATED__: hipDrvGraphAddMemsetNode */
   TRY;
-  return hip::GetHipDispatchTable()->hipDrvGraphAddMemsetNode_fn(
-      phGraphNode, hGraph, dependencies, numDependencies, memsetParams, ctx);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipDrvGraphAddMemsetNode, hip::GetHipDispatchTable()->hipDrvGraphAddMemsetNode_fn(phGraphNode, hGraph, dependencies,
+                                                              numDependencies, memsetParams, ctx));
   CATCH;
 }
 hipError_t hipInit(unsigned int flags) {
@@ -3934,8 +4560,11 @@ hipError_t hipTexRefSetMipmappedArray(textureReference* texRef,
   CATCH;
 }
 hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode) {
+  auto const __rocm_in_mode = mode;
+  rocm_trace_emit_hipThreadExchangeStreamCaptureMode_enter(
+      (const void*)(uintptr_t)(__rocm_in_mode)); /* __ROCM_CURATED__: hipThreadExchangeStreamCaptureMode */
   TRY;
-  return hip::GetHipDispatchTable()->hipThreadExchangeStreamCaptureMode_fn(mode);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipThreadExchangeStreamCaptureMode, hip::GetHipDispatchTable()->hipThreadExchangeStreamCaptureMode_fn(mode));
   CATCH;
 }
 extern "C" hipError_t hipUnbindTexture(const textureReference* tex) {
@@ -3945,19 +4574,40 @@ extern "C" hipError_t hipUnbindTexture(const textureReference* tex) {
 }
 hipError_t hipUserObjectCreate(hipUserObject_t* object_out, void* ptr, hipHostFn_t destroy,
                                unsigned int initialRefcount, unsigned int flags) {
+  auto const __rocm_in_object_out = object_out;
+  auto const __rocm_in_ptr = ptr;
+  auto const __rocm_in_destroy = destroy;
+  auto const __rocm_in_initialRefcount = initialRefcount;
+  auto const __rocm_in_flags = flags;
+  rocm_trace_emit_hipUserObjectCreate_enter(
+      (const void*)(uintptr_t)(__rocm_in_object_out),
+      (const void*)(uintptr_t)(__rocm_in_ptr),
+      (const void*)(uintptr_t)(__rocm_in_destroy),
+      (__rocm_in_initialRefcount),
+      (__rocm_in_flags)); /* __ROCM_CURATED__: hipUserObjectCreate */
   TRY;
-  return hip::GetHipDispatchTable()->hipUserObjectCreate_fn(object_out, ptr, destroy,
-                                                            initialRefcount, flags);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipUserObjectCreate, hip::GetHipDispatchTable()->hipUserObjectCreate_fn(object_out, ptr, destroy, initialRefcount,
+                                                         flags));
   CATCH;
 }
 hipError_t hipUserObjectRelease(hipUserObject_t object, unsigned int count) {
+  auto const __rocm_in_object = object;
+  auto const __rocm_in_count = count;
+  rocm_trace_emit_hipUserObjectRelease_enter(
+      (const void*)(uintptr_t)(__rocm_in_object),
+      (__rocm_in_count)); /* __ROCM_CURATED__: hipUserObjectRelease */
   TRY;
-  return hip::GetHipDispatchTable()->hipUserObjectRelease_fn(object, count);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipUserObjectRelease, hip::GetHipDispatchTable()->hipUserObjectRelease_fn(object, count));
   CATCH;
 }
 hipError_t hipUserObjectRetain(hipUserObject_t object, unsigned int count) {
+  auto const __rocm_in_object = object;
+  auto const __rocm_in_count = count;
+  rocm_trace_emit_hipUserObjectRetain_enter(
+      (const void*)(uintptr_t)(__rocm_in_object),
+      (__rocm_in_count)); /* __ROCM_CURATED__: hipUserObjectRetain */
   TRY;
-  return hip::GetHipDispatchTable()->hipUserObjectRetain_fn(object, count);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipUserObjectRetain, hip::GetHipDispatchTable()->hipUserObjectRetain_fn(object, count));
   CATCH;
 }
 hipError_t hipWaitExternalSemaphoresAsync(const hipExternalSemaphore_t* extSemArray,
@@ -4556,8 +5206,13 @@ extern "C" hipError_t hipLaunchKernel_spt(const void* function_address, dim3 num
 }
 
 hipError_t hipGraphLaunch_spt(hipGraphExec_t graphExec, hipStream_t stream) {
+  auto const __rocm_in_graphExec = graphExec;
+  auto const __rocm_in_stream = stream;
+  rocm_trace_emit_hipGraphLaunch_spt_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_graphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_stream)); /* __ROCM_CURATED__: hipGraphLaunch_spt */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphLaunch_spt_fn(graphExec, stream);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphLaunch_spt, hip::GetHipDispatchTable()->hipGraphLaunch_spt_fn(graphExec, stream));
   CATCH;
 }
 hipError_t hipStreamBeginCapture_spt(hipStream_t stream, hipStreamCaptureMode mode) {
@@ -4703,29 +5358,63 @@ hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr)
 }
 hipError_t hipDrvGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
                                               const hipMemsetParams* memsetParams, hipCtx_t ctx) {
+  auto const __rocm_in_hGraphExec = hGraphExec;
+  auto const __rocm_in_hNode = hNode;
+  auto const __rocm_in_memsetParams = memsetParams;
+  auto const __rocm_in_ctx = ctx;
+  rocm_trace_emit_hipDrvGraphExecMemsetNodeSetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hGraphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_hNode),
+      (const void*)(uintptr_t)(__rocm_in_memsetParams),
+      (const void*)(uintptr_t)(__rocm_in_ctx)); /* __ROCM_CURATED__: hipDrvGraphExecMemsetNodeSetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipDrvGraphExecMemsetNodeSetParams_fn(hGraphExec, hNode,
-                                                                           memsetParams, ctx);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipDrvGraphExecMemsetNodeSetParams, hip::GetHipDispatchTable()->hipDrvGraphExecMemsetNodeSetParams_fn(hGraphExec, hNode,
+                                                                        memsetParams, ctx));
   CATCH;
 }
 hipError_t hipGraphExecGetFlags(hipGraphExec_t graphExec, unsigned long long* flags) {
+  auto const __rocm_in_graphExec = graphExec;
+  auto const __rocm_in_flags = flags;
+  rocm_trace_emit_hipGraphExecGetFlags_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_graphExec),
+      (const void*)(uintptr_t)(__rocm_in_flags)); /* __ROCM_CURATED__: hipGraphExecGetFlags */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphExecGetFlags_fn(graphExec, flags);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphExecGetFlags, hip::GetHipDispatchTable()->hipGraphExecGetFlags_fn(graphExec, flags));
   CATCH;
 }
 hipError_t hipDrvGraphAddMemFreeNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph,
                                      const hipGraphNode_t* dependencies, size_t numDependencies,
                                      hipDeviceptr_t dptr) {
+  auto const __rocm_in_phGraphNode = phGraphNode;
+  auto const __rocm_in_hGraph = hGraph;
+  auto const __rocm_in_dependencies = dependencies;
+  auto const __rocm_in_numDependencies = numDependencies;
+  auto const __rocm_in_dptr = dptr;
+  rocm_trace_emit_hipDrvGraphAddMemFreeNode_enter(
+      (const void*)(uintptr_t)(__rocm_in_phGraphNode),
+      (uint64_t)(uintptr_t)(__rocm_in_hGraph),
+      (const void*)(uintptr_t)(__rocm_in_dependencies),
+      (__rocm_in_numDependencies),
+      (uint64_t)(__rocm_in_dptr)); /* __ROCM_CURATED__: hipDrvGraphAddMemFreeNode */
   TRY;
-  return hip::GetHipDispatchTable()->hipDrvGraphAddMemFreeNode_fn(phGraphNode, hGraph, dependencies,
-                                                                  numDependencies, dptr);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipDrvGraphAddMemFreeNode, hip::GetHipDispatchTable()->hipDrvGraphAddMemFreeNode_fn(
+                                    phGraphNode, hGraph, dependencies, numDependencies, dptr));
   CATCH;
 }
 hipError_t hipDrvGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
                                               const HIP_MEMCPY3D* copyParams, hipCtx_t ctx) {
+  auto const __rocm_in_hGraphExec = hGraphExec;
+  auto const __rocm_in_hNode = hNode;
+  auto const __rocm_in_copyParams = copyParams;
+  auto const __rocm_in_ctx = ctx;
+  rocm_trace_emit_hipDrvGraphExecMemcpyNodeSetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hGraphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_hNode),
+      (const void*)(uintptr_t)(__rocm_in_copyParams),
+      (const void*)(uintptr_t)(__rocm_in_ctx)); /* __ROCM_CURATED__: hipDrvGraphExecMemcpyNodeSetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipDrvGraphExecMemcpyNodeSetParams_fn(hGraphExec, hNode,
-                                                                           copyParams, ctx);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipDrvGraphExecMemcpyNodeSetParams, hip::GetHipDispatchTable()->hipDrvGraphExecMemcpyNodeSetParams_fn(hGraphExec, hNode,
+                                                                        copyParams, ctx));
   CATCH;
 }
 hipError_t hipSetValidDevices(int* device_arr, int len) {
@@ -4845,45 +5534,88 @@ hipError_t hipMemcpy2DArrayToArray(hipArray_t dst, size_t wOffsetDst, size_t hOf
   CATCH;
 }
 hipError_t hipDrvGraphMemcpyNodeGetParams(hipGraphNode_t hNode, HIP_MEMCPY3D* nodeParams) {
+  auto const __rocm_in_hNode = hNode;
+  auto const __rocm_in_nodeParams = nodeParams;
+  rocm_trace_emit_hipDrvGraphMemcpyNodeGetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hNode),
+      (const void*)(uintptr_t)(__rocm_in_nodeParams)); /* __ROCM_CURATED__: hipDrvGraphMemcpyNodeGetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipDrvGraphMemcpyNodeGetParams_fn(hNode, nodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipDrvGraphMemcpyNodeGetParams, hip::GetHipDispatchTable()->hipDrvGraphMemcpyNodeGetParams_fn(hNode, nodeParams));
   CATCH;
 }
 hipError_t hipDrvGraphMemcpyNodeSetParams(hipGraphNode_t hNode, const HIP_MEMCPY3D* nodeParams) {
+  auto const __rocm_in_hNode = hNode;
+  auto const __rocm_in_nodeParams = nodeParams;
+  rocm_trace_emit_hipDrvGraphMemcpyNodeSetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hNode),
+      (const void*)(uintptr_t)(__rocm_in_nodeParams)); /* __ROCM_CURATED__: hipDrvGraphMemcpyNodeSetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipDrvGraphMemcpyNodeSetParams_fn(hNode, nodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipDrvGraphMemcpyNodeSetParams, hip::GetHipDispatchTable()->hipDrvGraphMemcpyNodeSetParams_fn(hNode, nodeParams));
   CATCH;
 }
 hipError_t hipGraphNodeSetParams(hipGraphNode_t node, hipGraphNodeParams* nodeParams) {
+  auto const __rocm_in_node = node;
+  auto const __rocm_in_nodeParams = nodeParams;
+  rocm_trace_emit_hipGraphNodeSetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_node),
+      (const void*)(uintptr_t)(__rocm_in_nodeParams)); /* __ROCM_CURATED__: hipGraphNodeSetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphNodeSetParams_fn(node, nodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphNodeSetParams, hip::GetHipDispatchTable()->hipGraphNodeSetParams_fn(node, nodeParams));
   CATCH;
 }
 hipError_t hipGraphAddBatchMemOpNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                      const hipGraphNode_t* dependencies, size_t numDependencies,
                                      const hipBatchMemOpNodeParams* nodeParams) {
+  auto const __rocm_in_pGraphNode = pGraphNode;
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_dependencies = dependencies;
+  auto const __rocm_in_numDependencies = numDependencies;
+  auto const __rocm_in_nodeParams = nodeParams;
+  rocm_trace_emit_hipGraphAddBatchMemOpNode_enter(
+      (const void*)(uintptr_t)(__rocm_in_pGraphNode),
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_dependencies),
+      (__rocm_in_numDependencies),
+      (const void*)(uintptr_t)(__rocm_in_nodeParams)); /* __ROCM_CURATED__: hipGraphAddBatchMemOpNode */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphAddBatchMemOpNode_fn(pGraphNode, graph, dependencies,
-                                                                  numDependencies, nodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphAddBatchMemOpNode, hip::GetHipDispatchTable()->hipGraphAddBatchMemOpNode_fn(pGraphNode, graph, dependencies,
+                                                               numDependencies, nodeParams));
   CATCH;
 }
 hipError_t hipGraphBatchMemOpNodeGetParams(hipGraphNode_t hNode,
                                            hipBatchMemOpNodeParams* nodeParams_out) {
+  auto const __rocm_in_hNode = hNode;
+  auto const __rocm_in_nodeParams_out = nodeParams_out;
+  rocm_trace_emit_hipGraphBatchMemOpNodeGetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hNode),
+      (const void*)(uintptr_t)(__rocm_in_nodeParams_out)); /* __ROCM_CURATED__: hipGraphBatchMemOpNodeGetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphBatchMemOpNodeGetParams_fn(hNode, nodeParams_out);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphBatchMemOpNodeGetParams, hip::GetHipDispatchTable()->hipGraphBatchMemOpNodeGetParams_fn(hNode, nodeParams_out));
   CATCH;
 }
 hipError_t hipGraphBatchMemOpNodeSetParams(hipGraphNode_t hNode,
                                            hipBatchMemOpNodeParams* nodeParams) {
+  auto const __rocm_in_hNode = hNode;
+  auto const __rocm_in_nodeParams = nodeParams;
+  rocm_trace_emit_hipGraphBatchMemOpNodeSetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hNode),
+      (const void*)(uintptr_t)(__rocm_in_nodeParams)); /* __ROCM_CURATED__: hipGraphBatchMemOpNodeSetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphBatchMemOpNodeSetParams_fn(hNode, nodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphBatchMemOpNodeSetParams, hip::GetHipDispatchTable()->hipGraphBatchMemOpNodeSetParams_fn(hNode, nodeParams));
   CATCH;
 }
 hipError_t hipGraphExecBatchMemOpNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
                                                const hipBatchMemOpNodeParams* nodeParams) {
+  auto const __rocm_in_hGraphExec = hGraphExec;
+  auto const __rocm_in_hNode = hNode;
+  auto const __rocm_in_nodeParams = nodeParams;
+  rocm_trace_emit_hipGraphExecBatchMemOpNodeSetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hGraphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_hNode),
+      (const void*)(uintptr_t)(__rocm_in_nodeParams)); /* __ROCM_CURATED__: hipGraphExecBatchMemOpNodeSetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphExecBatchMemOpNodeSetParams_fn(hGraphExec, hNode,
-                                                                            nodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphExecBatchMemOpNodeSetParams, hip::GetHipDispatchTable()->hipGraphExecBatchMemOpNodeSetParams_fn(
+                                    hGraphExec, hNode, nodeParams));
   CATCH;
 }
 hipError_t hipEventRecordWithFlags(hipEvent_t event, hipStream_t stream, unsigned int flags) {
@@ -5156,61 +5888,115 @@ hipError_t hipDeviceGetTexture1DLinearMaxWidth(size_t* maxWidthInElements,
 hipError_t hipGraphAddExternalSemaphoresSignalNode(
     hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies,
     size_t numDependencies, const hipExternalSemaphoreSignalNodeParams* nodeParams) {
+  auto const __rocm_in_pGraphNode = pGraphNode;
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_pDependencies = pDependencies;
+  auto const __rocm_in_numDependencies = numDependencies;
+  auto const __rocm_in_nodeParams = nodeParams;
+  rocm_trace_emit_hipGraphAddExternalSemaphoresSignalNode_enter(
+      (const void*)(uintptr_t)(__rocm_in_pGraphNode),
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_pDependencies),
+      (__rocm_in_numDependencies),
+      (const void*)(uintptr_t)(__rocm_in_nodeParams)); /* __ROCM_CURATED__: hipGraphAddExternalSemaphoresSignalNode */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphAddExternalSemaphoresSignalNode_fn(
-      pGraphNode, graph, pDependencies, numDependencies, nodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphAddExternalSemaphoresSignalNode, hip::GetHipDispatchTable()->hipGraphAddExternalSemaphoresSignalNode_fn(
+          pGraphNode, graph, pDependencies, numDependencies, nodeParams));
   CATCH;
 }
 hipError_t hipGraphAddExternalSemaphoresWaitNode(
     hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies,
     size_t numDependencies, const hipExternalSemaphoreWaitNodeParams* nodeParams) {
+  auto const __rocm_in_pGraphNode = pGraphNode;
+  auto const __rocm_in_graph = graph;
+  auto const __rocm_in_pDependencies = pDependencies;
+  auto const __rocm_in_numDependencies = numDependencies;
+  auto const __rocm_in_nodeParams = nodeParams;
+  rocm_trace_emit_hipGraphAddExternalSemaphoresWaitNode_enter(
+      (const void*)(uintptr_t)(__rocm_in_pGraphNode),
+      (uint64_t)(uintptr_t)(__rocm_in_graph),
+      (const void*)(uintptr_t)(__rocm_in_pDependencies),
+      (__rocm_in_numDependencies),
+      (const void*)(uintptr_t)(__rocm_in_nodeParams)); /* __ROCM_CURATED__: hipGraphAddExternalSemaphoresWaitNode */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphAddExternalSemaphoresWaitNode_fn(
-      pGraphNode, graph, pDependencies, numDependencies, nodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphAddExternalSemaphoresWaitNode, hip::GetHipDispatchTable()->hipGraphAddExternalSemaphoresWaitNode_fn(
+          pGraphNode, graph, pDependencies, numDependencies, nodeParams));
   CATCH;
 }
 hipError_t hipGraphExternalSemaphoresSignalNodeSetParams(
     hipGraphNode_t hNode, const hipExternalSemaphoreSignalNodeParams* nodeParams) {
+  auto const __rocm_in_hNode = hNode;
+  auto const __rocm_in_nodeParams = nodeParams;
+  rocm_trace_emit_hipGraphExternalSemaphoresSignalNodeSetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hNode),
+      (const void*)(uintptr_t)(__rocm_in_nodeParams)); /* __ROCM_CURATED__: hipGraphExternalSemaphoresSignalNodeSetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphExternalSemaphoresSignalNodeSetParams_fn(hNode,
-                                                                                      nodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphExternalSemaphoresSignalNodeSetParams, hip::GetHipDispatchTable()->hipGraphExternalSemaphoresSignalNodeSetParams_fn(hNode,
+                                                                                   nodeParams));
   CATCH;
 }
 hipError_t hipGraphExternalSemaphoresSignalNodeGetParams(
     hipGraphNode_t hNode, hipExternalSemaphoreSignalNodeParams* params_out) {
+  auto const __rocm_in_hNode = hNode;
+  auto const __rocm_in_params_out = params_out;
+  rocm_trace_emit_hipGraphExternalSemaphoresSignalNodeGetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hNode),
+      (const void*)(uintptr_t)(__rocm_in_params_out)); /* __ROCM_CURATED__: hipGraphExternalSemaphoresSignalNodeGetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphExternalSemaphoresSignalNodeGetParams_fn(hNode,
-                                                                                      params_out);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphExternalSemaphoresSignalNodeGetParams, hip::GetHipDispatchTable()->hipGraphExternalSemaphoresSignalNodeGetParams_fn(hNode,
+                                                                                   params_out));
   CATCH;
 }
 hipError_t hipGraphExternalSemaphoresWaitNodeGetParams(
     hipGraphNode_t hNode, hipExternalSemaphoreWaitNodeParams* params_out) {
+  auto const __rocm_in_hNode = hNode;
+  auto const __rocm_in_params_out = params_out;
+  rocm_trace_emit_hipGraphExternalSemaphoresWaitNodeGetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hNode),
+      (const void*)(uintptr_t)(__rocm_in_params_out)); /* __ROCM_CURATED__: hipGraphExternalSemaphoresWaitNodeGetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphExternalSemaphoresWaitNodeGetParams_fn(hNode,
-                                                                                    params_out);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphExternalSemaphoresWaitNodeGetParams, hip::GetHipDispatchTable()->hipGraphExternalSemaphoresWaitNodeGetParams_fn(hNode, params_out));
   CATCH;
 }
 hipError_t hipGraphExternalSemaphoresWaitNodeSetParams(
     hipGraphNode_t hNode, const hipExternalSemaphoreWaitNodeParams* nodeParams) {
+  auto const __rocm_in_hNode = hNode;
+  auto const __rocm_in_nodeParams = nodeParams;
+  rocm_trace_emit_hipGraphExternalSemaphoresWaitNodeSetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hNode),
+      (const void*)(uintptr_t)(__rocm_in_nodeParams)); /* __ROCM_CURATED__: hipGraphExternalSemaphoresWaitNodeSetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphExternalSemaphoresWaitNodeSetParams_fn(hNode,
-                                                                                    nodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphExternalSemaphoresWaitNodeSetParams, hip::GetHipDispatchTable()->hipGraphExternalSemaphoresWaitNodeSetParams_fn(hNode, nodeParams));
   CATCH;
 }
 hipError_t hipGraphExecExternalSemaphoresSignalNodeSetParams(
     hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
     const hipExternalSemaphoreSignalNodeParams* nodeParams) {
+  auto const __rocm_in_hGraphExec = hGraphExec;
+  auto const __rocm_in_hNode = hNode;
+  auto const __rocm_in_nodeParams = nodeParams;
+  rocm_trace_emit_hipGraphExecExternalSemaphoresSignalNodeSetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hGraphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_hNode),
+      (const void*)(uintptr_t)(__rocm_in_nodeParams)); /* __ROCM_CURATED__: hipGraphExecExternalSemaphoresSignalNodeSetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphExecExternalSemaphoresSignalNodeSetParams_fn(
-      hGraphExec, hNode, nodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphExecExternalSemaphoresSignalNodeSetParams, hip::GetHipDispatchTable()->hipGraphExecExternalSemaphoresSignalNodeSetParams_fn(
+          hGraphExec, hNode, nodeParams));
   CATCH;
 }
 hipError_t hipGraphExecExternalSemaphoresWaitNodeSetParams(
     hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
     const hipExternalSemaphoreWaitNodeParams* nodeParams) {
+  auto const __rocm_in_hGraphExec = hGraphExec;
+  auto const __rocm_in_hNode = hNode;
+  auto const __rocm_in_nodeParams = nodeParams;
+  rocm_trace_emit_hipGraphExecExternalSemaphoresWaitNodeSetParams_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_hGraphExec),
+      (uint64_t)(uintptr_t)(__rocm_in_hNode),
+      (const void*)(uintptr_t)(__rocm_in_nodeParams)); /* __ROCM_CURATED__: hipGraphExecExternalSemaphoresWaitNodeSetParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipGraphExecExternalSemaphoresWaitNodeSetParams_fn(
-      hGraphExec, hNode, nodeParams);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGraphExecExternalSemaphoresWaitNodeSetParams, hip::GetHipDispatchTable()->hipGraphExecExternalSemaphoresWaitNodeSetParams_fn(
+          hGraphExec, hNode, nodeParams));
   CATCH;
 }
 hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* code, hipJitOption* jitOptions,
