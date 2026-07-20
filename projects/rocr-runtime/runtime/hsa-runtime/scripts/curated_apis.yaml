@@ -255,3 +255,176 @@
 
 - api: hsa_amd_signal_get_event_id
   args: [signal, event_id]
+
+- api: hsa_amd_memory_pool_allocate
+  args: [memory_pool, size, flags, ptr]
+  out: [ptr]
+
+- api: hsa_amd_memory_pool_free
+  args: [ptr]
+
+- api: hsa_amd_memory_async_copy
+  args: [dst, dst_agent, src, src_agent, size, num_dep_signals, dep_signals, completion_signal]
+
+- api: hsa_amd_memory_async_copy_on_engine
+  args: [dst, dst_agent, src, src_agent, size, num_dep_signals, completion_signal, engine_id, force_copy_on_sdma]
+
+- api: hsa_agent_iterate_regions
+  args: [agent, callback, data]
+
+- api: hsa_region_get_info
+  args: [region, attribute, value]
+
+- api: hsa_memory_register
+  args: [ptr, size]
+
+- api: hsa_memory_deregister
+  args: [ptr, size]
+
+- api: hsa_memory_allocate
+  args: [region, size, ptr]
+
+- api: hsa_memory_free
+  args: [ptr]
+
+- api: hsa_memory_copy
+  args: [dst, src, size]
+
+- api: hsa_memory_assign_agent
+  args: [ptr, agent, access]
+
+- api: hsa_amd_memory_pool_get_info
+  args: [memory_pool, attribute, value]
+
+- api: hsa_amd_agent_iterate_memory_pools
+  args: [agent, callback, data]
+
+- api: hsa_amd_memory_async_batch_copy
+  args: [copy_ops, num_copy_ops, num_dep_signals, dep_signals]
+
+- api: hsa_amd_memory_copy_engine_status
+  args: [dst_agent, src_agent, engine_ids_mask]
+
+- api: hsa_amd_memory_get_preferred_copy_engine
+  args: [dst_agent, src_agent, recommended_ids_mask]
+
+- api: hsa_amd_memory_async_copy_rect
+  args: [dst, dst_offset, src, src_offset, range, copy_agent, dir, num_dep_signals, dep_signals, completion_signal]
+
+- api: hsa_amd_agent_memory_pool_get_info
+  args: [agent, memory_pool, attribute, value]
+
+- api: hsa_amd_agents_allow_access
+  args: [num_agents, agents, flags, ptr]
+
+- api: hsa_amd_memory_pool_can_migrate
+  args: [src_memory_pool, dst_memory_pool, result]
+
+- api: hsa_amd_memory_migrate
+  args: [ptr, memory_pool, flags]
+
+- api: hsa_amd_memory_lock
+  args: [host_ptr, size, agents, num_agent, agent_ptr]
+
+- api: hsa_amd_memory_lock_to_pool
+  args: [host_ptr, size, agents, num_agent, pool, flags, agent_ptr]
+
+- api: hsa_amd_memory_unlock
+  args: [host_ptr]
+
+- api: hsa_amd_memory_fill
+  args: [ptr, value, count]
+
+- api: hsa_amd_interop_map_buffer
+  args: [num_agents, agents, interop_handle, flags, size, ptr, metadata_size, metadata]
+
+- api: hsa_amd_interop_unmap_buffer
+  args: [ptr]
+
+- api: hsa_amd_pointer_info
+  args: [ptr, info, alloc, num_agents_accessible, accessible]
+
+- api: hsa_amd_pointer_info_set_userdata
+  args: [ptr, userdata]
+
+- api: hsa_amd_ipc_memory_create
+  args: [ptr, len, handle]
+
+- api: hsa_amd_ipc_memory_attach
+  args: [handle, len, num_agents, mapping_agents, mapped_ptr]
+
+- api: hsa_amd_ipc_memory_detach
+  args: [mapped_ptr]
+
+- api: hsa_amd_svm_attributes_set
+  args: [ptr, size, attribute_list, attribute_count]
+
+- api: hsa_amd_svm_attributes_get
+  args: [ptr, size, attribute_list, attribute_count]
+
+- api: hsa_amd_svm_prefetch_async
+  args: [ptr, size, agent, num_dep_signals, dep_signals, completion_signal]
+
+- api: hsa_amd_portable_export_dmabuf
+  args: [ptr, size, dmabuf, offset]
+
+- api: hsa_amd_portable_export_dmabuf_v2
+  args: [ptr, size, dmabuf, offset, flags]
+
+- api: hsa_amd_portable_close_dmabuf
+  args: [dmabuf]
+
+- api: hsa_amd_vmem_address_reserve
+  args: [va, size, address, flags]
+
+- api: hsa_amd_vmem_address_reserve_align
+  args: [va, size, address, alignment, flags]
+
+- api: hsa_amd_vmem_address_free
+  args: [va, size]
+
+- api: hsa_amd_vmem_handle_create
+  args: [pool, size, type, flags, memory_handle]
+
+- api: hsa_amd_vmem_handle_release
+  args: [memory_handle]
+
+- api: hsa_amd_vmem_map
+  args: [va, size, in_offset, memory_handle, flags]
+
+- api: hsa_amd_vmem_unmap
+  args: [va, size]
+
+- api: hsa_amd_vmem_set_access
+  args: [va, size, desc, desc_cnt]
+
+- api: hsa_amd_vmem_get_access
+  args: [va, perms, agent_handle]
+
+- api: hsa_amd_vmem_export_shareable_handle
+  args: [dmabuf_fd, handle, flags]
+
+- api: hsa_amd_vmem_import_shareable_handle
+  args: [dmabuf_fd, handle]
+
+- api: hsa_amd_vmem_retain_alloc_handle
+  args: [memory_handle, addr]
+
+- api: hsa_amd_vmem_get_alloc_properties_from_handle
+  args: [memory_handle, pool, type]
+
+- api: hsa_amd_svm_discard_batch_async
+  args: [ptrs, sizes, count, num_dep_signals, dep_signals, completion_signal]
+
+- api: hsa_amd_interop_map_buffer_with_size
+  args: [num_agents, agents, interop_handle, flags, size_hint, size, ptr, metadata_size, metadata]
+
+- api: hsa_amd_vmem_export_fabric_handle
+  args: [fabric_handle, handle, flags]
+
+- api: hsa_amd_vmem_import_fabric_handle
+  args: [handle]
+  notes: |
+    Skipped fabric_handle (hsa_fabric_handle_t): non-handle by-value struct
+    containing a fixed-size 16-byte array; it is not representable by the
+    curated DSL.
