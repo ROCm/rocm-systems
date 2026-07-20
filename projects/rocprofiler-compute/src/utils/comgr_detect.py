@@ -3,12 +3,13 @@
 
 """Detection of the double comgr condition.
 
-Two different ``libamd_comgr`` libraries loaded into one process cause the
-profiling run to abort. This module resolves the comgr required by the
-rocprofiler-sdk tool and the comgr supplied by the workload, logs both, and
-reports a mismatch. It also identifies the abort in captured workload output.
+Two different ``libamd_comgr`` libraries loaded into one process abort the
+profiling run. This module resolves the comgr required by the rocprofiler-sdk
+tool and the comgr supplied by the workload, reports a mismatch, selects a
+single comgr to preload, and recognizes the abort in captured output.
 """
 
+import ast
 import json
 import os
 import re
@@ -33,6 +34,12 @@ _PYTHON_EXE_RE = re.compile(r"^python[0-9.]*$")
 
 # Timeout in seconds for external commands.
 _SUBPROCESS_TIMEOUT_SEC = 20
+
+# Timeout in seconds for the import-probe subprocess.
+_IMPORT_PROBE_TIMEOUT_SEC = 90
+
+# Prefix marking the import probe's result line in its stdout.
+_IMPORT_PROBE_MARKER = "__COMGR_PROBE_RESULT__:"
 
 
 def output_indicates_double_comgr(output: str) -> bool:
@@ -133,9 +140,11 @@ def _resolve_interpreter(app_cmd: list[str]) -> Optional[Path]:
     executable = shutil.which(app_cmd[0])
     if not executable:
         return None
-    resolved = Path(executable).resolve()
-    if _PYTHON_EXE_RE.match(resolved.name):
-        return resolved
+    exe_path = Path(executable)
+    if _PYTHON_EXE_RE.match(exe_path.name) or _PYTHON_EXE_RE.match(
+        Path(os.path.realpath(executable)).name
+    ):
+        return exe_path
     return None
 
 
@@ -198,6 +207,122 @@ def _elf_runpath_dirs(elf_path: Path) -> list[Path]:
     return dirs
 
 
+def _workload_script_path(app_cmd: list[str]) -> Optional[Path]:
+    """Return the ``.py`` script file from a python workload command, if any.
+
+    Returns ``None`` for the module form (``python -m pkg``).
+    """
+    for arg in app_cmd[1:]:
+        if arg == "-m":
+            return None
+        if arg.startswith("-"):
+            continue
+        candidate = Path(arg)
+        if candidate.suffix == ".py" and candidate.is_file():
+            return candidate
+        return None
+    return None
+
+
+def _python_import_names(script_path: Path) -> list[str]:
+    """Return the top-level package names imported in ``script_path``.
+
+    Parses the source without executing it. Relative imports are skipped.
+    """
+    try:
+        source = script_path.read_text(encoding="utf-8", errors="replace")
+    except OSError as err:
+        console_debug("comgr", f"could not read workload script: {err}")
+        return []
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as err:
+        console_debug("comgr", f"could not parse workload script: {err}")
+        return []
+    names: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name:
+                    names.append(alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            if node.level == 0 and node.module:
+                names.append(node.module.split(".")[0])
+    return list(dict.fromkeys(name for name in names if name))
+
+
+# Probe program: import the given modules, then report every ``libamd_comgr``
+# mapped into the process via /proc/self/maps.
+_IMPORT_PROBE_SOURCE = f"""
+import importlib, json, sys
+
+names = json.loads(sys.argv[1])
+for name in names:
+    try:
+        importlib.import_module(name)
+    except BaseException:
+        pass
+
+found = []
+try:
+    with open("/proc/self/maps") as maps:
+        for line in maps:
+            fields = line.split()
+            if len(fields) < 6:
+                continue
+            path = fields[-1]
+            if "{COMGR_LIB_STEM}" in path and path not in found:
+                found.append(path)
+except OSError:
+    pass
+
+print("{_IMPORT_PROBE_MARKER}" + json.dumps(found))
+"""
+
+
+def find_workload_comgr_by_imports(
+    app_cmd: list[str],
+    env: dict[str, str],
+) -> list[Path]:
+    """Return the comgr libraries loaded by the workload's imports.
+
+    Python workloads only. Parses the workload script's imports, imports those
+    modules in a separate subprocess using the workload's interpreter and
+    environment, and reports each ``libamd_comgr`` mapped into that process.
+    """
+    interpreter = _resolve_interpreter(app_cmd)
+    if interpreter is None:
+        return []
+    script = _workload_script_path(app_cmd)
+    if script is None:
+        return []
+    import_names = _python_import_names(script)
+    if not import_names:
+        return []
+    try:
+        completed = subprocess.run(
+            [str(interpreter), "-c", _IMPORT_PROBE_SOURCE, json.dumps(import_names)],
+            capture_output=True,
+            text=True,
+            timeout=_IMPORT_PROBE_TIMEOUT_SEC,
+            check=False,
+            cwd=str(script.resolve().parent),
+            env=env,
+        )
+    except (OSError, subprocess.SubprocessError) as err:
+        console_debug("comgr", f"import probe failed: {err}")
+        return []
+    for line in completed.stdout.splitlines():
+        if not line.startswith(_IMPORT_PROBE_MARKER):
+            continue
+        try:
+            paths = json.loads(line[len(_IMPORT_PROBE_MARKER) :])
+        except (ValueError, TypeError):
+            return []
+        return _dedupe_paths([Path(p) for p in paths])
+    return []
+
+
 def find_workload_comgr_static(app_cmd: list[str]) -> list[Path]:
     """Return workload comgr candidates from static inspection.
 
@@ -218,6 +343,11 @@ def find_workload_comgr_static(app_cmd: list[str]) -> list[Path]:
             for runpath_dir in _elf_runpath_dirs(Path(executable)):
                 candidates.extend(_glob_comgr_in_dir(runpath_dir))
     return _dedupe_paths(candidates)
+
+
+def dedupe_comgr_paths(paths: list[Path]) -> list[Path]:
+    """De-duplicate comgr paths by real path, preserving order."""
+    return _dedupe_paths(paths)
 
 
 def _dedupe_paths(paths: list[Path]) -> list[Path]:
@@ -244,45 +374,60 @@ def detect_and_log_double_comgr(
     app_cmd: list[str],
     tool_path: Optional[str],
     env: dict[str, str],
-) -> None:
-    """Detect and log the double comgr condition before the workload runs."""
+) -> Optional[Path]:
+    """Detect and log the double comgr condition before the workload runs.
+
+    Returns the workload's ``libamd_comgr`` to preload when it differs from the
+    profiler tool's comgr, so that both share a single comgr; otherwise ``None``.
+    """
     try:
         tool_comgr = resolve_tool_comgr(tool_path)
         if tool_comgr is not None:
-            console_log("comgr", f"Profiler tool comgr (#1): {tool_comgr}")
+            console_log("comgr", f"Profiler tool comgr: {tool_comgr}")
         else:
             console_debug("comgr", "could not resolve profiler tool comgr")
 
-        workload_comgrs = find_workload_comgr_dynamic(env)
-        if workload_comgrs:
+        dynamic_comgrs = find_workload_comgr_dynamic(env)
+        if dynamic_comgrs:
             console_log(
                 "comgr",
-                f"Workload comgr from dynamic env (#2): "
-                f"{', '.join(str(p) for p in workload_comgrs)}",
+                f"Workload comgr (dynamic env): "
+                f"{', '.join(str(p) for p in dynamic_comgrs)}",
             )
-        else:
-            workload_comgrs = find_workload_comgr_static(app_cmd)
-            if workload_comgrs:
-                console_log(
-                    "comgr",
-                    f"Workload comgr from static check (#2): "
-                    f"{', '.join(str(p) for p in workload_comgrs)}",
-                )
-            else:
-                console_debug("comgr", "no workload comgr found")
 
-        _log_comgr_mismatch(tool_comgr, workload_comgrs)
+        import_comgrs = find_workload_comgr_by_imports(app_cmd, env)
+        if import_comgrs:
+            console_log(
+                "comgr",
+                f"Workload comgr (imports): {', '.join(str(p) for p in import_comgrs)}",
+            )
+
+        static_comgrs = find_workload_comgr_static(app_cmd)
+        if static_comgrs:
+            console_log(
+                "comgr",
+                f"Workload comgr (static): {', '.join(str(p) for p in static_comgrs)}",
+            )
+
+        workload_comgrs = _dedupe_paths(dynamic_comgrs + import_comgrs + static_comgrs)
+        if not workload_comgrs:
+            console_debug("comgr", "no workload comgr found")
+
+        conflicting = _log_comgr_mismatch(tool_comgr, workload_comgrs)
+        if conflicting and tool_comgr is not None:
+            return conflicting[0]
     except Exception as err:  # noqa: BLE001
         console_debug("comgr", f"detection skipped: {err}")
+    return None
 
 
 def _log_comgr_mismatch(
     tool_comgr: Optional[Path],
     workload_comgrs: list[Path],
-) -> None:
-    """Warn when the tool comgr and a workload comgr are different objects."""
+) -> list[Path]:
+    """Warn on and return the workload comgrs that differ from the tool comgr."""
     if tool_comgr is None or not workload_comgrs:
-        return
+        return []
     tool_real = _real_path(tool_comgr)
     conflicting = [p for p in workload_comgrs if _real_path(p) != tool_real]
     if conflicting:
@@ -295,10 +440,11 @@ def _log_comgr_mismatch(
         )
     else:
         console_debug("comgr", "single comgr; workload matches tool")
+    return conflicting
 
 
 def tool_path_from_preload(ld_preload: Optional[str]) -> Optional[str]:
-    """Return the rocprofiler-sdk tool path from an ``LD_PRELOAD`` string, if present."""
+    """Return the rocprofiler-sdk tool path from ``LD_PRELOAD``, if present."""
     if not ld_preload:
         return None
     for entry in ld_preload.replace(os.pathsep, " ").split():

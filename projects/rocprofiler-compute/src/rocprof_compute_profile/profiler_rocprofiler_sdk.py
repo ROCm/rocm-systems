@@ -34,15 +34,23 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         app_cmd = shlex.split(args.remaining)
 
         if app_cmd and not getattr(self, "_comgr_checked", False):
-            detect_and_log_double_comgr(
+            self._forced_comgr = detect_and_log_double_comgr(
                 app_cmd, args.rocprofiler_sdk_tool_path, dict(os.environ)
             )
             self._comgr_checked = True
 
+        forced_comgr = getattr(self, "_forced_comgr", None)
+        if forced_comgr is not None:
+            console_log(
+                "comgr",
+                f"Forcing single comgr via LD_PRELOAD: {forced_comgr}",
+            )
+
         # Build LD_PRELOAD: preserve user's existing, then append our libs
-        # Order: [user's existing LD_PRELOAD] : [our profiler libs]
+        # Order: [user's existing LD_PRELOAD] : [forced comgr] : [our profiler libs]
         ld_preload_parts = [
             os.environ.get("LD_PRELOAD"),  # User's existing LD_PRELOAD (if any)
+            str(forced_comgr) if forced_comgr is not None else None,  # Forced comgr
             args.rocprofiler_sdk_tool_path,  # Our rocprofiler-sdk tool
             native_tool_path,  # Native tool (if provided)
         ]

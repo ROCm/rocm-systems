@@ -18,7 +18,9 @@ import config
 import utils.utils_profile_csv as csv_ops
 from utils import rocpd_data
 from utils.comgr_detect import (
+    dedupe_comgr_paths,
     double_comgr_error_message,
+    find_workload_comgr_by_imports,
     find_workload_comgr_dynamic,
     find_workload_comgr_static,
     output_indicates_double_comgr,
@@ -283,9 +285,13 @@ def run_prof(
             tool_comgr = resolve_tool_comgr(
                 tool_path_from_preload(new_env.get("LD_PRELOAD"))
             )
-            workload_comgrs = find_workload_comgr_dynamic(
-                new_env
-            ) or find_workload_comgr_static(app_cmd or [])
+            # Probe with a clean environment, without the profiler's LD_PRELOAD.
+            probe_env = dict(os.environ)
+            workload_comgrs = dedupe_comgr_paths(
+                find_workload_comgr_dynamic(new_env)
+                + find_workload_comgr_by_imports(app_cmd or [], probe_env)
+                + find_workload_comgr_static(app_cmd or [])
+            )
             console_error(
                 double_comgr_error_message(tool_comgr, workload_comgrs), exit=False
             )
