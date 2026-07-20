@@ -33,6 +33,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Changed
 - Bump rocpd schema to version 3.0.1 which supports NIC agent types.
+- Bump rocpd schema to version 3.0.2 for HIP graph per-node attribution (`graph_exec_id`/`graph_node_id` columns on `rocpd_kernel_dispatch`/`rocpd_memory_copy` and the new `rocpd_graph_launch` table). The pre-graph-attribution 3.0.1 schema is now frozen under `versions/3.0.1/` per the rocpd schema versioning scheme.
 
 ### Removed
 
@@ -63,6 +64,12 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - Fixed handling for special SVM location in KFD prefetch location reporting
   - Fixed parsing for queue restore events to handle both correct format (character '0') and broken driver format (NULL character '\0')
 
+- Per-graph-node attribution for HIP graph operations:
+  - New callback tracing kind `ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH` fires for `hipGraphInstantiate*`, `hipGraphExecDestroy`, and `hipGraphLaunch{,_spt}` lifecycle events. Payload carries a process-monotonic `graph_exec_id` and the raw `hipGraphExec_t` handle. Mirrors the `HIP_STREAM` design.
+  - New buffer tracing kind `ROCPROFILER_BUFFER_TRACING_HIP_GRAPH` emits a summary record per successful `hipGraphLaunch` invocation with `graph_exec_id`, `kernel_dispatch_count`, agent, and launch timestamps.
+  - Tools can associate kernel dispatches and memory copies with their producing graph node by maintaining a per-thread attribution stack (push on EXEC_LAUNCH ENTER, pop on EXIT) and capturing the top of stack into the external correlation id at request time. See the doc comment on `rocprofiler_callback_tracing_hip_graph_data_t` for the recipe.
+  - Attribution accuracy across launches requires segmented scheduling (default), `AMD_DIRECT_DISPATCH=1`, and single-threaded launching of one `hipGraphExec_t`.
+
 **rocprofv3 (CLI):**
 
 - Multi-pass counter collection support: Support for multiple `--pmc` flags to define separate counter groups for different profiling passes.
@@ -85,10 +92,15 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - Enables profiling long-running or production-style jobs at the point of interest.
   - Results integrate with the existing PC sampling analysis flow.
 
+- HIP graph attribution fields and trace:
+  - Kernel and memory-copy records gain `graph_exec_id` and `graph_node_id` fields in JSON and rocpd output. rocpd conversion exposes these fields in CSV, OTF2, and Perfetto output.
+  - New `--hip-graph-trace` CLI flag emits per-launch summary records (one row per successful `hipGraphLaunch`) in JSON and rocpd output, including `graph_exec_id` and `kernel_dispatch_count`. Automatically enabled by `--hip-trace` / `--hip-runtime-trace` since HIP graphs are part of the HIP runtime.
+
 **Documentation:**
 
 - Added marker-controlled thread tracing section to the thread trace how-to guide.
 - Added cross-reference from ROCTx documentation to ATT with `selected-regions`.
+- Added HIP graph attribution section to the rocprofv3 how-to guide covering the new output columns, the `--hip-graph-trace` flag, the determinism contract, and v1 limitations.
 
 ### Changed
 

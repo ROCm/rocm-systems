@@ -370,6 +370,12 @@ public:
     template<typename T = void, typename Enabled = IfConst<T, false>>
     Span(const Span<T>& src) : Span(src.Data(), src.NumElements()) {}
 
+    /// Template copy constructor
+    ///
+    /// @param [in] src Other Span<T> to copy from
+    template<typename T = void, typename Enabled = IfConst<T, false>>
+    Span(Span<T>& src) : Span(src.Data(), src.NumElements()) {}
+
     /// Template constructor from any C++ array
     ///
     /// @param [in] src C++ array

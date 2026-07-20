@@ -41,16 +41,33 @@ get_index_data()
     return _v;
 }
 
+// Returns a reference to a per-thread empty optional, used as a safe fallback for
+// out-of-range / uninitialized thread indices instead of throwing from .at().
+template <typename Tp>
+std::optional<Tp>&
+empty_thread_local()
+{
+    static thread_local auto _dummy = std::optional<Tp>{};
+    _dummy.reset();
+    return _dummy;
+}
+
 auto&
 get_info_data(std::int64_t _tid)
 {
-    return get_info_data()->at(_tid);
+    auto& _v = get_info_data();
+    if(!_v || _tid < 0 || static_cast<size_t>(_tid) >= max_supported_threads)
+        return empty_thread_local<thread_info>();
+    return _v->at(_tid);
 }
 
 auto&
 get_index_data(std::int64_t _tid)
 {
-    return get_index_data()->at(_tid);
+    auto& _v = get_index_data();
+    if(!_v || _tid < 0 || static_cast<size_t>(_tid) >= max_supported_threads)
+        return empty_thread_local<thread_index_data>();
+    return _v->at(_tid);
 }
 
 auto
@@ -69,7 +86,7 @@ init_index_data(std::int64_t _tid, bool _offset = false)
                             "thread {} on thread {}\n",
                             _tid, itr->internal_value));
         }
-
+        thread_info::initialized_threads.fetch_add(1, std::memory_order_relaxed);
         LOG_TRACE("Thread {} on PID {} (rank: {}) assigned rocprof-sys TID {} "
                   "(internal: {})",
                   itr->system_value, process::get_id(), dmp::rank(), itr->sequent_value,
@@ -90,6 +107,8 @@ const auto peak_num_threads_callback_registered = []() {
 }();
 }  // namespace
 
+std::atomic<size_t> thread_info::initialized_threads = 0;
+
 std::string
 thread_index_data::as_string() const
 {
@@ -105,6 +124,15 @@ grow_data(std::int64_t _tid)
     struct data_growth
     {};
 
+    // Do not grow when _tid is greater than or equal to max_supported_threads
+    if(_tid >= static_cast<std::int64_t>(max_supported_threads))
+    {
+        // if thread limit exceeded, return current peak number of threads
+        return peak_num_threads;
+    }
+
+    // Unreachable code: peak_num_threads is already max_supported_threads,
+    // and _tid >= max_supported_threads returns above. Retained for future use.
     if(_tid >= peak_num_threads)
     {
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
@@ -144,6 +172,12 @@ thread_info::get_peak_num_threads()
     return peak_num_threads;
 }
 
+size_t
+thread_info::get_initialized_thread()
+{
+    return initialized_threads.load(std::memory_order_relaxed);
+}
+
 const std::optional<thread_info>&
 thread_info::init(bool _offset)
 {
@@ -151,11 +185,8 @@ thread_info::init(bool _offset)
     auto&                    _info_data = get_info_data();
     auto                     _tid       = utility::get_thread_index();
 
-    if(!_info_data)
-    {
-        static auto _dummy = std::optional<thread_info>{};
-        return (_dummy.reset(), _dummy);  // always reset for safety
-    }
+    if((!_info_data) || (_tid < 0 || static_cast<size_t>(_tid) >= max_supported_threads))
+        return empty_thread_local<thread_info>();
 
     if(!_once && (_once = true))
     {
@@ -181,11 +212,7 @@ thread_info::init(bool _offset)
 const std::optional<thread_info>&
 thread_info::get()
 {
-    if(!exists())
-    {
-        static thread_local auto _v = std::optional<thread_info>{};
-        return _v;
-    }
+    if(!exists()) return empty_thread_local<thread_info>();
     return get_info_data(utility::get_thread_index());
 }
 

@@ -18,11 +18,11 @@ NCCL_PARAM(IbReceiverSideMatchingScheme, "IB_RECEIVER_SIDE_MATCHING_SCHEME", -2)
 RCCL_PARAM(IbSplitDataThreshold, "IB_SPLIT_DATA_THRESHOLD", 128);
 RCCL_PARAM(IbGdrFlushGpuMemNoRelaxedOrdering, "GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING", 1);
 
-const char* ncclIbReqTypeStr[] = { "Unused", "Send", "Recv", "Flush", "IPut", "IGet", "Failed" };
+const char* ncclIbReqTypeStr[] = {"Unused", "Send", "Recv", "Flush", "IPut", "IGet", "Failed"};
 
 ncclResult_t ncclIbGetRequest(struct ncclIbNetCommBase* base, struct ncclIbRequest** req) {
-  for (int i=0; i<NET_IB_MAX_REQUESTS; i++) {
-    struct ncclIbRequest* r = base->reqs+i;
+  for (int i = 0; i < NET_IB_MAX_REQUESTS; i++) {
+    struct ncclIbRequest* r = base->reqs + i;
     if (r->type == NCCL_NET_IB_REQ_UNUSED) {
       r->base = base;
       r->sock = NULL;
@@ -48,7 +48,6 @@ void ncclIbAddEvent(struct ncclIbRequest* req, int devIndex) {
   req->devBases[devIndex] = base;
 }
 
-
 #ifdef ENABLE_TRACE
 static ncclResult_t ncclIbPrintWr(struct ibv_send_wr* wr, char* wrStr) {
   if (wr == NULL) {
@@ -57,32 +56,24 @@ static ncclResult_t ncclIbPrintWr(struct ibv_send_wr* wr, char* wrStr) {
   }
   const char* opcodeStr = ibvWrOpcodeStr(wr->opcode);
   switch (wr->opcode) {
-    case IBV_WR_RDMA_WRITE:
-      sprintf(wrStr, "wr=%p, wr_id=%ld, opcode=%s, num_sge=%d, sge[0].length=%" PRIu32 ", sge[0].addr=0x%016" PRIx64 ", rdma.remote_addr=0x%016" PRIx64 ", rdma.rkey=0x%x",
-        wr,
-        wr->wr_id,
-        opcodeStr,
-        wr->num_sge,
-        (wr->num_sge > 0 && wr->sg_list) ? wr->sg_list->length : 0,
-        (wr->num_sge > 0 && wr->sg_list) ? wr->sg_list->addr : 0,
-        wr->wr.rdma.remote_addr,
-        wr->wr.rdma.rkey);
-      break;
-    case IBV_WR_RDMA_WRITE_WITH_IMM:
-      sprintf(wrStr, "wr=%p, wr_id=%ld, opcode=%s, num_sge=%d, sge[0].length=%" PRIu32 ", sge[0].addr=0x%016" PRIx64 ", rdma.remote_addr=0x%016" PRIx64 ",  rdma.rkey=0x%x, imm_data=0x%x",
-        wr,
-        wr->wr_id,
-        opcodeStr,
-        wr->num_sge,
-        (wr->num_sge > 0 && wr->sg_list) ? wr->sg_list->length : 0,
-        (wr->num_sge > 0 && wr->sg_list) ? wr->sg_list->addr : 0,
-        wr->wr.rdma.remote_addr,
-        wr->wr.rdma.rkey,
-        wr->imm_data);
-      break;
-    default:
-      WARN("NET/IB: %s: No format specified for opcode=%d", __func__, wr->opcode);
-      return ncclInternalError;
+  case IBV_WR_RDMA_WRITE:
+    sprintf(wrStr,
+            "wr=%p, wr_id=%ld, opcode=%s, num_sge=%d, sge[0].length=%" PRIu32 ", sge[0].addr=0x%016" PRIx64
+            ", rdma.remote_addr=0x%016" PRIx64 ", rdma.rkey=0x%x",
+            wr, wr->wr_id, opcodeStr, wr->num_sge, (wr->num_sge > 0 && wr->sg_list) ? wr->sg_list->length : 0,
+            (wr->num_sge > 0 && wr->sg_list) ? wr->sg_list->addr : 0, wr->wr.rdma.remote_addr, wr->wr.rdma.rkey);
+    break;
+  case IBV_WR_RDMA_WRITE_WITH_IMM:
+    sprintf(wrStr,
+            "wr=%p, wr_id=%ld, opcode=%s, num_sge=%d, sge[0].length=%" PRIu32 ", sge[0].addr=0x%016" PRIx64
+            ", rdma.remote_addr=0x%016" PRIx64 ",  rdma.rkey=0x%x, imm_data=0x%x",
+            wr, wr->wr_id, opcodeStr, wr->num_sge, (wr->num_sge > 0 && wr->sg_list) ? wr->sg_list->length : 0,
+            (wr->num_sge > 0 && wr->sg_list) ? wr->sg_list->addr : 0, wr->wr.rdma.remote_addr, wr->wr.rdma.rkey,
+            wr->imm_data);
+    break;
+  default:
+    WARN("NET/IB: %s: No format specified for opcode=%d", __func__, wr->opcode);
+    return ncclInternalError;
   }
   return ncclSuccess;
 }
@@ -97,22 +88,23 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   int nreqs = slots[0].nreqs;
   if (nreqs > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
 
-  TRACE(NCCL_NET, "NET/IB: %s: Posting a send request (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d)", __func__, reqs[0], reqs[0]->base, reqs[0]->id, slot, nreqs);
+  TRACE(NCCL_NET, "NET/IB: %s: Posting a send request (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d)", __func__, reqs[0],
+        reqs[0]->base, reqs[0]->id, slot, nreqs);
 
   int nqps = ncclIbCommBaseGetNqpsPerRequest(&comm->base);
   ncclResult_t ret;
   uint64_t wr_id = 0ULL;
-  for (int r=0; r<nreqs; r++) {
-    struct ibv_send_wr* wr = comm->wrs+r;
+  for (int r = 0; r < nreqs; r++) {
+    struct ibv_send_wr* wr = comm->wrs + r;
     memset(wr, 0, sizeof(struct ibv_send_wr));
 
-    struct ibv_sge* sge = comm->sges+r;
-    sge->addr=(uintptr_t)reqs[r]->send.data;
+    struct ibv_sge* sge = comm->sges + r;
+    sge->addr = (uintptr_t)reqs[r]->send.data;
     wr->opcode = IBV_WR_RDMA_WRITE;
     wr->send_flags = 0;
     wr->wr.rdma.remote_addr = slots[r].addr;
     wr->next = wr + 1;
-    wr_id += (uint64_t)(slot & 0xff) << (r*8);
+    wr_id += (uint64_t)(slot & 0xff) << (r * 8);
     wr->wr_id = wr_id;
 #ifdef NCCL_ENABLE_NET_PROFILING
     reqs[r]->pInfo[0].nEventHandles = 0;
@@ -138,15 +130,16 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   //      written to directly to remote completion records array
   uint32_t immData = comm->base.recvMatchingScheme == BY_ID ? (uint32_t)(reqs[0]->id % UINT32_MAX) : reqs[0]->send.size;
 
-  struct ibv_send_wr* lastWr = comm->wrs+nreqs-1;
-  if (nreqs > 1 || (!(comm->base.remOooRq && comm->base.localOooRq) && comm->ar && reqs[0]->send.size > ncclIbArThreshold)) {
+  struct ibv_send_wr* lastWr = comm->wrs + nreqs - 1;
+  if (nreqs > 1 ||
+      (!(comm->base.remOooRq && comm->base.localOooRq) && comm->ar && reqs[0]->send.size > ncclIbArThreshold)) {
     // When Adaptive Routing is enabled, send the bulk of the data first as an
     // RDMA Write.
     lastWr++;
     memset(lastWr, 0, sizeof(struct ibv_send_wr));
     if (nreqs > 1) {
       // Write remote sizes array
-      lastWr->wr.rdma.remote_addr = comm->remCmplsRecords.addr + slot*sizeof(struct ncclIbRequestCompletionRecord);
+      lastWr->wr.rdma.remote_addr = comm->remCmplsRecords.addr + slot * sizeof(struct ncclIbRequestCompletionRecord);
       lastWr->num_sge = 1;
     }
   }
@@ -166,22 +159,27 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   for (int i = 0; i < nqps; i++) {
     NCCLCHECK(ncclIbCommBaseGetQpForRequest(&comm->base, reqs[0]->id, i, &qp, &qpIndex));
 
-    TRACE(NCCL_NET, "NET/IB: %s: Posting send (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=%ld) on QP (qp_num=%u, devIndex=%d, qpIndex=%d)", __func__, reqs[0], reqs[0]->base, reqs[0]->id, slot, nreqs, wr_id, qp->qp->qp_num, qp->devIndex, qpIndex);
+    TRACE(NCCL_NET,
+          "NET/IB: %s: Posting send (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=%ld) on QP (qp_num=%u, "
+          "devIndex=%d, qpIndex=%d)",
+          __func__, reqs[0], reqs[0]->base, reqs[0]->id, slot, nreqs, wr_id, qp->qp->qp_num, qp->devIndex, qpIndex);
 
     // Selective retransmission
     if (comm->base.resiliency && reqs[0]->send.sentData[qpIndex] == true) {
-      for (int r=0; r<nreqs; r++) {
+      for (int r = 0; r < nreqs; r++) {
         comm->wrs[r].sg_list->addr += comm->wrs[r].sg_list->length;
         comm->wrs[r].wr.rdma.remote_addr += comm->wrs[r].sg_list->length;
       }
-      INFO(NCCL_NET, "NET/IB: %s: Skipping retransmission on QP index %d (req=%p, slot=%d) as it was already delivered.", __func__, qpIndex, reqs[0], slot);
+      INFO(NCCL_NET,
+           "NET/IB: %s: Skipping retransmission on QP index %d (req=%p, slot=%d) as it was already delivered.",
+           __func__, qpIndex, reqs[0], slot);
       continue;
     }
 
     int devIndex = qp->devIndex;
-    for (int r=0; r<nreqs; r++) {
+    for (int r = 0; r < nreqs; r++) {
       // Track this event for completion
-      //ncclIbAddEvent(reqs[r], devIndex);
+      // ncclIbAddEvent(reqs[r], devIndex);
 
       // Select proper rkey (needed even for 0-size send)
       comm->wrs[r].wr.rdma.rkey = slots[r].rkeys[qp->remDevIdx];
@@ -197,7 +195,7 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
       }
       // Check the data left to send. If the send is too small, it might be
       // that on the current QP there is no data left to be sent.
-      comm->wrs[r].sg_list->length = std::min<uint32_t>(reqs[r]->send.size-sendOffsets[r], chunkSize);
+      comm->wrs[r].sg_list->length = std::min<uint32_t>(reqs[r]->send.size - sendOffsets[r], chunkSize);
       if (comm->wrs[r].sg_list->length == 0) {
         comm->wrs[r].num_sge = 0;
       } else {
@@ -211,7 +209,7 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
       // Note that the lkey is already correct from the initialization phase.
       lastWr->sg_list = &(comm->devs[devIndex].sge);
       lastWr->sg_list[0].addr = (uint64_t)(comm->remCmplsRecords.elems[slot]);
-      lastWr->sg_list[0].length = nreqs*sizeof(int);
+      lastWr->sg_list[0].length = nreqs * sizeof(int);
       // Populate the correct RKey based on the device used
       lastWr->wr.rdma.rkey = comm->remCmplsRecords.rkeys[devIndex];
     }
@@ -219,7 +217,7 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
     struct ibv_send_wr* bad_wr;
 #ifdef NCCL_ENABLE_NET_PROFILING
     // QP profiling loop
-    for (int r=0; r<nreqs; r++) {
+    for (int r = 0; r < nreqs; r++) {
       // Store the qpIndex for this request
       int nEventHandles = reqs[r]->pInfo[0].nEventHandles;
       assert(nEventHandles < MAX_QPS_PER_REQ);
@@ -233,13 +231,16 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
       reqs[r]->pInfo[0].data.qp.qpNum = qp->qp->qp_num;
       reqs[r]->pInfo[0].data.qp.length = comm->sges[r].length;
       void* pHandle = reqs[r]->pInfo[0].pHandle;
-      NCCLCHECK(ncclProfilerFunction(&reqs[r]->pInfo[0].qpEventHandles[nEventHandles], ncclProfilerNetEventStart, pHandle, pluginId, &reqs[r]->pInfo[0].data));
+      NCCLCHECK(ncclProfilerFunction(&reqs[r]->pInfo[0].qpEventHandles[nEventHandles], ncclProfilerNetEventStart,
+                                     pHandle, pluginId, &reqs[r]->pInfo[0].data));
       reqs[r]->pInfo[0].nEventHandles++;
     }
 #endif
 #ifdef ENABLE_TRACE
     for (int r = 0; r < nreqs; r++) {
-      TRACE(NCCL_NET, "NET/IB: %s: Posting send work request on QP (qpn=%u, devIndex=%d, qpIndex=%d) (slot=%d, req[r=%d]=%p)", __func__, qp->qp->qp_num, qp->devIndex, qpIndex, slot, r, reqs[r]);
+      TRACE(NCCL_NET,
+            "NET/IB: %s: Posting send work request on QP (qpn=%u, devIndex=%d, qpIndex=%d) (slot=%d, req[r=%d]=%p)",
+            __func__, qp->qp->qp_num, qp->devIndex, qpIndex, slot, r, reqs[r]);
     }
     int wrIdx = 0;
     char wrStr[1024];
@@ -262,26 +263,35 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
 
     // Update the send offset and addresses for the next QP according to the
     // actual data size that was sent on the current QP, for every request
-    for (int r=0; r<nreqs; r++) {
+    for (int r = 0; r < nreqs; r++) {
       sendOffsets[r] = std::min<uint32_t>(sendOffsets[r] + comm->wrs[r].sg_list->length, reqs[r]->send.size);
       comm->wrs[r].sg_list->addr += comm->wrs[r].sg_list->length;
       comm->wrs[r].wr.rdma.remote_addr += comm->wrs[r].sg_list->length;
-      TRACE(NCCL_NET, "NET/IB: %s: Send request (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, reqIdx=%d, wr_id=%ld) posted %d bytes on QP index %d (devIndex=%d, qp_num=%u), total posted %d/%d bytes", __func__, reqs[r], reqs[0]->base, reqs[r]->id, slot, nreqs, r, comm->wrs[r].wr_id, comm->wrs[r].sg_list->length, qpIndex, devIndex, qp->qp->qp_num, sendOffsets[r], reqs[r]->send.size);
+      TRACE(NCCL_NET,
+            "NET/IB: %s: Send request (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, reqIdx=%d, wr_id=%ld) posted %d "
+            "bytes on QP index %d (devIndex=%d, qp_num=%u), total posted %d/%d bytes",
+            __func__, reqs[r], reqs[0]->base, reqs[r]->id, slot, nreqs, r, comm->wrs[r].wr_id,
+            comm->wrs[r].sg_list->length, qpIndex, devIndex, qp->qp->qp_num, sendOffsets[r], reqs[r]->send.size);
       reqs[r]->send.sentData[qpIndex] = true;
       // TODO: add ibv_dev_index to remDevs struct to enable full TRACE log with remote device info
-      TRACE(NCCL_VERBS, "Posted send wr_id=%lu, wr_indx=%d, qp_num=%d, src_nic=%d, opcode=%d, send_flags=%d, imm_data=%d, remote_addr=%lx, rkey=%x, length=%d, lkey=%x",
-        comm->wrs[r].wr_id, r, qp->qp->qp_num, comm->devs[qp->devIndex].base.ibDevN,
-        comm->wrs[r].opcode, comm->wrs[r].send_flags, comm->wrs[r].imm_data, comm->wrs[r].wr.rdma.remote_addr,
-        comm->wrs[r].wr.rdma.rkey, comm->wrs[r].sg_list ? comm->wrs[r].sg_list->length : 0, comm->wrs[r].sg_list ? comm->wrs[r].sg_list->lkey : 0);
+      TRACE(NCCL_VERBS,
+            "Posted send wr_id=%lu, wr_indx=%d, qp_num=%d, src_nic=%d, opcode=%d, send_flags=%d, imm_data=%d, "
+            "remote_addr=%lx, rkey=%x, length=%d, lkey=%x",
+            comm->wrs[r].wr_id, r, qp->qp->qp_num, comm->devs[qp->devIndex].base.ibDevN, comm->wrs[r].opcode,
+            comm->wrs[r].send_flags, comm->wrs[r].imm_data, comm->wrs[r].wr.rdma.remote_addr, comm->wrs[r].wr.rdma.rkey,
+            comm->wrs[r].sg_list ? comm->wrs[r].sg_list->length : 0,
+            comm->wrs[r].sg_list ? comm->wrs[r].sg_list->lkey : 0);
     }
   }
 
-  TRACE(NCCL_NET, "NET/IB: %s: Send request posted (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=%ld)", __func__, reqs[0], reqs[0]->base, reqs[0]->id, slot, nreqs, wr_id);
+  TRACE(NCCL_NET, "NET/IB: %s: Send request posted (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=%ld)", __func__,
+        reqs[0], reqs[0]->base, reqs[0]->id, slot, nreqs, wr_id);
 
   return ncclSuccess;
 }
 
-ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void* mhandle, void* phandle, void** request) {
+ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void* mhandle, void* phandle,
+                         void** request) {
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
   ncclResult_t ret = ncclSuccess;
   if (comm->base.ready == 0) {
@@ -289,7 +299,7 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void*
     *request = NULL;
     return ncclInternalError;
   }
-  struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*) mhandle;
+  struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)mhandle;
 
   // Wait for the receiver to have posted the corresponding receive
   int nreqs = 0;
@@ -298,20 +308,24 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void*
   int slot = comm->base.fifoHead % NET_IB_MAX_REQUESTS;
   struct ncclIbRequest** reqs = comm->sendReqs[slot];
   slots = comm->ctsFifo[slot];
-  uint64_t idx = comm->base.fifoHead+1;
+  uint64_t idx = comm->base.fifoHead + 1;
   int nqps = ncclIbCommBaseGetNqpsPerRequest(&comm->base);
   int qpIndex = -1;
   ncclIbQp* qp = NULL;
   struct ncclIbRequest* req = NULL;
 
-  NCCLCHECKGOTO(ncclIbStatsCheckFatalCount(&comm->base.stats,__func__), ret, isendFail);
+  NCCLCHECKGOTO(ncclIbStatsCheckFatalCount(&comm->base.stats, __func__), ret, isendFail);
 
-  if (slots[0].idx != idx) { *request = NULL; return ncclSuccess; }
+  if (slots[0].idx != idx) {
+    *request = NULL;
+    return ncclSuccess;
+  }
   nreqs = slots[0].nreqs;
   // Wait until all data has arrived
-  for (int r=1; r<nreqs; r++) while(slots[r].idx != idx);
+  for (int r = 1; r < nreqs; r++)
+    while (slots[r].idx != idx);
   std::atomic_thread_fence(std::memory_order_seq_cst); // order the nreqsPtr load against tag/rkey/addr loads below
-  for (int r=0; r<nreqs; r++) {
+  for (int r = 0; r < nreqs; r++) {
     if (reqs[r] != NULL || slots[r].tag != tag) continue;
 
     if (size > slots[r].size) size = slots[r].size;
@@ -320,8 +334,8 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void*
       char line[SOCKET_NAME_MAXLEN + 1];
       union ncclSocketAddress addr;
       ncclSocketGetAddr(&comm->base.sock, &addr);
-      WARN("NET/IB : req %d/%d tag %x peer %s posted incorrect receive info: size %ld addr %lx rkeys[0]=%x",
-        r, nreqs, tag, ncclSocketToString(&addr, line), slots[r].size, slots[r].addr, slots[r].rkeys[0]);
+      WARN("NET/IB : req %d/%d tag %x peer %s posted incorrect receive info: size %ld addr %lx rkeys[0]=%x", r, nreqs,
+           tag, ncclSocketToString(&addr, line), slots[r].size, slots[r].addr, slots[r].rkeys[0]);
       return ncclInternalError;
     }
 
@@ -356,7 +370,10 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void*
     // and be sent to the receiver.
     comm->remCmplsRecords.elems[slot][r] = req->send.size;
 
-    TRACE(NCCL_NET, "NET/IB: %s: Send request created (req=%p, comm=%p, id=%ld, slot=%d, reqIdx=%d, nreqs=%d, tag=%x, size=%ld, data=0x%016" PRIx64 ", mhandle=%p, size=%ld)", __func__, req, req->base, req->id, slot, r, nreqs, tag, size, (uint64_t)data, mhandle, size);
+    TRACE(NCCL_NET,
+          "NET/IB: %s: Send request created (req=%p, comm=%p, id=%ld, slot=%d, reqIdx=%d, nreqs=%d, tag=%x, size=%ld, "
+          "data=0x%016" PRIx64 ", mhandle=%p, size=%ld)",
+          __func__, req, req->base, req->id, slot, r, nreqs, tag, size, (uint64_t)data, mhandle, size);
 
     *request = reqs[r] = req;
 
@@ -399,12 +416,13 @@ isendFail:
 }
 
 ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* req, int slot) {
-  ncclIbQp* ctsQp = NULL;;
+  ncclIbQp* ctsQp = NULL;
+  ;
   NCCLCHECK(ncclIbRecvCommGetQpForCts(comm, req->id, &ctsQp));
 
   struct ibv_send_wr wr;
   memset(&wr, 0, sizeof(wr));
-  wr.wr.rdma.remote_addr = comm->remCtsFifo.addr + slot*NCCL_NET_IB_MAX_RECVS*sizeof(struct ncclIbSendFifo);
+  wr.wr.rdma.remote_addr = comm->remCtsFifo.addr + slot * NCCL_NET_IB_MAX_RECVS * sizeof(struct ncclIbSendFifo);
 
   // Lookup the correct rkey
   wr.wr.rdma.rkey = comm->base.remDevs[ctsQp->remDevIdx].rkey;
@@ -414,7 +432,7 @@ ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
   struct ncclIbSendFifo* localElem = comm->remCtsFifo.elems[slot];
   wr.sg_list = &(comm->devs[ctsQp->devIndex].sge);
   wr.sg_list[0].addr = (uint64_t)localElem;
-  wr.sg_list[0].length = req->nreqs*sizeof(struct ncclIbSendFifo);
+  wr.sg_list[0].length = req->nreqs * sizeof(struct ncclIbSendFifo);
   wr.num_sge = 1;
 
   wr.opcode = IBV_WR_RDMA_WRITE;
@@ -448,16 +466,26 @@ ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
     wr.wr_id = slot;
   }
 
-  TRACE(NCCL_NET, "NET/IB: %s: Posting a CTS (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=%ld, opcode=%d, send_flags=%d, qp_num=%u)", __func__, req, req->base, req->id, slot, req->nreqs, wr.wr_id, wr.opcode, wr.send_flags, ctsQp->qp->qp_num);
+  TRACE(NCCL_NET,
+        "NET/IB: %s: Posting a CTS (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=%ld, opcode=%d, send_flags=%d, "
+        "qp_num=%u)",
+        __func__, req, req->base, req->id, slot, req->nreqs, wr.wr_id, wr.opcode, wr.send_flags, ctsQp->qp->qp_num);
 
   struct ibv_send_wr* bad_wr;
   ncclResult_t postFifoRet;
   NCCLCHECKGOTO(wrap_ibv_post_send(ctsQp->qp, &wr, &bad_wr), postFifoRet, postFifoFail);
-  TRACE(NCCL_VERBS, "Posted send wr_id=%lu, wr_indx=%d, qp_num=%d, src_nic=%d, dst_nic=%d, dlid=%u, opcode=%d, send_flags=%d, imm_data=%d, remote_addr=%lx, rkey=%x, length=%d, lkey=%x",
-        wr.wr_id, 0, ctsQp->qp->qp_num, comm->devs[ctsQp->devIndex].base.ibDevN, comm->base.remDevs[ctsQp->remDevIdx].ibv_dev_index, comm->base.remDevs[ctsQp->remDevIdx].lid,
-        wr.opcode, wr.send_flags, wr.imm_data, wr.wr.rdma.remote_addr, wr.wr.rdma.rkey, wr.sg_list ? wr.sg_list->length : 0, wr.sg_list ? wr.sg_list->lkey : 0);
+  TRACE(NCCL_VERBS,
+        "Posted send wr_id=%lu, wr_indx=%d, qp_num=%d, src_nic=%d, dst_nic=%d, dlid=%u, opcode=%d, send_flags=%d, "
+        "imm_data=%d, remote_addr=%lx, rkey=%x, length=%d, lkey=%x",
+        wr.wr_id, 0, ctsQp->qp->qp_num, comm->devs[ctsQp->devIndex].base.ibDevN,
+        comm->base.remDevs[ctsQp->remDevIdx].ibv_dev_index, comm->base.remDevs[ctsQp->remDevIdx].lid, wr.opcode,
+        wr.send_flags, wr.imm_data, wr.wr.rdma.remote_addr, wr.wr.rdma.rkey, wr.sg_list ? wr.sg_list->length : 0,
+        wr.sg_list ? wr.sg_list->lkey : 0);
 
-  TRACE(NCCL_NET, "NET/IB: %s: CTS posted (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=%ld, opcode=%d, send_flags=%d, qp_num=%u)", __func__, req, req->base, req->id, slot, req->nreqs, wr.wr_id, wr.opcode, wr.send_flags, ctsQp->qp->qp_num);
+  TRACE(NCCL_NET,
+        "NET/IB: %s: CTS posted (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=%ld, opcode=%d, send_flags=%d, "
+        "qp_num=%u)",
+        __func__, req, req->base, req->id, slot, req->nreqs, wr.wr_id, wr.opcode, wr.send_flags, ctsQp->qp->qp_num);
 
   return ncclSuccess;
 
@@ -466,7 +494,8 @@ postFifoFail:
   return postFifoRet;
 }
 
-ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles, void** phandles, void** request) {
+ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles, void** phandles,
+                         void** request) {
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
   ncclResult_t ret = ncclSuccess;
   struct ncclIbRequest* req = NULL;
@@ -481,7 +510,7 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
     return ncclInternalError;
   }
   if (n > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
-  NCCLCHECKGOTO(ncclIbStatsCheckFatalCount(&comm->base.stats,__func__), ret, irecvFail);
+  NCCLCHECKGOTO(ncclIbStatsCheckFatalCount(&comm->base.stats, __func__), ret, irecvFail);
 
   NCCLCHECKGOTO(ncclIbGetRequest(&comm->base, &req), ret, irecvFail);
   slot = comm->base.fifoHead % NET_IB_MAX_REQUESTS;
@@ -495,7 +524,8 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
       req->devBases[devIndex] = ncclIbGetNetCommDevBase(&comm->base, devIndex);
     }
   }
-  TRACE(NCCL_NET, "NET/IB: %s: Recv request created (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, tag[0]=%x)", __func__, req, req->base, req->id, slot, n, tags[0]);
+  TRACE(NCCL_NET, "NET/IB: %s: Recv request created (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, tag[0]=%x)", __func__,
+        req, req->base, req->id, slot, n, tags[0]);
 
 #ifdef NCCL_ENABLE_NET_PROFILING
   for (int r = 0; r < n && phandles; r++) req->pInfo[r].nEventHandles = 0;
@@ -526,7 +556,8 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
       req->pInfo[r].data.qp.device = qp->devIndex;
       req->pInfo[r].data.qp.wr_id = comm->ibRecvWorkRequest.wr_id;
       req->pInfo[r].data.qp.qpNum = qp->qp->qp_num;
-      NCCLCHECK(ncclProfilerFunction(&req->pInfo[r].qpEventHandles[nEventHandles], ncclProfilerNetEventStart, phandles[r], pluginId, &req->pInfo[r].data));
+      NCCLCHECK(ncclProfilerFunction(&req->pInfo[r].qpEventHandles[nEventHandles], ncclProfilerNetEventStart,
+                                     phandles[r], pluginId, &req->pInfo[r].data));
       req->pInfo[r].nEventHandles++;
     }
 #endif
@@ -535,12 +566,12 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
 
   req->recv.aggSize = 0;
   req->recv.cmplsRecords = &comm->cmplsRecords[slot];
-  memset(req->recv.cmplsRecords->sizes, 0, sizeof(int)*n);
+  memset(req->recv.cmplsRecords->sizes, 0, sizeof(int) * n);
   memset(req->recv.cmplsRecords->completions, 0, sizeof(req->recv.cmplsRecords->completions));
   localElem = comm->remCtsFifo.elems[slot];
-  for (int i=0; i<n; i++) {
+  for (int i = 0; i < n; i++) {
     localElem[i].addr = (uint64_t)data[i];
-    struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*) mhandles[i];
+    struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)mhandles[i];
     // Send all applicable rkeys
     for (int j = 0; j < comm->base.vProps.ndevs; j++) {
       localElem[i].rkeys[j] = mhandleWrapper->mrs[j]->rkey;
@@ -548,7 +579,7 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
     localElem[i].nreqs = n;
     localElem[i].size = sizes[i]; // Sanity/Debugging
     localElem[i].tag = tags[i];
-    localElem[i].idx = comm->base.fifoHead+1;
+    localElem[i].idx = comm->base.fifoHead + 1;
   }
 
   // Post to FIFO to notify sender
@@ -591,11 +622,12 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
   struct ncclIbRequest* req = NULL;
   struct ncclIbMrHandle* mhandle = NULL;
   int last = -1;
-  for (int i=0; i<n; i++) if (sizes[i]) last = i;
+  for (int i = 0; i < n; i++)
+    if (sizes[i]) last = i;
   if (comm->flushEnabled == 0 || last == -1) return ncclSuccess;
 
   // Only flush once using the last non-zero receive
-  mhandle = (struct ncclIbMrHandle*) mhandles[last];
+  mhandle = (struct ncclIbMrHandle*)mhandles[last];
   NCCLCHECKGOTO(ncclIbGetRequest(&comm->base, &req), ret, iflushFail);
   req->type = NCCL_NET_IB_REQ_FLUSH;
   req->sock = &comm->base.sock;
@@ -606,8 +638,7 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
     // Check if GPU flush buffer was successfully registered
     // If not, fall back to using user data buffer for flush
     bool useGpuFlushMem = rcclParamIbGdrFlushGpuMemNoRelaxedOrdering() &&
-                          comm->devs[i].gpuFlush.gpuFlushGpuMem != nullptr &&
-                          comm->devs[i].gpuFlush.gpuMr != nullptr;
+                          comm->devs[i].gpuFlush.gpuFlushGpuMem != nullptr && comm->devs[i].gpuFlush.gpuMr != nullptr;
     memset(&wr, 0, sizeof(wr));
     wr.wr_id = (req - comm->base.reqs) + NCCL_IB_FLUSH_REQ_WR_ID_OFFSET;
 
@@ -635,7 +666,8 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
     wr.opcode = IBV_WR_RDMA_READ;
     wr.send_flags = IBV_SEND_SIGNALED;
 
-    TRACE(NCCL_NET, "NET/IB: %s: Posting a flush request (req=%p, comm=%p, wr_id=%ld)", __func__, req, req->base, wr.wr_id);
+    TRACE(NCCL_NET, "NET/IB: %s: Posting a flush request (req=%p, comm=%p, wr_id=%ld)", __func__, req, req->base,
+          wr.wr_id);
     TIME_START(4);
     struct ibv_send_wr* bad_wr;
     NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &wr, &bad_wr), iflushRet, iflushFail);
@@ -643,7 +675,8 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
 
     ncclIbAddEvent(req, i);
 
-    TRACE(NCCL_NET, "NET/IB: %s: Flush request posted (req=%p, comm=%p, wr_id=%ld)", __func__, req, req->base, wr.wr_id);
+    TRACE(NCCL_NET, "NET/IB: %s: Flush request posted (req=%p, comm=%p, wr_id=%ld)", __func__, req, req->base,
+          wr.wr_id);
   }
 
   *request = req;
@@ -684,7 +717,8 @@ static int getReqQpIndex(struct ncclIbRequest* req, int request, int qpNumber) {
 }
 #endif
 
-static inline ncclResult_t ncclIbRequestRetrieveFromCompletion(struct ncclIbNetCommBase* base, ibv_wc* wc, ncclIbRequest** req) {
+static inline ncclResult_t ncclIbRequestRetrieveFromCompletion(struct ncclIbNetCommBase* base, ibv_wc* wc,
+                                                               ncclIbRequest** req) {
   assert(req != NULL);
   assert(wc != NULL);
 
@@ -692,10 +726,12 @@ static inline ncclResult_t ncclIbRequestRetrieveFromCompletion(struct ncclIbNetC
   // of the completion are valid.
   assert(wc->status == IBV_WC_SUCCESS);
 
-  TRACE(NCCL_NET, "NET/IB: %s: Retrieving a %s request (wr_id=%ld, opcode=%s)", __func__, base->isSend ? "send" : "recv", wc->wr_id, ibvWcOpcodeStr(wc->opcode));
+  TRACE(NCCL_NET, "NET/IB: %s: Retrieving a %s request (wr_id=%ld, opcode=%s)", __func__,
+        base->isSend ? "send" : "recv", wc->wr_id, ibvWcOpcodeStr(wc->opcode));
 
   if (!base->isSend && wc->opcode == IBV_WC_RECV_RDMA_WITH_IMM && base->recvMatchingScheme == BY_ID) {
-    TRACE(NCCL_NET, "NET/IB: %s: Retrieving a receive request (wr_id=%ld, opcode=%s, imm_data=%d, byte_len=%d)", __func__, wc->wr_id, ibvWcOpcodeStr(wc->opcode), be32toh(wc->imm_data), wc->byte_len);
+    TRACE(NCCL_NET, "NET/IB: %s: Retrieving a receive request (wr_id=%ld, opcode=%s, imm_data=%d, byte_len=%d)",
+          __func__, wc->wr_id, ibvWcOpcodeStr(wc->opcode), be32toh(wc->imm_data), wc->byte_len);
     struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)base;
     *req = recvComm->recvReqs[be32toh(wc->imm_data) % NET_IB_MAX_REQUESTS];
   } else if (!base->isSend && wc->opcode == IBV_WC_RDMA_READ) { // Flush request completion
@@ -710,12 +746,17 @@ static inline ncclResult_t ncclIbRequestRetrieveFromCompletion(struct ncclIbNetC
     // wr_id.,
     *req = sendComm->sendReqs[wc->wr_id & 0xff][0];
   }
-  TRACE(NCCL_NET, "NET/IB: %s: Retrieved a %s request (req=%p, comm=%p, id=%ld, type=%s, wc.wr_id=%ld, wc.opcode=%s, wc.imm_data=%d, wc.byte_len=%d, wc.qp_num=%u)", __func__, base->isSend ? "send" : "recv", *req, (*req)->base, (*req)->id, ncclIbReqTypeStr[(*req)->type], wc->wr_id, ibvWcOpcodeStr(wc->opcode), be32toh(wc->imm_data), wc->byte_len, wc->qp_num);
+  TRACE(NCCL_NET,
+        "NET/IB: %s: Retrieved a %s request (req=%p, comm=%p, id=%ld, type=%s, wc.wr_id=%ld, wc.opcode=%s, "
+        "wc.imm_data=%d, wc.byte_len=%d, wc.qp_num=%u)",
+        __func__, base->isSend ? "send" : "recv", *req, (*req)->base, (*req)->id, ncclIbReqTypeStr[(*req)->type],
+        wc->wr_id, ibvWcOpcodeStr(wc->opcode), be32toh(wc->imm_data), wc->byte_len, wc->qp_num);
   return ncclSuccess;
 }
 
-static inline bool ncclIbRequestIsComplete(struct ncclIbRequest *request) {
-  bool complete = (request->events[0] == 0 && request->events[1] == 0 && request->events[2] == 0 && request->events[3] == 0);
+static inline bool ncclIbRequestIsComplete(struct ncclIbRequest* request) {
+  bool complete =
+    (request->events[0] == 0 && request->events[1] == 0 && request->events[2] == 0 && request->events[3] == 0);
   if (!complete && request->base->resiliency) {
     NCCLCHECK(ncclIbResiliencyRequestIsComplete(request, &complete));
   }
@@ -723,12 +764,15 @@ static inline bool ncclIbRequestIsComplete(struct ncclIbRequest *request) {
 }
 
 static inline ncclResult_t ncclIbRequestComplete(struct ncclIbRequest* r, int* done, int* sizes) {
-  TRACE(NCCL_NET, "NET/IB: %s: %s request completed (req=%p, comm=%p, id=%ld, type=%s)", __func__, r->base->isSend ? "Send" : "Recv", r, r->base, r->id, ncclIbReqTypeStr[r->type]);
+  TRACE(NCCL_NET, "NET/IB: %s: %s request completed (req=%p, comm=%p, id=%ld, type=%s)", __func__,
+        r->base->isSend ? "Send" : "Recv", r, r->base, r->id, ncclIbReqTypeStr[r->type]);
   *done = 1;
   if (sizes && r->type == NCCL_NET_IB_REQ_RECV) {
-    TRACE(NCCL_NET, "NET/IB: %s: Recv request completed (req=%p, comm=%p, id=%ld, type=%s, nreqs=%d)", __func__, r, r->base, r->id, ncclIbReqTypeStr[r->type], r->nreqs);
-    int *sizesToReport = (r->nreqs > 1 || r->recv.cmplsRecords->sizes[0] > 0) ? r->recv.cmplsRecords->sizes : &(r->recv.aggSize);
-    for (int i=0; i<r->nreqs; i++) {
+    TRACE(NCCL_NET, "NET/IB: %s: Recv request completed (req=%p, comm=%p, id=%ld, type=%s, nreqs=%d)", __func__, r,
+          r->base, r->id, ncclIbReqTypeStr[r->type], r->nreqs);
+    int* sizesToReport =
+      (r->nreqs > 1 || r->recv.cmplsRecords->sizes[0] > 0) ? r->recv.cmplsRecords->sizes : &(r->recv.aggSize);
+    for (int i = 0; i < r->nreqs; i++) {
       sizes[i] = sizesToReport[i];
 #ifdef NCCL_ENABLE_NET_PROFILING
       for (int j = 0; j < r->pInfo[i].nEventHandles; j++) {
@@ -741,11 +785,11 @@ static inline ncclResult_t ncclIbRequestComplete(struct ncclIbRequest* r, int* d
     TRACE(NCCL_NET, "NET/IB: %s: Send request completed (req=%p, comm=%p, id=%ld)", __func__, r, r->base, r->id);
     if (sizes) {
       sizes[0] = r->send.size;
-  #ifdef NCCL_ENABLE_NET_PROFILING
+#ifdef NCCL_ENABLE_NET_PROFILING
       for (int j = 0; j < r->pInfo[0].nEventHandles; j++) {
         NCCLCHECK(ncclProfilerFunction(&r->pInfo[0].qpEventHandles[j], ncclProfilerNetEventStop, NULL, 0, NULL));
       }
-  #endif
+#endif
     }
     int slot = r->id % NET_IB_MAX_REQUESTS;
     struct ncclIbSendComm* sendComm = (struct ncclIbSendComm*)r->base;
@@ -767,44 +811,52 @@ static ncclResult_t ncclIbLogCompletionWithError(struct ncclIbNetCommBase* commB
   struct ncclIbNetCommDevBase* devBase = ncclIbGetNetCommDevBase(commBase, devIndex);
   char localGidString[INET6_ADDRSTRLEN] = "";
   char remoteGidString[INET6_ADDRSTRLEN] = "";
-  const char* localGidStr = NULL, *remoteGidStr = NULL;
+  const char *localGidStr = NULL, *remoteGidStr = NULL;
   if (devBase->gidInfo.link_layer == IBV_LINK_LAYER_ETHERNET) {
     localGidStr = ibvGetGidStr(&devBase->gidInfo.localGid, localGidString, sizeof(localGidString));
     remoteGidStr = ibvGetGidStr(&commBase->remDevs[devIndex].remoteGid, remoteGidString, sizeof(remoteGidString));
   }
 
-  char sockStr[SOCKET_NAME_MAXLEN+1];
+  char sockStr[SOCKET_NAME_MAXLEN + 1];
   union ncclSocketAddress addr;
   ncclSocketGetAddr(&commBase->sock, &addr);
   ncclSocketToString(&addr, sockStr);
-  char *hcaName = devBase->pd->context->device->name;
-  WARN("NET/IB: Got completion from peer %s with status=%s(%d) opcode=%s(%d) vendor_err=%u %s%s%s%s hca %s",
-      sockStr, ibvWcStatusStr(wc->status), wc->status,
-      ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->vendor_err,
-      localGidStr ?  " localGid ":"", localGidString, remoteGidStr ? " remoteGids":"", remoteGidString, hcaName);
+  char* hcaName = devBase->pd->context->device->name;
+  WARN("NET/IB: Got completion from peer %s with status=%s(%d) opcode=%s(%d) vendor_err=%u %s%s%s%s hca %s", sockStr,
+       ibvWcStatusStr(wc->status), wc->status, ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->vendor_err,
+       localGidStr ? " localGid " : "", localGidString, remoteGidStr ? " remoteGids" : "", remoteGidString, hcaName);
   return ncclSuccess;
 }
 
-static inline ncclResult_t ncclIbCompletionEventProcess(struct ncclIbNetCommBase* commBase, struct ibv_wc* wc, int devIndex) {
+static inline ncclResult_t ncclIbCompletionEventProcess(struct ncclIbNetCommBase* commBase, struct ibv_wc* wc,
+                                                        int devIndex) {
   union ncclSocketAddress addr;
   ncclSocketGetAddr(&commBase->sock, &addr);
 
   struct ncclIbRequest* req = NULL;
   NCCLCHECK(ncclIbRequestRetrieveFromCompletion(commBase, wc, &req));
   if (req == NULL) {
-    WARN("NET/IB: %s: %s comm could not retreive a request found for a successful completion (comm=%p, wc.wr_id=%ld, opcode=%d, qp_num=%u)", __func__, commBase->isSend ? "Send" : "Recv", commBase, wc->wr_id, wc->opcode, wc->qp_num);
+    WARN("NET/IB: %s: %s comm could not retreive a request found for a successful completion (comm=%p, wc.wr_id=%ld, "
+         "opcode=%d, qp_num=%u)",
+         __func__, commBase->isSend ? "Send" : "Recv", commBase, wc->wr_id, wc->opcode, wc->qp_num);
     return ncclInternalError;
   }
 
-  #ifdef ENABLE_TRACE
-  char line[SOCKET_NAME_MAXLEN+1];
-  TRACE(NCCL_NET, "Got completion from peer %s with status=%d opcode=%d len=%u wr_id=%lu r=%p type=%d events={%d,%d,%d,%d}, devIndex=%d",
-    ncclSocketToString(&addr, line), wc->status, wc->opcode,wc->byte_len, wc->wr_id, req, req->type, req->events[0], req->events[1], req->events[2], req->events[3], devIndex);
-  #endif
+#ifdef ENABLE_TRACE
+  char line[SOCKET_NAME_MAXLEN + 1];
+  TRACE(NCCL_NET,
+        "Got completion from peer %s with status=%d opcode=%d len=%u wr_id=%lu r=%p type=%d events={%d,%d,%d,%d}, "
+        "devIndex=%d",
+        ncclSocketToString(&addr, line), wc->status, wc->opcode, wc->byte_len, wc->wr_id, req, req->type,
+        req->events[0], req->events[1], req->events[2], req->events[3], devIndex);
+#endif
 
   if (commBase->isSend) {
     if (req->type != NCCL_NET_IB_REQ_SEND) {
-      WARN("NET/IB: %s: Sender expected a 'send' request but got '%s' (req=%p, comm=%p, id=%ld, wc.wr_id=%ld, wc.opcode=%s(%d), wc.qp_num=%u)", __func__, ncclIbReqTypeStr[req->type], req, commBase, req->id, wc->wr_id, ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->qp_num);
+      WARN("NET/IB: %s: Sender expected a 'send' request but got '%s' (req=%p, comm=%p, id=%ld, wc.wr_id=%ld, "
+           "wc.opcode=%s(%d), wc.qp_num=%u)",
+           __func__, ncclIbReqTypeStr[req->type], req, commBase, req->id, wc->wr_id, ibvWcOpcodeStr(wc->opcode),
+           wc->opcode, wc->qp_num);
       return ncclInternalError;
     }
     struct ncclIbSendComm* sendComm = (struct ncclIbSendComm*)commBase;
@@ -813,35 +865,46 @@ static inline ncclResult_t ncclIbCompletionEventProcess(struct ncclIbNetCommBase
     for (int j = 0; j < req->nreqs; j++) {
       sendReq = sendComm->sendReqs[slot][j];
       if (!commBase->resiliency && (sendReq->events[devIndex] <= 0)) {
-        WARN("NET/IB: sendReq(%p)->events={%d,%d,%d,%d}, devIndex=%d, reqIdx=%d <= 0", sendReq, sendReq->events[0], sendReq->events[1], sendReq->events[2], sendReq->events[3], devIndex, j);
+        WARN("NET/IB: sendReq(%p)->events={%d,%d,%d,%d}, devIndex=%d, reqIdx=%d <= 0", sendReq, sendReq->events[0],
+             sendReq->events[1], sendReq->events[2], sendReq->events[3], devIndex, j);
         return ncclInternalError;
       }
       sendReq->events[devIndex]--;
-      TRACE(NCCL_NET, "NET/IB: %s: Got completion for a send request (req=%p, comm=%p, id=%ld, devIndex=%d, qp_num=%u)", __func__, sendReq, sendReq->base, sendReq->id, devIndex, wc->qp_num);
+      TRACE(NCCL_NET, "NET/IB: %s: Got completion for a send request (req=%p, comm=%p, id=%ld, devIndex=%d, qp_num=%u)",
+            __func__, sendReq, sendReq->base, sendReq->id, devIndex, wc->qp_num);
 #ifdef NCCL_ENABLE_NET_PROFILING
       // Stop Qp event for sendReq
       int qpIndex = getReqQpIndex(sendReq, j, wc->qp_num);
-      NCCLCHECK(ncclProfilerFunction(&sendReq->pInfo[j].qpEventHandles[qpIndex], ncclProfilerNetEventStop, NULL, 0, NULL));
+      NCCLCHECK(ncclProfilerFunction(&sendReq->pInfo[j].qpEventHandles[qpIndex], ncclProfilerNetEventStop, NULL, 0,
+                                     NULL));
 #endif
     }
   } else {
     if (wc->opcode == IBV_WC_RECV_RDMA_WITH_IMM) {
       if (req->type == NCCL_NET_IB_REQ_UNUSED && commBase->resiliency) {
-        INFO(NCCL_NET, "NET/IB: %s: Receiver got a completion for a data transfer but retrieved an 'unused' request (req=%p, comm=%p, id=%ld, wc.status=%s(%d), wc.wr_id=%ld, wc.imm_data=%d, wc.opcode=%s(%d), wc.qp_num=%u)", __func__, req, commBase, req->id, ibvWcStatusStr(wc->status), wc->status, wc->wr_id, be32toh(wc->imm_data), ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->qp_num);
+        INFO(NCCL_NET,
+             "NET/IB: %s: Receiver got a completion for a data transfer but retrieved an 'unused' request (req=%p, "
+             "comm=%p, id=%ld, wc.status=%s(%d), wc.wr_id=%ld, wc.imm_data=%d, wc.opcode=%s(%d), wc.qp_num=%u)",
+             __func__, req, commBase, req->id, ibvWcStatusStr(wc->status), wc->status, wc->wr_id, be32toh(wc->imm_data),
+             ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->qp_num);
         return ncclSuccess;
       }
       if (req->type != NCCL_NET_IB_REQ_RECV && !commBase->resiliency) {
-        WARN("NET/IB: %s: Receiver expected a 'recv' request but got '%s' (req=%p, comm=%p, id=%ld, wc.wr_id=%ld, wc.status=%s(%d) wc.opcode=%s(%d), wc.qp_num=%u)", __func__, ncclIbReqTypeStr[req->type], req, req->base, req->id, wc->wr_id, ibvWcStatusStr(wc->status), wc->status, ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->qp_num);
+        WARN("NET/IB: %s: Receiver expected a 'recv' request but got '%s' (req=%p, comm=%p, id=%ld, wc.wr_id=%ld, "
+             "wc.status=%s(%d) wc.opcode=%s(%d), wc.qp_num=%u)",
+             __func__, ncclIbReqTypeStr[req->type], req, req->base, req->id, wc->wr_id, ibvWcStatusStr(wc->status),
+             wc->status, ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->qp_num);
         return ncclInternalError;
       }
       if (req->nreqs == 1) {
         if (commBase->recvMatchingScheme == BY_INDEX) {
           req->recv.cmplsRecords->sizes[0] = be32toh(wc->imm_data);
         } else if (req->recv.cmplsRecords->sizes[0] == 0) {
-          req->recv.aggSize+= wc->byte_len;
+          req->recv.aggSize += wc->byte_len;
         }
       }
-      TRACE(NCCL_NET, "NET/IB: %s: Got completion for a recv request (req=%p, comm=%p, id=%ld, devIndex=%d, qp_num=%u)", __func__, req, req->base, req->id, devIndex, wc->qp_num);
+      TRACE(NCCL_NET, "NET/IB: %s: Got completion for a recv request (req=%p, comm=%p, id=%ld, devIndex=%d, qp_num=%u)",
+            __func__, req, req->base, req->id, devIndex, wc->qp_num);
       struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)commBase;
       if (recvComm->prepostReceiveWorkRequests) {
         // Post another receive work request on the QP
@@ -853,17 +916,27 @@ static inline ncclResult_t ncclIbCompletionEventProcess(struct ncclIbNetCommBase
       }
       req->events[devIndex]--;
     } else if (wc->opcode == IBV_WC_RDMA_READ) {
-      TRACE(NCCL_NET, "NET/IB: %s: Got completion for a flush request (req=%p, comm=%p, id=%ld, devIndex=%d, qp_num=%u)", __func__, req, req->base, req->id, devIndex, wc->qp_num);
+      TRACE(NCCL_NET,
+            "NET/IB: %s: Got completion for a flush request (req=%p, comm=%p, id=%ld, devIndex=%d, qp_num=%u)",
+            __func__, req, req->base, req->id, devIndex, wc->qp_num);
       req->events[devIndex]--;
     } else if (wc->opcode == IBV_WC_RDMA_WRITE) {
       // This is a CTS completion
-      TRACE(NCCL_NET, "NET/IB: %s: Got completion for a CTS (req=%p, comm=%p, id=%ld, devIndex=%d, qp_num=%u)", __func__, req, req->base, req->id, devIndex, wc->qp_num);
+      TRACE(NCCL_NET, "NET/IB: %s: Got completion for a CTS (req=%p, comm=%p, id=%ld, devIndex=%d, qp_num=%u)",
+            __func__, req, req->base, req->id, devIndex, wc->qp_num);
       if (req->type == NCCL_NET_IB_REQ_UNUSED) {
-        INFO(NCCL_NET, "NET/IB: %s: Receiver got a completion for a CTS but retrieved an 'unused' request (req=%p, comm=%p, id=%ld, wc.wr_id=%ld, wc.opcode=%s(%d), wc.qp_num=%u, wc.imm_data=%d)", __func__, req, req->base, req->id, wc->wr_id, ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->qp_num, be32toh(wc->imm_data));
+        INFO(NCCL_NET,
+             "NET/IB: %s: Receiver got a completion for a CTS but retrieved an 'unused' request (req=%p, comm=%p, "
+             "id=%ld, wc.wr_id=%ld, wc.opcode=%s(%d), wc.qp_num=%u, wc.imm_data=%d)",
+             __func__, req, req->base, req->id, wc->wr_id, ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->qp_num,
+             be32toh(wc->imm_data));
         return ncclSuccess;
       }
     } else {
-      WARN("NET/IB: %s: Unknown completion (req=%p, comm=%p, id=%ld, devIndex=%d, req->type=%s, wc.wr_id=%ld, wc.opcode=%s(%d), wc.qp_num=%u, wc.imm_data=%d)", __func__, req, commBase, req ? req->id : -1, devIndex, ncclIbReqTypeStr[req->type], wc->wr_id, ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->qp_num, be32toh(wc->imm_data));
+      WARN("NET/IB: %s: Unknown completion (req=%p, comm=%p, id=%ld, devIndex=%d, req->type=%s, wc.wr_id=%ld, "
+           "wc.opcode=%s(%d), wc.qp_num=%u, wc.imm_data=%d)",
+           __func__, req, commBase, req ? req->id : -1, devIndex, ncclIbReqTypeStr[req->type], wc->wr_id,
+           ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->qp_num, be32toh(wc->imm_data));
       return ncclInternalError;
     }
 #ifdef NCCL_ENABLE_NET_PROFILING
@@ -878,7 +951,7 @@ static inline ncclResult_t ncclIbCompletionEventProcess(struct ncclIbNetCommBase
 }
 
 ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
-  struct ncclIbRequest *r = (struct ncclIbRequest*)request;
+  struct ncclIbRequest* r = (struct ncclIbRequest*)request;
   *done = 0;
   ncclResult_t ret = ncclSuccess;
   int failDevIdx = -1;
@@ -891,7 +964,7 @@ ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
   int wrDone = 0;
   struct ibv_wc wcs[4];
   do {
-    NCCLCHECKGOTO(ncclIbStatsCheckFatalCount(&r->base->stats,__func__), ret, fail);
+    NCCLCHECKGOTO(ncclIbStatsCheckFatalCount(&r->base->stats, __func__), ret, fail);
     if (ncclIbRequestIsComplete(r)) {
       NCCLCHECK(ncclIbRequestComplete(r, done, sizes));
       return ncclSuccess;
@@ -909,30 +982,37 @@ ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
       TIME_START(3);
       ret = wrap_ibv_poll_cq(r->devBases[i]->cq, 4, wcs, &wrDone);
       if (ret != ncclSuccess) {
-         failDevIdx = i;
-         goto fail;
+        failDevIdx = i;
+        goto fail;
       }
-      if (wrDone == 0) { TIME_CANCEL(3); } else { TIME_STOP(3); }
+      if (wrDone == 0) {
+        TIME_CANCEL(3);
+      } else {
+        TIME_STOP(3);
+      }
       if (wrDone == 0) continue;
       totalWrDone += wrDone;
-      for (int w=0; w<wrDone; w++) {
-        struct ibv_wc *wc = wcs+w;
+      for (int w = 0; w < wrDone; w++) {
+        struct ibv_wc* wc = wcs + w;
         if (wc->status != IBV_WC_SUCCESS) {
           if (r->base->resiliency == NULL) {
-            WARN("NET/IB: %s: Got CQE with error (devIndex=%d, req=%p, comm=%p (%s), wr_id=%lu, qp_num=%d)", __func__, i, r, r->base, r->base->isSend ? "send" : "recv", wc->wr_id, wc->qp_num);
+            WARN("NET/IB: %s: Got CQE with error (devIndex=%d, req=%p, comm=%p (%s), wr_id=%lu, qp_num=%d)", __func__,
+                 i, r, r->base, r->base->isSend ? "send" : "recv", wc->wr_id, wc->qp_num);
             ncclIbLogCompletionWithError(r->base, wc, i);
             // If resiliency is not enabled, we cannot recover from any error.
             return ncclRemoteError;
           }
           NCCLCHECK(ncclIbResiliencyHandleCompletionError(r->base->resiliency, wc, i));
         } else {
-          TRACE(NCCL_NET, "NET/IB: %s: Processing a completion event (devIndex=%d, comm=%p (%s), req=%p, wr_id=%lu, qp_num=%d)", __func__, i, r->base, r->base->isSend ? "send" : "recv", r, wc->wr_id, wc->qp_num);
+          TRACE(NCCL_NET,
+                "NET/IB: %s: Processing a completion event (devIndex=%d, comm=%p (%s), req=%p, wr_id=%lu, qp_num=%d)",
+                __func__, i, r->base, r->base->isSend ? "send" : "recv", r, wc->wr_id, wc->qp_num);
           NCCLCHECK(ncclIbCompletionEventProcess(r->base, wc, i));
         }
       }
       // Once the IB fatal event is reported in the async thread, we want to propagate this error
       // to communicator and prevent further polling to reduce error pollution.
-      ret = ncclIbStatsCheckFatalCount(&ncclIbDevs[r->devBases[i]->ibDevN].stats,__func__);
+      ret = ncclIbStatsCheckFatalCount(&ncclIbDevs[r->devBases[i]->ibDevN].stats, __func__);
       if (ret != ncclSuccess) {
         failDevIdx = i;
         goto fail;
