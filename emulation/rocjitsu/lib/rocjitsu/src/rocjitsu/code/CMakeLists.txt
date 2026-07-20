@@ -30,3 +30,5 @@ rj_add_object_library(rocjitsu_code
     patch/spill_manager.cpp
     patch/trampoline_builder.cpp
 )
+
+add_subdirectory(patch/consan)

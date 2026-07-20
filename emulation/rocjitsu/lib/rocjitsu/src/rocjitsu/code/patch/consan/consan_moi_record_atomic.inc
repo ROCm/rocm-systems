@@ -1,0 +1,290 @@
+void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanOptions &options,
+                                   rj_code_arch_t arch, ConSanResult &result) {
+  if (!options.moi_track_atomics)
+    return;
+  if (options.moi_engine != ConSanMoiEngine::RecordReplay)
+    return;
+  if (!is_rdna4_family_arch(arch) && arch != ROCJITSU_CODE_ARCH_CDNA4) {
+    result.warnings.emplace_back(
+        "ConSan MOI atomic record patch does not support this architecture");
+    return;
+  }
+  if (!options.moi_report_buffer_address) {
+    result.warnings.emplace_back("ConSan MOI atomic record patch requires a MOI report buffer");
+    return;
+  }
+  if (options.moi_report_buffer_size < consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1)) {
+    result.warnings.emplace_back(
+        "ConSan MOI atomic record patch requires room for access and atomic records");
+    return;
+  }
+  const ConSanMoiReportBufferLayout layout =
+      resolve_record_replay_report_layout(options, options.moi_track_barriers,
+                                          /*include_atomics=*/true, /*include_fences=*/true);
+  const uint32_t max_candidates = std::min(options.max_patches, layout.atomic_record_capacity);
+  if (max_candidates == 0) {
+    result.warnings.emplace_back("ConSan MOI atomic record patch has no atomic record capacity");
+    return;
+  }
+  std::vector<AtomicRecordCandidate> candidates;
+  auto retain_unavailable_cas = [&](std::string_view container_name, bool in_kernel,
+                                    const std::vector<ConSanAtomicSite> &sites) {
+    for (const ConSanAtomicSite &site : sites) {
+      const bool cas = site.mnemonic.find("cmpswap") != std::string::npos ||
+                       site.mnemonic.find("cmpxchg") != std::string::npos;
+      if (!cas || site.returns_old_value.value_or(false) ||
+          !atomic_event_kind_for_site(result, container_name, in_kernel, site))
+        continue;
+      result.warnings.emplace_back(
+          "ConSan MOI atomic record patch skipped compare-exchange-outcome-unavailable in " +
+          std::string(container_name));
+    }
+  };
+  for (const ConSanKernelInfo &kernel : result.kernels) {
+    retain_unavailable_cas(kernel.name, true, kernel.atomic_sites);
+    append_atomic_record_candidates(kernel, result, candidates);
+  }
+  for (const ConSanFunctionInfo &function : result.functions) {
+    retain_unavailable_cas(function.name, false, function.atomic_sites);
+    append_atomic_record_candidates(function, result, candidates);
+  }
+  apply_test_container_filter(candidates, options);
+  std::sort(candidates.begin(), candidates.end(), [](const auto &lhs, const auto &rhs) {
+    return lhs.site.text_offset < rhs.site.text_offset;
+  });
+  if (candidates.empty()) {
+    result.warnings.emplace_back("ConSan MOI atomic record patch found no supported flat atomics");
+    return;
+  }
+
+  std::span<const uint8_t> active_bytes = bytes;
+  if (result.modified)
+    active_bytes = std::span<const uint8_t>(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject code_object(active_bytes.data(), active_bytes.size());
+  CodeObjectPatcher patcher(code_object);
+  const std::span<const uint8_t> old_text = patcher.text_bytes();
+  if (old_text.empty()) {
+    result.errors.emplace_back("ConSan MOI atomic record patch found no .text section");
+    return;
+  }
+  struct PlannedAtomicRecord {
+    AtomicRecordCandidate candidate;
+    ResolvedMoiScratchPlan resources;
+    ConSanMoiAtomicAddressPlan address_plan;
+    std::optional<VgprSpillSequence> spill;
+  };
+  std::vector<PlannedAtomicRecord> selected_candidates;
+  selected_candidates.reserve(max_candidates);
+  MoiResourcePlanningState resource_state(bytes, arch, options, result);
+  MoiSpillManagers spill_managers;
+  MoiDescriptorVgprRequirements descriptor_requirements;
+  MoiDescriptorPrivateRequirements private_requirements;
+  for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
+    const AtomicRecordCandidate &candidate = candidates[candidate_index];
+    if (selected_candidates.size() == max_candidates)
+      break;
+    const ConSanAtomicSite &site = candidate.site;
+    if (site.text_offset > old_text.size() || site.size > old_text.size() - site.text_offset) {
+      result.errors.emplace_back("ConSan MOI atomic record patch site is outside .text");
+      return;
+    }
+    const auto overlaps_existing_patch = std::any_of(
+        result.patches.begin(), result.patches.end(), [&](const ConSanPatchInfo &patch) {
+          const uint64_t patch_end =
+              patch.anchor_offset + std::max<uint32_t>(patch.original_size, 1);
+          return site.text_offset < patch_end && patch.anchor_offset < site.text_offset + site.size;
+        });
+    if (overlaps_existing_patch) {
+      result.warnings.emplace_back(
+          "ConSan MOI atomic record patch skipped an overlapping patch in " +
+          candidate.container_name);
+      continue;
+    }
+    const ConSanCandidateResourcePlan *existing_plan =
+        resource_plan_for_site(result, ConSanResourceSiteKind::Atomic, site.text_offset);
+    const uint16_t scratch_count = inline_atomic_scratch_count(site);
+    ConSanCandidateResourcePlan plan =
+        existing_plan
+            ? *existing_plan
+            : plan_moi_resource_site(resource_state, options, ConSanResourceSiteKind::Atomic,
+                                     candidate_index, site.text_offset,
+                                     candidate.kernel_descriptor_file_offset, scratch_count);
+    if (!existing_plan)
+      result.resource_plans.push_back(plan);
+    const auto resources = resolve_moi_scratch_plan(plan, options, scratch_count);
+    if (!resources) {
+      result.warnings.emplace_back(
+          "ConSan MOI atomic record patch has no usable resource plan in " +
+          candidate.container_name);
+      continue;
+    }
+    const ConSanMoiAtomicAddressPlan address_plan = plan_consan_moi_atomic_address(
+        site, resources->base, resources->count, resources->source, arch);
+    if (!address_plan.supported()) {
+      result.warnings.emplace_back(
+          "ConSan MOI atomic record patch has no usable address plan in " +
+          candidate.container_name + ": " +
+          std::string(consan_moi_atomic_address_support_name(address_plan.support)));
+      continue;
+    }
+    AtomicRecordCandidate planned_candidate = candidate;
+    if (!options.moi_owner_vgpr && !planned_candidate.kernel_descriptor_file_offset) {
+      planned_candidate.kernel_descriptor_file_offset =
+          common_moi_record_owner_descriptor(bytes, *resources, arch, result.warnings);
+      if (!planned_candidate.kernel_descriptor_file_offset)
+        continue;
+    }
+    std::optional<VgprSpillSequence> spill;
+    if (resources->source == ConSanRegisterAllocationSource::SpillRequired) {
+      spill = build_moi_spill_sequence(result, *resources, options, spill_managers, arch,
+                                       result.warnings);
+      if (!spill)
+        continue;
+    }
+    selected_candidates.push_back(
+        {std::move(planned_candidate), *resources, address_plan, std::move(spill)});
+  }
+  const bool has_atomic_acquire_consumer =
+      std::ranges::any_of(selected_candidates, [](const PlannedAtomicRecord &planned) {
+        return planned.candidate.event_kind == ConSanMoiAtomicEventKind::Acquire ||
+               planned.candidate.event_kind == ConSanMoiAtomicEventKind::AcquireRelease;
+      });
+  const bool has_access_record_probe =
+      std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+        return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+               patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
+      });
+  // Such a release cannot order any replayed access without an instrumented acquire. Preserve
+  // atomic-only probes, however: they remain useful emission tests and pruning them would make an
+  // otherwise empty Record/Replay transform vacuous.
+  if (!has_atomic_acquire_consumer && has_access_record_probe) {
+    const auto old_size = selected_candidates.size();
+    std::erase_if(selected_candidates, [](const PlannedAtomicRecord &planned) {
+      const bool is_compare_exchange =
+          planned.candidate.site.mnemonic.find("cmpswap") != std::string::npos ||
+          planned.candidate.site.mnemonic.find("cmpxchg") != std::string::npos;
+      return planned.candidate.event_kind == ConSanMoiAtomicEventKind::Release &&
+             !is_compare_exchange && planned.candidate.site.returns_old_value &&
+             !*planned.candidate.site.returns_old_value;
+    });
+    if (selected_candidates.size() != old_size) {
+      result.warnings.emplace_back(
+          "ConSan MOI atomic record pruned isolated no-return release metadata with no "
+          "instrumented acquire consumer");
+    }
+  }
+  if (selected_candidates.empty()) {
+    result.warnings.emplace_back("ConSan MOI atomic record patch found no patchable atomics");
+    return;
+  }
+  for (const PlannedAtomicRecord &planned : selected_candidates) {
+    if (planned.spill) {
+      note_spill_descriptor_requirements(private_requirements, planned.resources, *planned.spill);
+    }
+    note_descriptor_requirements(descriptor_requirements, planned.resources);
+  }
+  if (!apply_descriptor_requirements(patcher, code_object, active_bytes, result,
+                                     descriptor_requirements, arch, result.errors) ||
+      !apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
+                                           private_requirements, result.errors)) {
+    return;
+  }
+
+  std::vector<uint8_t> new_text(old_text.begin(), old_text.end());
+  DbiPatchPlacementPlanner placement_planner(arch, old_text.size());
+  MoiLocalNopIslandAllocator indirect_allocator(old_text, result, arch,
+                                                kMoiLocalIndirectIslandWords);
+  std::vector<ConSanPatchInfo> patches;
+  const uint32_t record_count = static_cast<uint32_t>(selected_candidates.size());
+  uint32_t record_index = 0;
+  for (const PlannedAtomicRecord &planned : selected_candidates) {
+    const AtomicRecordCandidate &candidate = planned.candidate;
+    const ConSanAtomicSite &site = candidate.site;
+    const uint64_t cave_text_offset = placement_planner.appended_end();
+    const uint64_t return_text_offset = site.text_offset + site.size;
+    ConSanOptions candidate_options = options;
+    candidate_options.scratch_vgpr = planned.resources.base;
+    uint32_t guest_instruction_offset = 0;
+    auto cave_words = build_atomic_record_cave_words(
+        active_bytes, candidate, planned.address_plan, candidate_options,
+        planned.spill ? &*planned.spill : nullptr, arch, record_index, record_count,
+        layout.atomic_records_offset, cave_text_offset, return_text_offset,
+        guest_instruction_offset, result.errors);
+    if (!cave_words)
+      return;
+
+    const bool direct_entry =
+        compute_sopp_branch_simm16(site.text_offset, cave_text_offset).has_value();
+    const std::optional<uint64_t> indirect_entry_island =
+        direct_entry ? std::nullopt : indirect_allocator.claim_reachable(site.text_offset);
+    if (!direct_entry && !indirect_entry_island) {
+      result.warnings.emplace_back(
+          "ConSan MOI atomic record patch found no reachable indirect entry island in " +
+          candidate.container_name);
+      continue;
+    }
+    std::string placement_error;
+    const auto placement = placement_planner.plan_indirect_appended(
+        site.text_offset, site.size, cave_words->size() * sizeof(uint32_t), &placement_error);
+    if (!placement) {
+      result.errors.emplace_back("ConSan MOI atomic record placement failed: " + placement_error);
+      return;
+    }
+    if (placement->body_offset != cave_text_offset || new_text.size() != placement->body_offset) {
+      result.errors.emplace_back("ConSan MOI atomic record patch has a stale cave mapping");
+      return;
+    }
+
+    const uint64_t entry_target = indirect_entry_island.value_or(placement->body_offset);
+    const auto fwd = compute_sopp_branch_simm16(placement->anchor_offset, entry_target);
+    if (!fwd) {
+      result.errors.emplace_back("ConSan MOI atomic record forward branch is out of range");
+      return;
+    }
+    std::vector<uint32_t> anchor_words(site.size / sizeof(uint32_t), build_s_nop(0, arch));
+    if (anchor_words.empty()) {
+      result.errors.emplace_back("ConSan MOI atomic record patch empty anchor");
+      return;
+    }
+    anchor_words.front() = build_s_branch(*fwd, arch);
+    if (site.text_offset > new_text.size() ||
+        anchor_words.size() * sizeof(uint32_t) > new_text.size() - site.text_offset) {
+      result.errors.emplace_back("ConSan MOI atomic record anchor exceeds .text");
+      return;
+    }
+    std::memcpy(new_text.data() + site.text_offset, anchor_words.data(),
+                anchor_words.size() * sizeof(uint32_t));
+    if (indirect_entry_island &&
+        !emit_moi_local_indirect_entry_island(
+            new_text, *indirect_entry_island, placement->body_offset, site.text_offset, options,
+            planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
+            "ConSan MOI atomic record patch")) {
+      return;
+    }
+    append_words_bytes(new_text, *cave_words);
+
+    ConSanPatchInfo info;
+    info.kind = ConSanPatchKind::TrampolineMoiAtomicRecord;
+    info.anchor_offset = site.text_offset;
+    info.trampoline_offset = cave_text_offset;
+    info.original_size = site.size;
+    info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
+    info.relocated_guest_instruction_offset = cave_text_offset + guest_instruction_offset;
+    info.scratch_vgpr = planned.resources.base;
+    info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
+    if (planned.spill) {
+      info.spilled_vgpr_count = planned.spill->vgpr_count;
+      info.required_private_segment_size = planned.spill->total_private_bytes;
+    }
+    patches.push_back(info);
+    ++record_index;
+  }
+
+  if (!patcher.replace_text(new_text, kConSanMaxPatchedFileGrowth)) {
+    result.errors.emplace_back("ConSan MOI atomic record patch could not grow .text");
+    return;
+  }
+  result.elf_bytes = patcher.emit();
+  result.patches.insert(result.patches.end(), patches.begin(), patches.end());
+  result.modified = true;
+}

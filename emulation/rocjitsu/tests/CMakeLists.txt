@@ -324,6 +324,11 @@ function(rj_add_gtest_tests target)
     endif()
 endfunction()
 
+# Keep the instrumentation-specific target and test registration out of this
+# shared manifest. The included file only defines registration helpers; calls
+# remain near the generic facilities they extend.
+include(consan/CMakeLists.txt)
+
 # --- Unit / integration test suite ---
 
 add_executable(
@@ -423,6 +428,7 @@ add_executable(
     data_types_test.cpp
     drm_info_layout_test.cpp
 )
+rj_add_consan_unit_sources(rocjitsu_tests)
 if(HAS_DEVICE_KERNELS)
     target_sources(
         rocjitsu_tests
@@ -491,6 +497,8 @@ if(HAS_DEVICE_KERNELS AND HAS_PROBE_FIXTURES)
         INSTALL_COMMAND "bin/probe_fixture_test"
     )
 endif()
+
+rj_add_consan_fuzzers()
 
 add_executable(
     rj_dbt_translate_smoke_test
@@ -1858,6 +1866,8 @@ if(RJ_ENABLE_HIP_TESTS)
             "HipVectorAddTest.CorrectResult"
             CONFIG ${RJ_HIP_TEST_CONFIG}
         )
+
+        rj_add_consan_hip_tests()
 
         # --- Daemon RPC tests (gtest-driven) ---
         # A gtest fixture manages the daemon lifecycle: fork+exec the daemon in
