@@ -226,9 +226,7 @@ def discover_pc_sampling_result_files(
         direct_child_files: tuple[Path, ...] = ()
     else:
         direct_child_files = tuple(
-            child_path
-            for child_path in workload_path.iterdir()
-            if not child_path.is_symlink() and child_path.is_file()
+            child_path for child_path in workload_path.iterdir() if child_path.is_file()
         )
 
     return _select_pc_sampling_result_files(direct_child_files)
