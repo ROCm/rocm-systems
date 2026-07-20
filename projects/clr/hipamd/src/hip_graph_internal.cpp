@@ -2440,13 +2440,9 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
 
   // Single AccumulateCommand on launch_stream manages all HW event lifetimes
   // and serves as the dispatch anchor for all segments across all streams.
-  // Pass `this` as the kernel-names owner: the command borrows kernel-name
-  // strings owned by this graph's nodes (via setKernelNamesRef during dispatch)
-  // and reads them in ReportActivity() at completion, after OnLaunchComplete()
-  // drops the launch's reference. Tying the GraphExecBase's lifetime to the command
-  // keeps those strings valid through the report (no copies). We already hold a
-  // launch reference here, so the retain in the constructor needs no trim lock.
-  auto* graph_accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr, this);
+  // Kernel names are copied into the command at dispatch time (via addKernelName
+  // in dispatchAqlPacketBatchFlat) — no string borrowing, no GraphExecBase pin.
+  auto* graph_accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr);
 
   // Register HW events with graph_accumulate so profiling can read them.
   for (auto& hw_event : segment_hw_events) {
@@ -2564,13 +2560,11 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
       return hipSuccess;
     }
 
-    const std::vector<const std::string*>* kernelNamesToDispatch;
     const std::vector<uint8_t>* flatData;
     const std::vector<uint32_t>* flatHdrs;
     const std::vector<uint8_t>* metaData = nullptr;
 
     if (packetBatch.disabledNodeCount == 0) {
-      kernelNamesToDispatch = &packetBatch.dispatchKernelNames;
       flatData = &packetBatch.flatPacketData;
       flatHdrs = &packetBatch.validPacketFullHeaders;
       if (!packetBatch.flatMetadataData.empty()) {
@@ -2580,7 +2574,6 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
       // Guard against stale filtered buffers: rebuildFlatBuffer (called from
       // UpdateAQLPacket) invalidates the cache. This is a no-op when valid.
       packetBatch.rebuildFilteredLists(sync_plan_.patch_list);
-      kernelNamesToDispatch = &packetBatch.enabledKernelNames;
       flatData = &packetBatch.filteredFlatPacketData;
       flatHdrs = &packetBatch.filteredValidPacketFullHeaders;
       if (!packetBatch.filteredFlatMetadataData.empty()) {
@@ -2590,8 +2583,7 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
 
     if (!flatData->empty()) {
       bool batchStatus = stream->vdev()->dispatchAqlPacketBatchFlat(
-          *flatData, *flatHdrs, accumulate, attach_signal, kernelNamesToDispatch, true,
-          false, metaData);
+          *flatData, *flatHdrs, accumulate, attach_signal, true, false, metaData);
       if (!batchStatus) {
         return hipErrorUnknown;
       }

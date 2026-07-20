@@ -1379,7 +1379,6 @@ class VirtualDevice : public amd::ReferenceCountedObject {
                                           const std::vector<uint32_t>& validFullHeaders,
                                           amd::AccumulateCommand* vcmd = nullptr,
                                           bool attach_signal = false,
-                                          const std::vector<const std::string*>* kernelNames = nullptr,
                                           bool pre_patched = false,
                                           bool blocking = false,
                                           const std::vector<uint8_t>* flatMetadataData = nullptr) {
