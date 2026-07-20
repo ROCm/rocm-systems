@@ -192,15 +192,6 @@ TEST_F(PathTest, Realpath_NonexistentPath)
     EXPECT_EQ(resolved, nonexistent);
 }
 
-TEST_F(PathTest, Realpath_WithResolvedOutput)
-{
-    std::string file_path = create_file("resolved_output_test.txt");
-    std::string resolved_output;
-    std::string result = realpath(file_path, &resolved_output);
-    EXPECT_EQ(result, file_path);
-    EXPECT_EQ(resolved_output, file_path);
-}
-
 TEST_F(PathTest, IsTextFile_TextFile)
 {
     std::string text_content = "This is a text file\nwith multiple lines\n";

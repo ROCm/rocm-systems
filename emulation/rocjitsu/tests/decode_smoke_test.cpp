@@ -708,7 +708,7 @@ void expect_sleep_yields_before_quantum_expires(rj_code_arch_t arch, uint32_t sl
   auto *wf = cu->dispatch_wf(0, kCodeAddress, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
   ASSERT_NE(wf, nullptr);
 
-  EXPECT_TRUE(cu->advance());
+  EXPECT_TRUE(cu->execute_quantum());
   EXPECT_EQ(wf->pc, kCodeAddress + sizeof(uint32_t));
 }
 

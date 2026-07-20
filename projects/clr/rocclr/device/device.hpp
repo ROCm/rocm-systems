@@ -1379,7 +1379,6 @@ class VirtualDevice : public amd::ReferenceCountedObject {
                                           const std::vector<uint32_t>& validFullHeaders,
                                           amd::AccumulateCommand* vcmd = nullptr,
                                           bool attach_signal = false,
-                                          const std::vector<const std::string*>* kernelNames = nullptr,
                                           bool pre_patched = false,
                                           bool blocking = false,
                                           const std::vector<uint8_t>* flatMetadataData = nullptr) {
@@ -2424,6 +2423,13 @@ class Device : public RuntimeObject {
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
   virtual device::UriLocator* createUriLocator() const = 0;
+#endif
+#endif
+
+#if defined(__linux__) && defined(__clang__)
+#if __has_feature(address_sanitizer)
+  void reportDeviceMemoryLeaks();
+  static void reportAllDeviceMemoryLeaks();
 #endif
 #endif
 
