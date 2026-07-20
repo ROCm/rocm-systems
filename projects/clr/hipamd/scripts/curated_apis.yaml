@@ -1252,3 +1252,133 @@
 
 - api: hipSetValidDevices
   args: [device_arr, len]
+
+- api: hipModuleGetFunction
+  args: [function, module, kname]
+  out: [function]
+  strings: [kname]
+
+- api: hipModuleLoadData
+  args: [module, image]
+  out: [module]
+
+- api: hipModuleLoadDataEx
+  args: [module, image, numOptions, options, optionValues]
+  out: [module]
+
+- api: hipModuleUnload
+  args: [module]
+
+- api: hipFuncGetAttribute
+  args: [value, attrib, hfunc]
+
+- api: hipFuncGetAttributes
+  args: [attr, func]
+
+- api: hipFuncSetAttribute
+  args: [func, attr, value]
+
+- api: hipFuncSetCacheConfig
+  args: [func, config]
+
+- api: hipFuncSetSharedMemConfig
+  args: [func, config]
+
+- api: hipKernelGetAttribute
+  args: [pi, attrib, kernel, dev]
+
+- api: hipKernelGetFunction
+  args: [pFunc, kernel]
+
+- api: hipKernelGetLibrary
+  args: [library, kernel]
+
+- api: hipKernelGetName
+  args: [name, kernel]
+
+- api: hipKernelGetParamInfo
+  args: [kernel, paramIndex, paramOffset, paramSize]
+
+- api: hipKernelNameRef
+  args: [f]
+
+- api: hipKernelNameRefByPtr
+  args: [hostFunction, stream]
+
+- api: hipKernelSetAttribute
+  args: [attrib, value, kernel, dev]
+
+- api: hipLibraryEnumerateKernels
+  args: [kernels, numKernels, library]
+
+- api: hipLibraryGetGlobal
+  args: [dptr, bytes, library, name]
+  strings: [name]
+
+- api: hipLibraryGetKernel
+  args: [pKernel, library, name]
+  strings: [name]
+
+- api: hipLibraryGetKernelCount
+  args: [count, library]
+
+- api: hipLibraryGetManaged
+  args: [dptr, bytes, library, name]
+  strings: [name]
+
+- api: hipLibraryLoadData
+  args: [library, code, jitOptions, jitOptionsValues, numJitOptions, libraryOptions, libraryOptionValues, numLibraryOptions]
+
+- api: hipLibraryLoadFromFile
+  args: [library, fileName, jitOptions, jitOptionsValues, numJitOptions, libraryOptions, libraryOptionValues, numLibraryOptions]
+  strings: [fileName]
+
+- api: hipLibraryUnload
+  args: [library]
+
+- api: hipLinkAddData
+  args: [state, type, data, size, name, numOptions, options, optionValues]
+  strings: [name]
+
+- api: hipLinkAddFile
+  args: [state, type, path, numOptions, options, optionValues]
+  strings: [path]
+
+- api: hipLinkComplete
+  args: [state, hipBinOut, sizeOut]
+
+- api: hipLinkCreate
+  args: [numOptions, options, optionValues, stateOut]
+
+- api: hipLinkDestroy
+  args: [state]
+
+- api: hipModuleGetFunctionCount
+  args: [count, mod]
+
+- api: hipModuleGetGlobal
+  args: [dptr, bytes, hmod, name]
+  strings: [name]
+
+- api: hipModuleGetTexRef
+  args: [texRef, hmod, name]
+  strings: [name]
+
+- api: hipModuleLoad
+  args: [module, fname]
+  strings: [fname]
+
+- api: hipModuleLoadFatBinary
+  args: [module, fatbin]
+
+- api: hipModuleOccupancyMaxActiveBlocksPerMultiprocessor
+  args: [numBlocks, f, blockSize, dynSharedMemPerBlk]
+
+- api: hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags
+  args: [numBlocks, f, blockSize, dynSharedMemPerBlk, flags]
+
+- api: hipModuleOccupancyMaxPotentialBlockSize
+  args: [gridSize, blockSize, f, dynSharedMemPerBlk, blockSizeLimit]
+
+- api: hipModuleOccupancyMaxPotentialBlockSizeWithFlags
+  args: [gridSize, blockSize, f, dynSharedMemPerBlk, blockSizeLimit, flags]

@@ -1052,28 +1052,57 @@ hipError_t hipFreeMipmappedArray(hipMipmappedArray_t mipmappedArray) {
   CATCH;
 }
 hipError_t hipFuncGetAttribute(int* value, hipFunction_attribute attrib, hipFunction_t hfunc) {
+  auto const __rocm_in_value = value;
+  auto const __rocm_in_attrib = attrib;
+  auto const __rocm_in_hfunc = hfunc;
+  rocm_trace_emit_hipFuncGetAttribute_enter(
+      (const void*)(uintptr_t)(__rocm_in_value),
+      (int32_t)(__rocm_in_attrib),
+      (uint64_t)(uintptr_t)(__rocm_in_hfunc)); /* __ROCM_CURATED__: hipFuncGetAttribute */
   TRY;
-  return hip::GetHipDispatchTable()->hipFuncGetAttribute_fn(value, attrib, hfunc);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipFuncGetAttribute, hip::GetHipDispatchTable()->hipFuncGetAttribute_fn(value, attrib, hfunc));
   CATCH;
 }
 hipError_t hipFuncGetAttributes(struct hipFuncAttributes* attr, const void* func) {
+  auto const __rocm_in_attr = attr;
+  auto const __rocm_in_func = func;
+  rocm_trace_emit_hipFuncGetAttributes_enter(
+      (const void*)(uintptr_t)(__rocm_in_attr),
+      (const void*)(uintptr_t)(__rocm_in_func)); /* __ROCM_CURATED__: hipFuncGetAttributes */
   TRY;
-  return hip::GetHipDispatchTable()->hipFuncGetAttributes_fn(attr, func);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipFuncGetAttributes, hip::GetHipDispatchTable()->hipFuncGetAttributes_fn(attr, func));
   CATCH;
 }
 hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int value) {
+  auto const __rocm_in_func = func;
+  auto const __rocm_in_attr = attr;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hipFuncSetAttribute_enter(
+      (const void*)(uintptr_t)(__rocm_in_func),
+      (int32_t)(__rocm_in_attr),
+      (__rocm_in_value)); /* __ROCM_CURATED__: hipFuncSetAttribute */
   TRY;
-  return hip::GetHipDispatchTable()->hipFuncSetAttribute_fn(func, attr, value);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipFuncSetAttribute, hip::GetHipDispatchTable()->hipFuncSetAttribute_fn(func, attr, value));
   CATCH;
 }
 hipError_t hipFuncSetCacheConfig(const void* func, hipFuncCache_t config) {
+  auto const __rocm_in_func = func;
+  auto const __rocm_in_config = config;
+  rocm_trace_emit_hipFuncSetCacheConfig_enter(
+      (const void*)(uintptr_t)(__rocm_in_func),
+      (int32_t)(__rocm_in_config)); /* __ROCM_CURATED__: hipFuncSetCacheConfig */
   TRY;
-  return hip::GetHipDispatchTable()->hipFuncSetCacheConfig_fn(func, config);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipFuncSetCacheConfig, hip::GetHipDispatchTable()->hipFuncSetCacheConfig_fn(func, config));
   CATCH;
 }
 hipError_t hipFuncSetSharedMemConfig(const void* func, hipSharedMemConfig config) {
+  auto const __rocm_in_func = func;
+  auto const __rocm_in_config = config;
+  rocm_trace_emit_hipFuncSetSharedMemConfig_enter(
+      (const void*)(uintptr_t)(__rocm_in_func),
+      (int32_t)(__rocm_in_config)); /* __ROCM_CURATED__: hipFuncSetSharedMemConfig */
   TRY;
-  return hip::GetHipDispatchTable()->hipFuncSetSharedMemConfig_fn(func, config);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipFuncSetSharedMemConfig, hip::GetHipDispatchTable()->hipFuncSetSharedMemConfig_fn(func, config));
   CATCH;
 }
 hipError_t hipGLGetDevices(unsigned int* pHipDeviceCount, int* pHipDevices,
@@ -2449,13 +2478,21 @@ hipError_t hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t handle, unsigned
   CATCH;
 }
 extern "C" const char* hipKernelNameRef(const hipFunction_t f) {
+  auto const __rocm_in_f = f;
+  rocm_trace_emit_hipKernelNameRef_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_f)); /* __ROCM_CURATED__: hipKernelNameRef */
   TRY;
-  return hip::GetHipDispatchTable()->hipKernelNameRef_fn(f);
+  ROCM_TRACE_RET_PTR_CURATED_NOARGS(hipKernelNameRef, auto, hip::GetHipDispatchTable()->hipKernelNameRef_fn(f));
   CATCHRET(const char*);
 }
 extern "C" const char* hipKernelNameRefByPtr(const void* hostFunction, hipStream_t stream) {
+  auto const __rocm_in_hostFunction = hostFunction;
+  auto const __rocm_in_stream = stream;
+  rocm_trace_emit_hipKernelNameRefByPtr_enter(
+      (const void*)(uintptr_t)(__rocm_in_hostFunction),
+      (uint64_t)(uintptr_t)(__rocm_in_stream)); /* __ROCM_CURATED__: hipKernelNameRefByPtr */
   TRY;
-  return hip::GetHipDispatchTable()->hipKernelNameRefByPtr_fn(hostFunction, stream);
+  ROCM_TRACE_RET_PTR_CURATED_NOARGS(hipKernelNameRefByPtr, auto, hip::GetHipDispatchTable()->hipKernelNameRefByPtr_fn(hostFunction, stream));
   CATCHRET(const char*);
 }
 extern "C" hipError_t hipLaunchByPtr(const void* func) {
@@ -3922,24 +3959,50 @@ hipError_t hipMipmappedArrayGetLevel(hipArray_t* pLevelArray, hipMipmappedArray_
   CATCH;
 }
 hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module, const char* kname) {
+  auto const __rocm_in_module = module;
+  auto const __rocm_in_kname = kname;
+  rocm_trace_emit_hipModuleGetFunction_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_module),
+      (const char*)(__rocm_in_kname)); /* __ROCM_CURATED__: hipModuleGetFunction */
   TRY;
-  return hip::GetHipDispatchTable()->hipModuleGetFunction_fn(function, module, kname);
+  ROCM_TRACE_RET_STATUS_CURATED(hipModuleGetFunction, hip::GetHipDispatchTable()->hipModuleGetFunction_fn(function, module, kname), function);
   CATCH;
 }
 hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod) {
+  auto const __rocm_in_count = count;
+  auto const __rocm_in_mod = mod;
+  rocm_trace_emit_hipModuleGetFunctionCount_enter(
+      (const void*)(uintptr_t)(__rocm_in_count),
+      (uint64_t)(uintptr_t)(__rocm_in_mod)); /* __ROCM_CURATED__: hipModuleGetFunctionCount */
   TRY;
-  return hip::GetHipDispatchTable()->hipModuleGetFunctionCount_fn(count, mod);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipModuleGetFunctionCount, hip::GetHipDispatchTable()->hipModuleGetFunctionCount_fn(count, mod));
   CATCH;
 }
 hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t hmod,
                               const char* name) {
+  auto const __rocm_in_dptr = dptr;
+  auto const __rocm_in_bytes = bytes;
+  auto const __rocm_in_hmod = hmod;
+  auto const __rocm_in_name = name;
+  rocm_trace_emit_hipModuleGetGlobal_enter(
+      (const void*)(uintptr_t)(__rocm_in_dptr),
+      (const void*)(uintptr_t)(__rocm_in_bytes),
+      (uint64_t)(uintptr_t)(__rocm_in_hmod),
+      (const char*)(__rocm_in_name)); /* __ROCM_CURATED__: hipModuleGetGlobal */
   TRY;
-  return hip::GetHipDispatchTable()->hipModuleGetGlobal_fn(dptr, bytes, hmod, name);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipModuleGetGlobal, hip::GetHipDispatchTable()->hipModuleGetGlobal_fn(dptr, bytes, hmod, name));
   CATCH;
 }
 hipError_t hipModuleGetTexRef(textureReference** texRef, hipModule_t hmod, const char* name) {
+  auto const __rocm_in_texRef = texRef;
+  auto const __rocm_in_hmod = hmod;
+  auto const __rocm_in_name = name;
+  rocm_trace_emit_hipModuleGetTexRef_enter(
+      (const void*)(uintptr_t)(__rocm_in_texRef),
+      (uint64_t)(uintptr_t)(__rocm_in_hmod),
+      (const char*)(__rocm_in_name)); /* __ROCM_CURATED__: hipModuleGetTexRef */
   TRY;
-  return hip::GetHipDispatchTable()->hipModuleGetTexRef_fn(texRef, hmod, name);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipModuleGetTexRef, hip::GetHipDispatchTable()->hipModuleGetTexRef_fn(texRef, hmod, name));
   CATCH;
 }
 hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDimX,
@@ -4012,98 +4075,216 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, unsigned int gridDimX, unsigne
   CATCH;
 }
 hipError_t hipModuleLoadFatBinary(hipModule_t* module, const void* fatbin) {
+  auto const __rocm_in_module = module;
+  auto const __rocm_in_fatbin = fatbin;
+  rocm_trace_emit_hipModuleLoadFatBinary_enter(
+      (const void*)(uintptr_t)(__rocm_in_module),
+      (const void*)(uintptr_t)(__rocm_in_fatbin)); /* __ROCM_CURATED__: hipModuleLoadFatBinary */
   TRY;
-  return hip::GetHipDispatchTable()->hipModuleLoadFatBinary_fn(module, fatbin);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipModuleLoadFatBinary, hip::GetHipDispatchTable()->hipModuleLoadFatBinary_fn(module, fatbin));
   CATCH;
 }
 hipError_t hipModuleLoad(hipModule_t* module, const char* fname) {
+  auto const __rocm_in_module = module;
+  auto const __rocm_in_fname = fname;
+  rocm_trace_emit_hipModuleLoad_enter(
+      (const void*)(uintptr_t)(__rocm_in_module),
+      (const char*)(__rocm_in_fname)); /* __ROCM_CURATED__: hipModuleLoad */
   TRY;
-  return hip::GetHipDispatchTable()->hipModuleLoad_fn(module, fname);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipModuleLoad, hip::GetHipDispatchTable()->hipModuleLoad_fn(module, fname));
   CATCH;
 }
 hipError_t hipModuleLoadData(hipModule_t* module, const void* image) {
+  auto const __rocm_in_image = image;
+  rocm_trace_emit_hipModuleLoadData_enter(
+      (const void*)(uintptr_t)(__rocm_in_image)); /* __ROCM_CURATED__: hipModuleLoadData */
   TRY;
-  return hip::GetHipDispatchTable()->hipModuleLoadData_fn(module, image);
+  ROCM_TRACE_RET_STATUS_CURATED(hipModuleLoadData, hip::GetHipDispatchTable()->hipModuleLoadData_fn(module, image), module);
   CATCH;
 }
 hipError_t hipModuleLoadDataEx(hipModule_t* module, const void* image, unsigned int numOptions,
                                hipJitOption* options, void** optionValues) {
+  auto const __rocm_in_image = image;
+  auto const __rocm_in_numOptions = numOptions;
+  auto const __rocm_in_options = options;
+  auto const __rocm_in_optionValues = optionValues;
+  rocm_trace_emit_hipModuleLoadDataEx_enter(
+      (const void*)(uintptr_t)(__rocm_in_image),
+      (__rocm_in_numOptions),
+      (const void*)(uintptr_t)(__rocm_in_options),
+      (const void*)(uintptr_t)(__rocm_in_optionValues)); /* __ROCM_CURATED__: hipModuleLoadDataEx */
   TRY;
-  return hip::GetHipDispatchTable()->hipModuleLoadDataEx_fn(module, image, numOptions, options,
-                                                            optionValues);
+  ROCM_TRACE_RET_STATUS_CURATED(hipModuleLoadDataEx, hip::GetHipDispatchTable()->hipModuleLoadDataEx_fn(
+                                    module, image, numOptions, options, optionValues), module);
   CATCH;
 }
 
 hipError_t hipLinkAddData(hipLinkState_t state, hipJitInputType type, void* data, size_t size,
                           const char* name, unsigned int numOptions, hipJitOption* options,
                           void** optionValues) {
+  auto const __rocm_in_state = state;
+  auto const __rocm_in_type = type;
+  auto const __rocm_in_data = data;
+  auto const __rocm_in_size = size;
+  auto const __rocm_in_name = name;
+  auto const __rocm_in_numOptions = numOptions;
+  auto const __rocm_in_options = options;
+  auto const __rocm_in_optionValues = optionValues;
+  rocm_trace_emit_hipLinkAddData_enter(
+      (const void*)(uintptr_t)(__rocm_in_state),
+      (int32_t)(__rocm_in_type),
+      (const void*)(uintptr_t)(__rocm_in_data),
+      (__rocm_in_size),
+      (const char*)(__rocm_in_name),
+      (__rocm_in_numOptions),
+      (const void*)(uintptr_t)(__rocm_in_options),
+      (const void*)(uintptr_t)(__rocm_in_optionValues)); /* __ROCM_CURATED__: hipLinkAddData */
   TRY;
-  return hip::GetHipDispatchTable()->hipLinkAddData_fn(state, type, data, size, name, numOptions,
-                                                       options, optionValues);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipLinkAddData, hip::GetHipDispatchTable()->hipLinkAddData_fn(state, type, data, size, name, numOptions,
+                                                    options, optionValues));
   CATCH;
 }
 
 hipError_t hipLinkAddFile(hipLinkState_t state, hipJitInputType type, const char* path,
                           unsigned int numOptions, hipJitOption* options, void** optionValues) {
+  auto const __rocm_in_state = state;
+  auto const __rocm_in_type = type;
+  auto const __rocm_in_path = path;
+  auto const __rocm_in_numOptions = numOptions;
+  auto const __rocm_in_options = options;
+  auto const __rocm_in_optionValues = optionValues;
+  rocm_trace_emit_hipLinkAddFile_enter(
+      (const void*)(uintptr_t)(__rocm_in_state),
+      (int32_t)(__rocm_in_type),
+      (const char*)(__rocm_in_path),
+      (__rocm_in_numOptions),
+      (const void*)(uintptr_t)(__rocm_in_options),
+      (const void*)(uintptr_t)(__rocm_in_optionValues)); /* __ROCM_CURATED__: hipLinkAddFile */
   TRY;
-  return hip::GetHipDispatchTable()->hipLinkAddFile_fn(state, type, path, numOptions, options,
-                                                       optionValues);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipLinkAddFile, hip::GetHipDispatchTable()->hipLinkAddFile_fn(
+                                    state, type, path, numOptions, options, optionValues));
   CATCH;
 }
 
 hipError_t hipLinkComplete(hipLinkState_t state, void** hipBinOut, size_t* sizeOut) {
+  auto const __rocm_in_state = state;
+  auto const __rocm_in_hipBinOut = hipBinOut;
+  auto const __rocm_in_sizeOut = sizeOut;
+  rocm_trace_emit_hipLinkComplete_enter(
+      (const void*)(uintptr_t)(__rocm_in_state),
+      (const void*)(uintptr_t)(__rocm_in_hipBinOut),
+      (const void*)(uintptr_t)(__rocm_in_sizeOut)); /* __ROCM_CURATED__: hipLinkComplete */
   TRY;
-  return hip::GetHipDispatchTable()->hipLinkComplete_fn(state, hipBinOut, sizeOut);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipLinkComplete, hip::GetHipDispatchTable()->hipLinkComplete_fn(state, hipBinOut, sizeOut));
   CATCH;
 }
 
 hipError_t hipLinkCreate(unsigned int numOptions, hipJitOption* options, void** optionValues,
                          hipLinkState_t* stateOut) {
+  auto const __rocm_in_numOptions = numOptions;
+  auto const __rocm_in_options = options;
+  auto const __rocm_in_optionValues = optionValues;
+  auto const __rocm_in_stateOut = stateOut;
+  rocm_trace_emit_hipLinkCreate_enter(
+      (__rocm_in_numOptions),
+      (const void*)(uintptr_t)(__rocm_in_options),
+      (const void*)(uintptr_t)(__rocm_in_optionValues),
+      (const void*)(uintptr_t)(__rocm_in_stateOut)); /* __ROCM_CURATED__: hipLinkCreate */
   TRY;
-  return hip::GetHipDispatchTable()->hipLinkCreate_fn(numOptions, options, optionValues, stateOut);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipLinkCreate, hip::GetHipDispatchTable()->hipLinkCreate_fn(numOptions, options, optionValues, stateOut));
   CATCH;
 }
 
 hipError_t hipLinkDestroy(hipLinkState_t state) {
+  auto const __rocm_in_state = state;
+  rocm_trace_emit_hipLinkDestroy_enter(
+      (const void*)(uintptr_t)(__rocm_in_state)); /* __ROCM_CURATED__: hipLinkDestroy */
   TRY;
-  return hip::GetHipDispatchTable()->hipLinkDestroy_fn(state);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipLinkDestroy, hip::GetHipDispatchTable()->hipLinkDestroy_fn(state));
   CATCH;
 }
 
 extern "C" hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(
     int* numBlocks, hipFunction_t f, int blockSize, size_t dynSharedMemPerBlk) {
+  auto const __rocm_in_numBlocks = numBlocks;
+  auto const __rocm_in_f = f;
+  auto const __rocm_in_blockSize = blockSize;
+  auto const __rocm_in_dynSharedMemPerBlk = dynSharedMemPerBlk;
+  rocm_trace_emit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_enter(
+      (const void*)(uintptr_t)(__rocm_in_numBlocks),
+      (uint64_t)(uintptr_t)(__rocm_in_f),
+      (__rocm_in_blockSize),
+      (__rocm_in_dynSharedMemPerBlk)); /* __ROCM_CURATED__: hipModuleOccupancyMaxActiveBlocksPerMultiprocessor */
   TRY;
-  return hip::GetHipDispatchTable()->hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_fn(
-      numBlocks, f, blockSize, dynSharedMemPerBlk);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipModuleOccupancyMaxActiveBlocksPerMultiprocessor, hip::GetHipDispatchTable()->hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_fn(
+          numBlocks, f, blockSize, dynSharedMemPerBlk));
   CATCH;
 }
 extern "C" hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
     int* numBlocks, hipFunction_t f, int blockSize, size_t dynSharedMemPerBlk, unsigned int flags) {
+  auto const __rocm_in_numBlocks = numBlocks;
+  auto const __rocm_in_f = f;
+  auto const __rocm_in_blockSize = blockSize;
+  auto const __rocm_in_dynSharedMemPerBlk = dynSharedMemPerBlk;
+  auto const __rocm_in_flags = flags;
+  rocm_trace_emit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_enter(
+      (const void*)(uintptr_t)(__rocm_in_numBlocks),
+      (uint64_t)(uintptr_t)(__rocm_in_f),
+      (__rocm_in_blockSize),
+      (__rocm_in_dynSharedMemPerBlk),
+      (__rocm_in_flags)); /* __ROCM_CURATED__: hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags */
   TRY;
-  return hip::GetHipDispatchTable()->hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_fn(
-      numBlocks, f, blockSize, dynSharedMemPerBlk, flags);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags, hip::GetHipDispatchTable()->hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_fn(
+          numBlocks, f, blockSize, dynSharedMemPerBlk, flags));
   CATCH;
 }
 extern "C" hipError_t hipModuleOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize,
                                                               hipFunction_t f,
                                                               size_t dynSharedMemPerBlk,
                                                               int blockSizeLimit) {
+  auto const __rocm_in_gridSize = gridSize;
+  auto const __rocm_in_blockSize = blockSize;
+  auto const __rocm_in_f = f;
+  auto const __rocm_in_dynSharedMemPerBlk = dynSharedMemPerBlk;
+  auto const __rocm_in_blockSizeLimit = blockSizeLimit;
+  rocm_trace_emit_hipModuleOccupancyMaxPotentialBlockSize_enter(
+      (const void*)(uintptr_t)(__rocm_in_gridSize),
+      (const void*)(uintptr_t)(__rocm_in_blockSize),
+      (uint64_t)(uintptr_t)(__rocm_in_f),
+      (__rocm_in_dynSharedMemPerBlk),
+      (__rocm_in_blockSizeLimit)); /* __ROCM_CURATED__: hipModuleOccupancyMaxPotentialBlockSize */
   TRY;
-  return hip::GetHipDispatchTable()->hipModuleOccupancyMaxPotentialBlockSize_fn(
-      gridSize, blockSize, f, dynSharedMemPerBlk, blockSizeLimit);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipModuleOccupancyMaxPotentialBlockSize, hip::GetHipDispatchTable()->hipModuleOccupancyMaxPotentialBlockSize_fn(
+          gridSize, blockSize, f, dynSharedMemPerBlk, blockSizeLimit));
   CATCH;
 }
 extern "C" hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(
     int* gridSize, int* blockSize, hipFunction_t f, size_t dynSharedMemPerBlk, int blockSizeLimit,
     unsigned int flags) {
+  auto const __rocm_in_gridSize = gridSize;
+  auto const __rocm_in_blockSize = blockSize;
+  auto const __rocm_in_f = f;
+  auto const __rocm_in_dynSharedMemPerBlk = dynSharedMemPerBlk;
+  auto const __rocm_in_blockSizeLimit = blockSizeLimit;
+  auto const __rocm_in_flags = flags;
+  rocm_trace_emit_hipModuleOccupancyMaxPotentialBlockSizeWithFlags_enter(
+      (const void*)(uintptr_t)(__rocm_in_gridSize),
+      (const void*)(uintptr_t)(__rocm_in_blockSize),
+      (uint64_t)(uintptr_t)(__rocm_in_f),
+      (__rocm_in_dynSharedMemPerBlk),
+      (__rocm_in_blockSizeLimit),
+      (__rocm_in_flags)); /* __ROCM_CURATED__: hipModuleOccupancyMaxPotentialBlockSizeWithFlags */
   TRY;
-  return hip::GetHipDispatchTable()->hipModuleOccupancyMaxPotentialBlockSizeWithFlags_fn(
-      gridSize, blockSize, f, dynSharedMemPerBlk, blockSizeLimit, flags);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipModuleOccupancyMaxPotentialBlockSizeWithFlags, hip::GetHipDispatchTable()->hipModuleOccupancyMaxPotentialBlockSizeWithFlags_fn(
+          gridSize, blockSize, f, dynSharedMemPerBlk, blockSizeLimit, flags));
   CATCH;
 }
 hipError_t hipModuleUnload(hipModule_t module) {
+  auto const __rocm_in_module = module;
+  rocm_trace_emit_hipModuleUnload_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_module)); /* __ROCM_CURATED__: hipModuleUnload */
   TRY;
-  return hip::GetHipDispatchTable()->hipModuleUnload_fn(module);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipModuleUnload, hip::GetHipDispatchTable()->hipModuleUnload_fn(module));
   CATCH;
 }
 extern "C" hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize,
@@ -6200,78 +6381,177 @@ hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* code, hipJitOpt
                               void** jitOptionsValues, unsigned int numJitOptions,
                               hipLibraryOption* libraryOptions, void** libraryOptionValues,
                               unsigned int numLibraryOptions) {
+  auto const __rocm_in_library = library;
+  auto const __rocm_in_code = code;
+  auto const __rocm_in_jitOptions = jitOptions;
+  auto const __rocm_in_jitOptionsValues = jitOptionsValues;
+  auto const __rocm_in_numJitOptions = numJitOptions;
+  auto const __rocm_in_libraryOptions = libraryOptions;
+  auto const __rocm_in_libraryOptionValues = libraryOptionValues;
+  auto const __rocm_in_numLibraryOptions = numLibraryOptions;
+  rocm_trace_emit_hipLibraryLoadData_enter(
+      (const void*)(uintptr_t)(__rocm_in_library),
+      (const void*)(uintptr_t)(__rocm_in_code),
+      (const void*)(uintptr_t)(__rocm_in_jitOptions),
+      (const void*)(uintptr_t)(__rocm_in_jitOptionsValues),
+      (__rocm_in_numJitOptions),
+      (const void*)(uintptr_t)(__rocm_in_libraryOptions),
+      (const void*)(uintptr_t)(__rocm_in_libraryOptionValues),
+      (__rocm_in_numLibraryOptions)); /* __ROCM_CURATED__: hipLibraryLoadData */
   TRY;
-  return hip::GetHipDispatchTable()->hipLibraryLoadData_fn(
-      library, code, jitOptions, jitOptionsValues, numJitOptions, libraryOptions,
-      libraryOptionValues, numLibraryOptions);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipLibraryLoadData, hip::GetHipDispatchTable()->hipLibraryLoadData_fn(library, code, jitOptions, jitOptionsValues,
+                                                        numJitOptions, libraryOptions,
+                                                        libraryOptionValues, numLibraryOptions));
   CATCH;
 }
 hipError_t hipLibraryLoadFromFile(hipLibrary_t* library, const char* fileName,
                                   hipJitOption* jitOptions, void** jitOptionsValues,
                                   unsigned int numJitOptions, hipLibraryOption* libraryOptions,
                                   void** libraryOptionValues, unsigned int numLibraryOptions) {
+  auto const __rocm_in_library = library;
+  auto const __rocm_in_fileName = fileName;
+  auto const __rocm_in_jitOptions = jitOptions;
+  auto const __rocm_in_jitOptionsValues = jitOptionsValues;
+  auto const __rocm_in_numJitOptions = numJitOptions;
+  auto const __rocm_in_libraryOptions = libraryOptions;
+  auto const __rocm_in_libraryOptionValues = libraryOptionValues;
+  auto const __rocm_in_numLibraryOptions = numLibraryOptions;
+  rocm_trace_emit_hipLibraryLoadFromFile_enter(
+      (const void*)(uintptr_t)(__rocm_in_library),
+      (const char*)(__rocm_in_fileName),
+      (const void*)(uintptr_t)(__rocm_in_jitOptions),
+      (const void*)(uintptr_t)(__rocm_in_jitOptionsValues),
+      (__rocm_in_numJitOptions),
+      (const void*)(uintptr_t)(__rocm_in_libraryOptions),
+      (const void*)(uintptr_t)(__rocm_in_libraryOptionValues),
+      (__rocm_in_numLibraryOptions)); /* __ROCM_CURATED__: hipLibraryLoadFromFile */
   TRY;
-  return hip::GetHipDispatchTable()->hipLibraryLoadFromFile_fn(
-      library, fileName, jitOptions, jitOptionsValues, numJitOptions, libraryOptions,
-      libraryOptionValues, numLibraryOptions);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipLibraryLoadFromFile, hip::GetHipDispatchTable()->hipLibraryLoadFromFile_fn(
+          library, fileName, jitOptions, jitOptionsValues, numJitOptions, libraryOptions,
+          libraryOptionValues, numLibraryOptions));
   CATCH;
 }
 hipError_t hipLibraryUnload(hipLibrary_t library) {
+  auto const __rocm_in_library = library;
+  rocm_trace_emit_hipLibraryUnload_enter(
+      (const void*)(uintptr_t)(__rocm_in_library)); /* __ROCM_CURATED__: hipLibraryUnload */
   TRY;
-  return hip::GetHipDispatchTable()->hipLibraryUnload_fn(library);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipLibraryUnload, hip::GetHipDispatchTable()->hipLibraryUnload_fn(library));
   CATCH;
 }
-hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const char* name)  {
+hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const char* name) {
+  auto const __rocm_in_pKernel = pKernel;
+  auto const __rocm_in_library = library;
+  auto const __rocm_in_name = name;
+  rocm_trace_emit_hipLibraryGetKernel_enter(
+      (const void*)(uintptr_t)(__rocm_in_pKernel),
+      (const void*)(uintptr_t)(__rocm_in_library),
+      (const char*)(__rocm_in_name)); /* __ROCM_CURATED__: hipLibraryGetKernel */
   TRY;
-  return hip::GetHipDispatchTable()->hipLibraryGetKernel_fn(pKernel, library,
-                                                            name);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipLibraryGetKernel, hip::GetHipDispatchTable()->hipLibraryGetKernel_fn(pKernel, library, name));
   CATCH;
 }
-hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library) {
+hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrary_t library) {
+  auto const __rocm_in_count = count;
+  auto const __rocm_in_library = library;
+  rocm_trace_emit_hipLibraryGetKernelCount_enter(
+      (const void*)(uintptr_t)(__rocm_in_count),
+      (const void*)(uintptr_t)(__rocm_in_library)); /* __ROCM_CURATED__: hipLibraryGetKernelCount */
   TRY;
-  return hip::GetHipDispatchTable()->hipLibraryGetKernelCount_fn(count,
-                                                                 library);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipLibraryGetKernelCount, hip::GetHipDispatchTable()->hipLibraryGetKernelCount_fn(count, library));
   CATCH;
 }
-hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library,
-                               const char* name) {
+hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library, const char* name) {
+  auto const __rocm_in_dptr = dptr;
+  auto const __rocm_in_bytes = bytes;
+  auto const __rocm_in_library = library;
+  auto const __rocm_in_name = name;
+  rocm_trace_emit_hipLibraryGetGlobal_enter(
+      (const void*)(uintptr_t)(__rocm_in_dptr),
+      (const void*)(uintptr_t)(__rocm_in_bytes),
+      (const void*)(uintptr_t)(__rocm_in_library),
+      (const char*)(__rocm_in_name)); /* __ROCM_CURATED__: hipLibraryGetGlobal */
   TRY;
-  return hip::GetHipDispatchTable()->hipLibraryGetGlobal_fn(dptr, bytes, library, name);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipLibraryGetGlobal, hip::GetHipDispatchTable()->hipLibraryGetGlobal_fn(dptr, bytes, library, name));
   CATCH;
 }
 hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library,
                                 const char* name) {
+  auto const __rocm_in_dptr = dptr;
+  auto const __rocm_in_bytes = bytes;
+  auto const __rocm_in_library = library;
+  auto const __rocm_in_name = name;
+  rocm_trace_emit_hipLibraryGetManaged_enter(
+      (const void*)(uintptr_t)(__rocm_in_dptr),
+      (const void*)(uintptr_t)(__rocm_in_bytes),
+      (const void*)(uintptr_t)(__rocm_in_library),
+      (const char*)(__rocm_in_name)); /* __ROCM_CURATED__: hipLibraryGetManaged */
   TRY;
-  return hip::GetHipDispatchTable()->hipLibraryGetManaged_fn(dptr, bytes, library, name);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipLibraryGetManaged, hip::GetHipDispatchTable()->hipLibraryGetManaged_fn(dptr, bytes, library, name));
   CATCH;
 }
 hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
                                  hipDevice_t dev) {
+  auto const __rocm_in_pi = pi;
+  auto const __rocm_in_attrib = attrib;
+  auto const __rocm_in_kernel = kernel;
+  auto const __rocm_in_dev = dev;
+  rocm_trace_emit_hipKernelGetAttribute_enter(
+      (const void*)(uintptr_t)(__rocm_in_pi),
+      (int32_t)(__rocm_in_attrib),
+      (const void*)(uintptr_t)(__rocm_in_kernel),
+      (__rocm_in_dev)); /* __ROCM_CURATED__: hipKernelGetAttribute */
   TRY;
-  return hip::GetHipDispatchTable()->hipKernelGetAttribute_fn(pi, attrib, kernel, dev);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipKernelGetAttribute, hip::GetHipDispatchTable()->hipKernelGetAttribute_fn(pi, attrib, kernel, dev));
   CATCH;
 }
 hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
                                       hipLibrary_t library) {
+  auto const __rocm_in_kernels = kernels;
+  auto const __rocm_in_numKernels = numKernels;
+  auto const __rocm_in_library = library;
+  rocm_trace_emit_hipLibraryEnumerateKernels_enter(
+      (const void*)(uintptr_t)(__rocm_in_kernels),
+      (__rocm_in_numKernels),
+      (const void*)(uintptr_t)(__rocm_in_library)); /* __ROCM_CURATED__: hipLibraryEnumerateKernels */
   TRY;
-  return hip::GetHipDispatchTable()->hipLibraryEnumerateKernels_fn(kernels, numKernels, library);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipLibraryEnumerateKernels, hip::GetHipDispatchTable()->hipLibraryEnumerateKernels_fn(kernels, numKernels, library));
   CATCH;
 }
 hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel) {
+  auto const __rocm_in_library = library;
+  auto const __rocm_in_kernel = kernel;
+  rocm_trace_emit_hipKernelGetLibrary_enter(
+      (const void*)(uintptr_t)(__rocm_in_library),
+      (const void*)(uintptr_t)(__rocm_in_kernel)); /* __ROCM_CURATED__: hipKernelGetLibrary */
   TRY;
-  return hip::GetHipDispatchTable()->hipKernelGetLibrary_fn(library, kernel);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipKernelGetLibrary, hip::GetHipDispatchTable()->hipKernelGetLibrary_fn(library, kernel));
   CATCH;
 }
 hipError_t hipKernelGetName(const char** name, hipKernel_t kernel) {
+  auto const __rocm_in_name = name;
+  auto const __rocm_in_kernel = kernel;
+  rocm_trace_emit_hipKernelGetName_enter(
+      (const void*)(uintptr_t)(__rocm_in_name),
+      (const void*)(uintptr_t)(__rocm_in_kernel)); /* __ROCM_CURATED__: hipKernelGetName */
   TRY;
-  return hip::GetHipDispatchTable()->hipKernelGetName_fn(name, kernel);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipKernelGetName, hip::GetHipDispatchTable()->hipKernelGetName_fn(name, kernel));
   CATCH;
 }
 hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* paramOffset,
                                  size_t* paramSize) {
+  auto const __rocm_in_kernel = kernel;
+  auto const __rocm_in_paramIndex = paramIndex;
+  auto const __rocm_in_paramOffset = paramOffset;
+  auto const __rocm_in_paramSize = paramSize;
+  rocm_trace_emit_hipKernelGetParamInfo_enter(
+      (const void*)(uintptr_t)(__rocm_in_kernel),
+      (__rocm_in_paramIndex),
+      (const void*)(uintptr_t)(__rocm_in_paramOffset),
+      (const void*)(uintptr_t)(__rocm_in_paramSize)); /* __ROCM_CURATED__: hipKernelGetParamInfo */
   TRY;
-  return hip::GetHipDispatchTable()->hipKernelGetParamInfo_fn(kernel, paramIndex, paramOffset,
-                                                              paramSize);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipKernelGetParamInfo, hip::GetHipDispatchTable()->hipKernelGetParamInfo_fn(
+                                    kernel, paramIndex, paramOffset, paramSize));
   CATCH;
 }
 hipError_t hipExtEnableLogging() {
@@ -6329,14 +6609,29 @@ hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* me
                                                                             mipmap, device));
   CATCH;
 }
-hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev) {
+hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel,
+                                 hipDevice_t dev) {
+  auto const __rocm_in_attrib = attrib;
+  auto const __rocm_in_value = value;
+  auto const __rocm_in_kernel = kernel;
+  auto const __rocm_in_dev = dev;
+  rocm_trace_emit_hipKernelSetAttribute_enter(
+      (int32_t)(__rocm_in_attrib),
+      (__rocm_in_value),
+      (const void*)(uintptr_t)(__rocm_in_kernel),
+      (__rocm_in_dev)); /* __ROCM_CURATED__: hipKernelSetAttribute */
   TRY;
-  return hip::GetHipDispatchTable()->hipKernelSetAttribute_fn(attrib, value, kernel, dev);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipKernelSetAttribute, hip::GetHipDispatchTable()->hipKernelSetAttribute_fn(attrib, value, kernel, dev));
   CATCH;
 }
 hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
+  auto const __rocm_in_pFunc = pFunc;
+  auto const __rocm_in_kernel = kernel;
+  rocm_trace_emit_hipKernelGetFunction_enter(
+      (const void*)(uintptr_t)(__rocm_in_pFunc),
+      (const void*)(uintptr_t)(__rocm_in_kernel)); /* __ROCM_CURATED__: hipKernelGetFunction */
   TRY;
-  return hip::GetHipDispatchTable()->hipKernelGetFunction_fn(pFunc, kernel) ;
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipKernelGetFunction, hip::GetHipDispatchTable()->hipKernelGetFunction_fn(pFunc, kernel));
   CATCH;
 }
 hipError_t hipGreenCtxCreate(hipExecutionCtx_t* ctx, hipDevResourceDesc_t desc, int device,
