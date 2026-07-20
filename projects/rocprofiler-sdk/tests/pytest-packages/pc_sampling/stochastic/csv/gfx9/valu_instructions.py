@@ -61,8 +61,7 @@ def validate_valu_instructions_stalled(samples):
             # A VALU instruction commonly stalls waiting on a prior ALU/register
             # result. This matches the scalar/texture/lds/flat validators, which
             # all accept ALU_DEPENDENCY; VALU was the only one omitting it.
-            or x
-            == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ALU_DEPENDENCY"
+            or x == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ALU_DEPENDENCY"
         )
         .all()
     )
