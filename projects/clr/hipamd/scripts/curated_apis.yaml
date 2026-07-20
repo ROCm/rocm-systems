@@ -16,3 +16,497 @@
 # libclang-based drift verifier.
 
 # --- streams + sync ---
+
+- api: hipMemcpy
+  args: [dst, src, sizeBytes, kind]
+
+- api: hipMemcpyDtoH
+  args: [dst, src, sizeBytes]
+
+- api: hipMemcpyHtoD
+  args: [dst, src, sizeBytes]
+
+- api: hipMemcpyDtoD
+  args: [dst, src, sizeBytes]
+
+- api: hipMemcpyPeer
+  args: [dst, dstDeviceId, src, srcDeviceId, sizeBytes]
+
+- api: hipMemcpyAsync
+  args: [dst, src, sizeBytes, kind, stream]
+
+- api: hipMemcpyDtoHAsync
+  args: [dst, src, sizeBytes, stream]
+
+- api: hipMemcpyHtoDAsync
+  args: [dst, src, sizeBytes, stream]
+
+- api: hipMemcpyDtoDAsync
+  args: [dst, src, sizeBytes, stream]
+
+- api: hipMemcpyPeerAsync
+  args: [dst, dstDeviceId, src, srcDevice, sizeBytes, stream]
+
+- api: hipMemcpy2DAsync
+  args: [dst, dpitch, src, spitch, width, height, kind, stream]
+
+- api: hipMemcpy3DAsync
+  args: [p, stream]
+
+- api: hipMalloc
+  args: [ptr, size]
+  out: [ptr]
+
+- api: hipMallocAsync
+  args: [dev_ptr, size, stream]
+  out: [dev_ptr]
+
+- api: hipMallocHost
+  args: [ptr, size]
+  out: [ptr]
+
+- api: hipHostMalloc
+  args: [ptr, size, flags]
+  out: [ptr]
+
+- api: hipMallocManaged
+  args: [dev_ptr, size, flags]
+  out: [dev_ptr]
+
+- api: hipFree
+  args: [ptr]
+
+- api: hipFreeAsync
+  args: [dev_ptr, stream]
+
+- api: hipFreeHost
+  args: [ptr]
+
+- api: hipHostFree
+  args: [ptr]
+
+- api: hipMemset
+  args: [dst, value, sizeBytes]
+
+- api: hipMemsetAsync
+  args: [dst, value, sizeBytes, stream]
+
+- api: hipMemsetD8
+  args: [dest, value, count]
+
+- api: hipMemsetD16
+  args: [dest, value, count]
+
+- api: hipMemsetD32
+  args: [dest, value, count]
+
+- api: hipMemPrefetchAsync
+  args: [dev_ptr, count, device, stream]
+
+- api: hipMemAdvise
+  args: [dev_ptr, count, advice, device]
+
+- api: hipArray3DCreate
+  args: [array, pAllocateArray]
+
+- api: hipArray3DGetDescriptor
+  args: [pArrayDescriptor, array]
+
+- api: hipArrayCreate
+  args: [pHandle, pAllocateArray]
+
+- api: hipArrayDestroy
+  args: [array]
+
+- api: hipArrayGetDescriptor
+  args: [pArrayDescriptor, array]
+
+- api: hipArrayGetInfo
+  args: [desc, extent, flags, array]
+
+- api: hipDrvMemDiscardAndPrefetchBatchAsync
+  args: [dptrs, sizes, count, prefetchLocs, prefetchLocIdxs, numPrefetchLocs, flags, stream]
+
+- api: hipDrvMemDiscardBatchAsync
+  args: [dptrs, sizes, count, flags, stream]
+
+- api: hipDrvMemcpy2DUnaligned
+  args: [pCopy]
+
+- api: hipDrvMemcpy3D
+  args: [pCopy]
+
+- api: hipDrvMemcpy3DAsync
+  args: [pCopy, stream]
+
+- api: hipDrvPointerGetAttributes
+  args: [numAttributes, attributes, data, ptr]
+
+- api: hipExtMallocWithFlags
+  args: [ptr, sizeBytes, flags]
+
+- api: hipFreeArray
+  args: [array]
+
+- api: hipFreeMipmappedArray
+  args: [mipmappedArray]
+
+- api: hipGetMipmappedArrayLevel
+  args: [levelArray, mipmappedArray, level]
+
+- api: hipHostAlloc
+  args: [ptr, size, flags]
+
+- api: hipHostGetDevicePointer
+  args: [devPtr, hstPtr, flags]
+
+- api: hipHostGetFlags
+  args: [flagsPtr, hostPtr]
+
+- api: hipHostRegister
+  args: [hostPtr, sizeBytes, flags]
+
+- api: hipHostUnregister
+  args: [hostPtr]
+
+- api: hipMalloc3D
+  args: [pitchedDevPtr]
+
+- api: hipMalloc3DArray
+  args: [array, desc, flags]
+
+- api: hipMallocArray
+  args: [array, desc, width, height, flags]
+
+- api: hipMallocFromPoolAsync
+  args: [dev_ptr, size, mem_pool, stream]
+
+- api: hipMallocMipmappedArray
+  args: [mipmappedArray, desc, numLevels, flags]
+
+- api: hipMallocPitch
+  args: [ptr, pitch, width, height]
+
+- api: hipMemAddressFree
+  args: [devPtr, size]
+
+- api: hipMemAddressReserve
+  args: [ptr, size, alignment, addr, flags]
+
+- api: hipMemAdvise_v2
+  args: [dev_ptr, count, advice]
+
+- api: hipMemAllocHost
+  args: [ptr, size]
+
+- api: hipMemAllocPitch
+  args: [dptr, pitch, widthInBytes, height, elementSizeBytes]
+
+- api: hipMemCreate
+  args: [handle, size, prop, flags]
+
+- api: hipMemDiscardAndPrefetchBatchAsync
+  args: [dptrs, sizes, count, prefetchLocs, prefetchLocIdxs, numPrefetchLocs, flags, stream]
+
+- api: hipMemDiscardBatchAsync
+  args: [dev_ptrs, sizes, count, flags, stream]
+
+- api: hipMemExportToShareableHandle
+  args: [shareableHandle, handle, handleType, flags]
+
+- api: hipMemGetAccess
+  args: [flags, location, ptr]
+
+- api: hipMemGetAddressRange
+  args: [pbase, psize, dptr]
+
+- api: hipMemGetAllocationGranularity
+  args: [granularity, prop, option]
+
+- api: hipMemGetAllocationPropertiesFromHandle
+  args: [prop, handle]
+
+- api: hipMemGetHandleForAddressRange
+  args: [handle, dptr, size, handleType, flags]
+
+- api: hipMemGetInfo
+  args: [free, total]
+
+- api: hipMemGetMemPool
+  args: [pool, location, type]
+
+- api: hipMemImportFromShareableHandle
+  args: [handle, osHandle, shHandleType]
+
+- api: hipMemMap
+  args: [ptr, size, offset, handle, flags]
+
+- api: hipMemMapArrayAsync
+  args: [mapInfoList, count, stream]
+
+- api: hipMemPoolCreate
+  args: [mem_pool, pool_props]
+
+- api: hipMemPoolDestroy
+  args: [mem_pool]
+
+- api: hipMemPoolExportPointer
+  args: [export_data, dev_ptr]
+
+- api: hipMemPoolExportToShareableHandle
+  args: [shared_handle, mem_pool, handle_type, flags]
+
+- api: hipMemPoolGetAccess
+  args: [flags, mem_pool, location]
+
+- api: hipMemPoolGetAttribute
+  args: [mem_pool, attr, value]
+
+- api: hipMemPoolImportFromShareableHandle
+  args: [mem_pool, shared_handle, handle_type, flags]
+
+- api: hipMemPoolImportPointer
+  args: [dev_ptr, mem_pool, export_data]
+
+- api: hipMemPoolSetAccess
+  args: [mem_pool, desc_list, count]
+
+- api: hipMemPoolSetAttribute
+  args: [mem_pool, attr, value]
+
+- api: hipMemPoolTrimTo
+  args: [mem_pool, min_bytes_to_hold]
+
+- api: hipMemPrefetchAsync_v2
+  args: [dev_ptr, count, flags, stream]
+
+- api: hipMemPrefetchBatchAsync
+  args: [dev_ptrs, sizes, count, prefetch_locs, prefetch_loc_idxs, num_prefetch_locs, flags, stream]
+
+- api: hipMemPtrGetInfo
+  args: [ptr, size]
+
+- api: hipMemRangeGetAttribute
+  args: [data, data_size, attribute, dev_ptr, count]
+
+- api: hipMemRangeGetAttributes
+  args: [data, data_sizes, attributes, num_attributes, dev_ptr, count]
+
+- api: hipMemRelease
+  args: [handle]
+
+- api: hipMemRetainAllocationHandle
+  args: [handle, addr]
+
+- api: hipMemSetAccess
+  args: [ptr, size, desc, count]
+
+- api: hipMemSetMemPool
+  args: [location, type, pool]
+
+- api: hipMemUnmap
+  args: [ptr, size]
+
+- api: hipMemcpy2D
+  args: [dst, dpitch, src, spitch, width, height, kind]
+
+- api: hipMemcpy2DArrayToArray
+  args: [dst, wOffsetDst, hOffsetDst, src, wOffsetSrc, hOffsetSrc, width, height, kind]
+
+- api: hipMemcpy2DAsync_spt
+  args: [dst, dpitch, src, spitch, width, height, kind, stream]
+
+- api: hipMemcpy2DFromArray
+  args: [dst, dpitch, src, wOffset, hOffset, width, height, kind]
+
+- api: hipMemcpy2DFromArrayAsync
+  args: [dst, dpitch, src, wOffset, hOffset, width, height, kind, stream]
+
+- api: hipMemcpy2DFromArrayAsync_spt
+  args: [dst, dpitch, src, wOffsetSrc, hOffsetSrc, width, height, kind, stream]
+
+- api: hipMemcpy2DFromArray_spt
+  args: [dst, dpitch, src, wOffset, hOffset, width, height, kind]
+
+- api: hipMemcpy2DToArray
+  args: [dst, wOffset, hOffset, src, spitch, width, height, kind]
+
+- api: hipMemcpy2DToArrayAsync
+  args: [dst, wOffset, hOffset, src, spitch, width, height, kind, stream]
+
+- api: hipMemcpy2DToArrayAsync_spt
+  args: [dst, wOffset, hOffset, src, spitch, width, height, kind, stream]
+
+- api: hipMemcpy2DToArray_spt
+  args: [dst, wOffset, hOffset, src, spitch, width, height, kind]
+
+- api: hipMemcpy2D_spt
+  args: [dst, dpitch, src, spitch, width, height, kind]
+
+- api: hipMemcpy3D
+  args: [p]
+
+- api: hipMemcpy3DAsync_spt
+  args: [p, stream]
+
+- api: hipMemcpy3DBatchAsync
+  args: [numOps, opList, failIdx, flags, stream]
+
+- api: hipMemcpy3DPeer
+  args: [p]
+
+- api: hipMemcpy3DPeerAsync
+  args: [p, stream]
+
+- api: hipMemcpy3D_spt
+  args: [p]
+
+- api: hipMemcpyAsync_spt
+  args: [dst, src, sizeBytes, kind, stream]
+
+- api: hipMemcpyAtoA
+  args: [dstArray, dstOffset, srcArray, srcOffset, ByteCount]
+
+- api: hipMemcpyAtoD
+  args: [dstDevice, srcArray, srcOffset, ByteCount]
+
+- api: hipMemcpyAtoH
+  args: [dst, srcArray, srcOffset, count]
+
+- api: hipMemcpyAtoHAsync
+  args: [dstHost, srcArray, srcOffset, ByteCount, stream]
+
+- api: hipMemcpyBatchAsync
+  args: [dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs, failIdx, stream]
+
+- api: hipMemcpyDtoA
+  args: [dstArray, dstOffset, srcDevice, ByteCount]
+
+- api: hipMemcpyFromArray
+  args: [dst, srcArray, wOffset, hOffset, count, kind]
+
+- api: hipMemcpyFromArray_spt
+  args: [dst, src, wOffsetSrc, hOffset, count, kind]
+
+- api: hipMemcpyFromSymbol
+  args: [dst, symbol, sizeBytes, offset, kind]
+
+- api: hipMemcpyFromSymbolAsync
+  args: [dst, symbol, sizeBytes, offset, kind, stream]
+
+- api: hipMemcpyFromSymbolAsync_spt
+  args: [dst, symbol, sizeBytes, offset, kind, stream]
+
+- api: hipMemcpyFromSymbol_spt
+  args: [dst, symbol, sizeBytes, offset, kind]
+
+- api: hipMemcpyHtoA
+  args: [dstArray, dstOffset, srcHost, count]
+
+- api: hipMemcpyHtoAAsync
+  args: [dstArray, dstOffset, srcHost, ByteCount, stream]
+
+- api: hipMemcpyParam2D
+  args: [pCopy]
+
+- api: hipMemcpyParam2DAsync
+  args: [pCopy, stream]
+
+- api: hipMemcpyToArray
+  args: [dst, wOffset, hOffset, src, count, kind]
+
+- api: hipMemcpyToSymbol
+  args: [symbol, src, sizeBytes, offset, kind]
+
+- api: hipMemcpyToSymbolAsync
+  args: [symbol, src, sizeBytes, offset, kind, stream]
+
+- api: hipMemcpyToSymbolAsync_spt
+  args: [symbol, src, sizeBytes, offset, kind, stream]
+
+- api: hipMemcpyToSymbol_spt
+  args: [symbol, src, sizeBytes, offset, kind]
+
+- api: hipMemcpyWithStream
+  args: [dst, src, sizeBytes, kind, stream]
+
+- api: hipMemcpy_spt
+  args: [dst, src, sizeBytes, kind]
+
+- api: hipMemset2D
+  args: [dst, pitch, value, width, height]
+
+- api: hipMemset2DAsync
+  args: [dst, pitch, value, width, height, stream]
+
+- api: hipMemset2DAsync_spt
+  args: [dst, pitch, value, width, height, stream]
+
+- api: hipMemset2D_spt
+  args: [dst, pitch, value, width, height]
+
+- api: hipMemset3D
+  args: [value]
+
+- api: hipMemset3DAsync
+  args: [value, stream]
+
+- api: hipMemset3DAsync_spt
+  args: [value, stream]
+
+- api: hipMemset3D_spt
+  args: [value]
+
+- api: hipMemsetAsync_spt
+  args: [dst, value, sizeBytes, stream]
+
+- api: hipMemsetD16Async
+  args: [dest, value, count, stream]
+
+- api: hipMemsetD2D16
+  args: [dst, dstPitch, value, width, height]
+
+- api: hipMemsetD2D16Async
+  args: [dst, dstPitch, value, width, height, stream]
+
+- api: hipMemsetD2D32
+  args: [dst, dstPitch, value, width, height]
+
+- api: hipMemsetD2D32Async
+  args: [dst, dstPitch, value, width, height, stream]
+
+- api: hipMemsetD2D8
+  args: [dst, dstPitch, value, width, height]
+
+- api: hipMemsetD2D8Async
+  args: [dst, dstPitch, value, width, height, stream]
+
+- api: hipMemsetD32Async
+  args: [dst, value, count, stream]
+
+- api: hipMemsetD8Async
+  args: [dest, value, count, stream]
+
+- api: hipMemset_spt
+  args: [dst, value, sizeBytes]
+
+- api: hipMipmappedArrayCreate
+  args: [pHandle, pMipmappedArrayDesc, numMipmapLevels]
+
+- api: hipMipmappedArrayDestroy
+  args: [hMipmappedArray]
+
+- api: hipMipmappedArrayGetLevel
+  args: [pLevelArray, hMipMappedArray, level]
+
+- api: hipMipmappedArrayGetMemoryRequirements
+  args: [memoryRequirements, mipmap, device]
+
+- api: hipPointerGetAttribute
+  args: [data, attribute, ptr]
+
+- api: hipPointerGetAttributes
+  args: [attributes, ptr]
+
+- api: hipPointerSetAttribute
+  args: [value, attribute, ptr]
