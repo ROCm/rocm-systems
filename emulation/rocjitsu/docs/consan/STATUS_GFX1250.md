@@ -57,12 +57,12 @@ preserve the earlier green claim.
 | **P1 Sharktank TP1 prefill** | 🟩 Exact prefill oracle; 352/352 accesses; current paired 1.17x | 🟩 Exact prefill oracle; 352/352 accesses, 37/37 barriers; current paired 1.25x | 🟩 Exact prefill oracle; 352/352 accesses, 64/64 applicable barriers; current paired 1.51x | 🟩 Exact prefill oracle; 352/352 accesses, 37/37 barriers; current paired 2.11x |
 | **P1 Sharktank TP1 decode/combined** | 🟩 Exact decode/combined oracles; 704/704 accesses; current paired 1.09x | 🟩 Exact decode/combined oracles; 704/704 accesses, 74/74 barriers; current paired 1.16x | 🟩 Exact decode/combined oracles; 704/704 accesses, 128/128 applicable barriers; current paired 1.28x | 🟧 Compute-active through 600 seconds; no verdict or accepted overhead |
 | **P2 Sharktank TP2 family** | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained |
-| **P4 hip-moi D128 block attention** | 🟩 Current paired 1.56x; 18/18 accesses | 🟩 Current paired 1.11x; 18/18 accesses, 4/4 barriers | 🟥 Current strict analysis incomplete on callable barrier variants | 🟩 Current paired 1.09x; 18/18 accesses, 4/4 barriers |
-| **P4 hip-moi D128 pressure attention** | 🟩 Current paired 1.84x; 40/40 accesses | 🟩 Current paired 1.13x; 40/40 accesses, 4/4 barriers | 🟥 Current strict analysis incomplete | 🟧 Current isolated run remained compute-active through 300 seconds; no verdict |
-| **P4 hip-moi WMMA attention** | 🟩 Current paired 1.78x; 18/18 accesses | 🟩 Current paired 1.17x; 18/18 accesses, 4/4 barriers | 🟥 Current strict analysis incomplete on callable barrier variants | 🟩 Current paired 1.17x; 18/18 accesses, 4/4 barriers |
-| **P4 hip-moi Stream-K arrival** | 🟩 Current paired 7.38x; 4/4 accesses | 🟩 Current paired 2.41x; 4/4 accesses, 4/4 barriers, 10/10 atomics, 16/16 fences | 🟥 Current strict analysis incomplete on callable barrier variants | 🟩 Current paired 2.62x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
-| **P4 hip-moi tree atomic-OR** | 🟩 Current paired 6.55x; 4/4 accesses | 🟩 Current paired 2.04x; 4/4 accesses, 4/4 barriers, 10/10 atomics, 16/16 fences | 🟥 Current strict analysis incomplete on callable barrier variants | 🟩 Current paired 2.19x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
-| **P4 Jakub attention variants** | 🟩 Current paired 2.52x; 31/31 accesses | 🟩 Current paired 1.44x; 62/62 accesses, 4/4 barriers | 🟥 Current strict analysis incomplete | 🟩 Current paired 1.55x; 62/62 accesses, 4/4 barriers |
+| **P4 hip-moi D128 block attention** | 🟩 Current paired 1.56x; 18/18 accesses | 🟩 Current paired 1.11x; 18/18 accesses, 4/4 barriers | 🟩 Current paired 1.13x; 18/18 accesses, 8/8 applicable barriers | 🟩 Current paired 1.09x; 18/18 accesses, 4/4 barriers |
+| **P4 hip-moi D128 pressure attention** | 🟩 Current paired 1.84x; 40/40 accesses | 🟩 Current paired 1.13x; 40/40 accesses, 4/4 barriers | 🟩 Current paired 1.12x; 40/40 accesses, 8/8 applicable barriers | 🟧 Current isolated run remained compute-active through 300 seconds; no verdict |
+| **P4 hip-moi WMMA attention** | 🟩 Current paired 1.78x; 18/18 accesses | 🟩 Current paired 1.17x; 18/18 accesses, 4/4 barriers | 🟩 Current paired 1.15x; 18/18 accesses, 8/8 applicable barriers | 🟩 Current paired 1.17x; 18/18 accesses, 4/4 barriers |
+| **P4 hip-moi Stream-K arrival** | 🟩 Current paired 7.38x; 4/4 accesses | 🟩 Current paired 2.41x; 4/4 accesses, 4/4 barriers, 10/10 atomics, 16/16 fences | 🟩 Current paired 2.72x; 4/4 accesses, 8/8 applicable barriers, 10/10 atomics | 🟩 Current paired 2.62x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
+| **P4 hip-moi tree atomic-OR** | 🟩 Current paired 6.55x; 4/4 accesses | 🟩 Current paired 2.04x; 4/4 accesses, 4/4 barriers, 10/10 atomics, 16/16 fences | 🟩 Current paired 2.57x; 4/4 accesses, 8/8 applicable barriers, 10/10 atomics | 🟩 Current paired 2.19x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
+| **P4 Jakub attention variants** | 🟩 Current paired 2.52x; 31/31 accesses | 🟩 Current paired 1.44x; 62/62 accesses, 4/4 barriers | 🟩 Current paired 1.56x; 62/62 accesses, 8/8 applicable barriers | 🟩 Current paired 1.55x; 62/62 accesses, 4/4 barriers |
 
 CLIP BF16 is intentionally omitted from the current acceptance matrix.  Its
 uninstrumented execution is not presently practical in the software GPU
@@ -212,6 +212,19 @@ do not promote matrix cells without the end-to-end evidence above.
 | Four focused flavor verticals | 🟦 Four-engine bootstrap | A clean ping-pong cooperative-LDS workload passed its host-reference oracle with 4/4 accesses patched by SuperCollider.  Record/Replay passed with 4/4 accesses and 8/8 barriers patched and visible records.  Sampled passed with 4/4 accesses and two visible records, but 0/8 barriers.  Inline Shadow is statically and dynamically complete with 4/4 accesses, 8/8 barriers, and one visible record.  Fault/diagnostic behavior, replay qualification, and Sampled synchronization remain open. |
 
 ## Progress log
+
+- 2026-07-20: Commit `e4df0064b1` closes the shared callable-barrier gap in
+  Sampled without weakening coverage.  A physical callable now scans the
+  causal-window ranges of all statically proven execution owners, validates
+  the active dispatch/workgroup/epoch, publishes at most one transition, and
+  advances the epoch once.  Its gfx1250 dense relay is grouped and placed by
+  the physical function rather than an arbitrary representative kernel.
+  Clean artifacts `consan-revalidation-gfx1250-20260720-*-sampled-callable-047`
+  and `-048` accept all six affected workloads.  One-repetition paired
+  artifacts `consan-revalidation-gfx1250-20260720-*-sampled-overhead-049` and
+  `-050` measure D128 block 1.13x, D128 pressure 1.12x, WMMA attention 1.15x,
+  Stream-K arrival 2.72x, tree atomic OR 2.57x, and Jakub attention 1.56x,
+  each with its exact oracle and complete access/barrier/atomic coverage.
 
 - 2026-07-20: gfx1250 signed FLAT displacement materialization removes the
   strict-analysis gap from D128-pressure and Jakub-attention without changing
