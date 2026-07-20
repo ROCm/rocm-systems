@@ -38,9 +38,12 @@ def validate_valu_instructions_issued(samples_issued):
             lambda x: x.startswith("v_") and ("mfma" not in x)
         )
     ]
+    _v_not_valu_typed = issued_v[
+        issued_v["Instruction_Type"] != "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_VALU"
+    ][["Instruction", "Instruction_Type"]].drop_duplicates()
     assert (
         issued_v["Instruction_Type"] == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_VALU"
-    ).all()
+    ).all(), f"issued v_ (non-mfma) instructions NOT typed VALU:\n{_v_not_valu_typed.to_string()}"
 
 
 def validate_valu_instructions_stalled(samples):
