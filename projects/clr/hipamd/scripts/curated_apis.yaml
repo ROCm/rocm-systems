@@ -510,3 +510,136 @@
 
 - api: hipPointerSetAttribute
   args: [value, attribute, ptr]
+
+- api: hipStreamCreate
+  args: [stream]
+  out: [stream]
+
+- api: hipStreamCreateWithFlags
+  args: [stream, flags]
+  out: [stream]
+
+- api: hipStreamCreateWithPriority
+  args: [stream, flags, priority]
+  out: [stream]
+
+- api: hipStreamDestroy
+  args: [stream]
+
+- api: hipStreamGetFlags
+  args: [stream, flags]
+  out: [flags]
+
+- api: hipStreamGetPriority
+  args: [stream, priority]
+  out: [priority]
+
+- api: hipStreamSynchronize
+  args: [stream]
+
+- api: hipStreamWaitEvent
+  args: [stream, event, flags]
+
+- api: hipStreamQuery
+  args: [stream]
+
+- api: hipStreamAddCallback
+  args: [stream, callback, userData, flags]
+
+- api: hipStreamAttachMemAsync
+  args: [stream, dev_ptr, length, flags]
+
+- api: hipStreamBeginCapture
+  args: [stream, mode]
+
+- api: hipStreamEndCapture
+  args: [stream, pGraph]
+  out: [pGraph]
+
+- api: hipStreamIsCapturing
+  args: [stream, pCaptureStatus]
+  out: [pCaptureStatus]
+
+- api: hipExtStreamCreateWithCUMask
+  args: [stream, cuMaskSize, cuMask]
+
+- api: hipExtStreamGetCUMask
+  args: [stream, cuMaskSize, cuMask]
+
+- api: hipStreamAddCallback_spt
+  args: [stream, callback, userData, flags]
+
+- api: hipStreamBatchMemOp
+  args: [stream, count, paramArray, flags]
+
+- api: hipStreamBeginCaptureToGraph
+  args: [stream, graph, dependencies, dependencyData, numDependencies, mode]
+
+- api: hipStreamBeginCapture_spt
+  args: [stream, mode]
+
+- api: hipStreamCopyAttributes
+  args: [dst, src]
+
+- api: hipStreamEndCapture_spt
+  args: [stream, pGraph]
+
+- api: hipStreamGetAttribute
+  args: [stream, attr, value]
+
+- api: hipStreamGetCaptureInfo
+  args: [stream, pCaptureStatus, pId]
+
+- api: hipStreamGetCaptureInfo_spt
+  args: [stream, pCaptureStatus, pId]
+
+- api: hipStreamGetCaptureInfo_v2
+  args: [stream, captureStatus_out, id_out, graph_out, dependencies_out, numDependencies_out]
+
+- api: hipStreamGetCaptureInfo_v2_spt
+  args: [stream, captureStatus_out, id_out, graph_out, dependencies_out, numDependencies_out]
+
+- api: hipStreamGetDevResource
+  args: [hStream, resource, type]
+
+- api: hipStreamGetDevice
+  args: [stream, device]
+
+- api: hipStreamGetFlags_spt
+  args: [stream, flags]
+
+- api: hipStreamGetId
+  args: [stream, streamId]
+
+- api: hipStreamGetPriority_spt
+  args: [stream, priority]
+
+- api: hipStreamIsCapturing_spt
+  args: [stream, pCaptureStatus]
+
+- api: hipStreamQuery_spt
+  args: [stream]
+
+- api: hipStreamSetAttribute
+  args: [stream, attr, value]
+
+- api: hipStreamSynchronize_spt
+  args: [stream]
+
+- api: hipStreamUpdateCaptureDependencies
+  args: [stream, dependencies, numDependencies, flags]
+
+- api: hipStreamWaitEvent_spt
+  args: [stream, event, flags]
+
+- api: hipStreamWaitValue32
+  args: [stream, ptr, value, flags, mask]
+
+- api: hipStreamWaitValue64
+  args: [stream, ptr, value, flags, mask]
+
+- api: hipStreamWriteValue32
+  args: [stream, ptr, value, flags]
+
+- api: hipStreamWriteValue64
+  args: [stream, ptr, value, flags]

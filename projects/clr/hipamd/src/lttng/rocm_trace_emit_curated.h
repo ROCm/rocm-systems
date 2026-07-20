@@ -2,7 +2,7 @@
  * Do not edit by hand — regenerate instead (see command below).
  *
  * SHA256(curated_apis.yaml) at generation:
- * 2671ce431ca27475aeee2b8bb4c1b1fa6fec7576841b8ee08a7c253b3a54f34e
+ * d77c73094a20d3c72eb90e61502038d5be66c4be81a0dd8afd6c5669f36214bc
  *
  * Per-API typed emit helpers for curated parameter capture. Every
  * helper takes (<captured-args...>, <status_type> status); status is
@@ -2972,6 +2972,744 @@ static inline void rocm_trace_emit_hipPointerSetAttribute_exit(hipError_t status
   }
 }
 
+static inline void rocm_trace_emit_hipStreamCreate_enter(void) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamCreate)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamCreate, (int32_t)0, 0, 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamCreate_exit(hipStream_t* stream_out_ptr,
+                                                        hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamCreate)) {
+    const uint64_t stream_val = (status == hipSuccess && stream_out_ptr != NULL)
+                                    ? (uint64_t)((uint64_t)(uintptr_t)(*stream_out_ptr))
+                                    : 0ULL;
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamCreate, (int32_t)1, stream_val, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamCreateWithFlags_enter(uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamCreateWithFlags)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamCreateWithFlags, (int32_t)0, 0, (uint32_t)(flags),
+                            0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamCreateWithFlags_exit(hipStream_t* stream_out_ptr,
+                                                                 hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamCreateWithFlags)) {
+    const uint64_t stream_val = (status == hipSuccess && stream_out_ptr != NULL)
+                                    ? (uint64_t)((uint64_t)(uintptr_t)(*stream_out_ptr))
+                                    : 0ULL;
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamCreateWithFlags, (int32_t)1, stream_val, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamCreateWithPriority_enter(uint32_t flags,
+                                                                     int32_t priority) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamCreateWithPriority)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamCreateWithPriority, (int32_t)0, 0, (uint32_t)(flags),
+                            (int32_t)(priority), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamCreateWithPriority_exit(hipStream_t* stream_out_ptr,
+                                                                    hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamCreateWithPriority)) {
+    const uint64_t stream_val = (status == hipSuccess && stream_out_ptr != NULL)
+                                    ? (uint64_t)((uint64_t)(uintptr_t)(*stream_out_ptr))
+                                    : 0ULL;
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamCreateWithPriority, (int32_t)1, stream_val, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamDestroy_enter(uint64_t stream) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamDestroy)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamDestroy, (int32_t)0, (uint64_t)(uintptr_t)(stream),
+                            0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamDestroy_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamDestroy)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamDestroy, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetFlags_enter(uint64_t stream) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetFlags)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetFlags, (int32_t)0, (uint64_t)(uintptr_t)(stream),
+                            0, 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetFlags_exit(uint32_t* flags_out_ptr,
+                                                          hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetFlags)) {
+    const auto flags_val = (status == hipSuccess && flags_out_ptr != NULL) ? *flags_out_ptr : 0;
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetFlags, (int32_t)1, 0, (uint32_t)(flags_val),
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetPriority_enter(uint64_t stream) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetPriority)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetPriority, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), 0, 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetPriority_exit(int32_t* priority_out_ptr,
+                                                             hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetPriority)) {
+    const auto priority_val =
+        (status == hipSuccess && priority_out_ptr != NULL) ? *priority_out_ptr : 0;
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetPriority, (int32_t)1, 0, (int32_t)(priority_val),
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamSynchronize_enter(uint64_t stream) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamSynchronize)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamSynchronize, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamSynchronize_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamSynchronize)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamSynchronize, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamWaitEvent_enter(uint64_t stream, uint64_t event,
+                                                            uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamWaitEvent)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamWaitEvent, (int32_t)0, (uint64_t)(uintptr_t)(stream),
+                            (uint64_t)(uintptr_t)(event), (uint32_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamWaitEvent_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamWaitEvent)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamWaitEvent, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamQuery_enter(uint64_t stream) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamQuery)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamQuery, (int32_t)0, (uint64_t)(uintptr_t)(stream), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamQuery_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamQuery)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamQuery, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamAddCallback_enter(uint64_t stream, const void* callback,
+                                                              const void* userData,
+                                                              uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamAddCallback)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamAddCallback, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (uint64_t)(uintptr_t)(callback),
+                            (uint64_t)(uintptr_t)(userData), (uint32_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamAddCallback_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamAddCallback)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamAddCallback, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamAttachMemAsync_enter(uint64_t stream,
+                                                                 const void* dev_ptr, size_t length,
+                                                                 uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamAttachMemAsync)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamAttachMemAsync, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (uint64_t)(uintptr_t)(dev_ptr),
+                            (uint64_t)(length), (uint32_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamAttachMemAsync_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamAttachMemAsync)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamAttachMemAsync, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamBeginCapture_enter(uint64_t stream, int32_t mode) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamBeginCapture)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamBeginCapture, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (int32_t)(mode), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamBeginCapture_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamBeginCapture)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamBeginCapture, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamEndCapture_enter(uint64_t stream) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamEndCapture)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamEndCapture, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), 0, 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamEndCapture_exit(hipGraph_t* pGraph_out_ptr,
+                                                            hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamEndCapture)) {
+    const uint64_t pGraph_val = (status == hipSuccess && pGraph_out_ptr != NULL)
+                                    ? (uint64_t)((uint64_t)(uintptr_t)(*pGraph_out_ptr))
+                                    : 0ULL;
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamEndCapture, (int32_t)1, 0, pGraph_val,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamIsCapturing_enter(uint64_t stream) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamIsCapturing)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamIsCapturing, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), 0, 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamIsCapturing_exit(int32_t* pCaptureStatus_out_ptr,
+                                                             hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamIsCapturing)) {
+    const auto pCaptureStatus_val =
+        (status == hipSuccess && pCaptureStatus_out_ptr != NULL) ? *pCaptureStatus_out_ptr : 0;
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamIsCapturing, (int32_t)1, 0,
+                            (int32_t)(pCaptureStatus_val), (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipExtStreamCreateWithCUMask_enter(const void* stream,
+                                                                      uint32_t cuMaskSize,
+                                                                      const void* cuMask) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExtStreamCreateWithCUMask)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExtStreamCreateWithCUMask, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (uint32_t)(cuMaskSize),
+                            (uint64_t)(uintptr_t)(cuMask), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipExtStreamCreateWithCUMask_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExtStreamCreateWithCUMask)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExtStreamCreateWithCUMask, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipExtStreamGetCUMask_enter(uint64_t stream, uint32_t cuMaskSize,
+                                                               const void* cuMask) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExtStreamGetCUMask)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExtStreamGetCUMask, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (uint32_t)(cuMaskSize),
+                            (uint64_t)(uintptr_t)(cuMask), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipExtStreamGetCUMask_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExtStreamGetCUMask)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExtStreamGetCUMask, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamAddCallback_spt_enter(uint64_t stream,
+                                                                  const void* callback,
+                                                                  const void* userData,
+                                                                  uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamAddCallback_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamAddCallback_spt, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (uint64_t)(uintptr_t)(callback),
+                            (uint64_t)(uintptr_t)(userData), (uint32_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamAddCallback_spt_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamAddCallback_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamAddCallback_spt, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamBatchMemOp_enter(uint64_t stream, uint32_t count,
+                                                             const void* paramArray,
+                                                             uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamBatchMemOp)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamBatchMemOp, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (uint32_t)(count),
+                            (uint64_t)(uintptr_t)(paramArray), (uint32_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamBatchMemOp_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamBatchMemOp)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamBatchMemOp, (int32_t)1, 0, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamBeginCaptureToGraph_enter(
+    uint64_t stream, uint64_t graph, const void* dependencies, const void* dependencyData,
+    size_t numDependencies, int32_t mode) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamBeginCaptureToGraph)) {
+    lttng_ust_do_tracepoint(
+        rocm_hip, hipStreamBeginCaptureToGraph, (int32_t)0, (uint64_t)(uintptr_t)(stream),
+        (uint64_t)(uintptr_t)(graph), (uint64_t)(uintptr_t)(dependencies),
+        (uint64_t)(uintptr_t)(dependencyData), (uint64_t)(numDependencies), (int32_t)(mode), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamBeginCaptureToGraph_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamBeginCaptureToGraph)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamBeginCaptureToGraph, (int32_t)1, 0, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamBeginCapture_spt_enter(uint64_t stream, int32_t mode) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamBeginCapture_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamBeginCapture_spt, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (int32_t)(mode), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamBeginCapture_spt_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamBeginCapture_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamBeginCapture_spt, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamCopyAttributes_enter(uint64_t dst, uint64_t src) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamCopyAttributes)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamCopyAttributes, (int32_t)0,
+                            (uint64_t)(uintptr_t)(dst), (uint64_t)(uintptr_t)(src), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamCopyAttributes_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamCopyAttributes)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamCopyAttributes, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamEndCapture_spt_enter(uint64_t stream,
+                                                                 const void* pGraph) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamEndCapture_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamEndCapture_spt, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (uint64_t)(uintptr_t)(pGraph), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamEndCapture_spt_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamEndCapture_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamEndCapture_spt, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetAttribute_enter(uint64_t stream, int32_t attr,
+                                                               const void* value) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetAttribute)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetAttribute, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (int32_t)(attr),
+                            (uint64_t)(uintptr_t)(value), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetAttribute_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetAttribute)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetAttribute, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetCaptureInfo_enter(uint64_t stream,
+                                                                 const void* pCaptureStatus,
+                                                                 const void* pId) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetCaptureInfo)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetCaptureInfo, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (uint64_t)(uintptr_t)(pCaptureStatus),
+                            (uint64_t)(uintptr_t)(pId), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetCaptureInfo_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetCaptureInfo)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetCaptureInfo, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetCaptureInfo_spt_enter(uint64_t stream,
+                                                                     const void* pCaptureStatus,
+                                                                     const void* pId) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetCaptureInfo_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetCaptureInfo_spt, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (uint64_t)(uintptr_t)(pCaptureStatus),
+                            (uint64_t)(uintptr_t)(pId), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetCaptureInfo_spt_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetCaptureInfo_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetCaptureInfo_spt, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetCaptureInfo_v2_enter(
+    uint64_t stream, const void* captureStatus_out, const void* id_out, const void* graph_out,
+    const void* dependencies_out, const void* numDependencies_out) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetCaptureInfo_v2)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetCaptureInfo_v2, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (uint64_t)(uintptr_t)(captureStatus_out),
+                            (uint64_t)(uintptr_t)(id_out), (uint64_t)(uintptr_t)(graph_out),
+                            (uint64_t)(uintptr_t)(dependencies_out),
+                            (uint64_t)(uintptr_t)(numDependencies_out), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetCaptureInfo_v2_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetCaptureInfo_v2)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetCaptureInfo_v2, (int32_t)1, 0, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetCaptureInfo_v2_spt_enter(
+    uint64_t stream, const void* captureStatus_out, const void* id_out, const void* graph_out,
+    const void* dependencies_out, const void* numDependencies_out) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetCaptureInfo_v2_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetCaptureInfo_v2_spt, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (uint64_t)(uintptr_t)(captureStatus_out),
+                            (uint64_t)(uintptr_t)(id_out), (uint64_t)(uintptr_t)(graph_out),
+                            (uint64_t)(uintptr_t)(dependencies_out),
+                            (uint64_t)(uintptr_t)(numDependencies_out), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetCaptureInfo_v2_spt_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetCaptureInfo_v2_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetCaptureInfo_v2_spt, (int32_t)1, 0, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetDevResource_enter(uint64_t hStream,
+                                                                 const void* resource,
+                                                                 int32_t type) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetDevResource)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetDevResource, (int32_t)0,
+                            (uint64_t)(uintptr_t)(hStream), (uint64_t)(uintptr_t)(resource),
+                            (int32_t)(type), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetDevResource_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetDevResource)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetDevResource, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetDevice_enter(uint64_t stream, const void* device) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetDevice)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetDevice, (int32_t)0, (uint64_t)(uintptr_t)(stream),
+                            (uint64_t)(uintptr_t)(device), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetDevice_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetDevice)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetDevice, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetFlags_spt_enter(uint64_t stream, const void* flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetFlags_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetFlags_spt, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (uint64_t)(uintptr_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetFlags_spt_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetFlags_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetFlags_spt, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetId_enter(uint64_t stream, const void* streamId) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetId)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetId, (int32_t)0, (uint64_t)(uintptr_t)(stream),
+                            (uint64_t)(uintptr_t)(streamId), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetId_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetId)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetId, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetPriority_spt_enter(uint64_t stream,
+                                                                  const void* priority) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetPriority_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetPriority_spt, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (uint64_t)(uintptr_t)(priority), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamGetPriority_spt_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamGetPriority_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamGetPriority_spt, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamIsCapturing_spt_enter(uint64_t stream,
+                                                                  const void* pCaptureStatus) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamIsCapturing_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamIsCapturing_spt, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (uint64_t)(uintptr_t)(pCaptureStatus),
+                            0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamIsCapturing_spt_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamIsCapturing_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamIsCapturing_spt, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamQuery_spt_enter(uint64_t stream) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamQuery_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamQuery_spt, (int32_t)0, (uint64_t)(uintptr_t)(stream),
+                            0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamQuery_spt_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamQuery_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamQuery_spt, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamSetAttribute_enter(uint64_t stream, int32_t attr,
+                                                               const void* value) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamSetAttribute)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamSetAttribute, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (int32_t)(attr),
+                            (uint64_t)(uintptr_t)(value), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamSetAttribute_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamSetAttribute)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamSetAttribute, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamSynchronize_spt_enter(uint64_t stream) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamSynchronize_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamSynchronize_spt, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamSynchronize_spt_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamSynchronize_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamSynchronize_spt, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamUpdateCaptureDependencies_enter(
+    uint64_t stream, const void* dependencies, size_t numDependencies, uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamUpdateCaptureDependencies)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamUpdateCaptureDependencies, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (uint64_t)(uintptr_t)(dependencies),
+                            (uint64_t)(numDependencies), (uint32_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamUpdateCaptureDependencies_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamUpdateCaptureDependencies)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamUpdateCaptureDependencies, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamWaitEvent_spt_enter(uint64_t stream, uint64_t event,
+                                                                uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamWaitEvent_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamWaitEvent_spt, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (uint64_t)(uintptr_t)(event),
+                            (uint32_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamWaitEvent_spt_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamWaitEvent_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamWaitEvent_spt, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamWaitValue32_enter(uint64_t stream, const void* ptr,
+                                                              uint32_t value, uint32_t flags,
+                                                              uint32_t mask) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamWaitValue32)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamWaitValue32, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (uint64_t)(uintptr_t)(ptr),
+                            (uint32_t)(value), (uint32_t)(flags), (uint32_t)(mask), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamWaitValue32_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamWaitValue32)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamWaitValue32, (int32_t)1, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamWaitValue64_enter(uint64_t stream, const void* ptr,
+                                                              uint64_t value, uint32_t flags,
+                                                              uint64_t mask) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamWaitValue64)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamWaitValue64, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (uint64_t)(uintptr_t)(ptr),
+                            (uint64_t)(value), (uint32_t)(flags), (uint64_t)(mask), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamWaitValue64_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamWaitValue64)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamWaitValue64, (int32_t)1, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamWriteValue32_enter(uint64_t stream, const void* ptr,
+                                                               uint32_t value, uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamWriteValue32)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamWriteValue32, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (uint64_t)(uintptr_t)(ptr),
+                            (uint32_t)(value), (uint32_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamWriteValue32_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamWriteValue32)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamWriteValue32, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamWriteValue64_enter(uint64_t stream, const void* ptr,
+                                                               uint64_t value, uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamWriteValue64)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamWriteValue64, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (uint64_t)(uintptr_t)(ptr),
+                            (uint64_t)(value), (uint32_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipStreamWriteValue64_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipStreamWriteValue64)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipStreamWriteValue64, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
 
 #else /* HIP_ENABLE_LTTNG_UST not defined — all helpers are no-ops */
 
@@ -3402,6 +4140,108 @@ static inline void rocm_trace_emit_hipPointerGetAttributes_enter(const void*, co
 static inline void rocm_trace_emit_hipPointerGetAttributes_exit(hipError_t) {}
 static inline void rocm_trace_emit_hipPointerSetAttribute_enter(const void*, int32_t, uint64_t) {}
 static inline void rocm_trace_emit_hipPointerSetAttribute_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamCreate_enter() {}
+static inline void rocm_trace_emit_hipStreamCreate_exit(hipStream_t*, hipError_t) {}
+static inline void rocm_trace_emit_hipStreamCreateWithFlags_enter(uint32_t) {}
+static inline void rocm_trace_emit_hipStreamCreateWithFlags_exit(hipStream_t*, hipError_t) {}
+static inline void rocm_trace_emit_hipStreamCreateWithPriority_enter(uint32_t, int32_t) {}
+static inline void rocm_trace_emit_hipStreamCreateWithPriority_exit(hipStream_t*, hipError_t) {}
+static inline void rocm_trace_emit_hipStreamDestroy_enter(uint64_t) {}
+static inline void rocm_trace_emit_hipStreamDestroy_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamGetFlags_enter(uint64_t) {}
+static inline void rocm_trace_emit_hipStreamGetFlags_exit(uint32_t*, hipError_t) {}
+static inline void rocm_trace_emit_hipStreamGetPriority_enter(uint64_t) {}
+static inline void rocm_trace_emit_hipStreamGetPriority_exit(int32_t*, hipError_t) {}
+static inline void rocm_trace_emit_hipStreamSynchronize_enter(uint64_t) {}
+static inline void rocm_trace_emit_hipStreamSynchronize_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamWaitEvent_enter(uint64_t, uint64_t, uint32_t) {}
+static inline void rocm_trace_emit_hipStreamWaitEvent_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamQuery_enter(uint64_t) {}
+static inline void rocm_trace_emit_hipStreamQuery_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamAddCallback_enter(uint64_t, const void*, const void*,
+                                                              uint32_t) {}
+static inline void rocm_trace_emit_hipStreamAddCallback_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamAttachMemAsync_enter(uint64_t, const void*, size_t,
+                                                                 uint32_t) {}
+static inline void rocm_trace_emit_hipStreamAttachMemAsync_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamBeginCapture_enter(uint64_t, int32_t) {}
+static inline void rocm_trace_emit_hipStreamBeginCapture_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamEndCapture_enter(uint64_t) {}
+static inline void rocm_trace_emit_hipStreamEndCapture_exit(hipGraph_t*, hipError_t) {}
+static inline void rocm_trace_emit_hipStreamIsCapturing_enter(uint64_t) {}
+static inline void rocm_trace_emit_hipStreamIsCapturing_exit(int32_t*, hipError_t) {}
+static inline void rocm_trace_emit_hipExtStreamCreateWithCUMask_enter(const void*, uint32_t,
+                                                                      const void*) {}
+static inline void rocm_trace_emit_hipExtStreamCreateWithCUMask_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipExtStreamGetCUMask_enter(uint64_t, uint32_t, const void*) {}
+static inline void rocm_trace_emit_hipExtStreamGetCUMask_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamAddCallback_spt_enter(uint64_t, const void*,
+                                                                  const void*, uint32_t) {}
+static inline void rocm_trace_emit_hipStreamAddCallback_spt_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamBatchMemOp_enter(uint64_t, uint32_t, const void*,
+                                                             uint32_t) {}
+static inline void rocm_trace_emit_hipStreamBatchMemOp_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamBeginCaptureToGraph_enter(uint64_t, uint64_t,
+                                                                      const void*, const void*,
+                                                                      size_t, int32_t) {}
+static inline void rocm_trace_emit_hipStreamBeginCaptureToGraph_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamBeginCapture_spt_enter(uint64_t, int32_t) {}
+static inline void rocm_trace_emit_hipStreamBeginCapture_spt_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamCopyAttributes_enter(uint64_t, uint64_t) {}
+static inline void rocm_trace_emit_hipStreamCopyAttributes_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamEndCapture_spt_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipStreamEndCapture_spt_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamGetAttribute_enter(uint64_t, int32_t, const void*) {}
+static inline void rocm_trace_emit_hipStreamGetAttribute_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamGetCaptureInfo_enter(uint64_t, const void*,
+                                                                 const void*) {}
+static inline void rocm_trace_emit_hipStreamGetCaptureInfo_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamGetCaptureInfo_spt_enter(uint64_t, const void*,
+                                                                     const void*) {}
+static inline void rocm_trace_emit_hipStreamGetCaptureInfo_spt_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamGetCaptureInfo_v2_enter(uint64_t, const void*,
+                                                                    const void*, const void*,
+                                                                    const void*, const void*) {}
+static inline void rocm_trace_emit_hipStreamGetCaptureInfo_v2_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamGetCaptureInfo_v2_spt_enter(uint64_t, const void*,
+                                                                        const void*, const void*,
+                                                                        const void*, const void*) {}
+static inline void rocm_trace_emit_hipStreamGetCaptureInfo_v2_spt_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamGetDevResource_enter(uint64_t, const void*, int32_t) {}
+static inline void rocm_trace_emit_hipStreamGetDevResource_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamGetDevice_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipStreamGetDevice_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamGetFlags_spt_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipStreamGetFlags_spt_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamGetId_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipStreamGetId_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamGetPriority_spt_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipStreamGetPriority_spt_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamIsCapturing_spt_enter(uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipStreamIsCapturing_spt_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamQuery_spt_enter(uint64_t) {}
+static inline void rocm_trace_emit_hipStreamQuery_spt_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamSetAttribute_enter(uint64_t, int32_t, const void*) {}
+static inline void rocm_trace_emit_hipStreamSetAttribute_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamSynchronize_spt_enter(uint64_t) {}
+static inline void rocm_trace_emit_hipStreamSynchronize_spt_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamUpdateCaptureDependencies_enter(uint64_t, const void*,
+                                                                            size_t, uint32_t) {}
+static inline void rocm_trace_emit_hipStreamUpdateCaptureDependencies_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamWaitEvent_spt_enter(uint64_t, uint64_t, uint32_t) {}
+static inline void rocm_trace_emit_hipStreamWaitEvent_spt_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamWaitValue32_enter(uint64_t, const void*, uint32_t,
+                                                              uint32_t, uint32_t) {}
+static inline void rocm_trace_emit_hipStreamWaitValue32_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamWaitValue64_enter(uint64_t, const void*, uint64_t,
+                                                              uint32_t, uint64_t) {}
+static inline void rocm_trace_emit_hipStreamWaitValue64_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamWriteValue32_enter(uint64_t, const void*, uint32_t,
+                                                               uint32_t) {}
+static inline void rocm_trace_emit_hipStreamWriteValue32_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipStreamWriteValue64_enter(uint64_t, const void*, uint64_t,
+                                                               uint32_t) {}
+static inline void rocm_trace_emit_hipStreamWriteValue64_exit(hipError_t) {}
 
 #endif /* HIP_ENABLE_LTTNG_UST */
 
