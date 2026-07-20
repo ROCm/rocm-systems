@@ -2116,7 +2116,18 @@ interval_event_type_for(reader_types::track_type_t t)
         case reader_types::track_type_t::memory:
             return reader_types::event_type_t::memory_allocate;
         case reader_types::track_type_t::kernel_dispatch_pmc:
-            return reader_types::event_type_t::pmc_event;
+            // DESIGN DECISION (task 035, 2026-07-20, owner-approved Option A): a kd_pmc
+            // interval row is really identified by the PAIR (kernel_dispatch_id, pmc_id)
+            // -- both v3 and v4 kd_pmc interval SQL SELECT K.id (a
+            // rocpd_kernel_dispatch.id), not a rocpd_pmc_event.id. event_id_t carries
+            // only (type, row_id), so we type the handle as kernel_dispatch and let it
+            // resolve through the kernel_dispatch detail path (correct name/ts/te + KD
+            // props). The specific counter value / pmc_id is NOT recoverable from the
+            // handle alone -- an accepted, documented limitation (a consumer clicking a
+            // specific pmc track already has that pmc context). Returning pmc_event here
+            // was the bug: it routed the K.id to the point pmc_event detail path (WHERE
+            // rocpd_pmc_event.id = ?), resolving wrong.
+            return reader_types::event_type_t::kernel_dispatch;
         case reader_types::track_type_t::cpu_thread:
         default: return reader_types::event_type_t::region;
     }
