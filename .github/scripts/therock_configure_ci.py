@@ -84,12 +84,19 @@ GITHUB_WORKFLOWS_CI_PATTERNS = [
 
 
 def is_path_workflow_file_related_to_ci(path: str) -> bool:
-    return any(
-        fnmatch.fnmatch(path, ".github/workflows/" + pattern)
-        for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
-    ) or any(
-        fnmatch.fnmatch(path, ".github/scripts/" + pattern)
-        for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
+    return (
+        any(
+            fnmatch.fnmatch(path, ".github/workflows/" + pattern)
+            for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
+        )
+        or any(
+            fnmatch.fnmatch(path, ".github/scripts/" + pattern)
+            for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
+        )
+        or any(
+            fnmatch.fnmatch(path, ".github/actions/" + pattern)
+            for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
+        )
     )
 
 
@@ -128,7 +135,7 @@ SKIPPABLE_PATH_PATTERNS = [
     # Miscellaneous git/github files
     "*.gitignore",
     "*.pre-commit-config.*",
-    ".github/*.yml",
+    ".github/label*.yml",
     "*CODEOWNERS",
     "*LICENSE",
     "*/.markdownlint-ci2.yaml",
@@ -152,11 +159,10 @@ SKIPPABLE_PATH_PATTERNS = [
 
 def is_path_skippable(path: str) -> bool:
     """Determines if a given relative path to a file matches any skippable patterns."""
-    # A .github/workflows/ file only affects TheRock CI when it matches the
-    # CI-related patterns. Treat every other workflow file as skippable so
-    # unrelated workflows never trigger CI and don't need to be enumerated one
-    # by one.
-    if path.startswith(".github/workflows/"):
+    # A workflow or action file only affects TheRock CI when it matches the
+    # CI-related patterns. Treat other workflow and action files as skippable so
+    # they don't need to be enumerated one by one.
+    if path.startswith((".github/workflows/", ".github/actions/")):
         return not is_path_workflow_file_related_to_ci(path)
     return any(fnmatch.fnmatch(path, pattern) for pattern in SKIPPABLE_PATH_PATTERNS)
 
