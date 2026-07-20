@@ -78,7 +78,9 @@
 #include "dda_all_reduce.h"
 #include "ipc_init.h"
 #include "fabric_init.h"
+#if defined(__x86_64__) || defined(__i386__)
 #include <cpuid.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include "kernel_config.h"
@@ -294,6 +296,7 @@ static ncclResult_t ncclInit() {
   }
   INFO(NCCL_INIT, "Kernel version: %s", verStr);
   if (strstr(verStr, "cray") == NULL) {
+#if defined(__x86_64__) || defined(__i386__)
     unsigned int eax, ebx, ecx, edx;
     if (!__get_cpuid(1, &eax, &ebx, &ecx, &edx)) ecx = 0; // cpuid not supported
     NCCLCHECK(ncclTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue));
@@ -313,6 +316,7 @@ static ncclResult_t ncclInit() {
       if (!ncclIommuPassthroughOk(cmdlinePtr))
         WARN("Missing \"iommu=pt\" from kernel command line which can lead to system instablity or hang!");
     }
+#endif
 #ifndef HIP_UNCACHED_MEMORY
     char* env = getenv("HSA_FORCE_FINE_GRAIN_PCIE");
     if (env == NULL || strcmp(env, "1") != 0)
