@@ -272,13 +272,10 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
     }
     ++decoded;
 
-    // Dispatch a fresh wavefront for each instruction to avoid state leaks.
+    // Dispatch a fresh wavefront for each instruction to avoid state leaks. The
+    // previous iteration halted its wave (freeing the slot), so this always
+    // succeeds on the single-slot scratch CU.
     amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
-    if (!wf) {
-      // Reset the slot and try again.
-      cu->reset_all_wf();
-      wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
-    }
     ASSERT_NE(wf, nullptr) << "Failed to dispatch WF for " << te.mnemonic;
 
     // Execute and catch UnimplementedInst.
@@ -294,7 +291,8 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
     }
 
     // Reset the wavefront for the next instruction.
-    cu->reset_all_wf();
+    if (!wf->is_halted())
+      wf->halt();
   }
 
   size_t testable = total - skipped;
@@ -490,7 +488,8 @@ TEST(Gfx1250MemoryExecutionHarness, ExecutesRepresentativeValidAddressStores) {
   EXPECT_EQ(gpu_mem.read32(kBufferAddr + 32), 0u);
   EXPECT_EQ(gpu_mem.read32(kBufferAddr + 48), 0x22000001u);
 
-  cu.reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Rdna4ScalarSccTest, AddSubCoI32UseSignedOverflow) {
@@ -537,7 +536,8 @@ TEST(Rdna4ScalarSccTest, AddSubCoI32UseSignedOverflow) {
   run(sub, "s_sub_co_i32", 0x80000000u, 1u, 0x7FFFFFFFu, true);
   run(sub, "s_sub_co_i32", 5u, 3u, 2u, false);
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 struct ScalarCvtSccCase {
@@ -589,7 +589,8 @@ void run_scalar_cvt_preserves_scc(rj_code_arch_t arch, std::string_view arch_nam
     }
   }
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(ScalarSccTest, ScalarCvtPreservesScc) {
@@ -689,7 +690,8 @@ TEST(Cdna4Vop3Test, CmpClassF16WritesWave64UpperMaskDword) {
     EXPECT_EQ(cu->read_sgpr(sb + 0), static_cast<uint32_t>(expected_mask));
     EXPECT_EQ(cu->read_sgpr(sb + 1), static_cast<uint32_t>(expected_mask >> 32));
 
-    cu->reset_all_wf();
+    if (!wf->is_halted())
+      wf->halt();
   }
 }
 
@@ -784,7 +786,8 @@ TEST(CdnaVop3True16Test, B16I16U16OpsUseOpSelAndCdnaDestinationPolicy) {
             << arch.name << " force_scalar=" << force_scalar << " lane " << lane;
       }
 
-      cu->reset_all_wf();
+      if (!wf->is_halted())
+        wf->halt();
     }
   }
 }
@@ -823,7 +826,8 @@ TEST(Rdna3Dot2ExecutionTest, Vop2Dot2accF32F16AccumulatesDst) {
 
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), std::bit_cast<uint32_t>(16.0f));
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Rdna4Dot2True16ExecutionTest, F16AppliesVop3ModifiersAndSelectedHalves) {
@@ -863,7 +867,8 @@ TEST(Rdna4Dot2True16ExecutionTest, F16AppliesVop3ModifiersAndSelectedHalves) {
 
   EXPECT_EQ(cu->read_vgpr(vb + 3, 0), pack16(0xBEEFu, util::f32_to_f16(1.0f)));
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Rdna4Dot2True16ExecutionTest, Bf16UsesSelectedAccumulatorAndDestinationHalf) {
@@ -902,7 +907,8 @@ TEST(Rdna4Dot2True16ExecutionTest, Bf16UsesSelectedAccumulatorAndDestinationHalf
 
   EXPECT_EQ(cu->read_vgpr(vb + 3, 0), pack16(util::f32_to_bf16(16.0f), 0xCAFEu));
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 uint32_t wmma64_ab_lane(uint32_t row_or_col, uint32_t k) {
@@ -1036,7 +1042,8 @@ TEST(Gfx1250WmmaTest, F16Fp8K64MatchesReferenceLayout) {
   cu->execute_instruction(inst.get(), *wf);
   expect_reference();
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250WmmaTest, CModifierAppliesAbsBeforeNegate) {
@@ -1128,7 +1135,8 @@ TEST(Gfx1250WmmaTest, Bf16F32K32Bf16PreservesAccumulatorLayout) {
     }
   }
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250Dpp8Test, Vop2AddF16UsesPermutedSourceLanes) {
@@ -1182,7 +1190,8 @@ TEST(Gfx1250Dpp8Test, Vop2AddF16UsesPermutedSourceLanes) {
     EXPECT_EQ(raw & 0xFFFFu, util::f32_to_f16(static_cast<float>(src_lane + 1))) << "lane=" << lane;
   }
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250ExecMaskTest, CmpxNeqAndScalarOrRestoreExec) {
@@ -1238,7 +1247,8 @@ TEST(Gfx1250ExecMaskTest, CmpxNeqAndScalarOrRestoreExec) {
   cu->execute_instruction(restore_exec.get(), *wf);
   EXPECT_EQ(wf->exec(), all_lanes);
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250ExecMaskTest, Vop3CmpxGtI32KeepsInRangeLanesActive) {
@@ -1277,7 +1287,8 @@ TEST(Gfx1250ExecMaskTest, Vop3CmpxGtI32KeepsInRangeLanesActive) {
   cu->execute_instruction(in_range.get(), *wf);
   EXPECT_EQ(wf->exec(), all_lanes);
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250ExecMaskTest, Vop3CmpF32PreservesHighMaskSgprOnWave32) {
@@ -1322,7 +1333,8 @@ TEST(Gfx1250ExecMaskTest, Vop3CmpF32PreservesHighMaskSgprOnWave32) {
   EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 0), 1u << 4);
   EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 1), saved_exec);
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250True16Vop3Test, SelectedHalfArithmeticPreservesDestinationHalf) {
@@ -1395,7 +1407,8 @@ TEST(Gfx1250True16Vop3Test, SelectedHalfArithmeticPreservesDestinationHalf) {
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
     EXPECT_EQ(cu->read_vgpr(v3, lane), 0xBEEF0023u);
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250True16Vop2Test, AddF16UsesSelectedHighVsrc1AndPreservesLowDestination) {
@@ -1436,7 +1449,8 @@ TEST(Gfx1250True16Vop2Test, AddF16UsesSelectedHighVsrc1AndPreservesLowDestinatio
 
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x4600CAFEu); // high=6.0h, low preserved
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250True16Vop2Test, FmacF16HighDestinationUsesSelectedAccumulatorHalf) {
@@ -1477,7 +1491,8 @@ TEST(Gfx1250True16Vop2Test, FmacF16HighDestinationUsesSelectedAccumulatorHalf) {
 
   EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0x4B003C00u); // high=14.0h, low preserved
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250True16Vop3Test, MulLoU16UsesSelectedHighSourceHalf) {
@@ -1514,7 +1529,8 @@ TEST(Gfx1250True16Vop3Test, MulLoU16UsesSelectedHighSourceHalf) {
 
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xAAAA625Cu);
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250True16Vop3Test, CmpLtI16UsesSelectedHighSourceHalf) {
@@ -1555,7 +1571,8 @@ TEST(Gfx1250True16Vop3Test, CmpLtI16UsesSelectedHighSourceHalf) {
   EXPECT_EQ(cu->read_sgpr(sb + 0), 0u);
   EXPECT_EQ(cu->read_sgpr(sb + 1), 0xDEADBEEFu);
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250True16Vop3Test, CmpClassF16UsesSelectedMaskHalf) {
@@ -1601,7 +1618,8 @@ TEST(Gfx1250True16Vop3Test, CmpClassF16UsesSelectedMaskHalf) {
     EXPECT_EQ(cu->read_sgpr(sb + 0), 0x1u);
     EXPECT_EQ(cu->read_sgpr(sb + 1), 0xDEADBEEFu);
 
-    cu->reset_all_wf();
+    if (!wf->is_halted())
+      wf->halt();
   }
 }
 
@@ -1646,7 +1664,8 @@ TEST(Gfx1250True16Vop3Test, CmpxClassF16UsesSelectedMaskHalf) {
     EXPECT_EQ(wf->exec(), 0x1u);
     EXPECT_EQ(wf->vcc(), 0xA5A5u);
 
-    cu->reset_all_wf();
+    if (!wf->is_halted())
+      wf->halt();
   }
 }
 
@@ -1728,7 +1747,8 @@ TEST(Gfx1250True16Vop3Test, SpecialVop3OpsUseSelectedHalves) {
             "v_div_fixup_f16");
     EXPECT_EQ(cu->read_vgpr(vb + 12, 0), pack16(0xBEEFu, util::f32_to_f16(2.0f)));
 
-    cu->reset_all_wf();
+    if (!wf->is_halted())
+      wf->halt();
   }
 }
 
@@ -1768,7 +1788,8 @@ TEST(Gfx1250True16VopcTest, CmpLtI16ReadsPackedHighVsrc1) {
 
   EXPECT_EQ(wf->vcc(), 0x2u);
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Rdna4True16Vop3Test, CmpGeF16UsesSelectedHighSourceHalf) {
@@ -1814,7 +1835,8 @@ TEST(Rdna4True16Vop3Test, CmpGeF16UsesSelectedHighSourceHalf) {
     EXPECT_EQ(cu->read_sgpr(sb + 0), 0x2u);
     EXPECT_EQ(cu->read_sgpr(sb + 1), 0xDEADBEEFu);
 
-    cu->reset_all_wf();
+    if (!wf->is_halted())
+      wf->halt();
   }
 }
 
@@ -1861,7 +1883,8 @@ TEST(Rdna4True16Vop3Test, CmpClassF16UsesSelectedMaskHalf) {
     EXPECT_EQ(cu->read_sgpr(sb + 0), 0x1u);
     EXPECT_EQ(cu->read_sgpr(sb + 1), 0xDEADBEEFu);
 
-    cu->reset_all_wf();
+    if (!wf->is_halted())
+      wf->halt();
   }
 }
 
@@ -1907,7 +1930,8 @@ TEST(Rdna4True16Vop3Test, CmpClassF16InlineConstantUsesF16Broadcast) {
     EXPECT_EQ(cu->read_sgpr(sb + 0), 0x3u);
     EXPECT_EQ(cu->read_sgpr(sb + 1), 0xDEADBEEFu);
 
-    cu->reset_all_wf();
+    if (!wf->is_halted())
+      wf->halt();
   }
 }
 
@@ -1952,7 +1976,8 @@ TEST(Rdna4True16Vop3Test, CmpxClassF16UsesSelectedMaskHalf) {
     EXPECT_EQ(wf->exec(), 0x1u);
     EXPECT_EQ(wf->vcc(), 0xA5A5u);
 
-    cu->reset_all_wf();
+    if (!wf->is_halted())
+      wf->halt();
   }
 }
 
@@ -2050,7 +2075,8 @@ TEST(Rdna4True16Vop3Test, ClassF16HelperSequenceMovesMaskIntoSelectedHighHalf) {
       EXPECT_EQ(cu->read_vgpr(vb + 0, test.lane), test.expected ? 1u : 0u) << "lane " << test.lane;
     }
 
-    cu->reset_all_wf();
+    if (!wf->is_halted())
+      wf->halt();
   }
 }
 
@@ -2091,7 +2117,8 @@ TEST(Rdna4True16Vop3Test, RcpF16WritesSelectedHighDestinationHalf) {
 
     EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0xB8004000u); // high=-0.5h, low preserved
 
-    cu->reset_all_wf();
+    if (!wf->is_halted())
+      wf->halt();
   }
 }
 
@@ -2132,7 +2159,8 @@ TEST(Rdna4True16Vop3Test, CvtF32F16AppliesAbsToSelectedSourceHalf) {
 
     EXPECT_EQ(cu->read_vgpr(vb + 4, 0), 0x40800000u);
 
-    cu->reset_all_wf();
+    if (!wf->is_halted())
+      wf->halt();
   }
 }
 
@@ -2182,7 +2210,8 @@ TEST(Rdna4True16Vop3Test, AddF16UsesSelectedHalvesAndPreservesDestinationHalf) {
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0), pack16(0xBEEFu, util::f32_to_f16(5.0f)));
     EXPECT_EQ(cu->read_vgpr(vb + 2, 1), pack16(0x1234u, util::f32_to_f16(-0.5f)));
 
-    cu->reset_all_wf();
+    if (!wf->is_halted())
+      wf->halt();
   }
 }
 
@@ -2243,7 +2272,8 @@ TEST(Rdna4True16Vop3Test, AddF16DppPreservesMaskedDestinationHalf) {
   EXPECT_EQ(cu->read_vgpr(vb + kDst, 2), pack16(0x4002u, util::f32_to_f16(11.5f)));
   EXPECT_EQ(cu->read_vgpr(vb + kDst, 16), pack16(0x4010u, 0x7010u));
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Rdna4True16Vop3Test, FmacF16UsesSelectedAccumulatorHalfAndPreservesDestinationHalf) {
@@ -2291,7 +2321,8 @@ TEST(Rdna4True16Vop3Test, FmacF16UsesSelectedAccumulatorHalfAndPreservesDestinat
     EXPECT_EQ(cu->read_vgpr(vb + 3, 0), pack16(0xBEEFu, util::f32_to_f16(10.0f)));
     EXPECT_EQ(cu->read_vgpr(vb + 3, 1), pack16(0x1234u, util::f32_to_f16(0.5f)));
 
-    cu->reset_all_wf();
+    if (!wf->is_halted())
+      wf->halt();
   }
 }
 
@@ -2352,7 +2383,8 @@ TEST(Rdna4True16Vop3Test, TernaryI16U16UsesSelectedHalvesAndPreservesDestination
     execute(/*op=*/0x24E, /*dst=*/14, /*src0=*/260, /*src1=*/261, /*src2=*/262, "v_max3_u16", 7u);
     execute(/*op=*/0x251, /*dst=*/15, /*src0=*/260, /*src1=*/261, /*src2=*/262, "v_med3_u16", 5u);
 
-    cu->reset_all_wf();
+    if (!wf->is_halted())
+      wf->halt();
   }
 }
 
@@ -2434,7 +2466,8 @@ TEST(Rdna4True16Vop3Test, SpecialVop3OpsUseSelectedHalves) {
             "v_div_fixup_f16");
     EXPECT_EQ(cu->read_vgpr(vb + 12, 0), pack16(0xBEEFu, util::f32_to_f16(2.0f)));
 
-    cu->reset_all_wf();
+    if (!wf->is_halted())
+      wf->halt();
   }
 }
 
@@ -2484,7 +2517,8 @@ TEST(Rdna4Vop3CndmaskTest, B32AppliesNegModifierBeforeSelect) {
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x11223344u);
     EXPECT_EQ(cu->read_vgpr(vb + 2, 1), 0xBF000000u);
 
-    cu->reset_all_wf();
+    if (!wf->is_halted())
+      wf->halt();
   }
 }
 
@@ -2544,7 +2578,8 @@ TEST(Rdna4Atan2F16Test, SignedHalfCompareFeedsQuadrantSelect) {
     cu->execute_instruction(f16_cmp.get(), *wf);
     EXPECT_EQ(wf->vcc() & 0x3u, 0x1u);
 
-    cu->reset_all_wf();
+    if (!wf->is_halted())
+      wf->halt();
   }
 }
 
@@ -2589,7 +2624,8 @@ TEST(Rdna4Atan2F16Test, DualCndmaskReadsOldPairedSlotSource) {
   EXPECT_EQ(cu->read_vgpr(vb + 5, 0), 0x4016CBE4u);
   EXPECT_EQ(cu->read_vgpr(vb + 5, 1), 0x4016CBE4u);
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Rdna4Atan2F16Test, TailSequenceKeepsNegativeXQuadrant) {
@@ -2648,7 +2684,8 @@ TEST(Rdna4Atan2F16Test, TailSequenceKeepsNegativeXQuadrant) {
 
   EXPECT_EQ(cu->read_vgpr(vb + 1, 0) & 0xFFFFu, 0xC0B6u);
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Rdna4Vop3pFmaMixTest, F32AppliesAbsModifiersFromNegHi) {
@@ -2759,7 +2796,8 @@ TEST(Rdna4Vop3pFmaMixTest, F32AppliesAbsModifiersFromNegHi) {
     cu->execute_instruction(atanh_scale_inst.get(), *wf);
     EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0xBBC9BEEFu);
 
-    cu->reset_all_wf();
+    if (!wf->is_halted())
+      wf->halt();
   }
 }
 
@@ -2845,7 +2883,8 @@ TEST(Rdna4True16Vop3Test, B16BitwiseLiteralPreservesInputSignBit) {
     cu->execute_instruction(xor_inst.get(), *wf);
     EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0xCAFEB4D0u);
 
-    cu->reset_all_wf();
+    if (!wf->is_halted())
+      wf->halt();
   }
 }
 
@@ -2892,7 +2931,8 @@ TEST(Gfx1250True16Vop3Test, CndmaskB16UsesSelectedSourceHalfAndPreservesDestinat
   EXPECT_EQ(cu->read_vgpr(vb + 2, 1), 0x1234CAFEu);
   EXPECT_EQ(cu->read_vgpr(vb + 2, 2), 0xDEADCAFEu);
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250True16Vop3Test, LshrrevB16UsesSelectedSourceHalfAndPreservesDestinationHalf) {
@@ -2929,7 +2969,8 @@ TEST(Gfx1250True16Vop3Test, LshrrevB16UsesSelectedSourceHalfAndPreservesDestinat
 
   EXPECT_EQ(cu->read_vgpr(vb + 16, 0), 0x00125555u);
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250True16Vop3Test, Bitop3B16UsesSelectedSourceHalfAndPreservesDestinationHalf) {
@@ -2992,7 +3033,8 @@ TEST(Gfx1250True16Vop3Test, Bitop3B16UsesSelectedSourceHalfAndPreservesDestinati
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
     EXPECT_EQ(cu->read_vgpr(v2, lane), 0xA5A50000u | expected);
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250True16Vop1Test, MovB16HighDestinationPreservesLowHalf) {
@@ -3030,7 +3072,8 @@ TEST(Gfx1250True16Vop1Test, MovB16HighDestinationPreservesLowHalf) {
 
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x12345555u);
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Rdna3True16Vop1Test, MovB16HighDestinationPreservesLowHalf) {
@@ -3068,7 +3111,8 @@ TEST(Rdna3True16Vop1Test, MovB16HighDestinationPreservesLowHalf) {
 
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x12345555u);
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Rdna3DppTest, VAddF32RowShrMatchesWaveReduceSequence) {
@@ -3134,7 +3178,8 @@ TEST(Rdna3DppTest, VAddF32RowShrMatchesWaveReduceSequence) {
     cu->execute_instruction(final_add_inst.get(), *wf);
     EXPECT_EQ(cu->read_vgpr(vb + 3, 31), std::bit_cast<uint32_t>(-2.0f));
 
-    cu->reset_all_wf();
+    if (!wf->is_halted())
+      wf->halt();
   }
 }
 
@@ -3181,7 +3226,8 @@ TEST(Rdna3ScalarOperandTest, NullSdstDoesNotClobberM0) {
   EXPECT_EQ(cu->read_vgpr(vb + 5, 1), 0u);
   EXPECT_EQ(cu->read_vgpr(vb + 5, 2), 0xCAFECAFEu);
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250True16Vop1Test, CvtF16F32HighDestinationPreservesLowHalf) {
@@ -3219,7 +3265,8 @@ TEST(Gfx1250True16Vop1Test, CvtF16F32HighDestinationPreservesLowHalf) {
 
   EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0x3C005555u);
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250CvtFp8Test, F16DecodeVop3UsesSelectedByte) {
@@ -3266,7 +3313,8 @@ TEST(Gfx1250CvtFp8Test, F16DecodeVop3UsesSelectedByte) {
   cu->execute_instruction(bf8_inst.get(), *wf);
   EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 0xBEEF3C00u);
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250CvtFp8Test, F32DecodeVop3UsesSelectedByte) {
@@ -3311,7 +3359,47 @@ TEST(Gfx1250CvtFp8Test, F32DecodeVop3UsesSelectedByte) {
   cu->execute_instruction(bf8_inst.get(), *wf);
   EXPECT_EQ(cu->read_vgpr(vb + 1, 0), std::bit_cast<uint32_t>(1.0f));
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(Gfx1250CvtFp8Test, E4M3OverflowProducesNaN) {
+  amdgpu::GpuMemory gpu_mem("gfx1250_cvt_fp8_overflow_mem");
+  amdgpu::L2Cache l2("gfx1250_cvt_fp8_overflow_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  const uint32_t sb = wf->sgpr_alloc().base;
+  cu->write_sgpr(sb + 5, std::bit_cast<uint32_t>(768.0f));
+  cu->write_sgpr(sb + 6, std::bit_cast<uint32_t>(-768.0f));
+  cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
+
+  // v_cvt_pk_fp8_f32 v2.l, s5, s6
+  const uint32_t words[] = {0xD7690002U, 0x02000C05U};
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_pk_fp8_f32");
+  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FF7Fu);
+
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250CvtFp8Test, E5M3ClampSelectsUnsignedFp8Format) {
@@ -3394,7 +3482,8 @@ TEST(Gfx1250CvtFp8Test, E5M3ClampSelectsUnsignedFp8Format) {
   cu->execute_instruction(sr_f16_inst.get(), *wf);
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xDE38BEEFu);
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250CvtScaleTest, UnpackUsesSelectedE8M0ScaleByte) {
@@ -3448,7 +3537,8 @@ TEST(Gfx1250CvtScaleTest, UnpackUsesSelectedE8M0ScaleByte) {
   for (uint32_t i = 18; i <= 33; ++i)
     EXPECT_EQ(cu->read_vgpr(vb + i, 0), std::bit_cast<uint32_t>(2.0f)) << "vgpr=" << i;
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250DsSwizzleTest, VdsBroadcastReadsAddrSource) {
@@ -3507,7 +3597,8 @@ TEST(Gfx1250DsSwizzleTest, VdsBroadcastReadsAddrSource) {
     EXPECT_EQ(cu->read_vgpr(vb + 2, lane), 0x1000u + src_lane) << "lane=" << lane;
   }
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddF32ReturnsOldValue) {
@@ -3549,7 +3640,8 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddF32ReturnsOldValue) {
   EXPECT_EQ(cu.read_vgpr(wf->vgpr_alloc().base + 0, 0), std::bit_cast<uint32_t>(kOld));
   EXPECT_EQ(gpu_mem.read32(kAddr), std::bit_cast<uint32_t>(kOld + kAdd));
 
-  cu.reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddF32AllowsDstSrcAlias) {
@@ -3591,7 +3683,8 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddF32AllowsDstSrcAlias) {
   EXPECT_EQ(cu.read_vgpr(wf->vgpr_alloc().base + 1, 0), std::bit_cast<uint32_t>(kOld));
   EXPECT_EQ(gpu_mem.read32(kAddr), std::bit_cast<uint32_t>(kOld + kAdd));
 
-  cu.reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddU64CopiesHighSourceDword) {
@@ -3633,7 +3726,8 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddU64CopiesHighSourceDword) {
 
   EXPECT_EQ(gpu_mem.read64(kAddr), kOld + kAdd);
 
-  cu.reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(Gfx1250AtomicReturnTest, GlobalAtomicCmpswapB32ReturnsOldValue) {
@@ -3676,7 +3770,8 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicCmpswapB32ReturnsOldValue) {
   EXPECT_EQ(cu.read_vgpr(wf->vgpr_alloc().base + 0, 0), kOld);
   EXPECT_EQ(gpu_mem.read32(kAddr), kNew);
 
-  cu.reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 /// @brief Targeted test for s_setreg_imm32_b32: verifies that the imm32
@@ -3722,7 +3817,8 @@ TEST(HwregTest, SetregImm32WritesStatus) {
   EXPECT_EQ(wf->status_raw(), kImm32Value)
       << "s_setreg_imm32_b32 did not write imm32 to STATUS register";
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 /// @brief Targeted test for s_setreg_imm32_b32 with partial bitfield write.
@@ -3763,7 +3859,8 @@ TEST(HwregTest, SetregImm32PartialBitfield) {
   // all other bits should be unchanged from 0xAAAAAAAA.
   EXPECT_EQ(wf->status_raw(), 0xAAAAAfAAu) << "Partial bitfield write to STATUS incorrect";
 
-  cu->reset_all_wf();
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 } // namespace

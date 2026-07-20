@@ -54,7 +54,7 @@ struct TopologyBuildResult {
 ///   SimulationEngine engine(loaded.engine_config);
 ///   engine.topology().set_root(loaded.take_root());
 ///   loaded.wire_links(engine.topology());
-///   engine.build();
+///   engine.create();
 /// @endcode
 struct LoadedConfig {
   simdojo::SimulationEngine::Config engine_config;

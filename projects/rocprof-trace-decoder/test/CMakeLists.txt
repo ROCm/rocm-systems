@@ -16,6 +16,10 @@ option(UNIT_TESTS "Build unit tests" ON)
 option(BUILD_INTEGRATION_TESTS "Build integration tests" ON)
 option(DISABLE_COMGR "Disable dependency on disassembly" OFF)
 
+if(NOT DEFINED TTD_PROJECT_SOURCE_DIR)
+    set(TTD_PROJECT_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
+endif()
+
 # Allow parent CMakeLists.txt to disable unit tests via BUILD_UNIT_TESTS
 if(DEFINED BUILD_UNIT_TESTS AND NOT BUILD_UNIT_TESTS)
     set(UNIT_TESTS OFF)
@@ -38,6 +42,36 @@ enable_testing()
 # Build unit tests
 if(UNIT_TESTS)
     add_subdirectory(unit)
+endif()
+
+if(BUILD_MARKERS)
+    if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR AND NOT TARGET SQTTInstrumentPass)
+        add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../markers ${CMAKE_CURRENT_BINARY_DIR}/markers)
+    endif()
+
+    find_program(
+        HIPCC_EXECUTABLE
+        NAMES hipcc
+        HINTS /opt/rocm/bin)
+    if(HIPCC_EXECUTABLE AND TARGET SQTTInstrumentPass)
+        add_test(NAME markers-python COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/markers/run_tests.py)
+        set_tests_properties(
+            markers-python
+            PROPERTIES
+                TIMEOUT
+                300
+                LABELS
+                "markers;integration-tests"
+                WORKING_DIRECTORY
+                ${TTD_PROJECT_SOURCE_DIR}
+                ENVIRONMENT
+                "HIPCC=${HIPCC_EXECUTABLE};SQTT_BUILD_DIR=${CMAKE_BINARY_DIR};SQTT_PASS_PLUGIN=$<TARGET_FILE:SQTTInstrumentPass>"
+        )
+    elseif(NOT TARGET SQTTInstrumentPass)
+        message(WARNING "SQTTInstrumentPass target not found; skipping SQTT marker Python tests")
+    else()
+        message(WARNING "hipcc not found; skipping SQTT marker Python tests")
+    endif()
 endif()
 
 if(BUILD_INTEGRATION_TESTS)
@@ -77,6 +111,8 @@ if(BUILD_INTEGRATION_TESTS)
     set(CSV_PY ${CMAKE_CURRENT_SOURCE_DIR}/csv_test.py)
     set(ATT_TOOL_PY ${CMAKE_CURRENT_SOURCE_DIR}/../python/att_tool.py)
     set(PYTHON_API_PY ${CMAKE_CURRENT_SOURCE_DIR}/python_api_test.py)
+    set(CODEGEN_TEST_PY ${CMAKE_CURRENT_SOURCE_DIR}/codegen_test.py)
+    set(ATT_TOOL_TEST_PY ${CMAKE_CURRENT_SOURCE_DIR}/att_tool_test.py)
 
     set(LIB_PATH ${CMAKE_BINARY_DIR}/lib/librocprof-trace-decoder${CMAKE_SHARED_LIBRARY_SUFFIX})
     set(SANITIZED_LIB_PATH ${CMAKE_BINARY_DIR}/lib/librocprof-trace-decoder-sanitized${CMAKE_SHARED_LIBRARY_SUFFIX})
@@ -111,6 +147,27 @@ if(BUILD_INTEGRATION_TESTS)
                    ${TEST_BIN_DIR}
                    ENVIRONMENT
                    "${PYTHON_API_TEST_ENV}")
+
+    add_test(NAME codegen-funcmap-metadata COMMAND ${Python3_EXECUTABLE} ${CODEGEN_TEST_PY})
+    set_tests_properties(
+        codegen-funcmap-metadata
+        PROPERTIES TIMEOUT
+                   30
+                   LABELS
+                   "integration-tests"
+                   ENVIRONMENT
+                   "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
+
+    add_test(NAME att-marker-clock-correction COMMAND ${Python3_EXECUTABLE} ${ATT_TOOL_TEST_PY})
+    set_tests_properties(
+        att-marker-clock-correction
+        PROPERTIES
+            TIMEOUT
+            30
+            LABELS
+            "integration-tests"
+            ENVIRONMENT
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
 
     if(DEFINED ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR)
         configure_file(python_api_install_test.cmake.in python_api_install_test.cmake @ONLY)

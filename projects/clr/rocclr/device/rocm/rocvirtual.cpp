@@ -491,8 +491,7 @@ void Timestamp::ExtractSignalTiming(ProfilingSignal* signal,
   if ((command().type() == CL_COMMAND_TASK) && (signal->flags_.isPacketDispatch_ == true)) {
     static_cast<amd::AccumulateCommand&>(command()).addTimestamps(
         static_cast<uint64_t>(sig_start * ticksToTime_),
-        static_cast<uint64_t>(sig_end * ticksToTime_),
-        signal->queue_index_);
+        static_cast<uint64_t>(sig_end * ticksToTime_));
   }
 
   signal->flags_.done_ = true;
@@ -1560,9 +1559,12 @@ bool VirtualGPU::dispatchAqlPacket(hsa_barrier_and_packet_t* packet, uint16_t he
 bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPacketData,
                                             const std::vector<uint32_t>& validFullHeaders,
                                             amd::AccumulateCommand* vcmd, bool attach_signal,
-                                            const std::vector<const std::string*>* kernelNames,
                                             bool pre_patched, bool blocking,
                                             const std::vector<uint8_t>* flatMetadataData) {
+  // Both base and ext kernel dispatch packets place kernel_object at the same offset.
+  static_assert(offsetof(hsa_kernel_dispatch_packet_t, kernel_object) ==
+                    offsetof(hsa_amd_ext_kernel_dispatch_packet_t, kernel_object),
+                "kernel_object offset mismatch between base and ext dispatch packets");
   if (vcmd == nullptr || flatPacketData.empty() || validFullHeaders.empty()) {
     return false;
   }
@@ -1571,14 +1573,9 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
   if (flatPacketData.size() != numPackets * 64) {
     return false;
   }
-
   std::scoped_lock lock(execution());
   profilingBegin(*vcmd);
   dispatchBlockingWait(nullptr);
-
-  if (kernelNames != nullptr && vcmd->profilingInfo().enabled_) {
-    vcmd->addKernelNames(*kernelNames);
-  }
 
   const uint32_t queueSize = gpu_queue_->size;
   const uint32_t queueMask = queueSize - 1;
@@ -1696,8 +1693,11 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
       lastSlotPtr->completion_signal = Barriers().ActiveSignal();
     }
 
-    // Per-packet fixups: profiling signals, kernel-name printing, and inline barrier logging.
-    if (timestamp_ != nullptr || IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
+    // Per-packet fixups: profiling signals, kernel-name collection, kernel-name
+    // printing, and inline barrier logging.
+    const bool needKernelNames = amd::activity_prof::IsEnabled(OP_ID_DISPATCH);
+    if (timestamp_ != nullptr || needKernelNames ||
+        IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
         IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
       for (size_t i = chunkStart; i < chunkEnd; ++i) {
         const uint64_t slotIdx = (startIndex + i) & queueMask;
@@ -1736,12 +1736,18 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
             slot->reserved2 = timestamp_->command().profilingInfo().correlation_id_;
           }
         }
-        if ((IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
-             IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) &&
-            kernelNames != nullptr && i < kernelNames->size() && isKernelDispatch) {
+        if (isKernelDispatch && (needKernelNames ||
+            IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
+            IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL))) {
+          auto kit = dev().KernelMap().find(slot->kernel_object);
+          const char* kname = kit != dev().KernelMap().end()
+                                  ? kit->second.getDemangledName().c_str()
+                                  : "<unknown>";
+          if (needKernelNames) {
+            vcmd->addKernelName(kname);
+          }
           ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2, "Graph ShaderName : %s, device id : %u",
-                  (*kernelNames)[i] != nullptr ? (*kernelNames)[i]->c_str() : "<null>",
-                  dev().index());
+                  kname, dev().index());
           if (isBaseKernelDispatch) {
             logAqlDispatchPacket(roc_device_, gpu_queue_, hdr, slot, slotIdx, priority_);
           } else {

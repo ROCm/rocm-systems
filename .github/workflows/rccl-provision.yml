@@ -1,0 +1,149 @@
+name: RCCL provision
+
+# Per-cluster shared setup for the RCCL suites: fetch ROCm on the head node, then
+# build GPU-aware OpenMPI once on a compute node, into that cluster's cache. Suites
+# (rccl-suite.yml) fan out from this so they share one warm ROCm/OpenMPI cache
+# instead of each re-fetching/rebuilding. Reusable: rccl-ci.yml calls it once per
+# cluster with that cluster's runner label / cache_root / partition. Exposes the
+# resolved ROCm version + channel as outputs for the suites
+# (to locate the same cached tree) and for cleanup (to release its reference).
+on:
+  workflow_call:
+    inputs:
+      runs_on:
+        description: 'Runner label(s) as a JSON array string for this cluster.'
+        type: string
+        required: false
+        default: '["ruby-linux-slurm-scale-runner"]'
+      cache_root:
+        description: 'Cluster-local ROCm/OpenMPI cache root (RCCL_DEVICE_API_CACHE).'
+        type: string
+        required: false
+        default: '/apps/rccl-ci'
+      partition:
+        description: 'SLURM partition for the OpenMPI build.'
+        type: string
+        required: false
+        default: 'interactive'
+      reservation:
+        description: 'SLURM reservation to pin the OpenMPI build to (e.g. "rccl_ci"). Empty = none.'
+        type: string
+        required: false
+        default: ''
+      rocm_release:
+        description: 'ROCm version prefix (e.g. "7.14"); empty = newest available.'
+        type: string
+        required: false
+        default: '7.14'
+      rocm_amdgpu_family:
+        description: 'Specific GPU family fallback if no multi-arch tarball is found.'
+        type: string
+        required: false
+        default: 'gfx950-dcgpu'
+    outputs:
+      rocm_release:
+        description: 'Exact ROCm version resolved by fetch-rocm.sh.'
+        value: ${{ jobs.provision-rocm.outputs.rocm_release }}
+      rocm_channel:
+        description: 'Resolved channel (release|prerelease|nightly), recorded for reference.'
+        value: ${{ jobs.provision-rocm.outputs.rocm_channel }}
+
+permissions:
+  contents: read
+
+jobs:
+  # Download ROCm once up front: avoids the suites racing on the cache path and
+  # pins them to one resolved version (the query is a prefix like "7.14").
+  provision-rocm:
+    name: Provision ROCm
+    runs-on: ${{ fromJSON(inputs.runs_on) }}
+    outputs:
+      rocm_release: ${{ steps.fetch.outputs.rocm_release }}
+      rocm_channel: ${{ steps.fetch.outputs.rocm_channel }}
+    env:
+      ROCM_RELEASE: ${{ inputs.rocm_release }}
+      ROCM_AMDGPU_FAMILY: ${{ inputs.rocm_amdgpu_family }}
+      RCCL_DEVICE_API_CACHE: ${{ inputs.cache_root }}
+      # Stability-first cascade used by fetch-rocm.sh (no token needed).
+      RCCL_ROCM_CHANNELS: 'release prerelease nightly'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          # Sparse-checkout: only the CI helper scripts are needed here.
+          sparse-checkout: projects/rccl/tools/ci
+
+      - name: Fetch ROCm
+        id: fetch
+        env:
+          RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}
+          # Reference the shared build so cleanup only GCs it once the last run is done.
+          ROCM_REF_TOKEN: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          "${{ github.workspace }}/projects/rccl/tools/ci/lib/fetch-rocm.sh"
+          # shellcheck disable=SC1091
+          source "${{ github.workspace }}/.ci-out/rocm.env"
+          echo "rocm_release=${ROCM_RELEASE}" >> "$GITHUB_OUTPUT"
+          # The resolved channel is recorded in the cache tree's .stamp.
+          channel="$(sed -n 's/^channel=//p' "${ROCM_PATH}/.stamp" 2>/dev/null || true)"
+          echo "rocm_channel=${channel}" >> "$GITHUB_OUTPUT"
+
+  # Build OpenMPI once on a compute node (after ROCm), so all suites on this
+  # cluster share a warm cache instead of each rebuilding it / racing the install.
+  provision-ompi:
+    name: Provision OpenMPI
+    needs: provision-rocm
+    runs-on: ${{ fromJSON(inputs.runs_on) }}
+    env:
+      ROCM_RELEASE: ${{ needs.provision-rocm.outputs.rocm_release }}
+      ROCM_AMDGPU_FAMILY: ${{ inputs.rocm_amdgpu_family }}
+      RCCL_DEVICE_API_CACHE: ${{ inputs.cache_root }}
+      RCCL_SLURM_PARTITION: ${{ inputs.partition }}
+      RCCL_SLURM_RESERVATION: ${{ inputs.reservation }}
+      RCCL_ROCM_CHANNELS: 'release prerelease nightly'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: projects/rccl/tools/ci
+
+      # fetch-rocm.sh re-resolves the version/family/channel (to locate the cache
+      # tree) even on a cache hit; the public CDNs need no token.
+      - name: Resolve ROCm from cache
+        env:
+          RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}
+        run: "${{ github.workspace }}/projects/rccl/tools/ci/lib/fetch-rocm.sh"
+
+      - name: Build OpenMPI on a compute node
+        env:
+          RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          ci_lib="${{ github.workspace }}/projects/rccl/tools/ci/lib"
+          python3 "${ci_lib}/submit_slurm_job.py" \
+            --script "${ci_lib}/build-ompi.sbatch" \
+            --chdir "${{ github.workspace }}/.ci-out/ompi-logs" \
+            --partition "${RCCL_SLURM_PARTITION}" \
+            --reservation "${RCCL_SLURM_RESERVATION}" \
+            --export "ALL,RCCL_DEVICE_API_WORKDIR,RCCL_DEVICE_API_CACHE,ROCM_RELEASE,ROCM_AMDGPU_FAMILY"
+
+      # Surface the compute-node OpenMPI build logs (rccl-ompi-<jobid>.{out,err})
+      # inline; without this a SLURM-side failure is invisible in the Actions log
+      # and the logs are wiped by the next run's `git clean -ffdx`.
+      - name: Dump OpenMPI build logs
+        if: always()
+        run: |
+          logs_dir="${{ github.workspace }}/.ci-out/ompi-logs"
+          shopt -s nullglob
+          dumped=0
+          for f in "${logs_dir}"/rccl-ompi-*.out "${logs_dir}"/rccl-ompi-*.err; do
+            echo "::group::ompi: $(basename "${f}")"
+            cat "${f}" || true
+            echo "::endgroup::"
+            dumped=1
+          done
+          if [[ "${dumped}" -eq 0 ]]; then
+            echo "No OpenMPI build logs found under ${logs_dir}"
+            ls -la "${logs_dir}" 2>/dev/null || echo "(logs dir missing)"
+          fi

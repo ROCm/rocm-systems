@@ -55,7 +55,7 @@ uint32_t query_gb_addr_config(const std::string &config_path, uint32_t gpu_id) {
   engine.topology().set_root(std::move(vm));
   loaded.wire_links(engine.topology());
   soc->wire_backing(engine.topology());
-  engine.build();
+  engine.create();
   engine.register_as_primary();
 
   driver->setup_topology(loaded.device, num_xcds);
@@ -92,7 +92,7 @@ protected:
     engine_->topology().set_root(std::move(vm));
     loaded_.wire_links(engine_->topology());
     soc->wire_backing(engine_->topology());
-    engine_->build();
+    engine_->create();
     engine_->register_as_primary();
 
     driver_->setup_topology(loaded_.device, num_xcds);
