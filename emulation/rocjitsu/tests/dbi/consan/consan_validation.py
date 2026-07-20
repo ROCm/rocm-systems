@@ -1577,6 +1577,14 @@ def _run_process(
             _stop_process_group(process, signal.SIGKILL)
             output, _ = process.communicate()
         output = (output or "") + f"\nvalidation timeout after {timeout}s\n"
+    except BaseException:
+        _stop_process_group(process, signal.SIGTERM)
+        try:
+            process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            _stop_process_group(process, signal.SIGKILL)
+            process.communicate()
+        raise
     elapsed = time.monotonic() - start
     log_path.write_text(output, encoding="utf-8")
     return returncode, elapsed, output
