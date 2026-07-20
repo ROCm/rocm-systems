@@ -122,6 +122,8 @@ for i in range(streamListSize):
                 sys.stdout.write(line)
                 sys.stdout.flush()
                 outputLog.write(line)
+        if process.returncode != 0:
+            sys.exit(process.returncode)
     print("======================================================================================\n")
 
 fileString = 'Input file'
