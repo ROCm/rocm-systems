@@ -230,10 +230,9 @@ def calc_unroll_and_pipeline_for_local_arch():
     elif "gfx908" == gfx_name or ("gfx942" == gfx_name and cu_count > 80):
       return (["2"], all_pipelines)
     elif "gfx1250" == gfx_name:
-      # gfx1250 (MI450) benefits from larger unrolls; keep 4 as the safe default
-      # and additionally build 8/16/32 so RCCL_UNROLL_FACTOR=3, =4 or =5 is
-      # usable without falling off into empty ncclDevFuncTable_8/_16/_32 slots.
-      return (["4", "8", "16", "32"], all_pipelines)
+      # gfx1250 (MI450) benefits from larger unrolls; build only 16 and 32
+      # (32 is the default, see commSetUnrollFactor).
+      return (["16", "32"], all_pipelines)
     else:
       return (["4"], all_pipelines)
   else:
@@ -536,6 +535,17 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
         key = ((coll_idx & 0x3F))
       
       out(f'  {{{key}, {fn_id}}}, {comment}\n')
+  out("};\n")
+
+  # Which unroll-factor tables were actually generated for this build. The host
+  # (commSetUnrollFactor) uses this to reject an RCCL_UNROLL_FACTOR that maps to
+  # an empty ncclDevFuncTable_* / NCCL_CALL_FUNCTIONS_* slot, which would
+  # otherwise dispatch to a nullptr and segfault on the device.
+  out("\n")
+  out("// Indexed by unroll-factor enum (NCCL_UNROLL_1 .. NCCL_UNROLL_32).\n")
+  out("bool const ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS] = {\n")
+  for u in all_unrolls:
+    out("  %s, // unroll %s\n" % ("true" if u in local_unroll else "false", u))
   out("};\n")
 
 # Maps to .cu filename which implements this func. The only constraint is that

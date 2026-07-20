@@ -786,6 +786,10 @@ inline bool ncclNvlsSupported(int devRedOp, int type) {
 // Map the uint64_t key to funcIdx
 extern std::unordered_map<uint64_t, int> ncclDevFuncNameToId;
 
+// Which unroll-factor tables were generated in this build, indexed by the
+// NCCL_UNROLL_* enum. Generated in host_table.cpp by generate.py.
+extern bool const ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS];
+
 // `ncclDevFuncId()` needs to be in sync with 'all_colls' in generate.py
 inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, int acc = 0, int pipeline = 0) {
   int row = -1;

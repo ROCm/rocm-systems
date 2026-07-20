@@ -900,6 +900,12 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
       WARN("Invalid RCCL_UNROLL_FACTOR %d specified. Valid values are 0 to %d corresponding to unroll factors of 1, 2, 4, 8, 16, and 32 respectively.", comm->unroll, NCCL_NUM_UNROLLS - 1);
       return ncclInvalidArgument;
     }
+    if(!ncclDevFuncUnrollGenerated[comm->unroll]) {
+      WARN("RCCL_UNROLL_FACTOR %d (unroll %d) was not built for arch %s; its device function table is empty and dispatching to it would crash. "
+           "Rebuild with this unroll factor, or select one that was generated for this build.",
+           comm->unroll, (int) (pow(2.0, (double)comm->unroll)), comm->archName);
+      return ncclInvalidArgument;
+    }
     INFO(NCCL_INIT, "RCCL Unroll Factor (user set): %d", (int) (pow(2.0, (double)comm->unroll)));
     return ncclSuccess;
   }
@@ -911,8 +917,26 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
   }
   else if(IsArchMatch(comm->archName, "gfx908") || ((IsArchMatch(comm->archName, "gfx942") && comm->cuCount > 80)))
     comm->unroll = NCCL_UNROLL_2;
+  else if(IsArchMatch(comm->archName, "gfx1250"))
+    comm->unroll = NCCL_UNROLL_32;
   else
     comm->unroll = NCCL_UNROLL_4;
+
+  // Guard against a default that wasn't built for this arch (e.g. the generation
+  // matrix was narrowed). Fall back to any generated unroll rather than segfault.
+  if(!ncclDevFuncUnrollGenerated[comm->unroll]) {
+    int fallback = -1;
+    for(int u = NCCL_NUM_UNROLLS - 1; u >= NCCL_UNROLL_1; u--) {
+      if(ncclDevFuncUnrollGenerated[u]) { fallback = u; break; }
+    }
+    if(fallback < 0) {
+      WARN("No unroll-factor device function tables were generated for arch %s.", comm->archName);
+      return ncclInvalidUsage;
+    }
+    WARN("Default RCCL unroll factor %d was not built for arch %s; falling back to %d. Set RCCL_UNROLL_FACTOR to override.",
+         (int) (pow(2.0, (double)comm->unroll)), comm->archName, (int) (pow(2.0, (double)fallback)));
+    comm->unroll = fallback;
+  }
 
   INFO(NCCL_INIT, "RCCL Unroll Factor (pre-set): %d", (int) (pow(2.0, (double)comm->unroll)));
   return ncclSuccess;
