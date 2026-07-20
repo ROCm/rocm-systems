@@ -571,7 +571,7 @@ static bool test_hipMallocFromPoolAsync_MThread_CommonMpool(enum eTestValue test
   }
   // Spawn the test threads
   for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
-    tests.push_back(std::thread(thread_Test2, mem_pool_common, stream[idx], N, idx));
+    tests.push_back(std::thread(thread_Test, mem_pool_common, stream[idx], N, idx));
   }
   // Wait for all threads to complete
   for (std::thread& t : tests) {
