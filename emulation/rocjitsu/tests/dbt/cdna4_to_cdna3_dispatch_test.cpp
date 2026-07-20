@@ -1067,7 +1067,7 @@ void run_flash_attention_triton(const std::vector<uint8_t> &elf_bytes, const Dis
 
   if (observed)
     *observed = std::move(o_host);
-  // Resources released by HsaDispatchResources::~ (queue first).
+  // Resources released by HsaDispatchResources destructor (queue first).
 }
 
 } // namespace
