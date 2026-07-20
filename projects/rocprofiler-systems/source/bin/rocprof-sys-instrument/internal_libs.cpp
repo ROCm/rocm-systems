@@ -8,19 +8,21 @@
 #include "binary/scope_filter.hpp"
 #include "binary/symbol.hpp"
 #include "common/defines.h"
+#include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
+#include "common/path.hpp"
 #include "core/demangler.hpp"
 #include "core/utility.hpp"
 #include "fwd.hpp"
 #include "log.hpp"
 
+#include <spdlog/fmt/fmt.h>
 #include <timemory/components/rusage/components.hpp>
 #include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/environment/types.hpp>
 #include <timemory/log/macros.hpp>
 #include <timemory/utility/filepath.hpp>
-#include <timemory/utility/join.hpp>
 #include <timemory/utility/types.hpp>
 
 #include <algorithm>
@@ -34,8 +36,6 @@ namespace
 {
 namespace filepath = ::tim::filepath;
 using rocprofsys::get_env;
-using ::tim::delimit;
-using ::timemory::join::join;
 using strview_init_t   = std::initializer_list<std::string_view>;
 using strview_set_t    = std::set<std::string_view>;
 using open_modes_vec_t = std::vector<int>;
@@ -43,7 +43,7 @@ using open_modes_vec_t = std::vector<int>;
 auto
 get_exe_realpath()
 {
-    return filepath::realpath("/proc/self/exe", nullptr, false);
+    return rocprofsys::path::realpath("/proc/self/exe");
 }
 
 auto&
@@ -123,7 +123,7 @@ get_linked_path(const char*        _name,
         dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
         if(_link_map != nullptr && !std::string_view{ _link_map->l_name }.empty())
         {
-            return filepath::realpath(_link_map->l_name, nullptr, false);
+            return rocprofsys::path::realpath(_link_map->l_name);
         }
     }
 
@@ -154,7 +154,7 @@ get_link_map(const std::string& _lib,
             if(!std::string_view{ _next->l_name }.empty() &&
                std::string_view{ _next->l_name } != _lib)
             {
-                _chain.emplace(filepath::realpath(_next->l_name, nullptr, false));
+                _chain.emplace(rocprofsys::path::realpath(_next->l_name));
             }
             _next = _next->l_next;
         }
@@ -179,18 +179,22 @@ get_library_search_paths_impl()
     };
 
     // search paths from environment variables
-    for(const auto& itr : delimit(get_env("LD_LIBRARY_PATH", std::string{}), ":"))
-        _emplace_if_exists(itr);
-
-    for(const auto& itr : { get_env<std::string>(rocprofsys::env_vars::ROCM_PATH, ""),
-                            get_env<std::string>("ROCM_PATH", ""),
-                            std::string{ ROCPROFSYS_DEFAULT_ROCM_PATH } })
+    for(const auto& path :
+        rocprofsys::delimit(get_env("LD_LIBRARY_PATH", std::string{}), ":"))
     {
-        if(!itr.empty())
+        _emplace_if_exists(path);
+    }
+
+    for(const auto& rocm_path :
+        { get_env<std::string>(rocprofsys::env_vars::ROCM_PATH, ""),
+          get_env<std::string>("ROCM_PATH", ""),
+          std::string{ ROCPROFSYS_DEFAULT_ROCM_PATH } })
+    {
+        if(!rocm_path.empty())
         {
-            for(const auto& ditr : delimit(itr, ":"))
+            for(const auto& path : rocprofsys::delimit(rocm_path, ":"))
             {
-                _emplace_if_exists(join('/', ditr, "lib"));
+                _emplace_if_exists(fmt::format("{}/lib", path));
             }
         }
     }
@@ -319,11 +323,14 @@ get_internal_basic_libs_impl()
 
     const auto _3rdparty_libs = strview_init_t{
         // shared libs potentially used by timemory
-        "libcaliper.so", "liblikwid.so", "libprofiler.so", "libtcmalloc.so",
-        "libtcmalloc_and_profiler.so", "libtcmalloc_debug.so", "libtcmalloc_minimal.so",
+        "libcaliper.so",
+        "liblikwid.so",
+        "libprofiler.so",
+        "libtcmalloc.so",
+        "libtcmalloc_and_profiler.so",
+        "libtcmalloc_debug.so",
+        "libtcmalloc_minimal.so",
         "libtcmalloc_minimal_debug.so",
-        // shared libs that Dyninst will fail to instrument correctly
-        "libclang-cpp.so", "libLLVM.so"
     };
 
     for(const auto& gitr : { _gnu_libs, _dyn_libs, _rocprof_sys_libs, _3rdparty_libs })
@@ -349,7 +356,7 @@ get_internal_libs_impl()
     {
         if(!itr.empty())
         {
-            if(parse_all_modules)
+            if(exclude_internal_lib_paths)
             {
                 auto _lib_v = find_libraries(itr);
                 if(!_lib_v.empty())
@@ -408,7 +415,7 @@ get_internal_libs_data_impl()
     _libs.assign(_libs_v.begin(), _libs_v.end());
 
     auto _rocprofsys_base_path = filepath::dirname(
-        filepath::dirname(filepath::realpath("/proc/self/exe", nullptr, false)));
+        filepath::dirname(rocprofsys::path::realpath("/proc/self/exe")));
     auto _rocprofsys_lib_path = std::string{};
 
     for(const auto* itr : { "lib", "lib64" })
@@ -416,10 +423,10 @@ get_internal_libs_data_impl()
         for(const auto* litr :
             { "librocprof-sys-dl.so", "librocprof-sys-user.so", "librocprof-sys-rt.so" })
         {
-            auto _libpath = join('/', _rocprofsys_base_path, itr, litr);
+            auto _libpath = fmt::format("{}/{}/{}", _rocprofsys_base_path, itr, litr);
             if(filepath::exists(_libpath))
             {
-                _libs.emplace_back(filepath::realpath(_libpath, nullptr, false));
+                _libs.emplace_back(rocprofsys::path::realpath(_libpath));
             }
         }
     }
@@ -430,7 +437,7 @@ get_internal_libs_data_impl()
     auto _data = library_module_map_t{};
     for(const auto& itr : _libs)
     {
-        auto _fpath = filepath::realpath(itr, nullptr, false);
+        auto _fpath = rocprofsys::path::realpath(itr);
         // allow the user to request this library be considered for instrumentation
         if(check_regex_restrictions(strvec_t{ itr, _fpath }, file_internal_include))
             continue;
@@ -528,7 +535,7 @@ find_library(std::string_view _lib_v)
 
     for(const auto& itr : get_library_search_paths())
     {
-        auto _path = join('/', itr, _lib_v);
+        auto _path = fmt::format("{}/{}", itr, _lib_v);
         if(filepath::exists(_path)) return std::optional<std::string>{ _path };
     }
 
@@ -545,7 +552,7 @@ find_libraries(std::string_view _lib_v)
 
     for(const auto& itr : get_library_search_paths())
     {
-        auto _path = join('/', itr, _lib_v);
+        auto _path = fmt::format("{}/{}", itr, _lib_v);
         if(filepath::exists(_path)) _libs.emplace_back(_path);
     }
 

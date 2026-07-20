@@ -433,12 +433,14 @@ namespace hip {
     }
     /// Release graph when capture is invalidated
     void ReleaseCaptureGraph();
+    /// Drop the capture-graph pointer without freeing it (forks alias the origin's graph).
+    void ClearCaptureGraph() { pCaptureGraph_ = nullptr; }
     /// Generate and assign a new capture ID (used at BeginCapture)
     void SetCaptureID() { captureID_ = GenerateCaptureID(); }
     /// Inherit capture ID from the parent stream
     void SetCaptureID(uint64_t captureId) { captureID_ = captureId; }
-    /// Reset capture parameters
-    hipError_t EndCapture();
+    /// Reset capture parameters, optionally keeping an invalidated status observable.
+    hipError_t EndCapture(bool preserveInvalidated = false);
     /// Set capture status
     void SetCaptureStatus(hipStreamCaptureStatus captureStatus) { captureStatus_ = captureStatus; }
     /// Set capture mode
@@ -474,9 +476,9 @@ namespace hip {
     /// destroyed. Behavior:
     ///   - Subsequent work-submit / sync APIs on this stream must return
     ///     hipErrorStreamDetached (enforced by CHECK_STREAM_DETACHED).
-    ///   - If a stream capture is active on this stream, the capture is
-    ///     invalidated (status -> hipStreamCaptureStatusInvalidated) and every
-    ///     forked parallel branch is marked invalidated as well.
+    ///   - If a stream capture is active or already invalidated on this stream,
+    ///     Detach() performs the invalidated EndCapture cleanup that API calls
+    ///     can no longer reach.
     ///   - hipStreamDestroy continues to succeed on a detached stream.
     void Detach();
     /// Returns true once Detach() has been called.

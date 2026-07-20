@@ -186,9 +186,10 @@ struct BarrierOperations
             uint16 eosTsPsDone                    : 1;  ///< Issue an end-of-pixel-shader event that can be waited on.
             uint16 eosTsCsDone                    : 1;  ///< Issue an end-of-compute-shader event that can be waited on
             uint16 waitOnTs                       : 1;  ///< Wait on an timestamp event (EOP or EOS) at the ME.
-                                                        ///  Which event is not necessarily specified here, though any
+                                                        ///  Which event is not necesarily specified here, though any
                                                         ///  that are specified here would be waited on.
-            uint16 reserved                       : 7;  ///< Reserved for future use.
+            uint16 reserved1                      : 1;
+            uint16 reserved                       : 6;  ///< Reserved for future use.
         };
 
         uint16 u16All;  ///< Unsigned integer containing all the values.

@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/sop1.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -180,7 +181,7 @@ SGetShaderCyclesU64Sop1::SGetShaderCyclesU64Sop1(const MachineInst *inst)
 void SGetShaderCyclesU64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   auto *engine = wf.cu().engine();
   uint64_t cycles = engine ? engine->global_time() : 0;
-  sdst.write_scalar64(wf, cycles);
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, cycles);
 }
 
 SCtzI32B32Sop1::SCtzI32B32Sop1(const MachineInst *inst)
@@ -372,9 +373,10 @@ SSextI32I16Sop1::SSextI32I16Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1445,9 +1447,11 @@ void SMovrelsB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src_reg = static_cast<uint32_t>(ssrc0.encoding_value()) + index * width_words;
   Operand indexed_src(ssrc0.size_bits(), OperandType::OPR_SSRC, static_cast<int>(src_reg));
   if (width_words == 2) {
-    sdst.write_scalar64(wf, indexed_src.read_scalar64(wf));
+    amdgpu::RegisterAccess(wf).write_scalar64(
+        sdst, amdgpu::RegisterAccess(wf).read_scalar64(indexed_src));
   } else {
-    sdst.write_scalar(wf, indexed_src.read_scalar(wf));
+    amdgpu::RegisterAccess(wf).write_scalar(sdst,
+                                            amdgpu::RegisterAccess(wf).read_scalar(indexed_src));
   }
 }
 
@@ -1479,9 +1483,11 @@ void SMovrelsB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src_reg = static_cast<uint32_t>(ssrc0.encoding_value()) + index * width_words;
   Operand indexed_src(ssrc0.size_bits(), OperandType::OPR_SSRC, static_cast<int>(src_reg));
   if (width_words == 2) {
-    sdst.write_scalar64(wf, indexed_src.read_scalar64(wf));
+    amdgpu::RegisterAccess(wf).write_scalar64(
+        sdst, amdgpu::RegisterAccess(wf).read_scalar64(indexed_src));
   } else {
-    sdst.write_scalar(wf, indexed_src.read_scalar(wf));
+    amdgpu::RegisterAccess(wf).write_scalar(sdst,
+                                            amdgpu::RegisterAccess(wf).read_scalar(indexed_src));
   }
 }
 
@@ -1513,9 +1519,11 @@ void SMovreldB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t dst_reg = static_cast<uint32_t>(sdst.encoding_value()) + index * width_words;
   Operand indexed_dst(sdst.size_bits(), OperandType::OPR_SDST, static_cast<int>(dst_reg));
   if (width_words == 2) {
-    indexed_dst.write_scalar64(wf, ssrc0.read_scalar64(wf));
+    amdgpu::RegisterAccess(wf).write_scalar64(indexed_dst,
+                                              amdgpu::RegisterAccess(wf).read_scalar64(ssrc0));
   } else {
-    indexed_dst.write_scalar(wf, ssrc0.read_scalar(wf));
+    amdgpu::RegisterAccess(wf).write_scalar(indexed_dst,
+                                            amdgpu::RegisterAccess(wf).read_scalar(ssrc0));
   }
 }
 
@@ -1547,9 +1555,11 @@ void SMovreldB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t dst_reg = static_cast<uint32_t>(sdst.encoding_value()) + index * width_words;
   Operand indexed_dst(sdst.size_bits(), OperandType::OPR_SDST, static_cast<int>(dst_reg));
   if (width_words == 2) {
-    indexed_dst.write_scalar64(wf, ssrc0.read_scalar64(wf));
+    amdgpu::RegisterAccess(wf).write_scalar64(indexed_dst,
+                                              amdgpu::RegisterAccess(wf).read_scalar64(ssrc0));
   } else {
-    indexed_dst.write_scalar(wf, ssrc0.read_scalar(wf));
+    amdgpu::RegisterAccess(wf).write_scalar(indexed_dst,
+                                            amdgpu::RegisterAccess(wf).read_scalar(ssrc0));
   }
 }
 
@@ -1582,7 +1592,8 @@ void SMovrelsd2B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t dst_reg = static_cast<uint32_t>(sdst.encoding_value()) + dst_index;
   Operand indexed_src(32, OperandType::OPR_SSRC, static_cast<int>(src_reg));
   Operand indexed_dst(32, OperandType::OPR_SDST, static_cast<int>(dst_reg));
-  indexed_dst.write_scalar(wf, indexed_src.read_scalar(wf));
+  amdgpu::RegisterAccess(wf).write_scalar(indexed_dst,
+                                          amdgpu::RegisterAccess(wf).read_scalar(indexed_src));
 }
 
 SGetPcI64Sop1::SGetPcI64Sop1(const MachineInst *inst)
@@ -1594,7 +1605,9 @@ SGetPcI64Sop1::SGetPcI64Sop1(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SGetPcI64Sop1::execute_impl(amdgpu::Wavefront &wf) { sdst.write_scalar64(wf, wf.pc + size_); }
+void SGetPcI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, wf.pc + size_);
+}
 
 SSetPcI64Sop1::SSetPcI64Sop1(const MachineInst *inst)
     : Sop1("s_set_pc_i64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1617,7 +1630,9 @@ SSetPcI64Sop1::SSetPcI64Sop1(const MachineInst *inst)
   flags_ |= INDIRECT_BRANCH;
 }
 
-void SSetPcI64Sop1::execute_impl(amdgpu::Wavefront &wf) { wf.pc = ssrc0.read_scalar64(wf) - size_; }
+void SSetPcI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
+  wf.pc = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0) - size_;
+}
 
 SSwapPcI64Sop1::SSwapPcI64Sop1(const MachineInst *inst)
     : Sop1("s_swap_pc_i64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1644,8 +1659,8 @@ SSwapPcI64Sop1::SSwapPcI64Sop1(const MachineInst *inst)
 
 void SSwapPcI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t next_pc = wf.pc + size_;
-  wf.pc = ssrc0.read_scalar64(wf) - size_;
-  sdst.write_scalar64(wf, next_pc);
+  wf.pc = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0) - size_;
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, next_pc);
 }
 
 SRfeI64Sop1::SRfeI64Sop1(const MachineInst *inst)
@@ -1691,7 +1706,7 @@ SAddPcI64Sop1::SAddPcI64Sop1(const MachineInst *inst)
 }
 
 void SAddPcI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  int64_t offset = static_cast<int64_t>(ssrc0.read_scalar64(wf));
+  int64_t offset = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc0));
   wf.pc = static_cast<uint64_t>(static_cast<int64_t>(wf.pc) + offset);
 }
 
@@ -1821,7 +1836,9 @@ SGetBarrierStateSop1::SGetBarrierStateSop1(const MachineInst *inst)
   }
 }
 
-void SGetBarrierStateSop1::execute_impl(amdgpu::Wavefront &wf) { sdst.write_scalar(wf, 0); }
+void SGetBarrierStateSop1::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, 0);
+}
 
 SBarrierInitSop1::SBarrierInitSop1(const MachineInst *inst)
     : Sop1("s_barrier_init", reinterpret_cast<const OpEncoding *>(inst),
@@ -2169,6 +2186,12 @@ SCvtF16F32Sop1::SCvtF16F32Sop1(const MachineInst *inst)
   }
 }
 
+void SCvtF16F32Sop1::implicit_uses(RegisterSet &uses) const {
+  Sop1::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void SCvtF16F32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_cvt_f16_f32_sop1(*this, wf);
 }
@@ -2183,9 +2206,10 @@ SCvtF32F16Sop1::SCvtF32F16Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2209,9 +2233,10 @@ SCvtHiF32F16Sop1::SCvtHiF32F16Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2234,9 +2259,10 @@ SCeilF16Sop1::SCeilF16Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2244,6 +2270,12 @@ SCeilF16Sop1::SCeilF16Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+}
+
+void SCeilF16Sop1::implicit_uses(RegisterSet &uses) const {
+  Sop1::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void SCeilF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -2260,9 +2292,10 @@ SFloorF16Sop1::SFloorF16Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2270,6 +2303,12 @@ SFloorF16Sop1::SFloorF16Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+}
+
+void SFloorF16Sop1::implicit_uses(RegisterSet &uses) const {
+  Sop1::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void SFloorF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -2286,9 +2325,10 @@ STruncF16Sop1::STruncF16Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2296,6 +2336,12 @@ STruncF16Sop1::STruncF16Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+}
+
+void STruncF16Sop1::implicit_uses(RegisterSet &uses) const {
+  Sop1::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void STruncF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -2312,9 +2358,10 @@ SRndneF16Sop1::SRndneF16Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2322,6 +2369,12 @@ SRndneF16Sop1::SRndneF16Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+}
+
+void SRndneF16Sop1::implicit_uses(RegisterSet &uses) const {
+  Sop1::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void SRndneF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
