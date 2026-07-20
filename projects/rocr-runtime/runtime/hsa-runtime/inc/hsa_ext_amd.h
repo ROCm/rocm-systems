@@ -2392,8 +2392,9 @@ typedef struct hsa_amd_memory_copy_op_s {
  * Each operation is self-describing via its @c type field. A BROADCAST operation
  * is a single op that copies one source to multiple destinations via @c dst_list
  * and @c num_entries. A SWAP operation exchanges two buffers using @c src_size and
- * @c dst_size.
- *
+ * @c dst_size. SWAP operations require addresses to be 64-byte aligned for gfx94/gfx95X 
+ * and 32-byte aligned for gfx1250.
+ * 
  * @param[in] copy_ops Array of copy operation descriptors.
  *
  * @param[in] num_copy_ops Number of copy operations in the array.
