@@ -1520,3 +1520,54 @@
 
 - api: hipUnbindTexture
   args: [tex]
+
+- api: hipCtxCreate
+  args: [ctx, flags, device]
+
+- api: hipCtxDestroy
+  args: [ctx]
+
+- api: hipCtxDisablePeerAccess
+  args: [peerCtx]
+
+- api: hipCtxEnablePeerAccess
+  args: [peerCtx, flags]
+
+- api: hipCtxGetApiVersion
+  args: [ctx, apiVersion]
+
+- api: hipCtxGetCacheConfig
+  args: [cacheConfig]
+
+- api: hipCtxGetCurrent
+  args: [ctx]
+
+- api: hipCtxGetDevice
+  args: [device]
+
+- api: hipCtxGetFlags
+  args: [flags]
+
+- api: hipCtxGetSharedMemConfig
+  args: [pConfig]
+
+- api: hipCtxPopCurrent
+  args: [ctx]
+
+- api: hipCtxPushCurrent
+  args: [ctx]
+
+- api: hipCtxSetCacheConfig
+  args: [cacheConfig]
+
+- api: hipCtxSetCurrent
+  args: [ctx]
+
+- api: hipCtxSetSharedMemConfig
+  args: [config]
+
+- api: hipCtxSynchronize
+  args: []
+
+- api: hipGreenCtxCreate
+  args: [ctx, desc, device, flags]

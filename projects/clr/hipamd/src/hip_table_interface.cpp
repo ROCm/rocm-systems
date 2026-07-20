@@ -411,83 +411,137 @@ hipError_t hipCreateTextureObject(hipTextureObject_t* pTexObject, const hipResou
   CATCH;
 }
 extern "C" hipError_t hipCtxCreate(hipCtx_t* ctx, unsigned int flags, hipDevice_t device) {
+  auto const __rocm_in_ctx = ctx;
+  auto const __rocm_in_flags = flags;
+  auto const __rocm_in_device = device;
+  rocm_trace_emit_hipCtxCreate_enter(
+      (const void*)(uintptr_t)(__rocm_in_ctx),
+      (__rocm_in_flags),
+      (__rocm_in_device)); /* __ROCM_CURATED__: hipCtxCreate */
   TRY;
-  return hip::GetHipDispatchTable()->hipCtxCreate_fn(ctx, flags, device);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipCtxCreate, hip::GetHipDispatchTable()->hipCtxCreate_fn(ctx, flags, device));
   CATCH;
 }
 extern "C" hipError_t hipCtxDestroy(hipCtx_t ctx) {
+  auto const __rocm_in_ctx = ctx;
+  rocm_trace_emit_hipCtxDestroy_enter(
+      (const void*)(uintptr_t)(__rocm_in_ctx)); /* __ROCM_CURATED__: hipCtxDestroy */
   TRY;
-  return hip::GetHipDispatchTable()->hipCtxDestroy_fn(ctx);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipCtxDestroy, hip::GetHipDispatchTable()->hipCtxDestroy_fn(ctx));
   CATCH;
 }
 hipError_t hipCtxDisablePeerAccess(hipCtx_t peerCtx) {
+  auto const __rocm_in_peerCtx = peerCtx;
+  rocm_trace_emit_hipCtxDisablePeerAccess_enter(
+      (const void*)(uintptr_t)(__rocm_in_peerCtx)); /* __ROCM_CURATED__: hipCtxDisablePeerAccess */
   TRY;
-  return hip::GetHipDispatchTable()->hipCtxDisablePeerAccess_fn(peerCtx);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipCtxDisablePeerAccess, hip::GetHipDispatchTable()->hipCtxDisablePeerAccess_fn(peerCtx));
   CATCH;
 }
 hipError_t hipCtxEnablePeerAccess(hipCtx_t peerCtx, unsigned int flags) {
+  auto const __rocm_in_peerCtx = peerCtx;
+  auto const __rocm_in_flags = flags;
+  rocm_trace_emit_hipCtxEnablePeerAccess_enter(
+      (const void*)(uintptr_t)(__rocm_in_peerCtx),
+      (__rocm_in_flags)); /* __ROCM_CURATED__: hipCtxEnablePeerAccess */
   TRY;
-  return hip::GetHipDispatchTable()->hipCtxEnablePeerAccess_fn(peerCtx, flags);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipCtxEnablePeerAccess, hip::GetHipDispatchTable()->hipCtxEnablePeerAccess_fn(peerCtx, flags));
   CATCH;
 }
 hipError_t hipCtxGetApiVersion(hipCtx_t ctx, unsigned int* apiVersion) {
+  auto const __rocm_in_ctx = ctx;
+  auto const __rocm_in_apiVersion = apiVersion;
+  rocm_trace_emit_hipCtxGetApiVersion_enter(
+      (const void*)(uintptr_t)(__rocm_in_ctx),
+      (const void*)(uintptr_t)(__rocm_in_apiVersion)); /* __ROCM_CURATED__: hipCtxGetApiVersion */
   TRY;
-  return hip::GetHipDispatchTable()->hipCtxGetApiVersion_fn(ctx, apiVersion);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipCtxGetApiVersion, hip::GetHipDispatchTable()->hipCtxGetApiVersion_fn(ctx, apiVersion));
   CATCH;
 }
 hipError_t hipCtxGetCacheConfig(hipFuncCache_t* cacheConfig) {
+  auto const __rocm_in_cacheConfig = cacheConfig;
+  rocm_trace_emit_hipCtxGetCacheConfig_enter(
+      (const void*)(uintptr_t)(__rocm_in_cacheConfig)); /* __ROCM_CURATED__: hipCtxGetCacheConfig */
   TRY;
-  return hip::GetHipDispatchTable()->hipCtxGetCacheConfig_fn(cacheConfig);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipCtxGetCacheConfig, hip::GetHipDispatchTable()->hipCtxGetCacheConfig_fn(cacheConfig));
   CATCH;
 }
 hipError_t hipCtxGetCurrent(hipCtx_t* ctx) {
+  auto const __rocm_in_ctx = ctx;
+  rocm_trace_emit_hipCtxGetCurrent_enter(
+      (const void*)(uintptr_t)(__rocm_in_ctx)); /* __ROCM_CURATED__: hipCtxGetCurrent */
   TRY;
-  return hip::GetHipDispatchTable()->hipCtxGetCurrent_fn(ctx);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipCtxGetCurrent, hip::GetHipDispatchTable()->hipCtxGetCurrent_fn(ctx));
   CATCH;
 }
 hipError_t hipCtxGetDevice(hipDevice_t* device) {
+  auto const __rocm_in_device = device;
+  rocm_trace_emit_hipCtxGetDevice_enter(
+      (const void*)(uintptr_t)(__rocm_in_device)); /* __ROCM_CURATED__: hipCtxGetDevice */
   TRY;
-  return hip::GetHipDispatchTable()->hipCtxGetDevice_fn(device);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipCtxGetDevice, hip::GetHipDispatchTable()->hipCtxGetDevice_fn(device));
   CATCH;
 }
 hipError_t hipCtxGetFlags(unsigned int* flags) {
+  auto const __rocm_in_flags = flags;
+  rocm_trace_emit_hipCtxGetFlags_enter(
+      (const void*)(uintptr_t)(__rocm_in_flags)); /* __ROCM_CURATED__: hipCtxGetFlags */
   TRY;
-  return hip::GetHipDispatchTable()->hipCtxGetFlags_fn(flags);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipCtxGetFlags, hip::GetHipDispatchTable()->hipCtxGetFlags_fn(flags));
   CATCH;
 }
 hipError_t hipCtxGetSharedMemConfig(hipSharedMemConfig* pConfig) {
+  auto const __rocm_in_pConfig = pConfig;
+  rocm_trace_emit_hipCtxGetSharedMemConfig_enter(
+      (const void*)(uintptr_t)(__rocm_in_pConfig)); /* __ROCM_CURATED__: hipCtxGetSharedMemConfig */
   TRY;
-  return hip::GetHipDispatchTable()->hipCtxGetSharedMemConfig_fn(pConfig);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipCtxGetSharedMemConfig, hip::GetHipDispatchTable()->hipCtxGetSharedMemConfig_fn(pConfig));
   CATCH;
 }
 hipError_t hipCtxPopCurrent(hipCtx_t* ctx) {
+  auto const __rocm_in_ctx = ctx;
+  rocm_trace_emit_hipCtxPopCurrent_enter(
+      (const void*)(uintptr_t)(__rocm_in_ctx)); /* __ROCM_CURATED__: hipCtxPopCurrent */
   TRY;
-  return hip::GetHipDispatchTable()->hipCtxPopCurrent_fn(ctx);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipCtxPopCurrent, hip::GetHipDispatchTable()->hipCtxPopCurrent_fn(ctx));
   CATCH;
 }
 hipError_t hipCtxPushCurrent(hipCtx_t ctx) {
+  auto const __rocm_in_ctx = ctx;
+  rocm_trace_emit_hipCtxPushCurrent_enter(
+      (const void*)(uintptr_t)(__rocm_in_ctx)); /* __ROCM_CURATED__: hipCtxPushCurrent */
   TRY;
-  return hip::GetHipDispatchTable()->hipCtxPushCurrent_fn(ctx);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipCtxPushCurrent, hip::GetHipDispatchTable()->hipCtxPushCurrent_fn(ctx));
   CATCH;
 }
 hipError_t hipCtxSetCacheConfig(hipFuncCache_t cacheConfig) {
+  auto const __rocm_in_cacheConfig = cacheConfig;
+  rocm_trace_emit_hipCtxSetCacheConfig_enter(
+      (int32_t)(__rocm_in_cacheConfig)); /* __ROCM_CURATED__: hipCtxSetCacheConfig */
   TRY;
-  return hip::GetHipDispatchTable()->hipCtxSetCacheConfig_fn(cacheConfig);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipCtxSetCacheConfig, hip::GetHipDispatchTable()->hipCtxSetCacheConfig_fn(cacheConfig));
   CATCH;
 }
 hipError_t hipCtxSetCurrent(hipCtx_t ctx) {
+  auto const __rocm_in_ctx = ctx;
+  rocm_trace_emit_hipCtxSetCurrent_enter(
+      (const void*)(uintptr_t)(__rocm_in_ctx)); /* __ROCM_CURATED__: hipCtxSetCurrent */
   TRY;
-  return hip::GetHipDispatchTable()->hipCtxSetCurrent_fn(ctx);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipCtxSetCurrent, hip::GetHipDispatchTable()->hipCtxSetCurrent_fn(ctx));
   CATCH;
 }
 hipError_t hipCtxSetSharedMemConfig(hipSharedMemConfig config) {
+  auto const __rocm_in_config = config;
+  rocm_trace_emit_hipCtxSetSharedMemConfig_enter(
+      (int32_t)(__rocm_in_config)); /* __ROCM_CURATED__: hipCtxSetSharedMemConfig */
   TRY;
-  return hip::GetHipDispatchTable()->hipCtxSetSharedMemConfig_fn(config);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipCtxSetSharedMemConfig, hip::GetHipDispatchTable()->hipCtxSetSharedMemConfig_fn(config));
   CATCH;
 }
 hipError_t hipCtxSynchronize(void) {
+  rocm_trace_emit_hipCtxSynchronize_enter(); /* __ROCM_CURATED__: hipCtxSynchronize */
   TRY;
-  return hip::GetHipDispatchTable()->hipCtxSynchronize_fn();
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipCtxSynchronize, hip::GetHipDispatchTable()->hipCtxSynchronize_fn());
   CATCH;
 }
 hipError_t hipDestroyExternalMemory(hipExternalMemory_t extMem) {
@@ -6920,8 +6974,17 @@ hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
 }
 hipError_t hipGreenCtxCreate(hipExecutionCtx_t* ctx, hipDevResourceDesc_t desc, int device,
                              unsigned int flags) {
+  auto const __rocm_in_ctx = ctx;
+  auto const __rocm_in_desc = desc;
+  auto const __rocm_in_device = device;
+  auto const __rocm_in_flags = flags;
+  rocm_trace_emit_hipGreenCtxCreate_enter(
+      (const void*)(uintptr_t)(__rocm_in_ctx),
+      (const void*)(uintptr_t)(__rocm_in_desc),
+      (__rocm_in_device),
+      (__rocm_in_flags)); /* __ROCM_CURATED__: hipGreenCtxCreate */
   TRY;
-  return hip::GetHipDispatchTable()->hipGreenCtxCreate_fn(ctx, desc, device, flags);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGreenCtxCreate, hip::GetHipDispatchTable()->hipGreenCtxCreate_fn(ctx, desc, device, flags));
   CATCH;
 }
 hipError_t hipExecutionCtxDestroy(hipExecutionCtx_t ctx) {
