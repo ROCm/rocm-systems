@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,7 +23,6 @@
 #include "lib/rocprofiler-sdk/thread_trace/shared_trace_buffer.hpp"
 
 #include "lib/common/logging.hpp"
-#include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 
@@ -41,9 +40,11 @@ namespace thread_trace
 {
 namespace
 {
-// Padding + mask to page-align the returned pointer.
-constexpr size_t PAGE_ALIGN_PADDING = 0x2000;
-constexpr size_t PAGE_ALIGN_MASK    = 0xFFFul;
+// Over-allocate, then round the returned pointer up to a 4K page. The round-up consumes
+// up to one page of the padding; the second padding page is a tail guard so cache-flush
+// operations at the end of the buffer cannot spill into the next allocation.
+constexpr size_t PAGE_ALIGN_PADDING = 0x2000;   // 2 pages: align slack + tail guard
+constexpr size_t PAGE_ALIGN_MASK    = 0xFFFul;  // align to a 4K page
 
 struct shared_buffer_t
 {
@@ -65,20 +66,15 @@ struct shared_state_t
     decltype(hsa_amd_memory_pool_free)* free_fn     = nullptr;  // captured for shutdown free
 };
 
-using locked_state_t = common::Synchronized<shared_state_t>;
-
-locked_state_t&
-get_state()
-{
-    static auto*& _state = common::static_object<locked_state_t>::construct();
-    return *CHECK_NOTNULL(_state);
-}
+// Namespace-scope so it outlives finalize() (see shared_trace_lease.cpp for the full
+// rationale). Freed once via free_shared_buffers().
+common::Synchronized<shared_state_t> g_buffer_state{};
 }  // namespace
 
 void
 register_shared_buffer_size(hsa_agent_t agent, uint64_t buffer_size)
 {
-    get_state().wlock([&](shared_state_t& state) {
+    g_buffer_state.wlock([&](shared_state_t& state) {
         auto& entry           = state.agents[agent.handle];
         entry.max_buffer_size = std::max(entry.max_buffer_size, buffer_size);
     });
@@ -87,7 +83,7 @@ register_shared_buffer_size(hsa_agent_t agent, uint64_t buffer_size)
 void*
 acquire_shared_buffer(const hsa::TraceMemoryPool& pool, size_t index, uint64_t size)
 {
-    return get_state().wlock([&](shared_state_t& state) -> void* {
+    return g_buffer_state.wlock([&](shared_state_t& state) -> void* {
         // Self-register in case the pre-pass didn't: acquire is the single buffer source.
         auto& entry           = state.agents[pool.gpu_agent.handle];
         entry.max_buffer_size = std::max(entry.max_buffer_size, size);
@@ -97,6 +93,17 @@ acquire_shared_buffer(const hsa::TraceMemoryPool& pool, size_t index, uint64_t s
         // Reuse the slot's buffer; the pre-pass sizes it to the agent max up front.
         auto& buf = entry.buffers.at(index);
         if(buf.aligned != nullptr && buf.size >= size) return buf.aligned;
+
+        // Re-allocating an existing (too-small) slot: release the old buffer first so we
+        // neither leak it nor leave a stale aligned pointer registered as shared. In the
+        // normal flow the pre-pass fixes max_buffer_size before any acquire, so this only
+        // runs if a larger size ever arrives after a slot was first sized.
+        if(buf.raw != nullptr)
+        {
+            if(pool.free_fn) pool.free_fn(buf.raw);
+            state.shared_ptrs.erase(buf.aligned);
+            buf = shared_buffer_t{};
+        }
 
         if(!pool.allocate_fn) return nullptr;
 
@@ -128,14 +135,14 @@ bool
 is_shared_buffer(void* ptr)
 {
     if(ptr == nullptr) return false;
-    return get_state().rlock(
+    return g_buffer_state.rlock(
         [&](const shared_state_t& state) { return state.shared_ptrs.count(ptr) != 0; });
 }
 
 void
 free_shared_buffers()
 {
-    get_state().wlock([](shared_state_t& state) {
+    g_buffer_state.wlock([](shared_state_t& state) {
         if(state.free_fn != nullptr)
         {
             for(auto& [_, entry] : state.agents)

@@ -193,7 +193,9 @@ struct TraceMemoryPool
     aqlprofile_handle_t handle;
 
     // Ring-slot counter: each device Alloc hands out the next shared buffer slot
-    // (0 = primary, 1.. = double/triple-buffer slots).
+    // (0 = primary, 1.. = double/triple-buffer slots). Each context's control packet gets
+    // its own value copy of TraceMemoryPool, so this restarts at 0 for every context --
+    // that is what maps every context's slot i onto the same shared per-agent buffer.
     uint32_t output_buffer_index = 0;
 
     ~TraceMemoryPool() { aqlprofile_att_delete_packets(this->handle); };

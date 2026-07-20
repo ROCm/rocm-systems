@@ -130,8 +130,16 @@ private:
 
     att_queue_ptr_t queue{};
 
+    // Hardware agent this tracer drives; keys the per-agent trace lease so no two
+    // contexts use the same agent's shared buffer/queue concurrently.
+    hsa_agent_t hw_agent{};
+
     std::atomic<int> active_traces{0};
     std::mutex       trace_resources_mut{};
+
+    // Log lease contention (this agent already traced by another context) only once per
+    // tracer instead of on every skipped dispatch. Guarded by trace_resources_mut.
+    bool lease_contention_logged{false};
 
     std::unique_ptr<hsa::TraceControlAQLPacket>           control_packet{nullptr};
     std::unique_ptr<code_object::CodeobjCallbackRegistry> codeobj_reg{nullptr};
