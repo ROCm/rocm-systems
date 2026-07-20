@@ -35,6 +35,12 @@ endif()
 ##########
 # Defaults
 ##########
+# Emit compile_commands.json so the standalone clang-tidy target (see the code
+# analysis section below) can lint each translation unit with its own real
+# compile flags. This correctly handles the gcc (rocclr) vs hipcc/clang
+# (hipamd) compiler mix, since each entry carries its own flags.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
     OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
     add_compile_options("/wd4267" "/wd4244" "/wd4996")
@@ -167,4 +173,34 @@ if(CLANGFORMAT_EXE)
     file(GLOB_RECURSE FORMAT_SOURCE_FILE_LIST *.cpp *.hpp *.hh *.h *.cc *.c)
     add_custom_target(clangformat COMMAND ${CLANGFORMAT_EXE} -style=file -i ${FORMAT_SOURCE_FILE_LIST}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
+
+#############################
+# Static analysis
+#############################
+# Target: clang-tidy
+# Standalone lint pass, decoupled from the normal build so it never slows
+# compilation. Runs run-clang-tidy against the compile_commands.json emitted
+# above, restricted to this project's own rocclr/ and hipamd/ sources. The
+# check set lives in .clang-tidy at the repo root. Diagnostics are report-only
+# for now (see WarningsAsErrors in .clang-tidy).
+find_program(RUN_CLANG_TIDY_EXE NAMES run-clang-tidy run-clang-tidy.py
+    PATHS "${ROCM_PATH}/lib/llvm/bin" "${ROCM_PATH}/llvm/bin")
+find_program(CLANG_TIDY_EXE clang-tidy
+    PATHS "${ROCM_PATH}/lib/llvm/bin" "${ROCM_PATH}/llvm/bin")
+if(RUN_CLANG_TIDY_EXE AND CLANG_TIDY_EXE)
+    # run-clang-tidy takes one or more path regexes (OR'd together). Pass rocclr
+    # and hipamd as separate args rather than a single "(rocclr|hipamd)"
+    # alternation, whose parens/pipe would be interpreted by the shell. VERBATIM
+    # ensures CMake escapes the arguments correctly for the native build tool.
+    add_custom_target(clang-tidy
+        COMMAND ${RUN_CLANG_TIDY_EXE}
+                -clang-tidy-binary ${CLANG_TIDY_EXE}
+                -p ${CMAKE_BINARY_DIR}
+                -extra-arg=-Wno-unknown-warning-option
+                "${CMAKE_CURRENT_SOURCE_DIR}/rocclr/"
+                "${CMAKE_CURRENT_SOURCE_DIR}/hipamd/"
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        VERBATIM
+        COMMENT "Running clang-tidy on rocclr and hipamd sources")
 endif()

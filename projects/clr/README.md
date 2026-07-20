@@ -134,6 +134,24 @@ The `ocltst` binaries are built under the folder `$CLR_DIR/build/tests/ocltst`.
 
 Additionally, [OpenCL-CTS](https://github.com/rocm/opencl-cts) can be used to validate OpenCL functionality.
 
+## Static analysis
+
+The `clr` sources (`rocclr` and `hipamd`) can be linted with `clang-tidy`. The
+check set is defined in [`.clang-tidy`](./.clang-tidy) and is currently
+report-only (warnings do not fail the run).
+
+`clang-tidy` and `run-clang-tidy` must be on `PATH` or under
+`${ROCM_PATH}/lib/llvm/bin` (they are provided by `rocm-llvm-dev`). Configure a
+build as usual, then invoke the `clang-tidy` target:
+
+```bash
+cmake --build build --target clang-tidy
+```
+
+The target runs `run-clang-tidy` against the `compile_commands.json` that CMake
+emits automatically, so each translation unit is linted with its real compile
+flags. It is decoupled from the normal build and does not affect compilation.
+
 ## Release Notes
 
 Release notes are published in the [CLR change log](./CHANGELOG.md).
