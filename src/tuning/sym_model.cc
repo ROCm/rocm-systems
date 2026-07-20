@@ -292,22 +292,24 @@ static void queryModel_lsa(struct ncclTuningInput_t* input, ncclSymkKernelId k, 
   }
 
   if (isTma) {
+    size_t maxWorkBytes = input->countMax * ncclTypeSize(input->datatype);
     // Only use TMA if the selected CTA count is able to take advantage of the TMA fast paths.
     // Except for the case when user sets NCCL_SYM_KERNEL.
-    // If TMA is not eligible for the minimum block at the current msg size
+    // If TMA is not eligible for the minimum block at the largest grouped work size
     // it will not be eligible for higher block count.
-    if (!ncclSymkTmaDeepEligible(comm, k, nBytes, nMinBlocks)) {
+    if (!ncclSymkTmaDeepEligible(comm, k, maxWorkBytes, nMinBlocks)) {
       const char* symKernelIdEnv = ncclGetEnv("NCCL_SYM_KERNEL");
       if (symKernelIdEnv) {
-        INFO(NCCL_TUNING, "NCCL_SYM_KERNEL set to %s. At %zu Bytes kernel will not exercise TMA paths.", symKernelIdEnv,
-             nBytes);
+        INFO(NCCL_TUNING,
+             "NCCL_SYM_KERNEL set to %s. At largest grouped work size %zu Bytes, kernel will not exercise TMA paths.",
+             symKernelIdEnv, maxWorkBytes);
       } else {
         *nBlocks = -1;
         return;
       }
     } else {
       // Decrease max block count until it is eligible for the current msg size.
-      while (nMaxBlocks > nMinBlocks && !ncclSymkTmaDeepEligible(comm, k, nBytes, nMaxBlocks)) {
+      while (nMaxBlocks > nMinBlocks && !ncclSymkTmaDeepEligible(comm, k, maxWorkBytes, nMaxBlocks)) {
         nMaxBlocks -= (nMaxBlocks == 2 ? 1 : 2);
       }
     }

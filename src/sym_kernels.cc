@@ -322,7 +322,7 @@ uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp
   if (!hasSTMC) kmask &= ~kernelMask_STMC;
   if (!hasLDMC) kmask &= ~kernelMask_LDMC;
 
-  size_t nBytes = nElts * ncclTypeSize(ty);
+  size_t nBytes = alignUp(nElts * ncclTypeSize(ty), NCCL_SYM_KERNEL_CELL_SIZE);
   size_t nBusBytes = (coll == ncclFuncAllReduce ? 1 : comm->nRanks) * nBytes;
   // LL kernels use 32-bit ints to track element counts and indices.
   if (nBusBytes >= (size_t(2) << 30)) kmask &= ~kernelMask_LL;
