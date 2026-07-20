@@ -848,14 +848,6 @@ bool Elf::isElfMagic(const char* p) {
   return true;
 }
 
-bool Elf::isCALTarget(const char* p, signed char ec) {
-  if (!isElfMagic(p)) {
-    return false;
-  }
-
-  return false;
-}
-
 void* Elf::xmalloc(const size_t len) {
   void* retval = ::calloc(1, len);
   if (retval == nullptr) {

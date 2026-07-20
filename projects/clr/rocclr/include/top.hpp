@@ -145,7 +145,7 @@ class MemoryPoolObject {
     ShouldNotCallThis();
     return badPointer;
   }
-  void* operator new(size_t size, void* address) { return address; }
+  void* operator new(size_t, void* address) { return address; }
   void operator delete(void*) {}
   void operator delete(void*, void* address) {}
 };
@@ -167,7 +167,7 @@ class ReferenceCountedObject {
   void* operator new(size_t size, size_t extSize) {
     return ReferenceCountedObject::operator new(size + extSize);
   };
-  void operator delete(void* obj, size_t extSize) { ReferenceCountedObject::operator delete(obj); }
+  void operator delete(void* obj, size_t) { ReferenceCountedObject::operator delete(obj); }
 
   uint referenceCount() const { return referenceCount_.load(std::memory_order_relaxed); }
 

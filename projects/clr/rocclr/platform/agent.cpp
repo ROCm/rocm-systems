@@ -199,7 +199,7 @@ void Agent::tearDown() {
 
 namespace agent {
 
-static int32_t CL_API_CALL GetVersionNumber(vdi_agent* agent, int32_t* version_ret) {
+static int32_t CL_API_CALL GetVersionNumber([[maybe_unused]] vdi_agent* agent, int32_t* version_ret) {
   if (version_ret == NULL) {
     return CL_INVALID_VALUE;
   }
@@ -207,7 +207,7 @@ static int32_t CL_API_CALL GetVersionNumber(vdi_agent* agent, int32_t* version_r
   return CL_SUCCESS;
 }
 
-static int32_t CL_API_CALL GetPlatform(vdi_agent* agent, cl_platform_id* platform_id_ret) {
+static int32_t CL_API_CALL GetPlatform([[maybe_unused]] vdi_agent* agent, cl_platform_id* platform_id_ret) {
   if (platform_id_ret == NULL) {
     return CL_INVALID_VALUE;
   }
@@ -215,7 +215,7 @@ static int32_t CL_API_CALL GetPlatform(vdi_agent* agent, cl_platform_id* platfor
   return CL_SUCCESS;
 }
 
-static int32_t CL_API_CALL GetTime(vdi_agent* agent, int64_t* time_nanos) {
+static int32_t CL_API_CALL GetTime([[maybe_unused]] vdi_agent* agent, int64_t* time_nanos) {
   if (time_nanos == NULL) {
     return CL_INVALID_VALUE;
   }
@@ -228,7 +228,7 @@ static int32_t CL_API_CALL SetCallbacks(vdi_agent* agent, const vdi_agent_callba
   return Agent::get(agent)->setCallbacks(callbacks, size);
 }
 
-static int32_t CL_API_CALL GetPotentialCapabilities(vdi_agent* agent,
+static int32_t CL_API_CALL GetPotentialCapabilities([[maybe_unused]] vdi_agent* agent,
                                                     vdi_agent_capabilities* capabilities) {
   if (capabilities == NULL) {
     return CL_INVALID_VALUE;
@@ -248,14 +248,14 @@ static int32_t CL_API_CALL SetCapabilities(vdi_agent* agent,
   return Agent::get(agent)->setCapabilities(capabilities, action == VDI_AGENT_ADD_CAPABILITIES);
 }
 
-static int32_t CL_API_CALL GetICDDispatchTable(vdi_agent* agent, cl_icd_dispatch_table* table,
+static int32_t CL_API_CALL GetICDDispatchTable([[maybe_unused]] vdi_agent* agent, cl_icd_dispatch_table* table,
                                                size_t size) {
   // FIXME_lmoriche: check size
   memcpy(table, amd::ICDDispatchedObject::icdVendorDispatch_, size);
   return CL_SUCCESS;
 }
 
-static int32_t CL_API_CALL SetICDDispatchTable(vdi_agent* agent, const cl_icd_dispatch_table* table,
+static int32_t CL_API_CALL SetICDDispatchTable([[maybe_unused]] vdi_agent* agent, const cl_icd_dispatch_table* table,
                                                size_t size) {
   // FIXME_lmoriche: check size
   memcpy(amd::ICDDispatchedObject::icdVendorDispatch_, table, size);

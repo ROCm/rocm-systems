@@ -140,7 +140,7 @@ void getDefault2(int OptDescTableIx, int64_t& idefault2, const char*& sdefault2)
   }
 }
 
-bool setAliasOptionVariable(int OptDescTableIx, Options& Opts, int64_t IValue, const char* SValue) {
+bool setAliasOptionVariable(int OptDescTableIx, Options& Opts, [[maybe_unused]] int64_t IValue, const char* SValue) {
   OptionDescriptor* od;
   OptionVariables* oVars = Opts.oVariables;
 
@@ -213,7 +213,7 @@ bool setAliasOptionVariable(int OptDescTableIx, Options& Opts, int64_t IValue, c
   return true;
 }
 
-void ShowOptionsHelp(const char* helpValue, Options& Opts) {
+void ShowOptionsHelp([[maybe_unused]] const char* helpValue, Options& Opts) {
   // -h[--help][=public|all]  : public is the second default
   bool showAll = false;
   bool showSupport = false;
@@ -577,7 +577,7 @@ int getOptionDesc(std::string& options, size_t StartPos, bool IsShortForm, Optio
   return option_ndx;
 }
 
-bool processOption(int OptDescTableIx, Options& Opts, const std::string& Value, bool IsPrefixOption,
+bool processOption(int OptDescTableIx, Options& Opts, const std::string& Value, [[maybe_unused]] bool IsPrefixOption,
                    bool IsOffFlag) {
   OptionVariables* ovars = Opts.oVariables;
   OptionDescriptor* od = &OptDescTable[OptDescTableIx];
@@ -1360,7 +1360,7 @@ static std::string getValidDumpPath(const std::string& path) {
 
 #endif
 
-static std::string getValidDumpBaseName(const std::string& path, const std::string& file,
+static std::string getValidDumpBaseName([[maybe_unused]] const std::string& path, const std::string& file,
                                         long basename_max, const std::string& ext) {
   if (file.size() + ext.size() < static_cast<unsigned long>(basename_max)) {
     return file;

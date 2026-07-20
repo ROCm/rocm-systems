@@ -160,9 +160,12 @@ void** __hipRegisterFatBinary(const void* data) {
 }
 
 // ================================================================================================
-void __hipRegisterFunction(void** modules, const void* hostFunction, char* deviceFunction,
-                           const char* deviceName, unsigned int threadLimit, uint3* tid, uint3* bid,
-                           dim3* blockDim, dim3* gridDim, int* wSize) {
+void __hipRegisterFunction(void** modules, const void* hostFunction,
+                           [[maybe_unused]] char* deviceFunction,
+                           const char* deviceName, [[maybe_unused]] unsigned int threadLimit,
+                           [[maybe_unused]] uint3* tid, [[maybe_unused]] uint3* bid,
+                           [[maybe_unused]] dim3* blockDim, [[maybe_unused]] dim3* gridDim,
+                           [[maybe_unused]] int* wSize) {
   auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfo**>(modules);
   
   static const bool enable_deferred_loading = []() {
@@ -193,14 +196,14 @@ void __hipRegisterFunction(void** modules, const void* hostFunction, char* devic
 // ================================================================================================
 // Registers a device-side global variable with host-side shadow copy for
 // tracking state between kernel executions.
-void __hipRegisterVar(void** modules,       // The device modules containing code object
-                      void* var,            // The shadow variable in host code
-                      char* hostVar,        // Variable name in host code
-                      char* deviceVar,      // Variable name in device code
-                      int ext,              // Whether this variable is external
-                      size_t size,          // Size of the variable
-                      int constant,         // Whether this variable is constant
-                      int global) {         // Unknown, always 0
+void __hipRegisterVar(void** modules,                    // The device modules containing code object
+                      void* var,                         // The shadow variable in host code
+                      char* hostVar,                     // Variable name in host code
+                      [[maybe_unused]] char* deviceVar,  // Variable name in device code
+                      [[maybe_unused]] int ext,          // Whether this variable is external
+                      size_t size,                       // Size of the variable
+                      [[maybe_unused]] int constant,     // Whether this variable is constant
+                      [[maybe_unused]] int global) {     // Unknown, always 0
   auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfo**>(modules);
   hip::Var* var_ptr = new hip::Var(std::string(hostVar), hip::Var::DeviceVarKind::DVK_Variable,
                                    size, fat_binary_modules);
@@ -210,11 +213,11 @@ void __hipRegisterVar(void** modules,       // The device modules containing cod
 
 // ================================================================================================
 void __hipRegisterSurface(
-    void** modules,       // The device modules containing code object
-    void* var,            // The shadow variable in host code
-    char* hostVar,        // Variable name in host code
-    char* deviceVar,      // Variable name in device code
-    int type, int ext) {
+    void** modules,                    // The device modules containing code object
+    void* var,                         // The shadow variable in host code
+    char* hostVar,                     // Variable name in host code
+    [[maybe_unused]] char* deviceVar,  // Variable name in device code
+    [[maybe_unused]] int type, [[maybe_unused]] int ext) {
   auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfo**>(modules);
   hip::Var* var_ptr = new hip::Var(std::string(hostVar), hip::Var::DeviceVarKind::DVK_Surface,
                                    sizeof(surfaceReference), fat_binary_modules);
@@ -268,11 +271,11 @@ void __hipRegisterManagedVar(
 
 // ================================================================================================
 void __hipRegisterTexture(
-    void** modules,       // The device modules containing code object
-    void* var,            // The shadow variable in host code
-    char* hostVar,        // Variable name in host code
-    char* deviceVar,      // Variable name in device code
-    int type, int norm, int ext) {
+    void** modules,                    // The device modules containing code object
+    void* var,                         // The shadow variable in host code
+    char* hostVar,                     // Variable name in host code
+    [[maybe_unused]] char* deviceVar,  // Variable name in device code
+    [[maybe_unused]] int type, [[maybe_unused]] int norm, [[maybe_unused]] int ext) {
   auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfo**>(modules);
   hip::Var* var_ptr = new hip::Var(std::string(hostVar), hip::Var::DeviceVarKind::DVK_Texture,
                                    sizeof(textureReference), fat_binary_modules);

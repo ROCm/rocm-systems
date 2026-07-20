@@ -540,7 +540,7 @@ class UserEvent : public Command {
   //! Adds dependent commands for the user event
   void AddDependent(Command* command) { dependents_.push_back(command); }
 
-  virtual void submit(device::VirtualDevice& device) { ShouldNotCallThis(); }
+  virtual void submit([[maybe_unused]] device::VirtualDevice& device) { ShouldNotCallThis(); }
 
   const Context& context() const { return context_; }
 };
@@ -555,7 +555,7 @@ class ClGlEvent : public Command {
     setStatus(CL_SUBMITTED);
   }
 
-  virtual void submit(device::VirtualDevice& device) { ShouldNotCallThis(); }
+  virtual void submit([[maybe_unused]] device::VirtualDevice& device) { ShouldNotCallThis(); }
 
   bool awaitCompletion() { return waitForFence(); }
 
@@ -1364,7 +1364,8 @@ class MapMemoryCommand : public OneMemoryArgCommand {
   //! Construct a new MapMemoryCommand
   MapMemoryCommand(HostQueue& queue, cl_command_type cmdType, const EventWaitList& eventWaitList,
                    Memory& memory, cl_map_flags mapFlags, bool blocking, Coord3D origin,
-                   Coord3D size, size_t* imgRowPitch = nullptr, size_t* imgSlicePitch = nullptr,
+                   Coord3D size, [[maybe_unused]] size_t* imgRowPitch = nullptr,
+                   [[maybe_unused]] size_t* imgSlicePitch = nullptr,
                    void* mapPtr = nullptr)
       : OneMemoryArgCommand(queue, cmdType, eventWaitList, memory),
         mapFlags_(mapFlags),
@@ -1774,7 +1775,8 @@ class ExtObjectsCommand : public Command {
 
  public:
   //! Construct a new AcquireExtObjectsCommand
-  ExtObjectsCommand(HostQueue& queue, const EventWaitList& eventWaitList, uint32_t num_objects,
+  ExtObjectsCommand(HostQueue& queue, const EventWaitList& eventWaitList,
+                    [[maybe_unused]] uint32_t num_objects,
                     const std::vector<amd::Memory*>& memoryObjects, cl_command_type type)
       : Command(queue, type, eventWaitList) {
     memObjects_.reserve(memoryObjects.size());
@@ -2199,7 +2201,7 @@ class CopyMemoryP2PCommand : public CopyMemoryCommand {
                        const EventWaitList& eventWaitList, Memory& srcMemory, Memory& dstMemory,
                        Coord3D srcOrigin, Coord3D dstOrigin, Coord3D size,
                        const BufferRect& srcRect, const BufferRect& dstRect,
-                       amd::CopyMetadata copyMetadata = amd::CopyMetadata())
+                       [[maybe_unused]] amd::CopyMetadata copyMetadata = amd::CopyMetadata())
       : CopyMemoryCommand(queue, cmdType, eventWaitList, srcMemory, dstMemory, srcOrigin, dstOrigin,
                           size, srcRect, dstRect) {}
 

@@ -305,9 +305,6 @@ class Elf {
   /* is it ELF */
   static bool isElfMagic(const char* p);
 
-  // is it ELF for CAL ?
-  static bool isCALTarget(const char* p, signed char ec);
-
  private:
   /* Initialization */
   bool Init();
