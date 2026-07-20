@@ -110,13 +110,15 @@ void TestFileLockMultipleShared::SetUp() {}
 void TestFileLockMultipleShared::Run() {
   const std::string test_file = "/tmp/cuid_test_lock_shared";
 
-  CuidFileLock lock1(test_file, CuidLockType::SHARED);
-  CuidFileLock lock2(test_file, CuidLockType::SHARED);
+  {
+    CuidFileLock lock1(test_file, CuidLockType::SHARED);
+    CuidFileLock lock2(test_file, CuidLockType::SHARED);
 
-  EXPECT_TRUE(lock1.acquire());
-  EXPECT_TRUE(lock2.try_acquire());
-  EXPECT_TRUE(lock1.is_locked());
-  EXPECT_TRUE(lock2.is_locked());
+    EXPECT_TRUE(lock1.acquire());
+    EXPECT_TRUE(lock2.try_acquire());
+    EXPECT_TRUE(lock1.is_locked());
+    EXPECT_TRUE(lock2.is_locked());
+  }
 
   unlink((test_file + ".lock").c_str());
 }
