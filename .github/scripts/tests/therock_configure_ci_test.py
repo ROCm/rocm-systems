@@ -187,14 +187,15 @@ class ConfigureCITest(unittest.TestCase):
         # None input
         self.assertFalse(therock_configure_ci.check_for_non_skippable_path(None))
 
-    @patch("subprocess.run")
-    def test_docs_only_change_returns_empty_list(self, mock_run):
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_docs_only_change_returns_empty_list(self, mock_get_modified):
         args = {"is_pull_request": True, "base_ref": "HEAD^"}
 
-        # Mock git diff to return only doc files
-        mock_process = MagicMock()
-        mock_process.stdout = "README.md\ndocs/guide.rst\nprojects/rocprim/docs/api.md"
-        mock_run.return_value = mock_process
+        mock_get_modified.return_value = [
+            "README.md",
+            "docs/guide.rst",
+            "projects/rocprim/docs/api.md",
+        ]
 
         project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)

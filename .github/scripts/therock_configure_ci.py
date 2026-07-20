@@ -125,23 +125,28 @@ def check_trigger_windows_ci_for_subtree(subtree: str) -> bool:
 # build or test workflows so any related jobs can be skipped if all paths
 # modified by a commit/PR match a pattern in this list.
 SKIPPABLE_PATH_PATTERNS = [
+    # Miscellaneous git/github files
+    "*.gitignore",
+    "*.pre-commit-config.*",
+    ".github/*.yml",
+    "*CODEOWNERS",
+    "*LICENSE",
+    "*/.markdownlint-ci2.yaml",
+    "tools/systems_pr_bot/*",
+    # Documentation files
     "docs/*",
-    ".gitignore",
     "*.md",
     "*.rtf",
     "*.rst",
-    "*/.markdownlint-ci2.yaml",
     "*/.readthedocs.yaml",
     "*/.spellcheck.local.yaml",
     "*/.wordlist.txt",
     "projects/*/docs/*",
-    "projects/*/.gitignore",
-    "projects/rocr-runtime/libhsakmt/src/dxg/*",
     "shared/*/docs/*",
-    "shared/*/.gitignore",
-    "experimental/python/perfxpert/*",
-    ".github/CODEOWNERS",
-    ".github/label*.yml",
+    # Changes to experimental code do not run standard build/test workflows.
+    "experimental/*",
+    # WSL support files (should these still be excluded?)
+    "projects/rocr-runtime/libhsakmt/src/dxg/*",
 ]
 
 
