@@ -50,10 +50,7 @@ ncclResult_t ncclIbCastSetTokens(void* sendComm, const int* qpTokens, int nqps);
 ncclResult_t ncclIbCastSetSchedParms(void* sendComm, bool schedEnable, bool doWrr, bool splitData,
                                      uint32_t splitDataMin);
 
-/* GRH (global route header) state per active QP, read back from the driver.
- * isGlobal is queried from the live QP via ibv_query_qp (ah_attr.is_global), so
- * it reflects what the driver actually programmed at RTR, not just intent.
- * linkLayer is the rtrAttr.linkLayer used to configure the QP. */
+/* GRH (global route header) state per active QP */
 struct ncclIbCastGrhState {
   int nqps;
   uint8_t linkLayer[NCCL_IB_MAX_QPS];  /* IBV_LINK_LAYER_ETHERNET (RoCE) / _INFINIBAND */

@@ -451,15 +451,9 @@ extern "C" ncclResult_t ncclIbCastGetSchedState(void* sendComm, struct ncclIbCas
 }
 
 // ncclIbCastGetGrhState — read per-QP global-addressing state out of a sendComm.
-// For each active QP, copies rtrAttr.linkLayer and queries the live QP via
-// ibv_query_qp to read back the driver-programmed ah_attr.is_global. Reading it
-// back from the driver (rather than from our intended attrs) makes this a true
-// end-to-end check of what was actually programmed at RTR.
-// Returns ncclInvalidArgument if sendComm or out is null.
+// For each active QP, copies rtrAttr.linkLayer and queries the live QP via ibv_query_qp
 extern "C" ncclResult_t ncclIbCastGetGrhState(void* sendComm, struct ncclIbCastGrhState* out) {
   if (!sendComm || !out) return ncclInvalidArgument;
-  // Zero the whole struct so entries beyond nqps are well-defined even if the
-  // caller passed an uninitialized stack struct.
   memset(out, 0, sizeof(*out));
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
   struct ncclIbNetCommBase* base = &comm->base;
