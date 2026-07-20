@@ -2401,10 +2401,10 @@ static std::string AddPidToPath(const std::string& path) {
 // Drains all queues when profiling was active; writes trace if GPU_CLR_PROFILE_OUTPUT is set.
 static void ProfilerAtExit() {
 #if !defined(_WIN32)
-  // Drain in-flight GPU work whenever profiling was active (env var or API),
-  // so all ReportActivity callbacks arrive before we serialise records.
+  // Drain all in-flight GPU work and async handlers unconditionally so that
+  // all ReportActivity callbacks complete before we serialise records.
   // Skipped on Windows where KFD streams may already be partially torn down.
-  if (IsProfilingActive()) DrainAllDevices();
+  DrainAllDevices();
 #endif
 
   // Stop the chunk delivery thread (if running) and flush all remaining records.
