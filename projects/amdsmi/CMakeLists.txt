@@ -259,30 +259,33 @@ set(ROCM_SRC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/src")
 set(ROCM_INC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi")
 set(SHR_MUTEX_DIR "${PROJECT_SOURCE_DIR}/third_party/shared_mutex")
 if(ENABLE_ESMI_LIB)
-    include(FetchContent)
+    # Pin to an immutable commit, not a mutable tag (ROCM-27024).
+    set(ESMI_GIT_HASH "d494a3194ceb4cc4dbb2debf9fcbe8773c6d3bef")
+    set(ESMI_SOURCE_DIR "${PROJECT_SOURCE_DIR}/esmi_ib_library")
 
-    FetchContent_Declare(
-        esmi_ib_library
-        GIT_REPOSITORY https://github.com/amd/esmi_ib_library.git
-        GIT_TAG d494a3194ceb4cc4dbb2debf9fcbe8773c6d3bef
-        GIT_SHALLOW FALSE
-        SOURCE_DIR
-        ${PROJECT_SOURCE_DIR}/esmi_ib_library
-    )
-    FetchContent_GetProperties(esmi_ib_library)
-    if(NOT esmi_ib_library_POPULATED)
-        FetchContent_Populate(esmi_ib_library)
+    # Use existing sources if present (vendored/offline); only fetch when absent.
+    if(NOT EXISTS "${ESMI_SOURCE_DIR}/src/e_smi.c")
+        include(FetchContent)
+        FetchContent_Declare(
+            esmi_ib_library
+            GIT_REPOSITORY https://github.com/amd/esmi_ib_library.git
+            GIT_TAG ${ESMI_GIT_HASH}
+            SOURCE_DIR
+            ${ESMI_SOURCE_DIR}
+            # Download-only: sources are compiled into amd_smi, not added as a
+            # subdir, so point SOURCE_SUBDIR at a dir with no CMakeLists.txt.
+            SOURCE_SUBDIR
+            __download_only__
+        )
+        FetchContent_MakeAvailable(esmi_ib_library)
     endif()
 
     # Make sure to update the amd_hsmp.h file with the corresponding esmi version
-    file(
-        COPY "${PROJECT_SOURCE_DIR}/include/amd_smi/impl/amd_hsmp.h"
-        DESTINATION "${PROJECT_SOURCE_DIR}/esmi_ib_library/include/asm"
-    )
+    file(COPY "${PROJECT_SOURCE_DIR}/include/amd_smi/impl/amd_hsmp.h" DESTINATION "${ESMI_SOURCE_DIR}/include/asm")
 
     add_definitions("-DENABLE_ESMI_LIB=1")
-    set(ESMI_INC_DIR "${PROJECT_SOURCE_DIR}/esmi_ib_library/include")
-    set(ESMI_SRC_DIR "${PROJECT_SOURCE_DIR}/esmi_ib_library/src")
+    set(ESMI_INC_DIR "${ESMI_SOURCE_DIR}/include")
+    set(ESMI_SRC_DIR "${ESMI_SOURCE_DIR}/src")
     # esmi has a lot of write-strings warnings - silence them
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-write-strings")
 endif()
