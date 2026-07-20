@@ -25,6 +25,8 @@
 // deltas around their own hipMalloc/hipFree and check pointer membership, never absolute inventory
 // sizes.
 
+#include "snap_kernels.hpp"
+
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
@@ -46,52 +48,6 @@ namespace msnp = kernel_replay::memory_snapshot;
 
 namespace
 {
-namespace kernel
-{
-__global__ void
-fill(float* d, float val, int n)
-{
-    const int stride = blockDim.x * gridDim.x;
-    for(int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += stride)
-        d[i] = val;
-}
-
-// d[i] = base + i : a non-uniform pattern so a stale/partial restore is easy to catch.
-__global__ void
-iota(float* d, float base, int n)
-{
-    const int stride = blockDim.x * gridDim.x;
-    for(int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += stride)
-        d[i] = base + static_cast<float>(i);
-}
-
-// In-place read-write kernel: the canonical case restore must protect (y is both read and written).
-__global__ void
-saxpy(float* y, const float* x, float a, int n)
-{
-    const int stride = blockDim.x * gridDim.x;
-    for(int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += stride)
-        y[i] = a * x[i] + y[i];
-}
-
-// In-place add (another read-write mutation).
-__global__ void
-add(float* d, float delta, int n)
-{
-    const int stride = blockDim.x * gridDim.x;
-    for(int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += stride)
-        d[i] = d[i] + delta;
-}
-}  // namespace kernel
-
-constexpr int NUM_THREADS = 1024;
-
-int
-blocks_for(int n)
-{
-    return (n + NUM_THREADS - 1) / NUM_THREADS;
-}
-
 rocprofiler_context_id_t g_ctx{};
 
 void
@@ -184,28 +140,28 @@ sync_ok()
 void
 launch_fill(float* d, float val, int n)
 {
-    kernel::fill<<<blocks_for(n), NUM_THREADS>>>(d, val, n);
+    kernel_launch::fill(d, val, n);
     sync_ok();
 }
 
 void
 launch_iota(float* d, float base, int n)
 {
-    kernel::iota<<<blocks_for(n), NUM_THREADS>>>(d, base, n);
+    kernel_launch::iota(d, base, n);
     sync_ok();
 }
 
 void
 launch_saxpy(float* y, const float* x, float a, int n)
 {
-    kernel::saxpy<<<blocks_for(n), NUM_THREADS>>>(y, x, a, n);
+    kernel_launch::saxpy(y, x, a, n);
     sync_ok();
 }
 
 void
 launch_add(float* d, float delta, int n)
 {
-    kernel::add<<<blocks_for(n), NUM_THREADS>>>(d, delta, n);
+    kernel_launch::add(d, delta, n);
     sync_ok();
 }
 
