@@ -40,6 +40,22 @@ struct ClusterDispatchShape {
   uint32_t size_z = 1;
 };
 
+/// @brief Translate the floating-point fields in COMPUTE_PGM_RSRC1 to their
+/// initial SQ_WAVE_MODE positions.
+///
+/// COMPUTE_PGM_RSRC1 stores FP_ROUND at bits 12:15, FP_DENORM at bits 16:19,
+/// and FP16_OVFL at bit 26. SQ_WAVE_MODE stores those fields at bits 0:3,
+/// 4:7, and 23 respectively.
+[[nodiscard]] inline constexpr uint32_t
+initial_wave_mode_from_compute_pgm_rsrc1(uint32_t compute_pgm_rsrc1) {
+  constexpr uint32_t kFloatRoundMask = 0xFu << 12;
+  constexpr uint32_t kFloatDenormMask = 0xFu << 16;
+  constexpr uint32_t kFp16OverflowMask = 1u << 26;
+  return ((compute_pgm_rsrc1 & kFloatRoundMask) >> 12) |
+         ((compute_pgm_rsrc1 & kFloatDenormMask) >> 12) |
+         ((compute_pgm_rsrc1 & kFp16OverflowMask) >> 3);
+}
+
 /// @brief Per-dispatch tracking entry created by the AQL Packet Processor.
 struct DispatchEntry {
   uint32_t dispatch_id = 0;
@@ -54,6 +70,8 @@ struct DispatchEntry {
   uint32_t kernarg_size = 0;
   uint32_t num_user_sgprs = 2;
   uint32_t kernel_code_properties = 0;
+  /// Initial SQ_WAVE_MODE value derived from COMPUTE_PGM_RSRC1.
+  uint32_t initial_wave_mode = 0;
   uint16_t kernarg_preload = 0;
   uint64_t dispatch_ptr = 0;
   uint64_t queue_ptr = 0;

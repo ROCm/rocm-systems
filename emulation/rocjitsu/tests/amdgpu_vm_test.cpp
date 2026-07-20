@@ -124,7 +124,7 @@ struct VmFixture {
   uint64_t write_kernel(uint64_t addr, const void *code, size_t code_size, uint32_t sgprs = 104,
                         uint32_t vgprs = 256, uint32_t user_sgprs = 2,
                         uint32_t group_segment_fixed_size = 0, bool wgp_mode = false,
-                        uint32_t enable_vgpr_workitem_id = 0) {
+                        uint32_t enable_vgpr_workitem_id = 0, bool fp16_overflow = false) {
     using namespace rocr::llvm::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
@@ -134,6 +134,7 @@ struct VmFixture {
                     ((sgprs / 8) - 1));
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgprs);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, (wgp_mode ? 1u : 0u));
+    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_FP16_OVFL, (fp16_overflow ? 1u : 0u));
     kd.group_segment_fixed_size = group_segment_fixed_size;
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID,
                     enable_vgpr_workitem_id);
@@ -589,6 +590,31 @@ TEST(DispatchEntryTest, InitialExecMaskSupportsWave64GridTail) {
 
   EXPECT_EQ(amdgpu::initial_exec_mask_for_wave(entry, 0, 0, 64), ~0ULL);
   EXPECT_EQ(amdgpu::initial_exec_mask_for_wave(entry, 1, 0, 64), 1ULL);
+}
+
+TEST(DispatchEntryTest, ComputePgmRsrc1FloatFieldsMapToInitialWaveMode) {
+  constexpr uint32_t kFloatRound = 0x9u;
+  constexpr uint32_t kFloatDenorm = 0x6u;
+  constexpr uint32_t kComputePgmRsrc1 = (kFloatRound << 12) | (kFloatDenorm << 16) | (1u << 26);
+
+  EXPECT_EQ(amdgpu::initial_wave_mode_from_compute_pgm_rsrc1(kComputePgmRsrc1),
+            kFloatRound | (kFloatDenorm << 4) | amdgpu::Wavefront::FP16_OVFL_BIT);
+}
+
+TEST(DispatchEntryTest, DescriptorFp16OverflowInitializesWavefrontMode) {
+  VmFixture f;
+  auto *snap = f.capture_halts();
+  const uint32_t program[] = {SOPP_S_ENDPGM};
+  uint64_t kernel_object =
+      f.write_kernel(0x1000, program, sizeof(program), 104, 256, 2, 0, false, 0, true);
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(kernel_object, 1, 1);
+  step_until_halted(*f.engine, {f.cu()});
+
+  ASSERT_EQ(snap->snapshots().size(), 1u);
+  EXPECT_EQ(snap->snapshots().front().mode_raw & amdgpu::Wavefront::FP16_OVFL_BIT,
+            amdgpu::Wavefront::FP16_OVFL_BIT);
 }
 
 TEST(DispatchEntryTest, InitialExecMaskHandles3DTailWithWorkgroupOffset) {

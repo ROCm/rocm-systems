@@ -1033,7 +1033,10 @@ class TestDeriveVectorUnary:
 
         assert 'inst_.clamp' in cpp
         assert 'util::f32_to_fp8_e5m3_rne(s0)' in cpp
-        assert 'util::f32_to_fp8_e4m3_rne(s0)' in cpp
+        assert (
+            'util::f32_to_fp8_e4m3_rne_with_saturation('
+            's0, wf.fp16_overflow_saturates())'
+        ) in cpp
         assert 'inst_.opsel' in cpp
 
     def test_gfx1250_cvt_sr_fp8_clamp_selects_e5m3_encoder(self):
@@ -1052,7 +1055,10 @@ class TestDeriveVectorUnary:
 
         assert 'inst_.clamp' in cpp
         assert 'util::f32_to_fp8_e5m3_sr(s0, seed)' in cpp
-        assert 'util::f32_to_fp8_e4m3_sr(s0, seed)' in cpp
+        assert (
+            'util::f32_to_fp8_e4m3_sr_with_saturation('
+            's0, seed, wf.fp16_overflow_saturates())'
+        ) in cpp
         assert 'inst_.opsel' in cpp
 
     def test_gfx1250_cvt_sr_fp8_f16_clamp_selects_e5m3_encoder(self):

@@ -232,14 +232,14 @@ TEST(Fp8E4M3Fnuz, BlockMatchesScalar) {
 
 TEST(Fp8E4M3Fnuz, RneNarrow) {
   EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(std::numeric_limits<float>::quiet_NaN()), 0x80);
-  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(std::numeric_limits<float>::infinity()), 0x7F);
-  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(-std::numeric_limits<float>::infinity()), 0xFF);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(std::numeric_limits<float>::infinity()), 0x80);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(-std::numeric_limits<float>::infinity()), 0x80);
   EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(0.0f), 0x00);
   EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(-0.0f), 0x00);
   EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(1.0f), 0x40);
   EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(240.0f), 0x7F);
-  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(300.0f), 0x7F);
-  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(-300.0f), 0xFF);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(300.0f), 0x80);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(-300.0f), 0x80);
   EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(1e-12f), 0x00);
 
   float largest_denorm = util::fp8_e4m3_fnuz_to_f32(0x07);
@@ -248,10 +248,27 @@ TEST(Fp8E4M3Fnuz, RneNarrow) {
   EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(midpoint + 1e-9f), 0x08);
 }
 
+TEST(Fp8E4M3Fnuz, RneSaturatingOverflow) {
+  EXPECT_EQ(
+      util::f32_to_fp8_e4m3_fnuz_rne_with_saturation(std::numeric_limits<float>::quiet_NaN(), true),
+      0x80);
+  EXPECT_EQ(
+      util::f32_to_fp8_e4m3_fnuz_rne_with_saturation(std::numeric_limits<float>::infinity(), true),
+      0x7F);
+  EXPECT_EQ(
+      util::f32_to_fp8_e4m3_fnuz_rne_with_saturation(-std::numeric_limits<float>::infinity(), true),
+      0xFF);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_with_saturation(300.0f, true), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_with_saturation(-300.0f, true), 0xFF);
+}
+
 TEST(Fp8E4M3Fnuz, SrNarrow) {
   EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_sr(1.0f, 0), 0x40);
   EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_sr(std::numeric_limits<float>::quiet_NaN(), 0), 0x80);
-  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_sr(std::numeric_limits<float>::infinity(), 0), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_sr(std::numeric_limits<float>::infinity(), 0), 0x80);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_sr_with_saturation(std::numeric_limits<float>::infinity(), 0,
+                                                          true),
+            0x7F);
 
   const float normal_lo = util::fp8_e4m3_fnuz_to_f32(0x40);
   const float normal_hi = util::fp8_e4m3_fnuz_to_f32(0x41);
@@ -286,6 +303,19 @@ TEST(Fp8E4M3, RneNarrow) {
   float smallest_normal = util::fp8_e4m3_to_f32(0x08);
   float midpoint = (largest_denorm + smallest_normal) / 2.0f;
   EXPECT_EQ(util::f32_to_fp8_e4m3_rne(midpoint + 1e-9f), 0x08);
+}
+
+TEST(Fp8E4M3, RneSaturatingOverflow) {
+  EXPECT_EQ(
+      util::f32_to_fp8_e4m3_rne_with_saturation(std::numeric_limits<float>::quiet_NaN(), true),
+      0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne_with_saturation(std::numeric_limits<float>::infinity(), true),
+            0x7E);
+  EXPECT_EQ(
+      util::f32_to_fp8_e4m3_rne_with_saturation(-std::numeric_limits<float>::infinity(), true),
+      0xFE);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne_with_saturation(500.0f, true), 0x7E);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne_with_saturation(-500.0f, true), 0xFE);
 }
 
 TEST(Fp8E4M3, RneExp15) {
@@ -336,6 +366,9 @@ TEST(Fp8E4M3, SrNarrow) {
   EXPECT_EQ(util::f32_to_fp8_e4m3_sr(std::numeric_limits<float>::quiet_NaN(), 0), 0x7F);
   EXPECT_EQ(util::f32_to_fp8_e4m3_sr(std::numeric_limits<float>::infinity(), 0), 0x7F);
   EXPECT_EQ(util::f32_to_fp8_e4m3_sr(-std::numeric_limits<float>::infinity(), 0), 0xFF);
+  EXPECT_EQ(
+      util::f32_to_fp8_e4m3_sr_with_saturation(std::numeric_limits<float>::infinity(), 0, true),
+      0x7E);
 }
 
 TEST(Fp8E4M3, SrDenormRoundTrip) {
@@ -456,21 +489,38 @@ TEST(Bf8E5M2Fnuz, BlockMatchesScalar) {
 
 TEST(Bf8E5M2Fnuz, RneNarrow) {
   EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(std::numeric_limits<float>::quiet_NaN()), 0x80);
-  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(std::numeric_limits<float>::infinity()), 0x7F);
-  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(-std::numeric_limits<float>::infinity()), 0xFF);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(std::numeric_limits<float>::infinity()), 0x80);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(-std::numeric_limits<float>::infinity()), 0x80);
   EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(0.0f), 0x00);
   EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(-0.0f), 0x00);
   EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(1.0f), 0x40);
   EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(57344.0f), 0x7F);
-  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(70000.0f), 0x7F);
-  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(-70000.0f), 0xFF);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(70000.0f), 0x80);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(-70000.0f), 0x80);
   EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(1e-12f), 0x00);
+}
+
+TEST(Bf8E5M2Fnuz, RneSaturatingOverflow) {
+  EXPECT_EQ(
+      util::f32_to_bf8_e5m2_fnuz_rne_with_saturation(std::numeric_limits<float>::quiet_NaN(), true),
+      0x80);
+  EXPECT_EQ(
+      util::f32_to_bf8_e5m2_fnuz_rne_with_saturation(std::numeric_limits<float>::infinity(), true),
+      0x7F);
+  EXPECT_EQ(
+      util::f32_to_bf8_e5m2_fnuz_rne_with_saturation(-std::numeric_limits<float>::infinity(), true),
+      0xFF);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_with_saturation(70000.0f, true), 0x7F);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_with_saturation(-70000.0f, true), 0xFF);
 }
 
 TEST(Bf8E5M2Fnuz, SrNarrow) {
   EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_sr(1.0f, 0), 0x40);
   EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_sr(std::numeric_limits<float>::quiet_NaN(), 0), 0x80);
-  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_sr(std::numeric_limits<float>::infinity(), 0), 0x7F);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_sr(std::numeric_limits<float>::infinity(), 0), 0x80);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_sr_with_saturation(std::numeric_limits<float>::infinity(), 0,
+                                                          true),
+            0x7F);
 
   const float normal_lo = util::bf8_e5m2_fnuz_to_f32(0x40);
   const float normal_hi = util::bf8_e5m2_fnuz_to_f32(0x41);
@@ -495,12 +545,24 @@ TEST(Bf8E5M2, RneNarrow) {
   EXPECT_EQ(util::f32_to_bf8_e5m2_rne(std::numeric_limits<float>::infinity()), 0x7C);
   EXPECT_EQ(util::f32_to_bf8_e5m2_rne(0.0f), 0x00);
   EXPECT_EQ(util::f32_to_bf8_e5m2_rne(1.0f), 0x3C);
+  EXPECT_EQ(
+      util::f32_to_bf8_e5m2_rne_with_saturation(std::numeric_limits<float>::quiet_NaN(), true),
+      0x7F);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_rne_with_saturation(std::numeric_limits<float>::infinity(), true),
+            0x7B);
+  EXPECT_EQ(
+      util::f32_to_bf8_e5m2_rne_with_saturation(-std::numeric_limits<float>::infinity(), true),
+      0xFB);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_rne_with_saturation(70000.0f, true), 0x7B);
 }
 
 TEST(Bf8E5M2, SrNarrow) {
   EXPECT_EQ(util::f32_to_bf8_e5m2_sr(1.0f, 0), 0x3C);
   EXPECT_EQ(util::f32_to_bf8_e5m2_sr(std::numeric_limits<float>::quiet_NaN(), 0), 0x7F);
   EXPECT_EQ(util::f32_to_bf8_e5m2_sr(std::numeric_limits<float>::infinity(), 0), 0x7C);
+  EXPECT_EQ(
+      util::f32_to_bf8_e5m2_sr_with_saturation(std::numeric_limits<float>::infinity(), 0, true),
+      0x7B);
 }
 
 TEST(Bf8E5M2, SrDenormRoundTrip) {

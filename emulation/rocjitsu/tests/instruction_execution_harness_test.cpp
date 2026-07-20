@@ -3537,7 +3537,7 @@ TEST(Gfx1250CvtFp8Test, F32DecodeVop3UsesSelectedByte) {
     wf->halt();
 }
 
-TEST(Gfx1250CvtFp8Test, E4M3OverflowProducesNaN) {
+TEST(Gfx1250CvtFp8Test, E4M3OverflowHonorsFp16OverflowMode) {
   amdgpu::GpuMemory gpu_mem("gfx1250_cvt_fp8_overflow_mem");
   amdgpu::L2Cache l2("gfx1250_cvt_fp8_overflow_l2");
 
@@ -3571,6 +3571,54 @@ TEST(Gfx1250CvtFp8Test, E4M3OverflowProducesNaN) {
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_pk_fp8_f32");
   cu->execute_instruction(inst.get(), *wf);
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FF7Fu);
+
+  wf->set_mode_raw(wf->mode_raw() | amdgpu::Wavefront::FP16_OVFL_BIT);
+  cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
+  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FE7Eu);
+
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(Cdna3CvtFp8Test, E4M3FnuzOverflowHonorsFp16OverflowMode) {
+  amdgpu::GpuMemory gpu_mem("cdna3_cvt_fp8_overflow_mem");
+  amdgpu::L2Cache l2("cdna3_cvt_fp8_overflow_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA3;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("cdna3", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  const uint32_t sb = wf->sgpr_alloc().base;
+  cu->write_sgpr(sb + 5, std::bit_cast<uint32_t>(300.0f));
+  cu->write_sgpr(sb + 6, std::bit_cast<uint32_t>(-300.0f));
+
+  const auto words = encode_cdna_vop3(/*op=*/0x2A2, /*vdst=*/2, /*src0=*/5, /*src1=*/6,
+                                      /*src2=*/0);
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_pk_fp8_f32");
+
+  cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
+  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x00008080u);
+
+  wf->set_mode_raw(wf->mode_raw() | amdgpu::Wavefront::FP16_OVFL_BIT);
+  cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
+  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x0000FF7Fu);
 
   if (!wf->is_halted())
     wf->halt();

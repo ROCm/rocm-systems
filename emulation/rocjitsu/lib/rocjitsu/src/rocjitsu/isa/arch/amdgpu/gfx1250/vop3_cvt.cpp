@@ -3928,7 +3928,8 @@ void VCvtScalef32SrPk8Fp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     };
     for (uint32_t index = 0; index < 8u; ++index) {
       float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_fp8_e4m3_sr(value, seed));
+      pack_scaled_dst(index, util::f32_to_fp8_e4m3_sr_with_saturation(
+                                 value, seed, wf.fp16_overflow_saturates()));
       seed = util::prng_advance(seed);
     }
     for (uint32_t word = 0; word < 2u; ++word)
@@ -4065,7 +4066,8 @@ void VCvtScalef32SrPk8Bf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     };
     for (uint32_t index = 0; index < 8u; ++index) {
       float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_bf8_e5m2_sr(value, seed));
+      pack_scaled_dst(index, util::f32_to_bf8_e5m2_sr_with_saturation(
+                                 value, seed, wf.fp16_overflow_saturates()));
       seed = util::prng_advance(seed);
     }
     for (uint32_t word = 0; word < 2u; ++word)
@@ -6608,7 +6610,8 @@ void VCvtScalef32Pk8Fp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     };
     for (uint32_t index = 0; index < 8u; ++index) {
       float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_fp8_e4m3_rne(value));
+      pack_scaled_dst(
+          index, util::f32_to_fp8_e4m3_rne_with_saturation(value, wf.fp16_overflow_saturates()));
     }
     for (uint32_t word = 0; word < 2u; ++word)
       amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
@@ -6851,7 +6854,8 @@ void VCvtScalef32Pk8Bf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     };
     for (uint32_t index = 0; index < 8u; ++index) {
       float value = read_scaled_input(index) / scale;
-      pack_scaled_dst(index, util::f32_to_bf8_e5m2_rne(value));
+      pack_scaled_dst(
+          index, util::f32_to_bf8_e5m2_rne_with_saturation(value, wf.fp16_overflow_saturates()));
     }
     for (uint32_t word = 0; word < 2u; ++word)
       amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);

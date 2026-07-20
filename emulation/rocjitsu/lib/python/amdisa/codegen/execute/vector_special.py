@@ -1020,6 +1020,12 @@ def gen_vector_cvt_pk(
                     else 'util::f32_to_bf8_e5m2_rne'
                 ),
             )
+            honor_fp16_overflow = op.endswith('_f32')
+            if honor_fp16_overflow:
+                conv += '_with_saturation'
+            overflow_arg = (
+                ', wf.fp16_overflow_saturates()' if honor_fp16_overflow else ''
+            )
             conv_e5m3 = (
                 'util::f32_to_fp8_e5m3_rne'
                 if op.startswith('fp8_') and fp8_format_select is not None
@@ -1042,14 +1048,14 @@ def gen_vector_cvt_pk(
                 )
             if conv_e5m3 is not None:
                 L.append(
-                    f'    uint32_t lo = ({fp8_format_select}) ? {conv_e5m3}(s0) : {conv}(s0);'
+                    f'    uint32_t lo = ({fp8_format_select}) ? {conv_e5m3}(s0) : {conv}(s0{overflow_arg});'
                 )
                 L.append(
-                    f'    uint32_t hi = ({fp8_format_select}) ? {conv_e5m3}(s1) : {conv}(s1);'
+                    f'    uint32_t hi = ({fp8_format_select}) ? {conv_e5m3}(s1) : {conv}(s1{overflow_arg});'
                 )
             else:
-                L.append(f'    uint32_t lo = {conv}(s0);')
-                L.append(f'    uint32_t hi = {conv}(s1);')
+                L.append(f'    uint32_t lo = {conv}(s0{overflow_arg});')
+                L.append(f'    uint32_t hi = {conv}(s1{overflow_arg});')
             L.append(
                 '    uint32_t packed = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 8);'
             )
@@ -1280,7 +1286,12 @@ def _scale_decode_call(fmt: str, raw_expr: str, arch_name: str = '') -> str:
     raise ValueError(f'unsupported scaled conversion input format: {fmt}')
 
 
-def _scale_encode_call(fmt: str, value_expr: str, arch_name: str = '') -> str:
+def _scale_encode_call(
+    fmt: str,
+    value_expr: str,
+    arch_name: str = '',
+    honor_fp16_overflow: bool = False,
+) -> str:
     if fmt == 'fp4':
         return f'util::f32_to_fp4_e2m1_rne({value_expr})'
     if fmt == 'fp6':
@@ -1288,18 +1299,26 @@ def _scale_encode_call(fmt: str, value_expr: str, arch_name: str = '') -> str:
     if fmt == 'bf6':
         return f'util::f32_to_bf6_e3m2_rne({value_expr})'
     if fmt == 'fp8':
-        return (
-            f"{fp8_helper_name(arch_name, 'util::f32_to_fp8_e4m3_rne')}({value_expr})"
-        )
+        fn = fp8_helper_name(arch_name, 'util::f32_to_fp8_e4m3_rne')
+        if honor_fp16_overflow:
+            fn += '_with_saturation'
+            return f'{fn}({value_expr}, wf.fp16_overflow_saturates())'
+        return f'{fn}({value_expr})'
     if fmt == 'bf8':
-        return (
-            f"{fp8_helper_name(arch_name, 'util::f32_to_bf8_e5m2_rne')}({value_expr})"
-        )
+        fn = fp8_helper_name(arch_name, 'util::f32_to_bf8_e5m2_rne')
+        if honor_fp16_overflow:
+            fn += '_with_saturation'
+            return f'{fn}({value_expr}, wf.fp16_overflow_saturates())'
+        return f'{fn}({value_expr})'
     raise ValueError(f'unsupported scaled conversion output format: {fmt}')
 
 
 def _scale_sr_encode_call(
-    fmt: str, value_expr: str, seed_expr: str, arch_name: str = ''
+    fmt: str,
+    value_expr: str,
+    seed_expr: str,
+    arch_name: str = '',
+    honor_fp16_overflow: bool = False,
 ) -> str:
     if fmt == 'fp4':
         return f'util::f32_to_fp4_e2m1_sr({value_expr}, {seed_expr})'
@@ -1308,9 +1327,17 @@ def _scale_sr_encode_call(
     if fmt == 'bf6':
         return f'util::f32_to_bf6_e3m2_sr({value_expr}, {seed_expr})'
     if fmt == 'fp8':
-        return f"{fp8_helper_name(arch_name, 'util::f32_to_fp8_e4m3_sr')}({value_expr}, {seed_expr})"
+        fn = fp8_helper_name(arch_name, 'util::f32_to_fp8_e4m3_sr')
+        if honor_fp16_overflow:
+            fn += '_with_saturation'
+            return f'{fn}({value_expr}, {seed_expr}, wf.fp16_overflow_saturates())'
+        return f'{fn}({value_expr}, {seed_expr})'
     if fmt == 'bf8':
-        return f"{fp8_helper_name(arch_name, 'util::f32_to_bf8_e5m2_sr')}({value_expr}, {seed_expr})"
+        fn = fp8_helper_name(arch_name, 'util::f32_to_bf8_e5m2_sr')
+        if honor_fp16_overflow:
+            fn += '_with_saturation'
+            return f'{fn}({value_expr}, {seed_expr}, wf.fp16_overflow_saturates())'
+        return f'{fn}({value_expr}, {seed_expr})'
     raise ValueError(f'unsupported scaled SR conversion output format: {fmt}')
 
 
@@ -1502,12 +1529,12 @@ def gen_vector_cvt_scale(
         L.append('      float value = read_scaled_input(index) / scale;')
         if stochastic:
             L.append(
-                f"      pack_scaled_dst(index, {_scale_sr_encode_call(out_fmt, 'value', 'seed', arch_name)});"
+                f"      pack_scaled_dst(index, {_scale_sr_encode_call(out_fmt, 'value', 'seed', arch_name, in_fmt == 'f32')});"
             )
             L.append('      seed = util::prng_advance(seed);')
         else:
             L.append(
-                f"      pack_scaled_dst(index, {_scale_encode_call(out_fmt, 'value', arch_name)});"
+                f"      pack_scaled_dst(index, {_scale_encode_call(out_fmt, 'value', arch_name, in_fmt == 'f32')});"
             )
         L.append('    }')
         L.append(f'    for (uint32_t word = 0; word < {out_words}u; ++word)')
@@ -1574,7 +1601,7 @@ def gen_cvt_fp8(ctx) -> str:
             L,
             dst,
             src,
-            fp8_helper_name(ctx.arch_name, 'util::f32_to_fp8_e4m3_rne'),
+            f"{fp8_helper_name(ctx.arch_name, 'util::f32_to_fp8_e4m3_rne')}_with_saturation",
             opsel,
             fp8_format_select=fp8_format_select,
             fp8_format_fn='util::f32_to_fp8_e5m3_rne',
@@ -1584,7 +1611,7 @@ def gen_cvt_fp8(ctx) -> str:
             L,
             dst,
             src,
-            fp8_helper_name(ctx.arch_name, 'util::f32_to_bf8_e5m2_rne'),
+            f"{fp8_helper_name(ctx.arch_name, 'util::f32_to_bf8_e5m2_rne')}_with_saturation",
             opsel,
         )
     elif op == 'sr_fp8_f32':
@@ -1592,7 +1619,7 @@ def gen_cvt_fp8(ctx) -> str:
             L,
             dst,
             src,
-            fp8_helper_name(ctx.arch_name, 'util::f32_to_fp8_e4m3_sr'),
+            f"{fp8_helper_name(ctx.arch_name, 'util::f32_to_fp8_e4m3_sr')}_with_saturation",
             opsel,
             fp8_format_select=fp8_format_select,
             fp8_format_fn='util::f32_to_fp8_e5m3_sr',
@@ -1602,7 +1629,7 @@ def gen_cvt_fp8(ctx) -> str:
             L,
             dst,
             src,
-            fp8_helper_name(ctx.arch_name, 'util::f32_to_bf8_e5m2_sr'),
+            f"{fp8_helper_name(ctx.arch_name, 'util::f32_to_bf8_e5m2_sr')}_with_saturation",
             opsel,
         )
     elif op == 'pk_f32_fp8':
@@ -1645,14 +1672,14 @@ def _gen_pk_narrow_fp8(
     )
     if fp8_format_select is not None and fp8_format_fn is not None:
         L.append(
-            f'    uint8_t r0 = ({fp8_format_select}) ? {fp8_format_fn}(s0) : {cvt_fn}(s0);'
+            f'    uint8_t r0 = ({fp8_format_select}) ? {fp8_format_fn}(s0) : {cvt_fn}(s0, wf.fp16_overflow_saturates());'
         )
         L.append(
-            f'    uint8_t r1 = ({fp8_format_select}) ? {fp8_format_fn}(s1) : {cvt_fn}(s1);'
+            f'    uint8_t r1 = ({fp8_format_select}) ? {fp8_format_fn}(s1) : {cvt_fn}(s1, wf.fp16_overflow_saturates());'
         )
     else:
-        L.append(f'    uint8_t r0 = {cvt_fn}(s0);')
-        L.append(f'    uint8_t r1 = {cvt_fn}(s1);')
+        L.append(f'    uint8_t r0 = {cvt_fn}(s0, wf.fp16_overflow_saturates());')
+        L.append(f'    uint8_t r1 = {cvt_fn}(s1, wf.fp16_overflow_saturates());')
     L.append(
         '    uint32_t packed = static_cast<uint32_t>(r0) | (static_cast<uint32_t>(r1) << 8);'
     )
@@ -1680,10 +1707,12 @@ def _gen_sr_narrow_fp8(
     )
     if fp8_format_select is not None and fp8_format_fn is not None:
         L.append(
-            f'    uint8_t result = ({fp8_format_select}) ? {fp8_format_fn}(s0, seed) : {cvt_fn}(s0, seed);'
+            f'    uint8_t result = ({fp8_format_select}) ? {fp8_format_fn}(s0, seed) : {cvt_fn}(s0, seed, wf.fp16_overflow_saturates());'
         )
     else:
-        L.append(f'    uint8_t result = {cvt_fn}(s0, seed);')
+        L.append(
+            f'    uint8_t result = {cvt_fn}(s0, seed, wf.fp16_overflow_saturates());'
+        )
     L.append(f'    uint32_t dst_byte = ({opsel} >> 2) & 0x3;')
     L.append(
         f'    uint32_t old = amdgpu::RegisterAccess(wf).read_lane({dst[0]}, lane);'
@@ -1858,6 +1887,10 @@ def _gen_narrow_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
     dst = ctx.dst_ops
     src = ctx.src_ops
     cvt_fn = _f32_to_narrow_rne_name(ctx.arch_name, dst_fmt)
+    honor_fp16_overflow = src_fmt == 'f32' and dst_fmt in ('fp8', 'bf8')
+    if honor_fp16_overflow:
+        cvt_fn += '_with_saturation'
+    overflow_arg = ', wf.fp16_overflow_saturates()' if honor_fp16_overflow else ''
     nan_val = _nan_for_fmt(dst_fmt)
 
     L = []
@@ -1881,8 +1914,8 @@ def _gen_narrow_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
         L.append(
             f'    float s1 = static_cast<float>(static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane)))) / scale);'
         )
-        L.append(f'    uint8_t r0 = {cvt_fn}(s0);')
-        L.append(f'    uint8_t r1 = {cvt_fn}(s1);')
+        L.append(f'    uint8_t r0 = {cvt_fn}(s0{overflow_arg});')
+        L.append(f'    uint8_t r1 = {cvt_fn}(s1{overflow_arg});')
         L.append(
             '    uint32_t packed = static_cast<uint32_t>(r0) | (static_cast<uint32_t>(r1) << 8);'
         )
@@ -1994,6 +2027,10 @@ def _gen_sr_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
     dst = ctx.dst_ops
     src = ctx.src_ops
     cvt_fn = _f32_to_narrow_sr_name(ctx.arch_name, dst_fmt)
+    honor_fp16_overflow = src_fmt == 'f32' and dst_fmt in ('fp8', 'bf8')
+    if honor_fp16_overflow:
+        cvt_fn += '_with_saturation'
+    overflow_arg = ', wf.fp16_overflow_saturates()' if honor_fp16_overflow else ''
     op = ctx.op
 
     L = []
@@ -2106,7 +2143,7 @@ def _gen_sr_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
         L.append(
             f'    uint32_t seed = amdgpu::RegisterAccess(wf).read_lane({random_src}, lane);'
         )
-        L.append(f'    uint8_t result = {cvt_fn}(scaled, seed);')
+        L.append(f'    uint8_t result = {cvt_fn}(scaled, seed{overflow_arg});')
         L.append('    uint32_t dst_byte = (inst_.op_sel >> 2) & 0x3;')
         L.append(
             f'    uint32_t old = amdgpu::RegisterAccess(wf).read_lane({dst[0]}, lane);'

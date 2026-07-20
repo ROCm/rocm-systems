@@ -201,6 +201,7 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
                                            const DispatchEntry &pkt, uint32_t global_wg_id,
                                            uint32_t wf_index_in_wg) {
   using namespace rocr::llvm::amdhsa;
+  wf->set_mode_raw(pkt.initial_wave_mode);
   uint32_t sbase = wf->sgpr_alloc().base;
   uint32_t kcp = pkt.kernel_code_properties;
 
@@ -1189,6 +1190,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.kernarg_size = kd.kernarg_size;
   dp.num_user_sgprs = user_sgprs;
   dp.kernel_code_properties = kd.kernel_code_properties;
+  dp.initial_wave_mode = initial_wave_mode_from_compute_pgm_rsrc1(kd.compute_pgm_rsrc1);
   dp.kernarg_preload = kd.kernarg_preload;
   dp.private_segment_fixed_size = std::max(kd.private_segment_fixed_size, pkt.private_segment_size);
   dp.group_segment_fixed_size = std::max(kd.group_segment_fixed_size, pkt.group_segment_size);
