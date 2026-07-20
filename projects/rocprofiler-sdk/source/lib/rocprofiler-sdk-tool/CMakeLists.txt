@@ -4,9 +4,16 @@
 
 rocprofiler_activate_clang_tidy()
 
-set(TOOL_HEADERS config.hpp execution_profile.hpp helper.hpp stream_stack.hpp)
+set(TOOL_HEADERS att_no_intercept.hpp att_no_intercept_impl.hpp config.hpp
+                 execution_profile.hpp graph_stack.hpp helper.hpp stream_stack.hpp)
 
-set(TOOL_SOURCES config.cpp main.c tool.cpp stream_stack.cpp)
+set(TOOL_SOURCES att_no_intercept.cpp config.cpp graph_stack.cpp main.c tool.cpp
+                 stream_stack.cpp)
+
+if(NOT ROCPROFILER_DISABLE_ATT_QUICK_SCAN)
+    find_package(rocprof-trace-decoder REQUIRED)
+    list(APPEND TOOL_SOURCES att_no_intercept_quick_scan.cpp)
+endif()
 
 add_library(rocprofiler-sdk-tool SHARED)
 target_sources(rocprofiler-sdk-tool PRIVATE ${TOOL_SOURCES} ${TOOL_HEADERS})
@@ -26,6 +33,16 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-att-parser
             rocprofiler-sdk::rocprofiler-sdk-sqlite3)
+
+if(NOT ROCPROFILER_DISABLE_ATT_QUICK_SCAN)
+    target_link_libraries(rocprofiler-sdk-tool
+                          PRIVATE rocprof-trace-decoder::rocprof-trace-decoder)
+    target_compile_definitions(rocprofiler-sdk-tool
+                               PRIVATE ROCPROFILER_ATT_QUICK_SCAN_ENABLED=1)
+else()
+    target_compile_definitions(rocprofiler-sdk-tool
+                               PRIVATE ROCPROFILER_ATT_QUICK_SCAN_ENABLED=0)
+endif()
 
 set_target_properties(
     rocprofiler-sdk-tool
