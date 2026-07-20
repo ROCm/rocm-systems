@@ -568,7 +568,7 @@ void run_dynamic_copy_loop(const std::vector<uint8_t> &elf_bytes, const Dispatch
     }
     EXPECT_EQ(mismatches, 0u) << mismatches << " mismatches for N=" << n;
   }
-  // Resources released by HsaDispatchResources::~ (queue first).
+  // Resources released by HsaDispatchResources destructor (queue first).
 }
 
 void translate_triton_fixture(const char *name, uint32_t mach, std::vector<uint8_t> &elf_bytes,
