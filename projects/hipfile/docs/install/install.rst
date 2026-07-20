@@ -87,6 +87,18 @@ Where:
 
             sudo zypper install amdrocm-<group>-devel
 
+
+.. note::
+
+   hipFile has experimental support for NVMeoF and NFSoRDMA on Linux. 
+
+   ``amdgpu-dkms`` version 31.40 or later must be installed to use NVMeoF and NFSoRDMA.
+   
+   NFSoRDMA requires ``HIPFILE_UNSUPPORTED_FILE_SYSTEMS=true``.
+
+   See :doc:`/reference/hipFile-io-backends` for information on file type rules.
+
+
 .. _hipfile-install-nightly:
 
 Install a nightly build
@@ -102,14 +114,3 @@ support notes.
 NVMeoF & NFSoRDMA Support on Linux
 ==================================
 
-NVMeoF & NFSoRDMA are supported by hipFile on Linux on an experimental basis. Version
-31.40 or newer of the ``amdgpu-dkms`` driver must be installed at a minimum.
-
-NFSoRDMA requires setting ``HIPFILE_UNSUPPORTED_FILE_SYSTEMS=true`` to bypass hipFile's
-filesystem check.
-
-NVMeoF does not require setting ``HIPFILE_UNSUPPORTED_FILE_SYSTEMS=true`` if the mounted
-NVMeoF target is a supported filesystem.
-
-See :doc:`/reference/hipFile-io-backends` for the fastpath backend's full
-filesystem and file-type rules.
