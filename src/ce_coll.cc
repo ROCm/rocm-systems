@@ -98,6 +98,7 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   comm->ceColl.intraBatchSyncFreq = CE_COLL_INTRA_BATCH_SYNC_FREQ;
   comm->ceColl.intraBatchSyncMsgThreshold = CE_COLL_INTRA_BATCH_SYNC_MSG_THRESHOLD;
   comm->ceColl.agMulticastThreshold = (int64_t)ncclParamCeCollAgMulticastThreshold();
+  comm->ceColl.initialized = true;
   NCCLCHECKGOTO(ncclCudaMemcpy(comm->ceColl.ceSeqNumDev + 1, (uint32_t*)&GRAPH_SYNC_VALUE, 1), ret, fail);
   INFO(NCCL_INIT, "Init CE, rank %d baseUCSymReadyPtr %p, baseUCSymComplPtr %p, seq num %d", comm->rank,
        comm->ceColl.baseUCSymReadyPtr, comm->ceColl.baseUCSymComplPtr, comm->ceColl.ceSeqNum);
@@ -105,6 +106,7 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
 exit:
   return ret;
 fail:
+  comm->ceColl.initialized = false;
   ncclCudaFree(comm->ceColl.ceSeqNumDev, comm->memManager);
   // Clean up partial initialization - both functions handle null safely
   ncclCommWindowDeregister(comm, ceWinDev);
@@ -132,6 +134,7 @@ ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
   comm->ceColl.baseUCSymReadyPtr = nullptr;
   comm->ceColl.baseUCSymComplPtr = nullptr;
   comm->ceColl.ceSyncWin = nullptr;
+  comm->ceColl.initialized = false;
 
   return ret;
 }

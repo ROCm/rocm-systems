@@ -544,10 +544,8 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
 
   ncclMemoryPoolConstruct(&comm->memPool_ncclKernelPlan);
   ncclMemoryPoolConstruct(&comm->memPool_ncclProxyOp);
+  ncclMemoryPoolConstruct(&comm->memPool_ncclRawTask);
 
-  for (int i = 0; i < ncclGroupTaskTypeNum; i++) {
-    comm->groupNext[i] = reinterpret_cast<struct ncclComm*>(0x1);
-  }
   comm->preconnectNext = reinterpret_cast<struct ncclComm*>(0x1);
 
   static_assert(MAXCHANNELS <= sizeof(*comm->connectSend) * 8,
@@ -574,6 +572,15 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   ncclIntruQueueConstruct(&comm->ceInitTaskQueue);
   ncclIntruQueueConstruct(&comm->suspendTaskQueue);
   ncclIntruQueueConstruct(&comm->resumeTaskQueue);
+  ncclIntruQueueConstruct(&comm->rawTaskQueue.genericQueue);
+  ncclIntruQueueConstruct(&comm->rawTaskQueue.bcastQueue);
+  ncclIntruQueueConstruct(&comm->classifiedTaskQueues.symTaskQueue);
+  ncclIntruQueueConstruct(&comm->classifiedTaskQueues.legacyTaskQueue);
+  ncclIntruQueueConstruct(&comm->classifiedTaskQueues.allgathervTaskQueue);
+  ncclIntruQueueConstruct(&comm->classifiedTaskQueues.p2pTaskQueue);
+  ncclIntruQueueConstruct(&comm->classifiedTaskQueues.rmaTaskQueue);
+  ncclIntruQueueConstruct(&comm->classifiedTaskQueues.ceTaskQueue);
+  ncclIntruQueueConstruct(&comm->mgmtTaskQueue);
 
   comm->regCache.pageSize = ncclOsGetPageSize();
 
@@ -1774,6 +1781,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
   comm->ceColl.baseUCSymReadyPtr = NULL;
   comm->ceColl.baseUCSymComplPtr = NULL;
+  comm->ceColl.initialized = false;
 
   // Call devCommSetup before the last barrier, making sure we don't have a thread running in front and starting to
   // launch NCCL kernels before all cuda mem allocation is complete. That could cause a deadlock.
@@ -2674,6 +2682,9 @@ static ncclResult_t ncclCommInitRankDev(ncclComm_t* newcomm, int nranks, int nId
   NCCLCHECKGOTO(ncclCalloc(&comm->abortFlagRefCount, 1), res, fail);
   comm->startMagic = comm->endMagic = NCCL_MAGIC; // Used to detect comm corruption.
   *comm->abortFlagRefCount = 1;
+  for (int i = 0; i < ncclGroupTaskTypeNum; i++) {
+    comm->groupNext[i] = reinterpret_cast<struct ncclComm*>(NCCL_COMM_GROUP_INVALID);
+  }
   NCCLCHECKGOTO(parseCommConfig(comm, config), res, fail);
   /* start with ncclInProgress and will be changed to ncclSuccess if init succeeds. */
   comm->initState = ncclInProgress;
@@ -2706,8 +2717,13 @@ static ncclResult_t ncclCommInitRankDev(ncclComm_t* newcomm, int nranks, int nId
     NCCLCHECKGOTO(bootstrapCreateRoot((struct ncclBootstrapHandle*)&job->commId[0], true), res, fail);
   }
   launchedJob = true;
-  NCCLCHECKGOTO(ncclAsyncLaunch((struct ncclAsyncJob*)job, ncclCommInitRankFunc, NULL, ncclCommInitJobFree, comm), res,
-                fail);
+  if (ncclParamEnqueueRearchEnable()) {
+    NCCLCHECKGOTO(ncclMgmtTaskEnqueue((struct ncclAsyncJob*)job, ncclCommInitRankFunc, ncclCommInitJobFree, comm), res,
+                  fail);
+  } else {
+    NCCLCHECKGOTO(ncclAsyncLaunch((struct ncclAsyncJob*)job, ncclCommInitRankFunc, NULL, ncclCommInitJobFree, comm),
+                  res, fail);
+  }
 
 exit:
   return ncclGroupErrCheck(res);
@@ -2725,6 +2741,7 @@ fail:
 
 NCCL_API(ncclResult_t, ncclCommInitRank, ncclComm_t* newcomm, int nranks, ncclUniqueId commId, int myrank);
 ncclResult_t ncclCommInitRank(ncclComm_t* newcomm, int nranks, ncclUniqueId commId, int myrank) {
+  ncclResult_t ret = ncclSuccess;
   NCCLCHECK(ncclInitEnv());
   NVTX3_RANGE(NcclNvtxParamsCommInitRank)
   // Load the CUDA driver and dlsym hooks (can fail on old drivers)
@@ -2734,12 +2751,19 @@ ncclResult_t ncclCommInitRank(ncclComm_t* newcomm, int nranks, ncclUniqueId comm
   ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
   CUDACHECK(cudaGetDevice(&cudaDev));
 
-  NCCLCHECK(ncclCommInitRankDev(newcomm, nranks, 1, &commId, myrank, cudaDev, &config, __func__));
+  NCCLCHECK(ncclGroupStartInternal());
+
+  NCCLCHECKGOTO(ncclCommInitRankDev(newcomm, nranks, 1, &commId, myrank, cudaDev, &config, __func__), ret, fail);
 
   NVTX3_RANGE_ADD_PAYLOAD(CommInitRank, NcclNvtxParamsCommInitRankSchema,
                           NVTX3_PAYLOAD((*newcomm)->commHash, nranks, myrank, cudaDev));
 
-  return ncclSuccess;
+exit:
+  ncclGroupErrCheck(ret);
+  NCCLCHECK(ncclGroupEndInternal());
+  return ret;
+fail:
+  goto exit;
 }
 
 NCCL_API(ncclResult_t, ncclCommInitAll, ncclComm_t* comms, int ndev, const int* devlist);
@@ -2993,9 +3017,14 @@ ncclResult_t ncclCommFinalize(ncclComm_t comm) {
   /* launch async thread to finalize comm. */
   NEW_NOTHROW_GOTO(job, ncclCommFinalizeAsyncJob, ret, fail);
   job->comm = comm;
-  NCCLCHECKGOTO(ncclAsyncLaunch((struct ncclAsyncJob*)job, commDestroySync, nullptr, ncclCommFinalizeAsyncJobFree,
-                                comm),
-                ret, fail);
+  if (ncclParamEnqueueRearchEnable()) {
+    NCCLCHECKGOTO(ncclMgmtTaskEnqueue((struct ncclAsyncJob*)job, commDestroySync, ncclCommFinalizeAsyncJobFree, comm),
+                  ret, fail);
+  } else {
+    NCCLCHECKGOTO(ncclAsyncLaunch((struct ncclAsyncJob*)job, commDestroySync, nullptr, ncclCommFinalizeAsyncJobFree,
+                                  comm),
+                  ret, fail);
+  }
 
 exit:
   ncclGroupErrCheck(ret);
@@ -3117,8 +3146,13 @@ ncclResult_t ncclCommDestroy(ncclComm_t comm) {
   NCCLCHECK(ncclCommEnsureReady(comm));
   NEW_NOTHROW_GOTO(job, ncclCommFinalizeAsyncJob, res, fail);
   job->comm = comm;
-  NCCLCHECKGOTO(ncclAsyncLaunch((struct ncclAsyncJob*)job, commReclaim, nullptr, ncclCommFinalizeAsyncJobFree, comm),
-                res, fail);
+  if (ncclParamEnqueueRearchEnable()) {
+    NCCLCHECKGOTO(ncclMgmtTaskEnqueue((struct ncclAsyncJob*)job, commReclaim, ncclCommFinalizeAsyncJobFree, comm), res,
+                  fail);
+  } else {
+    NCCLCHECKGOTO(ncclAsyncLaunch((struct ncclAsyncJob*)job, commReclaim, nullptr, ncclCommFinalizeAsyncJobFree, comm),
+                  res, fail);
+  }
 
 exit:
   ncclGroupErrCheck(res);
@@ -3216,9 +3250,14 @@ ncclResult_t ncclCommRevoke(ncclComm_t comm, int revokeFlags) {
 
   NEW_NOTHROW_GOTO(job, ncclCommRevokeAsyncJob, res, fail);
   job->comm = comm;
-  NCCLCHECKGOTO(ncclAsyncLaunch((struct ncclAsyncJob*)job, commRevokeAsync, nullptr, ncclCommFinalizeAsyncJobFree,
-                                comm),
-                res, fail);
+  if (ncclParamEnqueueRearchEnable()) {
+    NCCLCHECKGOTO(ncclMgmtTaskEnqueue((struct ncclAsyncJob*)job, commRevokeAsync, ncclCommFinalizeAsyncJobFree, comm),
+                  res, fail);
+  } else {
+    NCCLCHECKGOTO(ncclAsyncLaunch((struct ncclAsyncJob*)job, commRevokeAsync, nullptr, ncclCommFinalizeAsyncJobFree,
+                                  comm),
+                  res, fail);
+  }
 
 exit:
   ncclGroupErrCheck(res);
@@ -3269,8 +3308,13 @@ ncclResult_t ncclCommAbort(ncclComm_t comm) {
 
   NEW_NOTHROW_GOTO(job, ncclCommFinalizeAsyncJob, res, fail);
   job->comm = comm;
-  NCCLCHECKGOTO(ncclAsyncLaunch((struct ncclAsyncJob*)job, commReclaim, nullptr, ncclCommFinalizeAsyncJobFree, comm),
-                res, fail);
+  if (ncclParamEnqueueRearchEnable()) {
+    NCCLCHECKGOTO(ncclMgmtTaskEnqueue((struct ncclAsyncJob*)job, commReclaim, ncclCommFinalizeAsyncJobFree, comm), res,
+                  fail);
+  } else {
+    NCCLCHECKGOTO(ncclAsyncLaunch((struct ncclAsyncJob*)job, commReclaim, nullptr, ncclCommFinalizeAsyncJobFree, comm),
+                  res, fail);
+  }
 
 exit:
   ncclGroupErrCheck(res);
@@ -3319,6 +3363,9 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
   } else {
     NCCLCHECKGOTO(ncclCalloc(&childComm, 1), res, fail);
     childComm->startMagic = childComm->endMagic = NCCL_MAGIC;
+    for (int i = 0; i < ncclGroupTaskTypeNum; i++) {
+      childComm->groupNext[i] = reinterpret_cast<struct ncclComm*>(NCCL_COMM_GROUP_INVALID);
+    }
 
     // Set the shareResource field, this is used throughout the init and must be reset every time.
     // Never share resources if the parent communicator has been revoked.
@@ -3369,9 +3416,13 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
   }
   job->cudaDev = comm->cudaDev;
   snprintf(job->funcName, NCCL_COMMINIT_FUNCNAME_LEN, "%s", caller);
-  NCCLCHECKGOTO(ncclAsyncLaunch((struct ncclAsyncJob*)job, ncclCommInitRankFunc, /*undo=*/nullptr,
-                                /*destructor=*/childCommCleanupJob, comm),
-                res, fail);
+  if (ncclParamEnqueueRearchEnable()) {
+    NCCLCHECKGOTO(ncclMgmtTaskEnqueue((struct ncclAsyncJob*)job, ncclCommInitRankFunc, childCommCleanupJob, comm), res,
+                  fail);
+  } else {
+    NCCLCHECKGOTO(ncclAsyncLaunch((struct ncclAsyncJob*)job, ncclCommInitRankFunc, nullptr, childCommCleanupJob, comm),
+                  res, fail);
+  }
 
 exit:
   (void)cudaSetDevice(oldDev);
@@ -3522,6 +3573,9 @@ ncclResult_t ncclCommGrow(ncclComm_t comm, int nRanks, const ncclUniqueId* uniqu
   // All ranks allocate a NEW comm structure for the grown communicator
   NCCLCHECKGOTO(ncclCalloc(&newComm, 1), res, fail);
   newComm->startMagic = newComm->endMagic = NCCL_MAGIC;
+  for (int i = 0; i < ncclGroupTaskTypeNum; i++) {
+    newComm->groupNext[i] = reinterpret_cast<struct ncclComm*>(NCCL_COMM_GROUP_INVALID);
+  }
 
   // All ranks allocate fresh resources for grown communicator
   NCCLCHECKGOTO(ncclCalloc(&newComm->abortFlag, 1), res, fail);
@@ -3569,8 +3623,13 @@ ncclResult_t ncclCommGrow(ncclComm_t comm, int nRanks, const ncclUniqueId* uniqu
   job->isGrow = 1;
   job->color = 0;
   job->key = job->myrank;
-  NCCLCHECKGOTO(ncclAsyncLaunch((struct ncclAsyncJob*)job, ncclCommInitRankFunc, NULL, childCommCleanupJob, newComm),
-                res, fail);
+  if (ncclParamEnqueueRearchEnable()) {
+    NCCLCHECKGOTO(ncclMgmtTaskEnqueue((struct ncclAsyncJob*)job, ncclCommInitRankFunc, childCommCleanupJob, newComm),
+                  res, fail);
+  } else {
+    NCCLCHECKGOTO(ncclAsyncLaunch((struct ncclAsyncJob*)job, ncclCommInitRankFunc, NULL, childCommCleanupJob, newComm),
+                  res, fail);
+  }
 
 exit:
   if (*newcomm) {

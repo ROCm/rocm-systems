@@ -26,6 +26,11 @@
 #include "argcheck.h"
 #include "mem_manager.h"
 #include "tuning.h"
+#include "enqueue/raw_task.h"
+#include "enqueue/task_pretuning.h"
+#include "enqueue/task_classify.h"
+#include "enqueue/task_posttuning.h"
+#include "enqueue/mgmt_task_enq.h"
 
 #if defined(NCCL_OS_WINDOWS)
 #include "gin/gin_host_win_stub.h"
@@ -536,7 +541,9 @@ struct ncclKernelPlanner {
 typedef enum ncclGroupTaskType {
   ncclGroupTaskTypeCollective = 0,
   ncclGroupTaskTypeSymRegister = 1,
-  ncclGroupTaskTypeNum = 2,
+  ncclGroupTaskTypeRawTask = 2,
+  ncclGroupTaskTypeMgmtTask = 3,
+  ncclGroupTaskTypeNum = 4,
 } ncclGroupTaskType_t;
 
 struct ncclCommSymTeams;
@@ -730,6 +737,7 @@ struct ncclComm {
   struct ncclMemoryPool memPool_ncclTaskColl;
   struct ncclMemoryPool memPool_ncclTaskP2p;
   struct ncclMemoryPool memPool_ncclTaskRma;
+  struct ncclMemoryPool memPool_ncclRawTask;
   struct ncclMemoryPool memPool_ncclProxyOp;
   struct ncclMemoryPool memPool_ncclKernelPlan;
 
@@ -745,6 +753,12 @@ struct ncclComm {
   }* p2pSchedule;
 
   struct ncclKernelPlanner planner;
+  struct ncclRawTaskQueue rawTaskQueue;
+  struct ncclClassifiedTaskQueues classifiedTaskQueues;
+  // Queue of management tasks (comm init/destroy/finalize/etc.) enqueued for this
+  // comm during a ncclGroup[Start|End]() scope.
+  struct ncclIntruQueue<struct ncclAsyncJob, &ncclAsyncJob::next> mgmtTaskQueue;
+  bool simulationMode;
   void* ringTasks; // An array of nRanks pointers used in ring sorting rooted collectives (bcast)
 
   cudaMemPool_t memPool;

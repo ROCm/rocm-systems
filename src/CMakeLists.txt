@@ -10,7 +10,6 @@ set(LIBSRCFILES
     ce_coll.cc
     collectives.cc
     debug.cc
-    enqueue.cc
     group.cc
     init.cc
     proxy.cc
@@ -47,6 +46,7 @@ add_subdirectory(transport)
 add_subdirectory(misc)
 add_subdirectory(register)
 add_subdirectory(graph)
+add_subdirectory(enqueue)
 
 if (NCCL_OS_LINUX)
 add_subdirectory(plugin)
@@ -79,6 +79,7 @@ list(APPEND LIBSRCFILES
     ${MISC_SOURCES}
     ${REGISTER_SOURCES}
     ${GRAPH_SOURCES}
+    ${ENQUEUE_SOURCES}
     ${PLUGIN_SOURCES}
     ${RAS_SOURCES}
     ${SYM_SOURCES}

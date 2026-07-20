@@ -300,7 +300,7 @@ bool ncclRmaProxyCircularBufEmpty(struct ncclRmaProxyCtx* ctx, int peer) {
 //   WaitSignal,     non-persistent  : false  (no queue exists)
 bool ncclRmaProxyEnqueueFull(struct ncclRmaProxyCtx* ctx, const struct ncclRmaProxyDesc* desc) {
   // Persistent queues are unbounded.
-  if (desc->persistPlan != nullptr) return false;
+  if (desc->persistPlan != nullptr || desc->captured) return false;
   // Non-persistent wait has no queue.
   if (desc->rmaDescType == ncclRmaDescTypeWaitSignal) return false;
   // Non-persistent put or put-group: derive peer from the desc.
@@ -393,7 +393,7 @@ ncclResult_t ncclRmaProxyEnqueueDesc(struct ncclRmaProxyCtx* rmaProxyCtx, struct
     std::this_thread::yield();
   }
 
-  bool persistent = ((*desc)->persistPlan != nullptr);
+  bool persistent = ((*desc)->persistPlan != nullptr) || (*desc)->captured;
   ncclResult_t ret;
   if (!persistent) {
     ret = ncclRmaProxyEnqueueNonPersistentDesc(rmaProxyCtx, peer, *desc);
@@ -444,7 +444,7 @@ ncclResult_t ncclRmaProxyPutDoneParams(struct ncclRmaProxyDesc* desc, CUstreamBa
   params[0].waitValue.value = desc->opSeq;
   params[0].waitValue.flags = CU_STREAM_WAIT_VALUE_GEQ;
 
-  bool persistent = (desc->persistPlan != nullptr);
+  bool persistent = (desc->persistPlan != nullptr) || desc->captured;
   if (persistent) {
     params[1].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_64;
     params[1].writeValue.address = (CUdeviceptr)desc->doneSeqDev;
@@ -494,7 +494,7 @@ ncclResult_t ncclRmaProxyPutGroupDoneParams(struct ncclRmaProxyDesc* desc, CUstr
   params[0].waitValue.value = desc->opSeq;
   params[0].waitValue.flags = CU_STREAM_WAIT_VALUE_GEQ;
 
-  bool persistent = (desc->persistPlan != nullptr);
+  bool persistent = (desc->persistPlan != nullptr) || desc->captured;
   if (persistent) {
     params[1].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_64;
     params[1].writeValue.address = (CUdeviceptr)desc->doneSeqDev;
@@ -506,7 +506,7 @@ ncclResult_t ncclRmaProxyPutGroupDoneParams(struct ncclRmaProxyDesc* desc, CUstr
 
 // Returns the number of stream-batch memops waitSignal will emit for the descriptor
 int ncclRmaProxyWaitNumStreamOps(const struct ncclRmaProxyDesc* desc) {
-  bool persistent = (desc->persistPlan != nullptr);
+  bool persistent = (desc->persistPlan != nullptr) || desc->captured;
   return persistent ? 3 : desc->waitSignal.npeers;
 }
 
@@ -518,7 +518,7 @@ ncclResult_t ncclRmaProxyWaitParams(struct ncclRmaProxyCtx* rmaProxyCtx, struct 
     return ncclInternalError;
   }
 
-  bool persistent = (desc->persistPlan != nullptr);
+  bool persistent = (desc->persistPlan != nullptr) || desc->captured;
   if (!persistent) {
     int npeers = desc->waitSignal.npeers;
     int* peers = desc->waitSignal.waitPeers;

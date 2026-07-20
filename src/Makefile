@@ -19,10 +19,13 @@ TRANSPORT_CC := $(filter-out transport/net_socket_stub.cc transport/net_ib_stub.
 endif
 
 LIBSRCFILES := \
-	bootstrap.cc channel.cc collectives.cc debug.cc enqueue.cc group.cc \
+	bootstrap.cc channel.cc collectives.cc debug.cc group.cc \
 	init.cc proxy.cc transport.cc mnnvl.cc allocator.cc dev_runtime.cc cft_dev_runtime.cc dev_runtime_segments.cc sym_kernels.cc ce_coll.cc mem_manager.cc \
 	$(wildcard config/*.cc) \
 	$(wildcard graph/*.cc) \
+	$(wildcard enqueue/*.cc) \
+	$(wildcard enqueue/task_prep/*.cc) \
+	$(wildcard enqueue/task_sched/*.cc) \
 	$(wildcard misc/*.cc) \
 	$(TRANSPORT_CC) \
 	$(wildcard transport/net_ib/*.cc) \

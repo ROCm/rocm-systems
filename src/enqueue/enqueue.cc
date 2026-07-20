@@ -30,6 +30,7 @@
 
 NCCL_PARAM(L1SharedMemoryCarveout, "L1_SHARED_MEMORY_CARVEOUT", 0);
 NCCL_PARAM(AllgathervEnable, "ALLGATHERV_ENABLE", 1);
+NCCL_PARAM(EnqueueRearchEnable, "ENQUEUE_REARCH_ENABLE", 0);
 NCCL_PARAM(SymCeThreshold, "SYM_CE_THRESHOLD", 8 * 1024 * 1024);
 NCCL_PARAM(P2pPerChannelRegNetBw, "P2P_PER_CHANNEL_REG_NET_BW", /*GB/s*/ -1); // -1 = full network bw
 
@@ -2566,7 +2567,7 @@ static ncclResult_t hostToDevRedOp(ncclDevRedOpFull* opFull, ncclRedOp_t op, ncc
   return ncclSuccess;
 }
 
-static ncclResult_t ncclPlannerSetCapturingGraph(struct ncclComm* comm, struct ncclInfo* info) {
+ncclResult_t ncclPlannerSetCapturingGraph(struct ncclComm* comm, struct ncclInfo* info) {
   struct ncclKernelPlanner* planner = &comm->planner;
   if (info->stream != planner->streamRecent || planner->streams == nullptr) {
     planner->streamRecent = info->stream;
@@ -2758,29 +2759,68 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
   return ncclSuccess;
 }
 
+struct ncclCeInitAsyncJob {
+  struct ncclAsyncJob base;
+  struct ncclComm* comm;
+};
+
+static void ncclCeInitAsyncJobFree(void* _job) {
+  delete (struct ncclCeInitAsyncJob*)_job;
+}
+
+static ncclResult_t ncclCeInitJob(struct ncclAsyncJob* job_) {
+  struct ncclCeInitAsyncJob* job = (struct ncclCeInitAsyncJob*)job_;
+  ncclResult_t ret = ncclSuccess;
+
+  CUDACHECKGOTO(cudaSetDevice(job->comm->cudaDev), ret, fail);
+  NCCLCHECKGOTO(ncclCeInit(job->comm), ret, fail);
+
+exit:
+  return ret;
+fail:
+  job->comm->ceColl.initialized = false;
+  goto exit;
+}
+
 static ncclResult_t ceCollTaskAppend(struct ncclComm* comm, struct ncclInfo* info, struct ncclDevrWindow* sendWin,
                                      struct ncclDevrWindow* recvWin, struct ncclDevRedOpFull opDev) {
+  ncclResult_t ret = ncclSuccess;
   struct ncclKernelPlanner* planner = &comm->planner;
+  struct ncclCeInitAsyncJob* ceInitJob = nullptr;
+  struct ncclCeInitTask* ceTask = nullptr;
+  bool isGraphCaptured = false;
+  struct ncclTaskColl* t = nullptr;
+  size_t elementSize;
 
   // Check if CE needs initialization
-  if (comm->ceColl.baseUCSymReadyPtr == NULL && ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
-    struct ncclCeInitTask* ceTask;
-    NCCLCHECK(ncclCalloc(&ceTask, 1));
+  if (ncclParamEnqueueRearchEnable()) {
+    if (!comm->ceColl.initialized) {
+      NEW_NOTHROW_GOTO(ceInitJob, ncclCeInitAsyncJob, ret, fail);
+      ceInitJob->comm = comm;
+      NCCLCHECKGOTO(ncclMgmtTaskEnqueue((struct ncclAsyncJob*)ceInitJob, ncclCeInitJob, ncclCeInitAsyncJobFree, comm),
+                    ret, fail);
+      comm->ceColl.initialized = true;
+      ceInitJob = nullptr; // ceInitJob is now owned by the management task
+    }
+  } else if (!comm->ceColl.initialized) {
+    NCCLCHECKGOTO(ncclCalloc(&ceTask, 1), ret, fail);
     ceTask->comm = comm;
     ncclIntruQueueEnqueue(&comm->ceInitTaskQueue, ceTask);
     ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
+    comm->ceColl.initialized = true;
+    ceTask = nullptr; // ceTask is now owned by the ceInitTaskQueue
   }
 
   // Must be in thread local group before tasks can be alloc'd in `comm->memScoped`.
   ncclGroupCommJoin(info->comm, ncclGroupTaskTypeCollective);
   // Set capturing graph. Called here so that profiler can emit a group API event with this information
   NCCLCHECK(ncclPlannerSetCapturingGraph(comm, info));
-  bool isGraphCaptured = ncclCudaGraphValid(planner->capturingGraph);
+  isGraphCaptured = ncclCudaGraphValid(planner->capturingGraph);
   NCCLCHECK(ncclProfilerStartGroupApiEvent(info, isGraphCaptured));
   NCCLCHECK(ncclProfilerRecordGroupApiEventState(ncclProfilerGroupStartApiStop));
   NCCLCHECK(ncclProfilerStartCollApiEvent(info, isGraphCaptured));
 
-  struct ncclTaskColl* t = ncclMemoryPoolAlloc<struct ncclTaskColl>(&comm->memPool_ncclTaskColl, &comm->memPermanent);
+  t = ncclMemoryPoolAlloc<struct ncclTaskColl>(&comm->memPool_ncclTaskColl, &comm->memPermanent);
 
   t->func = info->coll;
   t->sendbuff = info->sendbuff;
@@ -2788,7 +2828,7 @@ static ncclResult_t ceCollTaskAppend(struct ncclComm* comm, struct ncclInfo* inf
   t->count = info->count;
   t->root = info->root;
   t->datatype = info->datatype;
-  size_t elementSize = ncclTypeSize(t->datatype);
+  elementSize = ncclTypeSize(t->datatype);
   if (t->func == ncclFuncAllGather || t->func == ncclFuncBroadcast) {
     t->count *= elementSize;
     t->datatype = ncclInt8;
@@ -2806,9 +2846,14 @@ static ncclResult_t ceCollTaskAppend(struct ncclComm* comm, struct ncclInfo* inf
   t->recvWin = recvWin;
 
   ncclIntruQueueEnqueue(&planner->collCeTaskQueue, t);
-
   ncclProfilerStopCollApiEvent();
-  return ncclSuccess;
+
+exit:
+  return ret;
+fail:
+  if (ceInitJob) ncclCeInitAsyncJobFree(ceInitJob);
+  if (ceTask) free(ceTask);
+  goto exit;
 }
 
 static ncclResult_t rmaTaskAppend(struct ncclComm* comm, struct ncclInfo* info) {
@@ -3039,13 +3084,144 @@ static ncclResult_t rmaTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
   return ncclSuccess;
 }
 
+// TODO(raw task): move this raw task capture implementation into raw_task.cc
+// once the remaining enqueue-local profiler and red-op dependencies are split.
+static ncclResult_t rawTaskAppend(struct ncclComm* comm, struct ncclInfo* info) {
+  struct ncclRawTaskQueue* rtq = &comm->rawTaskQueue;
+  struct ncclRawTask* t;
+
+  if (info->coll == ncclFuncSend || info->coll == ncclFuncRecv) {
+    t = ncclMemoryPoolAlloc<struct ncclRawTask>(&comm->memPool_ncclRawTask, &comm->memPermanent);
+    t->kind = ncclTaskKindSendRecv;
+    t->sendRecv.func = info->coll;
+    t->sendRecv.collAPI = info->coll;
+    t->sendRecv.buff = info->recvbuff;
+    t->sendRecv.count = info->count;
+    t->sendRecv.datatype = info->datatype;
+    t->sendRecv.peer = info->root;
+    t->sendRecv.bytes = info->count * ncclTypeSize(info->datatype);
+    t->sendRecv.stream = info->stream;
+    ncclIntruQueueEnqueue(&rtq->genericQueue, t);
+  } else if (info->coll == ncclFuncPutSignal || info->coll == ncclFuncSignal) {
+    if (info->ctx < 0 || info->ctx >= comm->config.numRmaCtx) {
+      WARN("ncclPutSignal/ncclSignal: invalid context %d (must be in [0, %d))", info->ctx, comm->config.numRmaCtx);
+      return ncclInvalidArgument;
+    }
+    t = ncclMemoryPoolAlloc<struct ncclRawTask>(&comm->memPool_ncclRawTask, &comm->memPermanent);
+    t->kind = ncclTaskKindRma;
+    t->rma.func = info->coll;
+    if (info->coll == ncclFuncPutSignal) {
+      struct ncclRawTaskPutSignal* put = &t->rma.rmaOp.putSignal;
+      put->localbuff = info->sendbuff;
+      put->count = info->count;
+      put->datatype = info->datatype;
+      put->peer = info->root;
+      put->peerWin = info->peerWin;
+      put->peerWinOffset = info->peerWinOffset;
+      put->sigIdx = info->sigIdx;
+      put->ctx = info->ctx;
+      put->flags = info->flags;
+      put->stream = info->stream;
+    } else {
+      if (info->count != 0) {
+        WARN("ncclSignal: count must be 0");
+        return ncclInvalidArgument;
+      }
+      struct ncclRawTaskSignal* sig = &t->rma.rmaOp.signal;
+      sig->peer = info->root;
+      sig->sigIdx = info->sigIdx;
+      sig->ctx = info->ctx;
+      sig->flags = info->flags;
+      sig->stream = info->stream;
+    }
+    ncclIntruQueueEnqueue(&rtq->genericQueue, t);
+  } else if (info->coll == ncclFuncWaitSignal) {
+    if (info->nDesc <= 0 || info->signalDescs == NULL) {
+      WARN("ncclWaitSignal: invalid arguments");
+      return ncclInvalidArgument;
+    }
+    for (int i = 0; i < info->nDesc; i++) {
+      if (info->signalDescs[i].opCnt <= 0) {
+        WARN("ncclWaitSignal: descriptor %d has invalid opCnt %d", i, info->signalDescs[i].opCnt);
+        return ncclInvalidArgument;
+      }
+      if (info->signalDescs[i].sigIdx < 0 || info->signalDescs[i].sigIdx >= comm->config.numRmaSig) {
+        WARN("ncclWaitSignal: descriptor %d has invalid sigIdx %d (must be in [0, %d))", i, info->signalDescs[i].sigIdx,
+             comm->config.numRmaSig);
+        return ncclInvalidArgument;
+      }
+      if (info->signalDescs[i].ctx < 0 || info->signalDescs[i].ctx >= comm->config.numRmaCtx) {
+        WARN("ncclWaitSignal: descriptor %d has invalid context %d (must be in [0, %d))", i, info->signalDescs[i].ctx,
+             comm->config.numRmaCtx);
+        return ncclInvalidArgument;
+      }
+    }
+    t = ncclMemoryPoolAlloc<struct ncclRawTask>(&comm->memPool_ncclRawTask, &comm->memPermanent);
+    t->kind = ncclTaskKindRma;
+    t->rma.func = ncclFuncWaitSignal;
+    t->rma.rmaOp.waitSignal.nDesc = info->nDesc;
+    t->rma.rmaOp.waitSignal.signalDescs = ncclMemoryStackAlloc<ncclWaitSignalDesc_t>(&comm->memScoped, info->nDesc);
+    memcpy(t->rma.rmaOp.waitSignal.signalDescs, info->signalDescs, info->nDesc * sizeof(ncclWaitSignalDesc_t));
+    t->rma.rmaOp.waitSignal.stream = info->stream;
+    ncclIntruQueueEnqueue(&rtq->genericQueue, t);
+  } else {
+    struct ncclDevRedOpFull opDev;
+
+    if (info->count == 0) return ncclSuccess;
+
+    // Validate any per-call algorithm selection up front.
+    uint64_t algMask;
+    NCCLCHECK(ncclCollConfigGetAlgMask(&info->collConfig, info->coll, &algMask));
+
+    // Reductions in FP8 require sm90+.
+    if (info->datatype == ncclFloat8e4m3 || info->datatype == ncclFloat8e5m2) {
+      if (comm->minCompCap < 90 &&
+          (info->coll == ncclFuncReduce || info->coll == ncclFuncReduceScatter || info->coll == ncclFuncAllReduce)) {
+        WARN("FP8 reduction support begins with sm90 capable devices.");
+        return ncclInvalidArgument;
+      }
+    }
+
+    NCCLCHECK(hostToDevRedOp(&opDev, info->op, info->datatype, comm));
+    if (comm->nRanks == 1) {
+      NCCLCHECK(ncclLaunchOneRank(info->recvbuff, info->sendbuff, info->count, opDev, info->datatype, info->stream));
+      return ncclSuccess;
+    }
+    t = ncclMemoryPoolAlloc<struct ncclRawTask>(&comm->memPool_ncclRawTask, &comm->memPermanent);
+    t->kind = ncclTaskKindColl;
+    t->coll.func = info->coll;
+    t->coll.sendbuff = info->sendbuff;
+    t->coll.recvbuff = info->recvbuff;
+    t->coll.count = info->count;
+    t->coll.root = info->root;
+    t->coll.datatype = info->datatype;
+    t->coll.opHost = info->op;
+    t->coll.opDev = opDev;
+    t->coll.stream = info->stream;
+    t->coll.collConfig = info->collConfig;
+    if (info->coll == ncclFuncBroadcast) {
+      ncclIntruQueueEnqueue(&rtq->bcastQueue, t);
+    } else {
+      ncclIntruQueueEnqueue(&rtq->genericQueue, t);
+    }
+  }
+
+  ncclGroupCommJoin(comm, ncclGroupTaskTypeRawTask);
+
+  NCCLCHECK(ncclPlannerSetCapturingGraph(comm, info));
+
+  return ncclSuccess;
+}
+
 // Converts `info` to a task and adds it to `comm->planner`. The exception is with
 // single rank communicators, collectives are issued as `ncclMemcpyAsync`s and
 // thus don't need a task.
 static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
   ncclFunc_t collAPI = info->coll;
 
-  if (info->coll == ncclFuncSend || info->coll == ncclFuncRecv) {
+  if (ncclParamEnqueueRearchEnable()) {
+    NCCLCHECK(rawTaskAppend(comm, info));
+  } else if (info->coll == ncclFuncSend || info->coll == ncclFuncRecv) {
     NCCLCHECK(p2pTaskAppend(comm, info, info->coll, collAPI, (void*)info->recvbuff, info->count, info->datatype,
                             info->root, true));
   } else if (info->coll == ncclFuncPutSignal || info->coll == ncclFuncSignal || info->coll == ncclFuncWaitSignal) {

@@ -12,6 +12,7 @@
 #include "nccl_device/impl/core__types.h"
 #include "nccl_device/lsa_barrier.h"
 #include "rma/rma.h"
+#include "rma/rma_ce.h"
 #include "device.h"
 #include "sym_kernels.h"
 #include "transport.h"
@@ -25,6 +26,8 @@
 #endif
 #include "argcheck.h"
 #include <mutex>
+
+int64_t ncclParamEnqueueRearchEnable();
 
 NCCL_PARAM(WinStride, "WIN_STRIDE", -1);
 NCCL_PARAM(EnableVersionCheck, "ENABLE_VERSION_CHECK", 1);
@@ -1474,6 +1477,67 @@ fail:
 
 ////////////////////////////////////////////////////////////////////////////////
 
+struct ncclDevrRegAsyncJob {
+  struct ncclAsyncJob base;
+  struct ncclComm* comm;
+  void* userPtr;
+  size_t userSize;
+  int winFlags;
+  ncclWindow_t* outWinDev;
+};
+
+static void ncclDevrRegAsyncJobFree(void* _job) {
+  delete (struct ncclDevrRegAsyncJob*)_job;
+}
+
+static ncclResult_t ncclDevrWindowRegisterJob(struct ncclAsyncJob* job_) {
+  struct ncclDevrRegAsyncJob* job = (struct ncclDevrRegAsyncJob*)job_;
+  ncclResult_t ret = ncclSuccess;
+
+  CUDACHECKGOTO(cudaSetDevice(job->comm->cudaDev), ret, fail);
+  if (job->comm->hostRmaSupport && !job->comm->rmaState.rmaCeState.initialized) {
+    NCCLCHECKGOTO(ncclRmaCeInit(job->comm), ret, fail);
+  }
+  NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(job->comm, job->userPtr, job->userSize, job->winFlags, job->outWinDev),
+                ret, fail);
+
+exit:
+  return ret;
+fail:
+  goto exit;
+}
+
+struct ncclDevrCommCreateAsyncJob {
+  struct ncclAsyncJob base;
+  struct ncclComm* comm;
+  struct ncclDevCommRequirements* reqs;
+  struct ncclDevComm* outDevComm;
+  uint32_t deviceCodeVersion;
+};
+
+static void ncclDevrCommCreateAsyncJobFree(void* _job) {
+  struct ncclDevrCommCreateAsyncJob* job = (struct ncclDevrCommCreateAsyncJob*)_job;
+  freeDevCommRequirements(job->reqs);
+  delete job;
+}
+
+static ncclResult_t ncclDevrCommCreateJob(struct ncclAsyncJob* job_) {
+  struct ncclDevrCommCreateAsyncJob* job = (struct ncclDevrCommCreateAsyncJob*)job_;
+  ncclResult_t ret = ncclSuccess;
+
+  CUDACHECKGOTO(cudaSetDevice(job->comm->cudaDev), ret, fail);
+  NCCLCHECKGOTO(ncclDevrCommCreateInternal(job->comm, job->reqs, job->outDevComm, /*isInternal=*/false,
+                                           job->deviceCodeVersion),
+                ret, fail);
+
+exit:
+  freeDevCommRequirements(job->reqs);
+  job->reqs = nullptr;
+  return ret;
+fail:
+  goto exit;
+}
+
 NCCL_API(ncclResult_t, ncclCommWindowRegister, ncclComm_t comm, void* buff, size_t size, ncclWindow_t* win,
          int winFlags);
 ncclResult_t ncclCommWindowRegister(ncclComm_t comm, void* buff, size_t size, ncclWindow_t* win, int winFlags) {
@@ -1491,8 +1555,9 @@ ncclResult_t ncclCommWindowRegister(ncclComm_t comm, void* buff, size_t size, nc
 
   ncclResult_t ret = ncclSuccess;
   int saveDev;
-  struct ncclDevrRegTask* task;
-  struct ncclRmaCeInitTask* ceTask;
+  struct ncclDevrRegTask* task = nullptr;
+  struct ncclRmaCeInitTask* ceTask = nullptr;
+  struct ncclDevrRegAsyncJob* regJob = nullptr;
 
   CUDACHECK(cudaGetDevice(&saveDev));
   NCCLCHECK(ncclGroupStartInternal());
@@ -1502,21 +1567,33 @@ ncclResult_t ncclCommWindowRegister(ncclComm_t comm, void* buff, size_t size, nc
 
   NCCLCHECKGOTO(ncclDevrInitOnce(comm), ret, fail);
 
-  NCCLCHECKGOTO(ncclCalloc(&task, 1), ret, fail);
-  task->userPtr = buff;
-  task->userSize = size;
-  task->winFlags = winFlags;
-  task->outWinDev = win;
-  ncclIntruQueueEnqueue(&comm->devrState.regTaskQueue, task);
-  ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
-
-  // Initialize RMA CE alongside the first window registration
-  if (comm->hostRmaSupport && !comm->rmaState.rmaCeState.initialized &&
-      ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
-    NCCLCHECKGOTO(ncclCalloc(&ceTask, 1), ret, fail);
-    ceTask->comm = comm;
-    ncclIntruQueueEnqueue(&comm->rmaCeInitTaskQueue, ceTask);
+  if (ncclParamEnqueueRearchEnable()) {
+    NEW_NOTHROW_GOTO(regJob, ncclDevrRegAsyncJob, ret, fail);
+    regJob->comm = comm;
+    regJob->userPtr = buff;
+    regJob->userSize = size;
+    regJob->winFlags = winFlags;
+    regJob->outWinDev = win;
+    NCCLCHECKGOTO(ncclMgmtTaskEnqueue((struct ncclAsyncJob*)regJob, ncclDevrWindowRegisterJob, ncclDevrRegAsyncJobFree,
+                                      comm),
+                  ret, fail);
+  } else {
+    NCCLCHECKGOTO(ncclCalloc(&task, 1), ret, fail);
+    task->userPtr = buff;
+    task->userSize = size;
+    task->winFlags = winFlags;
+    task->outWinDev = win;
+    ncclIntruQueueEnqueue(&comm->devrState.regTaskQueue, task);
     ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
+
+    // Initialize RMA CE alongside the first window registration
+    if (comm->hostRmaSupport && !comm->rmaState.rmaCeState.initialized &&
+        ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
+      NCCLCHECKGOTO(ncclCalloc(&ceTask, 1), ret, fail);
+      ceTask->comm = comm;
+      ncclIntruQueueEnqueue(&comm->rmaCeInitTaskQueue, ceTask);
+      ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
+    }
   }
 
 exit:
@@ -1525,6 +1602,9 @@ exit:
   cudaSetDevice(saveDev);
   return ret;
 fail:
+  ncclDevrRegAsyncJobFree(regJob);
+  free(ceTask);
+  free(task);
   goto exit;
 }
 
@@ -1654,6 +1734,7 @@ ncclResult_t ncclDevCommCreate(ncclComm_t comm, struct ncclDevCommRequirements c
   ncclResult_t ret = ncclSuccess;
   int saveDev;
   struct ncclDevrCommCreateTask* task = nullptr;
+  struct ncclDevrCommCreateAsyncJob* createJob = nullptr;
 
   CUDACHECK(cudaGetDevice(&saveDev));
   NCCLCHECK(ncclGroupStartInternal());
@@ -1669,22 +1750,46 @@ ncclResult_t ncclDevCommCreate(ncclComm_t comm, struct ncclDevCommRequirements c
 
   NCCLCHECKGOTO(ncclDevrInitOnce(comm), ret, fail);
 
-  NCCLCHECKGOTO(ncclCalloc(&task, 1), ret, fail);
-  // reqs must be deep copied to the task so background threads can safely access it
-  NCCLCHECKGOTO(deepCopyDevCommRequirements(reqs, &task->reqs), ret, fail);
-  if (reqsCompat->devCommRequirementsFilter) {
-    NCCLCHECKGOTO(reqsCompat->devCommRequirementsFilter(comm, task->reqs), ret, fail);
+  if (ncclParamEnqueueRearchEnable()) {
+    NEW_NOTHROW_GOTO(createJob, ncclDevrCommCreateAsyncJob, ret, fail);
+    createJob->comm = comm;
+    createJob->outDevComm = outDevComm;
+    createJob->deviceCodeVersion = deviceCodeVersion;
+    createJob->reqs = nullptr;
+    NCCLCHECKGOTO(deepCopyDevCommRequirements(reqs, &createJob->reqs), ret, fail);
+    if (reqsCompat->devCommRequirementsFilter) {
+      NCCLCHECKGOTO(reqsCompat->devCommRequirementsFilter(comm, createJob->reqs), ret, fail);
+    }
+    if (comm->gpuCftSupport == 0 && createJob->reqs->cftCaps != NCCL_CFT_NONE) {
+      WARN("User requested CFT capabilities (cftCaps=0x%x), but not all ranks in the communicator support CFT.",
+           createJob->reqs->cftCaps);
+      ret = ncclInvalidArgument;
+      goto fail;
+    }
+    // ncclMgmtTaskEnqueue takes ownership of createJob (enqueues on success, frees on
+    // failure), so drop our reference before checking the result to avoid a double free.
+    ret =
+      ncclMgmtTaskEnqueue((struct ncclAsyncJob*)createJob, ncclDevrCommCreateJob, ncclDevrCommCreateAsyncJobFree, comm);
+    createJob = nullptr;
+    NCCLCHECKGOTO(ret, ret, fail);
+  } else {
+    NCCLCHECKGOTO(ncclCalloc(&task, 1), ret, fail);
+    // reqs must be deep copied to the task so background threads can safely access it
+    NCCLCHECKGOTO(deepCopyDevCommRequirements(reqs, &task->reqs), ret, fail);
+    if (reqsCompat->devCommRequirementsFilter) {
+      NCCLCHECKGOTO(reqsCompat->devCommRequirementsFilter(comm, task->reqs), ret, fail);
+    }
+    if (comm->gpuCftSupport == 0 && task->reqs->cftCaps != NCCL_CFT_NONE) {
+      WARN("User requested CFT capabilities (cftCaps=0x%x), but not all ranks in the communicator support CFT.",
+           task->reqs->cftCaps);
+      ret = ncclInvalidArgument;
+      goto fail;
+    }
+    task->outDevComm = outDevComm;
+    task->deviceCodeVersion = deviceCodeVersion;
+    ncclIntruQueueEnqueue(&comm->devrState.commCreateTaskQueue, task);
+    ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
   }
-  if (comm->gpuCftSupport == 0 && task->reqs->cftCaps != NCCL_CFT_NONE) {
-    WARN("User requested CFT capabilities (cftCaps=0x%x), but not all ranks in the communicator support CFT.",
-         task->reqs->cftCaps);
-    ret = ncclInvalidArgument;
-    goto fail;
-  }
-  task->outDevComm = outDevComm;
-  task->deviceCodeVersion = deviceCodeVersion;
-  ncclIntruQueueEnqueue(&comm->devrState.commCreateTaskQueue, task);
-  ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
 
 exit:
   ncclGroupErrCheck(ret);
@@ -1692,6 +1797,10 @@ exit:
   cudaSetDevice(saveDev);
   return ret;
 fail:
+  if (createJob) {
+    freeDevCommRequirements(createJob->reqs);
+    delete createJob;
+  }
   if (task) {
     freeDevCommRequirements(task->reqs);
     free(task);

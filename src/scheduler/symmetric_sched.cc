@@ -29,7 +29,7 @@ ncclDevRedOp_t symkRedOp(ncclRedOp_t redOp, ncclDevRedOp_t devRedOp) {
   return devRedOp;
 }
 
-void convertCollTaskToSymmetricTask(struct ncclComm* comm, struct ncclTaskColl* task) {
+void convertSymTaskDevOp(struct ncclComm* comm, struct ncclTaskColl* task) {
   task->opDev.op = symkRedOp(task->opHost, task->opDev.op);
   if (task->opDev.op == ncclDevSumPostDiv) {
     // LDMC uses the same accumulator type as data type. Do not re-pack the scalar.
@@ -244,7 +244,7 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
         task->devFuncId = (uint32_t)kernelId;
         task->nMaxChannels = nChannels;
         task->nWarps = nWarps;
-        convertCollTaskToSymmetricTask(comm, task);
+        convertSymTaskDevOp(comm, task);
         ncclIntruQueueEnqueue(&planner->collSymTaskQueue, task);
         task = next;
         if (isSymLast) break;

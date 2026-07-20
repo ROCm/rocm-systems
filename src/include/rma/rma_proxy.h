@@ -100,6 +100,8 @@ struct ncclRmaProxyDesc {
 
   // Graph capture fields
   struct ncclKernelPlan* persistPlan; // Back reference to persistent plan during clean up
+  bool captured;
+  struct ncclCudaGraph graph;
   bool persistDescValid; // Persistent descriptor is valid
 };
 

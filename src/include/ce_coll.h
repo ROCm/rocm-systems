@@ -23,6 +23,7 @@ enum ncclCeMethodId {
 };
 
 struct ncclCeColl {
+  bool initialized;
   uint8_t* baseUCSymReadyPtr;
   uint8_t* baseUCSymComplPtr;
   size_t baseUCSymReadyOffset;
