@@ -19,7 +19,7 @@ HIP_TEST_CASE(Unit_hipModuleLaunchKernel_ManagedVar_Memcpy) {
 
   for (int i = 0; i < numDevices; ++i) {
     HIP_CHECK(hipSetDevice(i));
-    CTX_CREATE();
+    CTX_CREATE_DEV(i);
 
     hipModule_t module;
     HIP_CHECK(hipModuleLoad(&module, kCodeFile));
