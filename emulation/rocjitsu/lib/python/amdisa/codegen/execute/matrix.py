@@ -617,6 +617,14 @@ def gen_mfma(
             L.append(
                 '    uint32_t sb_base = amdgpu::src_base(vb, (raw_words_[1] >> 9) & 0x1FFu);'
             )
+            L.append(
+                '    uint32_t sa_byte = ((raw_words_[0] >> 11) & 1u) |'
+                ' (((raw_words_[1] >> 27) & 1u) << 1);'
+            )
+            L.append(
+                '    uint32_t sb_byte = ((raw_words_[0] >> 12) & 1u) |'
+                ' (((raw_words_[1] >> 28) & 1u) << 1);'
+            )
             L.append('    dispatched = amdgpu::dispatch_matrix_fmt_pair(')
             L.append(
                 '        inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {'
@@ -625,7 +633,7 @@ def gen_mfma(
                 f'          amdgpu::exec_f32_scaled_mixed(cu, {M}, {N}, {K}, {B}, a_bits, b_bits, dst, s0b, s1b, s2, ea,'
             )
             L.append(
-                f'                                        eb, const_acc, sa_base, sb_base);'
+                f'                                        eb, const_acc, sa_base, sb_base, sa_byte, sb_byte);'
             )
             L.append('        });')
             L.append('  }')

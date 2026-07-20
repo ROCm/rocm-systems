@@ -762,6 +762,10 @@ inline constexpr ExtractF64 extract_f64{};
 
 inline float decode_e8m0_scale(uint8_t raw) { return util::e8m0_to_f32(raw); }
 
+inline uint8_t extract_e8m0_scale_byte(uint32_t raw, uint32_t byte_select) {
+  return static_cast<uint8_t>((raw >> (8u * (byte_select & 3u))) & 0xFFu);
+}
+
 inline float decode_wmma_scale_byte(uint8_t raw, uint32_t fmt) {
   switch (fmt) {
   case 0:
@@ -3028,7 +3032,8 @@ template <typename ExtractA, typename ExtractB>
 void exec_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
                            uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0, uint32_t s1,
                            uint32_t s2, ExtractA ea, ExtractB eb, uint32_t const_acc,
-                           uint32_t scale_a_base, uint32_t scale_b_base) {
+                           uint32_t scale_a_base, uint32_t scale_b_base, uint32_t scale_a_byte,
+                           uint32_t scale_b_byte) {
   constexpr uint32_t BLOCK_K = 32;
   const uint32_t wf = cu.wf_size();
   struct Result {
@@ -3058,8 +3063,8 @@ void exec_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_
           }
           uint32_t sa_raw = RegisterAccess(cu).read_vgpr(scale_a_base, M * blk + row);
           uint32_t sb_raw = RegisterAccess(cu).read_vgpr(scale_b_base, N * blk + col);
-          uint8_t sa_e8m0 = static_cast<uint8_t>(sa_raw & 0xFFu);
-          uint8_t sb_e8m0 = static_cast<uint8_t>(sb_raw & 0xFFu);
+          uint8_t sa_e8m0 = extract_e8m0_scale_byte(sa_raw, scale_a_byte);
+          uint8_t sb_e8m0 = extract_e8m0_scale_byte(sb_raw, scale_b_byte);
           int scale_exp = static_cast<int>(sa_e8m0) + static_cast<int>(sb_e8m0) - 254;
           acc += std::ldexp(block_sum, scale_exp);
         }

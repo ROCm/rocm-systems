@@ -45,6 +45,14 @@ constexpr uint32_t SOPP_S_ENDPGM = 0xBF810000;
 
 using namespace rocjitsu;
 
+TEST(MfmaScaleTest, ExtractsSelectedE8m0Byte) {
+  constexpr uint32_t packed_scales = 0xD4C3B2A1u;
+  EXPECT_EQ(amdgpu::extract_e8m0_scale_byte(packed_scales, 0), 0xA1u);
+  EXPECT_EQ(amdgpu::extract_e8m0_scale_byte(packed_scales, 1), 0xB2u);
+  EXPECT_EQ(amdgpu::extract_e8m0_scale_byte(packed_scales, 2), 0xC3u);
+  EXPECT_EQ(amdgpu::extract_e8m0_scale_byte(packed_scales, 3), 0xD4u);
+}
+
 TEST(DsTransposeTest, ReadB64TrB16UsesMfmaCrossbarLayout) {
   constexpr uint32_t wave_size = 64;
   constexpr uint32_t bytes_per_lane = 8;

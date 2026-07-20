@@ -126,6 +126,27 @@ def _parse_cdna_specs(*names: str):
     return specs
 
 
+def test_cdna4_scaled_mfma_honors_packed_scale_byte_selectors(
+    cdna4_generated_root: Path,
+):
+    vop3p = (cdna4_generated_root / 'vop3p.cpp').read_text()
+    body = _generated_method_body(
+        vop3p,
+        'VMfmaF3216x16x128F8f6f4Vop3pMfma',
+        'VMfmaF3232x32x64F8f6f4Vop3pMfma',
+    )
+
+    assert (
+        'uint32_t sa_byte = ((raw_words_[0] >> 11) & 1u) | '
+        '(((raw_words_[1] >> 27) & 1u) << 1);'
+    ) in body
+    assert (
+        'uint32_t sb_byte = ((raw_words_[0] >> 12) & 1u) | '
+        '(((raw_words_[1] >> 28) & 1u) << 1);'
+    ) in body
+    assert 'sa_base, sb_base, sa_byte, sb_byte' in body
+
+
 @pytest.mark.parametrize(
     'isa_name,profile_type',
     [

@@ -910,10 +910,12 @@ void VMfmaF3216x16x128F8f6f4Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   } else {
     uint32_t sa_base = amdgpu::src_base(vb, raw_words_[1] & 0x1FFu);
     uint32_t sb_base = amdgpu::src_base(vb, (raw_words_[1] >> 9) & 0x1FFu);
+    uint32_t sa_byte = ((raw_words_[0] >> 11) & 1u) | (((raw_words_[1] >> 27) & 1u) << 1);
+    uint32_t sb_byte = ((raw_words_[0] >> 12) & 1u) | (((raw_words_[1] >> 28) & 1u) << 1);
     dispatched = amdgpu::dispatch_matrix_fmt_pair(
         inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
           amdgpu::exec_f32_scaled_mixed(cu, 16, 16, 128, 1, a_bits, b_bits, dst, s0b, s1b, s2, ea,
-                                        eb, const_acc, sa_base, sb_base);
+                                        eb, const_acc, sa_base, sb_base, sa_byte, sb_byte);
         });
   }
   if (!dispatched)
@@ -981,10 +983,12 @@ void VMfmaF3232x32x64F8f6f4Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   } else {
     uint32_t sa_base = amdgpu::src_base(vb, raw_words_[1] & 0x1FFu);
     uint32_t sb_base = amdgpu::src_base(vb, (raw_words_[1] >> 9) & 0x1FFu);
+    uint32_t sa_byte = ((raw_words_[0] >> 11) & 1u) | (((raw_words_[1] >> 27) & 1u) << 1);
+    uint32_t sb_byte = ((raw_words_[0] >> 12) & 1u) | (((raw_words_[1] >> 28) & 1u) << 1);
     dispatched = amdgpu::dispatch_matrix_fmt_pair(
         inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
           amdgpu::exec_f32_scaled_mixed(cu, 32, 32, 64, 1, a_bits, b_bits, dst, s0b, s1b, s2, ea,
-                                        eb, const_acc, sa_base, sb_base);
+                                        eb, const_acc, sa_base, sb_base, sa_byte, sb_byte);
         });
   }
   if (!dispatched)
