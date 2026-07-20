@@ -133,7 +133,14 @@ def detect_gpu(rocm_path: Optional[Path] = None) -> GPUInfo:
                 text=True,
                 timeout=30,
             )
-            rocminfo_stdout = result.stdout if result.returncode == 0 else None
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"rocminfo ({rocminfo}) failed with return code "
+                    f"{result.returncode}\n"
+                    f"--- stdout ---\n{result.stdout}\n"
+                    f"--- stderr ---\n{result.stderr}"
+                )
+            rocminfo_stdout = result.stdout
             if rocminfo_stdout:
                 # Only match gfx on "Name:"
                 name_gfx_pattern = re.compile(

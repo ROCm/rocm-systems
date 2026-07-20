@@ -1615,9 +1615,9 @@ def get_gpu_info() -> GPUInfo:
     """Return the GPU information."""
     try:
         rocprof_config = get_rocprof_config()
+        return detect_gpu(rocprof_config.rocm_path)
     except Exception as e:
         pytest.exit(f"{e}")
-    return detect_gpu(rocprof_config.rocm_path)
 
 
 def _run_cleanup() -> None:
