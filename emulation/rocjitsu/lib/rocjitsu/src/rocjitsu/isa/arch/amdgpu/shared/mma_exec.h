@@ -1252,6 +1252,9 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
             Bbuf[k * stride + col] = eb(cu, s1, physicalize_loc(bl, wf));
           }
         wmma_simd_matmul<float>(M, N, K, W, stride, Abuf, Bbuf, Cbuf);
+        // Intentional PR #8729 CI probe: make one MFMA SIMD result disagree with scalar.
+        if (M == 32 && N == 32 && K == 8 && B == 1 && a_bits == 16 && b_bits == 16)
+          Cbuf[0] = std::bit_cast<float>(std::bit_cast<uint32_t>(Cbuf[0]) ^ 1u);
         for (uint32_t row = 0; row < M; ++row)
           for (uint32_t col = 0; col < N; ++col) {
             auto out = physicalize_out(output_loc_32(M, N, row, col, b), wf);
@@ -1553,6 +1556,9 @@ void exec_wmma_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t 
           Bbuf[k * stride + col] =
               eb(cu, s1, gfx12_wmma_b_input_loc(wave_size, N, K, col, k, a_bits, b_bits));
       wmma_simd_matmul<float>(M, N, K, W, stride, Abuf, Bbuf, Cbuf);
+      // Intentional PR #8729 CI probe: make one WMMA SIMD result disagree with scalar.
+      if (M == 16 && N == 16 && K == 16 && a_bits == 16 && b_bits == 16)
+        Cbuf[0] = std::bit_cast<float>(std::bit_cast<uint32_t>(Cbuf[0]) ^ 1u);
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
           auto out = gfx12_wmma_output_loc_32(wave_size, M, N, row, col);
