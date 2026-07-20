@@ -192,6 +192,36 @@ add_executable(unit_tests_logging rdna_logging_test.cpp)
 target_include_directories(unit_tests_logging PRIVATE ${SRC_DIR} ${INC_DIR})
 target_link_libraries(unit_tests_logging PRIVATE rocprof-trace-decoder-static GTest::gtest_main GTest::gmock_main)
 
+if(BUILD_MARKERS)
+    find_package(LLVM REQUIRED CONFIG)
+
+    set(MARKER_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../markers)
+    set(MARKER_TEST_LIB_SOURCES
+        ${MARKER_SRC_DIR}/SQTTPass.cpp
+        ${MARKER_SRC_DIR}/SQTTMarkers.cpp
+        ${MARKER_SRC_DIR}/SQTTNamedMarkers.cpp
+        ${MARKER_SRC_DIR}/SQTTAutomatic.cpp
+        ${MARKER_SRC_DIR}/SQTTAddressTrace.cpp
+        ${MARKER_SRC_DIR}/SQTTFunctions.cpp
+        ${MARKER_SRC_DIR}/SQTTFuncMap.cpp)
+
+    add_executable(marker_unit_tests markers_test.cpp ${MARKER_TEST_LIB_SOURCES})
+    target_include_directories(marker_unit_tests PRIVATE ${MARKER_SRC_DIR} ${INC_DIR} ${LLVM_INCLUDE_DIRS})
+    target_compile_definitions(marker_unit_tests PRIVATE ${LLVM_DEFINITIONS})
+    target_compile_features(marker_unit_tests PRIVATE cxx_std_17)
+    if(NOT MSVC)
+        set_source_files_properties(${MARKER_TEST_LIB_SOURCES} PROPERTIES COMPILE_OPTIONS "-fno-rtti")
+    endif()
+
+    if(TARGET LLVM)
+        set(MARKER_TEST_LLVM_LIBS LLVM)
+    else()
+        llvm_map_components_to_libnames(MARKER_TEST_LLVM_LIBS Core Support Analysis TransformUtils Passes)
+    endif()
+
+    target_link_libraries(marker_unit_tests PRIVATE GTest::gtest_main ${MARKER_TEST_LLVM_LIBS})
+endif()
+
 include(GoogleTest)
 
 gtest_discover_tests(
@@ -213,3 +243,10 @@ gtest_discover_tests(
     unit_tests_logging
     PROPERTIES LABELS "unit-tests;regular;logging" ENVIRONMENT "SQTT_LOGGING=1"
     TEST_PREFIX "logging/")
+
+if(BUILD_MARKERS)
+    gtest_discover_tests(
+        marker_unit_tests
+        PROPERTIES LABELS "unit-tests;regular;markers"
+        TEST_PREFIX "markers/")
+endif()

@@ -1094,6 +1094,12 @@ For attachment profiling of running processes:
         help="Enables thread trace",
     )
 
+    add_parser_bool_argument(
+        att_options,
+        "--att-no-intercept",
+        help="Enables ATT quick-scan mode without kernel-dispatch interception.",
+    )
+
     att_options.add_argument(
         "--att-library-path",
         help="Search path to decoder library.",
@@ -1123,7 +1129,7 @@ For attachment profiling of running processes:
 
     att_options.add_argument(
         "--att-buffer-size",
-        help="Thread trace buffer size. Default 256MB",
+        help="Thread trace buffer size. Default 384MB",
         default=None,
         type=str,
     )
@@ -1720,6 +1726,9 @@ def run(app_args, args, **kwargs):
         for itr in ("page_migration", "page_mapping", "queue", "dropped_events"):
             setattrifnone(args, f"kfd_{itr}_trace", True)
 
+    if args.att_no_intercept:
+        args.advanced_thread_trace = True
+
     trace_count = 0
     trace_opts = ["--hip-trace", "--hsa-trace", "--kfd-trace"]
     for opt, env_val in dict(
@@ -2191,6 +2200,7 @@ def run(app_args, args, **kwargs):
     if args.advanced_thread_trace:
 
         update_env("ROCPROF_ADVANCED_THREAD_TRACE", True, overwrite=True)
+        update_env("ROCPROF_ATT_NO_INTERCEPT", args.att_no_intercept, overwrite=True)
 
         if args.att_target_cu is not None:
             update_env(
@@ -2241,7 +2251,7 @@ def run(app_args, args, **kwargs):
                 args.att_library_path,
                 overwrite=True,
             )
-        else:
+        elif not args.att_no_intercept:
             fatal_error(
                 f"rocprof-trace-decoder library path not found in {get_att_paths(args)}"
             )
@@ -2361,6 +2371,14 @@ def main(argv=None):
 
     def validate_selected_regions_conflicts(_args):
         if getattr(_args, "selected_regions", False) and getattr(
+            _args, "att_no_intercept", False
+        ):
+            warning(
+                "--selected-regions does not control --att-no-intercept captures; "
+                "ATT no-intercept will quick-scan after each selected GPU agent's "
+                "first code-object upload"
+            )
+        elif getattr(_args, "selected_regions", False) and getattr(
             _args, "att_consecutive_kernels", None
         ):
             fatal_error(
