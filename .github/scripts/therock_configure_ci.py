@@ -23,11 +23,6 @@ import time
 from typing import List, Mapping, Optional, Iterable
 import os
 
-# Add TheRock's github_actions to path for shared utilities
-THEROCK_ACTIONS_PATH = Path("TheRock") / "build_tools" / "github_actions"
-sys.path.insert(0, str(THEROCK_ACTIONS_PATH))
-from amdgpu_family_matrix import get_build_runner_labels, select_weighted_label
-
 # Valid test types in order of comprehensiveness (least to most)
 VALID_TEST_TYPES = ["quick", "standard", "comprehensive", "full"]
 
@@ -221,8 +216,7 @@ def check_hip_rocr_changes(modified_paths: Optional[Iterable[str]]) -> bool:
 
     # Check for HIP/ROCR code changes (excluding ignored files)
     return any(
-        is_hip_rocr_code(path) and not is_ignored(path)
-        for path in modified_paths
+        is_hip_rocr_code(path) and not is_ignored(path) for path in modified_paths
     )
 
 
@@ -296,7 +290,9 @@ def retrieve_projects(args):
 
         # Change in CI workflow triggers full subtree evaluation with quick tests
         if check_for_workflow_file_related_to_ci(modified_paths):
-            logging.info("CI workflow files changed, evaluating all subtrees with quick tests")
+            logging.info(
+                "CI workflow files changed, evaluating all subtrees with quick tests"
+            )
             subtrees = list(subtree_to_project_map.keys())
             test_type = "quick"
         elif matched_subtrees:
@@ -332,7 +328,9 @@ def retrieve_projects(args):
 
         # Change in CI workflow triggers full subtree evaluation with quick tests
         if check_for_workflow_file_related_to_ci(modified_paths):
-            logging.info("CI workflow files changed, evaluating all subtrees with quick tests")
+            logging.info(
+                "CI workflow files changed, evaluating all subtrees with quick tests"
+            )
             subtrees = list(subtree_to_project_map.keys())
             test_type = "quick"
 
@@ -434,6 +432,14 @@ def retrieve_projects(args):
 
 def select_build_runner(platform: str) -> str:
     """Select a build runner label based on platform and build variant."""
+    # TheRock is checked out alongside this repository in therock-ci.yml, but it
+    # is not available in a standalone rocm-systems checkout. Keep this import
+    # local so the rest of this module, including its unit tests, can run without
+    # TheRock.
+    therock_actions_path = Path("TheRock") / "build_tools" / "github_actions"
+    sys.path.insert(0, str(therock_actions_path))
+    from amdgpu_family_matrix import get_build_runner_labels, select_weighted_label
+
     build_runner_labels = get_build_runner_labels()
     if platform not in build_runner_labels:
         # Platform not configured for weighted selection, return default
@@ -484,7 +490,9 @@ def run(args):
         if args.get("is_pull_request"):
             base_ref = args.get("base_ref")
             modified_paths = get_modified_paths(base_ref)
-            if check_for_workflow_file_related_to_ci(modified_paths) or check_hip_rocr_changes(modified_paths):
+            if check_for_workflow_file_related_to_ci(
+                modified_paths
+            ) or check_hip_rocr_changes(modified_paths):
                 outputs["run_mi455_test"] = "true"
             else:
                 outputs["run_mi455_test"] = "false"
