@@ -55,14 +55,22 @@ Any `AFTER-PIN` commit's entry must move to a new `## amd_smi_lib for ROCm
 
 ## When a Changelog Entry is Required
 
+The repo uses these section headings under each release (matching the ROCm
+release-notes taxonomy): **Added**, **Changed**, **Removed**, **Optimized**,
+**Resolved Issues**, **Upcoming Changes**, **Known Issues**. There is no `Fixed`
+section — bug fixes go under **Resolved Issues**, deprecations under **Upcoming
+Changes**.
+
 | Change Type | Required? | Section |
 |------------|-----------|---------|
 | New public API function | ✅ Yes | Added |
-| Bug fix | ✅ Yes | Fixed |
-| Breaking API change | ✅ Yes | Changed (+ migration note) |
-| Performance improvement | ✅ Yes | Changed |
 | New CLI flag/subcommand | ✅ Yes | Added |
-| Build system fix | ⚠️ If user-visible | Fixed |
+| Bug fix | ✅ Yes | Resolved Issues |
+| Build system fix | ⚠️ If user-visible | Resolved Issues |
+| Breaking API change | ✅ Yes | Changed (+ migration note) |
+| Behavior/output change (non-fix) | ✅ Yes | Changed |
+| Performance / tooling improvement | ✅ Yes | Optimized |
+| Deprecation (still functional) | ✅ Yes | Upcoming Changes |
 | Internal refactor (no behavior change) | ❌ No | — |
 | Test-only changes | ❌ No | — |
 | Documentation-only changes | ❌ No | — |
@@ -70,27 +78,34 @@ Any `AFTER-PIN` commit's entry must move to a new `## amd_smi_lib for ROCm
 
 ## Entry Format
 
-Follow [Keep a Changelog](https://keepachangelog.com/) format:
+Entries follow [Keep a Changelog](https://keepachangelog.com/) conventions but
+under ROCm-version headings, not `## [Unreleased]`:
 
 ```markdown
-## [Unreleased]
+## amd_smi_lib for ROCm <MAJOR>.<MINOR>.<PATCH>
 
 ### Added
-- New `amdsmi_get_gpu_<feature>()` API for querying <feature>
-
-### Fixed
-- Fixed `amd-smi metric` crash when NIC device not present
+- **New `amdsmi_get_gpu_<feature>()` API for querying <feature>**.··
 
 ### Changed
-- `amdsmi_get_gpu_temperature()` now returns temperature in millidegrees (breaking change)
+- **`amdsmi_get_gpu_temperature()` now returns millidegrees (breaking change)**.··
+
+### Optimized
+- **Improved `amd-smi metric` refresh path**.··
+
+### Resolved Issues
+- **Fixed `amd-smi metric` crash when NIC device not present**.··
+
+### Upcoming Changes
+- **`amdsmi_get_gpu_vram_vendor()` is deprecated in favor of `amdsmi_get_gpu_vram_info()`**.··
 ```
 
 ### Rules
 - One bullet per logical change (not per file)
 - Start with the affected component: API name, CLI subcommand, or module
 - For breaking changes: include migration guidance
-- Use past tense for fixes ("Fixed"), present tense for additions ("New")
-- Reference the JIRA/issue if available: `[SWDEV-XXXXXX]`
+- Bug fixes go under **Resolved Issues**, not a `Fixed` section (this repo has none)
+- Reference the JIRA/issue only in the PR `JIRA ID` section, never in the entry text
 - **Bolded headline bullets must end with two trailing spaces** (Markdown hard line break) so Sphinx renders the headline and its sub-bullets on separate lines. Example:
   ```markdown
   - **Fixed `amd-smi static` hang on gfx1153**.··
