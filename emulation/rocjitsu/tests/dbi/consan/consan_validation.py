@@ -2781,8 +2781,10 @@ def _run(args: argparse.Namespace) -> int:
     else:
         selected = (None, *profiles) if args.include_baseline else profiles
         selections = tuple((profile, None) for profile in selected)
-    results = [
-        _run_profile(
+    results = []
+    baseline_before_failed = False
+    for profile, row_label in selections:
+        result = _run_profile(
             workspace,
             target,
             workload,
@@ -2792,10 +2794,27 @@ def _run(args: argparse.Namespace) -> int:
             args.timeout,
             row_label,
         )
-        for profile, row_label in selections
-    ]
+        results.append(result)
+        if (
+            args.phase == "overhead"
+            and args.include_baseline
+            and row_label == "baseline-before"
+            and not result["accepted"]
+        ):
+            baseline_before_failed = True
+            break
     if args.phase == "overhead" and args.include_baseline:
-        summary = _overhead_summary(results)
+        if baseline_before_failed:
+            summary = {
+                "schema_version": SCHEMA_VERSION,
+                "baseline_policy": "mean-of-before-and-after-medians",
+                "paired_baseline_median_ms": {},
+                "profiles": {},
+                "accepted": False,
+                "reasons": ["baseline-before rejected; profile phases skipped"],
+            }
+        else:
+            summary = _overhead_summary(results)
         summary_path = artifact_root / workload.id / "overhead" / "summary.json"
         atomic_write_json(summary_path, summary)
     print(json.dumps(results, indent=2, sort_keys=True))
