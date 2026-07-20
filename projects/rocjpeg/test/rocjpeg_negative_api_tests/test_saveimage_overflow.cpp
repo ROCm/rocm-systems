@@ -25,16 +25,9 @@ THE SOFTWARE.
 // integer overflow when computing the host buffer size, which would result in
 // an undersized allocation and subsequent heap overflow during hipMemcpyDtoH.
 
-#include "../../samples/rocjpeg_samples_utils.h"
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
-
-// Mock RocJpegImage for testing size calculations without requiring actual GPU allocation.
-struct MockRocJpegImage {
-    hipDeviceptr_t channel[3];
-    uint32_t pitch[3];
-};
 
 // Test helper: compute what SaveImage's buffer size would be for given dimensions.
 // This mimics the size arithmetic from SaveImage() so we can verify it doesn't overflow.
@@ -50,8 +43,8 @@ int main() {
     std::cout << "Testing SaveImage overflow fix (SWSPLAT-24294)..." << std::endl;
 
     // Test case 1: Max JPEG dimensions (65535×65535).
-    // Before the fix, uint32_t pitch * height would wrap to ~0 for large images.
-    // After the fix (size_t arithmetic), this should yield the correct ~4.3 GB size.
+    // 65535 * 65535 = 4,294,836,225 bytes, which actually fits in uint32_t.
+    // This case verifies the arithmetic works correctly for large but non-overflowing sizes.
     {
         uint32_t max_dim = 65535;
         uint32_t pitch = max_dim;  // pitch is typically close to width
@@ -59,21 +52,20 @@ int main() {
 
         size_t buffer_size = compute_saveimage_buffer_size(pitch, height);
 
-        // Expected size: 65535 * 65535 = 4,294,836,225 bytes (~4.29 GB).
-        // If the calculation wrapped uint32_t, buffer_size would be < UINT32_MAX.
-        // With size_t, it should be > UINT32_MAX.
-        const size_t expected_min = static_cast<size_t>(UINT32_MAX) + 1;
+        // Expected size: 65535 * 65535 = 4,294,836,225 bytes (~4.0 GB).
+        // This is less than UINT32_MAX (4,294,967,295), so it doesn't overflow uint32_t,
+        // but we still want to verify the size_t arithmetic is correct.
+        const size_t expected = static_cast<size_t>(pitch) * height;
 
-        if (buffer_size < expected_min) {
+        if (buffer_size != expected) {
             std::cerr << "FAIL: buffer_size " << buffer_size
-                      << " is suspiciously small for " << max_dim << "×" << max_dim
-                      << " (expected > " << expected_min << "). Overflow still present?"
-                      << std::endl;
+                      << " doesn't match expected " << expected
+                      << " for " << max_dim << "×" << max_dim << std::endl;
             return EXIT_FAILURE;
         }
 
         std::cout << "  ✓ Max dimensions (" << max_dim << "×" << max_dim
-                  << "): buffer_size = " << buffer_size << " bytes (correct, no overflow)"
+                  << "): buffer_size = " << buffer_size << " bytes (correct)"
                   << std::endl;
     }
 
