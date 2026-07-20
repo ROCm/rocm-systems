@@ -70,6 +70,7 @@ typedef struct rj_vm_map_t {
   uint32_t prot;        ///< Memory protection flags.
   uint32_t flags;       ///< Mapping flags.
   uint64_t mapped_addr; ///< [out] Address the mapping was placed at.
+  int32_t map_errno;    ///< [out] errno captured at the failing mmap (0 on success).
 } rj_vm_map_t;
 
 /// @brief Device memory unmapping descriptor.
@@ -251,6 +252,12 @@ RJ_API_EXPORT rj_status_t rj_vm_device_open(rj_vm_t *vm, rj_client_pid_t client_
 /// @param[in] vm VM handle.
 /// @param[in] process_id The process ID to close (0 closes the local process).
 RJ_API_EXPORT rj_status_t rj_vm_device_close(rj_vm_t *vm, uint32_t process_id);
+
+/// @brief Close every registered KFD process, waking any parked event waiters.
+/// @details Daemon-teardown helper: closes all live processes so client threads
+/// blocked in an infinite-timeout WAIT_EVENTS unblock and can be joined.
+/// @param[in] vm VM handle.
+RJ_API_EXPORT rj_status_t rj_vm_close_all_devices(rj_vm_t *vm);
 
 /// @brief Map device memory (local mode).
 /// @param[in] vm VM handle.

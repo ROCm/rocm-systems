@@ -135,7 +135,7 @@ void run_benchmark(rj_code_arch_t arch, std::string_view arch_name, const TestEn
 
   // Build corpus (decode-only filtering, no execute warmup).
   auto corpus = build_corpus(encodings, num_encodings, *decoder);
-  cu->reset_all_wf();
+  wf->halt();
   wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
   ASSERT_NE(wf, nullptr);
 
@@ -186,6 +186,11 @@ void run_benchmark(rj_code_arch_t arch, std::string_view arch_name, const TestEn
       std::chrono::duration_cast<std::chrono::nanoseconds>(decode_end - decode_start).count();
 
   // --- Measure decode + execute (non-memory only) ---
+  // build_corpus() already excludes program terminators (s_endpgm et al.) via
+  // should_skip(), so no instruction here frees the wave. Guard defensively anyway:
+  // a wave frees its resources at s_endpgm, so if the skip list ever drifts and a
+  // terminator slips in, re-dispatch a fresh wave rather than execute on a freed
+  // slot (which would benchmark dead work).
   auto full_start = Clock::now();
   for (int iter = 0; iter < ITERATIONS; ++iter) {
     for (const auto *entry : executable) {
@@ -196,6 +201,10 @@ void run_benchmark(rj_code_arch_t arch, std::string_view arch_name, const TestEn
         } catch (...) {
         }
         delete inst;
+        if (wf->is_halted()) {
+          wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+          ASSERT_NE(wf, nullptr); // single-slot CU: re-dispatch must succeed
+        }
       }
     }
   }
