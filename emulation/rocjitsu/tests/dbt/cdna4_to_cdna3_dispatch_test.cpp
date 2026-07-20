@@ -40,6 +40,16 @@ namespace {
 using test::kernel_hsaco_path;
 using test::kernel_path;
 
+// Upper bound on how long to block for a dispatch's completion signal. This is a
+// hang guard, NOT a performance budget: the real hang guard is the ctest-level
+// TIMEOUT (120-300s). The larger fixtures (e.g. the 1024^3 buffer-async Triton
+// matmul) are genuinely ~10s of single-threaded functional emulation; under CI's
+// `ctest -j` the emulating thread is CPU-starved and a correct dispatch can take
+// well past a tight per-signal budget, so a 5-10s wait produced false "dispatch
+// timed out" failures. Keep this generously below the ctest TIMEOUT so a real hang
+// still surfaces as a signal-wait failure rather than a hard ctest kill.
+constexpr uint64_t kDispatchSignalWaitTimeoutNs = 120'000'000'000ULL;
+
 std::vector<uint8_t> load_kernel_hsaco_bytes(const char *name) {
   std::ifstream file(kernel_hsaco_path(name), std::ios::binary);
   if (!file)
@@ -352,20 +362,51 @@ struct HsaShutdownGuard {
   ~HsaShutdownGuard() { hsa_shut_down(); }
 };
 
-struct HsaMatmulResources {
+/// @brief RAII owner for one raw-HSA dispatch's resources.
+/// @details Every dispatch helper builds the same object graph (code-object
+/// reader, executable, device/kernarg pool allocations, queue, completion
+/// signal) and must tear it down in a fixed order even when a mid-helper
+/// ASSERT/timeout returns early. Manual tail cleanup is skipped on any early
+/// return, which leaks the queue and — worse — leaves a live simulator dispatch
+/// referencing freed packet operands when hsa_shut_down() later runs, turning a
+/// lost/timed-out dispatch into a confusing exit-time crash instead of a clean
+/// test failure. This owner destroys the queue FIRST (stopping execution) before
+/// releasing anything an in-flight AQL packet can reference.
+struct HsaDispatchResources {
   hsa_code_object_reader_t reader{};
   hsa_executable_t executable{};
   hsa_queue_t *queue = nullptr;
   hsa_signal_t signal{};
   void *kernarg = nullptr;
-  void *a = nullptr;
-  void *b = nullptr;
-  void *c = nullptr;
+  std::vector<void *>
+      device_allocs; ///< Device global-pool blocks (from alloc_device) freed in dtor.
   bool reader_created = false;
   bool executable_created = false;
   bool signal_created = false;
 
-  ~HsaMatmulResources() {
+  HsaDispatchResources() = default;
+  // Sole-owner of raw HSA handles/allocations: copying would duplicate them and
+  // double-free/destroy in the dtor. Every call site uses this as a local, so
+  // deleting copy and move (rather than defining a move) is sufficient and safest.
+  HsaDispatchResources(const HsaDispatchResources &) = delete;
+  HsaDispatchResources &operator=(const HsaDispatchResources &) = delete;
+  HsaDispatchResources(HsaDispatchResources &&) = delete;
+  HsaDispatchResources &operator=(HsaDispatchResources &&) = delete;
+
+  /// @brief Allocate a global-pool block and record it for destruction.
+  /// @param[out] out Receives the allocated pointer (nullptr on failure).
+  /// @returns The hsa_status_t so callers can ASSERT on the specific failure
+  /// (OOM, invalid pool) rather than only observing a null pointer.
+  [[nodiscard]] hsa_status_t alloc_device(hsa_amd_memory_pool_t pool, size_t bytes, void **out) {
+    void *ptr = nullptr;
+    hsa_status_t st = hsa_amd_memory_pool_allocate(pool, bytes, 0, &ptr);
+    if (st == HSA_STATUS_SUCCESS && ptr)
+      device_allocs.push_back(ptr);
+    *out = (st == HSA_STATUS_SUCCESS) ? ptr : nullptr;
+    return st;
+  }
+
+  ~HsaDispatchResources() {
     // Stop queue execution before releasing anything referenced by an AQL
     // packet. This also makes an assertion after a dispatch timeout safe: the
     // test must not leave a live simulator dispatch for hsa_shut_down().
@@ -375,12 +416,8 @@ struct HsaMatmulResources {
       hsa_signal_destroy(signal);
     if (kernarg)
       hsa_amd_memory_pool_free(kernarg);
-    if (a)
-      hsa_amd_memory_pool_free(a);
-    if (b)
-      hsa_amd_memory_pool_free(b);
-    if (c)
-      hsa_amd_memory_pool_free(c);
+    for (void *ptr : device_allocs)
+      hsa_amd_memory_pool_free(ptr);
     if (executable_created)
       hsa_executable_destroy(executable);
     if (reader_created)
@@ -392,22 +429,25 @@ void run_dynamic_copy_loop(const std::vector<uint8_t> &elf_bytes, const Dispatch
   hsa_agent_t cpu = find_cpu_agent();
   ASSERT_NE(cpu.handle, 0u) << "No CPU agent found";
 
-  hsa_code_object_reader_t reader{};
-  auto st = hsa_code_object_reader_create_from_memory(elf_bytes.data(), elf_bytes.size(), &reader);
+  HsaDispatchResources resources;
+  auto st = hsa_code_object_reader_create_from_memory(elf_bytes.data(), elf_bytes.size(),
+                                                      &resources.reader);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+  resources.reader_created = true;
 
-  hsa_executable_t executable{};
   st = hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, nullptr,
-                                 &executable);
+                                 &resources.executable);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
-  st = hsa_executable_load_agent_code_object(executable, target.agent, reader, nullptr, nullptr);
+  resources.executable_created = true;
+  st = hsa_executable_load_agent_code_object(resources.executable, target.agent, resources.reader,
+                                             nullptr, nullptr);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
-  st = hsa_executable_freeze(executable, nullptr);
+  st = hsa_executable_freeze(resources.executable, nullptr);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
 
   hsa_executable_symbol_t symbol{};
-  st =
-      hsa_executable_get_symbol_by_name(executable, "dynamic_copy_loop.kd", &target.agent, &symbol);
+  st = hsa_executable_get_symbol_by_name(resources.executable, "dynamic_copy_loop.kd",
+                                         &target.agent, &symbol);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
 
   uint64_t kernel_object = 0;
@@ -422,14 +462,12 @@ void run_dynamic_copy_loop(const std::vector<uint8_t> &elf_bytes, const Dispatch
 
   auto gpu_pool = find_pool(target.agent, HSA_AMD_SEGMENT_GLOBAL);
   ASSERT_NE(gpu_pool.handle, 0u);
-  uint32_t *src_dev = nullptr;
-  uint32_t *dst_dev = nullptr;
-  ASSERT_EQ(
-      hsa_amd_memory_pool_allocate(gpu_pool, kMaxBytes, 0, reinterpret_cast<void **>(&src_dev)),
-      HSA_STATUS_SUCCESS);
-  ASSERT_EQ(
-      hsa_amd_memory_pool_allocate(gpu_pool, kMaxBytes, 0, reinterpret_cast<void **>(&dst_dev)),
-      HSA_STATUS_SUCCESS);
+  void *src_raw = nullptr;
+  ASSERT_EQ(resources.alloc_device(gpu_pool, kMaxBytes, &src_raw), HSA_STATUS_SUCCESS);
+  auto *src_dev = static_cast<uint32_t *>(src_raw);
+  void *dst_raw = nullptr;
+  ASSERT_EQ(resources.alloc_device(gpu_pool, kMaxBytes, &dst_raw), HSA_STATUS_SUCCESS);
+  auto *dst_dev = static_cast<uint32_t *>(dst_raw);
 
   hsa_agent_t both[] = {cpu, target.agent};
   ASSERT_EQ(hsa_amd_agents_allow_access(2, both, nullptr, src_dev), HSA_STATUS_SUCCESS);
@@ -437,8 +475,9 @@ void run_dynamic_copy_loop(const std::vector<uint8_t> &elf_bytes, const Dispatch
 
   auto kernarg_pool = find_pool(cpu, HSA_AMD_SEGMENT_GLOBAL, true);
   ASSERT_NE(kernarg_pool.handle, 0u);
-  void *kernarg = nullptr;
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, 256, 0, &kernarg), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, 256, 0, &resources.kernarg),
+            HSA_STATUS_SUCCESS);
+  void *kernarg = resources.kernarg;
   ASSERT_EQ(hsa_amd_agents_allow_access(2, both, nullptr, kernarg), HSA_STATUS_SUCCESS);
   std::memset(kernarg, 0, 256);
 
@@ -457,15 +496,16 @@ void run_dynamic_copy_loop(const std::vector<uint8_t> &elf_bytes, const Dispatch
   args->workgroup_size = kWorkgroupSize;
   args->stride = kDispatchWorkItems;
 
-  hsa_queue_t *queue = nullptr;
   uint32_t queue_size = 0;
   hsa_agent_get_info(target.agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size);
   st = hsa_queue_create(target.agent, queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr,
-                        UINT32_MAX, UINT32_MAX, &queue);
+                        UINT32_MAX, UINT32_MAX, &resources.queue);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+  hsa_queue_t *queue = resources.queue;
 
-  hsa_signal_t signal{};
-  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &resources.signal), HSA_STATUS_SUCCESS);
+  resources.signal_created = true;
+  hsa_signal_t signal = resources.signal;
 
   const std::array<uint32_t, 12> shapes = {0, 1, 17, 63, 64, 65, 255, 256, 257, 1024, 4097, kMaxN};
   std::vector<uint32_t> src_host(kMaxN);
@@ -510,7 +550,7 @@ void run_dynamic_copy_loop(const std::vector<uint8_t> &elf_bytes, const Dispatch
     hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
 
     const hsa_signal_value_t val = hsa_signal_wait_scacquire(
-        signal, HSA_SIGNAL_CONDITION_LT, 1, 5'000'000'000ULL, HSA_WAIT_STATE_BLOCKED);
+        signal, HSA_SIGNAL_CONDITION_LT, 1, kDispatchSignalWaitTimeoutNs, HSA_WAIT_STATE_BLOCKED);
     ASSERT_EQ(val, 0) << "Kernel dispatch timed out or failed";
 
     ASSERT_EQ(hsa_memory_copy(dst_host.data(), dst_dev, kMaxBytes), HSA_STATUS_SUCCESS);
@@ -528,14 +568,7 @@ void run_dynamic_copy_loop(const std::vector<uint8_t> &elf_bytes, const Dispatch
     }
     EXPECT_EQ(mismatches, 0u) << mismatches << " mismatches for N=" << n;
   }
-
-  hsa_signal_destroy(signal);
-  hsa_queue_destroy(queue);
-  hsa_amd_memory_pool_free(kernarg);
-  hsa_amd_memory_pool_free(src_dev);
-  hsa_amd_memory_pool_free(dst_dev);
-  hsa_executable_destroy(executable);
-  hsa_code_object_reader_destroy(reader);
+  // Resources released by HsaDispatchResources destructor (queue first).
 }
 
 void translate_triton_fixture(const char *name, uint32_t mach, std::vector<uint8_t> &elf_bytes,
@@ -565,7 +598,7 @@ void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const DispatchTarg
   hsa_agent_t cpu = find_cpu_agent();
   ASSERT_NE(cpu.handle, 0u) << "No CPU agent found";
 
-  HsaMatmulResources resources;
+  HsaDispatchResources resources;
   auto st = hsa_code_object_reader_create_from_memory(elf_bytes.data(), elf_bytes.size(),
                                                       &resources.reader);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
@@ -608,12 +641,15 @@ void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const DispatchTarg
 
   auto gpu_pool = find_pool(target.agent, HSA_AMD_SEGMENT_GLOBAL);
   ASSERT_NE(gpu_pool.handle, 0u);
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(gpu_pool, kABytes, 0, &resources.a), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(gpu_pool, kBBytes, 0, &resources.b), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(gpu_pool, kCBytes, 0, &resources.c), HSA_STATUS_SUCCESS);
-  auto *a_dev = static_cast<uint16_t *>(resources.a);
-  auto *b_dev = static_cast<uint16_t *>(resources.b);
-  auto *c_dev = static_cast<float *>(resources.c);
+  void *a_raw = nullptr;
+  ASSERT_EQ(resources.alloc_device(gpu_pool, kABytes, &a_raw), HSA_STATUS_SUCCESS);
+  auto *a_dev = static_cast<uint16_t *>(a_raw);
+  void *b_raw = nullptr;
+  ASSERT_EQ(resources.alloc_device(gpu_pool, kBBytes, &b_raw), HSA_STATUS_SUCCESS);
+  auto *b_dev = static_cast<uint16_t *>(b_raw);
+  void *c_raw = nullptr;
+  ASSERT_EQ(resources.alloc_device(gpu_pool, kCBytes, &c_raw), HSA_STATUS_SUCCESS);
+  auto *c_dev = static_cast<float *>(c_raw);
 
   hsa_agent_t both[] = {cpu, target.agent};
   ASSERT_EQ(hsa_amd_agents_allow_access(2, both, nullptr, a_dev), HSA_STATUS_SUCCESS);
@@ -691,8 +727,9 @@ void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const DispatchTarg
   __atomic_store_n(reinterpret_cast<uint16_t *>(aql), header, __ATOMIC_RELEASE);
   hsa_signal_store_relaxed(resources.queue->doorbell_signal, write_idx);
 
-  const hsa_signal_value_t val = hsa_signal_wait_scacquire(
-      resources.signal, HSA_SIGNAL_CONDITION_LT, 1, 5'000'000'000ULL, HSA_WAIT_STATE_BLOCKED);
+  const hsa_signal_value_t val =
+      hsa_signal_wait_scacquire(resources.signal, HSA_SIGNAL_CONDITION_LT, 1,
+                                kDispatchSignalWaitTimeoutNs, HSA_WAIT_STATE_BLOCKED);
   ASSERT_EQ(val, 0) << "Kernel dispatch timed out or failed";
 
   ASSERT_EQ(hsa_memory_copy(c_host.data(), c_dev, kCBytes), HSA_STATUS_SUCCESS);
@@ -729,21 +766,24 @@ void run_buffer_async_triton_matmul(const std::vector<uint8_t> &elf_bytes,
   hsa_agent_t cpu = find_cpu_agent();
   ASSERT_NE(cpu.handle, 0u) << "No CPU agent found";
 
-  hsa_code_object_reader_t reader{};
-  auto st = hsa_code_object_reader_create_from_memory(elf_bytes.data(), elf_bytes.size(), &reader);
+  HsaDispatchResources resources;
+  auto st = hsa_code_object_reader_create_from_memory(elf_bytes.data(), elf_bytes.size(),
+                                                      &resources.reader);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+  resources.reader_created = true;
 
-  hsa_executable_t executable{};
   st = hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, nullptr,
-                                 &executable);
+                                 &resources.executable);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
-  st = hsa_executable_load_agent_code_object(executable, target.agent, reader, nullptr, nullptr);
+  resources.executable_created = true;
+  st = hsa_executable_load_agent_code_object(resources.executable, target.agent, resources.reader,
+                                             nullptr, nullptr);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
-  st = hsa_executable_freeze(executable, nullptr);
+  st = hsa_executable_freeze(resources.executable, nullptr);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
 
   hsa_executable_symbol_t symbol{};
-  st = hsa_executable_get_symbol_by_name(executable, "matmul_async_buffer_load_lds.kd",
+  st = hsa_executable_get_symbol_by_name(resources.executable, "matmul_async_buffer_load_lds.kd",
                                          &target.agent, &symbol);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
 
@@ -772,15 +812,15 @@ void run_buffer_async_triton_matmul(const std::vector<uint8_t> &elf_bytes,
 
   auto gpu_pool = find_pool(target.agent, HSA_AMD_SEGMENT_GLOBAL);
   ASSERT_NE(gpu_pool.handle, 0u);
-  uint16_t *a_dev = nullptr;
-  uint16_t *b_dev = nullptr;
-  float *c_dev = nullptr;
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(gpu_pool, kABytes, 0, reinterpret_cast<void **>(&a_dev)),
-            HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(gpu_pool, kBBytes, 0, reinterpret_cast<void **>(&b_dev)),
-            HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(gpu_pool, kCBytes, 0, reinterpret_cast<void **>(&c_dev)),
-            HSA_STATUS_SUCCESS);
+  void *a_raw = nullptr;
+  ASSERT_EQ(resources.alloc_device(gpu_pool, kABytes, &a_raw), HSA_STATUS_SUCCESS);
+  auto *a_dev = static_cast<uint16_t *>(a_raw);
+  void *b_raw = nullptr;
+  ASSERT_EQ(resources.alloc_device(gpu_pool, kBBytes, &b_raw), HSA_STATUS_SUCCESS);
+  auto *b_dev = static_cast<uint16_t *>(b_raw);
+  void *c_raw = nullptr;
+  ASSERT_EQ(resources.alloc_device(gpu_pool, kCBytes, &c_raw), HSA_STATUS_SUCCESS);
+  auto *c_dev = static_cast<float *>(c_raw);
 
   hsa_agent_t both[] = {cpu, target.agent};
   ASSERT_EQ(hsa_amd_agents_allow_access(2, both, nullptr, a_dev), HSA_STATUS_SUCCESS);
@@ -789,8 +829,9 @@ void run_buffer_async_triton_matmul(const std::vector<uint8_t> &elf_bytes,
 
   auto kernarg_pool = find_pool(cpu, HSA_AMD_SEGMENT_GLOBAL, true);
   ASSERT_NE(kernarg_pool.handle, 0u);
-  void *kernarg = nullptr;
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, 64, 0, &kernarg), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, 64, 0, &resources.kernarg),
+            HSA_STATUS_SUCCESS);
+  void *kernarg = resources.kernarg;
   ASSERT_EQ(hsa_amd_agents_allow_access(2, both, nullptr, kernarg), HSA_STATUS_SUCCESS);
   std::memset(kernarg, 0, 64);
 
@@ -830,15 +871,16 @@ void run_buffer_async_triton_matmul(const std::vector<uint8_t> &elf_bytes,
   ASSERT_EQ(hsa_memory_copy(b_dev, b_host.data(), kBBytes), HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_memory_copy(c_dev, c_init.data(), kCBytes), HSA_STATUS_SUCCESS);
 
-  hsa_queue_t *queue = nullptr;
   uint32_t queue_size = 0;
   hsa_agent_get_info(target.agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size);
   st = hsa_queue_create(target.agent, queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr,
-                        UINT32_MAX, UINT32_MAX, &queue);
+                        UINT32_MAX, UINT32_MAX, &resources.queue);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+  hsa_queue_t *queue = resources.queue;
 
-  hsa_signal_t signal{};
-  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &resources.signal), HSA_STATUS_SUCCESS);
+  resources.signal_created = true;
+  hsa_signal_t signal = resources.signal;
   hsa_signal_store_relaxed(signal, 1);
 
   const uint64_t write_idx = hsa_queue_add_write_index_relaxed(queue, 1);
@@ -865,22 +907,14 @@ void run_buffer_async_triton_matmul(const std::vector<uint8_t> &elf_bytes,
   hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
 
   const hsa_signal_value_t val = hsa_signal_wait_scacquire(
-      signal, HSA_SIGNAL_CONDITION_LT, 1, 10'000'000'000ULL, HSA_WAIT_STATE_BLOCKED);
+      signal, HSA_SIGNAL_CONDITION_LT, 1, kDispatchSignalWaitTimeoutNs, HSA_WAIT_STATE_BLOCKED);
   ASSERT_EQ(val, 0) << "Kernel dispatch timed out or failed";
 
   ASSERT_EQ(hsa_memory_copy(c_host.data(), c_dev, kCBytes), HSA_STATUS_SUCCESS);
 
   if (observed)
     *observed = std::move(c_host);
-
-  hsa_signal_destroy(signal);
-  hsa_queue_destroy(queue);
-  hsa_amd_memory_pool_free(kernarg);
-  hsa_amd_memory_pool_free(a_dev);
-  hsa_amd_memory_pool_free(b_dev);
-  hsa_amd_memory_pool_free(c_dev);
-  hsa_executable_destroy(executable);
-  hsa_code_object_reader_destroy(reader);
+  // Resources released by HsaDispatchResources destructor (queue first).
 }
 
 void run_flash_attention_triton(const std::vector<uint8_t> &elf_bytes, const DispatchTarget &target,
@@ -892,21 +926,24 @@ void run_flash_attention_triton(const std::vector<uint8_t> &elf_bytes, const Dis
   ASSERT_LE(shared_bytes, 65536u)
       << "gfx942 dispatch must stay within the 64 KiB LDS limit until LDS virtualization exists";
 
-  hsa_code_object_reader_t reader{};
-  auto st = hsa_code_object_reader_create_from_memory(elf_bytes.data(), elf_bytes.size(), &reader);
+  HsaDispatchResources resources;
+  auto st = hsa_code_object_reader_create_from_memory(elf_bytes.data(), elf_bytes.size(),
+                                                      &resources.reader);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+  resources.reader_created = true;
 
-  hsa_executable_t executable{};
   st = hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, nullptr,
-                                 &executable);
+                                 &resources.executable);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
-  st = hsa_executable_load_agent_code_object(executable, target.agent, reader, nullptr, nullptr);
+  resources.executable_created = true;
+  st = hsa_executable_load_agent_code_object(resources.executable, target.agent, resources.reader,
+                                             nullptr, nullptr);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
-  st = hsa_executable_freeze(executable, nullptr);
+  st = hsa_executable_freeze(resources.executable, nullptr);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
 
   hsa_executable_symbol_t symbol{};
-  st = hsa_executable_get_symbol_by_name(executable, symbol_name, &target.agent, &symbol);
+  st = hsa_executable_get_symbol_by_name(resources.executable, symbol_name, &target.agent, &symbol);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
 
   uint64_t kernel_object = 0;
@@ -925,18 +962,18 @@ void run_flash_attention_triton(const std::vector<uint8_t> &elf_bytes, const Dis
 
   auto gpu_pool = find_pool(target.agent, HSA_AMD_SEGMENT_GLOBAL);
   ASSERT_NE(gpu_pool.handle, 0u);
-  uint16_t *q_dev = nullptr;
-  uint16_t *k_dev = nullptr;
-  uint16_t *v_dev = nullptr;
-  float *o_dev = nullptr;
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(gpu_pool, kQBytes, 0, reinterpret_cast<void **>(&q_dev)),
-            HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(gpu_pool, kKVBytes, 0, reinterpret_cast<void **>(&k_dev)),
-            HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(gpu_pool, kKVBytes, 0, reinterpret_cast<void **>(&v_dev)),
-            HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(gpu_pool, kOBytes, 0, reinterpret_cast<void **>(&o_dev)),
-            HSA_STATUS_SUCCESS);
+  void *q_raw = nullptr;
+  ASSERT_EQ(resources.alloc_device(gpu_pool, kQBytes, &q_raw), HSA_STATUS_SUCCESS);
+  auto *q_dev = static_cast<uint16_t *>(q_raw);
+  void *k_raw = nullptr;
+  ASSERT_EQ(resources.alloc_device(gpu_pool, kKVBytes, &k_raw), HSA_STATUS_SUCCESS);
+  auto *k_dev = static_cast<uint16_t *>(k_raw);
+  void *v_raw = nullptr;
+  ASSERT_EQ(resources.alloc_device(gpu_pool, kKVBytes, &v_raw), HSA_STATUS_SUCCESS);
+  auto *v_dev = static_cast<uint16_t *>(v_raw);
+  void *o_raw = nullptr;
+  ASSERT_EQ(resources.alloc_device(gpu_pool, kOBytes, &o_raw), HSA_STATUS_SUCCESS);
+  auto *o_dev = static_cast<float *>(o_raw);
 
   hsa_agent_t both[] = {cpu, target.agent};
   ASSERT_EQ(hsa_amd_agents_allow_access(2, both, nullptr, q_dev), HSA_STATUS_SUCCESS);
@@ -946,8 +983,9 @@ void run_flash_attention_triton(const std::vector<uint8_t> &elf_bytes, const Dis
 
   auto kernarg_pool = find_pool(cpu, HSA_AMD_SEGMENT_GLOBAL, true);
   ASSERT_NE(kernarg_pool.handle, 0u);
-  void *kernarg = nullptr;
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, 64, 0, &kernarg), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, 64, 0, &resources.kernarg),
+            HSA_STATUS_SUCCESS);
+  void *kernarg = resources.kernarg;
   ASSERT_EQ(hsa_amd_agents_allow_access(2, both, nullptr, kernarg), HSA_STATUS_SUCCESS);
   std::memset(kernarg, 0, 64);
 
@@ -986,15 +1024,16 @@ void run_flash_attention_triton(const std::vector<uint8_t> &elf_bytes, const Dis
   ASSERT_EQ(hsa_memory_copy(v_dev, v_host.data(), kKVBytes), HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_memory_copy(o_dev, o_init.data(), kOBytes), HSA_STATUS_SUCCESS);
 
-  hsa_queue_t *queue = nullptr;
   uint32_t queue_size = 0;
   hsa_agent_get_info(target.agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size);
   st = hsa_queue_create(target.agent, queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr,
-                        UINT32_MAX, UINT32_MAX, &queue);
+                        UINT32_MAX, UINT32_MAX, &resources.queue);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+  hsa_queue_t *queue = resources.queue;
 
-  hsa_signal_t signal{};
-  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &resources.signal), HSA_STATUS_SUCCESS);
+  resources.signal_created = true;
+  hsa_signal_t signal = resources.signal;
   hsa_signal_store_relaxed(signal, 1);
 
   const uint64_t write_idx = hsa_queue_add_write_index_relaxed(queue, 1);
@@ -1021,23 +1060,14 @@ void run_flash_attention_triton(const std::vector<uint8_t> &elf_bytes, const Dis
   hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
 
   const hsa_signal_value_t val = hsa_signal_wait_scacquire(
-      signal, HSA_SIGNAL_CONDITION_LT, 1, 10'000'000'000ULL, HSA_WAIT_STATE_BLOCKED);
+      signal, HSA_SIGNAL_CONDITION_LT, 1, kDispatchSignalWaitTimeoutNs, HSA_WAIT_STATE_BLOCKED);
   ASSERT_EQ(val, 0) << "Kernel dispatch timed out or failed";
 
   ASSERT_EQ(hsa_memory_copy(o_host.data(), o_dev, kOBytes), HSA_STATUS_SUCCESS);
 
   if (observed)
     *observed = std::move(o_host);
-
-  hsa_signal_destroy(signal);
-  hsa_queue_destroy(queue);
-  hsa_amd_memory_pool_free(kernarg);
-  hsa_amd_memory_pool_free(q_dev);
-  hsa_amd_memory_pool_free(k_dev);
-  hsa_amd_memory_pool_free(v_dev);
-  hsa_amd_memory_pool_free(o_dev);
-  hsa_executable_destroy(executable);
-  hsa_code_object_reader_destroy(reader);
+  // Resources released by HsaDispatchResources destructor (queue first).
 }
 
 } // namespace

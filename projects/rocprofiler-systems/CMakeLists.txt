@@ -312,8 +312,8 @@ endif()
 include(ProcessorCount)
 ProcessorCount(ROCPROFSYS_PROCESSOR_COUNT)
 
-if(ROCPROFSYS_PROCESSOR_COUNT LESS 8)
-    set(ROCPROFSYS_THREAD_COUNT 128)
+if(ROCPROFSYS_PROCESSOR_COUNT LESS 128)
+    set(ROCPROFSYS_THREAD_COUNT 2048)
 else()
     math(EXPR ROCPROFSYS_THREAD_COUNT "16 * ${ROCPROFSYS_PROCESSOR_COUNT}")
     compute_pow2_ceil(ROCPROFSYS_THREAD_COUNT "16 * ${ROCPROFSYS_PROCESSOR_COUNT}")
@@ -335,7 +335,7 @@ set(ROCPROFSYS_MAX_THREADS
 )
 rocprofiler_systems_add_feature(
     ROCPROFSYS_MAX_THREADS
-    "Maximum number of total threads supported in the host application (default: max of 128 or 16 * nproc)"
+    "Maximum number of total threads supported in the host application (default: max of 2048 or 16 * nproc)"
 )
 
 compute_pow2_ceil(_MAX_THREADS "${ROCPROFSYS_MAX_THREADS}")
