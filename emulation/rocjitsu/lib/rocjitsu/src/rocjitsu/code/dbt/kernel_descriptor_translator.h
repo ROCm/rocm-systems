@@ -9,6 +9,7 @@
 #include "rocjitsu/code/dbt/translation_diagnostic.h"
 #include "rocjitsu/code/rj_code.h"
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -81,7 +82,20 @@ struct VirtualLdsLoweringState {
 /// @brief Immutable source identity and entry facts for one kernel descriptor.
 struct KernelDescriptorFacts {
   /// @brief File offset of the original AMDHSA kernel descriptor.
+  ///
+  /// @note This offset is only valid against the pre-translation source image.
+  /// After .text is replaced/grown, a descriptor section that follows .text is
+  /// shifted and this offset no longer points at the descriptor. Consumers that
+  /// run post-growth (e.g. sidecar materialization) must use
+  /// @ref source_descriptor_bytes instead of re-reading at this offset.
   uint64_t descriptor_file_offset = 0;
+
+  /// @brief Snapshot of the 64 source AMDHSA kernel-descriptor bytes.
+  ///
+  /// @details Captured at translation time while @ref descriptor_file_offset is
+  /// still valid, so sidecar descriptors materialized after .text growth copy
+  /// their template from here rather than from a stale, now-shifted file offset.
+  std::array<uint8_t, 64> source_descriptor_bytes{};
 
   /// @brief Kernel symbol name without the AMDHSA ".kd" descriptor suffix.
   std::string kernel_name;

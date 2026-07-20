@@ -604,6 +604,13 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
                          const KernelDescriptorTranslationOptions &options) {
   KdTranslation result;
   result.descriptor_file_offset = descriptor_file_offset;
+  // Snapshot the source descriptor bytes now, while descriptor_file_offset is
+  // still valid against the source image. Sidecar descriptors are materialized
+  // after .text is grown, which shifts a following descriptor section, so they
+  // must copy their template from this snapshot rather than re-reading the stale
+  // offset.
+  static_assert(sizeof(KD) == 64, "descriptor snapshot size mismatch");
+  std::memcpy(result.source_descriptor_bytes.data(), &src, sizeof(KD));
   result.kernel_name = std::move(kernel_name);
   result.entry_text_offset = entry_text_offset;
   result.target_entry_text_offset = entry_text_offset;

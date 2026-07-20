@@ -119,6 +119,7 @@ using rocjitsu::VirtualLdsDispatchState;
 using rocjitsu::write_kernarg_extension_wrapper;
 using rocjitsu::hooks::completed_virtual_lds_dispatch;
 using rocjitsu::hooks::empty_virtual_lds_buffers;
+using rocjitsu::hooks::first_unsupportable_virtual_lds_kernel;
 using rocjitsu::hooks::parse_virtual_lds_hook_metadata;
 using rocjitsu::hooks::record_virtual_lds_completion_signal;
 using rocjitsu::hooks::release_virtual_lds_buffers;
@@ -1201,6 +1202,9 @@ public:
     clear_agent_mapper();
     VirtualLdsRuntimeRegistry::instance().clear();
     clear_virtual_lds_dispatch_queues();
+    // Drop the installed runtime-API table so a later OnLoad cannot race readers
+    // against stale entry points and post-unload callbacks become no-ops.
+    rocjitsu::hooks::clear_virtual_lds_runtime_api();
     clear_memory_pool_mapper();
     if (!had_state)
       return;
@@ -2118,11 +2122,14 @@ void map_pointer_info_accessible_agents(uint32_t *num_agents_accessible, hsa_age
 
 /// @brief Return a copy of @p header with the packet type forced to INVALID.
 ///
-/// @details The command processor treats an INVALID-typed slot as a no-op and
-/// advances past it. Neutralizing a doomed dispatch this way keeps the ring's
-/// read/write indices consistent (the slot is still consumed) without executing
-/// a dispatch the host cannot satisfy. HSA_PACKET_TYPE_INVALID is zero, so this
-/// clears the type field.
+/// @details Used only as a transient "not ready" marker while the ring rewrite
+/// mutates a not-yet-doorbelled slot: the header is set to INVALID, the packet
+/// body is edited, then the original header is republished. A command processor
+/// that observes an INVALID slot treats it as "the producer has not finished
+/// writing this packet" and waits (it does NOT skip the slot), so this must only
+/// ever be a transient value that is overwritten before the doorbell is rung.
+/// HSA_PACKET_TYPE_INVALID is 1 (HSA_PACKET_TYPE_VENDOR_SPECIFIC is 0), so this
+/// clears the type field and writes the INVALID code.
 [[nodiscard]] uint16_t make_invalid_packet_header(uint16_t header) {
   constexpr uint16_t kTypeMask =
       static_cast<uint16_t>(((1u << HSA_PACKET_HEADER_WIDTH_TYPE) - 1u) << HSA_PACKET_HEADER_TYPE);
@@ -2221,6 +2228,12 @@ public:
     if (signal.handle == 0)
       return;
 
+    // O(queues x slots) per hsa_signal_destroy. Acceptable because virtual-LDS
+    // dispatches (the only ones that borrow a completion signal) are rare relative
+    // to plain signal churn, and the scan is bounded by the queue ring size. If a
+    // workload ever makes this hot, index borrowed signals by handle so destroy
+    // becomes O(1); today the simpler full sweep keeps the borrow bookkeeping in
+    // one place.
     std::lock_guard lock(mutex_);
     for (auto &[queue_key, state] : queues_by_ptr_) {
       (void)queue_key;
@@ -2273,9 +2286,20 @@ public:
 
   /// @brief Release all tracked queues during HSA tool unload.
   void clear() {
-    scanner_.request_stop();
-    if (scanner_.joinable())
-      scanner_.join();
+    // Stop and join the scanner under the dedicated lifecycle mutex, NOT the data
+    // mutex_. The scanner thread itself takes mutex_ in scan_ready_packets(), so
+    // joining while holding mutex_ would deadlock. Setting stopping_ here also
+    // prevents a concurrent record_queue() from resurrecting the thread mid-clear.
+    // The lifecycle mutex is released before mutex_ is taken below so the
+    // (mutex_ -> scanner_lifecycle_mutex_) order used by ensure_scanner_started_
+    // locked() cannot invert into a deadlock.
+    {
+      std::lock_guard lifecycle(scanner_lifecycle_mutex_);
+      stopping_ = true;
+      scanner_.request_stop();
+      if (scanner_.joinable())
+        scanner_.join();
+    }
 
     std::lock_guard lock(mutex_);
     for (auto &[queue, state] : queues_by_ptr_) {
@@ -2285,6 +2309,13 @@ public:
     queues_by_ptr_.clear();
     queues_by_doorbell_.clear();
     VirtualLdsDispatchAllocator::instance().clear();
+    // Allow the scanner to start again if the registry is reused after a clear
+    // (e.g. an in-process reload). Safe under mutex_ because start is gated by
+    // stopping_ under the lifecycle mutex.
+    {
+      std::lock_guard lifecycle(scanner_lifecycle_mutex_);
+      stopping_ = false;
+    }
   }
 
   /// @brief Rewrite a contiguous packet batch delivered by ROCR's intercept queue.
@@ -2325,20 +2356,17 @@ public:
           continue;
         ensure_intercept_packet_private_size(packet, user_pkt_index + index);
         const uint64_t packet_id = user_pkt_index + index;
-        bool rejected = false;
-        auto prepared =
-            prepare_virtual_lds_dispatch(state, packet, packet_id, "intercept", &rejected);
+        auto prepared = prepare_virtual_lds_dispatch(state, packet, packet_id, "intercept");
         if (!prepared) {
-          // A required virtual-LDS rewrite that cannot be satisfied must not
-          // dispatch (it asks for more LDS than the host has and would fault).
-          // Neutralize the local copy before the batch writer publishes it so
-          // the CP skips the slot. Benign nullopt cases (no plan / below
-          // threshold) leave the dispatchable packet untouched.
-          if (rejected)
-            publish_packet_header(
-                packet,
-                make_invalid_packet_header(
-                    std::atomic_ref<uint16_t>(packet.header).load(std::memory_order_relaxed)));
+          // Leave the packet on its normal descriptor. Metadata-unsupportable
+          // kernels were already rejected at code-object load
+          // (first_unsupportable_virtual_lds_kernel), and a required-sidecar
+          // kernel whose static LDS exceeds the host limit has its normal
+          // descriptor redirected to a skipped-kernel trap stub at translation
+          // time, so the normal path is always safe to dispatch here: either a
+          // legitimate below-threshold launch or a self-halting trap. (Do NOT
+          // publish an INVALID header: the command processor treats INVALID as
+          // "producer has not finished writing this slot" and stalls the queue.)
           continue;
         }
         apply_virtual_lds_dispatch(packet, *prepared);
@@ -2514,14 +2542,16 @@ private:
   /// @details This is the single policy path shared by ROCR intercept batches and
   /// direct queue scanning. The returned buffers transfer to the delivery adapter,
   /// which publishes fields using the synchronization required by its packet source.
-  /// @param rejected Optional out-flag set true when the virtual-LDS plan is a hard
-  /// Reject (a required rewrite that cannot be satisfied, e.g. oversized virtual
-  /// LDS). Distinct from the benign nullopt cases (no plan / KeepNormal), where the
-  /// original packet is legitimately dispatchable. Callers must not dispatch a
-  /// rejected packet — it would fault on the host — so they turn it into a no-op.
+  /// A nullopt result means "dispatch the packet on its normal descriptor": either
+  /// there is no virtual-LDS plan, the request is below threshold (KeepNormal), or
+  /// the rewrite could not be prepared. The last case is safe because a required
+  /// virtual-LDS kernel whose metadata is unsupportable is rejected at code-object
+  /// load, and a required-sidecar kernel's oversized normal descriptor is redirected
+  /// to a self-halting trap stub at translation time, so the normal path never
+  /// dispatches a host-faulting oversized launch.
   [[nodiscard]] static std::optional<PreparedVirtualLdsDispatch>
   prepare_virtual_lds_dispatch(QueueState &state, const hsa_kernel_dispatch_packet_t &packet,
-                               uint64_t packet_id, const char *delivery, bool *rejected = nullptr) {
+                               uint64_t packet_id, const char *delivery) {
     auto resolved =
         VirtualLdsRuntimeRegistry::instance().find_by_kernel_object(packet.kernel_object);
     if (!resolved) {
@@ -2565,12 +2595,14 @@ private:
       return std::nullopt;
     }
     if (rewrite.decision == VirtualLdsDispatchDecision::Reject) {
+      // A dispatch-time-only rejection (per-packet grid geometry overflowing the
+      // runtime-state ABI). The load-time check cannot see packet dimensions, so
+      // this is reachable; fall back to the normal descriptor (the required
+      // oversized normal descriptor was stubbed to a trap at translation time).
       trace_virtual_lds_dispatch(
           "virtual-LDS plan rejected delivery=%s packet=%llu kernel=%s requested=%llu reason=%s",
           delivery, static_cast<unsigned long long>(packet_id), metadata.kernel_name.c_str(),
           static_cast<unsigned long long>(rewrite.requested_lds), rewrite.diagnostic.c_str());
-      if (rejected != nullptr)
-        *rejected = true;
       return std::nullopt;
     }
 
@@ -2696,19 +2728,18 @@ private:
 
     retire_slot_buffers(state, slot);
     ensure_queue_packet_private_size(packet, packet_id, slot, header);
-    bool rejected = false;
-    auto prepared = prepare_virtual_lds_dispatch(state, packet, packet_id, "queue", &rejected);
+    auto prepared = prepare_virtual_lds_dispatch(state, packet, packet_id, "queue");
     if (!prepared) {
-      // A required virtual-LDS rewrite that cannot be satisfied must not dispatch:
-      // the original packet asks for more LDS than the host has and would fault.
-      // Neutralize it by turning the slot into a no-op (INVALID type) so the CP
-      // skips it rather than executing a doomed dispatch. Benign nullopt cases
-      // (no plan / below threshold) leave the dispatchable packet untouched.
-      if (rejected)
-        publish_packet_header(packet, make_invalid_packet_header(header));
+      // Leave the packet on its normal descriptor. Metadata-unsupportable kernels
+      // were already rejected at code-object load, and a required-sidecar kernel
+      // whose static LDS exceeds the host limit has its normal descriptor
+      // redirected to a skipped-kernel trap stub at translation time, so the
+      // normal path is always safe here. Do NOT publish an INVALID header: the
+      // command processor treats INVALID as "producer has not finished writing
+      // this slot" and stalls the queue permanently rather than skipping it.
       return true;
     }
-    publish_packet_header(packet, 0);
+    publish_packet_header(packet, make_invalid_packet_header(header));
     apply_virtual_lds_dispatch(packet, *prepared);
     publish_packet_header(packet, header);
     trace_prepared_virtual_lds_dispatch(*prepared, packet_id, "queue");
@@ -2759,8 +2790,14 @@ private:
     }
   }
 
+  // Called while holding mutex_. Acquires scanner_lifecycle_mutex_ second; clear()
+  // takes the lifecycle mutex WITHOUT mutex_ held, so the two paths share the same
+  // (data-then-lifecycle) nesting order and cannot deadlock. The lifecycle mutex
+  // guards the jthread handle and stopping_ against a concurrent clear() that is
+  // joining the thread.
   void ensure_scanner_started_locked() {
-    if (scanner_.joinable())
+    std::lock_guard lifecycle(scanner_lifecycle_mutex_);
+    if (stopping_ || scanner_.joinable())
       return;
     scanner_ = std::jthread([this](std::stop_token stop) {
       using namespace std::chrono_literals;
@@ -2776,6 +2813,11 @@ private:
   std::mutex mutex_;
   std::unordered_map<uint64_t, QueueState> queues_by_ptr_;
   std::unordered_map<uint64_t, uint64_t> queues_by_doorbell_;
+  // Serializes scanner start (ensure_scanner_started_locked) against stop/join
+  // (clear). Separate from mutex_ because clear() must join the scanner thread,
+  // which itself takes mutex_ — joining under mutex_ would deadlock.
+  std::mutex scanner_lifecycle_mutex_;
+  bool stopping_ = false;
   std::jthread scanner_;
 };
 
@@ -3630,6 +3672,14 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     if (status == HSA_STATUS_SUCCESS) {
       auto hook_metadata = parse_virtual_lds_hook_metadata(std::span<const uint8_t>(bytes, size));
       if (hook_metadata) {
+        if (auto bad = first_unsupportable_virtual_lds_kernel(*hook_metadata)) {
+          std::fprintf(
+              stderr,
+              "[rocjitsu-hooks] virtual-LDS kernel '%s' cannot be dispatched on this host "
+              "(missing runtime-state ABI or inconsistent kernarg wrapper); failing load\n",
+              bad->c_str());
+          return HSA_STATUS_ERROR;
+        }
         const hsa_loaded_code_object_t loaded =
             loaded_code_object != nullptr ? *loaded_code_object : hsa_loaded_code_object_t{};
         VirtualLdsRuntimeRegistry::instance().record_load(executable, agent, load_agent, loaded,
@@ -3677,6 +3727,13 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
   if (!hook_metadata) {
     std::fprintf(stderr,
                  "[rocjitsu-hooks] translated code object has malformed virtual-LDS metadata\n");
+    return HSA_STATUS_ERROR;
+  }
+  if (auto bad = first_unsupportable_virtual_lds_kernel(*hook_metadata)) {
+    std::fprintf(stderr,
+                 "[rocjitsu-hooks] virtual-LDS kernel '%s' cannot be dispatched on this host "
+                 "(missing runtime-state ABI or inconsistent kernarg wrapper); failing load\n",
+                 bad->c_str());
     return HSA_STATUS_ERROR;
   }
 

@@ -101,10 +101,15 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
 /// must query the descriptor limit separately from semantic scratch limits.
 /// RDNA descriptors use the ordinary ISA SGPR maximum.
 [[nodiscard]] inline constexpr uint32_t arch_descriptor_sgpr_allocation_limit(rj_code_arch_t arch) {
+  // Architectural descriptor SGPR-allocation ceilings. CDNA descriptors may name
+  // up to 112 SGPRs; RDNA up to 106. These are fixed ISA facts (not the smaller
+  // scratch range in CdnaIsaBase), so they are named here rather than derived.
+  constexpr uint32_t kCdnaDescriptorSgprLimit = 112;
+  constexpr uint32_t kRdnaDescriptorSgprLimit = 106;
   if (arch_is_cdna(arch))
-    return 112;
+    return kCdnaDescriptorSgprLimit;
   if (arch_is_rdna(arch))
-    return 106;
+    return kRdnaDescriptorSgprLimit;
   return 0;
 }
 

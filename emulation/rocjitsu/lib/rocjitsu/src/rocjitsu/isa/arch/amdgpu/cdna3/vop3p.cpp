@@ -44,8 +44,7 @@ VPkMadI16Vop3p::VPkMadI16Vop3p(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  src_operands_[3] = &vdst;
-  num_src_ = 4;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -68,8 +67,7 @@ VPkMulLoU16Vop3p::VPkMulLoU16Vop3p(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  src_operands_[2] = &vdst;
-  num_src_ = 3;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -177,8 +175,7 @@ VPkMaxI16Vop3p::VPkMaxI16Vop3p(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  src_operands_[2] = &vdst;
-  num_src_ = 3;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -201,8 +198,7 @@ VPkMinI16Vop3p::VPkMinI16Vop3p(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  src_operands_[2] = &vdst;
-  num_src_ = 3;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -227,8 +223,7 @@ VPkMadU16Vop3p::VPkMadU16Vop3p(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  src_operands_[3] = &vdst;
-  num_src_ = 4;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -285,8 +280,7 @@ VPkMaxU16Vop3p::VPkMaxU16Vop3p(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  src_operands_[2] = &vdst;
-  num_src_ = 3;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -309,8 +303,7 @@ VPkMinU16Vop3p::VPkMinU16Vop3p(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  src_operands_[2] = &vdst;
-  num_src_ = 3;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -386,8 +379,7 @@ VPkMinF16Vop3p::VPkMinF16Vop3p(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  src_operands_[2] = &vdst;
-  num_src_ = 3;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -410,8 +402,7 @@ VPkMaxF16Vop3p::VPkMaxF16Vop3p(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  src_operands_[2] = &vdst;
-  num_src_ = 3;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -451,11 +442,11 @@ VMadMixloF16Vop3p::VMadMixloF16Vop3p(const MachineInst *inst)
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  src_operands_[3] = &vdst;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  src_operands_[3] = &src2;
   num_src_ = 4;
   num_dst_ = 1;
 }
@@ -477,11 +468,11 @@ VMadMixhiF16Vop3p::VMadMixhiF16Vop3p(const MachineInst *inst)
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  src_operands_[3] = &vdst;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  src_operands_[3] = &src2;
   num_src_ = 4;
   num_dst_ = 1;
 }

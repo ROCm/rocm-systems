@@ -797,6 +797,22 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     return leave_unchanged();
   }
 
+  // DBT relocates instructions within .text (compaction, expansion, per-kernel
+  // block placement) but does not rewrite relocation places that land inside
+  // .text — only whole sections moved after .text have their relocation offsets
+  // shifted. An in-.text relocation would therefore be applied to the wrong
+  // translated bytes. Fail closed rather than silently miscompile. AMDHSA kernel
+  // code objects do not carry such relocations, so this rejects only genuinely
+  // unsupported inputs. (Text-defined function *symbol* values are not remapped
+  // either, but kernel dispatch resolves through the descriptor's
+  // kernel_code_entry_byte_offset, which DBT does update, so those are benign.)
+  if (patcher.has_relocations_within_text()) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization,
+                 "code object has relocations targeting .text; relocating translated .text would "
+                 "apply them to the wrong bytes and is not supported");
+    return leave_unchanged();
+  }
+
   // Per-kernel text relocation strategy:
   // 1. Translate descriptors first so their source entries and ABI state define
   //    the normal and sidecar kernel scopes.
@@ -1317,7 +1333,6 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     layout.body_begin = 0;
     layout.blocks.reserve(scope.blocks.size());
     uint64_t next_branch_island_pool_offset = first_direct_branch_island_pool_offset();
-    size_t next_semantic_expand_instruction = 0;
     for (BasicBlock *block : scope.blocks) {
       BlockPlacement placement{.block = block,
                                .source_start = block->start_offset(),
@@ -1330,11 +1345,14 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         const uint64_t offset = inst.src_loc();
         const uint64_t target_offset = kernel_text.size();
         const uint32_t inst_size = inst.size();
+        // Ask the semantic translator directly whether this instruction has an
+        // expand rule. The previous positional cursor into live_before_instructions
+        // silently depended on that vector being built in the exact same block/
+        // instruction iteration order as this loop; querying by encoding/opcode
+        // removes that hidden coupling.
         const bool has_semantic_expand_rule =
-            next_semantic_expand_instruction < live_before_instructions.size() &&
-            live_before_instructions[next_semantic_expand_instruction] == &inst;
-        if (has_semantic_expand_rule)
-          ++next_semantic_expand_instruction;
+            semantic_translator_ != nullptr &&
+            semantic_translator_->has_expand_rule(inst.encoding_id(), inst.opcode());
         if (needed_builder_source_offsets.contains(offset))
           target_offset_by_source_offset.emplace(offset, target_offset);
 
@@ -1533,6 +1551,38 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
               DiagnosticKind::ExpandMissing,
               "legalization requires EXPAND, but no expansion rule is implemented", offset,
               std::string(inst.mnemonic()), {"Add a semantic expansion rule for this mnemonic."});
+          if (continue_after_failure && !skip_failed_kernels) {
+            append_error(result.diagnostics, failure.kind, failure.message, failure.guest_offset,
+                         failure.mnemonic, failure.required_work);
+            if (continue_after_instruction_error(inst, offset, kernel_text, pending_traces)) {
+              continue;
+            }
+          }
+          if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot)) {
+            skip_scope = true;
+            break;
+          }
+          return leave_unchanged();
+        }
+
+        // Cross-arch translation must have a legalization decision for every
+        // opcode. When a lookup function exists (i.e. this is not a same-arch
+        // identity pass) but the opcode is absent from the table, or the table
+        // marks it Illegal, re-encoding it verbatim with the guest opcode number
+        // would silently produce a different — possibly valid but wrong — host
+        // instruction. Fail loudly instead of that silent passthrough. A null
+        // lookup function means same-arch identity translation, where verbatim
+        // copy is correct, so that path is intentionally not gated here.
+        if (legalization_lookup_ != nullptr && (leg == nullptr || leg->action == Action::Illegal)) {
+          auto failure = make_kernel_failure(
+              DiagnosticKind::Legalization,
+              leg == nullptr
+                  ? "no legalization entry for this opcode on the target ISA; refusing to emit the "
+                    "guest encoding verbatim"
+                  : "legalization marks this opcode illegal on the target ISA",
+              offset, std::string(inst.mnemonic()),
+              {"Add a legalization/substitution/expansion entry for this mnemonic in the amdisa "
+               "codegen pipeline."});
           if (continue_after_failure && !skip_failed_kernels) {
             append_error(result.diagnostics, failure.kind, failure.message, failure.guest_offset,
                          failure.mnemonic, failure.required_work);

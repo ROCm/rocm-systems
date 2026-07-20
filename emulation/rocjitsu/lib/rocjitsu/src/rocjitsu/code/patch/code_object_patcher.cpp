@@ -604,6 +604,56 @@ std::span<const uint8_t> CodeObjectPatcher::text_bytes() const {
   return {image_.data() + text_offset_, text_size_};
 }
 
+bool CodeObjectPatcher::has_relocations_within_text() const {
+  if (text_size_ == 0)
+    return false;
+
+  auto header = *reinterpret_cast<const Elf64_Ehdr *>(image_.data());
+  const auto shdrs = read_section_headers(image_, header);
+  const auto text_index = find_text_section(shdrs, text_offset_, text_size_);
+  if (!text_index)
+    return false;
+
+  // ET_DYN relocation places are virtual addresses; ET_REL places are section
+  // offsets. .text uses sh_addr for the former and file offsets map through
+  // sh_offset for the latter, but AMDHSA .text is loaded 1:1 so its sh_addr and
+  // in-section range bound the place either way. Compare against the .text range
+  // in whichever coordinate the relocation records use.
+  const Elf64_Shdr &text = shdrs[*text_index];
+  const uint64_t text_lo = header.e_type == ET_REL ? text.sh_offset : text.sh_addr;
+  const uint64_t text_hi = text_lo + text_size_;
+
+  auto place_in_text = [&](uint64_t place) { return place >= text_lo && place < text_hi; };
+
+  for (const Elf64_Shdr &relocs : shdrs) {
+    if (relocs.sh_type != SHT_RELA && relocs.sh_type != SHT_REL)
+      continue;
+    if (!image_contains_range(image_.size(), relocs.sh_offset, relocs.sh_size))
+      continue;
+    const bool is_rela = relocs.sh_type == SHT_RELA;
+    const size_t entsize = is_rela ? sizeof(Elf64_Rela) : sizeof(Elf64_Rel);
+    if (relocs.sh_entsize != entsize)
+      continue;
+    const size_t count = relocs.sh_size / entsize;
+    for (size_t i = 0; i < count; ++i) {
+      const uint64_t offset = relocs.sh_offset + i * entsize;
+      uint64_t r_offset = 0;
+      if (is_rela) {
+        Elf64_Rela rela{};
+        std::memcpy(&rela, image_.data() + offset, sizeof(rela));
+        r_offset = rela.r_offset;
+      } else {
+        Elf64_Rel rel{};
+        std::memcpy(&rel, image_.data() + offset, sizeof(rel));
+        r_offset = rel.r_offset;
+      }
+      if (place_in_text(r_offset))
+        return true;
+    }
+  }
+  return false;
+}
+
 bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text) {
   // Keep fail-closed behavior for callers that assume word-aligned executable
   // sections; accepting a non-word-aligned replacement can break downstream
@@ -774,9 +824,6 @@ CodeObjectPatcher::append_sidecar_descriptor_translations(
   appended.reserve(translations.size());
   uint64_t cursor_vaddr = insertion_vaddr;
   for (const KdTranslation &translation : translations) {
-    if (!image_contains_range(image_.size(), translation.descriptor_file_offset, sizeof(KD)))
-      return std::nullopt;
-
     const uint64_t descriptor_vaddr = align_up(cursor_vaddr, alignment);
     if (descriptor_vaddr < cursor_vaddr)
       return std::nullopt;
@@ -785,8 +832,13 @@ CodeObjectPatcher::append_sidecar_descriptor_translations(
       return std::nullopt;
     inserted.resize(inserted.size() + static_cast<size_t>(padding), 0);
 
+    // Copy the sidecar template from the source-descriptor snapshot, NOT from
+    // translation.descriptor_file_offset: this runs after .text growth, which
+    // shifts a descriptor section that follows .text, leaving that offset
+    // pointing at relocated instruction bytes.
+    static_assert(sizeof(KD) == 64, "sidecar descriptor snapshot size mismatch");
     KD desc{};
-    std::memcpy(&desc, image_.data() + translation.descriptor_file_offset, sizeof(desc));
+    std::memcpy(&desc, translation.source_descriptor_bytes.data(), sizeof(desc));
     apply_kernel_descriptor_resource_translation(desc, translation, target_arch);
     if (!set_kernel_entry_from_vaddr(desc, descriptor_vaddr, text_vaddr_,
                                      translation.target_entry_text_offset))

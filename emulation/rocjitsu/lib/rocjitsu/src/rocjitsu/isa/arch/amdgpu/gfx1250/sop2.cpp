@@ -2277,10 +2277,10 @@ SFmacF32Sop2::SFmacF32Sop2(const MachineInst *inst)
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+  src_operands_[0] = &sdst;
   dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  src_operands_[2] = &sdst;
+  src_operands_[1] = &ssrc0;
+  src_operands_[2] = &ssrc1;
   num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
@@ -2589,10 +2589,10 @@ SFmacF16Sop2::SFmacF16Sop2(const MachineInst *inst)
       sdst(16, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+  src_operands_[0] = &sdst;
   dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  src_operands_[2] = &sdst;
+  src_operands_[1] = &ssrc0;
+  src_operands_[2] = &ssrc1;
   num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)

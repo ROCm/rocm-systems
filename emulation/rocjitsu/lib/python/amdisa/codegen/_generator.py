@@ -2458,11 +2458,16 @@ class CodeGenerator:
         ):
             return True
 
-        # The liveness model is 32-bit-register granular. A true16/sub-dword
-        # vector destination writes only part of the physical VGPR lane, so the
-        # old 32-bit register value is a real input for preserving the other
-        # half/bytes.
-        return opnd.size < 32 and self._operand_type_can_name_vgpr(opnd.operand_type)
+        # A sub-dword (true16/byte) vector destination writes only part of its
+        # 32-bit register lane, so the old value is a real input. That partial-def
+        # read is surfaced separately as an implicit_uses() override (see
+        # _partial_def_outputs), so it must NOT also be appended to src_operands_:
+        # doing so would print the destination a second time in disassembly and
+        # (for the architectural operand list) misrepresent the instruction's
+        # sources. Liveness/DBT already pick up the read via InstDefUse merging
+        # implicit_uses, so returning False here keeps the operand tables faithful
+        # to the ISA without losing the dependency.
+        return False
 
     _VGPR_MSB_SRC_ROLES = ('Src0', 'Src1', 'Src2')
 
@@ -3656,11 +3661,12 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'trap':
-            # S_TRAP is an exceptional control-flow terminator for CFG and DBT
-            # purposes. The simulator does not configure a trap handler, which
-            # models STATUS.TRAP_EN == 0; AMD hardware executes S_TRAP as a NOP
-            # in that state. Keep PROGRAM_TERMINATOR for static CFG construction
-            # while allowing dynamic execution to continue just like hardware.
+            # S_TRAP transfers to the trap handler and RETURNS to the following
+            # instruction. This simulator does not configure a trap handler
+            # (STATUS.TRAP_EN == 0), the state in which AMD hardware executes
+            # S_TRAP as a NOP. Either way the fallthrough is reachable, so S_TRAP
+            # is NOT a PROGRAM_TERMINATOR (see the flag-assignment site) and
+            # execution simply continues.
             return '  (void)wf;'
 
         if cls == 'waitcnt':
@@ -6261,10 +6267,23 @@ class CodeGenerator:
                     conditional_src_body = []
                     conditional_dst_body = []
                     # DPP/SDWA helpers index the architectural input operands
-                    # from the front of src_operands_. Defer read/write output
-                    # operands until all explicit inputs have been registered;
-                    # otherwise an XML output listed before src0 displaces src0
-                    # and DPP permutes the old destination instead.
+                    # from the front of src_operands_. On those encodings a
+                    # read/write output listed before src0 in the XML would
+                    # displace src0, so DPP would permute the old destination
+                    # instead. Defer read/write outputs to the end there. On
+                    # encodings without DPP/SDWA (e.g. SOPK) there is no such
+                    # positional dependency, so keep the read/write output at its
+                    # XML operand position to preserve the architectural source
+                    # order (e.g. s_addk_i32/s_mulk_i32 read sdst as src0).
+                    _enc_upper_for_defer = enc.enc_name.upper()
+                    defer_readwrite_outputs = _enc_upper_for_defer in (
+                        'ENC_VOP1',
+                        'ENC_VOP2',
+                    ) or (
+                        _enc_upper_for_defer
+                        in ('ENC_VOP3', 'ENC_VOP3P', 'VOP3_SDST_ENC')
+                        and self._supports_vop_dpp_encoding(_enc_upper_for_defer)
+                    )
                     readwrite_output_sources = []
                     vgpr_msb_role_body = []
                     src_idx = 0
@@ -6331,10 +6350,20 @@ class CodeGenerator:
                         elif self._output_operand_is_also_source(inst, opnd):
                             # Read/write outputs (FMAC/dot/swap accumulators,
                             # sub-dword partial-def destinations, etc.) are also
-                            # sources. Defer them until every explicit input is
-                            # registered so DPP/SDWA, which index src_operands_[0],
-                            # are not displaced by an output listed before src0.
-                            readwrite_output_sources.append(opnd.name)
+                            # sources. On DPP/SDWA-capable encodings, defer them
+                            # until every explicit input is registered so the
+                            # DPP/SDWA helpers that index src_operands_[0] are not
+                            # displaced by an output listed before src0. On other
+                            # encodings there is no such positional dependency, so
+                            # register the read/write output at its XML position to
+                            # preserve architectural source order.
+                            if defer_readwrite_outputs:
+                                readwrite_output_sources.append(opnd.name)
+                            else:
+                                opnd_body.append(
+                                    f'src_operands_[{src_idx}] = &{opnd.name};'
+                                )
+                                src_idx += 1
                         _is_optional_atomic_return = (
                             opnd.is_output
                             and inst_sem is not None
@@ -6843,11 +6872,18 @@ class CodeGenerator:
                         ctor_body_parts.append('flags_ |= BRANCH;')
                     if _mem_sem and _mem_sem.semantic_class == 'cbranch':
                         ctor_body_parts.append('flags_ |= COND_BRANCH;')
-                    if _mem_sem and _mem_sem.semantic_class in ('endpgm', 'trap'):
-                        # BasicBlock splitting treats PROGRAM_TERMINATOR as a
-                        # hard stop. S_TRAP needs the same metadata as S_ENDPGM:
-                        # without it, CFG recovery can add a bogus fallthrough
-                        # edge into padding or a following ELF FUNC symbol.
+                    if _mem_sem and _mem_sem.semantic_class == 'endpgm':
+                        # BasicBlock splitting treats PROGRAM_TERMINATOR as a hard
+                        # stop with no fallthrough successor. Only S_ENDPGM ends the
+                        # wave. S_TRAP is NOT a terminator: on hardware it transfers
+                        # to the trap handler and RETURNS to the next instruction,
+                        # and with no handler configured (STATUS.TRAP_EN == 0, the
+                        # state this simulator models) it executes as a NOP that
+                        # falls through. Marking it PROGRAM_TERMINATOR made the CFG
+                        # drop that reachable fallthrough while the executor (a NOP)
+                        # kept going, so translated code could run off the end of a
+                        # block. Skipped-kernel stubs still halt because they emit an
+                        # explicit S_ENDPGM after the trap.
                         ctor_body_parts.append('flags_ |= PROGRAM_TERMINATOR;')
                     if _mem_sem and _mem_sem.semantic_class in (
                         'scalar_setpc',

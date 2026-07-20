@@ -668,7 +668,8 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernel_descriptors(
   return image;
 }
 
-std::vector<uint8_t> make_minimal_amdgpu_elf_with_relocation_after_text() {
+std::vector<uint8_t>
+make_minimal_amdgpu_elf_with_relocation_after_text(bool place_reloc_in_text = false) {
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_vaddr = 0x1100;
   constexpr uint64_t text_size = 8;
@@ -737,7 +738,10 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_relocation_after_text() {
   std::memcpy(image.data() + data_offset, &data_word, sizeof(data_word));
 
   Elf64_Rela rela{};
-  rela.r_offset = data_vaddr;
+  // By default the relocation place is in .data (safe: DBT shifts it with the
+  // moved section). place_reloc_in_text points it inside .text, which DBT cannot
+  // remap after relocating instructions and must reject.
+  rela.r_offset = place_reloc_in_text ? text_vaddr : data_vaddr;
   std::memcpy(image.data() + rela_offset, &rela, sizeof(rela));
   std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
 
@@ -1492,6 +1496,38 @@ TEST(CodeObjectPatcher, ReplaceTextUpdatesRelocationOffsetsIntoMovedSections) {
       << "ET_DYN relocation r_offset is the relocated storage address";
 }
 
+TEST(CodeObjectPatcher, DetectsRelocationsWithinText) {
+  auto safe_image =
+      make_minimal_amdgpu_elf_with_relocation_after_text(/*place_reloc_in_text=*/false);
+  AmdGpuCodeObject safe_co(safe_image.data(), safe_image.size());
+  ASSERT_TRUE(safe_co.is_valid());
+  CodeObjectPatcher safe_patcher(safe_co);
+  EXPECT_FALSE(safe_patcher.has_relocations_within_text());
+
+  auto text_image =
+      make_minimal_amdgpu_elf_with_relocation_after_text(/*place_reloc_in_text=*/true);
+  AmdGpuCodeObject text_co(text_image.data(), text_image.size());
+  ASSERT_TRUE(text_co.is_valid());
+  CodeObjectPatcher text_patcher(text_co);
+  EXPECT_TRUE(text_patcher.has_relocations_within_text());
+}
+
+TEST(BinaryTranslatorE2E, RejectsRelocationTargetingText) {
+  // A relocation whose place is inside .text cannot be remapped after DBT
+  // relocates instructions, so translation must fail closed and leave the code
+  // object unchanged rather than apply the relocation to the wrong bytes.
+  auto image = make_minimal_amdgpu_elf_with_relocation_after_text(/*place_reloc_in_text=*/true);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  auto result = translator.translate(source);
+
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
+                                             "relocations targeting .text"));
+}
+
 TEST(BinaryTranslator, InlineExpansionAvoidsCaveBranchOverflow) {
   auto image = make_large_amdgpu_elf_with_waitcnt_entry();
   AmdGpuCodeObject co(image.data(), image.size());
@@ -1973,22 +2009,35 @@ std::vector<ExpectedCdna3Inst> expected_cdna3_cvt_pk_f16_f32_sequence() {
 }
 
 std::vector<ExpectedCdna3Inst> expected_cdna3_cvt_pk_bf16_f32_sequence() {
-  return {
-      expect_vop3(cdna3::kVMovB32Vop3),     // v_mov_b32 low source into scratch.
-      expect_vop3(cdna3::kVLshrrevB32Vop3), // v_lshrrev_b32 extracts low BF16 lsb.
-      expect_vop3(cdna3::kVAndB32Vop3),     // v_and_b32 isolates low BF16 lsb.
-      expect_vop2(cdna3::kVAddU32Vop2),     // v_add_u32_e32 adds 0x7fff rounding bias.
-      expect_vop3(cdna3::kVAddU32Vop3),     // v_add_u32 applies low RNE bias.
-      expect_vop3(cdna3::kVLshrrevB32Vop3), // v_lshrrev_b32 keeps low rounded BF16 half.
-      expect_vop3(cdna3::kVMovB32Vop3),     // v_mov_b32 high source into scratch.
-      expect_vop3(cdna3::kVLshrrevB32Vop3), // v_lshrrev_b32 extracts high BF16 lsb.
-      expect_vop3(cdna3::kVAndB32Vop3),     // v_and_b32 isolates high BF16 lsb.
-      expect_vop2(cdna3::kVAddU32Vop2),     // v_add_u32_e32 adds 0x7fff rounding bias.
-      expect_vop3(cdna3::kVAddU32Vop3),     // v_add_u32 applies high RNE bias.
-      expect_vop3(cdna3::kVLshrrevB32Vop3), // v_lshrrev_b32 keeps high rounded BF16 half.
-      expect_vop3(cdna3::kVLshlrevB32Vop3), // v_lshlrev_b32 moves high half into position.
-      expect_vop3(cdna3::kVOrB32Vop3),      // v_or_b32 packs low/high halves into vdst.
+  // Per-half NaN-safe RNE lowering (emit_cdna3_f32_to_bf16_rne): compute the
+  // rounded value and the NaN-preserving value in parallel, then blend with an
+  // exponent-all-ones mask via v_bfi_b32. See semantic/cdna4_to_cdna3.cpp.
+  auto half = []() {
+    return std::vector<ExpectedCdna3Inst>{
+        expect_vop3(cdna3::kVMovB32Vop3),     // f = source bits into scratch.
+        expect_vop3(cdna3::kVLshrrevB32Vop3), // (f >> 16)
+        expect_vop3(cdna3::kVAndB32Vop3),     // & 1  -> rounding lsb
+        expect_vop2(cdna3::kVAddU32Vop2),     // + 0x7fff  (rounding bias)
+        expect_vop3(cdna3::kVAddU32Vop3),     // f + bias  -> rounded (t0)
+        expect_vop3(cdna3::kVBfeU32Vop3),     // f & 0xffff -> low bits
+        expect_vop3(cdna3::kVMinU32Vop3),     // min(1, low) -> nonzero flag
+        expect_vop3(cdna3::kVLshlrevB32Vop3), // flag << 16
+        expect_vop3(cdna3::kVOrB32Vop3),      // f | (flag<<16) -> NaN-preserving (t1)
+        expect_vop2(cdna3::kVAndB32Vop2),     // f & 0x7f800000  (exponent field)
+        expect_vop2(cdna3::kVXorB32Vop2),     // ^ 0x7f800000    -> 0 iff exp all-ones
+        expect_vop3(cdna3::kVSubU32Vop3),     // - 1
+        expect_vop3(cdna3::kVLshrrevB32Vop3), // >> 31
+        expect_vop3(cdna3::kVSubU32Vop3),     // 0 - x  -> all-ones mask (t2)
+        expect_vop3(cdna3::kVBfiB32Vop3),     // bfi(mask, t1, t0)  -> select
+        expect_vop3(cdna3::kVLshrrevB32Vop3), // >> 16  -> BF16 half
+    };
   };
+  std::vector<ExpectedCdna3Inst> expected = half();
+  const std::vector<ExpectedCdna3Inst> high = half();
+  expected.insert(expected.end(), high.begin(), high.end());
+  expected.push_back(expect_vop3(cdna3::kVLshlrevB32Vop3)); // high half into position.
+  expected.push_back(expect_vop3(cdna3::kVOrB32Vop3));      // pack low/high into vdst.
+  return expected;
 }
 
 std::vector<ExpectedCdna3Inst> expected_cdna3_cvt_f32_bf16_sequence() {
@@ -2118,6 +2167,18 @@ std::array<uint32_t, 2> make_cdna4_bitop3_words(uint16_t opcode, uint8_t vdst,
   inst.omod = truth_table >> 6;
   inst.abs = (truth_table >> 3) & 0x7;
   inst.neg = truth_table & 0x7;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_v_lshl_add_u64_words(uint8_t vdst, uint16_t src0, uint16_t src1,
+                                                        uint16_t src2) {
+  rocjitsu::cdna4::Vop3MachineInst inst{};
+  inst.encoding = 0x34;
+  inst.op = cdna4::kVLshlAddU64Vop3;
+  inst.vdst = vdst;
+  inst.src0 = src0;
+  inst.src1 = src1;
+  inst.src2 = src2;
   return encode_two_word_inst(inst);
 }
 
@@ -3658,6 +3719,59 @@ TEST(BinaryTranslatorE2E, OversizedTargetLdsDescriptorEmitsVirtualVariantInstead
             0u);
 }
 
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarPreservesReservedBytesAfterTextGrowth) {
+  // Regression for the sidecar being copied from a stale pre-.text-growth file
+  // offset. The DS-read fixture lowers to a flat-global load, which GROWS .text
+  // and thus shifts the descriptor section that follows it. The sidecar template
+  // must come from a snapshot of the source descriptor, not from re-reading the
+  // now-shifted offset (which would read relocated instruction bytes). Seed the
+  // reserved regions with recognizable patterns and assert the emitted sidecar
+  // carries them unchanged.
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read_b32_words();
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+
+  // Seed reserved1[20] with a distinctive byte pattern. reserved1 is a field DBT
+  // never rewrites, so it is only correct in the sidecar if the template was
+  // copied from the (pre-growth) source descriptor snapshot.
+  const uint64_t reserved1_off =
+      rodata->sectionOffset() + offsetof(rocjitsu::TestKernelDescriptor, reserved1);
+  std::array<uint8_t, 20> reserved1_pattern{};
+  for (size_t i = 0; i < reserved1_pattern.size(); ++i)
+    reserved1_pattern[i] = static_cast<uint8_t>(0xA0 + i);
+  for (size_t i = 0; i < reserved1_pattern.size(); ++i)
+    image[reserved1_off + i] = reserved1_pattern[i];
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        rocjitsu::BinaryTranslatorOptions{});
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  // Confirm .text actually grew (otherwise the regression could not occur).
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  EXPECT_GT(translated.text_sections()[0]->size(), 3u * sizeof(uint32_t));
+
+  const auto sidecar_kd = read_virtual_lds_sidecar_descriptor_for_test(result.elf_bytes, "kernel");
+  ASSERT_TRUE(sidecar_kd.has_value());
+  EXPECT_TRUE(std::equal(std::begin(sidecar_kd->reserved1), std::end(sidecar_kd->reserved1),
+                         reserved1_pattern.begin()))
+      << "sidecar reserved1 was not copied from the source descriptor snapshot";
+}
+
 TEST(BinaryTranslatorE2E, VirtualLdsWrapperIgnoresInlineKernargLoadsBeyondDescriptorSize) {
   constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
   constexpr uint16_t kKernargSgpr = 0;
@@ -4005,6 +4119,72 @@ INSTANTIATE_TEST_SUITE_P(ImplementedRules, Cdna4ToCdna3SemanticRuleTranslationTe
                          [](const ::testing::TestParamInfo<Cdna4ToCdna3SemanticRuleCase> &info) {
                            return std::string(info.param.name);
                          });
+
+TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaEmitsShiftAndCarryAdd) {
+  // v[4:5] = (v[0:1] << 2) + v[2:3]. vdst does not alias the addend, so the shift
+  // goes straight into vdst. Verify a v_lshlrev_b64 (the shift the old lowering
+  // dropped) precedes the carry-add pair.
+  const auto words = make_cdna4_v_lshl_add_u64_words(/*vdst=*/4, /*src0=*/256 + 0,
+                                                     /*src1=*/2, /*src2=*/256 + 2);
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {words[0], words[1], 0xBF810000u});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_RDNA4);
+  const bool has_shift = std::any_of(decoded.begin(), decoded.end(), [](const auto &inst) {
+    return inst->mnemonic() == "v_lshlrev_b64";
+  });
+  EXPECT_TRUE(has_shift) << "lowering must materialize the shift, not drop it";
+  const bool has_add = std::any_of(decoded.begin(), decoded.end(), [](const auto &inst) {
+    return inst->mnemonic() == "v_add_co_u32";
+  });
+  EXPECT_TRUE(has_add) << "lowering must emit the 64-bit carry add";
+}
+
+TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaHandlesDestinationAliasingAddend) {
+  // v[2:3] = (v[0:1] << 2) + v[2:3]: the destination aliases the VGPR addend, the
+  // common address-computation pattern emitted by real kernels (e.g. vector_add).
+  // The lowering must shift into a dead scratch pair rather than clobbering the
+  // addend, and must still succeed (the earlier fail-closed guard wrongly rejected
+  // this).
+  const auto words = make_cdna4_v_lshl_add_u64_words(/*vdst=*/2, /*src0=*/256 + 0,
+                                                     /*src1=*/2, /*src2=*/256 + 2);
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {words[0], words[1], 0xBF810000u});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_RDNA4);
+
+  const auto shift = std::find_if(decoded.begin(), decoded.end(), [](const auto &inst) {
+    return inst->mnemonic() == "v_lshlrev_b64";
+  });
+  ASSERT_NE(shift, decoded.end()) << "lowering must materialize the shift";
+  // The shift destination must not be v2/v3 (the aliased addend); it must land in
+  // a separate scratch pair so the following add can still read the addend.
+  ASSERT_GE((*shift)->num_dst_operands(), 1);
+  const auto shift_dst = (*shift)->dst_operand(0)->to_register_ref();
+  ASSERT_TRUE(shift_dst.has_value());
+  EXPECT_NE(shift_dst->index, 2u)
+      << "shift result must not overwrite the aliased addend v[2:3] before the add reads it";
+}
 
 TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersDsReadB32ToFlatGlobalLoad) {
   constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
@@ -6740,13 +6920,21 @@ TEST(BinaryTranslatorE2E, RelocatesDirectCallReturnAcrossShiftedOffsets) {
   EXPECT_EQ(*decoded[1]->branch_offset_bytes(), 4);
 }
 
-TEST(BinaryTranslatorE2E, TrapTerminatesCfgBeforeFollowingFunction) {
+TEST(BinaryTranslatorE2E, EndpgmAfterTrapTerminatesCfgBeforeFollowingFunction) {
+  // S_TRAP is NOT a CFG terminator: on hardware it transfers to the trap handler
+  // and returns to the next instruction, and with no handler configured (the
+  // state this emulator models) it executes as a NOP that falls through. A real
+  // terminator (S_ENDPGM) must follow it to end the block. This mirrors the
+  // skipped-kernel stub layout (trap; endpgm). The S_ENDPGM terminates the CFG so
+  // the following ELF function bytes stay unreachable and the unrecovered
+  // S_SETPC_B64 below is never decoded into the CFG.
   const std::vector<uint32_t> words = {
       rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4), // 0x00 -> trap block.
       rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),    // 0x04 unreachable gap.
-      build_s_trap(2),                                       // 0x08 terminates.
-      build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_CDNA4),       // 0x0c next function body.
-      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),    // 0x10 unreachable.
+      build_s_trap(2),                                       // 0x08 falls through to endpgm.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),    // 0x0c terminates the block.
+      build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_CDNA4),       // 0x10 next function body.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),    // 0x14 unreachable.
   };
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
@@ -6762,15 +6950,38 @@ TEST(BinaryTranslatorE2E, TrapTerminatesCfgBeforeFollowingFunction) {
 
   const auto decoded =
       decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_CDNA3);
-  ASSERT_GE(decoded.size(), 2u);
+  ASSERT_GE(decoded.size(), 3u);
   EXPECT_EQ(decoded[0]->mnemonic(), "s_branch");
   EXPECT_EQ(decoded[1]->mnemonic(), "s_trap");
-  // The real regression this covers is a bogus CFG fallthrough from S_TRAP into
-  // the following ELF function/padding bytes. If that edge is present, the
-  // unrecovered S_SETPC_B64 below the trap becomes reachable and translation
-  // fails with an indirect-branch diagnostic.
+  EXPECT_EQ(decoded[2]->mnemonic(), "s_endpgm");
+  // The trailing S_ENDPGM (a real terminator) prevents a bogus fallthrough into
+  // the following ELF function bytes, so the unrecovered S_SETPC_B64 is never
+  // reached and translation does not emit it.
   EXPECT_TRUE(std::none_of(decoded.begin(), decoded.end(),
                            [](const auto &inst) { return inst->mnemonic() == "s_setpc_b64"; }));
+}
+
+TEST(BinaryTranslatorE2E, TrapAloneFallsThroughAndDoesNotHideFollowingCode) {
+  // Corrected trap contract: a bare S_TRAP falls through, so code after it is
+  // reachable. Here the fallthrough reaches an unrecovered S_SETPC_B64, which the
+  // translator must now surface as an error instead of silently dropping it (the
+  // old contract treated S_TRAP as a terminator and hid this).
+  const std::vector<uint32_t> words = {
+      build_s_trap(2),                                 // 0x00 falls through.
+      build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_CDNA4), // 0x04 reachable, unrecovered.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(
+      rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
+                                     "indirect branch or call target recovery is not implemented"));
 }
 
 TEST(BinaryTranslatorE2E, RejectsUnrecoveredIndirectBranchInstructions) {

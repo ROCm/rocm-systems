@@ -84,8 +84,7 @@ VInterpP2F16F32Vinterp::VInterpP2F16F32Vinterp(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  src_operands_[3] = &vdst;
-  num_src_ = 4;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -129,8 +128,7 @@ VInterpP2RtzF16F32Vinterp::VInterpP2RtzF16F32Vinterp(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  src_operands_[3] = &vdst;
-  num_src_ = 4;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 

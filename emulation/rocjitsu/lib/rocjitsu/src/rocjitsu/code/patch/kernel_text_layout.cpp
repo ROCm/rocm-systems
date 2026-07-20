@@ -419,6 +419,15 @@ uint64_t direct_branch_patch_window_bytes(const Instruction &inst, uint64_t sour
   // branch-island form: invert the condition to skip over an unconditional
   // branch into the island chain. Keep this policy beside the actual patcher
   // support check so the translator only reserves windows the patch layer owns.
+  //
+  // Known limitation (fail-closed, not a miscompile): a NEAR conditional branch
+  // gets only this two-word window. If translation expansion later pushes it out
+  // of SOPP range and the island pool cannot reach it, the long-branch sequence
+  // for a conditional (invert + getpc + builder + setpc, up to ~7 words) will not
+  // fit and append_long_direct_branch_sequence reports relocation_error, so the
+  // kernel is skipped rather than mis-branched. Widening this window for
+  // invertible conditionals when a long-branch SGPR is available would lift the
+  // limitation for large kernels; today the conservative window is kept.
   if ((inst.flags() & COND_BRANCH) != 0 && conditional_branch_can_invert(inst.mnemonic()))
     return 2 * sizeof(uint32_t);
 

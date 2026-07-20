@@ -116,9 +116,9 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
            make_exec_fn<SCmovkI32Sopk>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_[0] = &sdst;
   dst_operands_[0] = &sdst;
-  src_operands_[0] = &simm16;
-  src_operands_[1] = &sdst;
+  src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= PREDICATED_DEF;
@@ -133,9 +133,9 @@ SAddkCoI32Sopk::SAddkCoI32Sopk(const MachineInst *inst)
            make_exec_fn<SAddkCoI32Sopk>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_[0] = &sdst;
   dst_operands_[0] = &sdst;
-  src_operands_[0] = &simm16;
-  src_operands_[1] = &sdst;
+  src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 1;
 }
@@ -156,9 +156,9 @@ SMulkI32Sopk::SMulkI32Sopk(const MachineInst *inst)
     : Sopk("s_mulk_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SMulkI32Sopk>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_[0] = &sdst;
   dst_operands_[0] = &sdst;
-  src_operands_[0] = &simm16;
-  src_operands_[1] = &sdst;
+  src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 1;
 }

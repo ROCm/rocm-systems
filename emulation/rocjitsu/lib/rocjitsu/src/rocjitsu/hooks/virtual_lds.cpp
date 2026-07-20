@@ -111,6 +111,32 @@ parse_virtual_lds_hook_metadata(std::span<const uint8_t> image) {
   return parsed;
 }
 
+std::optional<std::string>
+first_unsupportable_virtual_lds_kernel(const ParsedVirtualLdsHookMetadata &metadata) {
+  for (const VirtualLdsKernelRuntimeMetadata &kernel : metadata.virtual_lds) {
+    // The dispatch path requires the runtime-state-block ABI for every virtual
+    // LDS launch; without it there is no place to publish the backing pointer.
+    if ((kernel.flags & kVirtualLdsFlagRuntimeStateBlock) == 0)
+      return kernel.kernel_name;
+
+    // The kernarg wrapper layout must be reconstructible and its backing-pointer
+    // payload must land at the offset the descriptor was built for. This is a
+    // pure function of the recorded kernarg size, so a mismatch is a permanent
+    // property of the code object, not a per-dispatch condition.
+    const KernargExtensionPayloadLayout payload{
+        .size = static_cast<uint32_t>(sizeof(VirtualLdsDispatchState)),
+        .alignment = alignof(uint64_t),
+    };
+    const auto wrapper_layout =
+        make_kernarg_extension_layout(kernel.kernarg_size, std::span{&payload, 1});
+    if (!wrapper_layout || wrapper_layout->payload_offsets.size() != 1 ||
+        wrapper_layout->payload_offsets.front() != kernel.backing_pointer_kernarg_offset) {
+      return kernel.kernel_name;
+    }
+  }
+  return std::nullopt;
+}
+
 VirtualLdsRuntimeRegistry &VirtualLdsRuntimeRegistry::instance() {
   static VirtualLdsRuntimeRegistry registry;
   return registry;
@@ -224,6 +250,10 @@ void VirtualLdsRuntimeRegistry::clear() {
 void set_virtual_lds_runtime_api(VirtualLdsRuntimeApi api) {
   g_runtime_api_storage = api;
   g_runtime_api_ptr.store(&g_runtime_api_storage, std::memory_order_release);
+}
+
+void clear_virtual_lds_runtime_api() {
+  g_runtime_api_ptr.store(nullptr, std::memory_order_release);
 }
 
 bool empty_virtual_lds_buffers(const VirtualLdsDispatchBuffers &buffers) {

@@ -6,6 +6,7 @@
 
 #include "rocjitsu/code/dbt/semantic/cdna4_to_rdna_common.h"
 
+#include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/dbt/translation_rule.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
@@ -39,7 +40,17 @@ namespace {
       op, {.vdst = vdst, .sdst = sdst, .src0 = src0, .src1 = src1, .src2 = src2});
 }
 
-ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_arch) {
+/// @brief Build a plain VOP3 instruction, selecting the builder by host ISA.
+[[nodiscard]] std::array<uint32_t, 2> build_rdna_vop3(rj_code_arch_t host_arch, uint16_t op,
+                                                      uint8_t vdst, uint16_t src0,
+                                                      uint16_t src1 = 0, uint16_t src2 = 0) {
+  if (host_arch == ROCJITSU_CODE_ARCH_RDNA3)
+    return rdna3::build_vop3(op, {.vdst = vdst, .src0 = src0, .src1 = src1, .src2 = src2});
+  return rdna4::build_vop3(op, {.vdst = vdst, .src0 = src0, .src1 = src1, .src2 = src2});
+}
+
+ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_arch,
+                                  const LivenessAnalysis &liveness) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() < 8)
     return ExpandResult::failed(std::string(inst.mnemonic()) +
@@ -50,6 +61,7 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
   std::memcpy(&src, raw, sizeof(src));
   const uint16_t vdst = src.vdst;
   const uint16_t src0 = src.src0;
+  const uint16_t src1 = src.src1;
   const uint16_t src2 = src.src2;
 
   if (host_arch != ROCJITSU_CODE_ARCH_RDNA3 && host_arch != ROCJITSU_CODE_ARCH_RDNA4)
@@ -60,10 +72,44 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
                                 " v_lshl_add_u64 lowering needs two destination VGPRs but vdst "
                                 "is v255");
 
+  // A two-word literal shift count would require carrying the literal dword
+  // through the emitted v_lshlrev_b64; that operand form is not decoded here.
+  if (src1 == 254 || src1 == 255)
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " v_lshl_add_u64 lowering does not support a literal shift count");
+
+  // v_lshl_add_u64 computes D = (S0 << S1[5:0]) + S2, lowered as a shift into a
+  // 64-bit temporary followed by a 64-bit carry-add of S2. The shift result must
+  // not clobber the addend S2 before the add reads it. Choosing the shift
+  // destination:
+  //   - Normally shift directly into vdst. vdst overlapping S0 is safe because
+  //     v_lshlrev_b64 reads all of S0 before writing.
+  //   - If vdst overlaps a VGPR S2, shifting into vdst would destroy S2 first, so
+  //     shift into a dead scratch pair instead and add scratch + S2 into vdst.
+  const bool src2_is_vgpr = src2 >= 256 && src2 <= 511;
+  const uint16_t src2_vgpr = src2_is_vgpr ? static_cast<uint16_t>(src2 - 256) : 0;
+  const bool vdst_aliases_src2 = src2_is_vgpr && vdst < static_cast<uint16_t>(src2_vgpr + 2) &&
+                                 src2_vgpr < static_cast<uint16_t>(vdst + 2);
+
+  uint16_t shift_dst = vdst;
+  if (vdst_aliases_src2) {
+    // Need a dead, even-aligned VGPR pair that overlaps neither S0/S2 nor vdst.
+    const auto scratch = liveness.find_free_run(&inst, /*count=*/2, /*search_start=*/0,
+                                                /*base_alignment=*/2);
+    if (!scratch)
+      return ExpandResult::failed(
+          std::string(inst.mnemonic()) +
+          " v_lshl_add_u64 lowering needs a scratch VGPR pair when the destination overlaps the "
+          "addend, but no dead pair is available");
+    shift_dst = *scratch;
+  }
+
   constexpr uint16_t kVccLo = 106;
   // These generated opcodes currently match on RDNA3 and RDNA4. Keep the
   // architecture-specific selection explicit so an ISA XML change cannot
   // silently make this shared lowering emit the other target's opcode.
+  const uint16_t lshlrev_b64_op =
+      host_arch == ROCJITSU_CODE_ARCH_RDNA3 ? rdna3::kVLshlrevB64Vop3 : rdna4::kVLshlrevB64Vop3;
   const uint16_t add_co_u32_op = host_arch == ROCJITSU_CODE_ARCH_RDNA3
                                      ? rdna3::kVAddCoU32Vop3SdstEnc
                                      : rdna4::kVAddCoU32Vop3SdstEnc;
@@ -78,10 +124,25 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
 
   std::vector<uint32_t> words;
 
-  // v_add_co_u32 writes VCC, then v_add_co_ci_u32 consumes VCC as carry-in.
+  // shift_dst = S0 << S1[5:0]. v_lshlrev_b64 takes the shift count as src0 and
+  // the 64-bit value as src1.
+  {
+    auto [w0, w1] =
+        build_rdna_vop3(host_arch, lshlrev_b64_op, static_cast<uint8_t>(shift_dst), src1, src0);
+    words.push_back(w0);
+    words.push_back(w1);
+  }
+
+  // GFX12 requires an explicit VALU dependency wait before the shifted value is
+  // consumed by the following add. GFX11 relies on hardware scoreboarding.
+  if (host_arch == ROCJITSU_CODE_ARCH_RDNA4)
+    words.push_back(rdna4::build_sopp(rdna4::kSWaitAlu, {.simm16 = 0xFFFD})[0]);
+
+  // vdst = shift_dst + S2. v_add_co_u32 writes VCC, then v_add_co_ci_u32 consumes
+  // VCC as carry-in. The low add reads the freshly shifted low half.
   {
     auto [w0, w1] = build_rdna_vop3_sdst(host_arch, add_co_u32_op, static_cast<uint8_t>(vdst),
-                                         kVccLo, src0, src2);
+                                         kVccLo, static_cast<uint16_t>(256 + shift_dst), src2);
     words.push_back(w0);
     words.push_back(w1);
   }
@@ -95,7 +156,7 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
   {
     auto [w0, w1] = build_rdna_vop3_sdst(
         host_arch, add_co_ci_u32_op, static_cast<uint8_t>(vdst + 1), kVccLo,
-        static_cast<uint16_t>(src0 + 1), static_cast<uint16_t>(src2 + 1), kVccLo);
+        static_cast<uint16_t>(256 + shift_dst + 1), static_cast<uint16_t>(src2 + 1), kVccLo);
     words.push_back(w0);
     words.push_back(w1);
   }
@@ -107,9 +168,10 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
 
 ExpandResult expand_cdna4_v_lshl_add_u64_for_rdna(const Instruction &inst, uint32_t host_arch,
                                                   uint64_t, std::span<const uint8_t>,
-                                                  const LivenessAnalysis &, TranslationContext &,
-                                                  const LaneLayout *, const LaneLayout *) {
-  return lower_v_lshl_add_u64(inst, static_cast<rj_code_arch_t>(host_arch));
+                                                  const LivenessAnalysis &liveness,
+                                                  TranslationContext &, const LaneLayout *,
+                                                  const LaneLayout *) {
+  return lower_v_lshl_add_u64(inst, static_cast<rj_code_arch_t>(host_arch), liveness);
 }
 
 } // namespace rocjitsu

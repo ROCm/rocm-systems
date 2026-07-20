@@ -46,6 +46,22 @@ struct ParsedVirtualLdsHookMetadata {
 [[nodiscard]] std::optional<ParsedVirtualLdsHookMetadata>
 parse_virtual_lds_hook_metadata(std::span<const uint8_t> image);
 
+/// @brief Validate the load-time-determinable virtual-LDS invariants.
+///
+/// @details Every dispatch of a virtual-LDS kernel needs the runtime-state-block
+/// ABI and a kernarg wrapper layout whose backing-pointer offset matches the
+/// descriptor's. Those facts are fixed per kernel (independent of the AQL packet),
+/// so a violation means the code object can never be dispatched correctly. It is
+/// detected here, at load, and the load is failed — rather than at dispatch, where
+/// the only recovery would be to submit a faulting packet or stall the queue.
+/// Dispatch-time-only failures (backing-allocation OOM, per-packet grid overflow)
+/// cannot be decided here and are handled on the dispatch path.
+///
+/// @returns The kernel name of the first unsupportable record, or std::nullopt
+/// when every virtual-LDS record is load-time valid.
+[[nodiscard]] std::optional<std::string>
+first_unsupportable_virtual_lds_kernel(const ParsedVirtualLdsHookMetadata &metadata);
+
 /// @brief Process-local virtual-LDS policy associated with HSA symbols.
 class VirtualLdsRuntimeRegistry {
 public:
@@ -119,6 +135,13 @@ struct VirtualLdsRuntimeApi {
 
 /// @brief Install the original HSA entry points used by virtual-LDS dispatches.
 void set_virtual_lds_runtime_api(VirtualLdsRuntimeApi api);
+
+/// @brief Clear the installed HSA entry points on hook unload.
+///
+/// @details After this, virtual-LDS resource calls become no-ops until the next
+/// install. Prevents a second OnLoad from racing readers against a stale table
+/// and stops post-unload callbacks from using entry points ROCR may have reset.
+void clear_virtual_lds_runtime_api();
 
 [[nodiscard]] bool empty_virtual_lds_buffers(const VirtualLdsDispatchBuffers &buffers);
 void release_virtual_lds_buffers(VirtualLdsDispatchBuffers &buffers);
