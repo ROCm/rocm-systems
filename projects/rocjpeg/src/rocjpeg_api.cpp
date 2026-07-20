@@ -330,7 +330,7 @@ RocJpegStatus ROCJPEGAPI rocJpegDecodeAsync(RocJpegHandle handle, RocJpegStreamH
 }
 
 /**
- * @brief Synchronizes an asynchronous JPEG decode associated with the specified RocJpegImage* and writes the decoded output.
+ * @brief Synchronizes a pending asynchronous JPEG decode associated with the specified RocJpegImage* and writes the decoded output.
  */
 RocJpegStatus ROCJPEGAPI rocJpegDecodeSync(RocJpegHandle handle, RocJpegImage *destination) {
     FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(handle) + ", " + RocJpegFmtPtr(destination));
