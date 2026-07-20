@@ -41,6 +41,7 @@
 // (iput/iget/iputSignal/iflush/test) that these tests exercise now lives on the
 // internal RMA IB proxy plugin (declared in src/include/rma.h).
 extern ncclRma_t ncclRmaIbProxy;
+extern ncclRma_t IbCastRmaIbProxy;
 
 namespace RCCLRmaTests
 {
