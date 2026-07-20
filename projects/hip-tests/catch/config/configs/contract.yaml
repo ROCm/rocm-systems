@@ -600,6 +600,9 @@ contract:
   Contract_OccupancyVariable_VariableSMemWithFlags_ReturnsUsableValues:
     <<: *level_0
     tags: [occupancy_variable]
+  Contract_OccupancyVariable_WindowsUnsupported_IsSkipped:
+    <<: *level_0
+    tags: [occupancy_variable]
   Contract_GraphCapture_BeginEndEmptyStream_ProducesGraph:
     <<: *level_0
     tags: [graph_capture]

@@ -951,7 +951,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_OccupancyVariable_PotentialBlockSizeWithFlags_ReturnsUsableValues` | hipOccupancyMaxPotentialBlockSizeWithFlags | returns a non-negative min grid size and positive block size; the reserved flag does not change the contract |
 | `Contract_OccupancyVariable_VariableSMemWithFlags_ReturnsUsableValues` | hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags | accepts the smem functor and returns a non-negative min grid size and positive block size under the reserved default flag |
 | `Contract_OccupancyVariable_VariableSMem_ReturnsUsableValues` | hipOccupancyMaxPotentialBlockSizeVariableSMem | accepts a block-size-to-dynamic-smem functor and returns a non-negative min grid size and positive block size |
-| `Contract_OccupancyVariable_WindowsUnsupported_IsSkipped` | hipOccupancyMaxPotentialBlockSizeWithFlags | Windows runtime does not export the symbol; the contract is skipped until export parity exists |
+| `Contract_OccupancyVariable_WindowsUnsupported_IsSkipped` | hipOccupancyMaxPotentialBlockSizeWithFlags | Windows runtime does not export the symbol and the occupancy_variable contract is skipped until export parity exists |
 
 ### `peer_access` (6 cases)
 

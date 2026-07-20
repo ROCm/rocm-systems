@@ -26,7 +26,7 @@
 // of failing during discovery. This gate can be removed once the Windows runtime
 // exports these symbols.
 #if defined(_WIN32)
-// @asserts: hipOccupancyMaxPotentialBlockSizeWithFlags - Windows runtime does not export the symbol; the contract is skipped until export parity exists
+// @asserts: hipOccupancyMaxPotentialBlockSizeWithFlags - Windows runtime does not export the symbol and the occupancy_variable contract is skipped until export parity exists
 HIP_TEST_CASE(Contract_OccupancyVariable_WindowsUnsupported_IsSkipped) {
   HIP_SKIP_TEST("hipOccupancyMaxPotentialBlockSize* occupancy contracts are not exported from the "
                 "Windows HIP runtime yet; the real cases are skipped here until export parity "
