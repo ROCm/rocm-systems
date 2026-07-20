@@ -288,6 +288,12 @@ hrr:
   Unit_HRR_MemsetExtra_Direct:
     <<: *level_2
     tags: [direct, memset]
+  Unit_HRR_MemsetSpt_Direct:
+    <<: *level_2
+    tags: [direct, memset]
+  Unit_HRR_MemsetSptRoundtrip:
+    <<: *level_2
+    tags: [capture, memset, playback, roundtrip]
   Unit_HRR_MemsetVariants_Direct:
     <<: *level_2
     tags: [direct, memset]

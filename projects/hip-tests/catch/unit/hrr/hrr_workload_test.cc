@@ -886,6 +886,51 @@ TEST_CASE("Unit_HRR_StressApis_Direct", "[.][hrr-direct]") {
 // Exercises typed-memset driver APIs and 2-D pitched memset.
 // Final blob: h[i] == 2 (set by hipMemsetD32 at the end).
 // ===========================================================================
+// ===========================================================================
+// Workload: memset per-thread-default-stream variants (hipMemset*_spt)
+//
+// Exercises hipMemset_spt / hipMemsetAsync_spt / hipMemset2D_spt /
+// hipMemset2DAsync_spt. These are replayed faithfully (mirror the non-_spt
+// memset handlers); replay must reproduce the final byte pattern.
+// Final blob: every int == 0x2A2A2A2A.
+// ===========================================================================
+TEST_CASE("Unit_HRR_MemsetSpt_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+  constexpr int    N  = 1024;
+  constexpr size_t SZ = N * sizeof(int);  // 4096 bytes
+
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+
+  int* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, SZ));
+
+  // 1D per-thread-stream memset (sync + async)
+  HIP_CHECK(hipMemset_spt(d, 0x11, SZ));
+  HIP_CHECK(hipMemsetAsync_spt(d, 0x22, SZ, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+
+  // 2D per-thread-stream memset covering the whole buffer as COLS x ROWS bytes
+  constexpr size_t COLS  = 32;
+  constexpr size_t ROWS  = N / COLS;            // 32 rows
+  constexpr size_t PITCH = COLS * sizeof(int);  // 128 bytes/row, contiguous
+  HIP_CHECK(hipMemset2D_spt(d, PITCH, 0x33, PITCH, ROWS));
+  HIP_CHECK(hipMemset2DAsync_spt(d, PITCH, 0x44, PITCH, ROWS, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+
+  // Final known byte pattern for D2H validation: 0x2A -> int 0x2A2A2A2A.
+  HIP_CHECK(hipMemset_spt(d, 0x2A, SZ));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  int* h = new int[N]();
+  HIP_CHECK(hipMemcpy(h, d, SZ, hipMemcpyDeviceToHost));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 0x2A2A2A2A);
+
+  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipStreamDestroy(s));
+  delete[] h;
+}
+
 TEST_CASE("Unit_HRR_MemsetVariants_Direct", "[.][hrr-direct]") {
   HIP_CHECK(hipSetDevice(0));
   constexpr int    N  = 1024;

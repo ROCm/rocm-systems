@@ -448,11 +448,6 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipMemset3DAsync",
     "hipMemset3D_spt",
     "hipMemset3DAsync_spt",
-    # hipMemset_spt / 2D_spt variants — host ptr for dst (stale) or pitched ptr — noop
-    "hipMemset_spt",
-    "hipMemset2D_spt",
-    "hipMemsetAsync_spt",
-    "hipMemset2DAsync_spt",
     # hipMemsetD2D8/16/32 and Async — hipDeviceptr_t output correctly typed; but not in alloc_map — noop
     "hipMemsetD2D8",
     "hipMemsetD2D8Async",
