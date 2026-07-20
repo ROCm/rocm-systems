@@ -47,7 +47,6 @@ ROCPROFV3=$2
 OUTPUT_DIR=${3:-${PWD}}
 LOG_LEVEL=${4:-info}
 OUTPUT_FILENAME=${5:-out}
-ATT_LIB_DIR=${6:-}
 
 # Set environment variables required for attachment
 export ROCP_TOOL_ATTACH=1
@@ -95,12 +94,6 @@ if [ ! -f "${ROCPROFV3}" ]; then
     exit 1
 fi
 
-# Build the ATT library path argument if provided
-ATT_LIB_ARG=""
-if [ -n "${ATT_LIB_DIR}" ]; then
-    ATT_LIB_ARG="--att-library-path ${ATT_LIB_DIR}"
-fi
-
 # Attachment with ATT enabled.
 # Target CU defaults to 1 (rocprofv3 default); shader engine mask 0x1 selects SE0.
 # Small buffer (16MB) to keep the test fast.
@@ -114,7 +107,6 @@ LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} \
     --attach $APP_PID \
     --attach-duration-msec 500 \
     --att \
-    ${ATT_LIB_ARG} \
     --att-shader-engine-mask 0x1 \
     --att-buffer-size 0x1000000 \
     -f json rocpd \

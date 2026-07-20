@@ -26,27 +26,18 @@ else()
     set(LOG_LEVEL "info")
 endif()
 
-find_library(
-    attdecoder_LIBRARY
-    NAMES rocprof-trace-decoder
-    HINTS ${ROCM_PATH}
-    PATH_SUFFIXES lib)
-
-cmake_path(GET attdecoder_LIBRARY PARENT_PATH attdecoder_LIB_DIR)
-
 set(attachment-env
     "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     )
 
 # Execute phase: launch attachment-test, attach rocprofv3 with ATT enabled for 2 seconds,
-# then stop the app.  The ATT library directory is passed as the sixth positional argument
-# to the shell script.
+# then stop the app.
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-attachment-attach-once-att
     COMMAND
         ${CMAKE_CURRENT_SOURCE_DIR}/run_attachment_att_test.sh
         $<TARGET_FILE:attachment-test> $<TARGET_FILE:rocprofiler-sdk::rocprofv3>
-        ${CMAKE_CURRENT_BINARY_DIR} ${LOG_LEVEL} out "${attdecoder_LIB_DIR}"
+        ${CMAKE_CURRENT_BINARY_DIR} ${LOG_LEVEL} out
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 90
     LABELS "attachment" "att"

@@ -49,7 +49,7 @@ env:
   ROCM_PATH: "/opt/rocm"
   GPU_TARGETS: "gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
   PATH: "/usr/bin:$PATH"
-  SUBMODULE_PATHS: "projects/rocprofiler-sdk projects/aqlprofile projects/rocprofiler-register projects/rocr-runtime projects/clr projects/hip"
+  SUBMODULE_PATHS: "projects/rocprofiler-sdk projects/aqlprofile projects/rocprofiler-register projects/rocprof-trace-decoder projects/rocr-runtime projects/clr projects/hip"
   ## No tests should be excluded here except for extreme emergencies; tests should only be disabled in CMake
   ## A task should be assigned directly to fix the issue
   ## Scratch memory tests need to be fixed for ROCm 7.0 release
