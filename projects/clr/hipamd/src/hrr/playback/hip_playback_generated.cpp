@@ -15,6 +15,8 @@
  *   - hrr_playback_dispatch[HRR_API_COUNT]  — indexed by hrr_api_id_t
  * ============================================================================ */
 
+// NOLINTBEGIN: generated file, excluded from clang-tidy (regenerate with gen_hrr_api_args.py).
+
 #include "hip_playback.h"
 #include "hrr_api_args.h"
 #include <hip/hip_runtime.h>
@@ -5927,3 +5929,5 @@ hrr_playback_fn_t hrr_playback_dispatch[HRR_API_COUNT] = {
     playback_hipExecutionCtxSynchronize,  // [548] HRR_API_HIPEXECUTIONCTXSYNCHRONIZE
     playback_hipExecutionCtxWaitEvent,  // [549] HRR_API_HIPEXECUTIONCTXWAITEVENT
 };
+
+// NOLINTEND

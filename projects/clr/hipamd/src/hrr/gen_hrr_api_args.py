@@ -1417,6 +1417,8 @@ _CPP_PREAMBLE = """\
  * ============================================================================
  */
 
+// NOLINTBEGIN: generated file, excluded from clang-tidy (regenerate with gen_hrr_api_args.py).
+
 // This file is compiled as part of amdhip64; it #includes internal headers.
 #include "hip_capture.h"
 #include "hip_capture_writer.h"
@@ -1769,6 +1771,8 @@ def generate_capture_cpp(entries: List[ApiEntry]) -> str:
     parts.append("")
     parts.append(generate_build_table(entries))
 
+    parts.append("")
+    parts.append("// NOLINTEND")
     return "\n".join(parts)
 
 
@@ -1793,6 +1797,8 @@ _PLAYBACK_CPP_PREAMBLE = """\
  *     Signature: hipError_t playback_foo(PlaybackContext&, const uint8_t*)
  *   - hrr_playback_dispatch[HRR_API_COUNT]  — indexed by hrr_api_id_t
  * ============================================================================ */
+
+// NOLINTBEGIN: generated file, excluded from clang-tidy (regenerate with gen_hrr_api_args.py).
 
 #include "hip_playback.h"
 #include "hrr_api_args.h"
@@ -2171,6 +2177,8 @@ def generate_playback_cpp(entries: List[ApiEntry]) -> str:
     parts.append("")
     parts.append(generate_dispatch_table(entries))
 
+    parts.append("")
+    parts.append("// NOLINTEND")
     return "\n".join(parts)
 
 

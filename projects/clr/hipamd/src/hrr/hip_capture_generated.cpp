@@ -28,6 +28,8 @@
  * ============================================================================
  */
 
+// NOLINTBEGIN: generated file, excluded from clang-tidy (regenerate with gen_hrr_api_args.py).
+
 // This file is compiled as part of amdhip64; it #includes internal headers.
 #include "hip_capture.h"
 #include "hip_capture_writer.h"
@@ -8036,3 +8038,5 @@ void hip_capture_build_compiler_table() {
   std::memcpy(const_cast<HipCompilerDispatchTable*>(hip::GetHipCompilerDispatchTable()),
               &cap, sizeof(HipCompilerDispatchTable));
 }
+
+// NOLINTEND
