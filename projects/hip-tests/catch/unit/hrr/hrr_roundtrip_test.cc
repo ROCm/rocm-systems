@@ -908,6 +908,14 @@ HIP_TEST_CASE(Unit_HRR_StreamWriteValueRoundtrip) {
   CHECK(d2h_pass >= 3);
 }
 
+HIP_TEST_CASE(Unit_HRR_StreamWriteValueRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_streamwritevalue"};
+  // Exercises hipStreamWriteValue32 / hipStreamWriteValue64 (replay-only fix).
+  // Replay must reproduce the written 32-bit and 64-bit values and validate
+  // them via D2H.
+  hrr_run_roundtrip("Unit_HRR_StreamWriteValue_Direct", cap.path);
+}
+
 HIP_TEST_CASE(Unit_HRR_MemsetVariantsRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetvariants"};
   hrr_run_roundtrip("Unit_HRR_MemsetVariants_Direct", cap.path);
