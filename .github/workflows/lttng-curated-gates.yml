@@ -38,6 +38,10 @@ on:
       - 'projects/rocr-runtime/runtime/hsa-runtime/inc/hsa_ext_amd.h'
       - 'projects/rocr-runtime/runtime/hsa-runtime/inc/hsa_api_trace.h'
       - 'projects/rocr-runtime/runtime/hsa-runtime/core/inc/hsa_table_interface.h'
+      - 'projects/clr/hipamd/scripts/lttng_categories_manifest.json'
+      - 'projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_categories_manifest.json'
+      - 'shared/lttng/scripts/lttng_categories.yaml'
+      - 'shared/lttng/scripts/lttng_gen_category_manifest.py'
       - 'shared/lttng/scripts/lttng_curated_verify.py'
       - 'shared/lttng/scripts/lttng_curated_codegen.py'
       - 'shared/lttng/scripts/lttng_curated_lib.py'
@@ -144,3 +148,20 @@ jobs:
             --extra-arg=-Iprojects/rocr-runtime/runtime/hsa-runtime \
             --tp-out projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h \
             --emit-out projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h
+
+      - name: HIP category manifest matches taxonomy + tp.h (and full coverage)
+        # No libclang needed: this parses the checked-in generated tp.h and the
+        # taxonomy YAML. Fails on stale manifest (drift), any uncategorized
+        # curated API, empty category, or dead (zero-match) pattern.
+        run: |
+          python3 shared/lttng/scripts/lttng_gen_category_manifest.py --provider hip --check \
+            --taxonomy shared/lttng/scripts/lttng_categories.yaml \
+            --tp-header projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h \
+            --out projects/clr/hipamd/scripts/lttng_categories_manifest.json
+
+      - name: HSA category manifest matches taxonomy + tp.h (and full coverage)
+        run: |
+          python3 shared/lttng/scripts/lttng_gen_category_manifest.py --provider hsa --check \
+            --taxonomy shared/lttng/scripts/lttng_categories.yaml \
+            --tp-header projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h \
+            --out projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_categories_manifest.json

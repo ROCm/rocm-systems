@@ -1,0 +1,45 @@
+# LTTng curated-tracepoint category taxonomy (schema v1).
+#
+# Maps human-friendly category names to shell-style glob patterns matched
+# against curated API *base names* (i.e. names as they appear in
+# curated_apis.yaml / hip_apis.txt / hsa_apis.txt, before chunk-suffix
+# expansion). An API may legitimately match more than one category's
+# patterns (e.g. hipMemcpyPeer matches both hip_memory and hip_peer) --
+# that's intentional; categories are convenience groupings for tracing
+# scope selection, not a strict partition.
+#
+# Consumed by lttng_gen_category_manifest.py, which resolves each
+# category's patterns against the real generated tp.h event list (base API
+# -> all its chunk events: <api>, <api>_2, <api>_3, ...) and writes the
+# concrete per-provider JSON manifest read by rocm_lttng_enable.sh.
+#
+# Patterns use Python fnmatch (POSIX shell glob) syntax: '*' matches any
+# run of characters, '?' matches one character. Matching is case-sensitive
+# and exact (no partial/substring matching) against the whole base API name.
+hip:
+  hip_memory:    ["hipMalloc*", "hipExtMallocWithFlags", "hipFree*", "hipMemcpy*", "hipMemset*", "hipHostMalloc", "hipHostFree", "hipHostAlloc", "hipHostGetDevicePointer", "hipHostGetFlags", "hipHostRegister*", "hipHostUnregister*", "hipMemPool*", "hipMemPrefetch*", "hipMemAdvise*", "hipMemGetInfo", "hipMemPtrGetInfo", "hipMem*", "hipPointerGetAttribute*", "hipPointerSetAttribute", "hipDrvMemcpy*", "hipDrvMemDiscard*", "hipDrvPointerGetAttributes", "hipArray*", "hipMipmappedArray*", "hipGetMipmappedArrayLevel"]
+  hip_streams:   ["hipStream*", "hipExtStreamCreateWithCUMask", "hipExtStreamGetCUMask"]
+  hip_events:    ["hipEvent*"]
+  hip_kernel_launch: ["hipLaunch*", "hipModuleLaunch*", "hipExtLaunch*", "hipExtModuleLaunchKernel", "hipHccModuleLaunchKernel", "hipConfigureCall", "hipSetupArgument", "__hipPushCallConfiguration", "__hipPopCallConfiguration", "hipDrvLaunchKernelEx", "hipModuleLaunchCooperativeKernel*", "hipOccupancy*"]
+  hip_graph:     ["hipGraph*", "hipStreamBeginCapture*", "hipStreamEndCapture*", "hipStreamIsCapturing*", "hipStreamGetCaptureInfo*", "hipStreamUpdateCaptureDependencies", "hipDrvGraphAdd*", "hipDrvGraphExec*", "hipDrvGraphMemcpyNode*", "hipUserObject*", "hipThreadExchangeStreamCaptureMode"]
+  hip_device:    ["hipGetDevice*", "hipSetDevice*", "hipSetValidDevices", "hipDeviceGet*", "hipDeviceSet*", "hipDeviceSynchronize", "hipDeviceReset", "hipDeviceComputeCapability", "hipDeviceTotalMem", "hipDevicePrimaryCtx*", "hipChooseDevice*", "hipGetDevicePropertiesR*", "hipDeviceCanAccessPeer", "hipDeviceEnablePeerAccess", "hipDeviceDisablePeerAccess", "hipDeviceGraphMemTrim", "hipDevResource*", "hipDevSm*", "hipExecutionCtx*"]
+  hip_module:    ["hipModule*", "hipLink*", "hipLibrary*", "hipKernelGet*", "hipKernelSetAttribute", "hipKernelNameRef*", "hipFuncGetAttribute*", "hipFuncSetAttribute", "hipFuncSetCacheConfig", "hipFuncSetSharedMemConfig"]
+  hip_texture:   ["hipTex*", "hipBindTexture*", "hipUnbindTexture", "hipCreateTextureObject", "hipDestroyTextureObject", "hipCreateSurfaceObject", "hipDestroySurfaceObject", "hipCreateChannelDesc", "hipGetChannelDesc", "hipGetTexture*"]
+  hip_ctx:       ["hipCtx*", "hipGreenCtxCreate"]
+  hip_ipc:       ["hipIpc*"]
+  hip_peer:      ["hipDeviceEnablePeerAccess", "hipDeviceDisablePeerAccess", "hipDeviceCanAccessPeer", "hipMemcpyPeer*", "hipMemcpy*Peer*", "hipCtxEnablePeerAccess", "hipCtxDisablePeerAccess", "hipDeviceGetP2PAttribute", "hipExtGetLinkTypeAndHopCount"]
+  hip_error:     ["hipGetLastError", "hipPeekAtLastError", "hipExtGetLastError", "hipGetErrorString", "hipGetErrorName", "hipDrvGetErrorString", "hipDrvGetErrorName", "__hipOnError"]
+  hip_external:  ["hipImportExternal*", "hipExternalMemory*", "hipDestroyExternal*", "hipSignalExternalSemaphoresAsync", "hipWaitExternalSemaphoresAsync"]
+  hip_init:      ["hipInit", "hipDriverGetVersion", "hipRuntimeGetVersion", "hipGetProcAddress*", "hipGetFuncBySymbol", "hipApiName", "hipProfiler*", "hipExtEnableLogging", "hipExtDisableLogging", "hipExtSetLoggingParams", "hipGetDriverEntryPoint*", "hipGetStreamDeviceId", "__hipRegister*", "__hipUnregisterFatBinary"]
+  hip_graphics:  ["hipGraphicsGL*", "hipGraphicsMapResources", "hipGraphicsResourceGetMappedPointer", "hipGraphicsSubResourceGetMappedArray", "hipGraphicsUnmapResources", "hipGraphicsUnregisterResource", "hipGLGetDevices"]
+  hip_symbol:    ["hipGetSymbolAddress", "hipGetSymbolSize"]
+hsa:
+  hsa_queues:      ["hsa_queue_*", "hsa_soft_queue_create", "hsa_amd_queue_*", "hsa_amd_counted_queue_*"]
+  hsa_signals:     ["hsa_signal_*", "hsa_amd_signal_*", "hsa_amd_ipc_signal_*"]
+  hsa_memory:      ["hsa_memory_*", "hsa_amd_memory_*", "hsa_amd_vmem_*", "hsa_amd_svm_*", "hsa_region_get_info", "hsa_agent_iterate_regions", "hsa_amd_agents_allow_access", "hsa_amd_agent_memory_pool_get_info", "hsa_amd_agent_iterate_memory_pools", "hsa_amd_pointer_info*", "hsa_amd_ipc_memory_*", "hsa_amd_portable_*", "hsa_amd_interop_*"]
+  hsa_agents:      ["hsa_agent_*", "hsa_iterate_agents", "hsa_cache_get_info", "hsa_amd_coherency_*", "hsa_amd_agent_*"]
+  hsa_executable:  ["hsa_executable_*", "hsa_code_object_*", "hsa_code_symbol_*"]
+  hsa_isa:         ["hsa_isa_*", "hsa_wavefront_get_info"]
+  hsa_init:        ["hsa_init", "hsa_shut_down", "hsa_system_*", "hsa_extension_get_name", "hsa_status_string", "hsa_table_interface_*"]
+  hsa_amd_profiling: ["hsa_amd_profiling_*"]
+  hsa_amd_misc:    ["hsa_amd_async_function", "hsa_amd_enable_logging", "hsa_amd_register_deallocation_callback", "hsa_amd_deregister_deallocation_callback", "hsa_amd_register_system_event_handler", "hsa_amd_external_semaphore_handle_*", "hsa_amd_ais_file_*", "hsa_amd_spm_*", "hsa_amd_image_create*"]
