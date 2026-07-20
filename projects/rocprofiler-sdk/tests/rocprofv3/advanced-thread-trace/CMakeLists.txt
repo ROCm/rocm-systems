@@ -367,7 +367,6 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;thread-trace"
     TIMEOUT 45
     DISABLED ${IS_DISABLED}
-    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_SETUP rocprofv3-test-att-no-intercept)
 

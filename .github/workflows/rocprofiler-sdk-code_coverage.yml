@@ -246,6 +246,7 @@ jobs:
         enable-rocdecode-build: ${{ env.ENABLE_ROCDECODE_BUILD }}
         enable-rocjpeg-build: ${{ env.ENABLE_ROCJPEG_BUILD }}
         enable-hipfile-build: ${{ env.ENABLE_HIPFILE_BUILD }}
+        enable-rocprof-trace-decoder-build: 'true'
         ccache-key: ccache-${{ matrix.system.os }}-${{ needs.ci_config.outputs.gfx94x_runner }}-${{ matrix.system.gpu }}
         ccache-variant: ccache
 
