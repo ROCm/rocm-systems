@@ -1042,6 +1042,7 @@ class db_analysis(OmniAnalyze_Base):
             "end_timestamp",
         ]
         if not tool_data_records:
+            process_pc_sampling_kernel_trace(None)
             return pd.DataFrame(columns=columns)
 
         trace_df = pd.concat(
@@ -1061,7 +1062,10 @@ class db_analysis(OmniAnalyze_Base):
             "start_timestamp": trace_df["Start_Timestamp"],
             "end_timestamp": trace_df["End_Timestamp"],
         })
-        return dispatch_df.drop_duplicates("kernel_name").reset_index(drop=True)
+        # A legacy one-file workload retains every original dispatch row.
+        if len(tool_data_records) > 1:
+            dispatch_df = dispatch_df.drop_duplicates("kernel_name")
+        return dispatch_df.reset_index(drop=True)
 
     def apply_pmc_filters(self) -> dict[str, pd.DataFrame]:
         pmc_df_per_workload = self._pmc_df_per_workload.copy()

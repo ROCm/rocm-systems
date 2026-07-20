@@ -549,6 +549,16 @@ def _load_pc_sampling_data_from_records(
     kernel_name: Optional[str] = None,
     num_rows: Optional[int] = None,
 ) -> pd.DataFrame:
+    # Preserve the legacy table's row identity, ordering, and column order.
+    if len(tool_data_records) == 1:
+        return load_pc_sampling_data_per_kernel(
+            method,
+            tool_data_records[0],
+            sorting_type,
+            kernel_name,
+            num_rows,
+        )
+
     process_frames = [
         load_pc_sampling_data_per_kernel(
             method,

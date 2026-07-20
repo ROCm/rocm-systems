@@ -131,7 +131,9 @@ class OmniAnalyze_Base:
         workload.raw_pmc = workload.raw_pmc.rename(
             columns={"Dispatch_Id": "Dispatch_ID"}
         )
-        workload.raw_pmc = workload.raw_pmc.drop_duplicates("Kernel_Name")
+        # A legacy one-file workload retains its original dispatch statistics.
+        if len(tool_data) > 1:
+            workload.raw_pmc = workload.raw_pmc.drop_duplicates("Kernel_Name")
         kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
             df_in=workload.raw_pmc,
             raw_data_dir=str(dir_path),
