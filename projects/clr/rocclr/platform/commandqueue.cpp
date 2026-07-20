@@ -296,6 +296,11 @@ void HostQueue::loop(device::VirtualDevice* virtualDevice) {
       continue;
     }
 
+    if (!command->isSupportedOn(virtualDevice->device())) {
+      command->setStatus(CL_INVALID_OPERATION);
+      continue;
+    }
+
     ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command (%s) submitted: %p",
             amd::activity_prof::getOclCommandKindString(command->type()), command);
 

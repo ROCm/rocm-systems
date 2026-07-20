@@ -5,6 +5,7 @@
  */
 
 #include "device/device.hpp"
+#include "platform/command.hpp"
 #include "thread/monitor.hpp"
 #include "utils/options.hpp"
 #include "comgrctx.hpp"
@@ -58,6 +59,23 @@ extern const char* BlitLinearSourceCode;
 extern const char* BlitImageSourceCode;
 
 bool VirtualDevice::ActiveWait() const { return device_().ActiveWait(); }
+
+void VirtualDevice::submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) {
+  cmd.setStatus(CL_INVALID_OPERATION);
+  LogError("submitSvmPrefetchAsync is not supported on this device");
+}
+void VirtualDevice::SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& cmd) {
+  cmd.setStatus(CL_INVALID_OPERATION);
+  LogError("SubmitSvmPrefetchBatchAsync is not supported on this device");
+}
+void VirtualDevice::SubmitSvmDiscardBatchAsync(amd::SvmDiscardBatchAsyncCommand& cmd) {
+  cmd.setStatus(CL_INVALID_OPERATION);
+  LogError("SubmitSvmDiscardBatchAsync is not supported on this device");
+}
+void VirtualDevice::submitBatchMemoryOperation(amd::BatchMemoryOperationCommand& cmd) {
+  cmd.setStatus(CL_INVALID_OPERATION);
+  LogError("submitBatchMemoryOperation is not supported on this device");
+}
 
 }  // namespace amd::device
 

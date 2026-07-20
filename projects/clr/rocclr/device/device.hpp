@@ -1336,19 +1336,12 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   /// Optional extensions
   virtual void submitSignal(amd::SignalCommand& cmd) = 0;
   virtual void submitMakeBuffersResident(amd::MakeBuffersResidentCommand& cmd) = 0;
-  virtual void submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) { ShouldNotReachHere(); }
-  virtual void SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& cmd) {
-    ShouldNotReachHere();
-  }
-  virtual void SubmitSvmDiscardBatchAsync(amd::SvmDiscardBatchAsyncCommand& cmd) {
-    ShouldNotReachHere();
-  }
-  virtual void submitStreamOperation(amd::StreamOperationCommand& cmd) { ShouldNotReachHere(); }
-  virtual void submitBatchMemoryOperation(amd::BatchMemoryOperationCommand& cmd) {
-    ShouldNotReachHere();
-  }
-  virtual void submitVirtualMap(amd::VirtualMapCommand& cmd) { ShouldNotReachHere(); }
-  virtual void submitUserEvent(amd::UserEvent& vcmd) { ShouldNotReachHere(); }
+  virtual void submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd);
+  virtual void SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& cmd);
+  virtual void SubmitSvmDiscardBatchAsync(amd::SvmDiscardBatchAsyncCommand& cmd);
+  virtual void submitStreamOperation(amd::StreamOperationCommand& cmd) = 0;
+  virtual void submitBatchMemoryOperation(amd::BatchMemoryOperationCommand& cmd);
+  virtual void submitVirtualMap(amd::VirtualMapCommand& cmd) = 0;
 
   virtual address allocKernelArguments(size_t size, size_t alignment) { return nullptr; }
   virtual void ReleaseSdmaEngines() {}  //!< Release SDMA engine assignments (ROCm specific)

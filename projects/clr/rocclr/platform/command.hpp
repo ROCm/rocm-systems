@@ -466,6 +466,10 @@ class Command : public Event {
   //! window across markers while resetting it for any other (intervening) command.
   virtual bool isMarkerCommand() const { return false; }
 
+  //! Returns false if the target device cannot execute this command; the
+  //! command queue rejects it with an error status instead of dispatching.
+  virtual bool isSupportedOn(const amd::Device& device) const { return true; }
+
   //! Release the resources associated with this event.
   virtual void releaseResources();
 
@@ -2233,6 +2237,10 @@ class SvmPrefetchAsyncCommand : public Command {
 
   virtual void submit(device::VirtualDevice& device) { device.submitSvmPrefetchAsync(*this); }
 
+  virtual bool isSupportedOn(const amd::Device& device) const {
+    return device.info().hmmCpuMemoryAccessible_;
+  }
+
   bool validateMemory();
 
   const void* dev_ptr() const { return dev_ptr_; }
@@ -2262,6 +2270,10 @@ class SvmPrefetchBatchAsyncCommand : public Command {
 
   virtual void submit(device::VirtualDevice& device) { device.SubmitSvmPrefetchBatchAsync(*this); }
 
+  virtual bool isSupportedOn(const amd::Device& device) const {
+    return device.info().hmmCpuMemoryAccessible_;
+  }
+
   void* const* DevicePointers() const { return dev_ptrs_.data(); }
   const size_t* Sizes() const { return sizes_.data(); }
   size_t Count() const { return count_; }
@@ -2286,6 +2298,10 @@ class SvmDiscardBatchAsyncCommand : public Command {
   }
 
   virtual void submit(device::VirtualDevice& device) { device.SubmitSvmDiscardBatchAsync(*this); }
+
+  virtual bool isSupportedOn(const amd::Device& device) const {
+    return device.info().hmmCpuMemoryAccessible_;
+  }
 
   void* const* DevicePointers() const { return dev_ptrs_.data(); }
   const size_t* Sizes() const { return sizes_.data(); }
