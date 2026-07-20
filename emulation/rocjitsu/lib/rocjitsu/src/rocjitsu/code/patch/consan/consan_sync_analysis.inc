@@ -593,8 +593,11 @@ is_safe_bounded_barrier_pair(const ConSanSyncSequence &signal, const ConSanSyncS
   // the useful work between a signal and its completing wait. Keep that
   // relaxation local to those consumers: other synchronization semantics
   // retain the closed bookkeeping pattern above.
-  constexpr uint32_t kMaximumExactFaultPairInstructions = 16u;
-  constexpr uint64_t kMaximumExactFaultPairBytes = 64u;
+  // gfx1250 compiler barrier lowering can retain 18 straight-line useful
+  // instructions between the signal and completing wait. Keep the extension
+  // narrowly bounded while admitting that emitted form.
+  constexpr uint32_t kMaximumExactFaultPairInstructions = 20u;
+  constexpr uint64_t kMaximumExactFaultPairBytes = 80u;
   const uint32_t maximum_instructions =
       allow_extended_pair ? kMaximumExactFaultPairInstructions : kMaximumBookkeepingInstructions;
   const uint64_t maximum_bytes =
