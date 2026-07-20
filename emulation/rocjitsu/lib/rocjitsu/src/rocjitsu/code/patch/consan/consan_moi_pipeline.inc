@@ -625,7 +625,10 @@ void append_moi_atomic_site_dispositions(const Container &container, const ConSa
     append_moi_site_disposition(ConSanResourceSiteKind::Atomic, container.name, in_kernel,
                                 site.text_offset, site.mnemonic, reason, result,
                                 reason == ConSanSiteDispositionReason::UnqualifiedSyncSequence ||
-                                    reason == ConSanSiteDispositionReason::NoAtomicAcquireConsumer);
+                                    reason ==
+                                        ConSanSiteDispositionReason::NoAtomicAcquireConsumer ||
+                                    (reason == ConSanSiteDispositionReason::UnsupportedScope &&
+                                     site.raw_scope && *site.raw_scope == 0u));
   }
 }
 

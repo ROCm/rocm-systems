@@ -2912,7 +2912,7 @@ TEST(ConSanMoi, AtomicRecordPatchTrampolinesFlatAtomicAndWritesRecord) {
 }
 
 TEST(ConSanMoi, Gfx1250AtomicRecordPatchesOrderedFlatAtomic) {
-  const auto atomic = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+  const auto atomic = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/2, /*return_old_value=*/true, /*scope=*/2,
       ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_TRUE(atomic);
@@ -2938,12 +2938,40 @@ TEST(ConSanMoi, Gfx1250AtomicRecordPatchesOrderedFlatAtomic) {
   ASSERT_EQ(result.kernels.size(), 1u);
   ASSERT_EQ(result.kernels.front().atomic_sites.size(), 1u);
   const ConSanAtomicSite &site = result.kernels.front().atomic_sites.front();
-  EXPECT_EQ(site.raw_saddr, 0x7fu);
+  EXPECT_EQ(site.raw_saddr, gfx1250::OPR_SREG_NULL);
   EXPECT_EQ(site.raw_scope, 2u);
   EXPECT_EQ(site.raw_ioffset, 0);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord,
                                &ConSanPatchInfo::kind),
             1u);
+}
+
+TEST(ConSanMoi, Gfx1250WaveScopeAtomicIsTypedNotApplicable) {
+  const auto atomic = build_gfx1250_flat_atomic_add_u32(
+      /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/2, /*return_old_value=*/true, /*scope=*/0,
+      ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(atomic);
+  const std::array<uint32_t, 7> text_words = {
+      0xEE0B0000u,  0x00000000u,  0x00000000u, // global_wb
+      (*atomic)[0], (*atomic)[1], (*atomic)[2],
+      0xBFB00000u, // s_endpgm
+  };
+  ConSanOptions options = moi_options();
+  options.moi_track_atomics = true;
+
+  const ConSanResult result =
+      try_patch_consan(make_gfx1250_code_object(text_words, "gfx1250_wave_atomic"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result));
+  EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [](const auto &site) {
+    return site.site_kind == ConSanResourceSiteKind::Atomic &&
+           site.disposition == ConSanSiteDisposition::NotApplicable &&
+           site.reason == ConSanSiteDispositionReason::UnsupportedScope &&
+           site.lowering_outcome == ConSanSiteLoweringOutcome::NotApplicable;
+  }));
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord,
+                               &ConSanPatchInfo::kind),
+            0u);
 }
 
 TEST(ConSanMoi, Gfx1250IsolatedLdsReleaseIsNotApplicableWithAccessReplay) {
