@@ -25,6 +25,7 @@
 // deltas around their own hipMalloc/hipFree and check pointer membership, never absolute inventory
 // sizes.
 
+#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 
@@ -143,10 +144,23 @@ ensure_live_tracking()
 }
 
 // ------------------------- device helpers -------------------------
-bool
-inventory_contains(void* p)
+// The GPU agent that owns the test's device allocations. Tests run with a single visible device, so
+// the first GPU agent is the one hipMalloc allocates on.
+hsa_agent_t
+gpu_agent()
 {
-    auto inv = mt::snap_inventory();
+    for(const auto* rocp_agent : rocprofiler::agent::get_agents())
+    {
+        if(rocp_agent == nullptr || rocp_agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+        if(auto hsa = rocprofiler::agent::get_hsa_agent(rocp_agent); hsa.has_value()) return *hsa;
+    }
+    return hsa_agent_t{.handle = 0};
+}
+
+bool
+inventory_contains(void* p, hsa_agent_t agent)
+{
+    auto inv = mt::snap_inventory(agent);
     return inv.find(p) != inv.end();
 }
 
@@ -204,7 +218,10 @@ TEST(kernel_replay_snapshot, hipmalloc_autocaptured_and_freed)
 {
     if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
 
-    const size_t before_alloc = mt::snap_inventory().size();
+    const auto agent = gpu_agent();
+    ASSERT_NE(agent.handle, 0U) << "no GPU agent found";
+
+    const size_t before_alloc = mt::snap_inventory(agent).size();
     const size_t bytes        = N_ELEMS * sizeof(float);
 
     float* buffer = nullptr;
@@ -212,15 +229,15 @@ TEST(kernel_replay_snapshot, hipmalloc_autocaptured_and_freed)
     ASSERT_EQ(hipMalloc(&buffer, bytes), hipSuccess);
     ASSERT_NE(buffer, nullptr);
 
-    EXPECT_EQ(mt::snap_inventory().size(), before_alloc + 1)
+    EXPECT_EQ(mt::snap_inventory(agent).size(), before_alloc + 1)
         << "hipMalloc was not auto-captured by the live-table tracker";
-    EXPECT_TRUE(inventory_contains(buffer))
+    EXPECT_TRUE(inventory_contains(buffer, agent))
         << "our device pointer is not in the auto-populated inventory";
 
-    const size_t before_free = mt::snap_inventory().size();
+    const size_t before_free = mt::snap_inventory(agent).size();
     ASSERT_EQ(hipFree(buffer), hipSuccess);
-    EXPECT_EQ(mt::snap_inventory().size(), before_free - 1) << "hipFree was not auto-removed";
-    EXPECT_FALSE(inventory_contains(buffer)) << "freed pointer still present in inventory";
+    EXPECT_EQ(mt::snap_inventory(agent).size(), before_free - 1) << "hipFree was not auto-removed";
+    EXPECT_FALSE(inventory_contains(buffer, agent)) << "freed pointer still present in inventory";
 }
 
 // iota A -> snapshot -> (sanity A) -> in-place kernel mutation (sanity mutated) -> restore -> A.
@@ -228,12 +245,15 @@ TEST(kernel_replay_snapshot, restore_reverts_device_memory)
 {
     if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
 
+    const auto agent = gpu_agent();
+    ASSERT_NE(agent.handle, 0U) << "no GPU agent found";
+
     const size_t bytes = N_ELEMS * sizeof(float);
 
     float* buffer = nullptr;
     ASSERT_EQ(hipMalloc(&buffer, bytes), hipSuccess);  // auto-captured
     ASSERT_NE(buffer, nullptr);
-    ASSERT_TRUE(inventory_contains(buffer));
+    ASSERT_TRUE(inventory_contains(buffer, agent));
 
     launch_iota(buffer, 1.0f, N_ELEMS);
     {
@@ -243,8 +263,7 @@ TEST(kernel_replay_snapshot, restore_reverts_device_memory)
             ASSERT_FLOAT_EQ(a[i], 1.0f + i) << "pre-mutation elem " << i;
     }
 
-    msnp::Snapshot snapshot{};
-    snapshot.snap();
+    auto snapshot = msnp::snap(agent);
 
     launch_add(buffer, 9000.0f, N_ELEMS);
     {
@@ -254,7 +273,7 @@ TEST(kernel_replay_snapshot, restore_reverts_device_memory)
             ASSERT_FLOAT_EQ(b[i], 9001.0f + i) << "mutated elem " << i;
     }
 
-    snapshot.restore();
+    msnp::restore(snapshot);
     {
         // restore reverted to A
         auto a = read_device(buffer, N_ELEMS);
@@ -271,6 +290,9 @@ TEST(kernel_replay_snapshot, restore_prevents_inplace_accumulation_across_passes
 {
     if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
 
+    const auto agent = gpu_agent();
+    ASSERT_NE(agent.handle, 0U) << "no GPU agent found";
+
     constexpr int   passes = 5;
     constexpr float y0     = 100.0f;
     constexpr float a      = 2.0f;  // x == 1 -> each saxpy pass adds exactly `a`
@@ -286,8 +308,7 @@ TEST(kernel_replay_snapshot, restore_prevents_inplace_accumulation_across_passes
     launch_fill(x, 1.0f, N_ELEMS);
     launch_fill(y, y0, N_ELEMS);
 
-    msnp::Snapshot snapshot{};
-    snapshot.snap();
+    auto snapshot = msnp::snap(agent);
 
     for(int pass = 0; pass < passes; ++pass)
     {
@@ -299,7 +320,7 @@ TEST(kernel_replay_snapshot, restore_prevents_inplace_accumulation_across_passes
                 ASSERT_FLOAT_EQ(mutated[i], y0 + a) << "pass " << pass << " elem " << i;
         }
 
-        snapshot.restore();
+        msnp::restore(snapshot);
         {
             // restore reverts to snapped inputs -- no accumulation into the next pass
             auto reverted = read_device(y, N_ELEMS);
@@ -323,6 +344,9 @@ TEST(kernel_replay_snapshot, restore_reverts_multiple_buffers)
 {
     if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
 
+    const auto agent = gpu_agent();
+    ASSERT_NE(agent.handle, 0U) << "no GPU agent found";
+
     const size_t bytes = N_ELEMS * sizeof(float);
 
     constexpr int                  kBufs = 3;
@@ -336,8 +360,7 @@ TEST(kernel_replay_snapshot, restore_reverts_multiple_buffers)
         launch_iota(buffers[b], base[b], N_ELEMS);
     }
 
-    msnp::Snapshot snapshot{};
-    snapshot.snap();
+    auto snapshot = msnp::snap(agent);
 
     for(int b = 0; b < kBufs; ++b)
     {
@@ -352,7 +375,7 @@ TEST(kernel_replay_snapshot, restore_reverts_multiple_buffers)
             ASSERT_FLOAT_EQ(mutated[i], base[b] + 77000.0f + i) << "buf " << b << " elem " << i;
     }
 
-    snapshot.restore();
+    msnp::restore(snapshot);
 
     for(int b = 0; b < kBufs; ++b)
     {
@@ -372,16 +395,20 @@ TEST(kernel_replay_snapshot, disabled_tracking_records_nothing)
 {
     if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
 
+    const auto agent = gpu_agent();
+    ASSERT_NE(agent.handle, 0U) << "no GPU agent found";
+
     const size_t bytes = 4096 * sizeof(float);
 
     ASSERT_EQ(mt::set_tracking_enabled(false), false);
-    const size_t before = mt::snap_inventory().size();
+    const size_t before = mt::snap_inventory(agent).size();
 
     float* d = nullptr;
     ASSERT_EQ(hipMalloc(&d, bytes), hipSuccess);
     ASSERT_NE(d, nullptr);
-    EXPECT_EQ(mt::snap_inventory().size(), before) << "allocation recorded while tracking disabled";
-    EXPECT_FALSE(inventory_contains(d)) << "disabled tracking still recorded the pointer";
+    EXPECT_EQ(mt::snap_inventory(agent).size(), before)
+        << "allocation recorded while tracking disabled";
+    EXPECT_FALSE(inventory_contains(d, agent)) << "disabled tracking still recorded the pointer";
 
     // restore the gate before freeing (and for subsequent tests)
     ASSERT_EQ(mt::set_tracking_enabled(true), true);
