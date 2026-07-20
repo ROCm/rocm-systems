@@ -124,6 +124,7 @@ See [docs/building.md](docs/building.md) for container setup with PyTorch.
 | Document | Description |
 |---|---|
 | [Utilities](lib/util/README.md) | Shared utility library (`lib/util/`) |
+| [ISA Gap Audit](docs/isa-gap-audit.md) | Workflow for auditing manual, XML, and rocjitsu ISA semantic gaps |
 | [rj_dbt_translate](docs/rj_dbt_translate.md) | Standalone DBT translation tool |
 | [CHANGELOG](CHANGELOG.md) | Release history |
 
