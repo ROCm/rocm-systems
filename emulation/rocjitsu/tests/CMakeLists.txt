@@ -532,7 +532,7 @@ target_link_libraries(
     launch_preload_test
     PRIVATE rocjitsu_cli_launch_preload GTest::gtest_main
 )
-if(RJ_ENABLE_ASAN AND RJ_SANITIZE_SHARED)
+if(RJ_ENABLE_ASAN AND RJ_SANITIZER_USE_SHARED)
     target_compile_definitions(
         launch_preload_test
         PRIVATE
@@ -540,7 +540,7 @@ if(RJ_ENABLE_ASAN AND RJ_SANITIZE_SHARED)
             RJ_EXPECTED_SHARED_ASAN_RUNTIME="${RJ_ASAN_SHARED_LIBRARY}"
     )
 endif()
-if(RJ_ENABLE_TSAN AND RJ_SANITIZE_SHARED)
+if(RJ_ENABLE_TSAN AND RJ_SANITIZER_USE_SHARED)
     target_compile_definitions(
         launch_preload_test
         PRIVATE
@@ -942,7 +942,7 @@ if(RJ_INSTALL_TESTS)
 endif()
 
 set(RJ_EARLY_MMAP_ASAN_PRELOAD "")
-if(RJ_ENABLE_ASAN AND RJ_SANITIZE_SHARED)
+if(RJ_ENABLE_ASAN AND RJ_SANITIZER_USE_SHARED)
     set(RJ_EARLY_MMAP_ASAN_PRELOAD "${RJ_ASAN_SHARED_LIBRARY}:")
 endif()
 
@@ -1977,9 +1977,9 @@ if(RJ_ENABLE_HIP_TESTS)
             "${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}"
         )
         set(RJ_DAEMON_SANITIZER_PRELOAD "")
-        if(RJ_ENABLE_ASAN AND RJ_SANITIZE_SHARED)
+        if(RJ_ENABLE_ASAN AND RJ_SANITIZER_USE_SHARED)
             set(RJ_DAEMON_SANITIZER_PRELOAD "${RJ_ASAN_SHARED_LIBRARY}:")
-        elseif(RJ_ENABLE_TSAN AND RJ_SANITIZE_SHARED)
+        elseif(RJ_ENABLE_TSAN AND RJ_SANITIZER_USE_SHARED)
             set(RJ_DAEMON_SANITIZER_PRELOAD "${RJ_TSAN_SHARED_LIBRARY}:")
         endif()
 

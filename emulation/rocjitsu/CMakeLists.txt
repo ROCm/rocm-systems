@@ -82,7 +82,22 @@ option(RJ_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(RJ_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 option(RJ_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
 option(RJ_ENABLE_MSAN "Enable MemorySanitizer" OFF)
-option(RJ_SANITIZE_SHARED "Link sanitizer runtime libraries dynamically" ON)
+set(RJ_SANITIZER_RUNTIME
+    "AUTO"
+    CACHE STRING
+    "Sanitizer runtime linkage policy (AUTO, SHARED, or STATIC)"
+)
+set_property(CACHE RJ_SANITIZER_RUNTIME PROPERTY STRINGS AUTO SHARED STATIC)
+string(TOUPPER "${RJ_SANITIZER_RUNTIME}" RJ_SANITIZER_RUNTIME)
+set(_rj_sanitizer_runtime_values AUTO SHARED STATIC)
+if(NOT RJ_SANITIZER_RUNTIME IN_LIST _rj_sanitizer_runtime_values)
+    message(
+        FATAL_ERROR
+        "RJ_SANITIZER_RUNTIME must be AUTO, SHARED, or STATIC; got "
+        "'${RJ_SANITIZER_RUNTIME}'."
+    )
+endif()
+unset(_rj_sanitizer_runtime_values)
 option(RJ_CLANG_TIDY "Enable clang-tidy static analysis" OFF)
 option(
     RJ_ENABLE_EXPENSIVE_CHECKS
@@ -110,6 +125,7 @@ if(RJ_ENABLE_MSAN)
     list(APPEND _rj_sanitizer_kinds memory)
 endif()
 list(LENGTH _rj_sanitizer_kinds _rj_sanitizer_count)
+set(RJ_SANITIZER_USE_SHARED OFF)
 
 if(LTO)
     if(_rj_sanitizer_count GREATER 0)
@@ -188,6 +204,32 @@ if(_rj_sanitizer_count GREATER 0)
             message(FATAL_ERROR "Only RJ_ENABLE_ASAN is supported by MSVC.")
         endif()
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+        if(
+            memory IN_LIST _rj_sanitizer_kinds
+            AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang"
+        )
+            message(FATAL_ERROR "MemorySanitizer requires Clang.")
+        endif()
+        if(RJ_SANITIZER_RUNTIME STREQUAL "SHARED")
+            if(memory IN_LIST _rj_sanitizer_kinds)
+                message(
+                    FATAL_ERROR
+                    "MemorySanitizer has no supported shared runtime; use "
+                    "RJ_SANITIZER_RUNTIME=AUTO or STATIC."
+                )
+            endif()
+            set(RJ_SANITIZER_USE_SHARED ON)
+        elseif(
+            RJ_SANITIZER_RUNTIME STREQUAL "AUTO"
+            AND NOT memory IN_LIST _rj_sanitizer_kinds
+        )
+            set(RJ_SANITIZER_USE_SHARED ON)
+        endif()
+        if(RJ_SANITIZER_USE_SHARED)
+            message(STATUS "Sanitizer runtime linkage: shared")
+        else()
+            message(STATUS "Sanitizer runtime linkage: static")
+        endif()
         list(APPEND RJ_SANITIZER_COMPILE_OPTIONS "-fno-sanitize-recover=all")
         list(
             APPEND RJ_SANITIZER_COMPILE_OPTIONS
@@ -208,7 +250,7 @@ if(_rj_sanitizer_count GREATER 0)
                 add_compile_options(-Wno-maybe-uninitialized)
             endif()
         endif()
-        if(RJ_SANITIZE_SHARED)
+        if(RJ_SANITIZER_USE_SHARED)
             rj_find_sanitizer_shared_libraries(
                 RJ_SANITIZER_SHARED_LIBRARIES
                 RJ_ASAN_SHARED_LIBRARY
@@ -233,7 +275,7 @@ if(_rj_sanitizer_count GREATER 0)
         rj_sanitizer_runtime_link_options(
             _rj_sanitizer_runtime_link_options
             COMPILER_ID "${CMAKE_CXX_COMPILER_ID}"
-            SHARED "${RJ_SANITIZE_SHARED}"
+            SHARED "${RJ_SANITIZER_USE_SHARED}"
             SHARED_LIBRARIES ${RJ_SANITIZER_SHARED_LIBRARIES}
             SANITIZERS ${_rj_sanitizer_kinds}
         )
@@ -295,6 +337,13 @@ set(FLATBUFFERS_INSTALL OFF CACHE BOOL "" FORCE)
 set(FLATBUFFERS_BUILD_FLATLIB ON CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(googletest flatbuffers)
+
+# flatc executes during the build and uses uninstrumented host libraries. Keep
+# that host tool runnable while the rocjitsu targets remain MSan-instrumented.
+if(RJ_ENABLE_MSAN)
+    target_compile_options(flatc PRIVATE -fno-sanitize=memory)
+    target_link_options(flatc PRIVATE -fno-sanitize=memory)
+endif()
 
 include(rj_flatbuffers)
 

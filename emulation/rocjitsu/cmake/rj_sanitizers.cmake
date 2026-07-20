@@ -148,8 +148,6 @@ function(
                 )
             elseif(_sanitizer STREQUAL "thread")
                 set(_runtime_name "libclang_rt.tsan-${_sanitizer_arch}.so")
-            elseif(_sanitizer STREQUAL "memory")
-                set(_runtime_name "libclang_rt.msan-${_sanitizer_arch}.so")
             endif()
         endif()
 
@@ -191,9 +189,9 @@ function(
         if(NOT _runtime_library)
             message(
                 FATAL_ERROR
-                "RJ_SANITIZE_SHARED=ON requires the ${_sanitizer} sanitizer "
-                "shared runtime, but CMake could not locate ${_runtime_name} "
-                "with ${RJ_SANI_LIB_COMPILER}."
+                "RJ_SANITIZER_RUNTIME=SHARED requires the ${_sanitizer} "
+                "sanitizer shared runtime, but CMake could not locate "
+                "${_runtime_name} with ${RJ_SANI_LIB_COMPILER}."
             )
         endif()
 
