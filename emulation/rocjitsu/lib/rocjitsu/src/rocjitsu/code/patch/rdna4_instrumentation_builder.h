@@ -120,6 +120,26 @@ build_ds_store_b32(uint16_t vaddr, uint16_t vdata, uint8_t byte_offset, rj_code_
                                      (static_cast<uint32_t>(vdata) << 8u)};
 }
 
+/// @brief Encode RDNA4/gfx1250 `ds_store_b64 vaddr, v[vdata:vdata+1]`.
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
+build_ds_store_b64(uint16_t vaddr, uint16_t vdata, uint8_t byte_offset, rj_code_arch_t arch) {
+  if (!is_rdna4_family_arch(arch) || vaddr > 255 || vdata > 254)
+    return std::nullopt;
+  return std::array<uint32_t, 2>{0xD9340000u | byte_offset,
+                                 static_cast<uint32_t>(vaddr) |
+                                     (static_cast<uint32_t>(vdata) << 8u)};
+}
+
+/// @brief Encode RDNA4/gfx1250 `ds_store_b128 vaddr, v[vdata:vdata+3]`.
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
+build_ds_store_b128(uint16_t vaddr, uint16_t vdata, uint8_t byte_offset, rj_code_arch_t arch) {
+  if (!is_rdna4_family_arch(arch) || vaddr > 255 || vdata > 252)
+    return std::nullopt;
+  return std::array<uint32_t, 2>{0xDB7C0000u | byte_offset,
+                                 static_cast<uint32_t>(vaddr) |
+                                     (static_cast<uint32_t>(vdata) << 8u)};
+}
+
 /// @brief Encode RDNA4 `ds_storexchg_rtn_b64 vdst, vaddr, vdata`.
 ///
 /// @details The data and destination operands each name the first register of
@@ -130,10 +150,48 @@ build_ds_storexchg_rtn_b64(uint16_t vdst, uint16_t vaddr, uint16_t vdata, uint8_
                            rj_code_arch_t arch) {
   if (!is_rdna4_family_arch(arch) || vdst > 254 || vaddr > 255 || vdata > 254)
     return std::nullopt;
-  return std::array<uint32_t, 2>{
-      0xD9B40000u | byte_offset,
-      static_cast<uint32_t>(vaddr) | (static_cast<uint32_t>(vdata) << 8u) |
-          (static_cast<uint32_t>(vdata + 1u) << 16u) | (static_cast<uint32_t>(vdst) << 24u)};
+  return std::array<uint32_t, 2>{0xD9B40000u | byte_offset,
+                                 static_cast<uint32_t>(vaddr) |
+                                     (static_cast<uint32_t>(vdata) << 8u) |
+                                     (static_cast<uint32_t>(vdst) << 24u)};
+}
+
+/// @brief Encode RDNA4/gfx1250 `ds_storexchg_rtn_b32 vdst, vaddr, vdata`.
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
+build_ds_storexchg_rtn_b32(uint16_t vdst, uint16_t vaddr, uint16_t vdata, uint8_t byte_offset,
+                           rj_code_arch_t arch) {
+  if (!is_rdna4_family_arch(arch) || vdst > 255 || vaddr > 255 || vdata > 255)
+    return std::nullopt;
+  return std::array<uint32_t, 2>{0xD8B40000u | byte_offset,
+                                 static_cast<uint32_t>(vaddr) |
+                                     (static_cast<uint32_t>(vdata) << 8u) |
+                                     (static_cast<uint32_t>(vdst) << 24u)};
+}
+
+/// @brief Encode RDNA4/gfx1250 `ds_or_rtn_b32 vdst, vaddr, vdata`.
+///
+/// @details The destination receives the prior 32-bit LDS word after the
+/// caller waits for DSCNT. This is used to claim and observe independently
+/// packed lazy-initialization state bits without disturbing adjacent cells.
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
+build_ds_or_rtn_b32(uint16_t vdst, uint16_t vaddr, uint16_t vdata, uint8_t byte_offset,
+                    rj_code_arch_t arch) {
+  if (!is_rdna4_family_arch(arch) || vdst > 255 || vaddr > 255 || vdata > 255)
+    return std::nullopt;
+  return std::array<uint32_t, 2>{0xD8A80000u | byte_offset,
+                                 static_cast<uint32_t>(vaddr) |
+                                     (static_cast<uint32_t>(vdata) << 8u) |
+                                     (static_cast<uint32_t>(vdst) << 24u)};
+}
+
+/// @brief Encode RDNA4/gfx1250 `ds_load_b32 vdst, vaddr`.
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
+build_ds_load_b32(uint16_t vdst, uint16_t vaddr, uint8_t byte_offset, rj_code_arch_t arch) {
+  if (!is_rdna4_family_arch(arch) || vdst > 255 || vaddr > 255)
+    return std::nullopt;
+  return std::array<uint32_t, 2>{0xD8D80000u | byte_offset,
+                                 static_cast<uint32_t>(vaddr) |
+                                     (static_cast<uint32_t>(vdst) << 24u)};
 }
 
 /// @brief Encode VOP2 `v_min_u32 vdst, literal, vsrc1`.
@@ -197,7 +255,7 @@ build_v_xor_b32_e32(uint16_t vdst, uint16_t src0, uint16_t vsrc1, rj_code_arch_t
 /// ALU dependency wait. VCC is clobbered and must be saved by the caller.
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 5>>
 build_v_add_u64_vgpr_offset(uint16_t address_vgpr, uint16_t offset_vgpr, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || address_vgpr >= 255 || offset_vgpr > 255)
+  if (!is_rdna4_family_arch(arch) || address_vgpr >= 255 || offset_vgpr > 255)
     return std::nullopt;
   constexpr uint16_t kVccLo = 106;
   const auto pack_vop3 = [](uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1, uint16_t src2,
@@ -208,12 +266,26 @@ build_v_add_u64_vgpr_offset(uint16_t address_vgpr, uint16_t offset_vgpr, rj_code
     return std::array<uint32_t, 2>{w0, w1};
   };
   const auto low =
-      pack_vop3(rdna4::kVAddCoU32Vop3SdstEnc, static_cast<uint8_t>(address_vgpr),
-                vector_source_vgpr(offset_vgpr), vector_source_vgpr(address_vgpr), 0, kVccLo);
+      arch == ROCJITSU_CODE_ARCH_GFX1250
+          ? gfx1250::build_vop3_sdst_enc(gfx1250::kVAddCoU32Vop3SdstEnc,
+                                         {.vdst = static_cast<uint8_t>(address_vgpr),
+                                          .sdst = kVccLo,
+                                          .src0 = vector_source_vgpr(offset_vgpr),
+                                          .src1 = vector_source_vgpr(address_vgpr)})
+          : pack_vop3(rdna4::kVAddCoU32Vop3SdstEnc, static_cast<uint8_t>(address_vgpr),
+                      vector_source_vgpr(offset_vgpr), vector_source_vgpr(address_vgpr), 0, kVccLo);
   const auto high =
-      pack_vop3(rdna4::kVAddCoCiU32Vop3SdstEnc, static_cast<uint8_t>(address_vgpr + 1u),
-                scalar_positive_inline_u32(0),
-                vector_source_vgpr(static_cast<uint16_t>(address_vgpr + 1u)), kVccLo, kVccLo);
+      arch == ROCJITSU_CODE_ARCH_GFX1250
+          ? gfx1250::build_vop3_sdst_enc(
+                gfx1250::kVAddCoCiU32Vop3SdstEnc,
+                {.vdst = static_cast<uint8_t>(address_vgpr + 1u),
+                 .sdst = kVccLo,
+                 .src0 = scalar_positive_inline_u32(0),
+                 .src1 = vector_source_vgpr(static_cast<uint16_t>(address_vgpr + 1u)),
+                 .src2 = kVccLo})
+          : pack_vop3(rdna4::kVAddCoCiU32Vop3SdstEnc, static_cast<uint8_t>(address_vgpr + 1u),
+                      scalar_positive_inline_u32(0),
+                      vector_source_vgpr(static_cast<uint16_t>(address_vgpr + 1u)), kVccLo, kVccLo);
   return std::array<uint32_t, 5>{low[0], low[1], pack_sopp(rdna4::kSWaitAlu, 0xfffdu), high[0],
                                  high[1]};
 }
@@ -226,7 +298,7 @@ build_v_add_u64_vgpr_offset(uint16_t address_vgpr, uint16_t offset_vgpr, rj_code
 build_v_add_u64_signed_i24(uint16_t address_vgpr, int32_t displacement, rj_code_arch_t arch) {
   constexpr int32_t kSigned24Min = -(1 << 23);
   constexpr int32_t kSigned24Max = (1 << 23) - 1;
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || address_vgpr >= 255 || displacement < kSigned24Min ||
+  if (!is_rdna4_family_arch(arch) || address_vgpr >= 255 || displacement < kSigned24Min ||
       displacement > kSigned24Max)
     return std::nullopt;
   constexpr uint16_t kVccLo = 106;
@@ -238,23 +310,50 @@ build_v_add_u64_signed_i24(uint16_t address_vgpr, int32_t displacement, rj_code_
     const uint32_t w1 = (src0 & 0x1ffu) | ((src1 & 0x1ffu) << 9u) | ((src2 & 0x1ffu) << 18u);
     return std::array<uint32_t, 2>{w0, w1};
   };
-  const auto low = pack_vop3(rdna4::kVAddCoU32Vop3SdstEnc, static_cast<uint8_t>(address_vgpr),
-                             kVopLiteralSource, vector_source_vgpr(address_vgpr), 0, kVccLo);
   const uint16_t high_displacement =
       displacement < 0 ? kScalarInlineNegativeOne : scalar_positive_inline_u32(0);
-  const auto high = pack_vop3(
-      rdna4::kVAddCoCiU32Vop3SdstEnc, static_cast<uint8_t>(address_vgpr + 1u), high_displacement,
-      vector_source_vgpr(static_cast<uint16_t>(address_vgpr + 1u)), kVccLo, kVccLo);
+  uint16_t low_displacement = kVopLiteralSource;
+  uint32_t low_extension = static_cast<uint32_t>(displacement);
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250 && displacement >= 0 && displacement <= 64) {
+    low_displacement = scalar_positive_inline_u32(static_cast<uint16_t>(displacement));
+    low_extension = build_s_nop(0, arch);
+  } else if (arch == ROCJITSU_CODE_ARCH_GFX1250 && displacement >= -16 && displacement < 0) {
+    low_displacement = static_cast<uint16_t>(192 - displacement);
+    low_extension = build_s_nop(0, arch);
+  }
+  const auto low = arch == ROCJITSU_CODE_ARCH_GFX1250
+                       ? gfx1250::build_vop3_sdst_enc(gfx1250::kVAddCoU32Vop3SdstEnc,
+                                                      {.vdst = static_cast<uint8_t>(address_vgpr),
+                                                       .sdst = kVccLo,
+                                                       .src0 = low_displacement,
+                                                       .src1 = vector_source_vgpr(address_vgpr)})
+                       : pack_vop3(rdna4::kVAddCoU32Vop3SdstEnc, static_cast<uint8_t>(address_vgpr),
+                                   kVopLiteralSource, vector_source_vgpr(address_vgpr), 0, kVccLo);
+  const auto high =
+      arch == ROCJITSU_CODE_ARCH_GFX1250
+          ? gfx1250::build_vop3_sdst_enc(
+                gfx1250::kVAddCoCiU32Vop3SdstEnc,
+                {.vdst = static_cast<uint8_t>(address_vgpr + 1u),
+                 .sdst = kVccLo,
+                 .src0 = high_displacement,
+                 .src1 = vector_source_vgpr(static_cast<uint16_t>(address_vgpr + 1u)),
+                 .src2 = kVccLo})
+          : pack_vop3(rdna4::kVAddCoCiU32Vop3SdstEnc, static_cast<uint8_t>(address_vgpr + 1u),
+                      high_displacement,
+                      vector_source_vgpr(static_cast<uint16_t>(address_vgpr + 1u)), kVccLo, kVccLo);
   return std::array<uint32_t, 6>{
-      low[0],  low[1], static_cast<uint32_t>(displacement), pack_sopp(rdna4::kSWaitAlu, 0xfffdu),
-      high[0], high[1]};
+      low[0], low[1], low_extension, pack_sopp(rdna4::kSWaitAlu, 0xfffdu), high[0], high[1]};
 }
 
 /// @brief Encode RDNA4 `v_readfirstlane_b32 sdst, vsrc`.
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_v_readfirstlane_b32(uint16_t sdst, uint16_t vsrc, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || sdst > 127 || vsrc > 255)
+  if (!is_rdna4_family_arch(arch) || sdst > 127 || vsrc > 255)
     return std::nullopt;
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return gfx1250::build_vop1(
+        gfx1250::kVReadfirstlaneB32Vop1,
+        {.src0 = vector_source_vgpr(vsrc), .vdst = static_cast<uint8_t>(sdst)})[0];
   return (0x3Fu << 25) | (static_cast<uint32_t>(sdst) << 17) | (2u << 9) | vector_source_vgpr(vsrc);
 }
 
@@ -264,7 +363,7 @@ build_v_mbcnt_lo_u32_b32(uint16_t vdst, uint16_t src0, uint16_t src1, rj_code_ar
   if (!is_rdna4_family_arch(arch) || vdst > 255 || src0 > 511 || src1 > 511)
     return std::nullopt;
   return std::array<uint32_t, 2>{0xD71F0000u | static_cast<uint32_t>(vdst),
-                                 0x02000000u | (static_cast<uint32_t>(src1) << 9u) | src0};
+                                 (static_cast<uint32_t>(src1) << 9u) | src0};
 }
 
 /// @brief Encode RDNA4 `v_mbcnt_hi_u32_b32 vdst, src0, src1`.
@@ -273,7 +372,7 @@ build_v_mbcnt_hi_u32_b32(uint16_t vdst, uint16_t src0, uint16_t src1, rj_code_ar
   if (!is_rdna4_family_arch(arch) || vdst > 255 || src0 > 511 || src1 > 511)
     return std::nullopt;
   return std::array<uint32_t, 2>{0xD7200000u | static_cast<uint32_t>(vdst),
-                                 0x02000000u | (static_cast<uint32_t>(src1) << 9u) | src0};
+                                 (static_cast<uint32_t>(src1) << 9u) | src0};
 }
 
 /// @brief Encode RDNA4 `v_cmp_eq_u32_e32 vcc_lo, src0, vsrc1`.
@@ -284,12 +383,16 @@ build_v_cmp_eq_u32_e32_vcc(uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {
   return 0x7C940000u | (static_cast<uint32_t>(vsrc1) << 9u) | src0;
 }
 
-/// @brief Encode RDNA4 `v_cmp_ne_u32_e32 vcc_lo, src0, vsrc1`.
+/// @brief Encode RDNA4-family `v_cmp_ne_u32_e32 vcc_lo, src0, vsrc1`.
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_v_cmp_ne_u32_e32_vcc(uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || src0 > 511 || vsrc1 > 255)
+  if (!is_rdna4_family_arch(arch) || src0 > 511 || vsrc1 > 255)
     return std::nullopt;
-  return 0x7C9A0000u | (static_cast<uint32_t>(vsrc1) << 9u) | src0;
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return gfx1250::build_vopc(gfx1250::kVCmpNeU32Vopc,
+                               {.src0 = src0, .vsrc1 = static_cast<uint8_t>(vsrc1)})[0];
+  return rdna4::build_vopc(rdna4::kVCmpNeU32Vopc,
+                           {.src0 = src0, .vsrc1 = static_cast<uint8_t>(vsrc1)})[0];
 }
 
 /// @brief Encode RDNA4 `v_cmp_gt_u32_e32 vcc_lo, src0, vsrc1`.
@@ -302,6 +405,15 @@ build_v_cmp_gt_u32_e32_vcc(uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {
   if (!is_rdna4_family_arch(arch) || src0 > 511 || vsrc1 > 255)
     return std::nullopt;
   return 0x7C980000u | (static_cast<uint32_t>(vsrc1) << 9u) | src0;
+}
+
+/// @brief Encode RDNA4/gfx1250 `v_cmp_gt_u32_e32 vcc_lo, literal, vsrc1`.
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
+build_v_cmp_gt_u32_e32_vcc_literal(uint32_t literal, uint16_t vsrc1, rj_code_arch_t arch) {
+  const auto compare = build_v_cmp_gt_u32_e32_vcc(kVopLiteralSource, vsrc1, arch);
+  if (!compare)
+    return std::nullopt;
+  return std::array<uint32_t, 2>{*compare, literal};
 }
 
 /// @brief Encode RDNA4 `v_mov_b32` in VOP3 form with a literal source.
@@ -318,7 +430,7 @@ build_flat_store_b32_vaddr_vsrc(uint16_t vaddr, uint16_t vsrc, rj_code_arch_t ar
                                 uint32_t byte_offset = 0) {
   if (!is_rdna4_family_arch(arch) || vaddr > 255 || vsrc > 255 || byte_offset > 0xffffffu)
     return std::nullopt;
-  constexpr uint32_t kRdna4FlatNoSaddr = 0x7C;
+  constexpr uint32_t kRdna4FlatNoSaddr = 0x7F;
   return std::array<uint32_t, 3>{0xEC068000u | kRdna4FlatNoSaddr,
                                  static_cast<uint32_t>(vsrc) << 23u,
                                  static_cast<uint32_t>(vaddr) | (byte_offset << 8u)};
@@ -328,9 +440,9 @@ build_flat_store_b32_vaddr_vsrc(uint16_t vaddr, uint16_t vsrc, rj_code_arch_t ar
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
 build_flat_load_b32_vaddr_vdst(uint16_t vaddr, uint16_t vdst, rj_code_arch_t arch,
                                uint32_t byte_offset = 0) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vaddr > 255 || vdst > 255 || byte_offset > 0xffffffu)
+  if (!is_rdna4_family_arch(arch) || vaddr > 255 || vdst > 255 || byte_offset > 0xffffffu)
     return std::nullopt;
-  constexpr uint32_t kRdna4FlatNoSaddr = 0x7C;
+  constexpr uint32_t kRdna4FlatNoSaddr = 0x7F;
   return std::array<uint32_t, 3>{0xEC050000u | kRdna4FlatNoSaddr, static_cast<uint32_t>(vdst),
                                  static_cast<uint32_t>(vaddr) | (byte_offset << 8u)};
 }
@@ -343,7 +455,7 @@ build_flat_load_b32_vaddr_vdst(uint16_t vaddr, uint16_t vdst, rj_code_arch_t arc
 /// is byte-addressed.
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
 build_address_free_scratch_store_b32(uint16_t vsrc, uint32_t byte_offset, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vsrc > 255 ||
+  if (!is_rdna4_family_arch(arch) || vsrc > 255 ||
       byte_offset > kMaxAddressFreeScratchDwordOffset || byte_offset % sizeof(uint32_t) != 0) {
     return std::nullopt;
   }
@@ -356,7 +468,7 @@ build_address_free_scratch_store_b32(uint16_t vsrc, uint32_t byte_offset, rj_cod
 /// @copydetails build_address_free_scratch_store_b32
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
 build_address_free_scratch_load_b32(uint16_t vdst, uint32_t byte_offset, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vdst > 255 ||
+  if (!is_rdna4_family_arch(arch) || vdst > 255 ||
       byte_offset > kMaxAddressFreeScratchDwordOffset || byte_offset % sizeof(uint32_t) != 0) {
     return std::nullopt;
   }
@@ -373,7 +485,7 @@ build_address_free_scratch_load_b32(uint16_t vdst, uint32_t byte_offset, rj_code
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
 build_scratch_store_b32_saddr(uint16_t vsrc, uint16_t saddr, uint32_t byte_offset,
                               rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vsrc > 255 || saddr > 127 ||
+  if (!is_rdna4_family_arch(arch) || vsrc > 255 || saddr > 127 ||
       byte_offset > kMaxAddressFreeScratchDwordOffset || byte_offset % sizeof(uint32_t) != 0) {
     return std::nullopt;
   }
@@ -386,7 +498,7 @@ build_scratch_store_b32_saddr(uint16_t vsrc, uint16_t saddr, uint32_t byte_offse
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
 build_scratch_load_b32_saddr(uint16_t vdst, uint16_t saddr, uint32_t byte_offset,
                              rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vdst > 255 || saddr > 127 ||
+  if (!is_rdna4_family_arch(arch) || vdst > 255 || saddr > 127 ||
       byte_offset > kMaxAddressFreeScratchDwordOffset || byte_offset % sizeof(uint32_t) != 0) {
     return std::nullopt;
   }
@@ -448,7 +560,7 @@ build_flat_atomic_add_u32_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uint16_
                                           rj_code_arch_t arch) {
   if (!is_rdna4_family_arch(arch) || vaddr > 255 || vsrc > 255 || vdst > 255 || scope > 3)
     return std::nullopt;
-  constexpr uint32_t kRdna4FlatNoSaddr = 0x7C;
+  constexpr uint32_t kRdna4FlatNoSaddr = 0x7F;
   constexpr uint32_t kRdna4AtomicReturnTh = 1;
   const uint32_t th = return_old_value ? kRdna4AtomicReturnTh : 0u;
   return std::array<uint32_t, 3>{0xEC0D4000u | kRdna4FlatNoSaddr,
@@ -469,7 +581,7 @@ build_flat_atomic_or_u32_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uint16_t
                                          rj_code_arch_t arch) {
   if (!is_rdna4_family_arch(arch) || vaddr > 255 || vsrc > 255 || vdst > 255 || scope > 3)
     return std::nullopt;
-  constexpr uint32_t kRdna4FlatNoSaddr = 0x7C;
+  constexpr uint32_t kRdna4FlatNoSaddr = 0x7F;
   constexpr uint32_t kRdna4AtomicReturnTh = 1;
   const uint32_t th = return_old_value ? kRdna4AtomicReturnTh : 0u;
   return std::array<uint32_t, 3>{0xEC0F4000u | kRdna4FlatNoSaddr,
@@ -485,11 +597,19 @@ build_flat_atomic_or_u32_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uint16_t
 build_flat_atomic_cmpswap_b32_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uint16_t vdst,
                                               bool return_old_value, uint8_t scope,
                                               rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vaddr > 254 || vsrc > 254 || vdst > 255 || scope > 3)
+  if (!is_rdna4_family_arch(arch) || vaddr > 254 || vsrc > 254 || vdst > 255 || scope > 3)
     return std::nullopt;
-  constexpr uint32_t kRdna4FlatNoSaddr = 0x7C;
+  constexpr uint32_t kRdna4FlatNoSaddr = 0x7F;
   constexpr uint32_t kRdna4AtomicReturnTh = 1;
   const uint32_t th = return_old_value ? kRdna4AtomicReturnTh : 0u;
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return gfx1250::build_vflat(gfx1250::kFlatAtomicCmpswapB32Vflat,
+                                {.saddr = kRdna4FlatNoSaddr,
+                                 .vdst = static_cast<uint8_t>(vdst),
+                                 .scope = scope,
+                                 .th = static_cast<uint8_t>(th),
+                                 .vsrc = static_cast<uint8_t>(vsrc),
+                                 .vaddr = static_cast<uint8_t>(vaddr)});
   return std::array<uint32_t, 3>{0xEC0D0000u | kRdna4FlatNoSaddr,
                                  static_cast<uint32_t>(vdst) |
                                      (static_cast<uint32_t>(scope) << 18u) | (th << 20u) |
@@ -508,11 +628,19 @@ build_flat_atomic_cmpswap_b32_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uin
 build_flat_atomic_swap_b64_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uint16_t vdst,
                                            bool return_old_value, uint8_t scope,
                                            rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vaddr > 254 || vsrc > 254 || vdst > 254 || scope > 3)
+  if (!is_rdna4_family_arch(arch) || vaddr > 254 || vsrc > 254 || vdst > 254 || scope > 3)
     return std::nullopt;
-  constexpr uint32_t kRdna4FlatNoSaddr = 0x7C;
+  constexpr uint32_t kRdna4FlatNoSaddr = 0x7F;
   constexpr uint32_t kRdna4AtomicReturnTh = 1;
   const uint32_t th = return_old_value ? kRdna4AtomicReturnTh : 0u;
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return gfx1250::build_vflat(gfx1250::kFlatAtomicSwapB64Vflat,
+                                {.saddr = kRdna4FlatNoSaddr,
+                                 .vdst = static_cast<uint8_t>(vdst),
+                                 .scope = scope,
+                                 .th = static_cast<uint8_t>(th),
+                                 .vsrc = static_cast<uint8_t>(vsrc),
+                                 .vaddr = static_cast<uint8_t>(vaddr)});
   return std::array<uint32_t, 3>{0xEC104000u | kRdna4FlatNoSaddr,
                                  static_cast<uint32_t>(vdst) |
                                      (static_cast<uint32_t>(scope) << 18u) | (th << 20u) |
@@ -529,11 +657,19 @@ build_flat_atomic_swap_b64_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uint16
 build_flat_atomic_add_u64_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uint16_t vdst,
                                           bool return_old_value, uint8_t scope,
                                           rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vaddr > 254 || vsrc > 254 || vdst > 254 || scope > 3)
+  if (!is_rdna4_family_arch(arch) || vaddr > 254 || vsrc > 254 || vdst > 254 || scope > 3)
     return std::nullopt;
-  constexpr uint32_t kRdna4FlatNoSaddr = 0x7C;
+  constexpr uint32_t kRdna4FlatNoSaddr = 0x7F;
   constexpr uint32_t kRdna4AtomicReturnTh = 1;
   const uint32_t th = return_old_value ? kRdna4AtomicReturnTh : 0u;
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return gfx1250::build_vflat(gfx1250::kFlatAtomicAddU64Vflat,
+                                {.saddr = kRdna4FlatNoSaddr,
+                                 .vdst = static_cast<uint8_t>(vdst),
+                                 .scope = scope,
+                                 .th = static_cast<uint8_t>(th),
+                                 .vsrc = static_cast<uint8_t>(vsrc),
+                                 .vaddr = static_cast<uint8_t>(vaddr)});
   return std::array<uint32_t, 3>{0xEC10C000u | kRdna4FlatNoSaddr,
                                  static_cast<uint32_t>(vdst) |
                                      (static_cast<uint32_t>(scope) << 18u) | (th << 20u) |
@@ -587,6 +723,24 @@ build_s_and_not1_b64(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch
     return std::nullopt;
   constexpr uint32_t kRdna4Sop2AndNot1B64 = 0x23;
   return pack_sop2(kRdna4Sop2AndNot1B64, sdst, ssrc0, ssrc1);
+}
+
+/// @brief Encode RDNA4/gfx1250 `s_and_b64`.
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+build_s_and_b64(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch) {
+  if (!is_rdna4_family_arch(arch) || sdst > 126 || ssrc0 > 254 || ssrc1 > 254)
+    return std::nullopt;
+  constexpr uint32_t kRdna4Sop2AndB64 = 0x17;
+  return pack_sop2(kRdna4Sop2AndB64, sdst, ssrc0, ssrc1);
+}
+
+/// @brief Encode RDNA4/gfx1250 `s_bcnt1_i32_b64`.
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+build_s_bcnt1_i32_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch) {
+  if (!is_rdna4_family_arch(arch) || sdst > 127 || ssrc0 > 254)
+    return std::nullopt;
+  constexpr uint32_t kRdna4Sop1Bcnt1I32B64 = 25u;
+  return pack_sop1(kRdna4Sop1Bcnt1I32B64, sdst, ssrc0);
 }
 
 /// @brief Encode RDNA4 `s_xor_b64 s[sdst:sdst+1],

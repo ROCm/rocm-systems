@@ -36,6 +36,28 @@ TEST(InstructionBuilder, BuildAddressFreeScratchB32) {
   EXPECT_EQ(load_inst->size(), 12u);
 }
 
+TEST(InstructionBuilder, BuildGfx1250AddressFreeScratchB32) {
+  const auto store = build_address_free_scratch_store_b32(
+      /*vsrc=*/5, /*byte_offset=*/16, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto load = build_address_free_scratch_load_b32(
+      /*vdst=*/5, /*byte_offset=*/16, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(store);
+  ASSERT_TRUE(load);
+  EXPECT_EQ(*store, (std::array<uint32_t, 3>{0xed06807cu, 0x02800000u, 0x00001000u}));
+  EXPECT_EQ(*load, (std::array<uint32_t, 3>{0xed05007cu, 0x00000005u, 0x00001000u}));
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> store_inst(decoder->decode(store->data()));
+  std::unique_ptr<Instruction> load_inst(decoder->decode(load->data()));
+  ASSERT_NE(store_inst, nullptr);
+  ASSERT_NE(load_inst, nullptr);
+  EXPECT_EQ(store_inst->mnemonic(), "scratch_store_b32");
+  EXPECT_EQ(load_inst->mnemonic(), "scratch_load_b32");
+  EXPECT_EQ(store_inst->size(), 12u);
+  EXPECT_EQ(load_inst->size(), 12u);
+}
+
 TEST(InstructionBuilder, AddressFreeScratchOffsetBoundary) {
   const auto store = build_address_free_scratch_store_b32(
       /*vsrc=*/255, kMaxAddressFreeScratchDwordOffset, ROCJITSU_CODE_ARCH_RDNA4);
@@ -143,13 +165,15 @@ TEST(InstructionBuilder, BuildVMbcntLaneIdSequence) {
       /*vdst=*/13, /*src0=*/0xC1, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(low);
   EXPECT_EQ((*low)[0], 0xD71F000Du);
-  EXPECT_EQ((*low)[1], 0x020100C1u);
+  // Pinned against LLVM's gfx1201 assembler. Reserved bit 25 must remain zero;
+  // setting it produces an illegal instruction on RDNA4.
+  EXPECT_EQ((*low)[1], 0x000100C1u);
 
   const auto high = build_v_mbcnt_hi_u32_b32(
       /*vdst=*/13, /*src0=*/0xC1, vector_source_vgpr(13), ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(high);
   EXPECT_EQ((*high)[0], 0xD720000Du);
-  EXPECT_EQ((*high)[1], 0x02021AC1u);
+  EXPECT_EQ((*high)[1], 0x00021AC1u);
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
@@ -465,15 +489,15 @@ TEST(InstructionBuilder, BuildGfx1250MoiBarrierRecordRecipeEncodings) {
   ASSERT_TRUE(save_scc);
   ASSERT_TRUE(restore_scc);
   ASSERT_TRUE(capacity_skip);
-  EXPECT_EQ(*mbcnt_low, (std::array<uint32_t, 2>{0xD71F000Du, 0x020100C1u}));
-  EXPECT_EQ(*mbcnt_high, (std::array<uint32_t, 2>{0xD720000Du, 0x02021AC1u}));
+  EXPECT_EQ(*mbcnt_low, (std::array<uint32_t, 2>{0xD71F000Du, 0x000100C1u}));
+  EXPECT_EQ(*mbcnt_high, (std::array<uint32_t, 2>{0xD720000Du, 0x00021AC1u}));
   EXPECT_EQ(*cmp_eq, 0x7C941A80u);
   EXPECT_EQ(*cmp_gt, 0x7C981484u);
   EXPECT_EQ(*mov_literal, (std::array<uint32_t, 3>{0xD581000Du, 0x000000FFu, 0x12345678u}));
-  EXPECT_EQ(*flat_store, (std::array<uint32_t, 3>{0xEC06807Cu, 0x05000000u, 0x00000008u}));
+  EXPECT_EQ(*flat_store, (std::array<uint32_t, 3>{0xEC06807Fu, 0x05000000u, 0x00000008u}));
   EXPECT_EQ(*store_wait, 0xBFC10000u);
   EXPECT_EQ(*load_wait, 0xBFC00000u);
-  EXPECT_EQ(*atomic_add, (std::array<uint32_t, 3>{0xEC0D407Cu, 0x0518000Au, 0x00000008u}));
+  EXPECT_EQ(*atomic_add, (std::array<uint32_t, 3>{0xEC0D407Fu, 0x0518000Au, 0x00000008u}));
   EXPECT_EQ(*save_exec, 0xBE9E216Au);
   EXPECT_EQ(*restore_exec, 0xBEFE011Eu);
   EXPECT_EQ(*save_scc, 0x98148081u);
@@ -501,7 +525,7 @@ TEST(InstructionBuilder, BuildFlatStoreB32) {
       build_flat_store_b32_vaddr_vsrc(/*vaddr=*/8, /*vsrc=*/10, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(words);
 
-  EXPECT_EQ((*words)[0], 0xEC06807Cu);
+  EXPECT_EQ((*words)[0], 0xEC06807Fu);
   EXPECT_EQ((*words)[1], 0x05000000u);
   EXPECT_EQ((*words)[2], 0x00000008u);
 
@@ -518,12 +542,52 @@ TEST(InstructionBuilder, BuildFlatStoreB32) {
   EXPECT_FALSE(build_flat_store_b32_vaddr_vsrc(/*vaddr=*/8, /*vsrc=*/10, ROCJITSU_CODE_ARCH_CDNA4));
 }
 
+TEST(InstructionBuilder, BuildWideLdsStoreAndLiteralBoundsCompare) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
+    const auto store = build_ds_store_b64(/*vaddr=*/3, /*vdata=*/4, /*byte_offset=*/16, arch);
+    const auto store_quad = build_ds_store_b128(/*vaddr=*/3, /*vdata=*/4, /*byte_offset=*/16, arch);
+    const auto compare = build_v_cmp_gt_u32_e32_vcc_literal(/*literal=*/13080u, /*vsrc1=*/3, arch);
+    ASSERT_TRUE(store);
+    ASSERT_TRUE(store_quad);
+    ASSERT_TRUE(compare);
+    EXPECT_EQ(*store, (std::array<uint32_t, 2>{0xD9340010u, 0x00000403u}));
+    EXPECT_EQ(*store_quad, (std::array<uint32_t, 2>{0xDB7C0010u, 0x00000403u}));
+    EXPECT_EQ(*compare, (std::array<uint32_t, 2>{0x7C9806FFu, 0x00003318u}));
+
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    std::unique_ptr<Instruction> store_inst(decoder->decode(store->data()));
+    std::unique_ptr<Instruction> store_quad_inst(decoder->decode(store_quad->data()));
+    std::unique_ptr<Instruction> compare_inst(decoder->decode(compare->data()));
+    ASSERT_NE(store_inst, nullptr);
+    ASSERT_NE(store_quad_inst, nullptr);
+    ASSERT_NE(compare_inst, nullptr);
+    EXPECT_EQ(std::string_view(store_inst->mnemonic()), "ds_store_b64");
+    EXPECT_EQ(std::string_view(store_quad_inst->mnemonic()), "ds_store_b128");
+    EXPECT_EQ(std::string_view(compare_inst->mnemonic()), "v_cmp_gt_u32_e32");
+    EXPECT_EQ(store_inst->size(), 8u);
+    EXPECT_EQ(store_quad_inst->size(), 8u);
+    EXPECT_EQ(compare_inst->size(), 8u);
+  }
+
+  EXPECT_FALSE(build_ds_store_b64(/*vaddr=*/3, /*vdata=*/255, /*byte_offset=*/0,
+                                  ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_FALSE(build_ds_store_b128(/*vaddr=*/3, /*vdata=*/253, /*byte_offset=*/0,
+                                   ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_FALSE(
+      build_ds_store_b64(/*vaddr=*/3, /*vdata=*/4, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(
+      build_ds_store_b128(/*vaddr=*/3, /*vdata=*/4, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_v_cmp_gt_u32_e32_vcc_literal(
+      /*literal=*/13080u, /*vsrc1=*/3, ROCJITSU_CODE_ARCH_CDNA4));
+}
+
 TEST(InstructionBuilder, BuildFlatLoadB32) {
   const auto words =
       build_flat_load_b32_vaddr_vdst(/*vaddr=*/8, /*vdst=*/10, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(words);
 
-  EXPECT_EQ((*words)[0], 0xEC05007Cu);
+  EXPECT_EQ((*words)[0], 0xEC05007Fu);
   EXPECT_EQ((*words)[1], 0x0000000Au);
   EXPECT_EQ((*words)[2], 0x00000008u);
 
@@ -539,13 +603,92 @@ TEST(InstructionBuilder, BuildFlatLoadB32) {
   EXPECT_FALSE(build_flat_load_b32_vaddr_vdst(/*vaddr=*/8, /*vdst=*/10, ROCJITSU_CODE_ARCH_CDNA4));
 }
 
+TEST(InstructionBuilder, BuildGfx1250FlatLoadB32) {
+  const auto words =
+      build_flat_load_b32_vaddr_vdst(/*vaddr=*/8, /*vdst=*/10, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(words);
+
+  EXPECT_EQ(*words, (std::array<uint32_t, 3>{0xEC05007Fu, 0x0000000Au, 0x00000008u}));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words->data()));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(std::string_view(inst->mnemonic()), "flat_load_b32");
+  EXPECT_EQ(inst->size(), 12u);
+}
+
+TEST(InstructionBuilder, BuildGfx1250SampledPublicationOperations) {
+  constexpr auto expected_cmpswap =
+      gfx1250::build_vflat(gfx1250::kFlatAtomicCmpswapB32Vflat,
+                           {.saddr = 127, .vdst = 10, .scope = 2, .th = 1, .vsrc = 10, .vaddr = 8});
+  constexpr auto expected_swap =
+      gfx1250::build_vflat(gfx1250::kFlatAtomicSwapB64Vflat,
+                           {.saddr = 127, .vdst = 10, .scope = 2, .th = 1, .vsrc = 10, .vaddr = 8});
+  constexpr auto expected_add =
+      gfx1250::build_vflat(gfx1250::kFlatAtomicAddU64Vflat,
+                           {.saddr = 127, .vdst = 10, .scope = 2, .th = 1, .vsrc = 10, .vaddr = 8});
+
+  EXPECT_EQ(
+      build_flat_atomic_cmpswap_b32_vaddr_vsrc_vdst(8, 10, 10, true, 2, ROCJITSU_CODE_ARCH_GFX1250),
+      expected_cmpswap);
+  EXPECT_EQ(
+      build_flat_atomic_swap_b64_vaddr_vsrc_vdst(8, 10, 10, true, 2, ROCJITSU_CODE_ARCH_GFX1250),
+      expected_swap);
+  EXPECT_EQ(
+      build_flat_atomic_add_u64_vaddr_vsrc_vdst(8, 10, 10, true, 2, ROCJITSU_CODE_ARCH_GFX1250),
+      expected_add);
+
+  const auto address_add = build_v_add_u64_vgpr_offset(/*address_vgpr=*/8, /*offset_vgpr=*/10,
+                                                       ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(address_add);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> low(decoder->decode(address_add->data()));
+  std::unique_ptr<Instruction> wait(decoder->decode(address_add->data() + 2));
+  std::unique_ptr<Instruction> high(decoder->decode(address_add->data() + 3));
+  ASSERT_NE(low, nullptr);
+  ASSERT_NE(wait, nullptr);
+  ASSERT_NE(high, nullptr);
+  EXPECT_EQ(std::string_view(low->mnemonic()), "v_add_co_u32");
+  EXPECT_EQ(std::string_view(wait->mnemonic()), "s_wait_alu");
+  EXPECT_EQ(std::string_view(high->mnemonic()), "v_add_co_ci_u32");
+
+  const auto readfirstlane =
+      build_v_readfirstlane_b32(/*sdst=*/78, /*vsrc=*/90, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(readfirstlane);
+  constexpr auto expected_readfirstlane = gfx1250::build_vop1(
+      gfx1250::kVReadfirstlaneB32Vop1, {.src0 = vector_source_vgpr(90), .vdst = 78});
+  EXPECT_EQ(*readfirstlane, expected_readfirstlane[0]);
+
+  const auto cell_offset = build_v_add_u64_signed_i24(/*address_vgpr=*/8, /*displacement=*/16,
+                                                      ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(cell_offset);
+  std::unique_ptr<Instruction> offset_low(decoder->decode(cell_offset->data()));
+  std::unique_ptr<Instruction> offset_wait(decoder->decode(cell_offset->data() + 3));
+  std::unique_ptr<Instruction> offset_high(decoder->decode(cell_offset->data() + 4));
+  ASSERT_NE(offset_low, nullptr);
+  ASSERT_NE(offset_wait, nullptr);
+  ASSERT_NE(offset_high, nullptr);
+  EXPECT_EQ(std::string_view(offset_low->mnemonic()), "v_add_co_u32");
+  constexpr auto expected_offset_low = gfx1250::build_vop3_sdst_enc(
+      gfx1250::kVAddCoU32Vop3SdstEnc, {.vdst = 8,
+                                       .sdst = 106,
+                                       .src0 = scalar_positive_inline_u32(16),
+                                       .src1 = vector_source_vgpr(8)});
+  EXPECT_EQ((*cell_offset)[0], expected_offset_low[0]);
+  EXPECT_EQ((*cell_offset)[1], expected_offset_low[1]);
+  EXPECT_EQ((*cell_offset)[2], build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_EQ(std::string_view(offset_wait->mnemonic()), "s_wait_alu");
+  EXPECT_EQ(std::string_view(offset_high->mnemonic()), "v_add_co_ci_u32");
+}
+
 TEST(InstructionBuilder, BuildFlatAtomicAddU32ReturnDeviceScope) {
   const auto words = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
       /*vaddr=*/8, /*vsrc=*/10, /*vdst=*/10, /*return_old_value=*/true, /*scope=*/2,
       ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(words);
 
-  EXPECT_EQ((*words)[0], 0xEC0D407Cu);
+  EXPECT_EQ((*words)[0], 0xEC0D407Fu);
   EXPECT_EQ((*words)[1], 0x0518000Au);
   EXPECT_EQ((*words)[2], 0x00000008u);
 
@@ -577,7 +720,7 @@ TEST(InstructionBuilder, BuildFlatAtomicOrU32ReturnDeviceScope) {
       /*vaddr=*/8, /*vsrc=*/10, /*vdst=*/10, /*return_old_value=*/true,
       /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(words);
-  EXPECT_EQ(*words, (std::array<uint32_t, 3>{0xEC0F407Cu, 0x0518000Au, 0x00000008u}));
+  EXPECT_EQ(*words, (std::array<uint32_t, 3>{0xEC0F407Fu, 0x0518000Au, 0x00000008u}));
 
   std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(decoder);
@@ -597,7 +740,7 @@ TEST(InstructionBuilder, BuildFlatAtomicSwapB64ReturnDeviceScope) {
       ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(words);
 
-  EXPECT_EQ((*words)[0], 0xEC10407Cu);
+  EXPECT_EQ((*words)[0], 0xEC10407Fu);
   EXPECT_EQ((*words)[1], 0x0518000Cu);
   EXPECT_EQ((*words)[2], 0x00000008u);
 

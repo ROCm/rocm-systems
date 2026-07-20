@@ -344,7 +344,11 @@ add_executable(
     transcendental_test.cpp
     analysis/liveness_test.cpp
     patch/spill_manager_test.cpp
+    patch/cdna4_instrumentation_builder_test.cpp
+    patch/gfx1250_instrumentation_builder_test.cpp
+    patch/instrumentation_builder_dispatch_test.cpp
     patch/instruction_builder_test.cpp
+    patch/instruction_sequence_test.cpp
     patch/rdna4_instrumentation_builder_test.cpp
     patch/trampoline_builder_test.cpp
     patch/instrumentor_test.cpp
