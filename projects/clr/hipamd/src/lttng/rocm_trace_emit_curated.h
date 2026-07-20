@@ -2,7 +2,7 @@
  * Do not edit by hand — regenerate instead (see command below).
  *
  * SHA256(curated_apis.yaml) at generation:
- * 01c6196e7126055fe7a9721a1ad6e2fd48f9a92f289673024e74f88854743c71
+ * 5eb9e8989aee8524f1c93f7c2cb71676778f6fd3148eedafb83b97bae0389c07
  *
  * Per-API typed emit helpers for curated parameter capture. Every
  * helper takes (<captured-args...>, <status_type> status); status is
@@ -9025,6 +9025,82 @@ static inline void rocm_trace_emit_hipGreenCtxCreate_exit(hipError_t status) {
   }
 }
 
+static inline void rocm_trace_emit_hipIpcCloseMemHandle_enter(const void* devPtr) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipIpcCloseMemHandle)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipIpcCloseMemHandle, (int32_t)0,
+                            (uint64_t)(uintptr_t)(devPtr), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipIpcCloseMemHandle_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipIpcCloseMemHandle)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipIpcCloseMemHandle, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipIpcGetEventHandle_enter(const void* handle, uint64_t event) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipIpcGetEventHandle)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipIpcGetEventHandle, (int32_t)0,
+                            (uint64_t)(uintptr_t)(handle), (uint64_t)(uintptr_t)(event), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipIpcGetEventHandle_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipIpcGetEventHandle)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipIpcGetEventHandle, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipIpcGetMemHandle_enter(const void* handle,
+                                                            const void* devPtr) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipIpcGetMemHandle)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipIpcGetMemHandle, (int32_t)0, (uint64_t)(uintptr_t)(handle),
+                            (uint64_t)(uintptr_t)(devPtr), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipIpcGetMemHandle_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipIpcGetMemHandle)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipIpcGetMemHandle, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipIpcOpenEventHandle_enter(const void* event) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipIpcOpenEventHandle)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipIpcOpenEventHandle, (int32_t)0,
+                            (uint64_t)(uintptr_t)(event), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipIpcOpenEventHandle_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipIpcOpenEventHandle)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipIpcOpenEventHandle, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipIpcOpenMemHandle_enter(const void* devPtr, uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipIpcOpenMemHandle)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipIpcOpenMemHandle, (int32_t)0,
+                            (uint64_t)(uintptr_t)(devPtr), (uint32_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipIpcOpenMemHandle_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipIpcOpenMemHandle)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipIpcOpenMemHandle, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
 
 #else /* HIP_ENABLE_LTTNG_UST not defined — all helpers are no-ops */
 
@@ -10340,6 +10416,16 @@ static inline void rocm_trace_emit_hipCtxSynchronize_exit(hipError_t) {}
 static inline void rocm_trace_emit_hipGreenCtxCreate_enter(const void*, const void*, int32_t,
                                                            uint32_t) {}
 static inline void rocm_trace_emit_hipGreenCtxCreate_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipIpcCloseMemHandle_enter(const void*) {}
+static inline void rocm_trace_emit_hipIpcCloseMemHandle_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipIpcGetEventHandle_enter(const void*, uint64_t) {}
+static inline void rocm_trace_emit_hipIpcGetEventHandle_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipIpcGetMemHandle_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipIpcGetMemHandle_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipIpcOpenEventHandle_enter(const void*) {}
+static inline void rocm_trace_emit_hipIpcOpenEventHandle_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipIpcOpenMemHandle_enter(const void*, uint32_t) {}
+static inline void rocm_trace_emit_hipIpcOpenMemHandle_exit(hipError_t) {}
 
 #endif /* HIP_ENABLE_LTTNG_UST */
 

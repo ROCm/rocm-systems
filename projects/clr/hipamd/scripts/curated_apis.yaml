@@ -1571,3 +1571,18 @@
 
 - api: hipGreenCtxCreate
   args: [ctx, desc, device, flags]
+
+- api: hipIpcCloseMemHandle
+  args: [devPtr]
+
+- api: hipIpcGetEventHandle
+  args: [handle, event]
+
+- api: hipIpcGetMemHandle
+  args: [handle, devPtr]
+
+- api: hipIpcOpenEventHandle
+  args: [event]
+
+- api: hipIpcOpenMemHandle
+  args: [devPtr, flags]

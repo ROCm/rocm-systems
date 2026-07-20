@@ -233,6 +233,11 @@ hipHostGetFlags	STATUS	hipError_t
 hipHostMalloc	STATUS	hipError_t
 hipHostRegister	STATUS	hipError_t
 hipHostUnregister	STATUS	hipError_t
+hipIpcCloseMemHandle	STATUS	hipError_t
+hipIpcGetEventHandle	STATUS	hipError_t
+hipIpcGetMemHandle	STATUS	hipError_t
+hipIpcOpenEventHandle	STATUS	hipError_t
+hipIpcOpenMemHandle	STATUS	hipError_t
 hipKernelGetAttribute	STATUS	hipError_t
 hipKernelGetFunction	STATUS	hipError_t
 hipKernelGetLibrary	STATUS	hipError_t

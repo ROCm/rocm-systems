@@ -2597,28 +2597,49 @@ hipError_t hipInitDevice(int device, unsigned int deviceFlags, unsigned int flag
   CATCH;
 }
 hipError_t hipIpcCloseMemHandle(void* devPtr) {
+  auto const __rocm_in_devPtr = devPtr;
+  rocm_trace_emit_hipIpcCloseMemHandle_enter(
+      (const void*)(uintptr_t)(__rocm_in_devPtr)); /* __ROCM_CURATED__: hipIpcCloseMemHandle */
   TRY;
-  return hip::GetHipDispatchTable()->hipIpcCloseMemHandle_fn(devPtr);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipIpcCloseMemHandle, hip::GetHipDispatchTable()->hipIpcCloseMemHandle_fn(devPtr));
   CATCH;
 }
 hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t* handle, hipEvent_t event) {
+  auto const __rocm_in_handle = handle;
+  auto const __rocm_in_event = event;
+  rocm_trace_emit_hipIpcGetEventHandle_enter(
+      (const void*)(uintptr_t)(__rocm_in_handle),
+      (uint64_t)(uintptr_t)(__rocm_in_event)); /* __ROCM_CURATED__: hipIpcGetEventHandle */
   TRY;
-  return hip::GetHipDispatchTable()->hipIpcGetEventHandle_fn(handle, event);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipIpcGetEventHandle, hip::GetHipDispatchTable()->hipIpcGetEventHandle_fn(handle, event));
   CATCH;
 }
 hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* devPtr) {
+  auto const __rocm_in_handle = handle;
+  auto const __rocm_in_devPtr = devPtr;
+  rocm_trace_emit_hipIpcGetMemHandle_enter(
+      (const void*)(uintptr_t)(__rocm_in_handle),
+      (const void*)(uintptr_t)(__rocm_in_devPtr)); /* __ROCM_CURATED__: hipIpcGetMemHandle */
   TRY;
-  return hip::GetHipDispatchTable()->hipIpcGetMemHandle_fn(handle, devPtr);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipIpcGetMemHandle, hip::GetHipDispatchTable()->hipIpcGetMemHandle_fn(handle, devPtr));
   CATCH;
 }
 hipError_t hipIpcOpenEventHandle(hipEvent_t* event, hipIpcEventHandle_t handle) {
+  auto const __rocm_in_event = event;
+  rocm_trace_emit_hipIpcOpenEventHandle_enter(
+      (const void*)(uintptr_t)(__rocm_in_event)); /* __ROCM_CURATED__: hipIpcOpenEventHandle */
   TRY;
-  return hip::GetHipDispatchTable()->hipIpcOpenEventHandle_fn(event, handle);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipIpcOpenEventHandle, hip::GetHipDispatchTable()->hipIpcOpenEventHandle_fn(event, handle));
   CATCH;
 }
 hipError_t hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t handle, unsigned int flags) {
+  auto const __rocm_in_devPtr = devPtr;
+  auto const __rocm_in_flags = flags;
+  rocm_trace_emit_hipIpcOpenMemHandle_enter(
+      (const void*)(uintptr_t)(__rocm_in_devPtr),
+      (__rocm_in_flags)); /* __ROCM_CURATED__: hipIpcOpenMemHandle */
   TRY;
-  return hip::GetHipDispatchTable()->hipIpcOpenMemHandle_fn(devPtr, handle, flags);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipIpcOpenMemHandle, hip::GetHipDispatchTable()->hipIpcOpenMemHandle_fn(devPtr, handle, flags));
   CATCH;
 }
 extern "C" const char* hipKernelNameRef(const hipFunction_t f) {
