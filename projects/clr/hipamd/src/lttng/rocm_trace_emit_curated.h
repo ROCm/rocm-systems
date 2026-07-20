@@ -2,7 +2,7 @@
  * Do not edit by hand — regenerate instead (see command below).
  *
  * SHA256(curated_apis.yaml) at generation:
- * 4931c93bd8238ceb7a88bdb0d66dac17e9ba6a3176ad443456b9b782bab51a0c
+ * 0e4b1dfa1cd0856c48a6c12544f56efcdf3afd33de461b279c1cd96f3c4acd96
  *
  * Per-API typed emit helpers for curated parameter capture. Every
  * helper takes (<captured-args...>, <status_type> status); status is
@@ -9121,6 +9121,122 @@ static inline void rocm_trace_emit_hipExtGetLinkTypeAndHopCount_exit(hipError_t 
   }
 }
 
+static inline void rocm_trace_emit___hipOnError_enter(const void* err_info) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, __hipOnError)) {
+    lttng_ust_do_tracepoint(rocm_hip, __hipOnError, (int32_t)0, (uint64_t)(uintptr_t)(err_info));
+  }
+}
+
+static inline void rocm_trace_emit___hipOnError_exit(void) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, __hipOnError)) {
+    lttng_ust_do_tracepoint(rocm_hip, __hipOnError, (int32_t)1, 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDrvGetErrorName_enter(int32_t hipError,
+                                                            const void* errorString) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDrvGetErrorName)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDrvGetErrorName, (int32_t)0, (int32_t)(hipError),
+                            (uint64_t)(uintptr_t)(errorString), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDrvGetErrorName_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDrvGetErrorName)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDrvGetErrorName, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDrvGetErrorString_enter(int32_t hipError,
+                                                              const void* errorString) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDrvGetErrorString)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDrvGetErrorString, (int32_t)0, (int32_t)(hipError),
+                            (uint64_t)(uintptr_t)(errorString), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDrvGetErrorString_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDrvGetErrorString)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDrvGetErrorString, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipExtGetLastError_enter(void) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExtGetLastError)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExtGetLastError, (int32_t)0, 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipExtGetLastError_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExtGetLastError)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExtGetLastError, (int32_t)1, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetErrorName_enter(int32_t hip_error) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetErrorName)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetErrorName, (int32_t)0, (int32_t)(hip_error), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetErrorName_exit(uint64_t retptr) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetErrorName)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetErrorName, (int32_t)1, 0, retptr);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetErrorString_enter(int32_t hipError) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetErrorString)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetErrorString, (int32_t)0, (int32_t)(hipError), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetErrorString_exit(uint64_t retptr) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetErrorString)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetErrorString, (int32_t)1, 0, retptr);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetLastError_enter(void) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetLastError)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetLastError, (int32_t)0, 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetLastError_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetLastError)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetLastError, (int32_t)1, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipPeekAtLastError_enter(void) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipPeekAtLastError)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipPeekAtLastError, (int32_t)0, 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipPeekAtLastError_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipPeekAtLastError)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipPeekAtLastError, (int32_t)1, (int32_t)status);
+  }
+}
+
 
 #else /* HIP_ENABLE_LTTNG_UST not defined — all helpers are no-ops */
 
@@ -10449,6 +10565,22 @@ static inline void rocm_trace_emit_hipIpcOpenMemHandle_exit(hipError_t) {}
 static inline void rocm_trace_emit_hipExtGetLinkTypeAndHopCount_enter(int32_t, int32_t, const void*,
                                                                       const void*) {}
 static inline void rocm_trace_emit_hipExtGetLinkTypeAndHopCount_exit(hipError_t) {}
+static inline void rocm_trace_emit___hipOnError_enter(const void*) {}
+static inline void rocm_trace_emit___hipOnError_exit() {}
+static inline void rocm_trace_emit_hipDrvGetErrorName_enter(int32_t, const void*) {}
+static inline void rocm_trace_emit_hipDrvGetErrorName_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDrvGetErrorString_enter(int32_t, const void*) {}
+static inline void rocm_trace_emit_hipDrvGetErrorString_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipExtGetLastError_enter() {}
+static inline void rocm_trace_emit_hipExtGetLastError_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGetErrorName_enter(int32_t) {}
+static inline void rocm_trace_emit_hipGetErrorName_exit(uint64_t) {}
+static inline void rocm_trace_emit_hipGetErrorString_enter(int32_t) {}
+static inline void rocm_trace_emit_hipGetErrorString_exit(uint64_t) {}
+static inline void rocm_trace_emit_hipGetLastError_enter() {}
+static inline void rocm_trace_emit_hipGetLastError_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipPeekAtLastError_enter() {}
+static inline void rocm_trace_emit_hipPeekAtLastError_exit(hipError_t) {}
 
 #endif /* HIP_ENABLE_LTTNG_UST */
 

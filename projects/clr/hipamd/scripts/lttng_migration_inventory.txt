@@ -1,3 +1,4 @@
+__hipOnError	VOID	void
 __hipPopCallConfiguration	STATUS	hipError_t
 __hipPushCallConfiguration	STATUS	hipError_t
 hipArray3DCreate	STATUS	hipError_t
@@ -72,6 +73,8 @@ hipDeviceSetMemPool	STATUS	hipError_t
 hipDeviceSetSharedMemConfig	STATUS	hipError_t
 hipDeviceSynchronize	STATUS	hipError_t
 hipDeviceTotalMem	STATUS	hipError_t
+hipDrvGetErrorName	STATUS	hipError_t
+hipDrvGetErrorString	STATUS	hipError_t
 hipDrvGraphAddMemFreeNode	STATUS	hipError_t
 hipDrvGraphAddMemcpyNode	STATUS	hipError_t
 hipDrvGraphAddMemsetNode	STATUS	hipError_t
@@ -103,6 +106,7 @@ hipExecutionCtxRecordEvent	STATUS	hipError_t
 hipExecutionCtxStreamCreate	STATUS	hipError_t
 hipExecutionCtxSynchronize	STATUS	hipError_t
 hipExecutionCtxWaitEvent	STATUS	hipError_t
+hipExtGetLastError	STATUS	hipError_t
 hipExtGetLinkTypeAndHopCount	STATUS	hipError_t
 hipExtLaunchKernel	STATUS	hipError_t
 hipExtLaunchMultiKernelMultiDevice	STATUS	hipError_t
@@ -126,6 +130,9 @@ hipGetDeviceCount	STATUS	hipError_t
 hipGetDeviceFlags	STATUS	hipError_t
 hipGetDevicePropertiesR0000	STATUS	hipError_t
 hipGetDevicePropertiesR0600	STATUS	hipError_t
+hipGetErrorName	PTR	const char *
+hipGetErrorString	PTR	const char *
+hipGetLastError	STATUS	hipError_t
 hipGetMipmappedArrayLevel	STATUS	hipError_t
 hipGetTextureAlignmentOffset	STATUS	hipError_t
 hipGetTextureObjectResourceDesc	STATUS	hipError_t
@@ -425,6 +432,7 @@ hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags	STATUS	hipError_t
 hipOccupancyMaxActiveClusters	STATUS	hipError_t
 hipOccupancyMaxPotentialBlockSize	STATUS	hipError_t
 hipOccupancyMaxPotentialClusterSize	STATUS	hipError_t
+hipPeekAtLastError	STATUS	hipError_t
 hipPointerGetAttribute	STATUS	hipError_t
 hipPointerGetAttributes	STATUS	hipError_t
 hipPointerSetAttribute	STATUS	hipError_t

@@ -7,8 +7,21 @@
 #include <hip/hip_runtime.h>
 
 #include "hip_internal.hpp"
+#include "lttng/rocm_trace_emit.h"
 
-extern "C" void __hipOnError(const void *err_info) { (void)err_info; }
+/* The debugger may place a breakpoint here to catch failed API calls (see
+ * HIP_UPDATE_ERROR_STATE in hip_internal.hpp, called on every failed HIP
+ * API that uses the HIP_RETURN/HIP_INIT_API macro pattern). Traced like any
+ * other exported HIP entry point so LTTng consumers can observe error
+ * events even for wrapper TUs the dispatch-table migration doesn't cover. */
+extern "C" void __hipOnError(const void* err_info) {
+  auto const __rocm_in_err_info = err_info;
+  rocm_trace_emit___hipOnError_enter(
+      (const void*)(uintptr_t)(__rocm_in_err_info)); /* __ROCM_CURATED__: __hipOnError */
+  (void)err_info;
+  rocm_trace_emit___hipOnError_exit();
+  
+}
 
 namespace hip {
 hipError_t hipExtGetLastError() {

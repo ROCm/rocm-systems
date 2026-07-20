@@ -899,13 +899,23 @@ hipError_t hipDriverGetVersion(int* driverVersion) {
   CATCH;
 }
 hipError_t hipDrvGetErrorName(hipError_t hipError, const char** errorString) {
+  auto const __rocm_in_hipError = hipError;
+  auto const __rocm_in_errorString = errorString;
+  rocm_trace_emit_hipDrvGetErrorName_enter(
+      (int32_t)(__rocm_in_hipError),
+      (const void*)(uintptr_t)(__rocm_in_errorString)); /* __ROCM_CURATED__: hipDrvGetErrorName */
   TRY;
-  return hip::GetHipDispatchTable()->hipDrvGetErrorName_fn(hipError, errorString);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipDrvGetErrorName, hip::GetHipDispatchTable()->hipDrvGetErrorName_fn(hipError, errorString));
   CATCH;
 }
 hipError_t hipDrvGetErrorString(hipError_t hipError, const char** errorString) {
+  auto const __rocm_in_hipError = hipError;
+  auto const __rocm_in_errorString = errorString;
+  rocm_trace_emit_hipDrvGetErrorString_enter(
+      (int32_t)(__rocm_in_hipError),
+      (const void*)(uintptr_t)(__rocm_in_errorString)); /* __ROCM_CURATED__: hipDrvGetErrorString */
   TRY;
-  return hip::GetHipDispatchTable()->hipDrvGetErrorString_fn(hipError, errorString);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipDrvGetErrorString, hip::GetHipDispatchTable()->hipDrvGetErrorString_fn(hipError, errorString));
   CATCH;
 }
 hipError_t hipDrvGraphAddMemcpyNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph,
@@ -1302,18 +1312,25 @@ hipError_t hipGetDriverEntryPoint_spt(const char* symbol, void** funcPtr, unsign
   CATCH;
 }
 const char* hipGetErrorName(hipError_t hip_error) {
+  auto const __rocm_in_hip_error = hip_error;
+  rocm_trace_emit_hipGetErrorName_enter(
+      (int32_t)(__rocm_in_hip_error)); /* __ROCM_CURATED__: hipGetErrorName */
   TRY;
-  return hip::GetHipDispatchTable()->hipGetErrorName_fn(hip_error);
+  ROCM_TRACE_RET_PTR_CURATED_NOARGS(hipGetErrorName, auto, hip::GetHipDispatchTable()->hipGetErrorName_fn(hip_error));
   CATCHRET(const char*);
 }
 const char* hipGetErrorString(hipError_t hipError) {
+  auto const __rocm_in_hipError = hipError;
+  rocm_trace_emit_hipGetErrorString_enter(
+      (int32_t)(__rocm_in_hipError)); /* __ROCM_CURATED__: hipGetErrorString */
   TRY;
-  return hip::GetHipDispatchTable()->hipGetErrorString_fn(hipError);
+  ROCM_TRACE_RET_PTR_CURATED_NOARGS(hipGetErrorString, auto, hip::GetHipDispatchTable()->hipGetErrorString_fn(hipError));
   CATCHRET(const char*);
 }
 hipError_t hipGetLastError(void) {
+  rocm_trace_emit_hipGetLastError_enter(); /* __ROCM_CURATED__: hipGetLastError */
   TRY;
-  return hip::GetHipDispatchTable()->hipGetLastError_fn();
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGetLastError, hip::GetHipDispatchTable()->hipGetLastError_fn());
   CATCH;
 }
 hipError_t hipGetMipmappedArrayLevel(hipArray_t* levelArray,
@@ -4533,8 +4550,9 @@ extern "C" hipError_t hipOccupancyMaxPotentialBlockSize(int* gridSize, int* bloc
   CATCH;
 }
 hipError_t hipPeekAtLastError(void) {
+  rocm_trace_emit_hipPeekAtLastError_enter(); /* __ROCM_CURATED__: hipPeekAtLastError */
   TRY;
-  return hip::GetHipDispatchTable()->hipPeekAtLastError_fn();
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipPeekAtLastError, hip::GetHipDispatchTable()->hipPeekAtLastError_fn());
   CATCH;
 }
 extern "C" hipError_t hipOccupancyMaxActiveClusters(int* numClusters, const void* func,
@@ -6023,8 +6041,9 @@ extern "C" int hipGetStreamDeviceId(hipStream_t stream) {
   CATCHRET(int)
 }
 hipError_t hipExtGetLastError() {
+  rocm_trace_emit_hipExtGetLastError_enter(); /* __ROCM_CURATED__: hipExtGetLastError */
   TRY;
-  return hip::GetHipDispatchTable()->hipExtGetLastError_fn();
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipExtGetLastError, hip::GetHipDispatchTable()->hipExtGetLastError_fn());
   CATCH;
 }
 hipError_t hipTexRefGetBorderColor(float* pBorderColor, const textureReference* texRef) {

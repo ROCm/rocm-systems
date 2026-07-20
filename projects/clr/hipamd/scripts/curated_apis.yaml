@@ -1589,3 +1589,27 @@
 
 - api: hipExtGetLinkTypeAndHopCount
   args: [device1, device2, linktype, hopcount]
+
+- api: __hipOnError
+  args: [err_info]
+
+- api: hipDrvGetErrorName
+  args: [hipError, errorString]
+
+- api: hipDrvGetErrorString
+  args: [hipError, errorString]
+
+- api: hipExtGetLastError
+  args: []
+
+- api: hipGetErrorName
+  args: [hip_error]
+
+- api: hipGetErrorString
+  args: [hipError]
+
+- api: hipGetLastError
+  args: []
+
+- api: hipPeekAtLastError
+  args: []
