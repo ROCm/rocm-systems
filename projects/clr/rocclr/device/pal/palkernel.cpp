@@ -341,10 +341,17 @@ Kernel::loadArguments(VirtualGPU& gpu, const amd::Kernel& kernel,
         break;
       case amd::KernelParameterDescriptor::HiddenAssertFaultBuffer:
         if (amd::IS_HIP) {
-          uintptr_t buffer = reinterpret_cast<uintptr_t>(gpu.getOrCreateAssertFaultBuffer());
-          if (!buffer) {
-            LogError("Kernel expects an assert fault buffer, but none found");
+          AssertFaultBuffer* assertFaultBuffer = gpu.assertFaultBuffer();
+          if (assertFaultBuffer == nullptr) {
+            LogError("Assert fault buffer object is unavailable");
+            break;
           }
+          if (!assertFaultBuffer->allocate()) {
+            LogError("Kernel expects an assert fault buffer, but allocation failed");
+            break;
+          }
+          uintptr_t buffer =
+              reinterpret_cast<uintptr_t>(assertFaultBuffer->faultBuffer());
           assert(it.size_ == sizeof(buffer) && "check the sizes");
           WriteAqlArgAt(hidden_arguments, buffer, it.size_, it.offset_);
         }

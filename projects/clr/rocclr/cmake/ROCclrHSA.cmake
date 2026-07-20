@@ -111,6 +111,7 @@ target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/device/rocm/rockernel.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocmemory.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocprintf.cpp
+  ${ROCCLR_SRC_DIR}/device/rocm/rocassertfaultbuffer.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocprogram.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocsettings.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocsignal.cpp

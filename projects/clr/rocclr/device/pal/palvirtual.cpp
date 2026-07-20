@@ -880,6 +880,7 @@ VirtualGPU::VirtualGPU(Device& device)
       engineID_(MainEngine),
       gpuDevice_(static_cast<Device&>(device)),
       printfDbgHSA_(nullptr),
+      assertFaultBuffer_(nullptr),
       tsCache_(nullptr),
       managedBuffer_(*this, device.settings().stagedXferSize_ + 32 * Ki),
       writeBuffer_(device, managedBuffer_, device.settings().stagedXferSize_),
@@ -904,7 +905,6 @@ VirtualGPU::VirtualGPU(Device& device)
 
   // The hostcall buffer for this vqueue is initialized on demand.
   hostcallBuffer_ = nullptr;
-  assertFaultBuffer_ = nullptr;
 }
 
 // ================================================================================================
@@ -1018,6 +1018,12 @@ bool VirtualGPU::create(bool profiling, uint deviceQueueSize, uint rtCUs,
     return false;
   }
 
+  assertFaultBuffer_ = new AssertFaultBuffer(gpuDevice_);
+  if (nullptr == assertFaultBuffer_) {
+    LogError("Could not create assertFaultBuffer object!");
+    return false;
+  }
+
   tsCache_ = new TimeStampCache(*this);
   if (nullptr == tsCache_) {
     LogError("Could not create TimeStamp cache!");
@@ -1121,6 +1127,7 @@ VirtualGPU::~VirtualGPU() {
 
   // Destroy printfHSA object
   delete printfDbgHSA_;
+  delete assertFaultBuffer_;
 
   // Destroy TimeStamp cache
   delete tsCache_;
@@ -1190,12 +1197,6 @@ VirtualGPU::~VirtualGPU() {
             hostcallBuffer_, this);
     amd::disableHostcalls(hostcallBuffer_);
     dev().svmFree(hostcallBuffer_);
-  }
-
-  if (assertFaultBuffer_ != nullptr) {
-    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "deleting assert fault buffer %p for virtual queue %p",
-            assertFaultBuffer_, this);
-    dev().svmFree(assertFaultBuffer_);
   }
 }
 
@@ -4018,29 +4019,6 @@ void* VirtualGPU::getOrCreateHostcallBuffer() {
     return nullptr;
   }
   return hostcallBuffer_;
-}
-
-// ================================================================================================
-void* VirtualGPU::getOrCreateAssertFaultBuffer() {
-  if (assertFaultBuffer_ != nullptr) {
-    return assertFaultBuffer_;
-  }
-
-  constexpr size_t size = 8;  // uint32_t fault flag + uint32_t site id
-  constexpr size_t align = 8;
-
-  assertFaultBuffer_ = dev().svmAlloc(dev().context(), size, align,
-                                      CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS, nullptr);
-  if (!assertFaultBuffer_) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to create assert fault buffer");
-    return nullptr;
-  }
-  memset(assertFaultBuffer_, 0, size);
-
-  ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
-          "Created assert fault buffer %p (size == %zu, align == %zu) for virtual queue %p\n",
-          assertFaultBuffer_, size, align, this);
-  return assertFaultBuffer_;
 }
 
 }  // namespace amd::pal

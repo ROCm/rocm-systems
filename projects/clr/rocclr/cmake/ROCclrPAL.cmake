@@ -57,6 +57,7 @@ target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/device/pal/palkernel.cpp
   ${ROCCLR_SRC_DIR}/device/pal/palmemory.cpp
   ${ROCCLR_SRC_DIR}/device/pal/palprintf.cpp
+  ${ROCCLR_SRC_DIR}/device/pal/palassertfaultbuffer.cpp
   ${ROCCLR_SRC_DIR}/device/pal/palprogram.cpp
   ${ROCCLR_SRC_DIR}/device/pal/palresource.cpp
   ${ROCCLR_SRC_DIR}/device/pal/palblitcl.cpp

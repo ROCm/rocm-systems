@@ -12,6 +12,7 @@
 #include "utils/flags.hpp"
 #include "utils/util.hpp"
 #include "rocprintf.hpp"
+#include "rocassertfaultbuffer.hpp"
 #include "rocsched.hpp"
 #include "device/device.hpp"
 #include "os/os.hpp"
@@ -579,6 +580,9 @@ class VirtualGPU : public device::VirtualDevice {
   // Return pointer to PrintfDbg
   PrintfDbg* printfDbg() const { return printfdbg_; }
 
+  //! Return pointer to AssertFaultBuffer helper
+  AssertFaultBuffer* assertFaultBuffer() const { return assertFaultBuffer_; }
+
   //! Returns memory dependency class
   MemoryDependency& memoryDependency() { return memoryDependency_; }
 
@@ -658,7 +662,6 @@ class VirtualGPU : public device::VirtualDevice {
   }
 
   void* getOrCreateHostcallBuffer();
-  void* getOrCreateAssertFaultBuffer();
 
  private:
   //! Release pinned memory after previously submitted work on the queue has completed.
@@ -838,6 +841,7 @@ class VirtualGPU : public device::VirtualDevice {
   uint32_t dispatch_id_;  //!< This variable must be updated atomically.
   Device& roc_device_;    //!< roc device object
   PrintfDbg* printfdbg_;
+  AssertFaultBuffer* assertFaultBuffer_;
   MemoryDependency memoryDependency_;  //!< Memory dependency class
   uint16_t aqlHeader_;                 //!< AQL header for dispatch
 
@@ -901,8 +905,6 @@ class VirtualGPU : public device::VirtualDevice {
 
   void* hostcallBuffer_;        //!< Hostcall buffer
   size_t hostcallBufferSize_ = 0; //!< Byte size of hostcallBuffer_, for hostFree
-  void* assertFaultBuffer_ = nullptr;        //!< Assert fault buffer (flag + site id)
-  size_t assertFaultBufferSize_ = 0; //!< Byte size of assertFaultBuffer_, for hostFree
 
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };

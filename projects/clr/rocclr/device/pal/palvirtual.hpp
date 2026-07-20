@@ -11,6 +11,7 @@
 #include "device/pal/paldefs.hpp"
 #include "device/pal/palconstbuf.hpp"
 #include "device/pal/palprintf.hpp"
+#include "device/pal/palassertfaultbuffer.hpp"
 #include "device/pal/paltimestamp.hpp"
 #include "device/pal/palsched.hpp"
 #include "device/pal/palgpuopen.hpp"
@@ -441,6 +442,9 @@ class VirtualGPU : public device::VirtualDevice {
   //! Get the PrintfDbgHSA object
   PrintfDbgHSA& printfDbgHSA() const { return *printfDbgHSA_; }
 
+  //! Return pointer to AssertFaultBuffer helper
+  AssertFaultBuffer* assertFaultBuffer() const { return assertFaultBuffer_; }
+
   //! Enables synchronized transfers
   void enableSyncedBlit() const;
 
@@ -579,7 +583,6 @@ class VirtualGPU : public device::VirtualDevice {
   }
 
   void* getOrCreateHostcallBuffer();
-  void* getOrCreateAssertFaultBuffer();
 
   //! Waits on an outstanding kernel.
   void releaseGpuMemoryFence() {
@@ -685,6 +688,7 @@ class VirtualGPU : public device::VirtualDevice {
   Device& gpuDevice_;  //!< physical GPU device
 
   PrintfDbgHSA* printfDbgHSA_;  //!< HSAIL printf implemenation
+  AssertFaultBuffer* assertFaultBuffer_;
 
   TimeStampCache* tsCache_;            //!< TimeStamp cache
   MemoryDependency memoryDependency_;  //!< Memory dependency class
@@ -720,7 +724,6 @@ class VirtualGPU : public device::VirtualDevice {
   MemoryRange sdmaRange_;             //!< SDMA memory range for write access
 
   void* hostcallBuffer_;  //!< Hostcall buffer
-  void* assertFaultBuffer_ = nullptr;  //!< Assert fault buffer (flag + site id)
 
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };
