@@ -364,45 +364,21 @@ TEST_F(PathTest, NestedDirectories)
     EXPECT_EQ(parent_path(subdir2), subdir1);
 }
 
-TEST_F(PathTest, ParentPath_TwoLevels)
-{
-    EXPECT_EQ(parent_path("/a/b/c", 2), "/a");
-}
+TEST_F(PathTest, ParentPath_TwoLevels) { EXPECT_EQ(parent_path("/a/b/c", 2), "/a"); }
 
-TEST_F(PathTest, ParentPath_ThreeLevels)
-{
-    EXPECT_EQ(parent_path("/a/b/c", 3), "/");
-}
+TEST_F(PathTest, ParentPath_ThreeLevels) { EXPECT_EQ(parent_path("/a/b/c", 3), "/"); }
 
-TEST_F(PathTest, ParentPath_RootClamp_OneComponent)
-{
-    EXPECT_EQ(parent_path("/a"), "/");
-}
+TEST_F(PathTest, ParentPath_RootClamp_OneComponent) { EXPECT_EQ(parent_path("/a"), "/"); }
 
-TEST_F(PathTest, ParentPath_RootClamp_Overwalk)
-{
-    EXPECT_EQ(parent_path("/a", 5), "/");
-}
+TEST_F(PathTest, ParentPath_RootClamp_Overwalk) { EXPECT_EQ(parent_path("/a", 5), "/"); }
 
-TEST_F(PathTest, ParentPath_RootClamp_Root)
-{
-    EXPECT_EQ(parent_path("/", 1), "/");
-}
+TEST_F(PathTest, ParentPath_RootClamp_Root) { EXPECT_EQ(parent_path("/", 1), "/"); }
 
-TEST_F(PathTest, ParentPath_Relative_OneLevel)
-{
-    EXPECT_EQ(parent_path("a/b", 1), "a");
-}
+TEST_F(PathTest, ParentPath_Relative_OneLevel) { EXPECT_EQ(parent_path("a/b", 1), "a"); }
 
-TEST_F(PathTest, ParentPath_Relative_Overwalk)
-{
-    EXPECT_EQ(parent_path("a/b", 5), "");
-}
+TEST_F(PathTest, ParentPath_Relative_Overwalk) { EXPECT_EQ(parent_path("a/b", 5), ""); }
 
-TEST_F(PathTest, ParentPath_Identity)
-{
-    EXPECT_EQ(parent_path("/a/b/c", 0), "/a/b/c");
-}
+TEST_F(PathTest, ParentPath_Identity) { EXPECT_EQ(parent_path("/a/b/c", 0), "/a/b/c"); }
 
 TEST_F(PathTest, ParentPath_TrailingSlash_Redundant)
 {
