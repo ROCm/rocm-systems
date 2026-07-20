@@ -47,6 +47,7 @@ public:
   rj_code_arch_t arch() const;
   uint32_t wf_size() const;
   uint32_t sgprs_per_wf() const;
+  uint32_t vgpr_allocation_block_size() const;
   std::string full_path() const;
   simdojo::ComponentID id() const;
   simdojo::SimulationEngine *engine() const;

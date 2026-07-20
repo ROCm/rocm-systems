@@ -75,7 +75,7 @@ TEST(VectorAddStressTest, AllCUsGoldenReference) {
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
   loaded.wire_links(engine->topology());
-  engine->build();
+  engine->create();
 
   // Load code into GPU memory. Place .rodata (kernel descriptor) and .text (code)
   // at their virtual addresses relative to a base. The .kd symbol value matches
@@ -170,7 +170,7 @@ TEST(VectorAddStressTest, AllCUsGoldenReference_MultiThreaded) {
         }
         return 0;
       });
-  engine->build();
+  engine->create();
 
   co->load_to_memory(memory, KD_ADDR);
   uint64_t kernel_object = KD_ADDR + co->kernel_descriptor_offset("vector_add");

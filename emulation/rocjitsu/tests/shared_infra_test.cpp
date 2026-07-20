@@ -166,7 +166,10 @@ TEST(RdnaWaitcntTest, Rdna3NamedSopkWaitcntsSetFineGrainedTargets) {
   ASSERT_NE(cu, nullptr);
 
   auto dispatch = [&]() -> amdgpu::Wavefront * {
-    cu->reset_all_wf();
+    // Recycle the single scratch slot: terminate a resident wave (freeing it) so
+    // the next dispatch has a free slot, mirroring s_endpgm on real hardware.
+    if (cu->wf(0) && !cu->wf(0)->is_halted())
+      cu->wf(0)->halt();
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
     EXPECT_NE(wf, nullptr);
     return wf;
@@ -575,7 +578,7 @@ TEST(MfmaExecTest, SwmmacF32K32Fp8MatchesSparseReference) {
     }
   }
 
-  cu->reset_all_wf();
+  wf->halt();
 }
 
 TEST(MfmaExecTest, WmmaF8f6f4K128InputLocUsesPairAwareSubbyteLayouts) {
@@ -1483,7 +1486,7 @@ TEST(CuFactoryTest, CdnaAccVgprsAreClearedOnRedispatch) {
     cu->write_vgpr(acc0, 0, 0xFFFFFFFFu);
     cu->write_vgpr(acc_last, 0, 0xDEADBEEFu);
 
-    cu->reset_all_wf();
+    wf->halt();
     wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
     ASSERT_NE(wf, nullptr);
 
