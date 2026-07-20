@@ -47,9 +47,9 @@ std::optional<Packed16VgprSource> packed_16bit_vgpr_source(bool packed_16bit_sou
   return std::nullopt;
 }
 
-std::optional<Packed16VgprSource> packed_16bit_vgpr_dst(int size_bits, OperandType opr_type,
-                                                        int ev) {
-  if (size_bits != 16 || opr_type != OperandType::OPR_VGPR)
+std::optional<Packed16VgprSource> packed_16bit_vgpr_dst(bool packed_16bit_dst, int size_bits,
+                                                        OperandType opr_type, int ev) {
+  if (!packed_16bit_dst || size_bits != 16 || opr_type != OperandType::OPR_VGPR)
     return std::nullopt;
   if (ev >= 0 && ev <= 127)
     return Packed16VgprSource{static_cast<uint32_t>(ev), 0};
@@ -59,15 +59,17 @@ std::optional<Packed16VgprSource> packed_16bit_vgpr_dst(int size_bits, OperandTy
 }
 } // namespace
 
-Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool packed_16bit_source)
+Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool packed_16bit_source,
+                 bool packed_16bit_dst)
     : AmdgpuIsaOperand<Isa>(size_bits, opr_type, encoding_value),
-      packed_16bit_source_(packed_16bit_source) {
+      packed_16bit_source_(packed_16bit_source), packed_16bit_dst_(packed_16bit_dst) {
   is_vgpr_ = is_vgpr_operand_type(opr_type);
 }
 
 Operand::Operand(int size_bits, OperandType opr_type, unsigned short encoding_value,
-                 bool packed_16bit_source)
-    : Operand(size_bits, opr_type, static_cast<int>(encoding_value), packed_16bit_source) {}
+                 bool packed_16bit_source, bool packed_16bit_dst)
+    : Operand(size_bits, opr_type, static_cast<int>(encoding_value), packed_16bit_source,
+              packed_16bit_dst) {}
 
 Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,
                  uint16_t literal16_display_value, bool has_literal16_display)
@@ -97,7 +99,8 @@ std::string Operand::name() const {
   if (auto packed =
           packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_))
     return std::format("v{}.{}", packed->reg, packed->shift ? "h" : "l");
-  if (auto packed = packed_16bit_vgpr_dst(size_bits_, opr_type_, encoding_value_))
+  if (auto packed =
+          packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_))
     return std::format("v{}.{}", packed->reg, packed->shift ? "h" : "l");
   switch (opr_type_) {
   case OperandType::OPR_ATTR: {
@@ -566,7 +569,8 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
   if (auto packed =
           packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_))
     return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(packed->reg), reg_width};
-  if (auto packed = packed_16bit_vgpr_dst(size_bits_, opr_type_, encoding_value_))
+  if (auto packed =
+          packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_))
     return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(packed->reg), reg_width};
   switch (opr_type_) {
   case OperandType::OPR_ATTR: {
@@ -992,7 +996,7 @@ bool Operand::simd_capable() const {
     return delegate()->simd_capable();
   if (packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_))
     return false;
-  if (packed_16bit_vgpr_dst(size_bits_, opr_type_, encoding_value_))
+  if (packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_))
     return false;
   return AmdgpuIsaOperand<Isa>::simd_capable();
 }
@@ -1018,7 +1022,7 @@ void Operand::write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32
     amdgpu::RegisterAccess(wf).write_chunk(*delegate(), lane_base, count, vals, mask);
     return;
   }
-  if (packed_16bit_vgpr_dst(size_bits_, opr_type_, encoding_value_)) {
+  if (packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_)) {
     for (uint32_t i = 0; i < count; ++i)
       if (mask & (1ULL << i))
         write_lane(wf, lane_base + i, vals[i]);
@@ -1064,7 +1068,8 @@ void Operand::write_scalar(amdgpu::Wavefront &wf, uint32_t val) const {
 }
 
 void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const {
-  if (auto packed = packed_16bit_vgpr_dst(size_bits_, opr_type_, encoding_value_)) {
+  if (auto packed =
+          packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_)) {
     uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, off, true) : off;
     uint32_t idx = wf.vgpr_alloc().base + voff;

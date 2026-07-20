@@ -17,10 +17,10 @@ namespace rdna3_5 {
 
 class Operand : public AmdgpuIsaOperand<Isa> {
 public:
-  Operand(int size_bits, OperandType opr_type, int encoding_value,
-          bool packed_16bit_source = false);
+  Operand(int size_bits, OperandType opr_type, int encoding_value, bool packed_16bit_source = false,
+          bool packed_16bit_dst = false);
   Operand(int size_bits, OperandType opr_type, unsigned short encoding_value,
-          bool packed_16bit_source);
+          bool packed_16bit_source, bool packed_16bit_dst = false);
   Operand(int size_bits, OperandType opr_type, int encoding_value, uint16_t literal16_display_value,
           bool has_literal16_display);
   Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64);
@@ -49,6 +49,7 @@ private:
   uint64_t literal64_value_ = 0;
   bool has_literal64_ = false;
   bool packed_16bit_source_ = false;
+  bool packed_16bit_dst_ = false;
 };
 
 } // namespace rdna3_5

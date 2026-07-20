@@ -39,9 +39,6 @@ _common_therock_regex_excludes: &_common_therock_regex_excludes
   - "jpeg-decode.*"
   - "matrix-exponential.*"
   - "scratch-memory.*"
-  - "selective-region-region-1-filter.*"
-  - "selective-region-region-2-and-3.*"
-  - "selective-region-no-marker-region-1-filter.*"
   - "shmem-pingpong.*"
   - "video-decode.*"
 

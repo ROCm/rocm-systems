@@ -1298,7 +1298,13 @@ rocprofiler_set_api_table(const char* name,
                     return (ctx->dispatch_counter_collection != nullptr ||
                             ctx->dispatch_thread_trace != nullptr || ctx->pc_sampler != nullptr ||
                             ctx->dispatch_spm != nullptr ||
-                            ctx->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_GRAPH));
+                            ctx->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_GRAPH) ||
+                            (ctx->device_thread_trace != nullptr &&
+                             ctx->device_thread_trace->requires_queue_intercept()));
+                });
+            auto device_thread_trace_contexts = rocprofiler::context::get_registered_contexts(
+                [](const rocprofiler::context::context* ctx) {
+                    return ctx->device_thread_trace != nullptr;
                 });
 
             ROCP_INFO << fmt::format(
@@ -1310,6 +1316,10 @@ rocprofiler_set_api_table(const char* name,
             // if non_queue_interposition_contexts is not empty, default to non-inline intercept.
             auto enable_queue_interposition = rocprofiler::common::get_env(
                 "ROCPROFILER_QUEUE_INTERPOSITION", non_queue_interposition_contexts.empty());
+
+            if(enable_queue_interposition && !device_thread_trace_contexts.empty() &&
+               !rocprofiler::hsa::enable_queue_intercept())
+                enable_queue_interposition = false;
 
             // if ROCPROFILER_QUEUE_INTERPOSITION is explicitly set to true, but there are contexts
             // that require non-inline intercept, print a warning and fall back to non-inline
