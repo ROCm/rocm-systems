@@ -93,8 +93,17 @@ public:
 
   /// @brief Write sentinel values to all event page slots for shutdown.
   /// @details Writes KFD_SIGNAL_EVENT_LIMIT to every slot, allowing ROCR's
-  ///          userspace polling to detect that events will no longer fire.
+  ///          userspace polling to detect that events will no longer fire. Takes
+  ///          mutex_ so it cannot race a concurrent release_page()/munmap tearing
+  ///          the mapping down.
   void signal_page_shutdown();
+
+  /// @brief Rebuild every event page slot from live event state.
+  /// @details Undoes signal_page_shutdown()'s poisoning on the teardown-rollback
+  ///          path: writes the unsignaled sentinel to every slot, then each
+  ///          signaled event's true age, so a surviving consumer does not observe
+  ///          a signaled event as unsignaled. Takes mutex_ like signal_page_shutdown().
+  void restore_page_from_events();
 
   /// @brief Reset closing state for driver re-open.
   void reset();

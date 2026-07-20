@@ -175,6 +175,21 @@ public:
   /// @returns An ExitStatus describing why the simulation stopped.
   ExitStatus run();
 
+  /// @brief Block until run() (or step()'s first call) has completed component
+  /// startup.
+  ///
+  /// @details A readiness boundary for embeddings that launch run() on a
+  /// background thread and must not publish the simulated device until every
+  /// component's startup() callback has completed — otherwise a caller can reach
+  /// a half-started device, and short-lived processes can race component startup
+  /// against C++ finalizers. Once observed, readiness stays latched until the next
+  /// create().
+  /// @returns true if startup completed normally; false if a component's startup()
+  /// threw (run() caught it, latched readiness so this call wakes, and returned an
+  /// error ExitStatus). A false return means the engine is NOT running and the
+  /// embedding must unwind rather than publish the device.
+  [[nodiscard]] bool wait_until_started() const;
+
   /// @brief Process all events at the next event time (single-threaded only).
   ///
   /// @details On the first call, starts all components (initialization
@@ -310,6 +325,19 @@ private:
   /// @brief Call shutdown() on all components across all partitions.
   void shutdown_components();
 
+  /// @brief Latch startup readiness and wake wait_until_started() observers.
+  /// @details Stores @p failed BEFORE startup_complete_, then notifies — the order
+  /// matters so a waiter that observes complete also observes the correct failed
+  /// state. Centralizes the epilogue used by run()/step() on both the success and
+  /// the throw paths so the ordering cannot drift. A startup throw is terminal for
+  /// the create() generation (see start_failed_), so this latches failure once and
+  /// the caller must shutdown() + create() before a fresh startup can latch success.
+  void latch_startup(bool failed) {
+    startup_failed_.store(failed, std::memory_order_release);
+    startup_complete_.store(true, std::memory_order_release);
+    startup_complete_.notify_all();
+  }
+
   /// @brief Drain all async event buffers into their partition queues (single-threaded).
   void drain_async_events();
 
@@ -371,6 +399,26 @@ private:
   ExitStatus exit_status_;                 ///< Exit information from the last run/step.
   bool created_ = false; ///< Whether create() has completed (components initialized).
   bool running_ = false; ///< True while running; also guards step() first-call startup.
+  /// @brief Latched true once startup() has run for every component (or thrown);
+  /// reset by create(). Read by wait_until_started() from an embedding thread.
+  std::atomic<bool> startup_complete_{false};
+  /// @brief Set true if a component's startup() threw; reset by create(). Lets
+  /// wait_until_started() report failure instead of blocking forever, since a
+  /// throwing startup latches startup_complete_ without the engine running.
+  std::atomic<bool> startup_failed_{false};
+  /// @brief True once a startup() throw made this create() generation terminal.
+  /// @details A startup throw leaves partition/async/cross-partition event queues,
+  /// primary-registration counters, and per-component state from the partial
+  /// attempt intact. Re-running startup on top of that would double-schedule a
+  /// started component's initial event and double-register a primary, so the
+  /// generation is dead: run()/step() refuse to re-run startup and the caller must
+  /// shutdown() + create() for a clean generation. Reset by create().
+  bool start_failed_ = false;
+  /// @brief True once shutdown_components() has run for this generation, so each
+  /// initialized component's shutdown() fires exactly once even if both the
+  /// startup-failure unwind and the engine shutdown() path reach it. Reset by
+  /// create().
+  bool components_shut_down_ = false;
 
   /// @brief Global lower bound on time stamp, updated by barrier completion.
   std::atomic<Tick> global_lbts_{0};

@@ -12,9 +12,11 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <cerrno>
 #include <charconv>
+#include <chrono>
 #include <cstdio>
 #include <dirent.h>
 #include <fcntl.h>
@@ -694,6 +696,47 @@ bool GuestKfd::retain_local_open() {
   return false;
 }
 
+uint32_t GuestKfd::local_open_ref_count() const {
+  std::lock_guard lock(mutex_);
+  return open_refs_;
+}
+
+void GuestKfd::begin_local_shutdown() {
+  // Wake any parked WAIT_EVENTS so it returns and drops its lifetime pin before the
+  // interposer takes the exclusive teardown latch. Snapshot execution_driver_ under
+  // mutex_, then call with the lock released (its begin_local_shutdown() takes the
+  // simulator's own process mutex; holding GuestKfd::mutex_ across it is
+  // unnecessary). A simulator-backed guest forwards to that driver. A hardware-
+  // backed guest has no execution_driver_ and forwards WAIT_EVENTS to the real
+  // kernel as bounded polls (forward_wait_events_bounded), so set hw_closing_ to
+  // cancel an in-flight poll loop instead.
+  LinuxKfd *execution_driver = nullptr;
+  {
+    std::lock_guard lock(mutex_);
+    execution_driver = execution_driver_;
+  }
+  if (execution_driver)
+    execution_driver->begin_local_shutdown();
+  else
+    hw_closing_.store(true, std::memory_order_release);
+}
+
+void GuestKfd::end_local_shutdown() {
+  // Mirror begin_local_shutdown(): forward the rollback to the simulator execution
+  // backend (clearing its process's closing state), or for a hardware-backed guest
+  // clear hw_closing_ so its WAIT_EVENTS poll loop resumes serving after an aborted
+  // teardown.
+  LinuxKfd *execution_driver = nullptr;
+  {
+    std::lock_guard lock(mutex_);
+    execution_driver = execution_driver_;
+  }
+  if (execution_driver)
+    execution_driver->end_local_shutdown();
+  else
+    hw_closing_.store(false, std::memory_order_release);
+}
+
 LinuxKfd::PrimaryInvalidation GuestKfd::invalidate_primary_fd(int fd) {
   if (fd < 0)
     return PrimaryInvalidation::kNotPrimary;
@@ -784,6 +827,47 @@ int GuestKfd::forward_ioctl(unsigned long request, void *arg) {
     return -1;
   }
   return ret;
+}
+
+int GuestKfd::forward_wait_events_bounded(unsigned long request, void *arg) {
+  int kfd_fd = fd();
+  if (kfd_fd < 0) {
+    errno = ENODEV;
+    return -1;
+  }
+  auto *wait_args = static_cast<kfd_ioctl_wait_events_args *>(arg);
+  const uint32_t original_timeout = wait_args->timeout;
+
+  // A zero-timeout poll already returns promptly; forward it unchanged.
+  if (original_timeout == 0)
+    return forward_ioctl(request, arg);
+
+  // Break a long/indefinite wait into short kernel polls, re-checking hw_closing_
+  // between iterations so begin_local_shutdown() can cancel it and the caller's
+  // lifetime pin drains. The per-poll timeout bounds how long a single blocking
+  // syscall can hold the pin. Mirrors RemoteDriver's client-side WAIT_EVENTS loop.
+  constexpr uint32_t kPollMs = 5;
+  const bool indefinite = original_timeout >= 0xFFFFFFFEu;
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(original_timeout);
+
+  for (;;) {
+    if (hw_closing_.load(std::memory_order_acquire)) {
+      // Report a benign timeout so the caller re-polls (and observes the driver
+      // going away) rather than treating the cancellation as an event completion.
+      wait_args->timeout = original_timeout;
+      wait_args->wait_result = KFD_IOC_WAIT_RESULT_TIMEOUT;
+      return 0;
+    }
+    wait_args->timeout = kPollMs;
+    int rc = forward_ioctl(request, arg);
+    wait_args->timeout = original_timeout;
+    if (rc != 0)
+      return rc;
+    if (wait_args->wait_result != KFD_IOC_WAIT_RESULT_TIMEOUT)
+      return 0;
+    if (!indefinite && std::chrono::steady_clock::now() >= deadline)
+      return 0; // real timeout: leave wait_result == TIMEOUT
+  }
 }
 
 int GuestKfd::get_process_apertures_ioctl(void *arg) {
@@ -1019,6 +1103,14 @@ int GuestKfd::ioctl(unsigned long request, void *arg) {
   case AMDKFD_IOC_SET_XNACK_MODE:
   case AMDKFD_IOC_RUNTIME_ENABLE:
     return forward_ioctl(request, arg);
+  case AMDKFD_IOC_WAIT_EVENTS:
+    // A simulator-backed guest routes WAIT_EVENTS to execution_driver_ (whose own
+    // begin_local_shutdown() wakes it). A hardware-backed guest forwards to the
+    // real kernel, where an indefinite wait would deadlock teardown under the
+    // interposer's lifetime pin, so break it into bounded, cancellable polls.
+    if (execution_driver_)
+      return forward_ioctl(request, arg);
+    return forward_wait_events_bounded(request, arg);
   default:
     if (request_targets_guest(request, arg))
       return reject_guest_execution_ioctl(request, arg);

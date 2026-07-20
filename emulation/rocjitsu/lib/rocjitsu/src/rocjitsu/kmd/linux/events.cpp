@@ -107,12 +107,39 @@ void EventState::notify_closing() {
 
 /// @brief Write KFD_SIGNAL_EVENT_LIMIT to all event page slots.
 void EventState::signal_page_shutdown() {
+  // Hold mutex_ across the page read+write: release_page() (called from munmap)
+  // clears page/page_size under the SAME lock and then unmaps the mapping, so
+  // without this an unmap could race in and leave us writing through a freed
+  // pointer (and racing page/page_size). This is the same discipline the CP
+  // interrupt path (signal_interrupt) uses to touch the mapping safely.
+  std::lock_guard<std::mutex> lock(mutex_);
   if (!page)
     return;
   auto *slots = static_cast<uint64_t *>(page);
   size_t count = page_size / sizeof(uint64_t);
   for (size_t i = 0; i < count; ++i)
     std::atomic_ref<uint64_t>(slots[i]).store(KFD_SIGNAL_EVENT_LIMIT, std::memory_order_release);
+}
+
+/// @brief Rebuild every event page slot from live event state (rollback path).
+void EventState::restore_page_from_events() {
+  // Reconstruct the slots signal_page_shutdown() poisoned, so an aborted teardown
+  // does not leave a surviving consumer reading the unsignaled sentinel for events
+  // that are actually signaled (which would look like a lost signal). Under mutex_
+  // for the same page-lifetime reason as signal_page_shutdown(): every slot is set
+  // to the sentinel, then each signaled event's true age is written on top —
+  // fully reconstructing the page regardless of the poisoned contents.
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!page)
+    return;
+  auto *slots = static_cast<uint64_t *>(page);
+  size_t count = page_size / sizeof(uint64_t);
+  for (size_t i = 0; i < count; ++i)
+    std::atomic_ref<uint64_t>(slots[i]).store(KFD_SIGNAL_EVENT_LIMIT, std::memory_order_release);
+  for (const auto &[id, ev] : events_) {
+    if (ev.signaled && id < count)
+      std::atomic_ref<uint64_t>(slots[id]).store(ev.event_age, std::memory_order_release);
+  }
 }
 
 void EventState::reset() { closing_.store(false, std::memory_order_release); }

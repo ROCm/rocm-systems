@@ -54,6 +54,27 @@ public:
   ///         caller must NOT treat the fd as retained.
   [[nodiscard]] virtual bool retain_local_open() { return false; }
 
+  /// @brief Non-destructively wake any thread blocked in a driver call so it can
+  /// return and drop its lifetime pin, allowing teardown to proceed.
+  /// @details Called by the interposer on an idle driver BEFORE it takes the
+  /// exclusive lifetime latch for destruction. An indefinite-timeout
+  /// AMDKFD_IOC_WAIT_EVENTS holds a shared lifetime pin for its whole duration, so
+  /// without this wake the exclusive acquire would deadlock waiting on a pin whose
+  /// call only returns once the driver is closed — which happens after the latch.
+  /// This sets the closing flag / signals the event page so the blocked call
+  /// returns promptly; it does NOT free or unpublish anything. Default no-op for
+  /// drivers with no blocking calls. Idempotent (the destroy path may re-run it).
+  virtual void begin_local_shutdown() {}
+
+  /// @brief Undo a begin_local_shutdown() wake that did not lead to teardown.
+  /// @details The interposer wakes an idle driver before taking the exclusive
+  /// lifetime latch, but a racing dup/retain can make the post-latch idle recheck
+  /// fail and abort teardown. begin_local_shutdown() leaves the driver in a
+  /// "closing" state that would wrongly make the surviving consumer's blocking
+  /// calls fail (e.g. WAIT_EVENTS returning -EBADF), so this clears that state so
+  /// the still-live driver keeps serving. Default no-op; idempotent.
+  virtual void end_local_shutdown() {}
+
   /// @brief Outcome of invalidate_primary_fd(), telling the interposer how to
   /// follow up on a dup2/dup3 that overwrote a primary KFD fd number.
   enum class PrimaryInvalidation {

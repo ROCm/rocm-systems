@@ -96,6 +96,26 @@ public:
   /// @retval false No live guest process to retain.
   [[nodiscard]] bool retain_local_open() override;
 
+  /// @brief Number of app-facing KFD descriptor references still live.
+  /// @details Only application-visible dup fds are counted (the internal real
+  /// /dev/kfd fd is not), so a count of zero means the guest driver is idle. The
+  /// interposer uses this to decide when the local VM may be torn down.
+  [[nodiscard]] uint32_t local_open_ref_count() const;
+
+  /// @brief Wake blocking calls before teardown (delegates to the simulator
+  /// execution backend, if any).
+  /// @details A simulator-backed guest forwards WAIT_EVENTS to its SimulatedKfd
+  /// execution driver, so the wake must reach that driver's local process. A
+  /// hardware-backed guest forwards to the real kernel and owns no simulator wait,
+  /// so this is a no-op there.
+  void begin_local_shutdown() override;
+
+  /// @brief Roll back a begin_local_shutdown() wake when teardown was aborted.
+  /// @details Forwards to the simulator execution backend (if any) so its local
+  /// process's closing state is cleared; a hardware-backed guest has no simulator
+  /// wait, so this is a no-op there.
+  void end_local_shutdown() override;
+
   /// @brief Stop classifying the hidden real /dev/kfd fd number as KFD after a
   /// dup2/dup3 overwrote it.
   /// @details GuestKfd hands applications ordinary dup fds and keeps the real
@@ -124,6 +144,17 @@ private:
 
   /// @brief Forward one ioctl to the real /dev/kfd fd.
   int forward_ioctl(unsigned long request, void *arg);
+
+  /// @brief Forward WAIT_EVENTS to the real kernel as bounded, cancellable polls.
+  /// @details A hardware-backed guest has no simulator wait to wake, and the real
+  /// kernel WAIT_EVENTS can block indefinitely. The interposer dispatches this
+  /// ioctl while holding a shared driver-lifetime pin, so an indefinite kernel wait
+  /// would keep that pin held and deadlock teardown (begin_local_shutdown() cannot
+  /// wake a kernel syscall, and closing the fd does not cancel an in-flight wait).
+  /// This breaks a long/indefinite wait into short kernel polls that re-check
+  /// hw_closing_ between iterations, so begin_local_shutdown() can cancel it and the
+  /// pin drains promptly. Mirrors the RemoteDriver client-side WAIT_EVENTS loop.
+  int forward_wait_events_bounded(unsigned long request, void *arg);
 
   /// @brief Return real process apertures plus one synthetic guest aperture.
   int get_process_apertures_ioctl(void *arg) override;
@@ -179,6 +210,10 @@ private:
   std::unordered_set<uint64_t> synthetic_handles_;
   std::unordered_set<uint64_t> synthetic_mmap_offsets_;
   std::atomic<bool> ready_{false};
+  /// @brief Set by begin_local_shutdown() for a hardware-backed guest so an
+  /// in-flight bounded WAIT_EVENTS poll loop returns and drops its lifetime pin
+  /// before teardown; cleared by end_local_shutdown() when teardown is aborted.
+  std::atomic<bool> hw_closing_{false};
 };
 
 } // namespace rocjitsu

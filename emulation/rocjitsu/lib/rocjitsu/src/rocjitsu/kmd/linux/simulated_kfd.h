@@ -86,6 +86,20 @@ public:
   /// @retval false No local process to retain (e.g. it was already torn down, or
   ///         daemon/remote mode); the caller must NOT treat the fd as retained.
   [[nodiscard]] bool retain_local_open() override;
+
+  /// @brief Wake the local process's parked event waiters so a blocking
+  /// WAIT_EVENTS returns and releases its lifetime pin before teardown.
+  /// @details Fires notify_closing()/signal_page_shutdown() on the local process
+  /// WITHOUT removing it from processes_ or freeing state, so the exclusive
+  /// lifetime latch acquired next does not deadlock behind an indefinite wait.
+  /// The subsequent close() completes the actual teardown. Idempotent.
+  void begin_local_shutdown() override;
+
+  /// @brief Clear the closing state a begin_local_shutdown() set, when teardown
+  /// was aborted (a racing retain kept the driver live). Resets the local
+  /// process's EventState so its blocking calls resume serving. Idempotent.
+  void end_local_shutdown() override;
+
   int ioctl(unsigned long request, void *arg) override;
   void *mmap(void *addr, size_t length, int prot, int flags, off_t offset) override;
   int munmap(void *addr, size_t length) override;

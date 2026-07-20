@@ -205,6 +205,59 @@ TEST_F(SimulatedKfdTest, TopologyDirectoryExists) {
   EXPECT_TRUE(std::filesystem::exists(path + "/nodes/1/properties"));
 }
 
+// Regression test for the phase-2/phase-3 teardown rollback (begin_local_shutdown
+// followed by an aborted teardown). begin_local_shutdown() wakes a parked
+// WAIT_EVENTS by setting the closing flag AND poisoning every event-page slot with
+// KFD_SIGNAL_EVENT_LIMIT. If the interposer's exclusive-latch idle re-check then
+// fails (a racing dup kept the driver live), teardown aborts and end_local_shutdown()
+// must FULLY restore state: clear closing AND rebuild the event page from live event
+// state, so a still-live consumer does not read an already-signaled event as
+// unsignaled (a lost signal). This drives begin -> abort -> end directly and asserts
+// the signaled slot survives the round trip.
+TEST_F(SimulatedKfdTest, AbortedShutdownRollbackRestoresSignaledEventPage) {
+  auto t = create_test_vm();
+  ASSERT_NE(t.driver(), nullptr);
+  auto *drv = t.driver();
+
+  ASSERT_GE(drv->open(), 0);
+  auto proc = drv->find_process(drv->local_process_id());
+  ASSERT_NE(proc, nullptr);
+
+  // Provide a real event page and adopt it, mirroring the CREATE_EVENT mmap path.
+  constexpr size_t kSlots = 64;
+  std::vector<uint64_t> page(kSlots, 0);
+  proc->event_state_.adopt_page(page.data(), page.size() * sizeof(uint64_t));
+
+  // Create a signal event and signal it, so its page slot holds a real (non-zero,
+  // non-sentinel) age.
+  kfd_ioctl_create_event_args create{};
+  create.event_type = 0; // signal event
+  ASSERT_EQ(drv->ioctl(AMDKFD_IOC_CREATE_EVENT, &create), 0);
+
+  kfd_ioctl_set_event_args set{};
+  set.event_id = create.event_id;
+  ASSERT_EQ(drv->ioctl(AMDKFD_IOC_SET_EVENT, &set), 0);
+
+  const uint64_t signaled_age = page[create.event_id];
+  ASSERT_NE(signaled_age, 0u);
+  ASSERT_NE(signaled_age, static_cast<uint64_t>(KFD_SIGNAL_EVENT_LIMIT));
+
+  // Phase 2: wake. Poisons the page and marks the driver closing.
+  drv->begin_local_shutdown();
+  EXPECT_EQ(page[create.event_id], static_cast<uint64_t>(KFD_SIGNAL_EVENT_LIMIT))
+      << "begin_local_shutdown must poison the slot to wake userspace pollers";
+  EXPECT_TRUE(proc->event_state_.is_closing());
+
+  // Phase 3 aborted -> rollback. Must restore BOTH the closing flag and the page.
+  drv->end_local_shutdown();
+  EXPECT_FALSE(proc->event_state_.is_closing()) << "end_local_shutdown must clear the closing flag";
+  EXPECT_EQ(page[create.event_id], signaled_age)
+      << "end_local_shutdown must rebuild the signaled slot's true age, not leave "
+         "the sentinel (a lost signal for the surviving consumer)";
+
+  EXPECT_EQ(drv->close(), 0);
+}
+
 // Regression test for the close()-vs-in-flight-ioctl teardown race. ioctl()
 // snapshots the KfdProcess shared_ptr WITHOUT retaining an open reference, so a
 // concurrent close() can erase and tear down the process while other threads are
