@@ -49,7 +49,7 @@ HIP_TEST_CASE(Unit_hipManagedMultiGpuVaConsistency_MultiDevice) {
     return;
   }
   for (int d = 0; d < numDevices; ++d) {
-    if (!isManagedMemorySupportedOnDevice(d)) {
+    if (!HipTest::isManagedMemorySupportedOnDevice(d)) {
       HIP_SKIP_TEST("Managed memory is not supported on all devices");
       return;
     }
