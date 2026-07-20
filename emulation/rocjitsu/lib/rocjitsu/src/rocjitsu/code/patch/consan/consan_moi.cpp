@@ -196,7 +196,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   bool inline_atomic_without_access = false;
   if (effective_options.moi_engine == ConSanMoiEngine::InlineShadow) {
     std::vector<const ConSanMoiCandidate *> inline_access_candidates =
-        find_inline_shadow_access_candidates(result, code_object_bytes);
+        find_inline_shadow_access_candidates(result, code_object_bytes, arch);
     apply_test_kernel_filter(inline_access_candidates, effective_options);
     effective_options.moi_inline_access_present = !inline_access_candidates.empty();
     inline_atomic_without_access = inline_access_candidates.empty() &&
@@ -445,8 +445,14 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
   for (const ConSanMoiCandidate &candidate : result.moi_candidates) {
     if (selected_candidate_count >= selected_candidate_limit)
       break;
-    if (classify_moi_access_candidate_support(code_object_bytes, candidate) !=
-        ConSanSiteDispositionReason::None)
+    const bool supported =
+        std::ranges::any_of(result.site_dispositions, [&](const ConSanSiteDispositionRecord &site) {
+          return site.site_kind == ConSanResourceSiteKind::Access &&
+                 site.disposition == ConSanSiteDisposition::Supported &&
+                 site.container_name == candidate.container_name &&
+                 site.text_offset == candidate.text_offset;
+        });
+    if (!supported)
       continue;
     const auto ranges = candidate_access_ranges(code_object_bytes, candidate);
     if (!ranges || ranges->empty())

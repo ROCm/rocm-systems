@@ -353,7 +353,7 @@ void warn_skipped_moi_flat_candidates(std::string_view container_name, bool in_k
 
 [[nodiscard]] ConSanSiteDispositionReason
 classify_moi_access_candidate_support(std::span<const uint8_t> bytes,
-                                      const ConSanMoiCandidate &candidate) {
+                                      const ConSanMoiCandidate &candidate, rj_code_arch_t arch) {
   const bool supported_atomic =
       candidate.kind == ConSanLdsAccessKind::Atomic &&
       equals_any(candidate.mnemonic,
@@ -385,7 +385,7 @@ classify_moi_access_candidate_support(std::span<const uint8_t> bytes,
       candidate.size == 2u * sizeof(uint32_t) && candidate.raw_segment == 0u;
   if (!rdna4_encoding && !cdna4_encoding)
     return ConSanSiteDispositionReason::UnsupportedFlatEncoding;
-  if (!candidate.raw_ioffset || *candidate.raw_ioffset != 0)
+  if (!candidate.raw_ioffset || (*candidate.raw_ioffset != 0 && arch != ROCJITSU_CODE_ARCH_GFX1250))
     return ConSanSiteDispositionReason::NonzeroFlatOffset;
   if (*candidate.addr_vgpr >= 255)
     return ConSanSiteDispositionReason::ReservedFlatAddressRegister;
@@ -405,7 +405,7 @@ void append_moi_access_site_disposition(std::span<const uint8_t> bytes,
   const ConSanSiteDispositionReason reason =
       candidate.mnemonic == "ds_load_b96" && arch != ROCJITSU_CODE_ARCH_GFX1250
           ? ConSanSiteDispositionReason::UnsupportedMnemonic
-          : classify_moi_access_candidate_support(bytes, candidate);
+          : classify_moi_access_candidate_support(bytes, candidate, arch);
   ConSanSiteDispositionRecord record;
   record.site_kind = ConSanResourceSiteKind::Access;
   record.disposition = reason == ConSanSiteDispositionReason::None
@@ -608,7 +608,8 @@ candidate_access_ranges(std::span<const uint8_t> bytes, const ConSanMoiCandidate
   return candidate_access_ranges(bytes, candidate).has_value();
 }
 
-[[nodiscard]] bool is_first_light_flat_candidate(const ConSanMoiCandidate &candidate) {
+[[nodiscard]] bool is_first_light_flat_candidate(const ConSanMoiCandidate &candidate,
+                                                 rj_code_arch_t arch) {
   if (candidate.source != ConSanMoiCandidateSource::FlatGroup &&
       candidate.source != ConSanMoiCandidateSource::FlatMaybeGroup)
     return false;
@@ -617,7 +618,7 @@ candidate_access_ranges(std::span<const uint8_t> bytes, const ConSanMoiCandidate
       candidate.size == 2u * sizeof(uint32_t) && candidate.raw_segment == 0u;
   if (!rdna4_encoding && !cdna4_encoding)
     return false;
-  if (!candidate.raw_ioffset || *candidate.raw_ioffset != 0)
+  if (!candidate.raw_ioffset || (*candidate.raw_ioffset != 0 && arch != ROCJITSU_CODE_ARCH_GFX1250))
     return false;
   if (!candidate.addr_vgpr || *candidate.addr_vgpr >= 255)
     return false;
@@ -634,7 +635,8 @@ candidate_access_ranges(std::span<const uint8_t> bytes, const ConSanMoiCandidate
 }
 
 [[nodiscard]] bool is_first_light_access_record_candidate(const ConSanMoiCandidate &candidate,
-                                                          std::span<const uint8_t> bytes) {
+                                                          std::span<const uint8_t> bytes,
+                                                          rj_code_arch_t arch) {
   if (candidate.kind != ConSanLdsAccessKind::Read && candidate.kind != ConSanLdsAccessKind::Write &&
       candidate.kind != ConSanLdsAccessKind::Atomic)
     return false;
@@ -646,15 +648,15 @@ candidate_access_ranges(std::span<const uint8_t> bytes, const ConSanMoiCandidate
     return false;
   if (candidate.source == ConSanMoiCandidateSource::NativeLds)
     return is_first_light_native_lds_candidate(candidate, bytes);
-  return is_first_light_flat_candidate(candidate);
+  return is_first_light_flat_candidate(candidate, arch);
 }
 
 [[nodiscard]] std::vector<const ConSanMoiCandidate *>
 find_first_light_access_record_candidates(const ConSanResult &result,
-                                          std::span<const uint8_t> bytes) {
+                                          std::span<const uint8_t> bytes, rj_code_arch_t arch) {
   std::vector<const ConSanMoiCandidate *> candidates;
   for (const ConSanMoiCandidate &candidate : result.moi_candidates) {
-    if (!is_first_light_access_record_candidate(candidate, bytes))
+    if (!is_first_light_access_record_candidate(candidate, bytes, arch))
       continue;
     candidates.push_back(&candidate);
   }

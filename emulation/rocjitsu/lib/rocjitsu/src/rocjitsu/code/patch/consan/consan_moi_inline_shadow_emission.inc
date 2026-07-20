@@ -2055,8 +2055,12 @@
   const uint16_t high_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 3u);
   const uint16_t tmp_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
   const uint16_t old_value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
+  const bool materialize_flat_offset =
+      candidate_requires_gfx1250_flat_offset_materialization(candidate);
   std::optional<uint16_t> saved_lds_byte_offset_vgpr;
-  if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+  if (materialize_flat_offset) {
+    saved_lds_byte_offset_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + scratch_count - 2u);
+  } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
     const uint16_t first_snapshot =
         static_cast<uint16_t>(*options.scratch_vgpr + scratch_count - 2u);
     saved_lds_byte_offset_vgpr =
@@ -2106,6 +2110,11 @@
   if (saved_lds_byte_offset_vgpr) {
     words.push_back(build_v_mov_b32_e32(*saved_lds_byte_offset_vgpr,
                                         vector_source_vgpr(*lds_byte_offset_vgpr), arch));
+    if (materialize_flat_offset) {
+      words.push_back(build_v_mov_b32_e32(
+          static_cast<uint16_t>(*saved_lds_byte_offset_vgpr + 1u),
+          vector_source_vgpr(static_cast<uint16_t>(*lds_byte_offset_vgpr + 1u)), arch));
+    }
     lds_byte_offset_vgpr = saved_lds_byte_offset_vgpr;
   }
   // Publish the shadow before the application access, then execute that access
@@ -2123,6 +2132,15 @@
   if (preserve_special_state && !append_save_moi_special_state(words, options, arch)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not preserve application VCC/SCC");
     return std::nullopt;
+  }
+  if (materialize_flat_offset) {
+    const auto add = instrumentation::build_v_add_u64_signed_i24(*lds_byte_offset_vgpr,
+                                                                 *candidate.raw_ioffset, arch);
+    if (!add) {
+      errors.emplace_back("ConSan MOI inline-shadow probe could not materialize FLAT offset");
+      return std::nullopt;
+    }
+    words.insert(words.end(), add->begin(), add->end());
   }
   if (!append_moi_lds_wait(words, arch))
     return std::nullopt;
@@ -2200,7 +2218,10 @@
     // shared aperture's high half. Global lanes bypass shadow bookkeeping and
     // later rejoin for the displaced guest access.
     const auto in_shared_aperture = instrumentation::build_v_cmp_eq_u32_vcc(
-        kScalarOperandSharedBase, static_cast<uint16_t>(*candidate.addr_vgpr + 1u), arch);
+        kScalarOperandSharedBase,
+        materialize_flat_offset ? static_cast<uint16_t>(*lds_byte_offset_vgpr + 1u)
+                                : static_cast<uint16_t>(*candidate.addr_vgpr + 1u),
+        arch);
     const auto retain_shared_lanes = instrumentation::build_s_and_saveexec_b64(
         static_cast<uint16_t>(*options.moi_exec_save_sgpr + 2u), kRdna4VccLo, arch);
     if (!in_shared_aperture || !retain_shared_lanes) {

@@ -2946,6 +2946,59 @@ TEST(ConSanMoi, Gfx1250AtomicRecordPatchesOrderedFlatAtomic) {
             1u);
 }
 
+TEST(ConSanMoi, Gfx1250RecordReplayMaterializesSignedFlatAccessOffset) {
+  constexpr auto load = gfx1250::build_vflat(gfx1250::kFlatLoadB128Vflat,
+                                             {.saddr = static_cast<uint8_t>(gfx1250::OPR_SREG_NULL),
+                                              .vdst = 8,
+                                              .vaddr = 4,
+                                              .ioffset = 16});
+  const std::array<uint32_t, 8> text_words = {
+      0xBE8001EBu, // s_mov_b64 s[0:1], src_shared_base
+      build_v_mov_b32_e32(/*vdst=*/4, /*src=*/0, ROCJITSU_CODE_ARCH_GFX1250),
+      build_v_mov_b32_e32(/*vdst=*/5, /*src=*/1, ROCJITSU_CODE_ARCH_GFX1250),
+      load[0],
+      load[1],
+      load[2],
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),
+  };
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+  options.scratch_vgpr = 16;
+  options.moi_exec_save_sgpr = 60;
+  options.moi_owner_vgpr = 24;
+  options.moi_epoch_vgpr = 25;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+
+  const ConSanResult result =
+      try_patch_consan(make_gfx1250_code_object(text_words, "gfx1250_flat_offset"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.moi_candidates.size(), 1u);
+  EXPECT_EQ(result.moi_candidates.front().source, ConSanMoiCandidateSource::FlatGroup);
+  EXPECT_EQ(result.moi_candidates.front().raw_ioffset, 16);
+  EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [](const auto &site) {
+    return site.site_kind == ConSanResourceSiteKind::Access &&
+           site.disposition == ConSanSiteDisposition::Supported &&
+           site.lowering_outcome == ConSanSiteLoweringOutcome::Patched;
+  }));
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  std::vector<uint32_t> patched_words(patched.text_sections().front()->size() / sizeof(uint32_t));
+  std::memcpy(patched_words.data(), patched.text_sections().front()->data(),
+              patched.text_sections().front()->size());
+  const auto add = build_v_add_u64_signed_i24(/*address_vgpr=*/19, /*displacement=*/16,
+                                              ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(add);
+  EXPECT_TRUE(contains_subsequence(patched_words, *add));
+}
+
 TEST(ConSanMoi, Gfx1250WaveScopeAtomicIsTypedNotApplicable) {
   const auto atomic = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/2, /*return_old_value=*/true, /*scope=*/0,

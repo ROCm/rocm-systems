@@ -58,11 +58,11 @@ preserve the earlier green claim.
 | **P1 Sharktank TP1 decode/combined** | 🟩 Exact decode/combined oracles; 704/704 accesses; current paired 1.09x | 🟩 Exact decode/combined oracles; 704/704 accesses, 74/74 barriers; current paired 1.16x | 🟩 Exact decode/combined oracles; 704/704 accesses, 128/128 applicable barriers; current paired 1.28x | 🟧 Compute-active through 600 seconds; no verdict or accepted overhead |
 | **P2 Sharktank TP2 family** | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained |
 | **P4 hip-moi D128 block attention** | 🟩 Current paired 1.56x; 18/18 accesses | 🟩 Current paired 1.11x; 18/18 accesses, 4/4 barriers | 🟥 Current strict analysis incomplete on callable barrier variants | 🟩 Current paired 1.09x; 18/18 accesses, 4/4 barriers |
-| **P4 hip-moi D128 pressure attention** | 🟩 Current paired 1.84x; 40/40 accesses | 🟥 Current strict analysis rejects nonzero-offset flat loads | 🟥 Current strict analysis incomplete | 🟥 Current strict analysis rejects nonzero-offset flat loads |
+| **P4 hip-moi D128 pressure attention** | 🟩 Current paired 1.84x; 40/40 accesses | 🟦 Current exact oracle; 40/40 accesses, 4/4 barriers | 🟥 Current strict analysis incomplete | 🟧 Current 40/40-access run remained compute-active through 120 seconds; isolated rerun pending |
 | **P4 hip-moi WMMA attention** | 🟩 Current paired 1.78x; 18/18 accesses | 🟩 Current paired 1.17x; 18/18 accesses, 4/4 barriers | 🟥 Current strict analysis incomplete on callable barrier variants | 🟩 Current paired 1.17x; 18/18 accesses, 4/4 barriers |
 | **P4 hip-moi Stream-K arrival** | 🟩 Current paired 7.38x; 4/4 accesses | 🟩 Current paired 2.41x; 4/4 accesses, 4/4 barriers, 10/10 atomics, 16/16 fences | 🟥 Current strict analysis incomplete on callable barrier variants | 🟩 Current paired 2.62x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
 | **P4 hip-moi tree atomic-OR** | 🟩 Current paired 6.55x; 4/4 accesses | 🟩 Current paired 2.04x; 4/4 accesses, 4/4 barriers, 10/10 atomics, 16/16 fences | 🟥 Current strict analysis incomplete on callable barrier variants | 🟩 Current paired 2.19x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
-| **P4 Jakub attention variants** | 🟩 Current paired 2.52x; 31/31 accesses | 🟥 Current strict analysis incomplete | 🟥 Current strict analysis incomplete | 🟥 Current strict analysis incomplete |
+| **P4 Jakub attention variants** | 🟩 Current paired 2.52x; 31/31 accesses | 🟦 Current exact oracle; 62/62 accesses, 4/4 barriers | 🟥 Current strict analysis incomplete | 🟦 Current exact oracle; 62/62 accesses, 4/4 barriers |
 
 CLIP BF16 is intentionally omitted from the current acceptance matrix.  Its
 uninstrumented execution is not presently practical in the software GPU
@@ -212,6 +212,15 @@ do not promote matrix cells without the end-to-end evidence above.
 | Four focused flavor verticals | 🟦 Four-engine bootstrap | A clean ping-pong cooperative-LDS workload passed its host-reference oracle with 4/4 accesses patched by SuperCollider.  Record/Replay passed with 4/4 accesses and 8/8 barriers patched and visible records.  Sampled passed with 4/4 accesses and two visible records, but 0/8 barriers.  Inline Shadow is statically and dynamically complete with 4/4 accesses, 8/8 barriers, and one visible record.  Fault/diagnostic behavior, replay qualification, and Sampled synchronization remain open. |
 
 ## Progress log
+
+- 2026-07-20: gfx1250 signed FLAT displacement materialization removes the
+  strict-analysis gap from D128-pressure and Jakub-attention without changing
+  gfx950 or gfx12 admission.  Current clean artifact wave `043` accepts Jakub
+  Record/Replay and Inline Shadow at 62/62 accesses and 4/4 barriers, and
+  D128-pressure Record/Replay at 40/40 accesses and 4/4 barriers.  The
+  concurrent D128-pressure Inline Shadow run reached complete static lowering
+  but remained compute-active through its 120-second bound; it is not accepted
+  and moves to an isolated run before paired measurement.
 
 - 2026-07-20: F16 sparse closure and the dependent Tensile opcode survey
   promote to green in Record/Replay.  Clean artifact `365` and paired artifact

@@ -91,7 +91,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     return;
   }
   std::vector<const ConSanMoiCandidate *> candidates =
-      find_first_light_access_record_candidates(result, bytes);
+      find_first_light_access_record_candidates(result, bytes, arch);
   apply_test_kernel_filter(candidates, options);
   std::ranges::sort(candidates, [](const ConSanMoiCandidate *lhs, const ConSanMoiCandidate *rhs) {
     return lhs->text_offset < rhs->text_offset;

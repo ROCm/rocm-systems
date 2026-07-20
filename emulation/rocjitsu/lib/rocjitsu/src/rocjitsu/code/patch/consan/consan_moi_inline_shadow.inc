@@ -110,7 +110,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     return;
   }
   std::vector<const ConSanMoiCandidate *> candidates =
-      find_inline_shadow_access_candidates(result, bytes);
+      find_inline_shadow_access_candidates(result, bytes, arch);
   apply_test_kernel_filter(candidates, options);
   std::ranges::sort(candidates, [](const ConSanMoiCandidate *lhs, const ConSanMoiCandidate *rhs) {
     return lhs->text_offset < rhs->text_offset;
@@ -1623,6 +1623,19 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
   words.push_back(*save_exec);
   words.push_back(*save_scc);
   words.push_back(*save_vcc);
+  if (candidate_requires_gfx1250_flat_offset_materialization(candidate)) {
+    if (!preserved_lds_byte_offset_vgpr) {
+      errors.emplace_back("ConSan MOI sampled FLAT offset has no preserved address pair");
+      return std::nullopt;
+    }
+    const auto add = instrumentation::build_v_add_u64_signed_i24(*preserved_lds_byte_offset_vgpr,
+                                                                 *candidate.raw_ioffset, arch);
+    if (!add) {
+      errors.emplace_back("ConSan MOI sampled probe could not materialize FLAT offset");
+      return std::nullopt;
+    }
+    words.insert(words.end(), add->begin(), add->end());
+  }
   if (runtime_sampled) {
     if (access_range.static_byte_offset != 0u) {
       if (!append_compute_effective_lds_byte_offset(words, low_vgpr, *lds_byte_offset_vgpr,
@@ -2090,7 +2103,9 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     words.push_back(*wait);
   }
   std::optional<uint16_t> preserved_lds_byte_offset_vgpr;
-  if (moi_load_clobbers_address(candidate)) {
+  const bool materialize_flat_offset =
+      candidate_requires_gfx1250_flat_offset_materialization(candidate);
+  if (moi_load_clobbers_address(candidate) || materialize_flat_offset) {
     if (!options.scratch_vgpr)
       return std::nullopt;
     const uint16_t base_scratch_count = static_cast<uint16_t>(
@@ -2103,6 +2118,11 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
       return std::nullopt;
     words.push_back(build_v_mov_b32_e32(*preserved_lds_byte_offset_vgpr,
                                         vector_source_vgpr(*lds_byte_offset_vgpr), arch));
+    if (materialize_flat_offset) {
+      words.push_back(build_v_mov_b32_e32(
+          static_cast<uint16_t>(*preserved_lds_byte_offset_vgpr + 1u),
+          vector_source_vgpr(static_cast<uint16_t>(*lds_byte_offset_vgpr + 1u)), arch));
+    }
   }
 
   for (uint32_t range_index = 0; range_index < access_ranges->size(); ++range_index) {

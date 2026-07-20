@@ -543,9 +543,12 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     return std::nullopt;
   }
   const uint16_t base_scratch_count = options.moi_dynamic_access_records ? 6u : 3u;
+  const bool materialize_flat_offset =
+      candidate_requires_gfx1250_flat_offset_materialization(candidate);
   const bool save_clobbered_address = moi_load_clobbers_address(candidate);
-  const uint16_t scratch_count =
-      static_cast<uint16_t>(base_scratch_count + (save_clobbered_address ? 1u : 0u));
+  const uint16_t address_scratch_count =
+      materialize_flat_offset ? 2u : (save_clobbered_address ? 1u : 0u);
+  const uint16_t scratch_count = static_cast<uint16_t>(base_scratch_count + address_scratch_count);
   if (static_cast<uint32_t>(*options.scratch_vgpr) + scratch_count > 256u) {
     errors.emplace_back(options.moi_dynamic_access_records
                             ? "ConSan MOI dynamic access-record probe needs six scratch VGPRs"
@@ -596,6 +599,10 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     errors.emplace_back("ConSan MOI first-light probe requires a supported LDS access range");
     return std::nullopt;
   }
+  if (materialize_flat_offset && access_ranges->size() != 1u) {
+    errors.emplace_back("ConSan MOI flat-offset probe requires one normalized access range");
+    return std::nullopt;
+  }
   std::optional<uint16_t> derived_owner_vgpr;
   std::vector<uint32_t> derived_owner_words;
   if (!options.moi_owner_vgpr && candidate.kernel_descriptor_file_offset) {
@@ -635,7 +642,16 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   // A DS load may overwrite the same VGPR that supplied its address. Preserve
   // that effective address before executing the displaced guest instruction;
   // otherwise RecordReplay publishes the loaded payload as the LDS offset.
-  if (save_clobbered_address) {
+  if (materialize_flat_offset && options.moi_dynamic_access_records) {
+    const uint16_t materialized_address_vgpr =
+        static_cast<uint16_t>(*options.scratch_vgpr + base_scratch_count);
+    words.push_back(build_v_mov_b32_e32(materialized_address_vgpr,
+                                        vector_source_vgpr(*candidate.addr_vgpr), arch));
+    words.push_back(build_v_mov_b32_e32(
+        static_cast<uint16_t>(materialized_address_vgpr + 1u),
+        vector_source_vgpr(static_cast<uint16_t>(*candidate.addr_vgpr + 1u)), arch));
+    lds_byte_offset_vgpr = materialized_address_vgpr;
+  } else if (save_clobbered_address) {
     const uint16_t saved_lds_byte_offset_vgpr =
         static_cast<uint16_t>(*options.scratch_vgpr + base_scratch_count);
     words.push_back(build_v_mov_b32_e32(saved_lds_byte_offset_vgpr,
@@ -679,6 +695,16 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       if (!append_save_moi_special_state(words, options, arch)) {
         errors.emplace_back("ConSan MOI dynamic access-record probe could not save VCC/SCC");
         return std::nullopt;
+      }
+      if (materialize_flat_offset) {
+        const auto add = instrumentation::build_v_add_u64_signed_i24(*lds_byte_offset_vgpr,
+                                                                     *candidate.raw_ioffset, arch);
+        if (!add) {
+          errors.emplace_back(
+              "ConSan MOI dynamic access-record probe could not materialize FLAT offset");
+          return std::nullopt;
+        }
+        words.insert(words.end(), add->begin(), add->end());
       }
 
       if (!append_atomic_fetch_add_one_u32(
@@ -841,6 +867,16 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   if (!options.moi_exec_save_sgpr || !append_save_moi_special_state(words, options, arch)) {
     errors.emplace_back("ConSan MOI first-light probe could not save EXEC/VCC/SCC");
     return std::nullopt;
+  }
+  if (materialize_flat_offset) {
+    const uint16_t materialized_address_vgpr =
+        static_cast<uint16_t>(*options.scratch_vgpr + base_scratch_count);
+    if (!append_materialize_gfx1250_flat_access_address(words, candidate, materialized_address_vgpr,
+                                                        arch)) {
+      errors.emplace_back("ConSan MOI first-light probe could not materialize FLAT offset");
+      return std::nullopt;
+    }
+    lds_byte_offset_vgpr = materialized_address_vgpr;
   }
   const auto lane_rank_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
       record_value_vgpr, kScalarInlineMinusOne, scalar_positive_inline_u32(0), arch);
@@ -1200,11 +1236,12 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
 }
 
 [[nodiscard]] bool is_inline_shadow_access_candidate(const ConSanMoiCandidate &candidate,
-                                                     std::span<const uint8_t> bytes) {
+                                                     std::span<const uint8_t> bytes,
+                                                     rj_code_arch_t arch) {
   const bool native_lds = candidate.source == ConSanMoiCandidateSource::NativeLds;
   const bool normalized_flat = (candidate.source == ConSanMoiCandidateSource::FlatGroup ||
                                 candidate.source == ConSanMoiCandidateSource::FlatMaybeGroup) &&
-                               is_first_light_flat_candidate(candidate);
+                               is_first_light_flat_candidate(candidate, arch);
   if (!native_lds && !normalized_flat)
     return false;
   if (candidate.kind != ConSanLdsAccessKind::Read && candidate.kind != ConSanLdsAccessKind::Write &&
@@ -1226,10 +1263,11 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
 }
 
 [[nodiscard]] std::vector<const ConSanMoiCandidate *>
-find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const uint8_t> bytes) {
+find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const uint8_t> bytes,
+                                     rj_code_arch_t arch) {
   std::vector<const ConSanMoiCandidate *> candidates;
   for (const ConSanMoiCandidate &candidate : result.moi_candidates) {
-    if (is_inline_shadow_access_candidate(candidate, bytes))
+    if (is_inline_shadow_access_candidate(candidate, bytes, arch))
       candidates.push_back(&candidate);
   }
   return candidates;

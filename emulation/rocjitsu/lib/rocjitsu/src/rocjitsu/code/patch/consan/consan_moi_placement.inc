@@ -525,6 +525,33 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
   return *candidate.addr_vgpr;
 }
 
+[[nodiscard]] bool
+candidate_requires_gfx1250_flat_offset_materialization(const ConSanMoiCandidate &candidate) {
+  return (candidate.source == ConSanMoiCandidateSource::FlatGroup ||
+          candidate.source == ConSanMoiCandidateSource::FlatMaybeGroup) &&
+         candidate.raw_ioffset && *candidate.raw_ioffset != 0;
+}
+
+[[nodiscard]] bool
+append_materialize_gfx1250_flat_access_address(std::vector<uint32_t> &words,
+                                               const ConSanMoiCandidate &candidate,
+                                               uint16_t result_vgpr, rj_code_arch_t arch) {
+  if (!candidate_requires_gfx1250_flat_offset_materialization(candidate) ||
+      arch != ROCJITSU_CODE_ARCH_GFX1250 || !candidate.addr_vgpr || *candidate.addr_vgpr >= 255u ||
+      result_vgpr >= 255u)
+    return false;
+  words.push_back(build_v_mov_b32_e32(result_vgpr, vector_source_vgpr(*candidate.addr_vgpr), arch));
+  words.push_back(build_v_mov_b32_e32(
+      static_cast<uint16_t>(result_vgpr + 1u),
+      vector_source_vgpr(static_cast<uint16_t>(*candidate.addr_vgpr + 1u)), arch));
+  const auto add =
+      instrumentation::build_v_add_u64_signed_i24(result_vgpr, *candidate.raw_ioffset, arch);
+  if (!add)
+    return false;
+  words.insert(words.end(), add->begin(), add->end());
+  return true;
+}
+
 [[nodiscard]] uint16_t candidate_payload_vgpr_count(const ConSanMoiCandidate &candidate) {
   if (candidate.width_bits == 0)
     return 1;
@@ -546,7 +573,9 @@ candidate_payload_vgpr_count_per_address(const ConSanMoiCandidate &candidate) {
 [[nodiscard]] bool moi_load_clobbers_address(const ConSanMoiCandidate &candidate) {
   if (!candidate.addr_vgpr || !candidate.dst_vgpr)
     return false;
-  return range_overlaps(*candidate.addr_vgpr, 1u, *candidate.dst_vgpr,
+  const uint16_t address_vgpr_count =
+      candidate.source == ConSanMoiCandidateSource::NativeLds ? 1u : 2u;
+  return range_overlaps(*candidate.addr_vgpr, address_vgpr_count, *candidate.dst_vgpr,
                         candidate_payload_vgpr_count(candidate));
 }
 
@@ -563,18 +592,23 @@ candidate_payload_vgpr_count_per_address(const ConSanMoiCandidate &candidate) {
       (options.force_vgpr_spill || options.automatic_moi_private_epoch ||
        options.moi_dynamic_stack_spill);
   const uint16_t spill_address_snapshot_count = cdna4_spill_capable ? 2u : 0u;
+  const uint16_t flat_offset_address_count =
+      candidate_requires_gfx1250_flat_offset_materialization(candidate) ? 2u : 0u;
   return static_cast<uint16_t>(
       inline_shadow_scratch_count(options) + inline_shadow_loop_scratch_count(options, candidate) +
-      (moi_load_clobbers_address(candidate) ? 1u : 0u) + spill_address_snapshot_count);
+      (moi_load_clobbers_address(candidate) && flat_offset_address_count == 0u ? 1u : 0u) +
+      std::max(spill_address_snapshot_count, flat_offset_address_count));
 }
 
 [[nodiscard]] uint16_t direct_sampled_scratch_count(const ConSanOptions &options,
                                                     const ConSanMoiCandidate &candidate) {
   const uint16_t base_scratch_count = options.moi_sampled_check ? 7u : 5u;
-  return static_cast<uint16_t>(base_scratch_count +
-                               (options.moi_runtime_sample_stride > 1 ? 1u : 0u) +
-                               (moi_load_clobbers_address(candidate) ? 1u : 0u) +
-                               (options.automatic_moi_private_epoch ? 1u : 0u));
+  return static_cast<uint16_t>(
+      base_scratch_count + (options.moi_runtime_sample_stride > 1 ? 1u : 0u) +
+      (candidate_requires_gfx1250_flat_offset_materialization(candidate) ? 2u
+       : moi_load_clobbers_address(candidate)                            ? 1u
+                                                                         : 0u) +
+      (options.automatic_moi_private_epoch ? 1u : 0u));
 }
 
 [[nodiscard]] bool reject_candidate_scratch_range_overlap(const ConSanMoiCandidate &candidate,
@@ -777,7 +811,10 @@ apply_moi_persistent_vgpr_assignment(ConSanOptions &options,
   switch (options.moi_engine) {
   case ConSanMoiEngine::RecordReplay:
     return static_cast<uint16_t>((options.moi_dynamic_access_records ? 6u : 3u) +
-                                 (moi_load_clobbers_address(candidate) ? 1u : 0u));
+                                 (candidate_requires_gfx1250_flat_offset_materialization(candidate)
+                                      ? 2u
+                                  : moi_load_clobbers_address(candidate) ? 1u
+                                                                         : 0u));
   case ConSanMoiEngine::InlineShadow:
     return inline_shadow_scratch_count(options, candidate, arch);
   case ConSanMoiEngine::Sampled:
