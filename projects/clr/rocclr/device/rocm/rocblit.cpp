@@ -204,7 +204,7 @@ bool DmaBlitManager::writeImage(const void* srcHost, device::Memory& dstMemory,
 // ================================================================================================
 bool DmaBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& dstMemory,
                                 const amd::Coord3D& srcOrigin, const amd::Coord3D& dstOrigin,
-                                const amd::Coord3D& size, bool entire,
+                                const amd::Coord3D& size, [[maybe_unused]] bool entire,
                                 amd::CopyMetadata copyMetadata) const {
   if (setup_.disableCopyBuffer_ ||
       (srcMemory.isHostMemDirectAccess() && !srcMemory.isCpuUncached() &&
@@ -2458,7 +2458,8 @@ static inline FillPatternPayload buildTilePattern(const void* pattern, size_t pa
 
 // ================================================================================================
 bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern,
-                                     size_t patternSize, const amd::Coord3D& surface,
+                                     size_t patternSize,
+                                     [[maybe_unused]] const amd::Coord3D& surface,
                                      const amd::Coord3D& origin, const amd::Coord3D& size,
                                      bool entire, bool forceBlit) const {
   std::scoped_lock k(lockXferOps_);
@@ -2700,8 +2701,9 @@ bool KernelBlitManager::fillBuffer2D(device::Memory& memory, const void* pattern
 // ================================================================================================
 bool KernelBlitManager::shaderCopyBuffer(address dst, address src, const amd::Coord3D& dstOrigin,
                                          const amd::Coord3D& srcOrigin, const amd::Coord3D& sizeIn,
-                                         bool entire, const uint32_t blitWg,
-                                         amd::CopyMetadata copyMetadata, bool attachSignal) const {
+                                         [[maybe_unused]] bool entire, const uint32_t blitWg,
+                                         [[maybe_unused]] amd::CopyMetadata copyMetadata,
+                                         bool attachSignal) const {
   constexpr uint32_t kBlitType = BlitCopyBuffer;
   constexpr uint32_t kMaxAlignment = 2 * sizeof(uint64_t);
   amd::Coord3D size(sizeIn[0]);

@@ -18,7 +18,7 @@ HostBlitManager::HostBlitManager(VirtualDevice& vDev, Setup setup)
 
 bool HostBlitManager::readBuffer(device::Memory& srcMemory, void* dstHost,
                                  const amd::Coord3D& origin, const amd::Coord3D& size, bool entire,
-                                 amd::CopyMetadata copyMetadata) const {
+                                 [[maybe_unused]] amd::CopyMetadata copyMetadata) const {
   // Map the device memory to CPU visible
   void* src = srcMemory.cpuMap(vDev_, Memory::CpuReadOnly);
   if (NULL == src) {
@@ -39,7 +39,8 @@ bool HostBlitManager::readBuffer(device::Memory& srcMemory, void* dstHost,
 bool HostBlitManager::readBufferRect(device::Memory& srcMemory, void* dstHost,
                                      const amd::BufferRect& bufRect,
                                      const amd::BufferRect& hostRect, const amd::Coord3D& size,
-                                     bool entire, amd::CopyMetadata copyMetadata) const {
+                                     bool entire,
+                                     [[maybe_unused]] amd::CopyMetadata copyMetadata) const {
   // Map source memory
   void* src = srcMemory.cpuMap(vDev_, Memory::CpuReadOnly);
   if (src == NULL) {
@@ -70,7 +71,7 @@ bool HostBlitManager::readBufferRect(device::Memory& srcMemory, void* dstHost,
 bool HostBlitManager::readImage(device::Memory& srcMemory, void* dstHost,
                                 const amd::Coord3D& origin, const amd::Coord3D& size,
                                 size_t rowPitch, size_t slicePitch, bool entire,
-                                amd::CopyMetadata copyMetadata) const {
+                                [[maybe_unused]] amd::CopyMetadata copyMetadata) const {
   size_t startLayer = origin[2];
   size_t numLayers = size[2];
   if (srcMemory.owner()->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) {
@@ -136,7 +137,7 @@ bool HostBlitManager::readImage(device::Memory& srcMemory, void* dstHost,
 
 bool HostBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemory,
                                   const amd::Coord3D& origin, const amd::Coord3D& size, bool entire,
-                                  amd::CopyMetadata copyMetadata) const {
+                                  [[maybe_unused]] amd::CopyMetadata copyMetadata) const {
   uint flags = 0;
   if (entire) {
     flags = Memory::CpuWriteOnly;
@@ -163,7 +164,8 @@ bool HostBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemory
 bool HostBlitManager::writeBufferRect(const void* srcHost, device::Memory& dstMemory,
                                       const amd::BufferRect& hostRect,
                                       const amd::BufferRect& bufRect, const amd::Coord3D& size,
-                                      bool entire, amd::CopyMetadata copyMetadata) const {
+                                      bool entire,
+                                      [[maybe_unused]] amd::CopyMetadata copyMetadata) const {
   // Map destination memory
   void* dst = dstMemory.cpuMap(vDev_, (entire) ? Memory::CpuWriteOnly : 0);
   if (dst == NULL) {
@@ -194,7 +196,7 @@ bool HostBlitManager::writeBufferRect(const void* srcHost, device::Memory& dstMe
 bool HostBlitManager::writeImage(const void* srcHost, device::Memory& dstMemory,
                                  const amd::Coord3D& origin, const amd::Coord3D& size,
                                  size_t rowPitch, size_t slicePitch, bool entire,
-                                 amd::CopyMetadata copyMetadata) const {
+                                 [[maybe_unused]] amd::CopyMetadata copyMetadata) const {
   uint flags = 0;
   if (entire) {
     flags = Memory::CpuWriteOnly;
@@ -264,7 +266,7 @@ bool HostBlitManager::writeImage(const void* srcHost, device::Memory& dstMemory,
 bool HostBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& dstMemory,
                                  const amd::Coord3D& srcOrigin, const amd::Coord3D& dstOrigin,
                                  const amd::Coord3D& size, bool entire,
-                                 amd::CopyMetadata copyMetadata) const {
+                                 [[maybe_unused]] amd::CopyMetadata copyMetadata) const {
   // Map source memory
   void* src = srcMemory.cpuMap(vDev_,
                                // Overlap detection
@@ -298,7 +300,7 @@ bool HostBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& dstM
 bool HostBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& dstMemory,
                                      const amd::BufferRect& srcRect, const amd::BufferRect& dstRect,
                                      const amd::Coord3D& size, bool entire,
-                                     amd::CopyMetadata copyMetadata) const {
+                                     [[maybe_unused]] amd::CopyMetadata copyMetadata) const {
   // Map source memory
   void* src = srcMemory.cpuMap(vDev_,
                                // Overlap detection
@@ -391,7 +393,7 @@ bool HostBlitManager::copyImageToBuffer(device::Memory& srcMemory, device::Memor
                                         const amd::Coord3D& srcOrigin,
                                         const amd::Coord3D& dstOrigin, const amd::Coord3D& size,
                                         bool entire, size_t rowPitch, size_t slicePitch,
-                                        amd::CopyMetadata copyMetadata) const {
+                                        [[maybe_unused]] amd::CopyMetadata copyMetadata) const {
   size_t startLayer = srcOrigin[2];
   size_t numLayers = size[2];
   if (srcMemory.owner()->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) {
@@ -457,7 +459,7 @@ bool HostBlitManager::copyBufferToImage(device::Memory& srcMemory, device::Memor
                                         const amd::Coord3D& srcOrigin,
                                         const amd::Coord3D& dstOrigin, const amd::Coord3D& size,
                                         bool entire, size_t rowPitch, size_t slicePitch,
-                                        amd::CopyMetadata copyMetadata) const {
+                                        [[maybe_unused]] amd::CopyMetadata copyMetadata) const {
   // Map source memory
   void* src = srcMemory.cpuMap(vDev_, Memory::CpuReadOnly);
   if (src == NULL) {
@@ -522,7 +524,7 @@ bool HostBlitManager::copyBufferToImage(device::Memory& srcMemory, device::Memor
 bool HostBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dstMemory,
                                 const amd::Coord3D& srcOrigin, const amd::Coord3D& dstOrigin,
                                 const amd::Coord3D& size, bool entire,
-                                amd::CopyMetadata copyMetadata) const {
+                                [[maybe_unused]] amd::CopyMetadata copyMetadata) const {
   size_t startLayer = srcOrigin[2];
   size_t numLayers = size[2];
   if (srcMemory.owner()->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) {
