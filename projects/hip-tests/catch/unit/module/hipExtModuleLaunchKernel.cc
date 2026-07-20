@@ -783,6 +783,7 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_AnyOrder") {
   }
   hipFunction_t first;
   hipFunction_t second;
+  hipModule_t module;
   HIP_CHECK(hipModuleLoad(&module, "anyOrderLaunch.code"));
   HIP_CHECK(hipModuleGetFunction(&first, module, "first"));
   HIP_CHECK(hipModuleGetFunction(&second, module, "second"));
