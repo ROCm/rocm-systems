@@ -30,6 +30,9 @@ def validate_valu_instructions(sample_records):
             "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ARBITER_WIN_EX_STALL",
             "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NO_INSTRUCTION_AVAILABLE",
             "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ARBITER_NOT_WIN",
+            # VALU commonly stalls waiting on a prior ALU/register result; matches
+            # the flat/lds validators below, which already accept ALU_DEPENDENCY.
+            "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ALU_DEPENDENCY",
         ]
     )
     for record in sample_records:
