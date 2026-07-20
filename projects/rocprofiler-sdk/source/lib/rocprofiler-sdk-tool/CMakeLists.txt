@@ -11,7 +11,7 @@ set(TOOL_SOURCES att_no_intercept.cpp config.cpp graph_stack.cpp main.c tool.cpp
                  stream_stack.cpp)
 
 if(NOT ROCPROFILER_DISABLE_TRACE_DECODER)
-    find_package(rocprof-trace-decoder REQUIRED)
+    rocprofiler_sdk_find_trace_decoder()
     list(APPEND TOOL_SOURCES att_no_intercept_quick_scan.cpp)
 endif()
 

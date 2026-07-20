@@ -55,7 +55,7 @@ add_custom_command(
     COMMENT "Stripping rocprofiler-sdk-c-tool...")
 
 if(NOT ROCPROFILER_DISABLE_TRACE_DECODER)
-    find_package(rocprof-trace-decoder 0.2 REQUIRED CONFIG)
+    rocprofiler_sdk_find_trace_decoder()
 
     # thread-trace tool libraries
     set(THREAD_TRACE_TOOL_LINK_LIBRARIES

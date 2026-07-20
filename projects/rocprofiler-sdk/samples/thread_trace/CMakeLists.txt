@@ -21,7 +21,7 @@ project(rocprofiler-sdk-samples-thread-trace LANGUAGES CXX HIP)
 
 find_package(rocprofiler-sdk REQUIRED)
 find_package(rocprofiler-sdk-roctx REQUIRED)
-find_package(rocprof-trace-decoder 0.2 REQUIRED CONFIG)
+rocprofiler_sdk_find_trace_decoder()
 find_package(
     amd_comgr
     REQUIRED

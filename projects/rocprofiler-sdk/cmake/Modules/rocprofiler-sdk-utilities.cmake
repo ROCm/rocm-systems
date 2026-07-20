@@ -4,6 +4,28 @@
 
 include_guard(GLOBAL)
 
+set(ROCPROFILER_TRACE_DECODER_MIN_VERSION 0.2)
+
+function(rocprofiler_sdk_find_trace_decoder)
+    if(TARGET rocprof-trace-decoder::rocprof-trace-decoder)
+        return()
+    endif()
+    set(_ROCPROF_TRACE_DECODER_FIND_ARGS)
+    if(ROCPROF_TRACE_DECODER_DIR)
+        set(_ROCPROF_TRACE_DECODER_FIND_ARGS HINTS "${ROCPROF_TRACE_DECODER_DIR}"
+                                             NO_DEFAULT_PATH)
+    endif()
+    find_package(rocprof-trace-decoder REQUIRED CONFIG
+                 ${_ROCPROF_TRACE_DECODER_FIND_ARGS})
+    if(NOT rocprof-trace-decoder_VERSION OR rocprof-trace-decoder_VERSION VERSION_LESS
+                                            "${ROCPROFILER_TRACE_DECODER_MIN_VERSION}")
+        message(
+            FATAL_ERROR
+                "rocprof-trace-decoder >= ${ROCPROFILER_TRACE_DECODER_MIN_VERSION} is required"
+            )
+    endif()
+endfunction()
+
 function(rocprofiler_sdk_get_gfx_architectures _VAR)
     cmake_parse_arguments(ARG "ECHO" "PREFIX;DELIM" "" ${ARGN})
 
