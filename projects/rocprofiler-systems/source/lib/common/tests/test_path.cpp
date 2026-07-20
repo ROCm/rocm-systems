@@ -118,23 +118,6 @@ TEST_F(PathTest, Exists_BrokenSymlink)
 
 TEST_F(PathTest, Exists_EmptyPath) { EXPECT_FALSE(exists("")); }
 
-TEST_F(PathTest, IsLink_RegularFile)
-{
-    std::string file_path = create_file("regular.txt");
-    EXPECT_FALSE(is_link(file_path));
-}
-
-TEST_F(PathTest, IsLink_Directory) { EXPECT_FALSE(is_link(m_test_dir)); }
-
-TEST_F(PathTest, IsLink_SymbolicLink)
-{
-    std::string target    = create_file("target.txt");
-    std::string link_path = create_symlink(target, "symbolic_link");
-    EXPECT_TRUE(is_link(link_path));
-}
-
-TEST_F(PathTest, IsLink_NonexistentPath) { EXPECT_FALSE(is_link("/nonexistent/path")); }
-
 TEST_F(PathTest, ReadSymlink_SymbolicLink)
 {
     std::string target    = create_file("read_symlink_target.txt");
@@ -328,8 +311,11 @@ TEST_F(PathTest, ChainedSymlinks)
     std::string link2_path = m_test_dir + "/chain_link2";
     symlink("chain_link1", link2_path.c_str());
 
-    EXPECT_TRUE(is_link(link1));
-    EXPECT_TRUE(is_link(link2_path));
+    // Verify that link1 and link2_path are actual links:
+    // read_symlink() returns link target for real links
+    // and unchanged input for non-links
+    EXPECT_NE(read_symlink(link1), link1);
+    EXPECT_NE(read_symlink(link2_path), link2_path);
 
     std::string resolved = realpath(link2_path);
     EXPECT_EQ(resolved, target);

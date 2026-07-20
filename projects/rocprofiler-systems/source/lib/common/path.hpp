@@ -101,9 +101,6 @@ realpath(const std::string& path) ROCPROFSYS_INTERNAL_API;
 inline bool
 is_text_file(const std::string& filename) ROCPROFSYS_INTERNAL_API;
 
-inline bool
-is_link(const std::string& _path) ROCPROFSYS_INTERNAL_API;
-
 [[nodiscard]] inline std::string
 read_symlink(const std::string& path) ROCPROFSYS_INTERNAL_API;
 
@@ -260,13 +257,6 @@ parent_path(std::string_view fpath, std::uint16_t levels)
     return result.string();
 }
 
-bool
-is_link(const std::string& _path)
-{
-    struct stat _buffer;
-    if(lstat(_path.c_str(), &_buffer) == 0) return (S_ISLNK(_buffer.st_mode) != 0);
-    return false;
-}
 
 /** @brief Read the symbolic link target.
  *  @param path The filesystem path to inspect.
