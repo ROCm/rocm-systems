@@ -753,9 +753,17 @@ class DiskWriter {
   bool stopping_ = false;
 };
 
+// ROCR is built with -fno-threadsafe-statics (see hsa-runtime/CMakeLists.txt),
+// so a function-local `static DiskWriter` would have no compiler guard on its
+// first initialization and concurrent first access would be UB. Use call_once
+// for thread-safe lazy init, mirroring GetProcessRetargetCache() in
+// hotswap_cache.cpp so both process singletons are consistent.
+std::once_flag g_disk_writer_once;
+std::unique_ptr<DiskWriter> g_disk_writer;
+
 DiskWriter& GetDiskWriter() {
-  static DiskWriter writer;
-  return writer;
+  std::call_once(g_disk_writer_once, [] { g_disk_writer.reset(new DiskWriter()); });
+  return *g_disk_writer;
 }
 
 #endif  // HOTSWAP_DISK_CACHE_SUPPORTED
