@@ -62,9 +62,6 @@ def make_policy(**overrides: Any) -> pc.Policy:
         description_checklist_patterns=[re.compile(p) for p in _CHECKLIST_PATTERNS],
         block_draft=True,
         forbidden_title_patterns=[re.compile(r"(?i)\bWIP\b")],
-        max_files_changed=50,
-        max_total_changes=2000,
-        max_single_file_changes=700,
         forbidden_paths=["**/*.pem", "**/.env", "**/id_rsa"],
         unit_test_code_extensions=[".py", ".cpp"],
         unit_test_patterns=[
@@ -195,6 +192,28 @@ class DescriptionTests(unittest.TestCase):
         e: List[str] = []
         pc.ensure_pr_description(policy, "A long enough description with no ref.", e)
         self.assertTrue(any("must reference a JIRA ID" in x for x in e))
+
+    def test_issue_reference_in_comment_does_not_pass(self) -> None:
+        # Isolate reference detection (skip min-length and checklist).
+        policy = make_policy(
+            description_min_length=0, description_checklist_patterns=[]
+        )
+        multiline_comment = """<!--
+Fixes #1234
+-->"""
+        multiple_comments = """This description has no visible issue reference.
+<!-- Related to #1234 -->
+Some visible text between the comments.
+<!-- https://github.com/ROCm/TheRock/issues/5678 -->"""
+        for body in [
+            "<!-- GitHub issue: https://github.com/ROCm/TheRock/issues/1234 -->",
+            multiline_comment,
+            multiple_comments,
+        ]:
+            with self.subTest(body=body):
+                e: List[str] = []
+                pc.ensure_pr_description(policy, body, e)
+                self.assertTrue(any("must reference a JIRA ID" in x for x in e))
 
     def test_issue_reference_variants_pass(self) -> None:
         # Isolate reference detection (skip min-length and checklist).
