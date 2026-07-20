@@ -433,7 +433,7 @@ if(ROCPROFSYS_BUILD_DYNINST)
         RELATIVE_PATH external/dyninst
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         REPO_URL https://github.com/ROCm/dyninst.git
-        REPO_BRANCH dyninst_13
+        REPO_BRANCH users/kcossett-amd/cherry-pick-relr
     )
 
     set(DYNINST_OPTION_PREFIX ON)

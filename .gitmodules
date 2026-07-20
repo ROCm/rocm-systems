@@ -77,7 +77,7 @@
 [submodule "projects/rocprofiler-systems/external/dyninst"]
 	path = projects/rocprofiler-systems/external/dyninst
 	url = https://github.com/ROCm/dyninst.git
-	branch = dyninst_13
+	branch = users/kcossett-amd/cherry-pick-relr
 	shallow = true
 [submodule "projects/rocprofiler-systems/external/kokkos"]
 	path = projects/rocprofiler-systems/examples/lulesh/external/kokkos
