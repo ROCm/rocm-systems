@@ -881,6 +881,59 @@ TEST_CASE("Unit_HRR_StressApis_Direct", "[.][hrr-direct]") {
 }
 
 // ===========================================================================
+// Workload: pitched device-to-device memset (hipMemsetD2D*)
+//
+// Exercises hipMemsetD2D8 / hipMemsetD2D8Async / hipMemsetD2D16 /
+// hipMemsetD2D16Async / hipMemsetD2D32 / hipMemsetD2D32Async. These are
+// replayed faithfully (mirror the hipMemset2D handler, with alloc-map pointer
+// translation and stream translation for the async variants); replay must
+// reproduce the final byte pattern.
+// Final blob: every int == 0x2A2A2A2A.
+// ===========================================================================
+TEST_CASE("Unit_HRR_MemsetD2D_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+  constexpr int    N  = 1024;
+  constexpr size_t SZ = N * sizeof(int);  // 4096 bytes
+
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+
+  int* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, SZ));
+
+  // Treat d as a contiguous COLS x ROWS 2-D region (pitch == row width), so
+  // every D2D memset covers the whole buffer and the final state is fully
+  // defined for byte-for-byte D2H validation.
+  constexpr size_t COLS  = 32;
+  constexpr size_t ROWS  = N / COLS;            // 32 rows
+  constexpr size_t PITCH = COLS * sizeof(int);  // 128 bytes/row, contiguous
+
+  // 8-bit pitched D2D memset (sync + async).
+  HIP_CHECK(hipMemsetD2D8(reinterpret_cast<hipDeviceptr_t>(d), PITCH, 0x11, PITCH, ROWS));
+  HIP_CHECK(hipMemsetD2D8Async(reinterpret_cast<hipDeviceptr_t>(d), PITCH, 0x22, PITCH, ROWS, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+
+  // 16-bit pitched D2D memset (sync + async).
+  HIP_CHECK(hipMemsetD2D16(reinterpret_cast<hipDeviceptr_t>(d), PITCH, 0x3333, PITCH, ROWS));
+  HIP_CHECK(hipMemsetD2D16Async(reinterpret_cast<hipDeviceptr_t>(d), PITCH, 0x4444, PITCH, ROWS, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+
+  // 32-bit pitched D2D memset (sync) then final async -> known pattern 0x2A2A2A2A.
+  HIP_CHECK(hipMemsetD2D32(reinterpret_cast<hipDeviceptr_t>(d), PITCH, 0x11223344u, PITCH, ROWS));
+  HIP_CHECK(hipMemsetD2D32Async(reinterpret_cast<hipDeviceptr_t>(d), PITCH, 0x2A2A2A2Au, PITCH, ROWS, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  int* h = new int[N]();
+  HIP_CHECK(hipMemcpy(h, d, SZ, hipMemcpyDeviceToHost));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 0x2A2A2A2A);
+
+  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipStreamDestroy(s));
+  delete[] h;
+}
+
+// ===========================================================================
 // Workload B: hipMemsetD8/16/32 variants + hipMemset2D/2DAsync
 //
 // Exercises typed-memset driver APIs and 2-D pitched memset.

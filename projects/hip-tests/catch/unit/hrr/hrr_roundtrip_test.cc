@@ -786,6 +786,15 @@ TEST_CASE("Unit_HRR_NullOptionalPtrRoundtrip", "[.][hrr-repro]") {
   REQUIRE(ret == 2);
 }
 
+HIP_TEST_CASE(Unit_HRR_MemsetD2DRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetd2d"};
+  // Exercises hipMemsetD2D8 / hipMemsetD2D8Async / hipMemsetD2D16 /
+  // hipMemsetD2D16Async / hipMemsetD2D32 / hipMemsetD2D32Async (pitched
+  // device-to-device memset). Replay must reproduce the final bytes and
+  // validate them via D2H.
+  hrr_run_roundtrip("Unit_HRR_MemsetD2D_Direct", cap.path);
+}
+
 HIP_TEST_CASE(Unit_HRR_MemsetVariantsRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetvariants"};
   hrr_run_roundtrip("Unit_HRR_MemsetVariants_Direct", cap.path);
