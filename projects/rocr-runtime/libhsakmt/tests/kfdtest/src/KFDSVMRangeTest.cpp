@@ -1704,6 +1704,163 @@ TEST_P(KFDSVMRangeTest, HMMProfilingEvent) {
 }
 
 /*
+ * Read back the per-GPU access state of [addr, size) via
+ * hsaKmtSVMGetAttr(HSA_SVM_ATTR_ACCESS). On return the attribute type holds the
+ * effective access: HSA_SVM_ATTR_ACCESS, HSA_SVM_ATTR_ACCESS_IN_PLACE or
+ * HSA_SVM_ATTR_NO_ACCESS. Query one page at a time so the result is unambiguous.
+ */
+static HSAuint32 GetSvmGpuAccess(void *addr, HSAuint64 size, int gpuNode) {
+    HSA_SVM_ATTRIBUTE attr = { HSA_SVM_ATTR_ACCESS, (HSAuint32)gpuNode };
+
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtSVMGetAttr, g_baseTest->m_hsakmt_current_ctx,
+                                   addr, size, 1, &attr), gpuNode);
+    return attr.type;
+}
+
+/* Establish a known ACCESS baseline for the GPU over [addr, size), so a later
+ * NO_ACCESS revoke is observable regardless of the XNACK default. */
+static void SetSvmGpuAccess(void *addr, HSAuint64 size, int gpuNode) {
+    HSA_SVM_ATTRIBUTE attr = { HSA_SVM_ATTR_ACCESS, (HSAuint32)gpuNode };
+
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtSVMSetAttr, g_baseTest->m_hsakmt_current_ctx,
+                                   addr, size, 1, &attr), gpuNode);
+}
+
+/*
+ * Guard the thunk SVM-API registration tracking (libhsakmt fmm.c
+ * svm_api_range_get/put). On a dGPU with SVM API support, hsaKmtRegisterMemory
+ * on system memory tracks the page-rounded range so hsaKmtDeregisterMemory can
+ * revoke GPU access (NO_ACCESS) for exactly the sub-ranges that no surviving
+ * registration still covers. Three edge cases are exercised:
+ *
+ *   1. Reject - a base re-registered with a different page-rounded size is
+ *      rejected (HSAKMT_STATUS_INVALID_PARAMETER): deregister is keyed only by
+ *      base address and could not tell the two extents apart.
+ *   2. Refcount - identical (base, size) registrations are refcounted; access
+ *      is revoked only on the last deregister.
+ *   3. Overlap - two registrations whose page-rounded ranges share a page keep
+ *      that page accessible until the last owner is deregistered, instead of
+ *      over-revoking a neighbor's page.
+ *
+ * Access state is read back per page with hsaKmtSVMGetAttr, making the
+ * assertions deterministic without relying on a GPU fault.
+ */
+void KFDSVMRangeTest::SVMApiDeregisterTest(int gpuNode) {
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM API not supported on gpuNode " << gpuNode << std::endl;
+        return;
+    }
+    if (GetFamilyIdFromNodeId(gpuNode) < FAMILY_AI) {
+        LOG() << "Skipping test: no svm range support on gpuNode " << gpuNode << std::endl;
+        return;
+    }
+    const HsaNodeProperties *pNodeProperties =
+        Get_NodeInfo()->GetNodeProperties(gpuNode);
+    if (pNodeProperties->Integrated || Get_NodeInfo()->IsAppAPU(gpuNode)) {
+        LOG() << "Skipping test on (App)APU gpuNode " << gpuNode << std::endl;
+        return;
+    }
+
+    const HSAuint64 PG = PAGE_SIZE;
+
+    /* ---- 1. Reject same-base re-register with a different size ---- */
+    LOG() << "Phase 1: reject same-base / different-size re-register" << std::endl;
+    {
+        void *buf = mmap(0, 2 * PG, PROT_READ | PROT_WRITE,
+                         MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+        ASSERT_NE_GPU(MAP_FAILED, buf, gpuNode);
+        memset(buf, 0, 2 * PG);
+
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtRegisterMemory, m_hsakmt_current_ctx,
+                                       buf, PG), gpuNode);
+        /* PG rounds to 1 page, 2*PG to 2 pages: a different extent at the same
+         * base must be rejected.
+         */
+        EXPECT_EQ_GPU(HSAKMT_STATUS_INVALID_PARAMETER,
+                      HSAKMT_CALL(hsaKmtRegisterMemory, m_hsakmt_current_ctx,
+                                  buf, 2 * PG), gpuNode);
+        /* Same (base, size) is accepted and refcounted. */
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtRegisterMemory, m_hsakmt_current_ctx,
+                                       buf, PG), gpuNode);
+
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
+                                       buf), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
+                                       buf), gpuNode);
+        munmap(buf, 2 * PG);
+    }
+
+    /* ---- 2. Refcount: access revoked only on the last deregister ---- */
+    LOG() << "Phase 2: refcounted identical registrations" << std::endl;
+    {
+        void *buf = mmap(0, PG, PROT_READ | PROT_WRITE,
+                         MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+        ASSERT_NE_GPU(MAP_FAILED, buf, gpuNode);
+        memset(buf, 0, PG);
+        SetSvmGpuAccess(buf, PG, gpuNode);
+
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtRegisterMemory, m_hsakmt_current_ctx,
+                                       buf, PG), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtRegisterMemory, m_hsakmt_current_ctx,
+                                       buf, PG), gpuNode);
+
+        /* One of two references dropped: still accessible. */
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
+                                       buf), gpuNode);
+        EXPECT_EQ_GPU(HSA_SVM_ATTR_ACCESS, GetSvmGpuAccess(buf, PG, gpuNode), gpuNode);
+
+        /* Last reference dropped: now revoked. */
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
+                                       buf), gpuNode);
+        EXPECT_EQ_GPU(HSA_SVM_ATTR_NO_ACCESS, GetSvmGpuAccess(buf, PG, gpuNode), gpuNode);
+        munmap(buf, PG);
+    }
+
+    /* ---- 3. Overlap: shared page survives until its last owner ---- */
+    LOG() << "Phase 3: overlapping registrations keep the shared page" << std::endl;
+    {
+        char *buf = (char *)mmap(0, 3 * PG, PROT_READ | PROT_WRITE,
+                                 MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+        ASSERT_NE_GPU(MAP_FAILED, buf, gpuNode);
+        memset(buf, 0, 3 * PG);
+        SetSvmGpuAccess(buf, 3 * PG, gpuNode);
+
+        /* A covers pages [0,1], B covers pages [1,2]; page 1 is shared. */
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtRegisterMemory, m_hsakmt_current_ctx,
+                                       buf, PG + 1), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtRegisterMemory, m_hsakmt_current_ctx,
+                                       buf + PG, PG + 1), gpuNode);
+
+        /* Drop A: only its exclusive page 0 is revoked; the shared page 1
+         * (still owned by B) and B's page 2 keep access.
+         */
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
+                                       buf), gpuNode);
+        EXPECT_EQ_GPU(HSA_SVM_ATTR_NO_ACCESS, GetSvmGpuAccess(buf,          PG, gpuNode), gpuNode);
+        EXPECT_EQ_GPU(HSA_SVM_ATTR_ACCESS,    GetSvmGpuAccess(buf + PG,     PG, gpuNode), gpuNode);
+        EXPECT_EQ_GPU(HSA_SVM_ATTR_ACCESS,    GetSvmGpuAccess(buf + 2 * PG, PG, gpuNode), gpuNode);
+
+        /* Drop B: pages 1 and 2 are now revoked. */
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
+                                       buf + PG), gpuNode);
+        EXPECT_EQ_GPU(HSA_SVM_ATTR_NO_ACCESS, GetSvmGpuAccess(buf + PG,     PG, gpuNode), gpuNode);
+        EXPECT_EQ_GPU(HSA_SVM_ATTR_NO_ACCESS, GetSvmGpuAccess(buf + 2 * PG, PG, gpuNode), gpuNode);
+        munmap(buf, 3 * PG);
+    }
+}
+
+TEST_P(KFDSVMRangeTest, SVMApiDeregisterTest) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL);
+
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SVMApiDeregisterTest(gpuNode);
+    }));
+
+    TEST_END
+}
+
+/*
  * Test SVM support VRAM overcommitment
  *
  * Prefetch total VRAM size plus overCommitSize SVM range to VRAM. after VRAM is full,
