@@ -3162,25 +3162,15 @@ static hipError_t playback_hipStreamWaitValue64(PlaybackContext& ctx, const uint
 }
 
 static hipError_t playback_hipStreamWriteValue32(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipStreamWriteValue32 — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
+  const auto* a = reinterpret_cast<const hrr_args_hipStreamWriteValue32*>(payload);
+  hipError_t _r = (hipError_t)hipStreamWriteValue32((hipStream_t)ctx.translate_stream(a->stream), ctx.translate_ptr(a->ptr), (uint32_t)a->value, (unsigned int)a->flags);
+  return _r;
 }
 
 static hipError_t playback_hipStreamWriteValue64(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipStreamWriteValue64 — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
+  const auto* a = reinterpret_cast<const hrr_args_hipStreamWriteValue64*>(payload);
+  hipError_t _r = (hipError_t)hipStreamWriteValue64((hipStream_t)ctx.translate_stream(a->stream), ctx.translate_ptr(a->ptr), (uint64_t)a->value, (unsigned int)a->flags);
+  return _r;
 }
 
 static hipError_t playback_hipStreamBatchMemOp(PlaybackContext& ctx, const uint8_t* payload) {

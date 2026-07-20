@@ -78,6 +78,9 @@ hrr:
   Unit_HRR_StressApisRoundtrip:
     <<: *level_2
     tags: [capture, stress, playback, roundtrip]
+  Unit_HRR_StreamWriteValueRoundtrip:
+    <<: *level_2
+    tags: [capture, stream, playback, roundtrip]
   Unit_HRR_MemsetVariantsRoundtrip:
     <<: *level_2
     tags: [capture, memset, playback, roundtrip]
@@ -288,6 +291,9 @@ hrr:
   Unit_HRR_MemsetExtra_Direct:
     <<: *level_2
     tags: [direct, memset]
+  Unit_HRR_StreamWriteValue_Direct:
+    <<: *level_2
+    tags: [direct, stream]
   Unit_HRR_MemsetVariants_Direct:
     <<: *level_2
     tags: [direct, memset]

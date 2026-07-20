@@ -881,6 +881,44 @@ TEST_CASE("Unit_HRR_StressApis_Direct", "[.][hrr-direct]") {
 }
 
 // ===========================================================================
+// Workload: hipStreamWriteValue32 / hipStreamWriteValue64
+//
+// Exercises hipStreamWriteValue32 and hipStreamWriteValue64. These are replayed
+// faithfully (replay-only fix: the destination void* ptr is translated via the
+// alloc_map and the stream is translated); replay must reproduce the written
+// values, validated via D2H.
+// Final blob (two contiguous uint64 slots): slot0 == 0x00000000CAFEBABE,
+// slot1 == 0xDEADBEEFFEEDFACE.
+// ===========================================================================
+TEST_CASE("Unit_HRR_StreamWriteValue_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+
+  // Two 64-bit slots so the 32-bit write and the 64-bit write land in disjoint,
+  // fully-defined memory for byte-for-byte D2H validation.
+  uint64_t* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, 2 * sizeof(uint64_t)));
+  HIP_CHECK(hipMemset(d, 0, 2 * sizeof(uint64_t)));
+
+  // 32-bit stream write into slot0 (low 32 bits); the high 32 bits stay zero.
+  HIP_CHECK(hipStreamWriteValue32(s, d, 0xCAFEBABEu, 0));
+  // 64-bit stream write into slot1.
+  HIP_CHECK(hipStreamWriteValue64(s, d + 1, 0xDEADBEEFFEEDFACEull, 0));
+  HIP_CHECK(hipStreamSynchronize(s));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  uint64_t h[2] = {0, 0};
+  HIP_CHECK(hipMemcpy(h, d, 2 * sizeof(uint64_t), hipMemcpyDeviceToHost));
+  REQUIRE(h[0] == 0x00000000CAFEBABEull);
+  REQUIRE(h[1] == 0xDEADBEEFFEEDFACEull);
+
+  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipStreamDestroy(s));
+}
+
+// ===========================================================================
 // Workload B: hipMemsetD8/16/32 variants + hipMemset2D/2DAsync
 //
 // Exercises typed-memset driver APIs and 2-D pitched memset.

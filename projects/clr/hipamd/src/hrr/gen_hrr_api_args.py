@@ -501,11 +501,12 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipExtStreamGetCUMask",
     # hipExtGetLinkTypeAndHopCount — output uint32_t* ptrs stale
     "hipExtGetLinkTypeAndHopCount",
-    # StreamWait/Write Value — void* ptr is stale device address (no alloc_map translation in generated shim)
+    # hipStreamWaitValue32/64 keep the void* ptr as a stale device address (no alloc_map
+    # translation in the generated shim), and a wait can hang on replay.
+    # hipStreamWriteValue32/64 are replayed faithfully instead: the void* ptr is
+    # translated via alloc_map (ctx.translate_ptr) and the stream via ctx.translate_stream.
     "hipStreamWaitValue32",
     "hipStreamWaitValue64",
-    "hipStreamWriteValue32",
-    "hipStreamWriteValue64",
     # hipStreamAttachMemAsync — void* dev_ptr stale
     "hipStreamAttachMemAsync",
     # hipGetStreamDeviceId — returns int not hipError_t (wrong return type cast)
