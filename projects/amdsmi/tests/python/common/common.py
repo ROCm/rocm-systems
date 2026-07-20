@@ -656,6 +656,178 @@ def run_test_dir(subdir, title, top_level_dir):
     sys.exit(0 if result.wasSuccessful() else 1)
 
 
+# Sentinel distinguishing "module was absent from the baseline" from "present but
+# mapped to None" when snapshotting sys.modules.
+_ISO_MISSING = object()
+
+
+class _IsolationLeakMarker:
+    """Stand-in "test" for attributing a sys.modules leak when the offending
+    class cannot be identified (rare fallback). Implements the minimal
+    ``TestResult`` surface (``id``/``shortDescription``/``str``)."""
+
+    def __init__(self, label):
+        self._label = label
+
+    def id(self):
+        return f"{self._label} (sys.modules cleanup)"
+
+    def shortDescription(self):
+        return None
+
+    def __str__(self):
+        return self.id()
+
+
+class _ModuleIsolationResult(unittest.TextTestResult):
+    """Fail a test class that leaves ``sys.modules`` dirty (cross-test pollution guard).
+
+    A unit test that stubs a module into ``sys.modules`` -- e.g. to import a CLI
+    module without hardware or the compiled ``amdsmi`` package -- MUST restore it:
+    snapshot the originals in ``setUpClass`` and put them back in
+    ``tearDownClass``. If it forgets, the stub leaks into every later test module
+    run by the same interpreter (a "dirty test invocation"). That is exactly how
+    an empty ``AMDSMIHelpers`` stub once hid ``handle_gpus`` and broke every
+    ``test_cli_exit_codes`` set/reset test -- but only in a full run, never when
+    the class ran alone, which makes it painful to diagnose.
+
+    Leaks are judged only at the *end* of the run, after every ``tearDownClass``
+    has had its chance. Whatever module is still replaced or stubbed then is a
+    leak, and it is blamed on the test that *first introduced the object* now
+    occupying that name (tracked by object identity as each test runs). This is
+    robust against save/restore cascades: if one class leaks a stub and a later,
+    well-behaved class snapshots and restores that same leaked object, the blame
+    stays with the original leaker -- never the innocent bystander that merely
+    ran afterward. A class that stubs a name and properly restores it is never
+    blamed, because its object is no longer present at the end.
+    """
+
+    def startTestRun(self):
+        super().startTestRun()
+        # Baseline of already-imported modules; genuine imports carry a __spec__.
+        self._iso_baseline = dict(sys.modules)
+        # id(object) -> the first test seen with that stub/replacement in sys.modules.
+        # A leak is blamed on whoever FIRST introduced the object still sitting in
+        # sys.modules at the end of the run. This survives save/restore cascades:
+        # when a leak persists and a later, innocent class re-exposes the same leaked
+        # object (e.g. by snapshotting then restoring it), the blame stays with the
+        # class that originally created that object -- not the bystander.
+        self._iso_first_seen = {}
+        # Hold a reference to every object we have attributed so its id() cannot be
+        # reused by a later, unrelated object once the original is scrubbed/replaced.
+        self._iso_seen_objs = []
+        # (class label, [leaked module names]) per offending class, so the runner
+        # can print a distinct root-cause banner after the normal summary.
+        self._iso_leaks = []
+
+    @staticmethod
+    def _iso_looks_like_stub(mod):
+        # A hand-built module (``types.ModuleType("x")``) has no import spec and
+        # no backing file; a genuinely imported module always has a __spec__.
+        return (
+            isinstance(mod, types.ModuleType)
+            and getattr(mod, "__spec__", None) is None
+            and not getattr(mod, "__file__", None)
+        )
+
+    def _iso_dirty(self):
+        """name -> module for every entry that differs from the clean baseline: a
+        baseline module replaced by a different object, or a new hand-built stub."""
+        baseline = self._iso_baseline
+        dirty = {}
+        for name, mod in list(sys.modules.items()):
+            # Skip Python-internal dunder modules (e.g. __main__, and __mp_main__
+            # which multiprocessing installs): they look stub-like but are never
+            # test-installed stubs.
+            if name.startswith("__"):
+                continue
+            original = baseline.get(name, _ISO_MISSING)
+            if original is _ISO_MISSING:
+                if self._iso_looks_like_stub(mod):
+                    dirty[name] = mod
+            elif mod is not original:
+                dirty[name] = mod
+        return dirty
+
+    def _iso_note(self, test):
+        """Record the first test to expose each currently-dirty module object.
+
+        Sampled at the start and end of every test. ``setUpClass`` has already run
+        by the first ``startTest``, so a class's stubs are attributed to it. The
+        first test to show a given object keeps it for the rest of the run, even
+        if a later class momentarily replaces and then restores that same object.
+        """
+        for _name, mod in self._iso_dirty().items():
+            key = id(mod)
+            if key not in self._iso_first_seen:
+                self._iso_first_seen[key] = test
+                self._iso_seen_objs.append(mod)
+
+    def startTest(self, test):
+        # setUpClass ran just before this, so its stubs are attributed to `test`.
+        self._iso_note(test)
+        super().startTest(test)
+
+    def stopTest(self, test):
+        # Also sample after the body, in case the test itself installed a stub.
+        super().stopTest(test)
+        self._iso_note(test)
+
+    def stopTestRun(self):
+        # Every tearDownClass has run by now; whatever is still dirty is a real
+        # leak. Blame each leaked name on the first test that introduced the object
+        # now occupying it, scrub it so a re-run starts clean, and fail that class.
+        dirty = self._iso_dirty()
+        if dirty:
+            baseline = self._iso_baseline
+            by_test = {}
+            for name, mod in dirty.items():
+                by_test.setdefault(self._iso_first_seen.get(id(mod)), []).append(name)
+            for name in dirty:
+                original = baseline.get(name, _ISO_MISSING)
+                if original is _ISO_MISSING:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = original
+            for test, names in by_test.items():
+                label = (
+                    f"{type(test).__module__}.{type(test).__qualname__}"
+                    if test is not None
+                    else None
+                )
+                self._iso_record_leak(label, test, names)
+        super().stopTestRun()
+
+    def _iso_record_leak(self, label, test, names):
+        who = label or "a test class"
+        sorted_names = sorted(names)
+        # Remember the leak so the runner can surface it in a root-cause banner;
+        # a leak usually triggers a cascade of downstream failures, and this
+        # banner keeps the actual culprit from being lost in that noise.
+        self._iso_leaks.append((who, sorted_names))
+        msg = (
+            f"{who} left sys.modules dirty: {', '.join(sorted_names)}.\n"
+            "It stubbed or replaced these modules and did not restore them, so the\n"
+            "stub leaks into later test modules run by the same interpreter and\n"
+            "corrupts them (a 'dirty test invocation' -- e.g. an empty AMDSMIHelpers\n"
+            "stub hides handle_gpus from test_cli_exit_codes). It surfaces only when\n"
+            "this class runs before the affected test in the same run; a filtered\n"
+            "run that excludes this class (the runner's -k/-x) hides the problem.\n"
+            "Fix: in setUpClass snapshot the originals\n"
+            "    cls._saved = {n: sys.modules.get(n) for n in NAMES}\n"
+            "and in tearDownClass restore them (put the originals back, or pop the\n"
+            "names you added). See tests/python/unit/gpu/test_cli_metric_partition.py.\n"
+            "(The runner scrubs the leak after the run so a re-run starts clean.)"
+        )
+        try:
+            raise AssertionError(msg)
+        except AssertionError:
+            # Attribute to a representative test of the offending class when known;
+            # otherwise fall back to a synthetic id so the run still fails loudly.
+            target = test if test is not None else _IsolationLeakMarker(who)
+            self.addFailure(target, sys.exc_info())
+
+
 class GTestSummaryRunner(unittest.TextTestRunner):
     """TextTestRunner that appends a GTest-style pass/skip/fail summary.
 
@@ -685,10 +857,16 @@ class GTestSummaryRunner(unittest.TextTestRunner):
         runner = common.GTestSummaryRunner(stream=sys.stderr, verbosity=common.make_runner_verbosity(verbose))
     """
 
+    # Enforce per-class sys.modules hygiene: a test that stubs a module and
+    # forgets to restore it fails (see _ModuleIsolationResult) instead of
+    # silently corrupting later test modules.
+    resultclass = _ModuleIsolationResult
+
     _CYAN = "\033[36m"
     _GREEN = "\033[32m"
     _YELLOW = "\033[33m"
     _RED = "\033[31m"
+    _MAGENTA = "\033[35m"
     _RESET = "\033[0m"
 
     @staticmethod
@@ -780,6 +958,40 @@ class GTestSummaryRunner(unittest.TextTestRunner):
             for t, _ in result.skipped:
                 stream.writeln(self._color(self._YELLOW, f"[  SKIPPED ] {self._test_label(t)}"))
         stream.writeln()
+        self._print_leak_banner(result)
+
+    def _print_leak_banner(self, result):
+        """Print a distinct root-cause banner for any sys.modules leaks.
+
+        A leaked stub typically causes a cascade of unrelated downstream
+        failures; this banner prints last so the real culprit (the class that
+        forgot to restore sys.modules) is the final, unmissable thing on screen.
+        """
+        leaks = getattr(result, "_iso_leaks", None)
+        if not leaks:
+            return
+        bar = "=" * 72
+        stream = self.stream
+        stream.writeln(self._color(self._MAGENTA, bar))
+        stream.writeln(
+            self._color(
+                self._MAGENTA,
+                "[  LEAK    ] sys.modules pollution detected -- likely the ROOT CAUSE of",
+            )
+        )
+        stream.writeln(
+            self._color(
+                self._MAGENTA,
+                "[  LEAK    ] any failures above. Fix the class(es) below first, then re-run:",
+            )
+        )
+        for who, names in leaks:
+            stream.writeln(self._color(self._MAGENTA, f"[  LEAK    ]     {who}"))
+            stream.writeln(
+                self._color(self._MAGENTA, f"[  LEAK    ]         leaked: {', '.join(names)}")
+            )
+        stream.writeln(self._color(self._MAGENTA, bar))
+        stream.writeln()
 
 
 def has_gpu_od_interface(bdf):
@@ -803,12 +1015,10 @@ def has_gpu_od_interface(bdf):
     # to remove the dependency on amdsmi_helpers from this common module.
     # Exposing non-public SYSFS API interfaces in the CLI (and in general)
     # is a bad design pattern and needs to be addressed in the future.
-    amdsmi_cli_path = os.path.normpath(
-        os.path.join(amdsmi_path, "..", "..", "libexec", "amdsmi_cli")
-    )
-    if not os.path.exists(amdsmi_cli_path):
+    amdsmi_cli_path = find_cli_dir(amdsmi_path)
+    if not amdsmi_cli_path:
         raise FileNotFoundError(
-            f'amdsmi_cli path "{amdsmi_cli_path}" does not exist. '
+            f'amdsmi_cli directory not found under "{amdsmi_path}". '
             f"Ensure the AMD-SMI CLI is installed, or set AMDSMI_PATH correctly."
         )
     if amdsmi_cli_path not in sys.path:
