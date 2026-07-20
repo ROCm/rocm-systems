@@ -685,8 +685,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       if (group.empty() || !options.moi_exec_save_sgpr || !group.front()->entry_island_offset)
         continue;
       const uint16_t base = *options.moi_exec_save_sgpr;
-      const uint16_t key_sgpr = static_cast<uint16_t>(base + 12u);
-      const uint16_t call_return_sgpr = static_cast<uint16_t>(base + 28u);
+      const uint16_t key_sgpr = options.automatic_moi_inline_sgpr_spill
+                                    ? *options.moi_inline_dispatch_key_sgpr
+                                    : static_cast<uint16_t>(base + 12u);
+      const uint16_t call_return_sgpr = options.automatic_moi_inline_sgpr_spill
+                                            ? *options.moi_inline_call_return_sgpr
+                                            : static_cast<uint16_t>(base + 28u);
       const uint64_t island_offset = *group.front()->entry_island_offset;
       const MoiIndirectJumpSgprs jump_sgprs = *moi_indirect_jump_sgprs(options);
 
@@ -1035,8 +1039,11 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                              deferred_guest_words.end());
           cave_words->insert(cave_words->end(), displaced_tail_words.begin(),
                              displaced_tail_words.end());
-          cave_words->push_back(
-              build_s_setpc_b64(static_cast<uint16_t>(*options.moi_exec_save_sgpr + 28u), arch));
+          const uint16_t call_return_sgpr = options.automatic_moi_inline_sgpr_spill
+                                                ? *options.moi_inline_call_return_sgpr
+                                                : static_cast<uint16_t>(
+                                                      *options.moi_exec_save_sgpr + 28u);
+          cave_words->push_back(build_s_setpc_b64(call_return_sgpr, arch));
         } else if (planned_patch.entry_island_offset) {
           const auto jump_sgprs = moi_indirect_jump_sgprs(options);
           if (!jump_sgprs) {

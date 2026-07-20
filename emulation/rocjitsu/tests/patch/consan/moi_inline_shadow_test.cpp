@@ -2741,6 +2741,8 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersUseSpillBackedRouter) {
   options.automatic_moi_inline_sgpr_spill = true;
   options.moi_inline_visible_evidence_sgpr = 28;
   options.moi_inline_indirect_pc_sgpr = 30;
+  options.moi_inline_call_return_sgpr = 26;
+  options.moi_inline_dispatch_key_sgpr = 25;
   options.moi_inline_indirect_scc_sgpr = 29;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -2759,6 +2761,20 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersUseSpillBackedRouter) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
                                &ConSanPatchInfo::kind),
             kAccessCount); // One epoch advance after each signal/wait pair completes.
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const uint32_t external_return = build_s_setpc_b64(/*sdst=*/26, ROCJITSU_CODE_ARCH_GFX1250);
+  const uint32_t spill_window_return =
+      build_s_setpc_b64(/*sdst=*/88, ROCJITSU_CODE_ARCH_GFX1250);
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind != ConSanPatchKind::TrampolineMoiExactShadowStore)
+      continue;
+    const std::vector<uint32_t> cave =
+        text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
+    EXPECT_NE(std::ranges::find(cave, external_return), cave.end());
+    EXPECT_EQ(std::ranges::find(cave, spill_window_return), cave.end());
+  }
 }
 
 TEST(ConSanMoi, InlineShadowPreservesTwoAddressLoadAddressAliasedBySecondResult) {
