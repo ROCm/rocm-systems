@@ -157,6 +157,8 @@ hipGetMipmappedArrayLevel	STATUS	hipError_t
 hipGetProcAddress	STATUS	hipError_t
 hipGetProcAddress_spt	STATUS	hipError_t
 hipGetStreamDeviceId	STATUS	int
+hipGetSymbolAddress	STATUS	hipError_t
+hipGetSymbolSize	STATUS	hipError_t
 hipGetTextureAlignmentOffset	STATUS	hipError_t
 hipGetTextureObjectResourceDesc	STATUS	hipError_t
 hipGetTextureObjectResourceViewDesc	STATUS	hipError_t

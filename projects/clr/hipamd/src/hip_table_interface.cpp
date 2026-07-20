@@ -1492,13 +1492,23 @@ hipError_t hipExternalMemoryGetMappedMipmappedArray(
   CATCH;
 }
 hipError_t hipGetSymbolAddress(void** devPtr, const void* symbol) {
+  auto const __rocm_in_devPtr = devPtr;
+  auto const __rocm_in_symbol = symbol;
+  rocm_trace_emit_hipGetSymbolAddress_enter(
+      (const void*)(uintptr_t)(__rocm_in_devPtr),
+      (const void*)(uintptr_t)(__rocm_in_symbol)); /* __ROCM_CURATED__: hipGetSymbolAddress */
   TRY;
-  return hip::GetHipDispatchTable()->hipGetSymbolAddress_fn(devPtr, symbol);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGetSymbolAddress, hip::GetHipDispatchTable()->hipGetSymbolAddress_fn(devPtr, symbol));
   CATCH;
 }
 hipError_t hipGetSymbolSize(size_t* size, const void* symbol) {
+  auto const __rocm_in_size = size;
+  auto const __rocm_in_symbol = symbol;
+  rocm_trace_emit_hipGetSymbolSize_enter(
+      (const void*)(uintptr_t)(__rocm_in_size),
+      (const void*)(uintptr_t)(__rocm_in_symbol)); /* __ROCM_CURATED__: hipGetSymbolSize */
   TRY;
-  return hip::GetHipDispatchTable()->hipGetSymbolSize_fn(size, symbol);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGetSymbolSize, hip::GetHipDispatchTable()->hipGetSymbolSize_fn(size, symbol));
   CATCH;
 }
 hipError_t hipGetTextureAlignmentOffset(size_t* offset, const textureReference* texref) {

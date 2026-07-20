@@ -1727,3 +1727,9 @@
 
 - api: hipGLGetDevices
   args: [pHipDeviceCount, pHipDevices, hipDeviceCount, deviceList]
+
+- api: hipGetSymbolAddress
+  args: [devPtr, symbol]
+
+- api: hipGetSymbolSize
+  args: [size, symbol]

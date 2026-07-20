@@ -2,7 +2,7 @@
  * Do not edit by hand — regenerate instead (see command below).
  *
  * SHA256(curated_apis.yaml) at generation:
- * c4229bb6818a0d72b49c0f1d04a6413ec5e18e78728d50239b723d32b7e47b78
+ * 01f28bb9306e3dcfcd8e1346d95c6178564a9d06e6e43d68385088a90f4027e7
  *
  * Per-API typed emit helpers for curated parameter capture. Every
  * helper takes (<captured-args...>, <status_type> status); status is
@@ -9855,6 +9855,37 @@ static inline void rocm_trace_emit_hipGLGetDevices_exit(hipError_t status) {
   }
 }
 
+static inline void rocm_trace_emit_hipGetSymbolAddress_enter(const void* devPtr,
+                                                             const void* symbol) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetSymbolAddress)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetSymbolAddress, (int32_t)0,
+                            (uint64_t)(uintptr_t)(devPtr), (uint64_t)(uintptr_t)(symbol), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetSymbolAddress_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetSymbolAddress)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetSymbolAddress, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetSymbolSize_enter(const void* size, const void* symbol) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetSymbolSize)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetSymbolSize, (int32_t)0, (uint64_t)(uintptr_t)(size),
+                            (uint64_t)(uintptr_t)(symbol), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetSymbolSize_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetSymbolSize)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetSymbolSize, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
 
 #else /* HIP_ENABLE_LTTNG_UST not defined — all helpers are no-ops */
 
@@ -11292,6 +11323,10 @@ static inline void rocm_trace_emit_hipRuntimeGetVersion_exit(hipError_t) {}
 static inline void rocm_trace_emit_hipGLGetDevices_enter(const void*, const void*, uint32_t,
                                                          int32_t) {}
 static inline void rocm_trace_emit_hipGLGetDevices_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGetSymbolAddress_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipGetSymbolAddress_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGetSymbolSize_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipGetSymbolSize_exit(hipError_t) {}
 
 #endif /* HIP_ENABLE_LTTNG_UST */
 
