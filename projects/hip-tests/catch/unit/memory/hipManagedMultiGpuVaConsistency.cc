@@ -41,7 +41,7 @@ static __global__ void read_into_out() { g_out = g_val; }
  * ------------------------
  *  - Multiple devices supporting managed memory
  */
-HIP_TEST_CASE("Unit_hipManagedMultiGpuVaConsistency_MultiDevice") {
+HIP_TEST_CASE(Unit_hipManagedMultiGpuVaConsistency_MultiDevice) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
@@ -126,7 +126,7 @@ static __global__ void write_int_ptr(int* p, int v) { *p = v; }
  * ------------------------
  *  - Multiple devices
  */
-HIP_TEST_CASE("Unit_hipManagedMultiGpuVaConsistency_HostAllocNoDivergence") {
+HIP_TEST_CASE(Unit_hipManagedMultiGpuVaConsistency_HostAllocNoDivergence) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
