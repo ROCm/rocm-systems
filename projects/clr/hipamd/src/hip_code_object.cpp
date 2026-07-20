@@ -265,6 +265,14 @@ hipError_t DynCO::populateDynGlobalFuncs() {
   amd::Program* amd_program = as_amd(reinterpret_cast<cl_program>(module_));
   for (auto& elem : func_names) {
     if (amd_program == nullptr || amd_program->findSymbol(elem.c_str()) == nullptr) continue;
+    // if symbols are init/fini, we trim them out
+    // These are ASAN specific symbols and we do not bubble them up to the user
+    // This means something like count of kernels in code object remains the same.
+#if defined(__clang__) && __has_feature(address_sanitizer)
+    if (elem == "amdgcn.device.init" || elem == "amdgcn.device.fini") {
+      continue;
+    }
+#endif
     functions_.insert(std::make_pair(elem, new Function(elem)));
   }
 

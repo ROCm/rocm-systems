@@ -263,53 +263,37 @@ endif()
 
 target_link_libraries(rocprofiler-systems-rocm INTERFACE amd_smi)
 
-# Detect AMD SMI library version from header
-set(_AMDSMI_HEADER "${ROCM_PATH}/include/amd_smi/amdsmi.h")
-if(EXISTS "${_AMDSMI_HEADER}")
-    file(READ "${_AMDSMI_HEADER}" _AMDSMI_HEADER_CONTENTS)
-
-    string(
-        REGEX MATCH
-        "#define AMDSMI_LIB_VERSION_MAJOR ([0-9]+)"
-        _
-        "${_AMDSMI_HEADER_CONTENTS}"
-    )
-    set(ROCPROFSYS_AMDSMI_VERSION_MAJOR "${CMAKE_MATCH_1}")
-
-    string(
-        REGEX MATCH
-        "#define AMDSMI_LIB_VERSION_MINOR ([0-9]+)"
-        _
-        "${_AMDSMI_HEADER_CONTENTS}"
-    )
-    set(ROCPROFSYS_AMDSMI_VERSION_MINOR "${CMAKE_MATCH_1}")
-
+# AMD SMI version is provided by config-mode find_package(amd_smi) above.
+# If the package does not report a version, treat it as 0.0 (AI NIC unsupported).
+if(amd_smi_VERSION)
+    message(STATUS "AMD SMI version detected: ${amd_smi_VERSION}")
+else()
+    set(amd_smi_VERSION "0.0")
     message(
         STATUS
-        "AMD SMI version detected: ${ROCPROFSYS_AMDSMI_VERSION_MAJOR}.${ROCPROFSYS_AMDSMI_VERSION_MINOR}"
+        "AMD SMI version not reported by find_package; assuming ${amd_smi_VERSION}"
     )
 endif()
 
 # AINIC requires AMD SMI >= 26.3 AND ROCPROFSYS_USE_AINIC option
 set(ROCPROFSYS_BUILD_AINIC OFF CACHE INTERNAL "Build AINIC support" FORCE)
 if(ROCPROFSYS_USE_AINIC)
-    if(
-        ROCPROFSYS_AMDSMI_VERSION_MAJOR GREATER 26
-        OR (
-            ROCPROFSYS_AMDSMI_VERSION_MAJOR EQUAL 26
-            AND ROCPROFSYS_AMDSMI_VERSION_MINOR GREATER 2
-        )
-    )
+    if(amd_smi_VERSION VERSION_GREATER_EQUAL 26.3)
         set(ROCPROFSYS_BUILD_AINIC ON CACHE INTERNAL "Build AINIC support" FORCE)
         message(STATUS "AINIC support enabled (AMD SMI >= 26.3)")
     else()
-        message(
-            STATUS
-            "AINIC disabled: AMD SMI ${ROCPROFSYS_AMDSMI_VERSION_MAJOR}.${ROCPROFSYS_AMDSMI_VERSION_MINOR} < 26.3"
-        )
+        message(STATUS "AINIC disabled: AMD SMI ${amd_smi_VERSION} < 26.3")
     endif()
 else()
     message(STATUS "AINIC disabled: ROCPROFSYS_USE_AINIC is OFF")
+endif()
+
+# Expose ROCPROFSYS_BUILD_AINIC as a global compile definition.
+if(ROCPROFSYS_BUILD_AINIC)
+    target_compile_definitions(
+        rocprofiler-systems-compile-definitions
+        INTERFACE ROCPROFSYS_BUILD_AINIC=1
+    )
 endif()
 
 # ----------------------------------------------------------------------------------------#

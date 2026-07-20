@@ -7,11 +7,23 @@ on:
         type: string
       artifact_group:
         type: string
+      event_name:
+        type: string
+        default: ''
       package_version:
         type: string
         required: true
       cmake_options:
         type: string
+      artifact_run_id:
+        type: string
+        default: ''
+      test_scope:
+        type: string
+        default: 'smoke'
+      notify_email:
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -19,6 +31,7 @@ permissions:
 jobs:
   therock-build-linux:
     name: Build Linux Packages
+    if: ${{ inputs.artifact_run_id == '' }}
     runs-on: azure-linux-scale-rocm
     permissions:
       id-token: write
@@ -41,7 +54,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 99f48ca9ecc4f3c92dadc2baef9e560e5e7d18b0 # 2026-07-07 commit
+          ref: d8e27dff1d165462ffa5bd50057a075b943c97c5 # 2026-07-13
 
       - name: Install python deps
         run: |
@@ -138,16 +151,29 @@ jobs:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}
       test_runs_on: ruby-linux-slurm-scale-runner
-      artifact_run_id: ${{ github.run_id }}
+      artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
 
   therock-test-linux-single-node:
     name: "Test single-node"
     # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
-    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' }}
+    if: ${{ !cancelled() && inputs.amdgpu_families != 'gfx950-dcgpu' }}
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-rccl-test-packages-single-node.yml
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}
       test_runs_on: linux-gfx942-8gpu-ossci-rocm
-      artifact_run_id: ${{ github.run_id }}
+      artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
+
+  therock-test-pytorch-distributed:
+    name: "Test PyTorch distributed (scheduled)"
+    if: ${{ !cancelled() && inputs.amdgpu_families != 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
+    needs: [therock-build-linux]
+    uses: ./.github/workflows/therock-rccl-test-pytorch-distributed.yml
+    with:
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      artifact_group: ${{ inputs.artifact_group }}
+      test_runs_on: linux-gfx942-8gpu-ossci-rocm
+      artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
+      test_scope: ${{ inputs.test_scope }}
+      notify_email: ${{ inputs.notify_email }}
