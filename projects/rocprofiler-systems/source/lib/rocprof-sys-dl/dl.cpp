@@ -24,7 +24,6 @@
 #include "rocprofiler-systems/types.h"
 
 #include <spdlog/fmt/fmt.h>
-#include <timemory/utility/filepath.hpp>
 
 #include <cassert>
 #include <gnu/libc-version.h>
@@ -1240,7 +1239,7 @@ rocprofsys_postinit(std::string _exe)
         case InstrumentMode::ProcessCreate:
         {
             if(_exe.empty())
-                _exe = tim::filepath::readlink(fmt::format("/proc/{}/exe", getpid()));
+                _exe = path::read_symlink(fmt::format("/proc/{}/exe", getpid()));
 
             rocprofsys_init_tooling();
             if(_exe.empty())
