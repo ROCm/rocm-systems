@@ -55,19 +55,12 @@ HIP_TEST_CASE(OOB_hip_module_load_over) {
 }
 
 // In-memory path: hipModuleLoadData(image) - no length, bound is derived from the
-// mapping that contains the (anonymous heap) buffer. These cases reject regardless
-// of the arena size: bad_shoff points 1TB out, sh_overflow overflows on any bound.
+// mapping that contains the (anonymous heap) buffer. These cases reject in
+// getElfSize before any device/arch check, so they are arch-independent. The valid
+// in-memory load is covered by OOB_hiprtc_roundtrip_loads, which is arch-correct.
 HIP_TEST_CASE(OOB_hip_module_load_data_over) {
-  DECL_MODULE_PATH(elf_valid);
   DECL_MODULE_PATH(elf_bad_shoff);
   DECL_MODULE_PATH(elf_sh_overflow);
-
-  SECTION("valid in-memory - sanity") {
-    auto buf = ReadFile(elf_valid);
-    hipModule_t module{};
-    HIP_CHECK(hipModuleLoadData(&module, buf.data()));
-    HIP_CHECK(hipModuleUnload(module));
-  }
 
   SECTION("bad shoff in-memory") {
     auto buf = ReadFile(elf_bad_shoff);
