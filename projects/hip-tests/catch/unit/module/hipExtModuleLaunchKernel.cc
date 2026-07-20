@@ -764,11 +764,10 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_AnyOrder") {
   hipDeviceProp_t props{};
   HIP_CHECK(hipGetDevice(&device));
   HIP_CHECK(hipGetDeviceProperties(&props, device));
-  std::string arch = std::string(props.gcnArchName);
-  auto pos = arch.find("gfx9");
-  // skip for all gfx9xx, Meant to run on gfx11xx & gfx12xx.
-  if (pos != std::string::npos) {
-    HIP_SKIP_TEST("Not supported on gfx9xx. Skipping test ...");
+  const std::string arch(props.gcnArchName);
+  // Meant to run on gfx11xx & gfx12xx only.
+  if (!(arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx12", 0) == 0)) {
+    HIP_SKIP_TEST("Any-order launch supported only on gfx11xx/gfx12xx. Skipping test ...");
     return;
   }
   int ticks_per_ms = 0;
