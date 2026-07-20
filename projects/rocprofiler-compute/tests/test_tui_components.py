@@ -9,6 +9,7 @@ including dataframe processing, aggregated kernel analysis,
 and widget creation.
 """
 
+import shutil
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, Mock, patch
@@ -16,8 +17,11 @@ from unittest.mock import MagicMock, Mock, patch
 import pandas as pd
 import pytest
 
+from rocprof_compute_tui.analysis_tui import tui_analysis
 from rocprof_compute_tui.widgets.instant_button import InstantButton
 from rocprof_compute_tui.widgets.menu_bar.menu_bar import DropdownMenu, MenuButton
+from utils import schema
+from utils.parser import PMC_DISPATCH_INFO_TABLE_ID, PMC_KERNEL_TOP_TABLE_ID
 
 # Mark all tests in this file with the 'tui' marker for pytest
 pytestmark = pytest.mark.tui
@@ -560,3 +564,32 @@ class TestDataStructureIntegration:
             kernel_name = kernel_data["Kernel_Name"]
             selected_data = kernel_to_df_dict.get(kernel_name)
             assert selected_data is not None, f"Missing data for {kernel_name}"
+
+
+def test_canonical_record_collection_preserves_legacy_analysis_tui(
+    tmp_path: Path,
+) -> None:
+    """TUI preprocessing preserves a legacy workload's dispatch data."""
+    workload_dir = tmp_path / "legacy_tui_workload"
+    shutil.copytree(
+        Path("tests/workloads/vcopy_pc_sampling_only/MI300X_A1"),
+        workload_dir,
+    )
+    workload_path = str(workload_dir)
+    args = MagicMock(random_port=False, time_unit="ns", kernel_verbose=5)
+    workload = schema.Workload()
+
+    analyzer = tui_analysis.__new__(tui_analysis)
+    analyzer.path = workload_path
+    analyzer.args = args
+    analyzer.initalize_runs = Mock(return_value={workload_path: workload})
+
+    analyzer.pre_processing()
+
+    assert workload.raw_pmc["Dispatch_ID"].tolist() == [1, 2, 3]
+    assert workload.dfs[PMC_KERNEL_TOP_TABLE_ID].iloc[0]["Count"] == 3
+    assert workload.dfs[PMC_DISPATCH_INFO_TABLE_ID]["Dispatch_ID"].tolist() == [
+        1,
+        2,
+        3,
+    ]

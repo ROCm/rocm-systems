@@ -13,10 +13,17 @@ import pandas as pd
 import pytest
 
 from pc_sampling.pc_sampling_analysis import load_pc_sample_records
+from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from rocprof_compute_analyze.analysis_cli import cli_analysis
+from rocprof_compute_analyze.analysis_webui import webui_analysis
+from utils import schema
 from utils.metrics.expression import build_eval_string
 from utils.metrics.metric_evaluator import MetricEvaluator
-from utils.parser import load_pc_sampling_data
+from utils.parser import (
+    PMC_DISPATCH_INFO_TABLE_ID,
+    PMC_KERNEL_TOP_TABLE_ID,
+    load_pc_sampling_data,
+)
 
 config = {}
 config["cleanup"] = True
@@ -31,6 +38,8 @@ indirs = [
 ]
 
 time_units = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
+
+PC_SAMPLING_WORKLOAD = Path("tests/workloads/vcopy_pc_sampling_only/MI300X_A1")
 
 
 @pytest.mark.misc
@@ -1035,11 +1044,11 @@ def test_pc_sampling_basic_coverage():
 
     workload = MockWorkload()
 
-    assert load_pc_sampling_data(workload, "none", "count", None).empty
-    assert load_pc_sampling_data(workload, "missing", "count", None).empty
+    assert load_pc_sampling_data(workload, "none", "count", []).empty
+    assert load_pc_sampling_data(workload, "missing", "count", []).empty
 
     workload.filter_kernel_ids = [0, 1, 2]  # Multiple kernels
-    assert load_pc_sampling_data(workload, "test", "count", None).empty
+    assert load_pc_sampling_data(workload, "test", "count", []).empty
 
     empty_records = load_pc_sample_records({
         "buffer_records": {
@@ -1791,7 +1800,7 @@ def test_pc_sampling_single_kernel_uses_workload_dfs():
     # Kernel index out of bounds warns and returns empty.
     workload.filter_kernel_ids = [99]
     with patch("utils.parser.console_warning") as mock_warning:
-        result = load_pc_sampling_data(workload, "test", "count", tool_data)
+        result = load_pc_sampling_data(workload, "test", "count", [tool_data])
         mock_warning.assert_called()
         call_args_str = str(mock_warning.call_args)
         assert "out of bounds" in call_args_str or "99" in call_args_str
@@ -1801,9 +1810,91 @@ def test_pc_sampling_single_kernel_uses_workload_dfs():
     workload.filter_kernel_ids = [1]  # kernel_b
     with patch("utils.parser.load_pc_sampling_data_per_kernel") as mock_per_kernel:
         mock_per_kernel.return_value = pd.DataFrame()
-        load_pc_sampling_data(workload, "test", "count", tool_data)
+        load_pc_sampling_data(workload, "test", "count", [tool_data])
         if mock_per_kernel.called:
             assert "kernel_b" in str(mock_per_kernel.call_args)
+
+
+@pytest.mark.misc
+def test_canonical_record_collection_preserves_legacy_analysis_stdout_and_text(
+    binary_handler_analyze_rocprof_compute,
+    capsys,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """A legacy record renders the same report to stdout and a text file."""
+    workload_path = tmp_path / "legacy_pc_sampling_workload"
+    shutil.copytree(PC_SAMPLING_WORKLOAD, workload_path)
+    monkeypatch.chdir(tmp_path)
+
+    analyze_args = [
+        "analyze",
+        "--path",
+        str(workload_path),
+        "--block",
+        "21",
+        "--kernel",
+        "0",
+    ]
+    assert binary_handler_analyze_rocprof_compute(analyze_args) == 0
+    stdout_report = common.strip_ansi(capsys.readouterr().out)
+
+    output_name = "legacy_pc_sampling_report"
+    assert (
+        binary_handler_analyze_rocprof_compute([
+            *analyze_args,
+            "--output-format",
+            "txt",
+            "--output-name",
+            output_name,
+        ])
+        == 0
+    )
+    text_report = common.strip_ansi(
+        (tmp_path / f"{output_name}.txt").read_text(encoding="utf-8")
+    )
+
+    pc_sampling_heading = "21. PC Sampling"
+    assert pc_sampling_heading in stdout_report
+    assert pc_sampling_heading in text_report
+    stdout_pc_sampling = stdout_report[stdout_report.index(pc_sampling_heading) :]
+    text_pc_sampling = text_report[text_report.index(pc_sampling_heading) :]
+    assert stdout_pc_sampling.rstrip() == text_pc_sampling.rstrip()
+
+
+@pytest.mark.misc
+def test_canonical_record_collection_preserves_legacy_analysis_webui(
+    tmp_path: Path,
+) -> None:
+    """Web UI preprocessing preserves a legacy workload's dispatch data."""
+    workload_dir = tmp_path / "legacy_webui_workload"
+    shutil.copytree(PC_SAMPLING_WORKLOAD, workload_dir)
+    workload_path = str(workload_dir.resolve())
+    workload = schema.Workload()
+    workload.sys_info = pd.DataFrame([{"gpu_arch": "gfx942"}])
+    args = Namespace(
+        path=[[workload_path]],
+        random_port=False,
+        time_unit="ns",
+        kernel_verbose=5,
+    )
+
+    analyzer = webui_analysis.__new__(webui_analysis)
+    analyzer._runs = {workload_path: workload}
+    analyzer._profiling_config = {"filter_blocks": ["21"]}
+    analyzer.get_args = Mock(return_value=args)
+
+    with patch.object(OmniAnalyze_Base, "pre_processing"):
+        analyzer.pre_processing()
+
+    assert workload.raw_pmc["Dispatch_ID"].tolist() == [1, 2, 3]
+    assert workload.dfs[PMC_KERNEL_TOP_TABLE_ID].iloc[0]["Count"] == 3
+    assert workload.dfs[PMC_DISPATCH_INFO_TABLE_ID]["Dispatch_ID"].tolist() == [
+        1,
+        2,
+        3,
+    ]
+    assert analyzer.arch == "gfx942"
 
 
 # =============================================================================
