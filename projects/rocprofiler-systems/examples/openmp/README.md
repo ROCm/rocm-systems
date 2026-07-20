@@ -18,6 +18,7 @@ This directory contains NAS Parallel Benchmarks (NPB) implemented with OpenMP th
 ### OpenMP Fortran Host and Offload Programs
 
 - `fortran/host.f90` - OpenMP host example that uses two CPU threads to update an integer array in round-robin order.
+- `fortran/detach.f90` - OpenMP task-detach example that exercises every distinct detach route (late, early, generator-thread, and out-of-order fulfillment).
 - `fortran/offload.f90` - OpenMP target offload example that launches a GPU target region to transpose a matrix.
 
 ## Prerequisites
@@ -25,7 +26,7 @@ This directory contains NAS Parallel Benchmarks (NPB) implemented with OpenMP th
 - CMake 3.25+
 - ROCm install providing `amdclang++` and `amdflang` (resolved from `ROCM_PATH` or `/opt/rocm`)
   - `amdclang++` is **required** for the C++ examples (`openmp-cg`, `openmp-lu`, and the `openmp-common` shared utility objects).
-  - `amdflang` (version 20 or newer) is **required** for the Fortran examples (`fortran/host.f90`, `fortran/offload.f90`).
+  - `amdflang` (version 20 or newer) is **required** for the Fortran examples (`fortran/host.f90`, `fortran/detach.f90`, `fortran/offload.f90`).
 
 If a required compiler for an **enabled** target is missing, CMake configuration fails with a `FATAL_ERROR` (append `openmp` to `ROCPROFSYS_DISABLE_EXAMPLES` to skip building these examples).
 
@@ -53,6 +54,7 @@ cmake --build <build_dir> --target openmp-cg openmp-lu
 | `openmp-lu` | NAS LU Gauss-Seidel benchmark |
 | `openmp-target` | OpenMP GPU target offloading example |
 | `openmp-fortran-host` | Fortran OpenMP host example |
+| `openmp-fortran-detach` | Fortran OpenMP task-detach example |
 | `openmp-fortran-offload` | Fortran OpenMP target offload example |
 
 ## Running

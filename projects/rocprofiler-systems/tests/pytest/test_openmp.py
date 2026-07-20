@@ -280,6 +280,14 @@ class TestOpenMPFortran(RocprofsysTest):
             sys_run_pass_regex=["omp_parallel"],
         )
 
+    @pytest.mark.parametrize("mode", ["baseline", "sampling", "sys_run"])
+    def test_detach(self, mode, ompt_base_env):
+        # Exercises omp task detach / omp_fulfill_event under the profiler.
+        # No output validation is needed: the default abort-fail regex check
+        # confirms the detached-task completion events are handled cleanly.
+        result = self.run_test(mode, "openmp-fortran-detach", env=ompt_base_env)
+        self.assert_regex(result)
+
     @pytest.mark.parametrize(
         "mode",
         [

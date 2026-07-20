@@ -96,6 +96,13 @@ target_sources(${HOST_EXAMPLE_NAME} PRIVATE host.f90)
 target_compile_options(${HOST_EXAMPLE_NAME} PRIVATE ${HOST_EXAMPLE_FLAGS})
 target_link_options(${HOST_EXAMPLE_NAME} PRIVATE ${HOST_EXAMPLE_FLAGS})
 
+set(DETACH_EXAMPLE_NAME "openmp-fortran-detach")
+
+add_executable(${DETACH_EXAMPLE_NAME})
+target_sources(${DETACH_EXAMPLE_NAME} PRIVATE detach.f90)
+target_compile_options(${DETACH_EXAMPLE_NAME} PRIVATE ${HOST_EXAMPLE_FLAGS})
+target_link_options(${DETACH_EXAMPLE_NAME} PRIVATE ${HOST_EXAMPLE_FLAGS})
+
 if(OPENMP_DIRECTIVE_USE_OFFLOAD)
     set(OFFLOAD_EXAMPLE_NAME "openmp-fortran-offload")
 
@@ -111,7 +118,7 @@ if(OPENMP_DIRECTIVE_USE_OFFLOAD)
 endif()
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)
-    foreach(_TARGET ${HOST_EXAMPLE_NAME} ${OFFLOAD_EXAMPLE_NAME})
+    foreach(_TARGET ${HOST_EXAMPLE_NAME} ${DETACH_EXAMPLE_NAME} ${OFFLOAD_EXAMPLE_NAME})
         if(TARGET ${_TARGET})
             install(
                 TARGETS ${_TARGET}
