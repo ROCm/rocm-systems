@@ -2084,9 +2084,9 @@ TEST(ConSanMoi, SampledBoundedSeparatedBarrierPublishesOneTwoMemberSequence) {
   words[0] = 0xD8340000u;
   words[1] = 0x00000000u; // ds_store_b32 v0, v0
   constexpr size_t kSignal = 390;
-  // Nineteen intervening instructions exercise the compiler-sized extended
+  // Thirty-one intervening instructions exercise the compiler-sized extended
   // association window rather than the ordinary four-instruction path.
-  constexpr size_t kWait = 410;
+  constexpr size_t kWait = 422;
   words[kSignal] = 0xBE804EC1u; // s_barrier_signal -1
   words[kWait] = 0xBF94FFFFu;   // s_barrier_wait -1
   words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
@@ -2116,7 +2116,7 @@ TEST(ConSanMoi, SampledBoundedSeparatedBarrierPublishesOneTwoMemberSequence) {
 
   std::vector<uint32_t> beyond = words;
   beyond[kWait] = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
-  constexpr size_t kBeyondWait = 412;
+  constexpr size_t kBeyondWait = 424;
   beyond[kBeyondWait] = 0xBF94FFFFu;
   const ConSanResult rejected =
       try_patch_consan(make_rdna4_lds_code_object(beyond, "sampled_overlong_barrier"), options);
