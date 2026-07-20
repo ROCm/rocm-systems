@@ -10,6 +10,7 @@
 #include "rocjitsu/hooks/sidecar_registry.h"
 
 #include <algorithm>
+#include <atomic>
 #include <ranges>
 #include <utility>
 
@@ -22,7 +23,20 @@ constexpr uint32_t kHsaAmdMemoryPoolGlobalFlagFineGrained = 2u;
 constexpr uint32_t kHsaAmdMemoryPoolGlobalFlagCoarseGrained = 4u;
 constexpr uint32_t kHsaAmdMemoryPoolGlobalFlagExtendedScopeFineGrained = 8u;
 
-VirtualLdsRuntimeApi g_runtime_api;
+// The runtime API table is installed exactly once from OnLoad (before any queue
+// exists) but read from the doorbell poll thread, the CP scanner thread, and the
+// ROCR packet-interceptor thread. Publishing the table through an atomic pointer
+// with release/acquire ordering gives those readers a well-defined view: the
+// non-atomic writes into the storage below happen-before the release store, and
+// each reader's acquire load establishes visibility of the whole table.
+VirtualLdsRuntimeApi g_runtime_api_storage;
+std::atomic<const VirtualLdsRuntimeApi *> g_runtime_api_ptr{nullptr};
+
+[[nodiscard]] const VirtualLdsRuntimeApi &runtime_api() {
+  static constexpr VirtualLdsRuntimeApi kUninstalled{};
+  const VirtualLdsRuntimeApi *api = g_runtime_api_ptr.load(std::memory_order_acquire);
+  return api != nullptr ? *api : kUninstalled;
+}
 
 [[nodiscard]] std::string normalize_kernel_symbol_name(std::string_view symbol_name) {
   constexpr std::string_view kDescriptorSuffix = ".kd";
@@ -32,8 +46,8 @@ VirtualLdsRuntimeApi g_runtime_api;
 }
 
 void free_allocation(void *ptr) {
-  if (ptr != nullptr && g_runtime_api.memory_pool_free != nullptr)
-    (void)g_runtime_api.memory_pool_free(ptr);
+  if (ptr != nullptr && runtime_api().memory_pool_free != nullptr)
+    (void)runtime_api().memory_pool_free(ptr);
 }
 
 } // namespace
@@ -207,7 +221,10 @@ void VirtualLdsRuntimeRegistry::clear() {
   symbols_.clear();
 }
 
-void set_virtual_lds_runtime_api(VirtualLdsRuntimeApi api) { g_runtime_api = api; }
+void set_virtual_lds_runtime_api(VirtualLdsRuntimeApi api) {
+  g_runtime_api_storage = api;
+  g_runtime_api_ptr.store(&g_runtime_api_storage, std::memory_order_release);
+}
 
 bool empty_virtual_lds_buffers(const VirtualLdsDispatchBuffers &buffers) {
   return buffers.kernarg == nullptr && buffers.backing == nullptr;
@@ -217,8 +234,8 @@ void release_virtual_lds_buffers(VirtualLdsDispatchBuffers &buffers) {
   free_allocation(buffers.kernarg);
   free_allocation(buffers.backing);
   if (buffers.owns_completion_signal && buffers.completion_signal.handle != 0 &&
-      g_runtime_api.signal_destroy != nullptr) {
-    (void)g_runtime_api.signal_destroy(buffers.completion_signal);
+      runtime_api().signal_destroy != nullptr) {
+    (void)runtime_api().signal_destroy(buffers.completion_signal);
   }
   buffers = {};
 }
@@ -226,10 +243,10 @@ void release_virtual_lds_buffers(VirtualLdsDispatchBuffers &buffers) {
 void record_virtual_lds_completion_signal(VirtualLdsDispatchBuffers &buffers,
                                           hsa_kernel_dispatch_packet_t &packet) {
   if (packet.completion_signal.handle == 0) {
-    if (g_runtime_api.signal_create == nullptr)
+    if (runtime_api().signal_create == nullptr)
       return;
     hsa_signal_t signal{};
-    if (g_runtime_api.signal_create(1, 0, nullptr, &signal) != HSA_STATUS_SUCCESS ||
+    if (runtime_api().signal_create(1, 0, nullptr, &signal) != HSA_STATUS_SUCCESS ||
         signal.handle == 0) {
       return;
     }
@@ -240,11 +257,11 @@ void record_virtual_lds_completion_signal(VirtualLdsDispatchBuffers &buffers,
     return;
   }
   buffers.completion_signal = packet.completion_signal;
-  if (g_runtime_api.signal_load_scacquire != nullptr) {
+  if (runtime_api().signal_load_scacquire != nullptr) {
     // Completion signals are decremented by CP. A zero value before enqueue is
     // not a useful lifetime fence because it already appears complete.
     buffers.completion_signal_was_pending =
-        g_runtime_api.signal_load_scacquire(packet.completion_signal) > 0;
+        runtime_api().signal_load_scacquire(packet.completion_signal) > 0;
   }
 }
 
@@ -254,10 +271,10 @@ bool completed_virtual_lds_dispatch(const VirtualLdsDispatchBuffers &buffers) {
   if (buffers.completion_signal_destroyed)
     return true;
   if (buffers.completion_signal.handle == 0 || !buffers.completion_signal_was_pending ||
-      g_runtime_api.signal_load_scacquire == nullptr) {
+      runtime_api().signal_load_scacquire == nullptr) {
     return false;
   }
-  return g_runtime_api.signal_load_scacquire(buffers.completion_signal) <= 0;
+  return runtime_api().signal_load_scacquire(buffers.completion_signal) <= 0;
 }
 
 VirtualLdsDispatchAllocator &VirtualLdsDispatchAllocator::instance() {
@@ -348,13 +365,13 @@ hsa_status_t VirtualLdsDispatchAllocator::collect_agent_kernarg_pool(hsa_agent_t
 }
 
 std::optional<hsa_amd_memory_pool_t> VirtualLdsDispatchAllocator::find_global_kernarg_pool() {
-  if (g_runtime_api.iterate_agents == nullptr || g_runtime_api.iterate_memory_pools == nullptr ||
-      g_runtime_api.memory_pool_get_info == nullptr) {
+  if (runtime_api().iterate_agents == nullptr || runtime_api().iterate_memory_pools == nullptr ||
+      runtime_api().memory_pool_get_info == nullptr) {
     return std::nullopt;
   }
-  GlobalKernargPoolSearch search{.iterate_pools = g_runtime_api.iterate_memory_pools,
-                                 .get_info = g_runtime_api.memory_pool_get_info};
-  (void)g_runtime_api.iterate_agents(collect_agent_kernarg_pool, &search);
+  GlobalKernargPoolSearch search{.iterate_pools = runtime_api().iterate_memory_pools,
+                                 .get_info = runtime_api().memory_pool_get_info};
+  (void)runtime_api().iterate_agents(collect_agent_kernarg_pool, &search);
   if (!search.found)
     return std::nullopt;
   return search.kernarg_pool;
@@ -369,12 +386,12 @@ VirtualLdsDispatchAllocator::pools_for_agent(hsa_agent_t host_agent, bool need_k
       return found->second;
     }
   }
-  if (g_runtime_api.iterate_memory_pools == nullptr ||
-      g_runtime_api.memory_pool_get_info == nullptr) {
+  if (runtime_api().iterate_memory_pools == nullptr ||
+      runtime_api().memory_pool_get_info == nullptr) {
     return std::nullopt;
   }
-  PoolSearch search{.get_info = g_runtime_api.memory_pool_get_info, .pools = {}};
-  const hsa_status_t status = g_runtime_api.iterate_memory_pools(host_agent, collect_pool, &search);
+  PoolSearch search{.get_info = runtime_api().memory_pool_get_info, .pools = {}};
+  const hsa_status_t status = runtime_api().iterate_memory_pools(host_agent, collect_pool, &search);
   if (status == HSA_STATUS_SUCCESS && need_kernarg_pool && !search.pools.has_kernarg_pool) {
     if (auto global_pool = find_global_kernarg_pool()) {
       search.pools.kernarg_pool = *global_pool;
@@ -391,16 +408,16 @@ VirtualLdsDispatchAllocator::pools_for_agent(hsa_agent_t host_agent, bool need_k
 
 bool VirtualLdsDispatchAllocator::allocate_from_pool(hsa_amd_memory_pool_t pool, size_t size,
                                                      void **ptr) {
-  if (g_runtime_api.memory_pool_allocate == nullptr || ptr == nullptr)
+  if (runtime_api().memory_pool_allocate == nullptr || ptr == nullptr)
     return false;
   *ptr = nullptr;
-  return g_runtime_api.memory_pool_allocate(pool, size, 0, ptr) == HSA_STATUS_SUCCESS &&
+  return runtime_api().memory_pool_allocate(pool, size, 0, ptr) == HSA_STATUS_SUCCESS &&
          *ptr != nullptr;
 }
 
 bool VirtualLdsDispatchAllocator::allow_agent_access(hsa_agent_t host_agent, const void *ptr) {
-  return g_runtime_api.agents_allow_access != nullptr && ptr != nullptr &&
-         g_runtime_api.agents_allow_access(1, &host_agent, nullptr, ptr) == HSA_STATUS_SUCCESS;
+  return runtime_api().agents_allow_access != nullptr && ptr != nullptr &&
+         runtime_api().agents_allow_access(1, &host_agent, nullptr, ptr) == HSA_STATUS_SUCCESS;
 }
 
 } // namespace rocjitsu::hooks

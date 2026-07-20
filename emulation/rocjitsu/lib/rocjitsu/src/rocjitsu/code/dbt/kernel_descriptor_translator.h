@@ -293,6 +293,17 @@ struct VirtualLdsPlan {
   /// @brief True when the dispatch path must provide a virtual LDS buffer.
   bool needs_lds_overflow_buf = false;
 
+  /// @brief True on a normal (hardware-LDS) descriptor whose static LDS exceeds
+  /// the host per-workgroup limit, so it is only launchable through its virtual
+  /// sidecar variant.
+  ///
+  /// @details Such a normal descriptor is translated with allow_oversized_lds so
+  /// the sidecar can be built, but its advertised LDS would fault on the host if
+  /// the launch ever fell back to it. When the sidecar variant fails and is
+  /// skipped, the normal descriptor must be stubbed too rather than left as a
+  /// dispatchable-but-doomed launch target.
+  bool static_lds_requires_sidecar = false;
+
   /// @brief Concrete scratch choices made while lowering the virtual-LDS body.
   ///
   /// @details This state is deliberately separate from descriptor-derived ABI

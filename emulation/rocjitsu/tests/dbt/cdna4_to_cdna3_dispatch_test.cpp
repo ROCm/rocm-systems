@@ -414,15 +414,21 @@ std::vector<float> reference_triton_matmul(const TritonMatmulCase &test_case) {
 }
 
 uint16_t f32_bits_to_bf16_rne_for_test(uint32_t bits) {
-  // The CDNA4 packed conversion should round each FP32 lane to BF16 using
-  // round-to-nearest-even:
+  // Independent oracle for the CDNA4 packed BF16 conversion, mirroring the
+  // hardware/guest semantics in util::f32_to_bf16_rne. Finite and subnormal
+  // inputs get the round-to-nearest-even bias; NaN/Inf (exponent all-ones) skip
+  // the bias so a NaN cannot round up into +/-Inf, and a NaN whose payload sits
+  // in the truncated low 16 bits keeps a nonzero mantissa bit so it stays a NaN.
   //
-  //   BF16 result = (bits + 0x7fff + ((bits >> 16) & 1)) >> 16
-  //
-  // These tests use finite FP32 patterns only, so there is no NaN payload
-  // canonicalization to model here.
-  const uint32_t lsb = (bits >> 16) & 1u;
-  return static_cast<uint16_t>((bits + 0x7fffu + lsb) >> 16);
+  // This deliberately does NOT copy the emitted-sequence formula: an oracle that
+  // reused the lowering's own math could not catch a NaN-handling regression.
+  if ((bits & 0x7f800000u) != 0x7f800000u) {
+    const uint32_t lsb = (bits >> 16) & 1u;
+    return static_cast<uint16_t>((bits + 0x7fffu + lsb) >> 16);
+  }
+  if (bits & 0xffffu)
+    bits |= 0x10000u;
+  return static_cast<uint16_t>(bits >> 16);
 }
 
 uint32_t pack_bf16_rne_for_test(uint32_t lo_bits, uint32_t hi_bits) {
@@ -1116,7 +1122,7 @@ void run_cvt_pk_bf16_f32(const std::vector<uint8_t> &elf_bytes, const DispatchTa
   const size_t kInputBytes = kInputs * sizeof(uint32_t);
   const size_t kOutputBytes = kLanes * sizeof(uint32_t);
 
-  const std::array<uint32_t, 16> patterns = {{
+  const std::array<uint32_t, 24> patterns = {{
       0x00000000u, // +0
       0x80000000u, // -0
       0x3f800000u, // 1.0, exactly representable in BF16
@@ -1128,8 +1134,16 @@ void run_cvt_pk_bf16_f32(const std::vector<uint8_t> &elf_bytes, const DispatchTa
       0xbf807fffu, 0xbf808000u, 0xbf808001u, 0xbf818000u,
       0x00800000u, // smallest normal FP32
       0x007fffffu, // largest subnormal FP32
-      0x7f7fffffu, // largest finite FP32
+      0x7f7fffffu, // largest finite FP32 (must not round up into +Inf)
       0xff7fffffu, // largest finite negative FP32
+      0x7f800000u, // +Inf (exponent all-ones, zero mantissa: stays +Inf)
+      0xff800000u, // -Inf
+      0x7fc00000u, // quiet NaN (payload in retained bits)
+      0x7f800001u, // NaN whose payload is ONLY in the truncated low bits
+      0xff800001u, // negative NaN, payload in truncated low bits
+      0x7fff8000u, // NaN with payload straddling the BF16 boundary
+      0x7f8000ffu, // signalling NaN, payload in truncated low bits
+      0xffc00000u, // negative quiet NaN
   }};
 
   std::vector<uint32_t> input_bits(kInputs);

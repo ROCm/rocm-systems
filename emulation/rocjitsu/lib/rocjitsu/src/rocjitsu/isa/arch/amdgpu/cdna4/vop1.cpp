@@ -10984,11 +10984,11 @@ void VPermlane16SwapB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     tmp_dst[lane] = amdgpu::RegisterAccess(wf).read_lane(vdst, lane);
     tmp_src[lane] = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
   }
-  for (uint32_t lane = 0; lane < 16; ++lane) {
-    if (lane + 16 >= wf.wf_size())
-      break;
-    amdgpu::RegisterAccess(wf).write_lane(src0, lane, tmp_dst[lane + 16]);
-    amdgpu::RegisterAccess(wf).write_lane(vdst, lane + 16, tmp_src[lane]);
+  for (uint32_t base = 0; base + 16 < wf.wf_size(); base += 2u * 16) {
+    for (uint32_t i = 0; i < 16; ++i) {
+      amdgpu::RegisterAccess(wf).write_lane(src0, base + i, tmp_dst[base + 16 + i]);
+      amdgpu::RegisterAccess(wf).write_lane(vdst, base + 16 + i, tmp_src[base + i]);
+    }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
@@ -11114,11 +11114,11 @@ void VPermlane32SwapB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     tmp_dst[lane] = amdgpu::RegisterAccess(wf).read_lane(vdst, lane);
     tmp_src[lane] = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
   }
-  for (uint32_t lane = 0; lane < 32; ++lane) {
-    if (lane + 32 >= wf.wf_size())
-      break;
-    amdgpu::RegisterAccess(wf).write_lane(src0, lane, tmp_dst[lane + 32]);
-    amdgpu::RegisterAccess(wf).write_lane(vdst, lane + 32, tmp_src[lane]);
+  for (uint32_t base = 0; base + 32 < wf.wf_size(); base += 2u * 32) {
+    for (uint32_t i = 0; i < 32; ++i) {
+      amdgpu::RegisterAccess(wf).write_lane(src0, base + i, tmp_dst[base + 32 + i]);
+      amdgpu::RegisterAccess(wf).write_lane(vdst, base + 32 + i, tmp_src[base + i]);
+    }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,

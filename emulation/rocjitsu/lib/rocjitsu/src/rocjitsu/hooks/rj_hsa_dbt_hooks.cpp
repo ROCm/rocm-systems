@@ -2116,6 +2116,20 @@ void map_pointer_info_accessible_agents(uint32_t *num_agents_accessible, hsa_age
   return aql_packet_type(packet.header) == HSA_PACKET_TYPE_KERNEL_DISPATCH;
 }
 
+/// @brief Return a copy of @p header with the packet type forced to INVALID.
+///
+/// @details The command processor treats an INVALID-typed slot as a no-op and
+/// advances past it. Neutralizing a doomed dispatch this way keeps the ring's
+/// read/write indices consistent (the slot is still consumed) without executing
+/// a dispatch the host cannot satisfy. HSA_PACKET_TYPE_INVALID is zero, so this
+/// clears the type field.
+[[nodiscard]] uint16_t make_invalid_packet_header(uint16_t header) {
+  constexpr uint16_t kTypeMask =
+      static_cast<uint16_t>(((1u << HSA_PACKET_HEADER_WIDTH_TYPE) - 1u) << HSA_PACKET_HEADER_TYPE);
+  return static_cast<uint16_t>((header & ~kTypeMask) |
+                               (HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE));
+}
+
 /// @brief Queue-doorbell rewrite state for virtual-LDS dispatch selection.
 ///
 /// @details This registry remains in the HSA interposition layer because it
@@ -2294,6 +2308,13 @@ public:
       }
 
       QueueState &state = queue_it->second;
+      // Reclaim buffers from earlier intercept dispatches whose completion signal
+      // has fired. The intercept path has no slot bookkeeping and no scanner (the
+      // scanner skips intercept-managed queues), so without a sweep here a queue
+      // that issues virtual-LDS dispatches accumulates retired_buffers until the
+      // queue is destroyed. Sweeping at batch entry bounds retention to "until the
+      // next dispatch on this queue", matching the slot path.
+      release_completed_retired_buffers(state);
       trace_virtual_lds_dispatch("intercept batch queue=%p begin=%llu count=%llu",
                                  static_cast<void *>(queue),
                                  static_cast<unsigned long long>(user_pkt_index),
@@ -2304,9 +2325,22 @@ public:
           continue;
         ensure_intercept_packet_private_size(packet, user_pkt_index + index);
         const uint64_t packet_id = user_pkt_index + index;
-        auto prepared = prepare_virtual_lds_dispatch(state, packet, packet_id, "intercept");
-        if (!prepared)
+        bool rejected = false;
+        auto prepared =
+            prepare_virtual_lds_dispatch(state, packet, packet_id, "intercept", &rejected);
+        if (!prepared) {
+          // A required virtual-LDS rewrite that cannot be satisfied must not
+          // dispatch (it asks for more LDS than the host has and would fault).
+          // Neutralize the local copy before the batch writer publishes it so
+          // the CP skips the slot. Benign nullopt cases (no plan / below
+          // threshold) leave the dispatchable packet untouched.
+          if (rejected)
+            publish_packet_header(
+                packet,
+                make_invalid_packet_header(
+                    std::atomic_ref<uint16_t>(packet.header).load(std::memory_order_relaxed)));
           continue;
+        }
         apply_virtual_lds_dispatch(packet, *prepared);
         trace_prepared_virtual_lds_dispatch(*prepared, packet_id, "intercept");
         state.retired_buffers.push_back(std::exchange(prepared->buffers, {}));
@@ -2480,9 +2514,14 @@ private:
   /// @details This is the single policy path shared by ROCR intercept batches and
   /// direct queue scanning. The returned buffers transfer to the delivery adapter,
   /// which publishes fields using the synchronization required by its packet source.
+  /// @param rejected Optional out-flag set true when the virtual-LDS plan is a hard
+  /// Reject (a required rewrite that cannot be satisfied, e.g. oversized virtual
+  /// LDS). Distinct from the benign nullopt cases (no plan / KeepNormal), where the
+  /// original packet is legitimately dispatchable. Callers must not dispatch a
+  /// rejected packet — it would fault on the host — so they turn it into a no-op.
   [[nodiscard]] static std::optional<PreparedVirtualLdsDispatch>
   prepare_virtual_lds_dispatch(QueueState &state, const hsa_kernel_dispatch_packet_t &packet,
-                               uint64_t packet_id, const char *delivery) {
+                               uint64_t packet_id, const char *delivery, bool *rejected = nullptr) {
     auto resolved =
         VirtualLdsRuntimeRegistry::instance().find_by_kernel_object(packet.kernel_object);
     if (!resolved) {
@@ -2530,6 +2569,8 @@ private:
           "virtual-LDS plan rejected delivery=%s packet=%llu kernel=%s requested=%llu reason=%s",
           delivery, static_cast<unsigned long long>(packet_id), metadata.kernel_name.c_str(),
           static_cast<unsigned long long>(rewrite.requested_lds), rewrite.diagnostic.c_str());
+      if (rejected != nullptr)
+        *rejected = true;
       return std::nullopt;
     }
 
@@ -2655,9 +2696,18 @@ private:
 
     retire_slot_buffers(state, slot);
     ensure_queue_packet_private_size(packet, packet_id, slot, header);
-    auto prepared = prepare_virtual_lds_dispatch(state, packet, packet_id, "queue");
-    if (!prepared)
+    bool rejected = false;
+    auto prepared = prepare_virtual_lds_dispatch(state, packet, packet_id, "queue", &rejected);
+    if (!prepared) {
+      // A required virtual-LDS rewrite that cannot be satisfied must not dispatch:
+      // the original packet asks for more LDS than the host has and would fault.
+      // Neutralize it by turning the slot into a no-op (INVALID type) so the CP
+      // skips it rather than executing a doomed dispatch. Benign nullopt cases
+      // (no plan / below threshold) leave the dispatchable packet untouched.
+      if (rejected)
+        publish_packet_header(packet, make_invalid_packet_header(header));
       return true;
+    }
     publish_packet_header(packet, 0);
     apply_virtual_lds_dispatch(packet, *prepared);
     publish_packet_header(packet, header);
@@ -2693,8 +2743,19 @@ private:
                                      static_cast<unsigned long long>(write_index));
         }
       }
+      // Only rewrite packets the doorbell hook has not already published to the
+      // command processor. rewrite_before_doorbell() advances next_packet_id past
+      // every slot it rewrote BEFORE the original doorbell store makes those slots
+      // visible to the CP; re-touching a slot below next_packet_id here would mutate
+      // (and briefly INVALID-toggle) a packet the CP may already be consuming — a
+      // data race against the consumer. Clamp the scan's lower edge to
+      // next_packet_id so the scanner only ever handles not-yet-doorbelled packets
+      // (the safety-net case where a submission's doorbell was not observed).
       const uint64_t tail_packets = std::min(write_index, kVirtualLdsScannerTailPackets);
-      rewrite_packet_range(state, write_index - tail_packets, write_index, false);
+      const uint64_t scan_begin = std::max(write_index - tail_packets, state.next_packet_id);
+      if (scan_begin >= write_index)
+        continue;
+      rewrite_packet_range(state, scan_begin, write_index, false);
     }
   }
 
@@ -2744,17 +2805,24 @@ void virtual_lds_packet_interceptor(const void *pkts, uint64_t pkt_count, uint64
 }
 
 /// @brief Attach the virtual-LDS packet interceptor to an AMD intercept queue.
-void register_virtual_lds_packet_interceptor(hsa_queue_t *queue) {
+/// @returns true iff the interceptor was successfully registered. Callers must not
+/// record the queue as intercept-managed unless this succeeds — a queue flagged
+/// uses_packet_interceptor is skipped by BOTH the doorbell and scanner rewrite
+/// paths, so a failed registration would silently disable all packet rewriting for
+/// it and every oversized-LDS dispatch would fault.
+[[nodiscard]] bool register_virtual_lds_packet_interceptor(hsa_queue_t *queue) {
   auto *register_interceptor = layer().amd_queue_intercept_register();
   if (register_interceptor == nullptr || queue == nullptr)
-    return;
+    return false;
   const hsa_status_t status = register_interceptor(queue, virtual_lds_packet_interceptor, queue);
   if (status != HSA_STATUS_SUCCESS) {
     log_message(kLogInfo, "failed to register virtual-LDS queue interceptor queue=%p status=%d",
                 static_cast<void *>(queue), static_cast<int>(status));
     trace_virtual_lds_dispatch("queue interceptor registration failed queue=%p status=%d",
                                static_cast<void *>(queue), static_cast<int>(status));
+    return false;
   }
+  return true;
 }
 
 hsa_status_t HSA_API rj_iterate_agents(hsa_status_t (*callback)(hsa_agent_t agent, void *data),
@@ -2832,8 +2900,12 @@ hsa_status_t HSA_API rj_queue_create(hsa_agent_t agent, uint32_t size, hsa_queue
     status = intercept_create(mapped, size, type, callback, data, private_segment_size,
                               group_segment_size, queue);
     if (status == HSA_STATUS_SUCCESS && queue != nullptr) {
-      VirtualLdsDispatchQueueRegistry::instance().record_queue(*queue, mapped, true);
-      register_virtual_lds_packet_interceptor(*queue);
+      // Record the queue as intercept-managed ONLY if the interceptor actually
+      // attaches. If registration fails, record it as a normal queue so the
+      // doorbell/scanner rewrite path still services its oversized-LDS dispatches
+      // instead of leaving it silently un-rewritten.
+      const bool intercepting = register_virtual_lds_packet_interceptor(*queue);
+      VirtualLdsDispatchQueueRegistry::instance().record_queue(*queue, mapped, intercepting);
       return status;
     }
     log_message(kLogInfo, "intercept queue_create failed status=%d; falling back",
@@ -2861,8 +2933,10 @@ hsa_status_t HSA_API rj_amd_queue_intercept_create(
   const hsa_status_t status =
       original(mapped, size, type, callback, data, private_segment_size, group_segment_size, queue);
   if (status == HSA_STATUS_SUCCESS && queue != nullptr) {
-    VirtualLdsDispatchQueueRegistry::instance().record_queue(*queue, mapped, true);
-    register_virtual_lds_packet_interceptor(*queue);
+    // Only mark intercept-managed when the interceptor attaches; otherwise record
+    // as a normal queue so the doorbell/scanner rewrite path still covers it.
+    const bool intercepting = register_virtual_lds_packet_interceptor(*queue);
+    VirtualLdsDispatchQueueRegistry::instance().record_queue(*queue, mapped, intercepting);
   }
   return status;
 }

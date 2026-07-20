@@ -5835,6 +5835,11 @@ TEST(BinaryTranslatorE2E, VirtualLdsSidecarRejectsUnsupportedDsMemoryOpcode) {
 }
 
 TEST(BinaryTranslatorE2E, SkipFailedVirtualLdsSidecarKeepsNormalDescriptor) {
+  // Static LDS that fits the host limit: the sidecar is only needed for
+  // *dynamic* LDS overflow, so the normal hardware-LDS descriptor is a valid
+  // launch target on its own. A sidecar lowering failure must therefore leave
+  // the normal descriptor intact.
+  constexpr uint32_t kBelowHostLdsBytes = 1024u;
   constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
   const auto ds = make_cdna4_ds_add_u32_words();
   auto image =
@@ -5848,7 +5853,7 @@ TEST(BinaryTranslatorE2E, SkipFailedVirtualLdsSidecarKeepsNormalDescriptor) {
   rocjitsu::write_value_for_test<uint32_t>(
       image,
       rodata->sectionOffset() + offsetof(rocjitsu::TestKernelDescriptor, group_segment_fixed_size),
-      105600u);
+      kBelowHostLdsBytes);
 
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
@@ -5894,6 +5899,73 @@ TEST(BinaryTranslatorE2E, SkipFailedVirtualLdsSidecarKeepsNormalDescriptor) {
       reinterpret_cast<const uint32_t *>(result.elf_bytes.data() + *normal_entry_file_offset);
   EXPECT_NE(entry_words[0],
             rocjitsu::build_s_trap(ROCJITSU_CODE_ARCH_CDNA3, rocjitsu::kSkippedKernelTrapId));
+  EXPECT_EQ(rocjitsu::find_section(translated, rocjitsu::kVirtualLdsMetadataSectionName), nullptr);
+}
+
+TEST(BinaryTranslatorE2E, SkipFailedVirtualLdsSidecarStubsOversizedNormalDescriptor) {
+  // Static LDS that exceeds the host limit: the normal descriptor advertises
+  // more hardware LDS than the host has, so it is only launchable through its
+  // virtual sidecar. When the sidecar lowering fails and is skipped, the normal
+  // descriptor must be stubbed too — leaving it dispatchable would fault the
+  // host at launch. This is the regression guard for the sidecar-dependent case.
+  constexpr uint32_t kOverHostLdsBytes = 105600u;
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_add_u32_words();
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+  rocjitsu::write_value_for_test<uint32_t>(
+      image,
+      rodata->sectionOffset() + offsetof(rocjitsu::TestKernelDescriptor, group_segment_fixed_size),
+      kOverHostLdsBytes);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  options.skip_failed_kernels = true;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  const auto skipped = std::ranges::find_if(result.diagnostics, [](const auto &diagnostic) {
+    return diagnostic.kind == rocjitsu::DiagnosticKind::KernelSkipped &&
+           diagnostic.message.find("virtual LDS lowering does not support this DS opcode") !=
+               std::string::npos;
+  });
+  ASSERT_NE(skipped, result.diagnostics.end());
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const auto *translated_rodata = rocjitsu::find_section(translated, ".rodata");
+  ASSERT_NE(translated_rodata, nullptr);
+  ASSERT_GE(translated_rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+  const auto normal_kd = rocjitsu::read_elf_struct_for_test<rocjitsu::TestKernelDescriptor>(
+      result.elf_bytes, translated_rodata->sectionOffset());
+  const int64_t normal_entry_vaddr = static_cast<int64_t>(translated_rodata->vaddr()) +
+                                     rocjitsu::read_kernel_descriptor_entry_offset(&normal_kd);
+  ASSERT_GE(normal_entry_vaddr, 0);
+  const auto normal_entry_file_offset = rocjitsu::loaded_vaddr_to_file_offset(
+      result.elf_bytes, static_cast<uint64_t>(normal_entry_vaddr));
+  ASSERT_TRUE(normal_entry_file_offset.has_value());
+
+  // The normal descriptor's advertised static LDS (105600) exceeds the CDNA3
+  // host limit, so it could only ever launch via the failed sidecar. Its entry
+  // must now point at the skipped-kernel trap stub, and the descriptor must
+  // advertise no fixed LDS so a launch attempt cannot fault the host.
+  const auto *entry_words =
+      reinterpret_cast<const uint32_t *>(result.elf_bytes.data() + *normal_entry_file_offset);
+  EXPECT_EQ(entry_words[0],
+            rocjitsu::build_s_trap(ROCJITSU_CODE_ARCH_CDNA3, rocjitsu::kSkippedKernelTrapId));
+  EXPECT_EQ(normal_kd.group_segment_fixed_size, 0u);
   EXPECT_EQ(rocjitsu::find_section(translated, rocjitsu::kVirtualLdsMetadataSectionName), nullptr);
 }
 

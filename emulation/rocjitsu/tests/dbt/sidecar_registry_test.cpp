@@ -5,9 +5,11 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -124,6 +126,64 @@ TEST_F(SidecarRegistryTest, ClearsUnresolvedLoadRecords) {
   registry.clear();
 
   EXPECT_FALSE(registry.find_by_kernel_object(kNormalObject).has_value());
+}
+
+// Thread-safety is the core contract of this registry: the load/symbol/object
+// mutation path runs on the ROCR loader thread while the dispatch/lookup path
+// runs on the doorbell and scanner threads, and executable teardown races both.
+// This stress test drives all of those entry points concurrently so
+// ThreadSanitizer can flag any missing lock or torn read. It asserts the
+// process does not crash or trip TSan rather than a specific interleaving
+// outcome, since the whole point is that no interleaving is unsafe.
+TEST_F(SidecarRegistryTest, ConcurrentMutationAndLookupIsRaceFree) {
+  auto &registry = SidecarRegistry::instance();
+  constexpr int kExecutables = 8;
+  constexpr int kIterations = 500;
+
+  std::atomic<bool> start{false};
+  std::vector<std::thread> threads;
+
+  // Writers: each owns a distinct executable id and repeatedly loads, records a
+  // symbol, publishes a kernel object, then erases and starts over.
+  for (int e = 0; e < kExecutables; ++e) {
+    threads.emplace_back([&, e] {
+      const uint64_t executable = static_cast<uint64_t>(e) + 1;
+      const uint64_t symbol = 100 + executable;
+      const uint64_t object = kLoadBase + (executable << 16);
+      while (!start.load(std::memory_order_acquire)) {
+      }
+      for (int i = 0; i < kIterations; ++i) {
+        registry.record_load(executable, executable << 8,
+                             one_sidecar("kernel" + std::to_string(e)));
+        registry.record_symbol(executable, "kernel" + std::to_string(e) + ".kd", symbol);
+        registry.note_kernel_object(symbol, object, static_cast<uint32_t>(i & 0xFF));
+        (void)registry.find_by_kernel_object(object);
+        registry.erase_executable(executable);
+      }
+    });
+  }
+
+  // Readers: hammer the lookup paths across the whole object-id space so they
+  // observe partially-published state from the writers above.
+  for (int r = 0; r < 4; ++r) {
+    threads.emplace_back([&] {
+      while (!start.load(std::memory_order_acquire)) {
+      }
+      for (int i = 0; i < kIterations * kExecutables; ++i) {
+        const uint64_t executable = static_cast<uint64_t>(i % kExecutables) + 1;
+        const uint64_t object = kLoadBase + (executable << 16);
+        (void)registry.find_by_kernel_object(object);
+        (void)registry.kernel_name_for_object(object);
+        (void)registry.private_segment_size_for_object(object);
+      }
+    });
+  }
+
+  start.store(true, std::memory_order_release);
+  for (auto &thread : threads)
+    thread.join();
+
+  SUCCEED();
 }
 
 } // namespace

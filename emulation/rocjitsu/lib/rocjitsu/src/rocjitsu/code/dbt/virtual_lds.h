@@ -56,6 +56,16 @@ inline constexpr uint16_t kVirtualLdsFlagWorkgroupIdX = 1u << 2;
 inline constexpr uint16_t kVirtualLdsFlagWorkgroupIdY = 1u << 3;
 inline constexpr uint16_t kVirtualLdsFlagWorkgroupIdZ = 1u << 4;
 
+/// @brief All flag bits this build understands.
+///
+/// @details Metadata is produced and consumed by the same rocjitsu build, so an
+/// unknown flag bit means either a version skew or a corrupt section. The parser
+/// rejects records carrying bits outside this mask rather than silently ignoring
+/// them, so a future feature bit cannot be misinterpreted as "off".
+inline constexpr uint16_t kVirtualLdsKnownFlagsMask =
+    kVirtualLdsFlagRuntimeStateBlock | kVirtualLdsFlagWorkgroupIdX | kVirtualLdsFlagWorkgroupIdY |
+    kVirtualLdsFlagWorkgroupIdZ;
+
 /// @brief One kernel's static virtual-LDS selection and resource facts.
 ///
 /// @details Descriptor addresses live in generic sidecar metadata and kernarg

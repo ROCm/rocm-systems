@@ -64,5 +64,37 @@ TEST(SidecarMetadata, RejectsUnknownWireVersion) {
   EXPECT_FALSE(parse_sidecar_metadata(bytes).has_value());
 }
 
+TEST(SidecarMetadata, RejectsTruncatedHeader) {
+  const std::vector<SidecarVariantMetadata> input = {{.kernel_name = "k", .variant_name = "v"}};
+  auto bytes = serialize_sidecar_metadata(input);
+  ASSERT_GE(bytes.size(), 24u);
+  // Cut the header short so read_pod<MetadataHeader> cannot succeed.
+  bytes.resize(23);
+  EXPECT_FALSE(parse_sidecar_metadata(bytes).has_value());
+}
+
+TEST(SidecarMetadata, RejectsTruncatedRecord) {
+  const std::vector<SidecarVariantMetadata> input = {
+      {.kernel_name = "kernel", .variant_name = "virtual-lds"}};
+  auto bytes = serialize_sidecar_metadata(input);
+  // A 24-byte header plus one 32-byte record is the minimum for record_count=1.
+  // Dropping bytes mid-record must be rejected by the per-record bounds check.
+  ASSERT_GT(bytes.size(), 24u + 16u);
+  bytes.resize(24u + 16u);
+  EXPECT_FALSE(parse_sidecar_metadata(bytes).has_value());
+}
+
+TEST(SidecarMetadata, RejectsStringBytesExceedingBuffer) {
+  const std::vector<SidecarVariantMetadata> input = {
+      {.kernel_name = "kernel", .variant_name = "virtual-lds"}};
+  auto bytes = serialize_sidecar_metadata(input);
+  ASSERT_GE(bytes.size(), 24u);
+  // string_bytes lives at header offset 16. Inflate it past the buffer so the
+  // strings-subspan bounds check must reject the section.
+  const uint32_t bogus_string_bytes = 0x10000u;
+  std::memcpy(bytes.data() + 16, &bogus_string_bytes, sizeof(bogus_string_bytes));
+  EXPECT_FALSE(parse_sidecar_metadata(bytes).has_value());
+}
+
 } // namespace
 } // namespace rocjitsu

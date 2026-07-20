@@ -264,6 +264,12 @@ parse_kernarg_extension_metadata(std::span<const uint8_t> bytes) {
       if (!read_pod(bytes, offset, payload_record))
         return std::nullopt;
 
+      // A non-power-of-two alignment would make the wrapper layout math (which
+      // masks with alignment-1) produce garbage offsets, so reject it at parse
+      // instead of trusting the on-disk value downstream.
+      if (!is_power_of_two(payload_record.alignment))
+        return std::nullopt;
+
       KernargExtensionPayloadMetadata payload{};
       if (!read_string(strings, payload_record.name_offset, payload_record.name_size,
                        payload.name)) {

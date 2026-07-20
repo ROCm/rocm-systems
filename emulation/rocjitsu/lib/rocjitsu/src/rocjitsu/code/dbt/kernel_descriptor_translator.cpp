@@ -859,14 +859,19 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   } else {
     result.target_lds_size = requested_lds_size;
     const uint32_t max_host_lds_bytes = arch_lds_bytes(host_arch);
-    if (!options.allow_oversized_lds && max_host_lds_bytes != 0 &&
-        result.target_lds_size > max_host_lds_bytes) {
+    const bool exceeds_host =
+        max_host_lds_bytes != 0 && result.target_lds_size > max_host_lds_bytes;
+    if (exceeds_host && !options.allow_oversized_lds) {
       append_descriptor_error(
           result, "target LDS size exceeds host per-workgroup limit; LDS virtualization is not "
                   "enabled (target_lds_size=" +
                       std::to_string(result.target_lds_size) +
                       ", max_lds=" + std::to_string(max_host_lds_bytes) + ")");
     }
+    // When oversized LDS is tolerated only because a virtual sidecar will carry
+    // the launch, mark the normal descriptor as sidecar-dependent so a later
+    // sidecar failure stubs it instead of leaving a doomed dispatch target.
+    result.static_lds_requires_sidecar = exceeds_host && options.allow_oversized_lds;
   }
 
   return result;
@@ -890,6 +895,7 @@ void KdTranslation::configure_skipped_stub() {
   target_lds_size = 0;
   lds_overflow_size = 0;
   needs_lds_overflow_buf = false;
+  static_lds_requires_sidecar = false;
   virtual_lds_lowering = {};
   kernarg_size = 0;
   target_kernarg_size = 0;

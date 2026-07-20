@@ -1029,13 +1029,20 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     }
 
     for (KdTranslation &translation : descriptor_translations) {
+      if (translation.entry_text_offset != source_entry)
+        continue;
       // Normal hardware-LDS and virtual-LDS sidecar descriptors share the same
-      // source entry, but a sidecar translation failure must not turn the
-      // already-translated normal descriptor into a no-op. Capture the variant
-      // bit before mutating the failed descriptor below so duplicated
-      // descriptors for the same variant are still skipped together.
-      if (translation.entry_text_offset != source_entry ||
-          translation.needs_lds_overflow_buf != skipped_uses_virtual_lds)
+      // source entry, but a sidecar translation failure must not turn a normal
+      // descriptor that can still launch on hardware LDS into a no-op. Skip
+      // together any descriptor of the failing variant. Additionally, when the
+      // sidecar variant is the one failing, a normal descriptor whose static LDS
+      // only fit because a sidecar was promised is itself undispatchable (its
+      // advertised LDS would fault on the host), so it must be stubbed too.
+      const bool same_variant = translation.needs_lds_overflow_buf == skipped_uses_virtual_lds;
+      const bool orphaned_by_sidecar_failure = skipped_uses_virtual_lds &&
+                                               !translation.needs_lds_overflow_buf &&
+                                               translation.static_lds_requires_sidecar;
+      if (!same_variant && !orphaned_by_sidecar_failure)
         continue;
       translation.target_entry_text_offset = skipped_text.target_entry;
       translation.target_body_entry_text_offset = skipped_text.target_body_entry;

@@ -1764,7 +1764,18 @@ if(RJ_ENABLE_HIP_TESTS)
         get_filename_component(_install_config_name "${ARG_CONFIG}" NAME)
         set(_install_env)
         foreach(_env_entry IN LISTS ARG_ENVIRONMENT)
-            if(_env_entry MATCHES "^(ROCJITSU_RUNTIME_DIR|RJ_SINK_DIR)=(.*)$")
+            if(_env_entry MATCHES "^ROCJITSU_HIPKITTENS_KERNEL_DIR=")
+                # The build-tree value points at KERNEL_OUTPUT_DIR, which does not
+                # exist in an install tree. The hipkittens .hsaco fixtures are
+                # installed alongside the other kernels, so point the installed
+                # test at the installed kernel directory instead.
+                list(
+                    APPEND _install_env
+                    "ROCJITSU_HIPKITTENS_KERNEL_DIR=\${RJ_INSTALLED_KERNEL_DIR}"
+                )
+            elseif(
+                _env_entry MATCHES "^(ROCJITSU_RUNTIME_DIR|RJ_SINK_DIR)=(.*)$"
+            )
                 set(_env_name "${CMAKE_MATCH_1}")
                 set(_env_value "${CMAKE_MATCH_2}")
                 if(IS_ABSOLUTE "${_env_value}")

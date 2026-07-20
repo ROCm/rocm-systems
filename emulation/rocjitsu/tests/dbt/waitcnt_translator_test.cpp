@@ -36,7 +36,13 @@ TEST(WaitcntTranslator, DecodeVmcnt15Lgkm0) {
 }
 
 TEST(WaitcntTranslator, EncodeAllZeroProducesMultipleWords) {
-  EXPECT_GE(encode_waitcnt_gfx12(WaitcntValues{0, 0, 0}).size(), 3u);
+  // vmcnt=0 splits into loadcnt(0) + storecnt/dscnt(0,0); lgkmcnt=0 also feeds
+  // dscnt and emits kmcnt(0); expcnt=0 emits expcnt(0). The encoding is
+  // deterministic, so pin the exact SOPP words to catch a regression in either
+  // the opcode selection or the packed simm16 fields.
+  const auto words = encode_waitcnt_gfx12(WaitcntValues{0, 0, 0});
+  const std::vector<uint32_t> expected = {0xBFC00000u, 0xBFC90000u, 0xBFC70000u, 0xBFC40000u};
+  EXPECT_EQ(words, expected);
 }
 
 TEST(WaitcntTranslator, EncodeAllRelaxedProducesNop) {
@@ -46,7 +52,14 @@ TEST(WaitcntTranslator, EncodeAllRelaxedProducesNop) {
 }
 
 TEST(WaitcntTranslator, EncodeVmcnt0EmitsLoadcntAndStorecnt) {
+  // vmcnt=0 with relaxed lgkm/exp yields exactly loadcnt(0) and
+  // storecnt(0)/dscnt(15): the dscnt field stays at its no-wait maximum because
+  // lgkmcnt is relaxed. Pin the exact words so a regression in the packed
+  // storecnt/dscnt simm16 (sc<<4 | dc) is caught.
   const auto words = encode_waitcnt_gfx12(WaitcntValues{0, 0x0F, 0x07});
+  const std::vector<uint32_t> expected = {0xBFC00000u, 0xBFC9000Fu};
+  EXPECT_EQ(words, expected);
+
   bool has_loadcnt = false;
   bool has_storecnt_dscnt = false;
   for (uint32_t word : words) {

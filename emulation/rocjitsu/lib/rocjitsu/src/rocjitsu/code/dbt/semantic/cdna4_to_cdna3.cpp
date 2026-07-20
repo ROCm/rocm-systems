@@ -169,25 +169,51 @@ void emit_cdna3_accvgpr_write_b32(std::vector<uint32_t> &words, uint8_t acc_dst,
   words.push_back(w1);
 }
 
-void emit_cdna3_f32_to_bf16_rne(std::vector<uint32_t> &words, uint8_t dst_half, uint8_t bias_tmp,
-                                uint16_t src) {
-  // Convert one FP32 payload to BF16 with round-to-nearest-even using the
-  // standard integer formulation:
+void emit_cdna3_f32_to_bf16_rne(std::vector<uint32_t> &words, uint8_t dst_half, uint8_t t0,
+                                uint8_t t1, uint8_t t2, uint16_t src) {
+  // Convert one FP32 payload to BF16 with round-to-nearest-even, matching the
+  // authoritative guest reference util::f32_to_bf16_rne (data_types.h):
   //
-  //   lsb    = (bits >> 16) & 1
-  //   bias   = 0x7fff + lsb
-  //   result = (bits + bias) >> 16
+  //   if ((f & 0x7f800000) != 0x7f800000)          // finite / subnormal
+  //     f += 0x7fff + ((f >> 16) & 1);             //   RNE bias
+  //   else if (f & 0xffff)                         // NaN whose payload is in
+  //     f |= 0x10000;                              //   the truncated low bits
+  //   return f >> 16;                              // keep it a NaN, not Inf
   //
-  // CDNA3 does not have the CDNA4 packed BF16 conversion used by gfx950
-  // epilogues, and the old lowering simply shifted the upper 16 bits. That was
-  // RTZ/truncation and made every mismatching BF16 result move toward zero.
-  emit_cdna3_vop3(words, cdna3::kVMovB32Vop3, dst_half, src);
-  emit_cdna3_vop3(words, cdna3::kVLshrrevB32Vop3, bias_tmp, scalar_positive_inline_u32(16),
-                  vgpr_src(dst_half));
-  emit_cdna3_vop3(words, cdna3::kVAndB32Vop3, bias_tmp, scalar_positive_inline_u32(1),
-                  vgpr_src(bias_tmp));
-  emit_cdna3_vop2_literal(words, cdna3::kVAddU32Vop2, bias_tmp, bias_tmp, 0x7fffu);
-  emit_cdna3_vop3(words, cdna3::kVAddU32Vop3, dst_half, vgpr_src(dst_half), vgpr_src(bias_tmp));
+  // CDNA3 has no CDNA4 packed BF16 conversion, so this is lowered by hand. The
+  // earlier lowering applied the RNE bias unconditionally, which turned a NaN
+  // like 0x7F800001 into +Inf (a real value change, not ~1ulp drift). This
+  // sequence is fully branchless and clobbers no VCC/SGPR state: it computes the
+  // rounded value and the NaN-preserving value in parallel, then selects between
+  // them with an arithmetic mask derived from whether the exponent is all-ones.
+  constexpr uint32_t kExpMask = 0x7f800000u;
+  const uint8_t f = dst_half; // working copy of the source bits
+  emit_cdna3_vop3(words, cdna3::kVMovB32Vop3, f, src);
+
+  // rounded (t0) = f + 0x7fff + ((f >> 16) & 1)
+  emit_cdna3_vop3(words, cdna3::kVLshrrevB32Vop3, t0, scalar_positive_inline_u32(16), vgpr_src(f));
+  emit_cdna3_vop3(words, cdna3::kVAndB32Vop3, t0, scalar_positive_inline_u32(1), vgpr_src(t0));
+  emit_cdna3_vop2_literal(words, cdna3::kVAddU32Vop2, t0, t0, 0x7fffu);
+  emit_cdna3_vop3(words, cdna3::kVAddU32Vop3, t0, vgpr_src(f), vgpr_src(t0));
+
+  // special (t1) = f | (((f & 0xffff) != 0) << 16)  -- preserve NaN-ness
+  emit_cdna3_vop3(words, cdna3::kVBfeU32Vop3, t1, vgpr_src(f), scalar_positive_inline_u32(0),
+                  scalar_positive_inline_u32(16));
+  emit_cdna3_vop3(words, cdna3::kVMinU32Vop3, t1, scalar_positive_inline_u32(1), vgpr_src(t1));
+  emit_cdna3_vop3(words, cdna3::kVLshlrevB32Vop3, t1, scalar_positive_inline_u32(16), vgpr_src(t1));
+  emit_cdna3_vop3(words, cdna3::kVOrB32Vop3, t1, vgpr_src(f), vgpr_src(t1));
+
+  // mask (t2) = (exp field all ones) ? 0xFFFFFFFF : 0, computed arithmetically:
+  //   d = (f & 0x7f800000) ^ 0x7f800000   -> 0 iff exponent is all-ones
+  //   mask = 0 - ((d - 1) >> 31)          -> all-ones iff d == 0
+  emit_cdna3_vop2_literal(words, cdna3::kVAndB32Vop2, t2, f, kExpMask);
+  emit_cdna3_vop2_literal(words, cdna3::kVXorB32Vop2, t2, t2, kExpMask);
+  emit_cdna3_vop3(words, cdna3::kVSubU32Vop3, t2, vgpr_src(t2), scalar_positive_inline_u32(1));
+  emit_cdna3_vop3(words, cdna3::kVLshrrevB32Vop3, t2, scalar_positive_inline_u32(31), vgpr_src(t2));
+  emit_cdna3_vop3(words, cdna3::kVSubU32Vop3, t2, scalar_positive_inline_u32(0), vgpr_src(t2));
+
+  // dst = bfi(mask, special, rounded) = (mask & special) | (~mask & rounded)
+  emit_cdna3_vop3(words, cdna3::kVBfiB32Vop3, dst_half, vgpr_src(t2), vgpr_src(t1), vgpr_src(t0));
   emit_cdna3_vop3(words, cdna3::kVLshrrevB32Vop3, dst_half, scalar_positive_inline_u32(16),
                   vgpr_src(dst_half));
 }
@@ -874,23 +900,28 @@ ExpandResult lower_cvt_pk_bf16_f32_cdna4_to_cdna3(const Instruction &inst,
   // before the low conversion clobbers any scratch register, but SRC1 must
   // survive until the second conversion. Spill-backed scratch borrows live
   // VGPRs, so never borrow the high source for this lowering.
+  // The NaN-safe RNE lowering needs one result register per half plus three
+  // shared scratch temporaries (the temps are reused across the two halves
+  // because the low conversion completes before the high one begins).
   auto scratch = choose_vgpr_window_or_spill(
-      inst, liveness, context, 3, 1,
+      inst, liveness, context, 5, 1,
       {{vdst, 1},
        {static_cast<uint16_t>(src1_vgpr.value_or(0)), static_cast<uint16_t>(src1_vgpr ? 1 : 0)}});
   if (!scratch)
     return failed_existing_expand_rule(
         inst, "No VGPR scratch window for packed BF16 conversion temporaries",
-        {"Provide three temporary VGPRs or spill-backed temporaries so BF16 "
-         "rounding and destination/source aliases are safe."});
+        {"Provide five temporary VGPRs or spill-backed temporaries so BF16 "
+         "rounding, NaN preservation, and destination/source aliases are safe."});
   std::vector<uint32_t> words;
   emit_cdna3_scratch_save(words, *scratch);
 
   const uint8_t lo = scratch->base;
   const uint8_t hi = static_cast<uint8_t>(scratch->base + 1);
-  const uint8_t bias = static_cast<uint8_t>(scratch->base + 2);
-  emit_cdna3_f32_to_bf16_rne(words, lo, bias, static_cast<uint16_t>(src.src0));
-  emit_cdna3_f32_to_bf16_rne(words, hi, bias, static_cast<uint16_t>(src.src1));
+  const uint8_t t0 = static_cast<uint8_t>(scratch->base + 2);
+  const uint8_t t1 = static_cast<uint8_t>(scratch->base + 3);
+  const uint8_t t2 = static_cast<uint8_t>(scratch->base + 4);
+  emit_cdna3_f32_to_bf16_rne(words, lo, t0, t1, t2, static_cast<uint16_t>(src.src0));
+  emit_cdna3_f32_to_bf16_rne(words, hi, t0, t1, t2, static_cast<uint16_t>(src.src1));
   emit_cdna3_vop3(words, cdna3::kVLshlrevB32Vop3, hi, scalar_positive_inline_u32(16), vgpr_src(hi));
   emit_cdna3_vop3(words, cdna3::kVOrB32Vop3, vdst, vgpr_src(lo), vgpr_src(hi));
 

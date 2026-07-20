@@ -113,6 +113,10 @@ if(RJ_INSTALL_TESTS)
         ${KERNEL_OUTPUT_DIR}/vector_add_gfx90a.o
         ${KERNEL_OUTPUT_DIR}/vector_add_probe_gfx90a.o
         ${KERNEL_OUTPUT_DIR}/dynamic_copy_loop.o
+        ${KERNEL_OUTPUT_DIR}/virtual_lds_smoke.o
+        ${KERNEL_OUTPUT_DIR}/cvt_pk_bf16_f32.o
+        ${KERNEL_OUTPUT_DIR}/hipkittens_bf16fp32_256_256_64_32_with16x32.hsaco
+        ${KERNEL_OUTPUT_DIR}/hipkittens_bf16fp32_256_256_64_32_with32x16.hsaco
         ${KERNEL_OUTPUT_DIR}/triton_cdna4_matmul_dynamic_32x32x64.hsaco
         ${KERNEL_OUTPUT_DIR}/triton_cdna4_matmul_buffer_async_1024.hsaco
         ${KERNEL_OUTPUT_DIR}/triton_cdna4_flash_attention_no_async_1024.hsaco

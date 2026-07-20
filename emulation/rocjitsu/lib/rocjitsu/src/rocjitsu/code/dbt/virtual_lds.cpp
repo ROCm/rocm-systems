@@ -135,6 +135,11 @@ parse_virtual_lds_metadata(std::span<const uint8_t> bytes) {
     if (!read_pod(bytes, offset, record))
       return std::nullopt;
 
+    // A flag bit outside the known mask means version skew or corruption; the
+    // record cannot be interpreted safely, so reject the whole section.
+    if ((record.flags & ~kVirtualLdsKnownFlagsMask) != 0)
+      return std::nullopt;
+
     VirtualLdsKernelMetadata kernel{};
     if (!read_string(strings, record.kernel_name_offset, record.kernel_name_size,
                      kernel.kernel_name) ||
