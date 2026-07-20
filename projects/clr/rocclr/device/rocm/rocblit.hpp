@@ -502,18 +502,6 @@ class KernelBlitManager : public DmaBlitManager {
                             bool forceBlit = false        //!< Force GPU Blit for fill
   ) const;
 
-  //! Fills a buffer memory with a pattern data
-  virtual bool fillBuffer3D(device::Memory& memory,       //!< Memory object to fill with pattern
-                            const void* pattern,          //!< Pattern data
-                            size_t patternSize,           //!< Pattern size
-                            const amd::Coord3D& surface,  //!< Whole Surface of mem object.
-                            const amd::Coord3D& origin,   //!< Destination origin
-                            const amd::Coord3D& size,     //!< Size of the fill region
-                            bool entire = false,          //!< Entire buffer will be updated
-                            bool forceBlit = false        //!< Force GPU Blit for fill
-  ) const;
-
-
   //! Fills an image memory with a pattern data
   bool fillImage(device::Memory& dstMemory,           //!< Memory object to fill with pattern
                          const void* pattern,         //!< Pattern data

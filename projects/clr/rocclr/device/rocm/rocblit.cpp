@@ -2698,15 +2698,6 @@ bool KernelBlitManager::fillBuffer2D(device::Memory& memory, const void* pattern
 }
 
 // ================================================================================================
-bool KernelBlitManager::fillBuffer3D(device::Memory& memory, const void* pattern,
-                                     size_t patternSize, const amd::Coord3D& surface,
-                                     const amd::Coord3D& origin, const amd::Coord3D& size,
-                                     bool entire, bool forceBlit) const {
-  ShouldNotReachHere();
-  return false;
-}
-
-// ================================================================================================
 bool KernelBlitManager::shaderCopyBuffer(address dst, address src, const amd::Coord3D& dstOrigin,
                                          const amd::Coord3D& srcOrigin, const amd::Coord3D& sizeIn,
                                          bool entire, const uint32_t blitWg,
