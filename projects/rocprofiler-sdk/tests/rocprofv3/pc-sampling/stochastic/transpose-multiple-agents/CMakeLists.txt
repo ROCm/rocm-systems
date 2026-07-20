@@ -35,6 +35,16 @@ find_package(rocprofiler-sdk REQUIRED)
 # Checking whether stochastic PC sampling is disabled. If so, skip the tests.
 rocprofiler_sdk_pc_sampling_stochastic_disabled(IS_PC_SAMPLING_STOCHASTIC_DISABLED)
 
+# TODO(pc-sampling): Temporarily quarantined (kept building, not run).
+# Under heavy multi-agent load (16 threads across all 8 agents) the
+# transpose-multiple-agents PC sampling tests intermittently (~0.25% of runs)
+# trigger a GPU hardware hang that escalates to a failed ASIC reset (PSP resume
+# -62) and requires a full node reboot. This is a runtime/driver-level issue,
+# not a test-logic bug: the other PC sampling test families pass 500/500 under
+# the same harness. Re-enable once the multi-agent host-trap hang is
+# root-caused/fixed.
+set(IS_PC_SAMPLING_STOCHASTIC_DISABLED TRUE)
+
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 

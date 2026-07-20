@@ -50,6 +50,11 @@ rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV)
 # Check if PC sampling is disabled and whether we should disable the test
 rocprofiler_sdk_pc_sampling_disabled(IS_PC_SAMPLING_DISABLED)
 
+# TODO(pc-sampling): Quarantined (built, not run). Runs a heavy workload on ALL
+# visible GPUs under PC sampling, which can trigger a multi-GPU hang requiring a
+# node reboot. Disabled with the transpose-multiple-agents tests until fixed.
+set(IS_PC_SAMPLING_DISABLED TRUE)
+
 set(pc-sampling-env ${PRELOAD_ENV} ${LIBRARY_PATH_ENV}
                     "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=on")
 

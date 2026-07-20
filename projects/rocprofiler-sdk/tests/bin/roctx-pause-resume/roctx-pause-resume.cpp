@@ -184,6 +184,10 @@ main()
             pc_sampling_kernel<<<num_blocks, threads_per_block>>>(threads_per_block);
             // Check for kernel launch errors
             checkHipErrors(hipGetLastError());
+            // Wait for the async kernels to finish before pausing: the pause
+            // stops PC sampling, so without this it can race ahead and collect
+            // zero samples for this window.
+            checkHipErrors(hipDeviceSynchronize());
             roctxProfilerPause(tid);
         }
     }
