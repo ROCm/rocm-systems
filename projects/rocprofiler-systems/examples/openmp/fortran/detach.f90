@@ -157,7 +157,9 @@ contains
                 r1 = 1
             !$omp end task
 
-            !$omp task detach(ev2) shared(r2, ev2)
+            ! ev2 is implicitly firstprivate via the detach clause, so it must
+            ! not appear in a shared clause on this same task construct.
+            !$omp task detach(ev2) shared(r2)
                 call omp_fulfill_event(ev2)        ! task 2 releases itself early
                 call busy_work(100000)
                 r2 = 2
