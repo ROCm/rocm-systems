@@ -2794,24 +2794,31 @@ uint64_t HipProfilerDisableExt() {
     const hipError_t __rocm_status = (expr);                                                       \
     rocm_trace_emit_##api##_exit(__rocm_status);                                                   \
     return __rocm_status;                                                                          \
-  } // ============================================================
-// Public C extension API
-// ============================================================
+  } while (0)
+
 extern "C" {
 
 // ================================================================================================
 hipError_t hipProfilerEnableExt(uint64_t* start_record_id, uint64_t state) {
+  auto const __rocm_in_start_record_id = start_record_id;
+  auto const __rocm_in_state = state;
+  rocm_trace_emit_hipProfilerEnableExt_enter(
+      (const void*)(uintptr_t)(__rocm_in_start_record_id),
+      (__rocm_in_state)); /* __ROCM_CURATED__: hipProfilerEnableExt */
   (void)state;  // reserved for future feature flags; ignored in this version
   uint64_t id = HipProfilerEnableExt();
   if (start_record_id) *start_record_id = id;
-  return hipSuccess;
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipProfilerEnableExt, hipSuccess);
 }
 
 // ================================================================================================
 hipError_t hipProfilerDisableExt(uint64_t* end_record_id) {
+  auto const __rocm_in_end_record_id = end_record_id;
+  rocm_trace_emit_hipProfilerDisableExt_enter(
+      (const void*)(uintptr_t)(__rocm_in_end_record_id)); /* __ROCM_CURATED__: hipProfilerDisableExt */
   uint64_t id = HipProfilerDisableExt();
   if (end_record_id) *end_record_id = id;
-  return hipSuccess;
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipProfilerDisableExt, hipSuccess);
 }
 
 // ================================================================================================
@@ -2819,8 +2826,17 @@ hipError_t hipProfilerGetRecordsExt(const hipApiRecordExt* const** chunks,
                                      size_t* chunk_count,
                                      size_t* chunk_size,
                                      size_t* total_count) {
+  auto const __rocm_in_chunks = chunks;
+  auto const __rocm_in_chunk_count = chunk_count;
+  auto const __rocm_in_chunk_size = chunk_size;
+  auto const __rocm_in_total_count = total_count;
+  rocm_trace_emit_hipProfilerGetRecordsExt_enter(
+      (const void*)(uintptr_t)(__rocm_in_chunks),
+      (const void*)(uintptr_t)(__rocm_in_chunk_count),
+      (const void*)(uintptr_t)(__rocm_in_chunk_size),
+      (const void*)(uintptr_t)(__rocm_in_total_count)); /* __ROCM_CURATED__: hipProfilerGetRecordsExt */
   if (!chunks || !chunk_count || !chunk_size || !total_count)
-    return hipErrorInvalidValue;
+    ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipProfilerGetRecordsExt, hipErrorInvalidValue);
 
   // Snapshot under alloc lock so chunk_count and total_count are consistent.
   size_t nchunks, total;
@@ -2834,12 +2850,18 @@ hipError_t hipProfilerGetRecordsExt(const hipApiRecordExt* const** chunks,
   *chunk_count = nchunks;
   *chunk_size  = kChunkSize;
   *total_count = total;
-  return hipSuccess;
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipProfilerGetRecordsExt, hipSuccess);
 }
 
 // ================================================================================================
 hipError_t hipProfilerRegisterChunkCallbackExt(hipProfilerChunkCallback cb, void* user_data) {
-  if (!cb) return hipErrorInvalidValue;
+  auto const __rocm_in_cb = cb;
+  auto const __rocm_in_user_data = user_data;
+  rocm_trace_emit_hipProfilerRegisterChunkCallbackExt_enter(
+      (const void*)(uintptr_t)(__rocm_in_cb),
+      (const void*)(uintptr_t)(__rocm_in_user_data)); /* __ROCM_CURATED__: hipProfilerRegisterChunkCallbackExt */
+  if (!cb)
+    ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipProfilerRegisterChunkCallbackExt, hipErrorInvalidValue);
   bool first;
   {
     std::lock_guard<std::mutex> lk(g_chunk_clients_mtx);
@@ -2852,7 +2874,7 @@ hipError_t hipProfilerRegisterChunkCallbackExt(hipProfilerChunkCallback cb, void
     g_chunk_thread_stop = false;
     g_chunk_thread      = std::thread(ChunkDeliveryThread);
   }
-  return hipSuccess;
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipProfilerRegisterChunkCallbackExt, hipSuccess);
 }
 
 }  // extern "C"

@@ -169,56 +169,144 @@ extern "C" hipError_t __hipPushCallConfiguration(dim3 gridDim, dim3 blockDim, si
   CATCH;
 }
 extern "C" void** __hipRegisterFatBinary(const void* data) {
+  auto const __rocm_in_data = data;
+  rocm_trace_emit___hipRegisterFatBinary_enter(
+      (const void*)(uintptr_t)(__rocm_in_data)); /* __ROCM_CURATED__: __hipRegisterFatBinary */
   TRY;
-  return hip::GetHipCompilerDispatchTable()->__hipRegisterFatBinary_fn(data);
+  ROCM_TRACE_RET_PTR_CURATED_NOARGS(__hipRegisterFatBinary, auto, hip::GetHipCompilerDispatchTable()->__hipRegisterFatBinary_fn(data));
   CATCHRET(void**);
 }
 extern "C" void __hipRegisterFunction(void** modules, const void* hostFunction,
                                       char* deviceFunction, const char* deviceName,
                                       unsigned int threadLimit, uint3* tid, uint3* bid,
                                       dim3* blockDim, dim3* gridDim, int* wSize) {
+  auto const __rocm_in_modules = modules;
+  auto const __rocm_in_hostFunction = hostFunction;
+  auto const __rocm_in_deviceFunction = deviceFunction;
+  auto const __rocm_in_deviceName = deviceName;
+  auto const __rocm_in_threadLimit = threadLimit;
+  auto const __rocm_in_tid = tid;
+  auto const __rocm_in_bid = bid;
+  auto const __rocm_in_blockDim = blockDim;
+  auto const __rocm_in_gridDim = gridDim;
+  auto const __rocm_in_wSize = wSize;
+  rocm_trace_emit___hipRegisterFunction_enter(
+      (const void*)(uintptr_t)(__rocm_in_modules),
+      (const void*)(uintptr_t)(__rocm_in_hostFunction),
+      (const char*)(__rocm_in_deviceFunction),
+      (const char*)(__rocm_in_deviceName),
+      (__rocm_in_threadLimit),
+      (const void*)(uintptr_t)(__rocm_in_tid),
+      (const void*)(uintptr_t)(__rocm_in_bid),
+      (const void*)(uintptr_t)(__rocm_in_blockDim),
+      (const void*)(uintptr_t)(__rocm_in_gridDim),
+      (const void*)(uintptr_t)(__rocm_in_wSize)); /* __ROCM_CURATED__: __hipRegisterFunction */
   TRY;
-  return hip::GetHipCompilerDispatchTable()->__hipRegisterFunction_fn(
-      modules, hostFunction, deviceFunction, deviceName, threadLimit, tid, bid, blockDim, gridDim,
-      wSize);
+  ROCM_TRACE_RET_VOID_CURATED_NOARGS(__hipRegisterFunction, hip::GetHipCompilerDispatchTable()->__hipRegisterFunction_fn(
+          modules, hostFunction, deviceFunction, deviceName, threadLimit, tid, bid, blockDim,
+          gridDim, wSize));
   CATCHRET(void);
 }
 extern "C" void __hipRegisterManagedVar(void* hipModule, void** pointer, void* init_value,
                                         const char* name, size_t size, unsigned align) {
+  auto const __rocm_in_hipModule = hipModule;
+  auto const __rocm_in_pointer = pointer;
+  auto const __rocm_in_init_value = init_value;
+  auto const __rocm_in_name = name;
+  auto const __rocm_in_size = size;
+  auto const __rocm_in_align = align;
+  rocm_trace_emit___hipRegisterManagedVar_enter(
+      (const void*)(uintptr_t)(__rocm_in_hipModule),
+      (const void*)(uintptr_t)(__rocm_in_pointer),
+      (const void*)(uintptr_t)(__rocm_in_init_value),
+      (const char*)(__rocm_in_name),
+      (__rocm_in_size),
+      (__rocm_in_align)); /* __ROCM_CURATED__: __hipRegisterManagedVar */
   TRY;
-  return hip::GetHipCompilerDispatchTable()->__hipRegisterManagedVar_fn(
-      hipModule, pointer, init_value, name, size, align);
+  ROCM_TRACE_RET_VOID_CURATED_NOARGS(__hipRegisterManagedVar, hip::GetHipCompilerDispatchTable()->__hipRegisterManagedVar_fn(
+                                  hipModule, pointer, init_value, name, size, align));
   CATCHRET(void);
 }
 extern "C" void __hipRegisterSurface(void** modules, void* var, char* hostVar, char* deviceVar,
                                      int type, int ext) {
+  auto const __rocm_in_modules = modules;
+  auto const __rocm_in_var = var;
+  auto const __rocm_in_hostVar = hostVar;
+  auto const __rocm_in_deviceVar = deviceVar;
+  auto const __rocm_in_type = type;
+  auto const __rocm_in_ext = ext;
+  rocm_trace_emit___hipRegisterSurface_enter(
+      (const void*)(uintptr_t)(__rocm_in_modules),
+      (const void*)(uintptr_t)(__rocm_in_var),
+      (const char*)(__rocm_in_hostVar),
+      (const char*)(__rocm_in_deviceVar),
+      (__rocm_in_type),
+      (__rocm_in_ext)); /* __ROCM_CURATED__: __hipRegisterSurface */
   TRY;
-  return hip::GetHipCompilerDispatchTable()->__hipRegisterSurface_fn(modules, var, hostVar,
-                                                                     deviceVar, type, ext);
+  ROCM_TRACE_RET_VOID_CURATED_NOARGS(__hipRegisterSurface, hip::GetHipCompilerDispatchTable()->__hipRegisterSurface_fn(
+                                  modules, var, hostVar, deviceVar, type, ext));
   CATCHRET(void);
 }
 extern "C" void __hipRegisterTexture(void** modules, void* var, char* hostVar, char* deviceVar,
                                      int type, int norm, int ext) {
+  auto const __rocm_in_modules = modules;
+  auto const __rocm_in_var = var;
+  auto const __rocm_in_hostVar = hostVar;
+  auto const __rocm_in_deviceVar = deviceVar;
+  auto const __rocm_in_type = type;
+  auto const __rocm_in_norm = norm;
+  auto const __rocm_in_ext = ext;
+  rocm_trace_emit___hipRegisterTexture_enter(
+      (const void*)(uintptr_t)(__rocm_in_modules),
+      (const void*)(uintptr_t)(__rocm_in_var),
+      (const char*)(__rocm_in_hostVar),
+      (const char*)(__rocm_in_deviceVar),
+      (__rocm_in_type),
+      (__rocm_in_norm),
+      (__rocm_in_ext)); /* __ROCM_CURATED__: __hipRegisterTexture */
   TRY;
-  return hip::GetHipCompilerDispatchTable()->__hipRegisterTexture_fn(modules, var, hostVar,
-                                                                     deviceVar, type, norm, ext);
+  ROCM_TRACE_RET_VOID_CURATED_NOARGS(__hipRegisterTexture, hip::GetHipCompilerDispatchTable()->__hipRegisterTexture_fn(
+                                  modules, var, hostVar, deviceVar, type, norm, ext));
   CATCHRET(void);
 }
 extern "C" void __hipRegisterVar(void** modules, void* var, char* hostVar, char* deviceVar, int ext,
                                  size_t size, int constant, int global) {
+  auto const __rocm_in_modules = modules;
+  auto const __rocm_in_var = var;
+  auto const __rocm_in_hostVar = hostVar;
+  auto const __rocm_in_deviceVar = deviceVar;
+  auto const __rocm_in_ext = ext;
+  auto const __rocm_in_size = size;
+  auto const __rocm_in_constant = constant;
+  auto const __rocm_in_global = global;
+  rocm_trace_emit___hipRegisterVar_enter(
+      (const void*)(uintptr_t)(__rocm_in_modules),
+      (const void*)(uintptr_t)(__rocm_in_var),
+      (const char*)(__rocm_in_hostVar),
+      (const char*)(__rocm_in_deviceVar),
+      (__rocm_in_ext),
+      (__rocm_in_size),
+      (__rocm_in_constant),
+      (__rocm_in_global)); /* __ROCM_CURATED__: __hipRegisterVar */
   TRY;
-  return hip::GetHipCompilerDispatchTable()->__hipRegisterVar_fn(modules, var, hostVar, deviceVar,
-                                                                 ext, size, constant, global);
+  ROCM_TRACE_RET_VOID_CURATED_NOARGS(__hipRegisterVar, hip::GetHipCompilerDispatchTable()->__hipRegisterVar_fn(modules, var, hostVar, deviceVar, ext,
+                                                              size, constant, global));
   CATCHRET(void);
 }
 extern "C" void __hipUnregisterFatBinary(void** modules) {
+  auto const __rocm_in_modules = modules;
+  rocm_trace_emit___hipUnregisterFatBinary_enter(
+      (const void*)(uintptr_t)(__rocm_in_modules)); /* __ROCM_CURATED__: __hipUnregisterFatBinary */
   TRY;
-  return hip::GetHipCompilerDispatchTable()->__hipUnregisterFatBinary_fn(modules);
+  ROCM_TRACE_RET_VOID_CURATED_NOARGS(__hipUnregisterFatBinary, hip::GetHipCompilerDispatchTable()->__hipUnregisterFatBinary_fn(modules));
   CATCHRET(void);
 }
 extern "C" const char* hipApiName(uint32_t id) {
+  auto const __rocm_in_id = id;
+  rocm_trace_emit_hipApiName_enter(
+      (__rocm_in_id)); /* __ROCM_CURATED__: hipApiName */
   TRY;
-  return hip::GetHipDispatchTable()->hipApiName_fn(id);
+  ROCM_TRACE_RET_PTR_CURATED_NOARGS(hipApiName, auto, hip::GetHipDispatchTable()->hipApiName_fn(id));
   CATCHRET(const char*);
 }
 hipError_t hipArray3DCreate(hipArray_t* array, const HIP_ARRAY3D_DESCRIPTOR* pAllocateArray) {
@@ -900,8 +988,11 @@ hipError_t hipDeviceTotalMem(size_t* bytes, hipDevice_t device) {
   CATCH;
 }
 hipError_t hipDriverGetVersion(int* driverVersion) {
+  auto const __rocm_in_driverVersion = driverVersion;
+  rocm_trace_emit_hipDriverGetVersion_enter(
+      (const void*)(uintptr_t)(__rocm_in_driverVersion)); /* __ROCM_CURATED__: hipDriverGetVersion */
   TRY;
-  return hip::GetHipDispatchTable()->hipDriverGetVersion_fn(driverVersion);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipDriverGetVersion, hip::GetHipDispatchTable()->hipDriverGetVersion_fn(driverVersion));
   CATCH;
 }
 hipError_t hipDrvGetErrorName(hipError_t hipError, const char** errorString) {
@@ -1313,14 +1404,32 @@ extern "C" hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, in
 }
 hipError_t hipGetDriverEntryPoint(const char* symbol, void** funcPtr, unsigned long long flags,
                                   hipDriverEntryPointQueryResult* status) {
+  auto const __rocm_in_symbol = symbol;
+  auto const __rocm_in_funcPtr = funcPtr;
+  auto const __rocm_in_flags = flags;
+  auto const __rocm_in_status = status;
+  rocm_trace_emit_hipGetDriverEntryPoint_enter(
+      (const char*)(__rocm_in_symbol),
+      (const void*)(uintptr_t)(__rocm_in_funcPtr),
+      (__rocm_in_flags),
+      (const void*)(uintptr_t)(__rocm_in_status)); /* __ROCM_CURATED__: hipGetDriverEntryPoint */
   TRY;
-  return hip::GetHipDispatchTable()->hipGetDriverEntryPoint_fn(symbol, funcPtr, flags, status);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGetDriverEntryPoint, hip::GetHipDispatchTable()->hipGetDriverEntryPoint_fn(symbol, funcPtr, flags, status));
   CATCH;
 }
 hipError_t hipGetDriverEntryPoint_spt(const char* symbol, void** funcPtr, unsigned long long flags,
                                       hipDriverEntryPointQueryResult* status) {
+  auto const __rocm_in_symbol = symbol;
+  auto const __rocm_in_funcPtr = funcPtr;
+  auto const __rocm_in_flags = flags;
+  auto const __rocm_in_status = status;
+  rocm_trace_emit_hipGetDriverEntryPoint_spt_enter(
+      (const char*)(__rocm_in_symbol),
+      (const void*)(uintptr_t)(__rocm_in_funcPtr),
+      (__rocm_in_flags),
+      (const void*)(uintptr_t)(__rocm_in_status)); /* __ROCM_CURATED__: hipGetDriverEntryPoint_spt */
   TRY;
-  return hip::GetHipDispatchTable()->hipGetDriverEntryPoint_spt_fn(symbol, funcPtr, flags, status);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGetDriverEntryPoint_spt, hip::GetHipDispatchTable()->hipGetDriverEntryPoint_spt_fn(symbol, funcPtr, flags, status));
   CATCH;
 }
 const char* hipGetErrorName(hipError_t hip_error) {
@@ -2642,8 +2751,11 @@ hipError_t hipDrvGraphAddMemsetNode(hipGraphNode_t* phGraphNode, hipGraph_t hGra
   CATCH;
 }
 hipError_t hipInit(unsigned int flags) {
+  auto const __rocm_in_flags = flags;
+  rocm_trace_emit_hipInit_enter(
+      (__rocm_in_flags)); /* __ROCM_CURATED__: hipInit */
   TRY;
-  return hip::GetHipDispatchTable()->hipInit_fn(flags);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipInit, hip::GetHipDispatchTable()->hipInit_fn(flags));
   CATCH;
 }
 hipError_t hipInitDevice(int device, unsigned int deviceFlags, unsigned int flags) {
@@ -4646,18 +4758,23 @@ hipError_t hipPointerSetAttribute(const void* value, hipPointer_attribute attrib
   CATCH;
 }
 hipError_t hipProfilerStart() {
+  rocm_trace_emit_hipProfilerStart_enter(); /* __ROCM_CURATED__: hipProfilerStart */
   TRY;
-  return hip::GetHipDispatchTable()->hipProfilerStart_fn();
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipProfilerStart, hip::GetHipDispatchTable()->hipProfilerStart_fn());
   CATCH;
 }
 hipError_t hipProfilerStop() {
+  rocm_trace_emit_hipProfilerStop_enter(); /* __ROCM_CURATED__: hipProfilerStop */
   TRY;
-  return hip::GetHipDispatchTable()->hipProfilerStop_fn();
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipProfilerStop, hip::GetHipDispatchTable()->hipProfilerStop_fn());
   CATCH;
 }
 hipError_t hipRuntimeGetVersion(int* runtimeVersion) {
+  auto const __rocm_in_runtimeVersion = runtimeVersion;
+  rocm_trace_emit_hipRuntimeGetVersion_enter(
+      (const void*)(uintptr_t)(__rocm_in_runtimeVersion)); /* __ROCM_CURATED__: hipRuntimeGetVersion */
   TRY;
-  return hip::GetHipDispatchTable()->hipRuntimeGetVersion_fn(runtimeVersion);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipRuntimeGetVersion, hip::GetHipDispatchTable()->hipRuntimeGetVersion_fn(runtimeVersion));
   CATCH;
 }
 hipError_t hipSetDevice(int deviceId) {
@@ -6083,8 +6200,11 @@ hipError_t hipLaunchHostFunc_spt(hipStream_t stream, hipHostFn_t fn, void* userD
   CATCH;
 }
 extern "C" int hipGetStreamDeviceId(hipStream_t stream) {
+  auto const __rocm_in_stream = stream;
+  rocm_trace_emit_hipGetStreamDeviceId_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_stream)); /* __ROCM_CURATED__: hipGetStreamDeviceId */
   TRY;
-  return hip::GetHipDispatchTable()->hipGetStreamDeviceId_fn(stream);
+  ROCM_TRACE_RET_I32_CURATED_NOARGS(hipGetStreamDeviceId, hip::GetHipDispatchTable()->hipGetStreamDeviceId_fn(stream));
   CATCHRET(int)
 }
 hipError_t hipExtGetLastError() {
@@ -6116,17 +6236,39 @@ hipError_t hipTexRefGetArray(hipArray_t* pArray, const textureReference* texRef)
 extern "C" hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion,
                                         uint64_t flags,
                                         hipDriverProcAddressQueryResult* symbolStatus) {
+  auto const __rocm_in_symbol = symbol;
+  auto const __rocm_in_pfn = pfn;
+  auto const __rocm_in_hipVersion = hipVersion;
+  auto const __rocm_in_flags = flags;
+  auto const __rocm_in_symbolStatus = symbolStatus;
+  rocm_trace_emit_hipGetProcAddress_enter(
+      (const char*)(__rocm_in_symbol),
+      (const void*)(uintptr_t)(__rocm_in_pfn),
+      (__rocm_in_hipVersion),
+      (__rocm_in_flags),
+      (const void*)(uintptr_t)(__rocm_in_symbolStatus)); /* __ROCM_CURATED__: hipGetProcAddress */
   TRY;
-  return hip::GetHipDispatchTable()->hipGetProcAddress_fn(symbol, pfn, hipVersion, flags,
-                                                          symbolStatus);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGetProcAddress, hip::GetHipDispatchTable()->hipGetProcAddress_fn(symbol, pfn, hipVersion, flags,
+                                                       symbolStatus));
   CATCH;
 }
-extern "C" hipError_t hipGetProcAddress_spt(const char* symbol, void** pfn, int  hipVersion,
+extern "C" hipError_t hipGetProcAddress_spt(const char* symbol, void** pfn, int hipVersion,
                                             uint64_t flags,
                                             hipDriverProcAddressQueryResult* symbolStatus) {
+  auto const __rocm_in_symbol = symbol;
+  auto const __rocm_in_pfn = pfn;
+  auto const __rocm_in_hipVersion = hipVersion;
+  auto const __rocm_in_flags = flags;
+  auto const __rocm_in_symbolStatus = symbolStatus;
+  rocm_trace_emit_hipGetProcAddress_spt_enter(
+      (const char*)(__rocm_in_symbol),
+      (const void*)(uintptr_t)(__rocm_in_pfn),
+      (__rocm_in_hipVersion),
+      (__rocm_in_flags),
+      (const void*)(uintptr_t)(__rocm_in_symbolStatus)); /* __ROCM_CURATED__: hipGetProcAddress_spt */
   TRY;
-  return hip::GetHipDispatchTable()->hipGetProcAddress_spt_fn(symbol, pfn, hipVersion, flags,
-                                                              symbolStatus);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGetProcAddress_spt, hip::GetHipDispatchTable()->hipGetProcAddress_spt_fn(symbol, pfn, hipVersion, flags,
+                                                           symbolStatus));
   CATCH;
 }
 hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
@@ -6152,8 +6294,13 @@ hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
   CATCH;
 }
 hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr) {
+  auto const __rocm_in_functionPtr = functionPtr;
+  auto const __rocm_in_symbolPtr = symbolPtr;
+  rocm_trace_emit_hipGetFuncBySymbol_enter(
+      (const void*)(uintptr_t)(__rocm_in_functionPtr),
+      (const void*)(uintptr_t)(__rocm_in_symbolPtr)); /* __ROCM_CURATED__: hipGetFuncBySymbol */
   TRY;
-  return hip::GetHipDispatchTable()->hipGetFuncBySymbol_fn(functionPtr, symbolPtr);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGetFuncBySymbol, hip::GetHipDispatchTable()->hipGetFuncBySymbol_fn(functionPtr, symbolPtr));
   CATCH;
 }
 hipError_t hipDrvGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
@@ -6989,18 +7136,27 @@ hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* 
   CATCH;
 }
 hipError_t hipExtEnableLogging() {
+  rocm_trace_emit_hipExtEnableLogging_enter(); /* __ROCM_CURATED__: hipExtEnableLogging */
   TRY;
-  return hip::GetHipDispatchTable()->hipExtEnableLogging_fn();
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipExtEnableLogging, hip::GetHipDispatchTable()->hipExtEnableLogging_fn());
   CATCH;
 }
 hipError_t hipExtDisableLogging() {
+  rocm_trace_emit_hipExtDisableLogging_enter(); /* __ROCM_CURATED__: hipExtDisableLogging */
   TRY;
-  return hip::GetHipDispatchTable()->hipExtDisableLogging_fn();
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipExtDisableLogging, hip::GetHipDispatchTable()->hipExtDisableLogging_fn());
   CATCH;
 }
 hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_mask) {
+  auto const __rocm_in_log_level = log_level;
+  auto const __rocm_in_log_size = log_size;
+  auto const __rocm_in_log_mask = log_mask;
+  rocm_trace_emit_hipExtSetLoggingParams_enter(
+      (__rocm_in_log_level),
+      (__rocm_in_log_size),
+      (__rocm_in_log_mask)); /* __ROCM_CURATED__: hipExtSetLoggingParams */
   TRY;
-  return hip::GetHipDispatchTable()->hipExtSetLoggingParams_fn(log_level, log_size, log_mask);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipExtSetLoggingParams, hip::GetHipDispatchTable()->hipExtSetLoggingParams_fn(log_level, log_size, log_mask));
   CATCH;
 }
 hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type,

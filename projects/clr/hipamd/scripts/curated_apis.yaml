@@ -1637,3 +1637,90 @@
 
 - api: hipWaitExternalSemaphoresAsync
   args: [extSemArray, paramsArray, numExtSems, stream]
+
+- api: __hipRegisterFatBinary
+  args: [data]
+
+- api: __hipRegisterFunction
+  args: [modules, hostFunction, deviceFunction, deviceName, threadLimit, tid, bid, blockDim, gridDim, wSize]
+  strings: [deviceFunction, deviceName]
+
+- api: __hipRegisterManagedVar
+  args: [hipModule, pointer, init_value, name, size, align]
+  strings: [name]
+
+- api: __hipRegisterSurface
+  args: [modules, var, hostVar, deviceVar, type, ext]
+  strings: [hostVar, deviceVar]
+
+- api: __hipRegisterTexture
+  args: [modules, var, hostVar, deviceVar, type, norm, ext]
+  strings: [hostVar, deviceVar]
+
+- api: __hipRegisterVar
+  args: [modules, var, hostVar, deviceVar, ext, size, constant, global]
+  strings: [hostVar, deviceVar]
+
+- api: __hipUnregisterFatBinary
+  args: [modules]
+
+- api: hipApiName
+  args: [id]
+
+- api: hipDriverGetVersion
+  args: [driverVersion]
+
+- api: hipExtDisableLogging
+  args: []
+
+- api: hipExtEnableLogging
+  args: []
+
+- api: hipExtSetLoggingParams
+  args: [log_level, log_size, log_mask]
+
+- api: hipGetDriverEntryPoint
+  args: [symbol, funcPtr, flags, status]
+  strings: [symbol]
+
+- api: hipGetDriverEntryPoint_spt
+  args: [symbol, funcPtr, flags, status]
+  strings: [symbol]
+
+- api: hipGetFuncBySymbol
+  args: [functionPtr, symbolPtr]
+
+- api: hipGetProcAddress
+  args: [symbol, pfn, hipVersion, flags, symbolStatus]
+  strings: [symbol]
+
+- api: hipGetProcAddress_spt
+  args: [symbol, pfn, hipVersion, flags, symbolStatus]
+  strings: [symbol]
+
+- api: hipGetStreamDeviceId
+  args: [stream]
+
+- api: hipInit
+  args: [flags]
+
+- api: hipProfilerDisableExt
+  args: [end_record_id]
+
+- api: hipProfilerEnableExt
+  args: [start_record_id, state]
+
+- api: hipProfilerGetRecordsExt
+  args: [chunks, chunk_count, chunk_size, total_count]
+
+- api: hipProfilerRegisterChunkCallbackExt
+  args: [cb, user_data]
+
+- api: hipProfilerStart
+  args: []
+
+- api: hipProfilerStop
+  args: []
+
+- api: hipRuntimeGetVersion
+  args: [runtimeVersion]

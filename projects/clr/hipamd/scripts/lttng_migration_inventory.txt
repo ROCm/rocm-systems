@@ -1,6 +1,14 @@
 __hipOnError	VOID	void
 __hipPopCallConfiguration	STATUS	hipError_t
 __hipPushCallConfiguration	STATUS	hipError_t
+__hipRegisterFatBinary	PTR	void **
+__hipRegisterFunction	VOID	void
+__hipRegisterManagedVar	VOID	void
+__hipRegisterSurface	VOID	void
+__hipRegisterTexture	VOID	void
+__hipRegisterVar	VOID	void
+__hipUnregisterFatBinary	VOID	void
+hipApiName	PTR	const char *
 hipArray3DCreate	STATUS	hipError_t
 hipArray3DGetDescriptor	STATUS	hipError_t
 hipArrayCreate	STATUS	hipError_t
@@ -75,6 +83,7 @@ hipDeviceSetMemPool	STATUS	hipError_t
 hipDeviceSetSharedMemConfig	STATUS	hipError_t
 hipDeviceSynchronize	STATUS	hipError_t
 hipDeviceTotalMem	STATUS	hipError_t
+hipDriverGetVersion	STATUS	hipError_t
 hipDrvGetErrorName	STATUS	hipError_t
 hipDrvGetErrorString	STATUS	hipError_t
 hipDrvGraphAddMemFreeNode	STATUS	hipError_t
@@ -108,12 +117,15 @@ hipExecutionCtxRecordEvent	STATUS	hipError_t
 hipExecutionCtxStreamCreate	STATUS	hipError_t
 hipExecutionCtxSynchronize	STATUS	hipError_t
 hipExecutionCtxWaitEvent	STATUS	hipError_t
+hipExtDisableLogging	STATUS	hipError_t
+hipExtEnableLogging	STATUS	hipError_t
 hipExtGetLastError	STATUS	hipError_t
 hipExtGetLinkTypeAndHopCount	STATUS	hipError_t
 hipExtLaunchKernel	STATUS	hipError_t
 hipExtLaunchMultiKernelMultiDevice	STATUS	hipError_t
 hipExtMallocWithFlags	STATUS	hipError_t
 hipExtModuleLaunchKernel	STATUS	hipError_t
+hipExtSetLoggingParams	STATUS	hipError_t
 hipExtStreamCreateWithCUMask	STATUS	hipError_t
 hipExtStreamGetCUMask	STATUS	hipError_t
 hipExternalMemoryGetMappedBuffer	STATUS	hipError_t
@@ -134,10 +146,16 @@ hipGetDeviceCount	STATUS	hipError_t
 hipGetDeviceFlags	STATUS	hipError_t
 hipGetDevicePropertiesR0000	STATUS	hipError_t
 hipGetDevicePropertiesR0600	STATUS	hipError_t
+hipGetDriverEntryPoint	STATUS	hipError_t
+hipGetDriverEntryPoint_spt	STATUS	hipError_t
 hipGetErrorName	PTR	const char *
 hipGetErrorString	PTR	const char *
+hipGetFuncBySymbol	STATUS	hipError_t
 hipGetLastError	STATUS	hipError_t
 hipGetMipmappedArrayLevel	STATUS	hipError_t
+hipGetProcAddress	STATUS	hipError_t
+hipGetProcAddress_spt	STATUS	hipError_t
+hipGetStreamDeviceId	STATUS	int
 hipGetTextureAlignmentOffset	STATUS	hipError_t
 hipGetTextureObjectResourceDesc	STATUS	hipError_t
 hipGetTextureObjectResourceViewDesc	STATUS	hipError_t
@@ -247,6 +265,7 @@ hipHostRegister	STATUS	hipError_t
 hipHostUnregister	STATUS	hipError_t
 hipImportExternalMemory	STATUS	hipError_t
 hipImportExternalSemaphore	STATUS	hipError_t
+hipInit	STATUS	hipError_t
 hipIpcCloseMemHandle	STATUS	hipError_t
 hipIpcGetEventHandle	STATUS	hipError_t
 hipIpcGetMemHandle	STATUS	hipError_t
@@ -442,6 +461,13 @@ hipPeekAtLastError	STATUS	hipError_t
 hipPointerGetAttribute	STATUS	hipError_t
 hipPointerGetAttributes	STATUS	hipError_t
 hipPointerSetAttribute	STATUS	hipError_t
+hipProfilerDisableExt	STATUS	hipError_t
+hipProfilerEnableExt	STATUS	hipError_t
+hipProfilerGetRecordsExt	STATUS	hipError_t
+hipProfilerRegisterChunkCallbackExt	STATUS	hipError_t
+hipProfilerStart	STATUS	hipError_t
+hipProfilerStop	STATUS	hipError_t
+hipRuntimeGetVersion	STATUS	hipError_t
 hipSetDevice	STATUS	hipError_t
 hipSetDeviceFlags	STATUS	hipError_t
 hipSetValidDevices	STATUS	hipError_t
