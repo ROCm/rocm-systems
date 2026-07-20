@@ -565,7 +565,8 @@ enable_queue_intercept()
 
         if(itr->dispatch_counter_collection || itr->pc_sampler || has_kernel_tracing ||
            itr->dispatch_spm || has_scratch_reporting || itr->device_counter_collection ||
-           itr->device_thread_trace || itr->dispatch_thread_trace || has_hip_graph_tracing)
+           (itr->device_thread_trace && itr->device_thread_trace->requires_queue_intercept()) ||
+           itr->dispatch_thread_trace || has_hip_graph_tracing)
             return true;
     }
     return false;

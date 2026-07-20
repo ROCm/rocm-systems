@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/cdna4/sopp.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -443,7 +444,8 @@ SSetGprIdxModeSopp::SSetGprIdxModeSopp(const MachineInst *inst)
 }
 
 void SSetGprIdxModeSopp::execute_impl(amdgpu::Wavefront &wf) {
-  wf.set_m0((wf.m0() & 0xFFFFF0FFu) | ((simm16.read_scalar(wf) & 0xF) << 8));
+  wf.set_m0((wf.m0() & 0xFFFFF0FFu) |
+            ((amdgpu::RegisterAccess(wf).read_scalar(simm16) & 0xF) << 8));
 }
 
 SEndpgmOrderedPsDoneSopp::SEndpgmOrderedPsDoneSopp(const MachineInst *inst)

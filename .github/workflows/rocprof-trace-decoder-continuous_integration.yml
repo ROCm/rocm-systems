@@ -120,6 +120,7 @@ jobs:
           -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
           -DPython3_EXECUTABLE=$(command -v python3) \
           -DBUILD_TESTS=ON \
+          -DBUILD_MARKERS=ON \
           -DBUILD_UNIT_TESTS=ON
 
     - name: Build

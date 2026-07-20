@@ -712,30 +712,19 @@ static void reserved_aperture_release(manageable_aperture_t *app,
 		/* Reset NUMA policy */
 		mbind(address, MemorySizeInBytes, MPOL_DEFAULT, NULL, 0, 0);
 
-		/* Remove any CPU mapping, but keep the address range reserved */
+		/*
+		 * Drop the CPU mapping to release shmem pages for MAP_SHARED
+		 * allocations, then re-reserve the VA range as PROT_NONE.
+		 * Callers hold fmm_mutex (see contract above), which serializes
+		 * this against aperture allocations, so no allocation can claim
+		 * the VA in the window between munmap() and mmap().
+		 */
+		munmap(address, MemorySizeInBytes);
 		mmap_ret = mmap(address, MemorySizeInBytes, PROT_NONE,
 			MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED,
 			-1, 0);
-		if (mmap_ret == MAP_FAILED && errno == ENOMEM) {
-			/* When mmap count reaches max_map_count, any mmap will
-			 * fail. Reduce the count with munmap then map it as
-			 * NORESERVE immediately.
-			 */
-			if (munmap(address, MemorySizeInBytes) == 0) {
-				/* After unmapping, try mmap again and handle failure
-				 * */
-				mmap_ret = mmap(address, MemorySizeInBytes, PROT_NONE,
-						MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED,
-						-1, 0);
-				if (mmap_ret == MAP_FAILED) {
-					/* Handle mmap failure gracefully, log if needed */
-					pr_err("Failed to remap memory after unmap\n");
-				}
-			} else {
-				/* Handle munmap failure if needed */
-				pr_err("Failed to unmap memory\n");
-			}
-		}
+		if (mmap_ret == MAP_FAILED)
+			pr_err("Failed to reserve VA range %p: %s\n", address, strerror(errno));
 	}
 }
 
@@ -1123,12 +1112,17 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	HSAuint64 aligned_addr = (HSAuint64)address - page_offset;
 	HSAuint64 aligned_size = PAGE_ALIGN_UP(page_offset + size);
 	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	HSAKMT_STATUS ret;
 
 	if (!fmm_ctx->first_gpu_mem)
 		return HSAKMT_STATUS_ERROR;
 
+	/* s_attr is a compile-time constant (16 bytes); no overflow possible */
 	s_attr = 2 * sizeof(struct kfd_ioctl_svm_attribute);
-	args = alloca(sizeof(*args) + s_attr);
+	args = malloc(sizeof(*args) + s_attr);
+	if (!args)
+		return HSAKMT_STATUS_NO_MEMORY;
+
 	args->start_addr = aligned_addr;
 	args->size = aligned_size;
 	args->op = KFD_IOCTL_SVM_OP_SET_ATTR;
@@ -1144,10 +1138,15 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	/* Driver does one copy_from_user, with extra attrs size */
 	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args)) {
 		pr_debug("op set range attrs failed %s\n", strerror(errno));
-		return HSAKMT_STATUS_ERROR;
+		ret = HSAKMT_STATUS_ERROR;
+		goto out;
 	}
 
-	return HSAKMT_STATUS_SUCCESS;
+	ret = HSAKMT_STATUS_SUCCESS;
+
+out:
+	free(args);
+	return ret;
 }
 
 static HSAKMT_STATUS fmm_map_mem_svm_api(HsaKFDContext *ctx,
@@ -1160,13 +1159,21 @@ static HSAKMT_STATUS fmm_map_mem_svm_api(HsaKFDContext *ctx,
 	size_t s_attr;
 	uint32_t i, nattr;
 	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	HSAKMT_STATUS ret;
 
 	if (!fmm_ctx->first_gpu_mem)
 		return HSAKMT_STATUS_ERROR;
 
 	nattr = nodes_array_size;
+
+	/* Check ioctl size-field limit (14 bits = 16383 bytes max, ~2044 attrs) */
+	if (sizeof(*args) + nattr * sizeof(struct kfd_ioctl_svm_attribute) > ((1UL << _IOC_SIZEBITS) - 1))
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
 	s_attr = sizeof(struct kfd_ioctl_svm_attribute) * nattr;
-	args = alloca(sizeof(*args) + s_attr);
+	args = malloc(sizeof(*args) + s_attr);
+	if (!args)
+		return HSAKMT_STATUS_NO_MEMORY;
 
 	args->start_addr = (uint64_t)address;
 	args->size = size;
@@ -1179,10 +1186,15 @@ static HSAKMT_STATUS fmm_map_mem_svm_api(HsaKFDContext *ctx,
 	/* Driver does one copy_from_user, with extra attrs size */
 	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args)) {
 		pr_debug("op set range attrs failed %s\n", strerror(errno));
-		return HSAKMT_STATUS_ERROR;
+		ret = HSAKMT_STATUS_ERROR;
+		goto out;
 	}
 
-	return HSAKMT_STATUS_SUCCESS;
+	ret = HSAKMT_STATUS_SUCCESS;
+
+out:
+	free(args);
+	return ret;
 }
 
 /* After allocating the memory, return the vm_object created for this memory.
@@ -2403,7 +2415,7 @@ int hsakmt_open_drm_render_device(HsaKFDContext *ctx, int minor)
 	 *    its own VM space).
 	*/
 	if (ctx->hsakmt_is_primary_ctx) {
-		dev_init_ret = amdgpu_device_initialize(fd, &major_drm, &minor_drm, device_handle);
+		dev_init_ret = hsakmt_amdgpu_device_initialize(fd, &major_drm, &minor_drm, device_handle);
 	} else if (hsakmt_fn_amdgpu_device_initialize2) {
 		dev_init_ret = hsakmt_fn_amdgpu_device_initialize2(fd, false, &major_drm, &minor_drm,
 						    (HsaAMDGPUDeviceHandle *)device_handle);

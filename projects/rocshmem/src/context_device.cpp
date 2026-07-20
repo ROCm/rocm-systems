@@ -358,4 +358,33 @@ __device__ int Context::tile_collective_wait(rocshmem_team_t team, uint64_t flag
   DISPATCH_RET(tile_collective_wait(team, flags));
 }
 
+
+__device__ int Context::fcollectmem_wave(rocshmem_team_t team, void *dest,
+                                  const void *source, int nelems) {
+  if (nelems == 0) {
+    return ROCSHMEM_SUCCESS;
+  }
+
+  if (is_thread_zero_in_block()) {
+    ctxStats.incStat(NUM_FCOLLECT);
+  }
+
+  DISPATCH_RET(fcollectmem_wave(team, dest, source, nelems));
+}
+
+
+__device__ void Context::fcollectmem_wg(rocshmem_team_t team, void *dest,
+                                  const void *source, int nelems) {
+  if (nelems == 0) {
+    return;
+  }
+
+  if (is_thread_zero_in_block()) {
+    ctxStats.incStat(NUM_FCOLLECT);
+  }
+
+  DISPATCH(fcollectmem_wg(team, dest, source, nelems));
+}
+
+
 }  // namespace rocshmem

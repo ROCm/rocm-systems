@@ -102,11 +102,10 @@ public:
                                    std::vector<HsaMemoryProperties>& mem_props) const override;
   hsa_status_t GetCacheProperties(uint32_t node_id, uint32_t processor_id,
                                   std::vector<HsaCacheProperties>& cache_props) const override;
-  hsa_status_t AllocateMemory(const core::MemoryRegion &mem_region,
-                              core::MemoryRegion::AllocateFlags alloc_flags,
-                              void **mem, size_t size,/* uint64_t* mmap_offset, */
-                              uint32_t node_id) override;
-  hsa_status_t FreeMemory(void *mem, size_t size) override;
+  hsa_status_t AllocateMemory(const core::MemoryRegion& mem_region,
+                              core::MemoryRegion::AllocateFlags alloc_flags, size_t size,
+                              uint32_t node_id, core::DriverMemoryHandle* handle) override;
+  hsa_status_t FreeMemory(const core::DriverMemoryHandle& handle) override;
   hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                            HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id, void* queue_addr,
                            uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes, HsaEvent* event,
@@ -144,8 +143,8 @@ public:
                    size_t size, hsa_access_permission_t perms, uint32_t node_id) override;
   hsa_status_t Unmap(const core::DriverMemoryHandle& handle, void *mem, size_t offset,
                      size_t size, uint32_t node_id) override;
-  hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size, const core::Agent& agent,
-                                     core::DriverMemoryHandle* handle, uint64_t* offset) override;
+  hsa_status_t CreateShareableHandle(core::DriverMemoryHandle* handle, const core::Agent& agent,
+                                     uint64_t* offset) override;
   hsa_status_t DestroyMemoryHandle(core::DriverMemoryHandle* handle) override;
 
   /// @brief Submits packets to the driver for execution.
@@ -158,8 +157,9 @@ public:
   /// @param[in] first_pkt_idx index of the first packet in the queue
   /// @param[in] num_pkts number of packets in the queue to be submitted. Must be greater than 0.
   /// @param[in] num_core_tiles number of core tiles in the AIE device
+  /// @param[in] agent agent that owns the queue
   hsa_status_t SubmitCmdChain(hsa_queue_t& q, void* queue_metadata, uint64_t first_pkt_idx,
-                              uint64_t num_pkts, uint32_t num_core_tiles);
+                              uint64_t num_pkts, uint32_t num_core_tiles, const core::Agent& agent);
 
   hsa_status_t SPMAcquire(uint32_t preferred_node_id) const override;
   hsa_status_t SPMRelease(uint32_t preferred_node_id) const override;
@@ -196,11 +196,6 @@ public:
   /// @param[in,out] bo_handle BO handle to destroy.
   hsa_status_t DestroyBOHandle(BOHandle& bo_handle) const;
 
-  /// @brief Returns the BO associated with the address.
-  ///
-  /// @param[in] mem virtual address to query.
-  BOHandle FindBOHandle(void* mem) const;
-
   /// @brief Queries the driver version and updates internal state.
   hsa_status_t QueryDriverVersion();
 
@@ -215,8 +210,6 @@ public:
   /// @param[in] size size of memory to allocate
   /// @param[out] bo_info allocated BO
   hsa_status_t CreateCmdBO(uint32_t size, BOHandle& bo_info) const;
-
-  std::map<void*, BOHandle> vmem_addr_mappings;
 
   /// @brief Virtual address range allocated for the device heap.
   ///

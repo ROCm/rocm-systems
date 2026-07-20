@@ -1443,7 +1443,7 @@ kfd_driver_t::kfd_agent_snapshot (kfd_dbg_device_info_entry *agents_infos,
   if (err == -ESRCH)
     return AMD_DBGAPI_STATUS_ERROR_PROCESS_EXITED;
   else if (args.device_snapshot.entry_size
-             != sizeof (kfd_dbg_device_info_entry)
+             > sizeof (kfd_dbg_device_info_entry)
            || err < 0)
     return AMD_DBGAPI_STATUS_ERROR;
 
@@ -1781,7 +1781,7 @@ kfd_driver_t::kfd_queue_snapshot (kfd_queue_snapshot_entry *snapshots,
   int err = kfd_dbg_trap_ioctl (KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT, &args);
   if (err == -ESRCH)
     return AMD_DBGAPI_STATUS_ERROR_PROCESS_EXITED;
-  else if (args.queue_snapshot.entry_size != sizeof (kfd_queue_snapshot_entry)
+  else if (args.queue_snapshot.entry_size > sizeof (kfd_queue_snapshot_entry)
            || err < 0)
     return AMD_DBGAPI_STATUS_ERROR;
 

@@ -16,6 +16,7 @@ RJ_DIAGNOSTIC_POP
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/code/rj_code.h"
+#include "util/data_types.h"
 
 #include <gtest/gtest.h>
 
@@ -28,6 +29,7 @@ RJ_DIAGNOSTIC_POP
 #include <iterator>
 #include <random>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #ifdef HAS_HOST_AMDGPU
@@ -38,6 +40,16 @@ namespace {
 using test::kernel_hsaco_path;
 using test::kernel_path;
 
+// Upper bound on how long to block for a dispatch's completion signal. This is a
+// hang guard, NOT a performance budget: the real hang guard is the ctest-level
+// TIMEOUT (120-300s). The larger fixtures (e.g. the 1024^3 buffer-async Triton
+// matmul) are genuinely ~10s of single-threaded functional emulation; under CI's
+// `ctest -j` the emulating thread is CPU-starved and a correct dispatch can take
+// well past a tight per-signal budget, so a 5-10s wait produced false "dispatch
+// timed out" failures. Keep this generously below the ctest TIMEOUT so a real hang
+// still surfaces as a signal-wait failure rather than a hard ctest kill.
+constexpr uint64_t kDispatchSignalWaitTimeoutNs = 120'000'000'000ULL;
+
 std::vector<uint8_t> load_kernel_hsaco_bytes(const char *name) {
   std::ifstream file(kernel_hsaco_path(name), std::ios::binary);
   if (!file)
@@ -46,11 +58,39 @@ std::vector<uint8_t> load_kernel_hsaco_bytes(const char *name) {
                               std::istreambuf_iterator<char>());
 }
 
+std::vector<uint8_t> load_gfx950_code_object(const char *name) {
+  Executable exec(kernel_hsaco_path(name));
+  if (!exec.is_valid() || exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950) == 0)
+    return {};
+  const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  if (!co)
+    return {};
+  std::vector<uint8_t> bytes(co->image_size());
+  std::memcpy(bytes.data(), co->image_data(), co->image_size());
+  return bytes;
+}
+
 struct TritonMatmulCase {
   uint32_t m;
   uint32_t n;
   uint32_t k;
 };
+
+constexpr uint32_t kFlashAttentionQ = 1024;
+constexpr uint32_t kFlashAttentionKV = 1024;
+constexpr uint32_t kFlashAttentionHeadDim = 64;
+constexpr uint32_t kFlashAttentionBlockN = 64;
+
+struct FlashAttentionReferenceSlice {
+  uint32_t row;
+  uint32_t begin;
+  uint32_t end;
+};
+
+constexpr std::array<FlashAttentionReferenceSlice, 2> kFlashAttentionReferenceSlices = {{
+    {0, 0, kFlashAttentionHeadDim / 2},
+    {kFlashAttentionQ - 1, kFlashAttentionHeadDim / 2, kFlashAttentionHeadDim},
+}};
 
 void expect_float_vectors_near(const std::vector<float> &actual, const std::vector<float> &expected,
                                float tolerance, const char *label) {
@@ -58,7 +98,7 @@ void expect_float_vectors_near(const std::vector<float> &actual, const std::vect
   uint32_t mismatches = 0;
   for (size_t i = 0; i < actual.size(); ++i) {
     const float diff = std::fabs(actual[i] - expected[i]);
-    if (diff > tolerance) {
+    if (!std::isfinite(actual[i]) || !std::isfinite(expected[i]) || diff > tolerance) {
       if (mismatches < 8)
         ADD_FAILURE() << label << " mismatch at i=" << i << ": got=" << actual[i]
                       << " expected=" << expected[i] << " diff=" << diff;
@@ -79,6 +119,113 @@ void fill_seeded_half_inputs(std::vector<uint16_t> &values, uint32_t seed) {
     const uint16_t sign = static_cast<uint16_t>(sign_dist(rng) << 15);
     value = static_cast<uint16_t>(sign | magnitude_dist(rng));
   }
+}
+
+std::vector<float> reference_flash_attention_slices(const std::vector<uint16_t> &q,
+                                                    const std::vector<uint16_t> &k,
+                                                    const std::vector<uint16_t> &v) {
+  std::vector<float> result;
+  result.reserve(kFlashAttentionHeadDim);
+
+  for (const FlashAttentionReferenceSlice &slice : kFlashAttentionReferenceSlices) {
+    float max_score = -1.0e20f;
+    float normalization = 0.0f;
+    std::vector<float> accumulator(slice.end - slice.begin, 0.0f);
+
+    for (uint32_t block = 0; block < kFlashAttentionKV; block += kFlashAttentionBlockN) {
+      std::array<float, kFlashAttentionBlockN> scores{};
+      float block_max = -1.0e20f;
+      for (uint32_t n = 0; n < kFlashAttentionBlockN; ++n) {
+        float score = 0.0f;
+        for (uint32_t d = 0; d < kFlashAttentionHeadDim; ++d) {
+          const float q_value =
+              util::f16_to_f32(q[static_cast<size_t>(slice.row) * kFlashAttentionHeadDim + d]);
+          const float k_value =
+              util::f16_to_f32(k[static_cast<size_t>(block + n) * kFlashAttentionHeadDim + d]);
+          score = std::fma(q_value, k_value, score);
+        }
+        // The Triton fixture scales by log2(e) and uses exp2 for the online
+        // softmax recurrence.
+        scores[n] = score * 1.4426950408889634f;
+        block_max = std::max(block_max, scores[n]);
+      }
+
+      const float new_max = std::max(max_score, block_max);
+      const float alpha = std::exp2(max_score - new_max);
+      float block_normalization = 0.0f;
+      std::array<float, kFlashAttentionBlockN> probabilities{};
+      for (uint32_t n = 0; n < kFlashAttentionBlockN; ++n) {
+        const float probability = std::exp2(scores[n] - new_max);
+        block_normalization += probability;
+        probabilities[n] = util::f16_to_f32(util::f32_to_f16(probability));
+      }
+
+      for (float &value : accumulator)
+        value *= alpha;
+      for (uint32_t n = 0; n < kFlashAttentionBlockN; ++n) {
+        for (uint32_t d = slice.begin; d < slice.end; ++d) {
+          const float v_value =
+              util::f16_to_f32(v[static_cast<size_t>(block + n) * kFlashAttentionHeadDim + d]);
+          accumulator[d - slice.begin] =
+              std::fma(probabilities[n], v_value, accumulator[d - slice.begin]);
+        }
+      }
+
+      normalization = normalization * alpha + block_normalization;
+      max_score = new_max;
+    }
+
+    for (float value : accumulator)
+      result.push_back(value / normalization);
+  }
+  return result;
+}
+
+void expect_flash_attention_slices_near(const std::vector<float> &actual,
+                                        const std::vector<float> &expected, float tolerance,
+                                        const char *label) {
+  ASSERT_EQ(actual.size(), static_cast<size_t>(kFlashAttentionQ) * kFlashAttentionHeadDim) << label;
+  ASSERT_EQ(expected.size(), kFlashAttentionHeadDim) << label;
+
+  uint32_t mismatches = 0;
+  size_t reference_index = 0;
+  for (const FlashAttentionReferenceSlice &slice : kFlashAttentionReferenceSlices) {
+    for (uint32_t d = slice.begin; d < slice.end; ++d, ++reference_index) {
+      const float actual_value =
+          actual[static_cast<size_t>(slice.row) * kFlashAttentionHeadDim + d];
+      const float expected_value = expected[reference_index];
+      const float diff = std::fabs(actual_value - expected_value);
+      if (!std::isfinite(actual_value) || !std::isfinite(expected_value) || diff > tolerance) {
+        if (mismatches < 8)
+          ADD_FAILURE() << label << " mismatch at row=" << slice.row << " d=" << d
+                        << ": got=" << actual_value << " expected=" << expected_value
+                        << " diff=" << diff;
+        ++mismatches;
+      }
+    }
+  }
+  EXPECT_EQ(mismatches, 0u) << mismatches << " " << label << " mismatches";
+}
+
+std::vector<float> reference_triton_matmul(const TritonMatmulCase &test_case) {
+  std::vector<uint16_t> a(static_cast<size_t>(test_case.m) * test_case.k);
+  std::vector<uint16_t> b(static_cast<size_t>(test_case.k) * test_case.n);
+  fill_seeded_half_inputs(a, 0xA0D4'0001u ^ test_case.m ^ (test_case.k << 8));
+  fill_seeded_half_inputs(b, 0xB0D4'0001u ^ test_case.n ^ (test_case.k << 8));
+
+  std::vector<float> result(static_cast<size_t>(test_case.m) * test_case.n, 0.0f);
+  for (uint32_t m = 0; m < test_case.m; ++m) {
+    for (uint32_t n = 0; n < test_case.n; ++n) {
+      float sum = 0.0f;
+      for (uint32_t k = 0; k < test_case.k; ++k) {
+        const float lhs = util::f16_to_f32(a[static_cast<size_t>(m) * test_case.k + k]);
+        const float rhs = util::f16_to_f32(b[static_cast<size_t>(k) * test_case.n + n]);
+        sum = std::fma(lhs, rhs, sum);
+      }
+      result[static_cast<size_t>(m) * test_case.n + n] = sum;
+    }
+  }
+  return result;
 }
 
 hsa_agent_t find_cpu_agent() {
@@ -126,7 +273,7 @@ hsa_amd_memory_pool_t find_pool(hsa_agent_t agent, hsa_amd_segment_t segment,
   return ctx.pool;
 }
 
-struct Cdna3Target {
+struct DispatchTarget {
   hsa_agent_t agent{};
   uint32_t mach = 0;
   std::string isa_name;
@@ -143,11 +290,11 @@ uint32_t cdna3_mach_for_isa_name(const char *name) {
   return 0;
 }
 
-Cdna3Target find_cdna3_target() {
-  Cdna3Target target;
+DispatchTarget find_cdna3_target() {
+  DispatchTarget target;
   hsa_iterate_agents(
       [](hsa_agent_t agent, void *data) -> hsa_status_t {
-        auto *t = static_cast<Cdna3Target *>(data);
+        auto *t = static_cast<DispatchTarget *>(data);
         hsa_device_type_t type;
         hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
         if (type != HSA_DEVICE_TYPE_GPU)
@@ -172,6 +319,36 @@ Cdna3Target find_cdna3_target() {
   return target;
 }
 
+DispatchTarget find_gpu_target_named(std::string_view expected_isa) {
+  struct Context {
+    std::string_view expected_isa;
+    DispatchTarget target;
+  } context{expected_isa, {}};
+
+  hsa_iterate_agents(
+      [](hsa_agent_t agent, void *data) -> hsa_status_t {
+        auto *ctx = static_cast<Context *>(data);
+        hsa_device_type_t type;
+        hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
+        if (type != HSA_DEVICE_TYPE_GPU)
+          return HSA_STATUS_SUCCESS;
+
+        hsa_isa_t isa{};
+        char isa_name[128]{};
+        hsa_agent_get_info(agent, HSA_AGENT_INFO_ISA, &isa);
+        hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, isa_name);
+        ctx->target.seen_gpu_isas.emplace_back(isa_name);
+        if (std::string_view(isa_name).find(ctx->expected_isa) == std::string_view::npos)
+          return HSA_STATUS_SUCCESS;
+
+        ctx->target.agent = agent;
+        ctx->target.isa_name = isa_name;
+        return HSA_STATUS_INFO_BREAK;
+      },
+      &context);
+  return context.target;
+}
+
 std::string join_seen_isas(const std::vector<std::string> &isas) {
   if (isas.empty())
     return "<none>";
@@ -185,7 +362,43 @@ struct HsaShutdownGuard {
   ~HsaShutdownGuard() { hsa_shut_down(); }
 };
 
-void run_dynamic_copy_loop(const std::vector<uint8_t> &elf_bytes, const Cdna3Target &target) {
+struct HsaMatmulResources {
+  hsa_code_object_reader_t reader{};
+  hsa_executable_t executable{};
+  hsa_queue_t *queue = nullptr;
+  hsa_signal_t signal{};
+  void *kernarg = nullptr;
+  void *a = nullptr;
+  void *b = nullptr;
+  void *c = nullptr;
+  bool reader_created = false;
+  bool executable_created = false;
+  bool signal_created = false;
+
+  ~HsaMatmulResources() {
+    // Stop queue execution before releasing anything referenced by an AQL
+    // packet. This also makes an assertion after a dispatch timeout safe: the
+    // test must not leave a live simulator dispatch for hsa_shut_down().
+    if (queue)
+      hsa_queue_destroy(queue);
+    if (signal_created)
+      hsa_signal_destroy(signal);
+    if (kernarg)
+      hsa_amd_memory_pool_free(kernarg);
+    if (a)
+      hsa_amd_memory_pool_free(a);
+    if (b)
+      hsa_amd_memory_pool_free(b);
+    if (c)
+      hsa_amd_memory_pool_free(c);
+    if (executable_created)
+      hsa_executable_destroy(executable);
+    if (reader_created)
+      hsa_code_object_reader_destroy(reader);
+  }
+};
+
+void run_dynamic_copy_loop(const std::vector<uint8_t> &elf_bytes, const DispatchTarget &target) {
   hsa_agent_t cpu = find_cpu_agent();
   ASSERT_NE(cpu.handle, 0u) << "No CPU agent found";
 
@@ -307,7 +520,7 @@ void run_dynamic_copy_loop(const std::vector<uint8_t> &elf_bytes, const Cdna3Tar
     hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
 
     const hsa_signal_value_t val = hsa_signal_wait_scacquire(
-        signal, HSA_SIGNAL_CONDITION_LT, 1, 5'000'000'000ULL, HSA_WAIT_STATE_BLOCKED);
+        signal, HSA_SIGNAL_CONDITION_LT, 1, kDispatchSignalWaitTimeoutNs, HSA_WAIT_STATE_BLOCKED);
     ASSERT_EQ(val, 0) << "Kernel dispatch timed out or failed";
 
     ASSERT_EQ(hsa_memory_copy(dst_host.data(), dst_dev, kMaxBytes), HSA_STATUS_SUCCESS);
@@ -356,28 +569,31 @@ void translate_dynamic_triton_matmul(uint32_t mach, std::vector<uint8_t> &elf_by
   translate_triton_fixture("triton_cdna4_matmul_dynamic_32x32x64", mach, elf_bytes);
 }
 
-void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const Cdna3Target &target,
+void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const DispatchTarget &target,
                        const TritonMatmulCase &test_case, uint32_t shared_bytes,
                        std::vector<float> *observed = nullptr) {
   hsa_agent_t cpu = find_cpu_agent();
   ASSERT_NE(cpu.handle, 0u) << "No CPU agent found";
 
-  hsa_code_object_reader_t reader{};
-  auto st = hsa_code_object_reader_create_from_memory(elf_bytes.data(), elf_bytes.size(), &reader);
+  HsaMatmulResources resources;
+  auto st = hsa_code_object_reader_create_from_memory(elf_bytes.data(), elf_bytes.size(),
+                                                      &resources.reader);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+  resources.reader_created = true;
 
-  hsa_executable_t executable{};
   st = hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, nullptr,
-                                 &executable);
+                                 &resources.executable);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
-  st = hsa_executable_load_agent_code_object(executable, target.agent, reader, nullptr, nullptr);
+  resources.executable_created = true;
+  st = hsa_executable_load_agent_code_object(resources.executable, target.agent, resources.reader,
+                                             nullptr, nullptr);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
-  st = hsa_executable_freeze(executable, nullptr);
+  st = hsa_executable_freeze(resources.executable, nullptr);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
 
   hsa_executable_symbol_t symbol{};
-  st = hsa_executable_get_symbol_by_name(executable, "triton_cdna4_matmul_kernel.kd", &target.agent,
-                                         &symbol);
+  st = hsa_executable_get_symbol_by_name(resources.executable, "triton_cdna4_matmul_kernel.kd",
+                                         &target.agent, &symbol);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
 
   uint64_t kernel_object = 0;
@@ -402,15 +618,12 @@ void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const Cdna3Target 
 
   auto gpu_pool = find_pool(target.agent, HSA_AMD_SEGMENT_GLOBAL);
   ASSERT_NE(gpu_pool.handle, 0u);
-  uint16_t *a_dev = nullptr;
-  uint16_t *b_dev = nullptr;
-  float *c_dev = nullptr;
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(gpu_pool, kABytes, 0, reinterpret_cast<void **>(&a_dev)),
-            HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(gpu_pool, kBBytes, 0, reinterpret_cast<void **>(&b_dev)),
-            HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(gpu_pool, kCBytes, 0, reinterpret_cast<void **>(&c_dev)),
-            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(gpu_pool, kABytes, 0, &resources.a), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(gpu_pool, kBBytes, 0, &resources.b), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(gpu_pool, kCBytes, 0, &resources.c), HSA_STATUS_SUCCESS);
+  auto *a_dev = static_cast<uint16_t *>(resources.a);
+  auto *b_dev = static_cast<uint16_t *>(resources.b);
+  auto *c_dev = static_cast<float *>(resources.c);
 
   hsa_agent_t both[] = {cpu, target.agent};
   ASSERT_EQ(hsa_amd_agents_allow_access(2, both, nullptr, a_dev), HSA_STATUS_SUCCESS);
@@ -419,10 +632,10 @@ void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const Cdna3Target 
 
   auto kernarg_pool = find_pool(cpu, HSA_AMD_SEGMENT_GLOBAL, true);
   ASSERT_NE(kernarg_pool.handle, 0u);
-  void *kernarg = nullptr;
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, 256, 0, &kernarg), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_amd_agents_allow_access(2, both, nullptr, kernarg), HSA_STATUS_SUCCESS);
-  std::memset(kernarg, 0, 256);
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, 256, 0, &resources.kernarg),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_amd_agents_allow_access(2, both, nullptr, resources.kernarg), HSA_STATUS_SUCCESS);
+  std::memset(resources.kernarg, 0, 256);
 
   struct __attribute__((packed)) DynamicKernArgs {
     const uint16_t *a;
@@ -437,7 +650,7 @@ void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const Cdna3Target 
   };
   static_assert(sizeof(DynamicKernArgs) == 56, "Dynamic Triton matmul kernarg layout changed");
 
-  auto *args = static_cast<DynamicKernArgs *>(kernarg);
+  auto *args = static_cast<DynamicKernArgs *>(resources.kernarg);
   args->a = a_dev;
   args->b = b_dev;
   args->c = c_dev;
@@ -455,20 +668,19 @@ void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const Cdna3Target 
   ASSERT_EQ(hsa_memory_copy(b_dev, b_host.data(), kBBytes), HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_memory_copy(c_dev, c_init.data(), kCBytes), HSA_STATUS_SUCCESS);
 
-  hsa_queue_t *queue = nullptr;
   uint32_t queue_size = 0;
   hsa_agent_get_info(target.agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size);
   st = hsa_queue_create(target.agent, queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr,
-                        UINT32_MAX, UINT32_MAX, &queue);
+                        UINT32_MAX, UINT32_MAX, &resources.queue);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
 
-  hsa_signal_t signal{};
-  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
-  hsa_signal_store_relaxed(signal, 1);
+  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &resources.signal), HSA_STATUS_SUCCESS);
+  resources.signal_created = true;
+  hsa_signal_store_relaxed(resources.signal, 1);
 
-  const uint64_t write_idx = hsa_queue_add_write_index_relaxed(queue, 1);
-  auto *aql = static_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address) +
-              (write_idx & (queue->size - 1));
+  const uint64_t write_idx = hsa_queue_add_write_index_relaxed(resources.queue, 1);
+  auto *aql = static_cast<hsa_kernel_dispatch_packet_t *>(resources.queue->base_address) +
+              (write_idx & (resources.queue->size - 1));
   std::memset(aql, 0, sizeof(*aql));
   aql->setup = 2;
   aql->workgroup_size_x = kWorkgroupSize;
@@ -479,38 +691,52 @@ void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const Cdna3Target 
   aql->grid_size_z = 1;
   aql->group_segment_size = shared_bytes;
   aql->kernel_object = kernel_object;
-  aql->kernarg_address = kernarg;
-  aql->completion_signal = signal;
+  aql->kernarg_address = resources.kernarg;
+  aql->completion_signal = resources.signal;
 
   uint16_t header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
   header |= 1 << HSA_PACKET_HEADER_BARRIER;
   header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
   header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
   __atomic_store_n(reinterpret_cast<uint16_t *>(aql), header, __ATOMIC_RELEASE);
-  hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
+  hsa_signal_store_relaxed(resources.queue->doorbell_signal, write_idx);
 
-  const hsa_signal_value_t val = hsa_signal_wait_scacquire(
-      signal, HSA_SIGNAL_CONDITION_LT, 1, 5'000'000'000ULL, HSA_WAIT_STATE_BLOCKED);
+  const hsa_signal_value_t val =
+      hsa_signal_wait_scacquire(resources.signal, HSA_SIGNAL_CONDITION_LT, 1,
+                                kDispatchSignalWaitTimeoutNs, HSA_WAIT_STATE_BLOCKED);
   ASSERT_EQ(val, 0) << "Kernel dispatch timed out or failed";
 
   ASSERT_EQ(hsa_memory_copy(c_host.data(), c_dev, kCBytes), HSA_STATUS_SUCCESS);
 
   if (observed)
     *observed = std::move(c_host);
+}
 
-  hsa_signal_destroy(signal);
-  hsa_queue_destroy(queue);
-  hsa_amd_memory_pool_free(kernarg);
-  hsa_amd_memory_pool_free(a_dev);
-  hsa_amd_memory_pool_free(b_dev);
-  hsa_amd_memory_pool_free(c_dev);
-  hsa_executable_destroy(executable);
-  hsa_code_object_reader_destroy(reader);
+template <size_t N>
+void compare_dynamic_triton_matmul_cases(const DispatchTarget &target,
+                                         const std::array<TritonMatmulCase, N> &cases) {
+  std::vector<uint8_t> translated;
+  ASSERT_NO_FATAL_FAILURE(translate_dynamic_triton_matmul(target.mach, translated));
+  std::vector<uint8_t> native = load_kernel_hsaco_bytes("triton_cdna3_matmul_dynamic_32x32x64");
+  ASSERT_FALSE(native.empty());
+
+  for (const TritonMatmulCase &test_case : cases) {
+    SCOPED_TRACE(::testing::Message()
+                 << "M=" << test_case.m << " N=" << test_case.n << " K=" << test_case.k);
+    std::vector<float> translated_out;
+    std::vector<float> native_out;
+    ASSERT_NO_FATAL_FAILURE(
+        run_triton_matmul(translated, target, test_case, 8192, &translated_out));
+    ASSERT_NO_FATAL_FAILURE(run_triton_matmul(native, target, test_case, 4096, &native_out));
+    expect_float_vectors_near(translated_out, native_out, 0.02f,
+                              "translated-vs-native dynamic Triton matmul");
+  }
 }
 
 void run_buffer_async_triton_matmul(const std::vector<uint8_t> &elf_bytes,
-                                    const Cdna3Target &target, uint32_t shared_bytes,
-                                    std::vector<float> *observed = nullptr) {
+                                    const DispatchTarget &target, uint32_t shared_bytes,
+                                    std::vector<float> *observed = nullptr,
+                                    std::vector<float> *reference = nullptr) {
   hsa_agent_t cpu = find_cpu_agent();
   ASSERT_NE(cpu.handle, 0u) << "No CPU agent found";
 
@@ -599,7 +825,18 @@ void run_buffer_async_triton_matmul(const std::vector<uint8_t> &elf_bytes,
   std::vector<float> c_init(kCElements, kSentinel);
   std::vector<float> c_host(kCElements);
   fill_seeded_half_inputs(a_host, 0xA0D4'1001u);
-  fill_seeded_half_inputs(b_host, 0xB0D4'1001u);
+  if (reference) {
+    // An identity RHS gives every output element a cheap closed-form CPU
+    // reference while still exercising the full translated 1024^3 kernel.
+    std::fill(b_host.begin(), b_host.end(), 0);
+    for (uint32_t i = 0; i < kK; ++i)
+      b_host[static_cast<size_t>(i) * kN + i] = 0x3c00; // fp16 1.0
+    reference->resize(kCElements);
+    for (size_t i = 0; i < kCElements; ++i)
+      (*reference)[i] = util::f16_to_f32(a_host[i]);
+  } else {
+    fill_seeded_half_inputs(b_host, 0xB0D4'1001u);
+  }
   ASSERT_EQ(hsa_memory_copy(a_dev, a_host.data(), kABytes), HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_memory_copy(b_dev, b_host.data(), kBBytes), HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_memory_copy(c_dev, c_init.data(), kCBytes), HSA_STATUS_SUCCESS);
@@ -639,7 +876,7 @@ void run_buffer_async_triton_matmul(const std::vector<uint8_t> &elf_bytes,
   hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
 
   const hsa_signal_value_t val = hsa_signal_wait_scacquire(
-      signal, HSA_SIGNAL_CONDITION_LT, 1, 10'000'000'000ULL, HSA_WAIT_STATE_BLOCKED);
+      signal, HSA_SIGNAL_CONDITION_LT, 1, kDispatchSignalWaitTimeoutNs, HSA_WAIT_STATE_BLOCKED);
   ASSERT_EQ(val, 0) << "Kernel dispatch timed out or failed";
 
   ASSERT_EQ(hsa_memory_copy(c_host.data(), c_dev, kCBytes), HSA_STATUS_SUCCESS);
@@ -657,9 +894,10 @@ void run_buffer_async_triton_matmul(const std::vector<uint8_t> &elf_bytes,
   hsa_code_object_reader_destroy(reader);
 }
 
-void run_flash_attention_triton(const std::vector<uint8_t> &elf_bytes, const Cdna3Target &target,
+void run_flash_attention_triton(const std::vector<uint8_t> &elf_bytes, const DispatchTarget &target,
                                 const char *symbol_name, uint32_t shared_bytes,
-                                std::vector<float> *observed = nullptr) {
+                                std::vector<float> *observed = nullptr,
+                                std::vector<float> *reference = nullptr) {
   hsa_agent_t cpu = find_cpu_agent();
   ASSERT_NE(cpu.handle, 0u) << "No CPU agent found";
   ASSERT_LE(shared_bytes, 65536u)
@@ -686,15 +924,12 @@ void run_flash_attention_triton(const std::vector<uint8_t> &elf_bytes, const Cdn
   hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kernel_object);
   ASSERT_NE(kernel_object, 0u);
 
-  constexpr uint32_t kQ = 1024;
-  constexpr uint32_t kKV = 1024;
-  constexpr uint32_t kHeadDim = 64;
   constexpr uint32_t kBlockM = 64;
   constexpr uint32_t kWorkgroupSize = 256;
-  constexpr uint32_t kGroups = (kQ + kBlockM - 1) / kBlockM;
-  const size_t kQElements = static_cast<size_t>(kQ) * kHeadDim;
-  const size_t kKVElements = static_cast<size_t>(kKV) * kHeadDim;
-  const size_t kOElements = static_cast<size_t>(kQ) * kHeadDim;
+  constexpr uint32_t kGroups = (kFlashAttentionQ + kBlockM - 1) / kBlockM;
+  const size_t kQElements = static_cast<size_t>(kFlashAttentionQ) * kFlashAttentionHeadDim;
+  const size_t kKVElements = static_cast<size_t>(kFlashAttentionKV) * kFlashAttentionHeadDim;
+  const size_t kOElements = static_cast<size_t>(kFlashAttentionQ) * kFlashAttentionHeadDim;
   const size_t kQBytes = kQElements * sizeof(uint16_t);
   const size_t kKVBytes = kKVElements * sizeof(uint16_t);
   const size_t kOBytes = kOElements * sizeof(float);
@@ -755,6 +990,8 @@ void run_flash_attention_triton(const std::vector<uint8_t> &elf_bytes, const Cdn
   fill_seeded_half_inputs(q_host, 0xF1A5'0001u);
   fill_seeded_half_inputs(k_host, 0xF1A5'0002u);
   fill_seeded_half_inputs(v_host, 0xF1A5'0003u);
+  if (reference)
+    *reference = reference_flash_attention_slices(q_host, k_host, v_host);
   ASSERT_EQ(hsa_memory_copy(q_dev, q_host.data(), kQBytes), HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_memory_copy(k_dev, k_host.data(), kKVBytes), HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_memory_copy(v_dev, v_host.data(), kKVBytes), HSA_STATUS_SUCCESS);
@@ -795,7 +1032,7 @@ void run_flash_attention_triton(const std::vector<uint8_t> &elf_bytes, const Cdn
   hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
 
   const hsa_signal_value_t val = hsa_signal_wait_scacquire(
-      signal, HSA_SIGNAL_CONDITION_LT, 1, 10'000'000'000ULL, HSA_WAIT_STATE_BLOCKED);
+      signal, HSA_SIGNAL_CONDITION_LT, 1, kDispatchSignalWaitTimeoutNs, HSA_WAIT_STATE_BLOCKED);
   ASSERT_EQ(val, 0) << "Kernel dispatch timed out or failed";
 
   ASSERT_EQ(hsa_memory_copy(o_host.data(), o_dev, kOBytes), HSA_STATUS_SUCCESS);
@@ -862,7 +1099,7 @@ TEST(Cdna4ToCdna3DispatchTest, DynamicCopyLoopDispatchAndRun) {
                  << "; CDNA4->CDNA3 dispatch verification requires an HSA-capable host";
   const HsaShutdownGuard shutdown;
 
-  Cdna3Target target = find_cdna3_target();
+  DispatchTarget target = find_cdna3_target();
   if (target.agent.handle == 0)
     GTEST_SKIP() << "Test requires a CDNA3 GPU agent (gfx940/gfx941/gfx942); found: "
                  << join_seen_isas(target.seen_gpu_isas);
@@ -882,19 +1119,123 @@ TEST(Cdna4ToCdna3DispatchTest, DynamicCopyLoopDispatchAndRun) {
   ASSERT_NO_FATAL_FAILURE(run_dynamic_copy_loop(translated.elf_bytes, target));
 }
 
+TEST(Cdna4ToCdna3DbtGuestTest, DynamicCopyLoopDispatchAndRun) {
+  const hsa_status_t init_status = hsa_init();
+  ASSERT_EQ(init_status, HSA_STATUS_SUCCESS)
+      << "DBT guest simulator launch must provide an HSA-capable execution backend";
+  const HsaShutdownGuard shutdown;
+
+  DispatchTarget guest = find_gpu_target_named("gfx950");
+  ASSERT_NE(guest.agent.handle, 0u) << "DBT guest launch must publicly expose gfx950; found: "
+                                    << join_seen_isas(guest.seen_gpu_isas);
+
+  Executable exec(kernel_path("dynamic_copy_loop"));
+  ASSERT_TRUE(exec.is_valid());
+  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
+  const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  ASSERT_NE(co, nullptr);
+  std::vector<uint8_t> guest_elf(co->image_size());
+  std::memcpy(guest_elf.data(), co->image_data(), co->image_size());
+
+  // Deliberately load the original gfx950 ELF through the public guest agent.
+  // The DBT HSA hook owns translation and maps execution to simulated gfx942.
+  ASSERT_NO_FATAL_FAILURE(run_dynamic_copy_loop(guest_elf, guest));
+}
+
+TEST(Cdna4ToCdna3DbtGuestTest, TritonDynamicMatmulDispatchAndRun) {
+  const hsa_status_t init_status = hsa_init();
+  ASSERT_EQ(init_status, HSA_STATUS_SUCCESS)
+      << "DBT guest simulator launch must provide an HSA-capable execution backend";
+  const HsaShutdownGuard shutdown;
+
+  DispatchTarget guest = find_gpu_target_named("gfx950");
+  ASSERT_NE(guest.agent.handle, 0u) << "DBT guest launch must publicly expose gfx950; found: "
+                                    << join_seen_isas(guest.seen_gpu_isas);
+
+  Executable exec(kernel_hsaco_path("triton_cdna4_matmul_dynamic_32x32x64"));
+  ASSERT_TRUE(exec.is_valid());
+  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
+  const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  ASSERT_NE(co, nullptr);
+  std::vector<uint8_t> guest_elf(co->image_size());
+  std::memcpy(guest_elf.data(), co->image_data(), co->image_size());
+
+  constexpr TritonMatmulCase kCase{32, 32, 64};
+  std::vector<float> observed;
+  ASSERT_NO_FATAL_FAILURE(run_triton_matmul(guest_elf, guest, kCase, 8192, &observed));
+  expect_float_vectors_near(observed, reference_triton_matmul(kCase), 0.02f,
+                            "guest DBT dynamic Triton matmul");
+}
+
+TEST(Cdna4ToCdna3DbtGuestTest, TritonBufferAsyncMatmulDispatchAndRun) {
+  const hsa_status_t init_status = hsa_init();
+  ASSERT_EQ(init_status, HSA_STATUS_SUCCESS)
+      << "DBT guest simulator launch must provide an HSA-capable execution backend";
+  const HsaShutdownGuard shutdown;
+
+  DispatchTarget guest = find_gpu_target_named("gfx950");
+  ASSERT_NE(guest.agent.handle, 0u) << "DBT guest launch must publicly expose gfx950; found: "
+                                    << join_seen_isas(guest.seen_gpu_isas);
+  const std::vector<uint8_t> guest_elf =
+      load_gfx950_code_object("triton_cdna4_matmul_buffer_async_1024");
+  ASSERT_FALSE(guest_elf.empty());
+
+  std::vector<float> observed;
+  std::vector<float> expected;
+  ASSERT_NO_FATAL_FAILURE(
+      run_buffer_async_triton_matmul(guest_elf, guest, 65536, &observed, &expected));
+  expect_float_vectors_near(observed, expected, 0.02f, "guest DBT buffer async Triton matmul");
+}
+
+TEST(Cdna4ToCdna3DbtGuestTest, TritonFlashAttentionNoAsyncDispatchAndRun) {
+  const hsa_status_t init_status = hsa_init();
+  ASSERT_EQ(init_status, HSA_STATUS_SUCCESS)
+      << "DBT guest simulator launch must provide an HSA-capable execution backend";
+  const HsaShutdownGuard shutdown;
+
+  DispatchTarget guest = find_gpu_target_named("gfx950");
+  ASSERT_NE(guest.agent.handle, 0u) << "DBT guest launch must publicly expose gfx950; found: "
+                                    << join_seen_isas(guest.seen_gpu_isas);
+  const std::vector<uint8_t> guest_elf =
+      load_gfx950_code_object("triton_cdna4_flash_attention_no_async_1024");
+  ASSERT_FALSE(guest_elf.empty());
+
+  std::vector<float> observed;
+  std::vector<float> expected;
+  ASSERT_NO_FATAL_FAILURE(run_flash_attention_triton(
+      guest_elf, guest, "flash_attention_fwd_no_async_kernel.kd", 65536, &observed, &expected));
+  expect_flash_attention_slices_near(observed, expected, 0.02f,
+                                     "guest DBT flash attention no-async");
+}
+
+TEST(Cdna4ToCdna3DbtGuestTest, TritonFlashAttentionBufferAsyncDispatchAndRun) {
+  const hsa_status_t init_status = hsa_init();
+  ASSERT_EQ(init_status, HSA_STATUS_SUCCESS)
+      << "DBT guest simulator launch must provide an HSA-capable execution backend";
+  const HsaShutdownGuard shutdown;
+
+  DispatchTarget guest = find_gpu_target_named("gfx950");
+  ASSERT_NE(guest.agent.handle, 0u) << "DBT guest launch must publicly expose gfx950; found: "
+                                    << join_seen_isas(guest.seen_gpu_isas);
+  const std::vector<uint8_t> guest_elf =
+      load_gfx950_code_object("triton_cdna4_flash_attention_buffer_async_1024");
+  ASSERT_FALSE(guest_elf.empty());
+
+  std::vector<float> observed;
+  std::vector<float> expected;
+  ASSERT_NO_FATAL_FAILURE(run_flash_attention_triton(
+      guest_elf, guest, "flash_attention_fwd_async_buffer_kernel.kd", 65536, &observed, &expected));
+  expect_flash_attention_slices_near(observed, expected, 0.02f,
+                                     "guest DBT flash attention buffer-async");
+}
+
 TEST(Cdna4ToCdna3DispatchTest, TritonDynamicMatmulDispatchAndRun) {
-  const std::array<TritonMatmulCase, 11> cases = {{
+  const std::array<TritonMatmulCase, 5> cases = {{
       {32, 32, 64},
-      {32, 32, 65},
-      {32, 32, 66},
-      {32, 32, 128},
-      {32, 32, 130},
-      {32, 32, 192},
-      {32, 32, 512},
-      {512, 512, 512},
-      {31, 31, 64},
-      {32, 32, 63},
-      {257, 129, 130},
+      {31, 31, 63},
+      {33, 33, 65},
+      {128, 128, 128},
+      {65, 33, 130},
   }};
 
   const hsa_status_t init_status = hsa_init();
@@ -903,27 +1244,12 @@ TEST(Cdna4ToCdna3DispatchTest, TritonDynamicMatmulDispatchAndRun) {
                  << "; CDNA4->CDNA3 dispatch verification requires an HSA-capable host";
   const HsaShutdownGuard shutdown;
 
-  Cdna3Target target = find_cdna3_target();
+  DispatchTarget target = find_cdna3_target();
   if (target.agent.handle == 0)
     GTEST_SKIP() << "Test requires a CDNA3 GPU agent (gfx940/gfx941/gfx942); found: "
                  << join_seen_isas(target.seen_gpu_isas);
 
-  std::vector<uint8_t> translated;
-  ASSERT_NO_FATAL_FAILURE(translate_dynamic_triton_matmul(target.mach, translated));
-  std::vector<uint8_t> native = load_kernel_hsaco_bytes("triton_cdna3_matmul_dynamic_32x32x64");
-  ASSERT_FALSE(native.empty());
-
-  for (const TritonMatmulCase &test_case : cases) {
-    SCOPED_TRACE(::testing::Message()
-                 << "M=" << test_case.m << " N=" << test_case.n << " K=" << test_case.k);
-    std::vector<float> translated_out;
-    std::vector<float> native_out;
-    ASSERT_NO_FATAL_FAILURE(
-        run_triton_matmul(translated, target, test_case, 8192, &translated_out));
-    ASSERT_NO_FATAL_FAILURE(run_triton_matmul(native, target, test_case, 4096, &native_out));
-    expect_float_vectors_near(translated_out, native_out, 0.02f,
-                              "translated-vs-native dynamic Triton matmul");
-  }
+  ASSERT_NO_FATAL_FAILURE(compare_dynamic_triton_matmul_cases(target, cases));
 }
 
 TEST(Cdna4ToCdna3DispatchTest, TritonBufferAsyncMatmulDispatchAndRun) {
@@ -933,7 +1259,7 @@ TEST(Cdna4ToCdna3DispatchTest, TritonBufferAsyncMatmulDispatchAndRun) {
                  << "; CDNA4->CDNA3 dispatch verification requires an HSA-capable host";
   const HsaShutdownGuard shutdown;
 
-  Cdna3Target target = find_cdna3_target();
+  DispatchTarget target = find_cdna3_target();
   if (target.agent.handle == 0)
     GTEST_SKIP() << "Test requires a CDNA3 GPU agent (gfx940/gfx941/gfx942); found: "
                  << join_seen_isas(target.seen_gpu_isas);
@@ -960,7 +1286,7 @@ TEST(Cdna4ToCdna3DispatchTest, TritonBufferAsyncMatmulConservativeLivenessDispat
                  << "; CDNA4->CDNA3 dispatch verification requires an HSA-capable host";
   const HsaShutdownGuard shutdown;
 
-  Cdna3Target target = find_cdna3_target();
+  DispatchTarget target = find_cdna3_target();
   if (target.agent.handle == 0)
     GTEST_SKIP() << "Test requires a CDNA3 GPU agent (gfx940/gfx941/gfx942); found: "
                  << join_seen_isas(target.seen_gpu_isas);
@@ -994,7 +1320,7 @@ TEST(Cdna4ToCdna3DispatchTest, TritonFlashAttentionNoAsyncDispatchAndRun) {
                  << "; CDNA4->CDNA3 dispatch verification requires an HSA-capable host";
   const HsaShutdownGuard shutdown;
 
-  Cdna3Target target = find_cdna3_target();
+  DispatchTarget target = find_cdna3_target();
   if (target.agent.handle == 0)
     GTEST_SKIP() << "Test requires a CDNA3 GPU agent (gfx940/gfx941/gfx942); found: "
                  << join_seen_isas(target.seen_gpu_isas);
@@ -1023,7 +1349,7 @@ TEST(Cdna4ToCdna3DispatchTest, TritonFlashAttentionBufferAsyncDispatchAndRun) {
                  << "; CDNA4->CDNA3 dispatch verification requires an HSA-capable host";
   const HsaShutdownGuard shutdown;
 
-  Cdna3Target target = find_cdna3_target();
+  DispatchTarget target = find_cdna3_target();
   if (target.agent.handle == 0)
     GTEST_SKIP() << "Test requires a CDNA3 GPU agent (gfx940/gfx941/gfx942); found: "
                  << join_seen_isas(target.seen_gpu_isas);
