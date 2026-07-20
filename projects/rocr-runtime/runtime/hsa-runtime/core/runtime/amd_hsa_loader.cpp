@@ -45,6 +45,8 @@
 
 #include <assert.h>
 
+#include <atomic>
+
 #if defined(__linux__)
 #include <link.h>
 #include <linux/limits.h>
@@ -64,6 +66,8 @@
 #include <string>
 
 namespace {
+
+std::atomic<uint64_t> g_next_retarget_reader_id{1};
 
 #if !defined(_WIN32) && !defined(_WIN64)
 uintptr_t PAGE_SIZE_MASK{
@@ -400,6 +404,11 @@ namespace rocr {
 namespace amd {
 namespace hsa {
 namespace loader {
+
+CodeObjectReaderImpl::CodeObjectReaderImpl()
+    : retarget_reader_id(g_next_retarget_reader_id.fetch_add(1, std::memory_order_relaxed)) {
+  if (retarget_reader_id == 0) abort();
+}
 
 /// @brief Default destructor.
 CodeObjectReaderImpl::~CodeObjectReaderImpl() {

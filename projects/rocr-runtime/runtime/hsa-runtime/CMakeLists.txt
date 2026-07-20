@@ -238,6 +238,7 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/amd_topology.cpp
            core/runtime/default_signal.cpp
            core/runtime/host_queue.cpp
+           core/runtime/hotswap_cache.cpp
            core/runtime/hotswap.cpp
            core/runtime/hotswap_gfx_query.cpp
            core/runtime/hsa.cpp

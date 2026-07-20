@@ -108,6 +108,8 @@ namespace amd {
 namespace hsa {
 namespace loader {
 
+using CodeObjectMemoryOwner = std::shared_ptr<const void>;
+
 /// @class CodeObjectReaderImpl.
 /// @brief Code Object Reader Wrapper.
 struct CodeObjectReaderImpl final {
@@ -128,7 +130,7 @@ struct CodeObjectReaderImpl final {
   }
 
   /// @brief Default constructor.
-  CodeObjectReaderImpl() {}
+  CodeObjectReaderImpl();
 
   /// @brief Default destructor.
   ~CodeObjectReaderImpl();
@@ -144,10 +146,12 @@ struct CodeObjectReaderImpl final {
 
   const void *GetCodeObjectMemory() const { return code_object_memory; };
   size_t GetCodeObjectSize() const { return code_object_size; }
+  uint64_t GetRetargetReaderId() const { return retarget_reader_id; }
 
   std::string GetUri() const { return uri; };
 
  private:
+  const uint64_t retarget_reader_id;
   const void *code_object_memory{nullptr};
   size_t code_object_size{0};
   std::string uri{};
@@ -368,6 +372,12 @@ public:
     const char *options,
     const std::string &uri,
     hsa_loaded_code_object_t *loaded_code_object = nullptr) = 0;
+
+  virtual hsa_status_t LoadCodeObject(hsa_agent_t agent, hsa_code_object_t code_object,
+                                      size_t code_object_size,
+                                      CodeObjectMemoryOwner code_object_owner, const char* options,
+                                      const std::string& uri,
+                                      hsa_loaded_code_object_t* loaded_code_object = nullptr) = 0;
 
   virtual hsa_status_t Freeze(const char *options) = 0;
 

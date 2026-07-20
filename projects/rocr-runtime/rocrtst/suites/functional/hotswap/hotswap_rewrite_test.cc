@@ -4,9 +4,15 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include <utility>
 
 #include "core/inc/hotswap.hpp"
 #include "core/inc/hotswap_gfx_query.hpp"
@@ -152,6 +158,7 @@ struct LoadCall {
 
 struct LoadRecorder {
   std::vector<LoadCall> calls;
+  std::vector<rocr::amd::hsa::loader::CodeObjectMemoryOwner> retained_owners;
   hsa_status_t original_status = HSA_STATUS_SUCCESS;
   hsa_status_t rewritten_status = HSA_STATUS_SUCCESS;
 };
@@ -171,10 +178,9 @@ hsa_status_t RecordOriginalLoad(void* context, hsa_agent_t /*agent*/,
 }
 
 hsa_status_t RecordRewrittenLoad(void* context, hsa_agent_t /*agent*/,
-                                 hsa_code_object_t code_object,
-                                 size_t code_object_size,
-                                 const char* /*options*/,
-                                 const std::string& uri,
+                                 hsa_code_object_t code_object, size_t code_object_size,
+                                 rocr::amd::hsa::loader::CodeObjectMemoryOwner code_object_owner,
+                                 const char* /*options*/, const std::string& uri,
                                  hsa_loaded_code_object_t* loaded_code_object) {
   auto* recorder = static_cast<LoadRecorder*>(context);
   recorder->calls.push_back({LoadPath::kRewritten,
@@ -182,6 +188,9 @@ hsa_status_t RecordRewrittenLoad(void* context, hsa_agent_t /*agent*/,
                              code_object_size, uri});
   if (loaded_code_object) {
     loaded_code_object->handle = 0x2000 + recorder->calls.size();
+  }
+  if (recorder->rewritten_status == HSA_STATUS_SUCCESS) {
+    recorder->retained_owners.push_back(std::move(code_object_owner));
   }
   return recorder->rewritten_status;
 }
@@ -199,7 +208,6 @@ void ResetRuntimeTestEnv() {
   g_fake_hsa_env = FakeHsaEnv{};
   g_fake_env_vars.clear();
   rocr::hotswap::ResetAgentGfxRevisionCache();
-  rocr::hotswap::ClearRetargetCacheForTesting();
   rocr::hotswap::ForceRetargetCodeObjectFailureForTesting(false);
 }
 
@@ -214,12 +222,9 @@ bool ComgrHotswapOptionsApiAvailable() {
 bool ComgrStrictModeApiAvailable() {
   if (!ComgrHotswapOptionsApiAvailable()) return false;
 
-  rocr::hotswap::OwnedElfBuffer rewritten_elf_buffer(nullptr, &std::free);
-  size_t rewritten_elf_size = 0;
-  if (rocr::hotswap::RetargetCodeObject(
-          kGfx1250MinCo, sizeof(kGfx1250MinCo), kGfx1250B0Isa, kGfx1250B0Isa,
-          &rewritten_elf_buffer, &rewritten_elf_size,
-          false, true)) {
+  if (rocr::hotswap::RetargetCodeObject(kGfx1250MinCo, sizeof(kGfx1250MinCo), kGfx1250B0Isa,
+                                        kGfx1250B0Isa, false, true)
+          .succeeded()) {
     return true;
   }
 
@@ -236,7 +241,6 @@ hsa_agent_t MakeTestAgent() {
 hsa_executable_t MakeTestExecutable(uint64_t handle) {
   hsa_executable_t executable{};
   executable.handle = handle;
-  rocr::hotswap::ReleaseRetainedRewrittenElfBuffers(executable);
   return executable;
 }
 
@@ -246,6 +250,18 @@ rocr::hotswap::CodeObjectView MakeRealCodeObjectView() {
   code_object.size = sizeof(kGfx1250MinCo);
   code_object.uri = "memory://gfx1250_min.hsaco";
   return code_object;
+}
+
+rocr::hotswap::RetargetOperationResult MakeTestRetargetedElf(
+    const rocr::hotswap::SourceSnapshotRef& source = {}) {
+  constexpr size_t kSize = 16;
+  rocr::hotswap::OwnedElfBuffer bytes(std::malloc(kSize), &std::free);
+  if (!bytes) {
+    return {{}, rocr::hotswap::RetargetError::kOutOfResources};
+  }
+  std::memcpy(bytes.get(), kGfx1250MinCo, kSize);
+  return {std::make_shared<const rocr::hotswap::RetargetedElf>(std::move(bytes), kSize, source),
+          rocr::hotswap::RetargetError::kNone};
 }
 
 rocr::hotswap::AgentGfxRevision MakeRevision(const std::string& gfx_target,
@@ -422,20 +438,14 @@ TEST(HotswapRewrite, GetIsaNameInvalidCodeObject) {
 }
 
 TEST(HotswapRewrite, RetargetRealCodeObject) {
-  rocr::hotswap::OwnedElfBuffer rewritten_elf_buffer(nullptr, &std::free);
-  size_t rewritten_elf_size = 0;
+  const auto rewritten = rocr::hotswap::RetargetCodeObject(kGfx1250MinCo, sizeof(kGfx1250MinCo),
+                                                           kGfx1250Isa, kGfx1250Isa);
 
-  const bool rewritten = rocr::hotswap::RetargetCodeObject(
-      kGfx1250MinCo, sizeof(kGfx1250MinCo), kGfx1250Isa, kGfx1250Isa,
-      &rewritten_elf_buffer, &rewritten_elf_size);
-
-  ASSERT_TRUE(rewritten);
-  ASSERT_NE(rewritten_elf_buffer.get(), nullptr);
-  EXPECT_NE(rewritten_elf_buffer.get(),
-            static_cast<const void*>(kGfx1250MinCo));
-  EXPECT_GT(rewritten_elf_size, 0u);
-  EXPECT_EQ(rocr::hotswap::GetCodeObjectIsaName(rewritten_elf_buffer.get(),
-                                                rewritten_elf_size),
+  ASSERT_TRUE(rewritten.succeeded());
+  ASSERT_NE(rewritten.elf->data(), nullptr);
+  EXPECT_NE(rewritten.elf->data(), static_cast<const void*>(kGfx1250MinCo));
+  EXPECT_GT(rewritten.elf->size(), 0u);
+  EXPECT_EQ(rocr::hotswap::GetCodeObjectIsaName(rewritten.elf->data(), rewritten.elf->size()),
             kGfx1250Isa);
 }
 
@@ -443,52 +453,30 @@ TEST(HotswapRewrite, RetargetInvalidCodeObjectFails) {
   const unsigned char fake_elf[] = {0x7f, 'E',  'L',  'F',  0x02, 0x01,
                                     0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
                                     0x00, 0x00, 0x00, 0x00};
-  rocr::hotswap::OwnedElfBuffer rewritten_elf_buffer(nullptr, &std::free);
-  size_t rewritten_elf_size = 0;
+  const auto rewritten =
+      rocr::hotswap::RetargetCodeObject(fake_elf, sizeof(fake_elf), kGfx1250Isa, kGfx1250Isa);
 
-  const bool rewritten = rocr::hotswap::RetargetCodeObject(
-      fake_elf, sizeof(fake_elf), kGfx1250Isa, kGfx1250Isa,
-      &rewritten_elf_buffer, &rewritten_elf_size);
-
-  EXPECT_FALSE(rewritten);
-  EXPECT_EQ(rewritten_elf_buffer.get(), nullptr);
-  EXPECT_EQ(rewritten_elf_size, 0u);
-}
-
-TEST(HotswapRewrite, RetargetNullOutputPointers) {
-  const unsigned char fake_elf[] = {0x7f, 'E', 'L', 'F'};
-
-  const bool rewritten = rocr::hotswap::RetargetCodeObject(
-      fake_elf, sizeof(fake_elf), kGfx1250Isa, kGfx1250Isa, nullptr, nullptr);
-
-  EXPECT_FALSE(rewritten);
+  EXPECT_FALSE(rewritten.succeeded());
+  EXPECT_EQ(rewritten.error, rocr::hotswap::RetargetError::kComgrFailure);
 }
 
 TEST(HotswapRewrite, RetargetNullInputs) {
-  rocr::hotswap::OwnedElfBuffer rewritten_elf_buffer(nullptr, &std::free);
-  size_t rewritten_elf_size = 0;
+  const auto rewritten = rocr::hotswap::RetargetCodeObject(nullptr, 0, kGfx1250Isa, kGfx1250Isa);
 
-  const bool rewritten = rocr::hotswap::RetargetCodeObject(
-      nullptr, 0, kGfx1250Isa, kGfx1250Isa, &rewritten_elf_buffer,
-      &rewritten_elf_size);
-
-  EXPECT_FALSE(rewritten);
+  EXPECT_FALSE(rewritten.succeeded());
+  EXPECT_EQ(rewritten.error, rocr::hotswap::RetargetError::kInvalidArgument);
 }
 
 TEST(HotswapRewrite, RetargetNullSourceOrTarget) {
   const unsigned char fake_elf[] = {0x7f, 'E', 'L', 'F'};
-  rocr::hotswap::OwnedElfBuffer rewritten_elf_buffer(nullptr, &std::free);
-  size_t rewritten_elf_size = 0;
 
-  const bool source_missing_rewritten = rocr::hotswap::RetargetCodeObject(
-      fake_elf, sizeof(fake_elf), nullptr, kGfx1250Isa, &rewritten_elf_buffer,
-      &rewritten_elf_size);
-  const bool target_missing_rewritten = rocr::hotswap::RetargetCodeObject(
-      fake_elf, sizeof(fake_elf), kGfx1250Isa, nullptr, &rewritten_elf_buffer,
-      &rewritten_elf_size);
+  const auto source_missing =
+      rocr::hotswap::RetargetCodeObject(fake_elf, sizeof(fake_elf), nullptr, kGfx1250Isa);
+  const auto target_missing =
+      rocr::hotswap::RetargetCodeObject(fake_elf, sizeof(fake_elf), kGfx1250Isa, nullptr);
 
-  EXPECT_FALSE(source_missing_rewritten);
-  EXPECT_FALSE(target_missing_rewritten);
+  EXPECT_EQ(source_missing.error, rocr::hotswap::RetargetError::kInvalidArgument);
+  EXPECT_EQ(target_missing.error, rocr::hotswap::RetargetError::kInvalidArgument);
 }
 
 TEST(HotswapRewrite, RuntimeLoadUsesRewrittenCodeObject) {
@@ -508,12 +496,8 @@ TEST(HotswapRewrite, RuntimeLoadUsesRewrittenCodeObject) {
   EXPECT_NE(load.calls[0].code_object, static_cast<const void*>(kGfx1250MinCo));
   EXPECT_GT(load.calls[0].code_object_size, 0u);
   EXPECT_EQ(load.calls[0].uri, "memory://gfx1250_min.hsaco");
-  EXPECT_EQ(
-      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 1u);
-
-  rocr::hotswap::ReleaseRetainedRewrittenElfBuffers(executable);
-  EXPECT_EQ(
-      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
+  ASSERT_EQ(load.retained_owners.size(), 1u);
+  EXPECT_EQ(load.retained_owners[0].get(), load.calls[0].code_object);
 }
 
 TEST(HotswapRewrite, RuntimeLoadNonA0DefaultsToOriginalWhenEntryTrampolinesUnset) {
@@ -530,8 +514,7 @@ TEST(HotswapRewrite, RuntimeLoadNonA0DefaultsToOriginalWhenEntryTrampolinesUnset
   ASSERT_EQ(load.calls.size(), 1u);
   EXPECT_EQ(load.calls[0].path, LoadPath::kOriginal);
   EXPECT_EQ(load.calls[0].code_object, static_cast<const void*>(kGfx1250MinCo));
-  EXPECT_EQ(
-      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
+  EXPECT_TRUE(load.retained_owners.empty());
 }
 
 TEST(HotswapRewrite, RuntimeLoadNonA0FallsBackWhenEntryTrampolinesDisabledAndStrictUnset) {
@@ -553,7 +536,7 @@ TEST(HotswapRewrite, RuntimeLoadNonA0FallsBackWhenEntryTrampolinesDisabledAndStr
     ASSERT_EQ(load.calls.size(), 1u);
     EXPECT_EQ(load.calls[0].path, LoadPath::kOriginal);
     EXPECT_EQ(load.calls[0].code_object, static_cast<const void*>(kGfx1250MinCo));
-    EXPECT_EQ(rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
+    EXPECT_TRUE(load.retained_owners.empty());
   }
 }
 
@@ -575,12 +558,8 @@ TEST(HotswapRewrite, RuntimeLoadNonA0UsesStrictModeEnvWhenEntryTrampolinesAreZer
   EXPECT_EQ(load.calls[0].path, LoadPath::kRewritten);
   EXPECT_NE(load.calls[0].code_object, static_cast<const void*>(kGfx1250MinCo));
   EXPECT_GT(load.calls[0].code_object_size, 0u);
-  EXPECT_EQ(
-      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 1u);
-
-  rocr::hotswap::ReleaseRetainedRewrittenElfBuffers(executable);
-  EXPECT_EQ(
-      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
+  ASSERT_EQ(load.retained_owners.size(), 1u);
+  EXPECT_EQ(load.retained_owners[0].get(), load.calls[0].code_object);
 }
 
 TEST(HotswapRewrite, RuntimeLoadNonA0UsesEntryTrampolinesWhenEnabled) {
@@ -603,14 +582,8 @@ TEST(HotswapRewrite, RuntimeLoadNonA0UsesEntryTrampolinesWhenEnabled) {
     EXPECT_EQ(status, HSA_STATUS_SUCCESS);
     ASSERT_EQ(load.calls.size(), 1u);
     EXPECT_EQ(load.calls[0].path, LoadPath::kRewritten);
-    EXPECT_EQ(
-        rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable),
-        1u);
-
-    rocr::hotswap::ReleaseRetainedRewrittenElfBuffers(executable);
-    EXPECT_EQ(
-        rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable),
-        0u);
+    ASSERT_EQ(load.retained_owners.size(), 1u);
+    EXPECT_EQ(load.retained_owners[0].get(), load.calls[0].code_object);
   }
 }
 
@@ -627,8 +600,7 @@ TEST(HotswapRewrite, RuntimeLoadDisableEnvFallsBackToOriginal) {
   EXPECT_EQ(status, HSA_STATUS_SUCCESS);
   ASSERT_EQ(load.calls.size(), 1u);
   EXPECT_EQ(load.calls[0].path, LoadPath::kOriginal);
-  EXPECT_EQ(
-      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
+  EXPECT_TRUE(load.retained_owners.empty());
 }
 
 TEST(HotswapRewrite, RuntimeLoadRewriteFailureFallsBackToOriginal) {
@@ -651,8 +623,7 @@ TEST(HotswapRewrite, RuntimeLoadRewriteFailureFallsBackToOriginal) {
   ASSERT_EQ(load.calls.size(), 1u);
   EXPECT_EQ(load.calls[0].path, LoadPath::kOriginal);
   EXPECT_EQ(load.calls[0].code_object, fake_elf);
-  EXPECT_EQ(
-      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
+  EXPECT_TRUE(load.retained_owners.empty());
 }
 
 TEST(HotswapRewrite, RuntimeLoadOptionalRewriteFailureFallsBackToOriginal) {
@@ -672,8 +643,7 @@ TEST(HotswapRewrite, RuntimeLoadOptionalRewriteFailureFallsBackToOriginal) {
   ASSERT_EQ(load.calls.size(), 1u);
   EXPECT_EQ(load.calls[0].path, LoadPath::kOriginal);
   EXPECT_EQ(load.calls[0].code_object, static_cast<const void*>(kGfx1250MinCo));
-  EXPECT_EQ(
-      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
+  EXPECT_TRUE(load.retained_owners.empty());
 
   rocr::hotswap::ForceRetargetCodeObjectFailureForTesting(false);
 }
@@ -693,8 +663,7 @@ TEST(HotswapRewrite, RuntimeLoadRequiredStrictRewriteFailureReturnsError) {
 
   EXPECT_EQ(status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
   EXPECT_TRUE(load.calls.empty());
-  EXPECT_EQ(
-      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
+  EXPECT_TRUE(load.retained_owners.empty());
 
   rocr::hotswap::ForceRetargetCodeObjectFailureForTesting(false);
 }
@@ -714,8 +683,7 @@ TEST(HotswapRewrite, RuntimeLoadOptionalA0RewriteFailureFallsBackToOriginal) {
   ASSERT_EQ(load.calls.size(), 1u);
   EXPECT_EQ(load.calls[0].path, LoadPath::kOriginal);
   EXPECT_EQ(load.calls[0].code_object, static_cast<const void*>(kGfx1250MinCo));
-  EXPECT_EQ(
-      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
+  EXPECT_TRUE(load.retained_owners.empty());
 
   rocr::hotswap::ForceRetargetCodeObjectFailureForTesting(false);
 }
@@ -738,69 +706,119 @@ TEST(HotswapRewrite, RuntimeLoadOptionalRewrittenLoadFailureFallsBackToOriginal)
   EXPECT_EQ(load.calls[0].path, LoadPath::kRewritten);
   EXPECT_EQ(load.calls[1].path, LoadPath::kOriginal);
   EXPECT_EQ(load.calls[1].code_object, static_cast<const void*>(kGfx1250MinCo));
-  EXPECT_EQ(
-      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
+  EXPECT_TRUE(load.retained_owners.empty());
 }
 
 TEST(HotswapRewrite, RetargetCacheServesSecondLoadFromCache) {
   ResetRuntimeTestEnv();
   if (!ComgrHotswapOptionsApiAvailable()) return;
-  rocr::hotswap::ClearRetargetCacheForTesting();
-  ASSERT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), 0u);
+  rocr::hotswap::ContentRetargetCache cache;
+  auto first_code_object = MakeRealCodeObjectView();
+  first_code_object.reader_id = 1;
+  first_code_object.retarget_cache = &cache;
+  auto second_code_object = MakeRealCodeObjectView();
+  second_code_object.reader_id = 2;
+  second_code_object.retarget_cache = &cache;
+  LoadRecorder first_load;
+  LoadRecorder second_load;
 
-  // First load: cache miss, performs the full retarget.
-  {
-    LoadRecorder load;
-    const hsa_executable_t executable = MakeTestExecutable(0x601);
-    const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
-        executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr, nullptr,
-        MakeLoadCallbacks(&load));
+  EXPECT_EQ(rocr::hotswap::LoadAgentCodeObjectWithHotswap(MakeTestExecutable(0x601),
+                                                          MakeTestAgent(), first_code_object, nullptr,
+                                                          nullptr, MakeLoadCallbacks(&first_load)),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(rocr::hotswap::LoadAgentCodeObjectWithHotswap(MakeTestExecutable(0x602),
+                                                          MakeTestAgent(), second_code_object, nullptr,
+                                                          nullptr, MakeLoadCallbacks(&second_load)),
+            HSA_STATUS_SUCCESS);
 
-    EXPECT_EQ(status, HSA_STATUS_SUCCESS);
-    ASSERT_EQ(load.calls.size(), 1u);
-    EXPECT_EQ(load.calls[0].path, LoadPath::kRewritten);
-    rocr::hotswap::ReleaseRetainedRewrittenElfBuffers(executable);
-  }
+  ASSERT_EQ(first_load.retained_owners.size(), 1u);
+  ASSERT_EQ(second_load.retained_owners.size(), 1u);
+  EXPECT_EQ(first_load.retained_owners[0].get(), second_load.retained_owners[0].get());
+  EXPECT_EQ(cache.ReadyEntryCountForTesting(), 1u);
+  EXPECT_EQ(cache.SnapshotMetrics().cross_reader_results, 1u);
 
-  const size_t cache_size_after_first = rocr::hotswap::RetargetCacheSizeForTesting();
-  EXPECT_GT(cache_size_after_first, 0u);
-
-  // Second load of the same code object: should be served from cache.
-  {
-    LoadRecorder load;
-    const hsa_executable_t executable = MakeTestExecutable(0x602);
-    const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
-        executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr, nullptr,
-        MakeLoadCallbacks(&load));
-
-    EXPECT_EQ(status, HSA_STATUS_SUCCESS);
-    ASSERT_EQ(load.calls.size(), 1u);
-    EXPECT_EQ(load.calls[0].path, LoadPath::kRewritten);
-    EXPECT_GT(load.calls[0].code_object_size, 0u);
-    rocr::hotswap::ReleaseRetainedRewrittenElfBuffers(executable);
-  }
-
-  // Cache size should not have grown (hit, not a new entry).
-  EXPECT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), cache_size_after_first);
-  rocr::hotswap::ClearRetargetCacheForTesting();
+  first_load.retained_owners.clear();
+  EXPECT_EQ(cache.ReadyEntryCountForTesting(), 1u);
+  second_load.retained_owners.clear();
+  EXPECT_EQ(cache.ReadyEntryCountForTesting(), 0u);
 }
 
-TEST(HotswapRewrite, RetargetCacheClearResetsCacheSize) {
-  ResetRuntimeTestEnv();
-  if (!ComgrHotswapOptionsApiAvailable()) return;
-  rocr::hotswap::ClearRetargetCacheForTesting();
+TEST(HotswapRewrite, RetargetCacheCoalescesConcurrentMisses) {
+  constexpr size_t kThreadCount = 8;
+  rocr::hotswap::ContentRetargetCache cache;
+  const rocr::hotswap::RetargetCacheKey key{kGfx1250B0Isa, kGfx1250A0Isa, false, false};
+  std::atomic<size_t> producer_calls{0};
+  std::atomic<size_t> started{0};
+  std::atomic<bool> release_producer{false};
+  std::vector<rocr::hotswap::RetargetOperationResult> results(kThreadCount);
+  std::vector<std::thread> threads;
 
-  // Populate the cache with one entry.
-  LoadRecorder load;
-  const hsa_executable_t executable = MakeTestExecutable(0x603);
-  rocr::hotswap::LoadAgentCodeObjectWithHotswap(
-      executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr, nullptr,
-      MakeLoadCallbacks(&load));
-  rocr::hotswap::ReleaseRetainedRewrittenElfBuffers(executable);
+  auto producer = [&](const rocr::hotswap::SourceSnapshotRef& source) {
+    producer_calls.fetch_add(1, std::memory_order_relaxed);
+    while (!release_producer.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+    return MakeTestRetargetedElf(source);
+  };
 
-  EXPECT_GT(rocr::hotswap::RetargetCacheSizeForTesting(), 0u);
-  rocr::hotswap::ClearRetargetCacheForTesting();
-  EXPECT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), 0u);
+  for (size_t i = 0; i < kThreadCount; ++i) {
+    threads.emplace_back([&, i] {
+      started.fetch_add(1, std::memory_order_release);
+      results[i] = cache.GetOrCompute(kGfx1250MinCo, sizeof(kGfx1250MinCo), 0,
+                                      key, producer);
+    });
+  }
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  bool all_waiters_observed = false;
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (started.load(std::memory_order_acquire) == kThreadCount &&
+        cache.WaiterCountForTesting(kGfx1250MinCo, sizeof(kGfx1250MinCo), key) ==
+            kThreadCount - 1) {
+      all_waiters_observed = true;
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+
+  release_producer.store(true, std::memory_order_release);
+  for (auto& thread : threads) thread.join();
+
+  EXPECT_TRUE(all_waiters_observed);
+  EXPECT_EQ(producer_calls.load(std::memory_order_relaxed), 1u);
+  size_t computed_results = 0;
+  size_t coalesced_results = 0;
+  for (const auto& result : results) {
+    ASSERT_TRUE(result.succeeded());
+    EXPECT_EQ(result.elf.get(), results[0].elf.get());
+    computed_results += result.source == rocr::hotswap::RetargetResultSource::kComputed;
+    coalesced_results += result.source == rocr::hotswap::RetargetResultSource::kCoalesced;
+  }
+  EXPECT_EQ(computed_results, 1u);
+  EXPECT_EQ(coalesced_results, kThreadCount - 1);
+}
+
+TEST(HotswapRewrite, RetargetCacheRetriesFailures) {
+  rocr::hotswap::ContentRetargetCache cache;
+  const rocr::hotswap::RetargetCacheKey key{kGfx1250B0Isa, kGfx1250A0Isa, false, false};
+  size_t producer_calls = 0;
+
+  const auto first = cache.GetOrCompute(kGfx1250MinCo, sizeof(kGfx1250MinCo), 0,
+                                       key, [&](const rocr::hotswap::SourceSnapshotRef&) {
+    ++producer_calls;
+    return rocr::hotswap::RetargetOperationResult{{},
+                                                  rocr::hotswap::RetargetError::kOutOfResources};
+  });
+  const auto second = cache.GetOrCompute(kGfx1250MinCo, sizeof(kGfx1250MinCo), 0,
+                                        key, [&](const rocr::hotswap::SourceSnapshotRef& source) {
+    ++producer_calls;
+    return MakeTestRetargetedElf(source);
+  });
+
+  EXPECT_FALSE(first.succeeded());
+  EXPECT_EQ(first.error, rocr::hotswap::RetargetError::kOutOfResources);
+  EXPECT_TRUE(second.succeeded());
+  EXPECT_EQ(producer_calls, 2u);
 }
 
 TEST(HotswapRewrite, RuntimeLoadOptionalA0RewrittenLoadFailureFallsBackToOriginal) {
@@ -819,8 +837,7 @@ TEST(HotswapRewrite, RuntimeLoadOptionalA0RewrittenLoadFailureFallsBackToOrigina
   EXPECT_EQ(load.calls[0].path, LoadPath::kRewritten);
   EXPECT_EQ(load.calls[1].path, LoadPath::kOriginal);
   EXPECT_EQ(load.calls[1].code_object, static_cast<const void*>(kGfx1250MinCo));
-  EXPECT_EQ(
-      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
+  EXPECT_TRUE(load.retained_owners.empty());
 }
 
 TEST(HotswapRewrite, RuntimeLoadRequiredStrictRewrittenLoadFailureReturnsError) {
@@ -839,8 +856,7 @@ TEST(HotswapRewrite, RuntimeLoadRequiredStrictRewrittenLoadFailureReturnsError) 
   EXPECT_EQ(status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
   ASSERT_EQ(load.calls.size(), 1u);
   EXPECT_EQ(load.calls[0].path, LoadPath::kRewritten);
-  EXPECT_EQ(
-      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
+  EXPECT_TRUE(load.retained_owners.empty());
 }
 
 }  // namespace
