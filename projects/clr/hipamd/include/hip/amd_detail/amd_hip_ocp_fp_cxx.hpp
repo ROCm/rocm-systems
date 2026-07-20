@@ -8,8 +8,6 @@
 
 #include "amd_hip_ocp_host.hpp"
 
-static_assert(sizeof(uint32_t) == sizeof(__amd_fp8_storage_t[4]));
-static_assert(sizeof(uint32_t) == sizeof(__amd_fp8x2_storage_t[2]));
 static_assert(sizeof(__amd_shortx2_storage_t) == sizeof(__amd_fp8x2_storage_t[2]));
 
 struct __hipext_ocp_fp8_e4m3 {
@@ -20,6 +18,7 @@ struct __hipext_ocp_fp8_e4m3 {
 
   explicit __OCP_FP_HOST_DEVICE__ __hipext_ocp_fp8_e4m3(const float in) {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
+    static_assert(sizeof(unsigned int) == sizeof(__amd_fp8_storage_t[4]));
     union {
       unsigned int ui32;
       __amd_fp8_storage_t fp8[4];
@@ -28,6 +27,7 @@ struct __hipext_ocp_fp8_e4m3 {
     __x = u.fp8[0];
 #else
     using namespace fcbx;
+    static_assert(sizeof(uint32_t) == sizeof(__amd_fp8_storage_t[4]));
     union {
       uint32_t ui32;
       __amd_fp8_storage_t fp8[4];
@@ -39,6 +39,7 @@ struct __hipext_ocp_fp8_e4m3 {
 
   explicit __OCP_FP_HOST_DEVICE__ __hipext_ocp_fp8_e4m3(const float in, const unsigned int seed) {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
+    static_assert(sizeof(unsigned int) == sizeof(__amd_fp8_storage_t[4]));
     union {
       unsigned int ui32;
       __amd_fp8_storage_t fp8[4];
@@ -47,6 +48,7 @@ struct __hipext_ocp_fp8_e4m3 {
     __x = u.fp8[0];
 #else
     using namespace fcbx;
+    static_assert(sizeof(uint32_t) == sizeof(__amd_fp8_storage_t[4]));
     union {
       uint32_t ui32;
       __amd_fp8_storage_t fp8[4];
@@ -59,6 +61,7 @@ struct __hipext_ocp_fp8_e4m3 {
   explicit __OCP_FP_HOST_DEVICE__ __hipext_ocp_fp8_e4m3(const float in, const unsigned int seed,
                                                         const __amd_scale_t scale) {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
+    static_assert(sizeof(unsigned int) == sizeof(__amd_fp8_storage_t[4]));
     union {
       unsigned int ui32;
       __amd_fp8_storage_t fp8[4];
@@ -68,11 +71,12 @@ struct __hipext_ocp_fp8_e4m3 {
     __x = u.fp8[0];
 #else
     using namespace fcbx;
+    static_assert(sizeof(uint32_t) == sizeof(__amd_fp8_storage_t[4]));
     union {
       uint32_t ui32;
       __amd_fp8_storage_t fp8[4];
     } u{0};
-    u.ui32 = from_float_sr<float, Encoding::E4M3, true>(in, seed, scale);
+    u.ui32 = from_float_sr<float, Encoding::E4M3Mx, true>(in, seed, scale);
     __x = u.fp8[0];
 #endif
   }
@@ -81,6 +85,7 @@ struct __hipext_ocp_fp8_e4m3 {
                                                         const unsigned int seed,
                                                         const __amd_scale_t scale) {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
+    static_assert(sizeof(unsigned int) == sizeof(__amd_fp8_storage_t[4]));
     union u {
       unsigned int ui32;
       __amd_fp8_storage_t fp8[4];
@@ -90,11 +95,12 @@ struct __hipext_ocp_fp8_e4m3 {
     __x = u.fp8[0];
 #else
     using namespace fcbx;
+    static_assert(sizeof(uint32_t) == sizeof(__amd_fp8_storage_t[4]));
     union {
       uint32_t ui32;
       __amd_fp8_storage_t fp8[4];
     } u{0};
-    u.ui32 = from_float_sr<__amd_fp16_storage_t, Encoding::E4M3, true>(in, seed, scale);
+    u.ui32 = from_float_sr<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(in, seed, scale);
     __x = u.fp8[0];
 #endif
   }
@@ -113,11 +119,12 @@ struct __hipext_ocp_fp8_e4m3 {
     __x = u.fp8[0];
 #else
     using namespace fcbx;
+    static_assert(sizeof(uint32_t) == sizeof(__amd_fp8_storage_t[4]));
     union {
       uint32_t ui32;
       __amd_fp8_storage_t fp8[4];
     } u{0};
-    u.ui32 = from_float_sr<__amd_bf16_storage_t, Encoding::E4M3, true>(in, seed, scale);
+    u.ui32 = from_float_sr<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(in, seed, scale);
     __x = u.fp8[0];
 #endif
   }
@@ -139,7 +146,7 @@ struct __hipext_ocp_fp8_e4m3 {
     union {
       __amd_fp8_storage_t fp8[4];
       unsigned int ui32;
-    } u;
+    } u{0};
     u.fp8[0] = __x;
     auto ret =
         __builtin_amdgcn_cvt_scalef32_pk_bf16_fp8(u.ui32, __amd_scale_to_float(scale), false);
@@ -177,6 +184,7 @@ struct __hipext_ocp_fp8_e5m2 {
 
   explicit __OCP_FP_HOST_DEVICE__ __hipext_ocp_fp8_e5m2(const float in) {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
+    static_assert(sizeof(unsigned int) == sizeof(__amd_fp8_storage_t[4]));
     union {
       unsigned int ui32;
       __amd_fp8_storage_t fp8[4];
@@ -185,6 +193,7 @@ struct __hipext_ocp_fp8_e5m2 {
     __x = u.fp8[0];
 #else
     using namespace fcbx;
+    static_assert(sizeof(uint32_t) == sizeof(__amd_fp8_storage_t[4]));
     union {
       uint32_t ui32;
       __amd_fp8_storage_t fp8[4];
@@ -196,6 +205,7 @@ struct __hipext_ocp_fp8_e5m2 {
 
   explicit __OCP_FP_HOST_DEVICE__ __hipext_ocp_fp8_e5m2(const float in, const unsigned int seed) {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
+    static_assert(sizeof(unsigned int) == sizeof(__amd_fp8_storage_t[4]));
     union {
       unsigned int ui32;
       __amd_fp8_storage_t fp8[4];
@@ -204,6 +214,7 @@ struct __hipext_ocp_fp8_e5m2 {
     __x = u.fp8[0];
 #else
     using namespace fcbx;
+    static_assert(sizeof(uint32_t) == sizeof(__amd_fp8_storage_t[4]));
     union {
       uint32_t ui32;
       __amd_fp8_storage_t fp8[4];
@@ -216,6 +227,7 @@ struct __hipext_ocp_fp8_e5m2 {
   explicit __OCP_FP_HOST_DEVICE__ __hipext_ocp_fp8_e5m2(const float in, const unsigned int seed,
                                                         const __amd_scale_t scale) {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
+    static_assert(sizeof(unsigned int) == sizeof(__amd_fp8_storage_t[4]));
     union {
       unsigned int ui32;
       __amd_fp8_storage_t fp8[4];
@@ -225,11 +237,12 @@ struct __hipext_ocp_fp8_e5m2 {
     __x = u.fp8[0];
 #else
     using namespace fcbx;
+    static_assert(sizeof(uint32_t) == sizeof(__amd_fp8_storage_t[4]));
     union {
       uint32_t ui32;
       __amd_fp8_storage_t fp8[4];
     } u{0};
-    u.ui32 = from_float_sr<float, Encoding::E5M2, true>(in, seed, scale);
+    u.ui32 = from_float_sr<float, Encoding::E5M2Mx, true>(in, seed, scale);
     __x = u.fp8[0];
 #endif
   }
@@ -238,6 +251,7 @@ struct __hipext_ocp_fp8_e5m2 {
                                                         const unsigned int seed,
                                                         const __amd_scale_t scale) {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
+    static_assert(sizeof(unsigned int) == sizeof(__amd_fp8_storage_t[4]));
     union u {
       unsigned int ui32;
       __amd_fp8_storage_t fp8[4];
@@ -247,11 +261,12 @@ struct __hipext_ocp_fp8_e5m2 {
     __x = u.fp8[0];
 #else
     using namespace fcbx;
+    static_assert(sizeof(uint32_t) == sizeof(__amd_fp8_storage_t[4]));
     union {
       uint32_t ui32;
       __amd_fp8_storage_t fp8[4];
     } u{0};
-    u.ui32 = from_float_sr<__amd_fp16_storage_t, Encoding::E5M2, true>(in, seed, scale);
+    u.ui32 = from_float_sr<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(in, seed, scale);
     __x = u.fp8[0];
 #endif
   }
@@ -260,6 +275,7 @@ struct __hipext_ocp_fp8_e5m2 {
                                                         const unsigned int seed,
                                                         const __amd_scale_t scale) {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
+    static_assert(sizeof(unsigned int) == sizeof(__amd_fp8_storage_t[4]));
     union u {
       unsigned int ui32;
       __amd_fp8_storage_t fp8[4];
@@ -269,11 +285,12 @@ struct __hipext_ocp_fp8_e5m2 {
     __x = u.fp8[0];
 #else
     using namespace fcbx;
+    static_assert(sizeof(uint32_t) == sizeof(__amd_fp8_storage_t[4]));
     union {
       uint32_t ui32;
       __amd_fp8_storage_t fp8[4];
     } u{0};
-    u.ui32 = from_float_sr<__amd_bf16_storage_t, Encoding::E5M2, true>(in, seed, scale);
+    u.ui32 = from_float_sr<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(in, seed, scale);
     __x = u.fp8[0];
 #endif
   }
@@ -295,7 +312,7 @@ struct __hipext_ocp_fp8_e5m2 {
     union {
       __amd_fp8_storage_t fp8[4];
       unsigned int ui32;
-    } u;
+    } u{0};
     u.fp8[0] = __x;
     auto ret =
         __builtin_amdgcn_cvt_scalef32_pk_bf16_fp8(u.ui32, __amd_scale_to_float(scale), false);
@@ -333,6 +350,7 @@ struct __hipext_ocp_fp8x2_e4m3 {
 
   explicit __OCP_FP_HOST_DEVICE__ __hipext_ocp_fp8x2_e4m3(const float a, const float b) {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
+    static_assert(sizeof(int) == sizeof(__amd_fp8x2_storage_t[2]));
     union {
       int i32;
       __amd_fp8x2_storage_t fp8x2[2];
@@ -341,6 +359,7 @@ struct __hipext_ocp_fp8x2_e4m3 {
     __x = u.fp8x2[0];
 #else
     using namespace fcbx;
+    static_assert(sizeof(uint32_t) == sizeof(__amd_fp8x2_storage_t[2]));
     union {
       uint32_t ui32;
       __amd_fp8x2_storage_t fp8x2[2];
@@ -367,6 +386,7 @@ struct __hipext_ocp_fp8x2_e4m3 {
     __x = u.fp8x2[0];
 #else
     using namespace fcbx;
+    static_assert(sizeof(uint32_t) == sizeof(__amd_fp8x2_storage_t[2]));
     union {
       uint32_t ui32;
       __amd_fp8x2_storage_t fp8x2[2];
@@ -395,6 +415,7 @@ struct __hipext_ocp_fp8x2_e4m3 {
     __x = u.fp8x2[0];
 #else
     using namespace fcbx;
+    static_assert(sizeof(uint32_t) == sizeof(__amd_fp8x2_storage_t[2]));
     union {
       uint32_t ui32;
       __amd_fp8x2_storage_t fp8x2[2];
@@ -418,6 +439,7 @@ struct __hipext_ocp_fp8x2_e4m3 {
     __x = u.fp8x2[0];
 #else
     using namespace fcbx;
+    static_assert(sizeof(uint32_t) == sizeof(__amd_fp8x2_storage_t[2]));
     union {
       uint32_t ui32;
       __amd_fp8x2_storage_t fp8x2[2];
@@ -431,10 +453,11 @@ struct __hipext_ocp_fp8x2_e4m3 {
 
   __OCP_FP_HOST_DEVICE__ __amd_fp16x2_storage_t get_scaled_fp16x2(const __amd_scale_t scale) const {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
+    static_assert(sizeof(unsigned int) == sizeof(__amd_fp8x2_storage_t[2]));
     union {
       __amd_fp8x2_storage_t fp8x2[2];
       unsigned int ui32;
-    } u;
+    } u{0};
     u.fp8x2[0] = __x;
     return __builtin_amdgcn_cvt_scalef32_pk_f16_fp8(u.ui32, __amd_scale_to_float(scale), false);
 #else
@@ -448,10 +471,11 @@ struct __hipext_ocp_fp8x2_e4m3 {
 
   __OCP_FP_HOST_DEVICE__ __amd_bf16x2_storage_t get_scaled_bf16x2(const __amd_scale_t scale) const {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
+    static_assert(sizeof(unsigned int) == sizeof(__amd_fp8x2_storage_t[2]));
     union {
       __amd_fp8x2_storage_t fp8x2[2];
       unsigned int ui32;
-    } u;
+    } u{0};
     u.fp8x2[0] = __x;
     return __builtin_amdgcn_cvt_scalef32_pk_bf16_fp8(u.ui32, __amd_scale_to_float(scale), false);
 #else
@@ -498,6 +522,7 @@ struct __hipext_ocp_fp8x2_e5m2 {
 
   __OCP_FP_HOST_DEVICE__ __hipext_ocp_fp8x2_e5m2(const float a, const float b) {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
+    static_assert(sizeof(int) == sizeof(__amd_fp8x2_storage_t[2]));
     union {
       int i32;
       __amd_fp8x2_storage_t fp8x2[2];
@@ -506,6 +531,7 @@ struct __hipext_ocp_fp8x2_e5m2 {
     __x = u.fp8x2[0];
 #else
     using namespace fcbx;
+    static_assert(sizeof(uint32_t) == sizeof(__amd_fp8x2_storage_t[2]));
     union {
       uint32_t ui32;
       __amd_fp8x2_storage_t fp8x2[2];
@@ -532,6 +558,7 @@ struct __hipext_ocp_fp8x2_e5m2 {
     __x = u.fp8x2[0];
 #else
     using namespace fcbx;
+    static_assert(sizeof(uint32_t) == sizeof(__amd_fp8x2_storage_t[2]));
     union {
       uint32_t ui32;
       __amd_fp8x2_storage_t fp8x2[2];
@@ -559,6 +586,7 @@ struct __hipext_ocp_fp8x2_e5m2 {
     __x = u.fp8x2[0];
 #else
     using namespace fcbx;
+    static_assert(sizeof(uint32_t) == sizeof(__amd_fp8x2_storage_t[2]));
     union {
       uint32_t ui32;
       __amd_fp8x2_storage_t fp8x2[2];
@@ -582,6 +610,7 @@ struct __hipext_ocp_fp8x2_e5m2 {
     __x = u.fp8x2[0];
 #else
     using namespace fcbx;
+    static_assert(sizeof(uint32_t) == sizeof(__amd_fp8x2_storage_t[2]));
     union {
       uint32_t ui32;
       __amd_fp8x2_storage_t fp8x2[2];
@@ -595,10 +624,11 @@ struct __hipext_ocp_fp8x2_e5m2 {
 
   __OCP_FP_HOST_DEVICE__ __amd_fp16x2_storage_t get_scaled_fp16x2(const __amd_scale_t scale) const {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
+    static_assert(sizeof(unsigned int) == sizeof(__amd_fp8x2_storage_t[2]));
     union {
       __amd_fp8x2_storage_t fp8x2[2];
       unsigned int ui32;
-    } u;
+    } u{0};
     u.fp8x2[0] = __x;
     return __builtin_amdgcn_cvt_scalef32_pk_f16_bf8(u.ui32, __amd_scale_to_float(scale), false);
 #else
@@ -612,10 +642,11 @@ struct __hipext_ocp_fp8x2_e5m2 {
 
   __OCP_FP_HOST_DEVICE__ __amd_bf16x2_storage_t get_scaled_bf16x2(const __amd_scale_t scale) const {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
+    static_assert(sizeof(unsigned int) == sizeof(__amd_fp8x2_storage_t[2]));
     union {
       __amd_fp8x2_storage_t fp8x2[2];
       unsigned int ui32;
-    } u;
+    } u{0};
     u.fp8x2[0] = __x;
     return __builtin_amdgcn_cvt_scalef32_pk_bf16_bf8(u.ui32, __amd_scale_to_float(scale), false);
 #else
