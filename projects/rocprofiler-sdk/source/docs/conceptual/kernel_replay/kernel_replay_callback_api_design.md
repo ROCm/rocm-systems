@@ -188,3 +188,82 @@ callbacks tht are added to the `rocprofiler_callback_tracing_kernel_replay_data_
   snapshot/restore phases.
 - **Pass info delivery to service callbacks**: mechanism for other service
   callbacks to know which replay pass they are in without tool-side TLS.
+
+## Concurrency hardening
+
+The replay loop originally matched the #7960 prototype (single agent, single
+thread). The following have since been implemented:
+
+1. **Per-agent replay lock (done).** A per-`hsa_agent_t` mutex spans the whole
+   `drain -> snap -> passes -> restore -> completion` window, so two dispatches
+   replaying on the same agent never interleave their snapshot/restore. Different
+   agents use different mutexes and replay concurrently. See `agent_replay_mutex()`
+   in `hsa/queue.cpp`.
+2. **Per-agent snapshot scoping (done).** The memory tracker tags each allocation
+   with its owning agent (`hsa_amd_pointer_info::agentOwner`) at allocation time;
+   `memory_snapshot::snap(agent)` captures only that agent's allocations, so one
+   GPU's replay never touches another GPU's memory.
+3. **Pool-type filter (done).** Tracking is restricted to coarse-grained device
+   (VRAM) allocations. Kernarg is excluded -- its pointer arguments are what fault
+   when a torn/stale restore lands on them -- as are host / fine-grained pools
+   (out of scope, precarious to restore). Classified from
+   `hsa_amd_pointer_info::global_flags` (`KERNARG_INIT`, `COARSE_GRAINED`).
+4. **Teardown finalization guard (done).** The HSA alloc/free wrappers outlive the
+   tracker's static state, so HIP's own `__cxa_finalize` can call the free wrapper
+   after rocprofiler's `destroy_static_objects()` has destroyed the inventory
+   static object. `record_alloc` / `record_free` / `snap_inventory` early-out on
+   `registration::get_fini_status() > 0`; otherwise they locked a freed mutex,
+   which threw `std::system_error` into HIP's noexcept teardown and aborted (the
+   abort then deadlocked the tool's signal handler, presenting as a hang).
+5. **Agent-wide drain (done).** Before snapshotting, *every* queue on the replay
+   agent is drained -- not just the replaying queue -- via
+   `QueueController::iterate_queues` filtered by `Queue::get_agent`, calling
+   `Queue::sync()` (waits on that queue's in-flight kernel count) on each. This
+   fences kernels already in flight on *sibling* queues that would otherwise
+   mutate device memory during snapshot/restore, and the per-agent lock blocks new
+   replayed dispatches for the window. Verified: 2-thread same-agent transpose
+   replay now runs to completion and emits output (previously it faulted mid-run).
+
+### Remaining: async-copy race
+
+The agent-wide drain closes the *kernel* half of the race. The residual is the
+**async-copy path**: `hsa_amd_memory_async_copy` is not a kernel dispatch (so the
+per-agent replay lock never blocks it) and is not intercepted at all unless
+mem-copy tracing is enabled, so a thread can run an SDMA copy against the shared
+device memory during another thread's replay window. On the 2-thread transpose
+this now surfaces as a GPU fault (`address (nil)`) during *finalization* -- the
+replay itself completes and produces correct output -- the same multi-thread
+teardown fault previously noted, now isolated to the copy path. Not a regression
+(#7960 faults identically); matches the design review ("per-agent locking solves
+~99%; async copies are the remaining exception").
+
+### Planned fix (remaining): async-copy serialization
+
+Gate async copies on an in-progress replay, scoped so normal runs are unaffected.
+Extend the per-agent replay state (currently just a mutex) with an
+`atomic<bool> replay_active` flag set for the replay window; the
+`hsa_amd_memory_async_copy` wrapper checks it: fast-path no-op when false; when
+true it serializes the copy against the replay. Because async copies are not
+wrapped unless mem-copy tracing is on, this also requires installing the wrapper
+whenever replay is active.
+
+Care points: the flag check and the act must be atomic w.r.t. replay start (a
+per-agent reader/writer scheme -- copies as readers, replay as writer -- avoids
+the check-then-race), and because an async copy is not complete when its wrapper
+returns, correctness requires waiting on its completion signal rather than just
+serializing the submit. This is a focused serializer / async-copy extension,
+intended as its own change. Alternatively, fold the whole quiesce into the profiler
+serializer's exclusive slot (also gated on `replay_active`).
+
+### Related: multi-thread teardown
+
+A prior multi-thread teardown SIGSEGV (exit 139) was noted; the finalization guard
+above removes the tracker-side teardown fault. Any residual teardown crash under
+concurrency is expected to be a facet of the multi-queue race above (a GPU fault
+mid-run surfacing at teardown), not a separate bug.
+
+### Still unwired
+
+- **Localized per-pass context control.** The `replay_local_start/stop_context_cb`
+  fields exist in the payload but are not yet wired (see "Localized Context
+  Control" above); the free-function + TLS design is the intended shape.

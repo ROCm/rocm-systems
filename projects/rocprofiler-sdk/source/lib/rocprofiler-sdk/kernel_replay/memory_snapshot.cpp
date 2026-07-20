@@ -45,19 +45,19 @@ dma_copy(void* dst, const void* src, size_t n)
 }
 }  // namespace
 
-size_t
-Snapshot::snap()
+device_snapshot_t
+snap(hsa_agent_t agent)
 {
-    auto inventory = memory_tracker::snap_inventory();
+    const auto inventory = memory_tracker::snap_inventory(agent);
 
-    blocks_.clear();
-    blocks_.reserve(inventory.size());
+    device_snapshot_t out{};
+    out.blocks.reserve(inventory.size());
 
     for(const auto& [ptr, size] : inventory)
     {
         if(size == 0) continue;
 
-        mem_block blk;
+        mem_block_t blk;
         blk.gpu_addr = ptr;
         blk.host_copy.resize(size);
 
@@ -67,19 +67,19 @@ Snapshot::snap()
             continue;
         }
 
-        blocks_.push_back(std::move(blk));
+        out.blocks.push_back(std::move(blk));
     }
 
-    ROCP_INFO << "replay snapshot: captured " << blocks_.size() << "/" << inventory.size()
-              << " regions";
-    return blocks_.size();
+    ROCP_INFO << "replay snapshot: captured " << out.blocks.size() << "/" << inventory.size()
+              << " regions for agent " << agent.handle;
+    return out;
 }
 
 size_t
-Snapshot::restore()
+restore(const device_snapshot_t& snapshot)
 {
     size_t ok = 0;
-    for(const auto& blk : blocks_)
+    for(const auto& blk : snapshot.blocks)
     {
         if(dma_copy(blk.gpu_addr, blk.host_copy.data(), blk.host_copy.size()) != HSA_STATUS_SUCCESS)
         {
@@ -89,7 +89,7 @@ Snapshot::restore()
         ++ok;
     }
 
-    ROCP_INFO << "replay restore: restored " << ok << "/" << blocks_.size() << " regions";
+    ROCP_INFO << "replay restore: restored " << ok << "/" << snapshot.blocks.size() << " regions";
     return ok;
 }
 }  // namespace memory_snapshot

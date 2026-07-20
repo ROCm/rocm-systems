@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include <hsa/hsa.h>
+
 #include <cstddef>
 #include <vector>
 
@@ -31,38 +33,34 @@ namespace kernel_replay
 {
 // Minimal save/restore of device memory for kernel replay.
 //
-// snap() copies every tracked device allocation into host memory; restore() copies it back. This
-// keeps each replay pass running against identical inputs. The implementation is deliberately
-// simple: a full copy of each region (no dirty-page diffing) of directly-allocated device memory.
+// snap(agent) copies every tracked device allocation owned by `agent` into host memory; restore()
+// copies it back. This keeps each replay pass running against identical inputs, scoped to one agent
+// so concurrent replays on other agents are unaffected. The implementation is deliberately simple:
+// a full copy of each region (no dirty-page diffing) of directly-allocated device memory.
 namespace memory_snapshot
 {
 // Saved copy of a single device allocation.
-struct mem_block
+struct mem_block_t
 {
     void*             gpu_addr = nullptr;  // live device allocation base pointer
     std::vector<char> host_copy;           // pre-kernel contents held in host memory
 };
 
-class Snapshot
+// A captured set of device allocations (host-side copies) for a single agent.
+struct device_snapshot_t
 {
-public:
-    Snapshot()  = default;
-    ~Snapshot() = default;
+    std::vector<mem_block_t> blocks;
 
-    Snapshot(const Snapshot&) = delete;
-    Snapshot& operator=(const Snapshot&) = delete;
-
-    // Copy every tracked allocation device->host. Returns number of regions captured.
-    size_t snap();
-
-    // Copy each saved region host->device. Returns number of regions restored.
-    size_t restore();
-
-    bool empty() const { return blocks_.empty(); }
-
-private:
-    std::vector<mem_block> blocks_;
+    bool empty() const { return blocks.empty(); }
 };
+
+// Copy (device->host) every tracked allocation owned by `agent`. Returns the captured snapshot.
+device_snapshot_t
+snap(hsa_agent_t agent);
+
+// Copy each saved region host->device. Returns the number of regions restored.
+size_t
+restore(const device_snapshot_t& snapshot);
 }  // namespace memory_snapshot
 }  // namespace kernel_replay
 }  // namespace rocprofiler
