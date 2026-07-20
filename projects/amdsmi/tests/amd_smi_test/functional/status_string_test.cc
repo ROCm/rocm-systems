@@ -37,14 +37,10 @@
 namespace {
 
 // ---------------------------------------------------------------------------
-// Compile-time enum reflection (stopgap until C++26 static reflection / P2996).
-// C++17 cannot enumerate enum members, so this uses the magic_enum trick:
-// instantiate a template on a value and parse its name from __PRETTY_FUNCTION__.
-// Real enumerators render as names, whereas unused values render as numbers or casts.
-//
-// Normal status codes are discovered by scanning a low numeric range. The two
-// high-value codes, AMDSMI_STATUS_MAP_ERROR and AMDSMI_STATUS_UNKNOWN_ERROR, are
-// appended explicitly because their values are near UINT_MAX.
+// Compile-time enum reflection: stopgap until C++26 static reflection (P2996).
+// C++17 cannot enumerate enum members, so this parses enumerator names out of
+// __PRETTY_FUNCTION__. AMDSMI_STATUS_MAP_ERROR and AMDSMI_STATUS_UNKNOWN_ERROR
+// sit near UINT_MAX, outside the scan range, so they are appended explicitly.
 // ---------------------------------------------------------------------------
 
 // Reflection needs enumerator names in __PRETTY_FUNCTION__. Clang does this at any version,
@@ -63,7 +59,7 @@ namespace enum_reflect {
 constexpr bool kAvailable = AMDSMI_ENUM_REFLECTION_AVAILABLE;
 
 // Compiler name and version, included in failure/skip diagnostics.
-inline const char* CompilerId() {
+inline const char* compiler_id() {
 #if defined(__clang__)
   return "clang " __clang_version__;
 #elif defined(__GNUC__)
@@ -76,7 +72,7 @@ inline const char* CompilerId() {
 #if AMDSMI_ENUM_REFLECTION_AVAILABLE
 
 template <amdsmi_status_t V>
-constexpr const char* Signature() {
+constexpr const char* signature() {
   // Return type is a plain `const char*` so the signature has no stray "= "
   // from typedef expansion to confuse the parse below.
   return __PRETTY_FUNCTION__;
@@ -84,8 +80,8 @@ constexpr const char* Signature() {
 
 // Enumerator name for V, e.g. "AMDSMI_STATUS_TIMEOUT".
 template <amdsmi_status_t V>
-constexpr std::string_view EnumName() {
-  std::string_view s = Signature<V>();
+constexpr std::string_view enum_name() {
+  std::string_view s = signature<V>();
   const auto start = s.find("V = ") + 4;  // anchor on the value parameter
   const auto end = s.find_first_of(";]", start);
   return s.substr(start, end - start);
@@ -94,19 +90,19 @@ constexpr std::string_view EnumName() {
 // Real enumerators start like C identifiers. Unused values start with '(' on
 // GCC or a digit on Clang, so this rejects both renderings.
 template <amdsmi_status_t V>
-constexpr bool IsEnumerator() {
-  const auto name = EnumName<V>();
+constexpr bool is_enumerator() {
+  const auto name = enum_name<V>();
   if (name.empty()) return false;
   const char c = name.front();
   return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_';
 }
 
 template <uint32_t... Is>
-void Collect(std::vector<std::pair<amdsmi_status_t, std::string>>& out,
+void collect(std::vector<std::pair<amdsmi_status_t, std::string>>& out,
              std::integer_sequence<uint32_t, Is...>) {
-  ((IsEnumerator<static_cast<amdsmi_status_t>(Is)>()
+  ((is_enumerator<static_cast<amdsmi_status_t>(Is)>()
         ? out.push_back({static_cast<amdsmi_status_t>(Is),
-                         std::string(EnumName<static_cast<amdsmi_status_t>(Is)>())})
+                         std::string(enum_name<static_cast<amdsmi_status_t>(Is)>())})
         : void()),
    ...);
 }
@@ -116,30 +112,30 @@ void Collect(std::vector<std::pair<amdsmi_status_t, std::string>>& out,
 constexpr uint32_t kScanLimit = 256;
 
 // {value, "AMDSMI_STATUS_..."} for every amdsmi_status_t enumerator.
-std::vector<std::pair<amdsmi_status_t, std::string>> AllStatusCodes() {
+std::vector<std::pair<amdsmi_status_t, std::string>> all_status_codes() {
   std::vector<std::pair<amdsmi_status_t, std::string>> out;
-  Collect(out, std::make_integer_sequence<uint32_t, kScanLimit>{});
+  collect(out, std::make_integer_sequence<uint32_t, kScanLimit>{});
   // Append the two high-value codes the scan cannot reach.
-  out.push_back({AMDSMI_STATUS_MAP_ERROR, std::string(EnumName<AMDSMI_STATUS_MAP_ERROR>())});
+  out.push_back({AMDSMI_STATUS_MAP_ERROR, std::string(enum_name<AMDSMI_STATUS_MAP_ERROR>())});
   out.push_back(
-      {AMDSMI_STATUS_UNKNOWN_ERROR, std::string(EnumName<AMDSMI_STATUS_UNKNOWN_ERROR>())});
+      {AMDSMI_STATUS_UNKNOWN_ERROR, std::string(enum_name<AMDSMI_STATUS_UNKNOWN_ERROR>())});
   return out;
 }
 
 // Include a raw signature in failures so compiler-format changes are visible.
-inline const char* SampleSignature() { return Signature<AMDSMI_STATUS_TIMEOUT>(); }
+inline const char* sample_signature() { return signature<AMDSMI_STATUS_TIMEOUT>(); }
 
 #else  // !AMDSMI_ENUM_REFLECTION_AVAILABLE
 
 // Unsupported compiler: no codes discovered; the positive test skips itself.
-std::vector<std::pair<amdsmi_status_t, std::string>> AllStatusCodes() { return {}; }
-inline const char* SampleSignature() { return "<enum reflection unavailable>"; }
+std::vector<std::pair<amdsmi_status_t, std::string>> all_status_codes() { return {}; }
+inline const char* sample_signature() { return "<enum reflection unavailable>"; }
 
 #endif  // AMDSMI_ENUM_REFLECTION_AVAILABLE
 
 }  // namespace enum_reflect
 
-bool StartsWith(const std::string& s, const std::string& prefix) {
+bool starts_with(const std::string& s, const std::string& prefix) {
   return s.size() >= prefix.size() && s.compare(0, prefix.size(), prefix) == 0;
 }
 
@@ -150,13 +146,13 @@ bool StartsWith(const std::string& s, const std::string& prefix) {
 // runs in CI without a GPU.
 TEST(AmdSmiStatusStringTest, EveryStatusCodeResolvesToItsOwnName) {
   if (!enum_reflect::kAvailable) {
-    GTEST_SKIP() << "enum reflection unavailable on this compiler (" << enum_reflect::CompilerId()
+    GTEST_SKIP() << "enum reflection unavailable on this compiler (" << enum_reflect::compiler_id()
                  << "). This test needs Clang or GCC >= 9 "
                  << "(older GCC renders enum template args as numeric casts). "
                  << "The matching Python test covers this case elsewhere.";
   }
 
-  const auto all_status_codes = enum_reflect::AllStatusCodes();
+  const auto all_status_codes = enum_reflect::all_status_codes();
 
   // Guard against an empty or incomplete reflection result: if these known
   // codes aren't discovered, the __PRETTY_FUNCTION__ parser or kScanLimit broke.
@@ -165,8 +161,8 @@ TEST(AmdSmiStatusStringTest, EveryStatusCodeResolvesToItsOwnName) {
   ASSERT_GE(all_status_codes.size(), 40u)
       << "enum reflection discovered only " << all_status_codes.size()
       << " status codes; the __PRETTY_FUNCTION__ parser or kScanLimit is broken. "
-      << "Compiler: " << enum_reflect::CompilerId() << "; sample signature: \""
-      << enum_reflect::SampleSignature() << "\".";
+      << "Compiler: " << enum_reflect::compiler_id() << "; sample signature: \""
+      << enum_reflect::sample_signature() << "\".";
 
   auto contains = [&](amdsmi_status_t code) {
     for (const auto& [value, name] : all_status_codes) {
@@ -179,8 +175,8 @@ TEST(AmdSmiStatusStringTest, EveryStatusCodeResolvesToItsOwnName) {
     ASSERT_TRUE(contains(code))
         << "enum reflection did not discover known status code " << code
         << "; the __PRETTY_FUNCTION__ parser in enum_reflect likely broke due to "
-        << "a compiler change (or kScanLimit is too low). Compiler: " << enum_reflect::CompilerId()
-        << "; sample signature: \"" << enum_reflect::SampleSignature()
+        << "a compiler change (or kScanLimit is too low). Compiler: " << enum_reflect::compiler_id()
+        << "; sample signature: \"" << enum_reflect::sample_signature()
         << "\". This is a test-harness "
         << "problem, not an amdsmi library bug.";
   }
@@ -195,7 +191,7 @@ TEST(AmdSmiStatusStringTest, EveryStatusCodeResolvesToItsOwnName) {
     ASSERT_NE(status_string, nullptr) << name;
 
     const std::string description(status_string);
-    EXPECT_TRUE(StartsWith(description, name))
+    EXPECT_TRUE(starts_with(description, name))
         << name << " (" << code << ") resolved to \"" << description
         << "\". Expected the description to start with its own enum name. A "
         << "missing case falls through to the UNKNOWN_ERROR default.";
@@ -224,7 +220,7 @@ TEST(AmdSmiStatusStringTest, KnownStatusCodesResolveToTheirOwnName) {
         << "amdsmi_status_code_to_string(). Must return AMDSMI_STATUS_SUCCESS "
         << "for a valid status code.";
     ASSERT_NE(status_string, nullptr) << name;
-    EXPECT_TRUE(StartsWith(status_string, name))
+    EXPECT_TRUE(starts_with(status_string, name))
         << name << " (" << code << ") resolved to \"" << status_string
         << "\". Expected the description to start with its own enum name.";
   }
@@ -243,7 +239,8 @@ TEST(AmdSmiStatusStringTest, UnmappedLowerLevelStatusYieldsMapError) {
   // Sanity: known mappings must NOT produce MAP_ERROR.
   EXPECT_EQ(amd::smi::rsmi_to_amdsmi_status(RSMI_STATUS_SUCCESS), AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(amd::smi::rsmi_to_amdsmi_status(RSMI_STATUS_INVALID_ARGS), AMDSMI_STATUS_INVAL);
-  EXPECT_NE(amd::smi::rsmi_to_amdsmi_status(RSMI_STATUS_NOT_SUPPORTED), AMDSMI_STATUS_MAP_ERROR);
+  EXPECT_EQ(amd::smi::rsmi_to_amdsmi_status(RSMI_STATUS_NOT_SUPPORTED),
+            AMDSMI_STATUS_NOT_SUPPORTED);
 }
 
 // A value that is not a defined status code (an enum gap) must hit the default
@@ -256,6 +253,10 @@ TEST(AmdSmiStatusStringTest, UndefinedStatusCodeYieldsUnknownError) {
   EXPECT_EQ(amdsmi_status_code_to_string(undefined_code, &status_string),
             AMDSMI_STATUS_UNKNOWN_ERROR);
   ASSERT_NE(status_string, nullptr);
+  // The default branch must actually write a description, not leave the pointer
+  // stale or empty.
+  EXPECT_STRNE(status_string, "")
+      << "an undefined status code returned UNKNOWN_ERROR but left an empty description.";
 }
 
 // A null output pointer must be rejected, not dereferenced.
