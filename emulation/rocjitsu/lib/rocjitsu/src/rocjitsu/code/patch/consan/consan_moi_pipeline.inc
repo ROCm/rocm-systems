@@ -709,10 +709,11 @@ void append_moi_sync_site_dispositions(const ConSanOptions &options, ConSanResul
     ConSanSiteDispositionReason reason = ConSanSiteDispositionReason::None;
     const auto communication = std::ranges::find(
         result.sync_events, fence.communication_event_identity, &ConSanSyncEvent::identity);
+    const bool unowned_communication =
+        communication != result.sync_events.end() && communication->execution_owners.empty();
     if (!fence.eligible) {
       reason = ConSanSiteDispositionReason::IneligibleFence;
-    } else if (communication == result.sync_events.end() ||
-               communication->execution_owners.empty()) {
+    } else if (communication == result.sync_events.end() || unowned_communication) {
       reason = ConSanSiteDispositionReason::MissingCommunicationEvent;
     } else if (std::ranges::none_of(admitted, [&](const FenceRecordCandidate &candidate) {
                  return candidate.fence.identity == fence.identity;
@@ -721,8 +722,9 @@ void append_moi_sync_site_dispositions(const ConSanOptions &options, ConSanResul
     }
     append_moi_site_disposition(ConSanResourceSiteKind::Fence, fence.container_name,
                                 fence.in_kernel, fence.text_offset, "fence", reason, result,
-                                result.arch_name == "gfx1250" &&
-                                    reason == ConSanSiteDispositionReason::IneligibleFence);
+                                unowned_communication ||
+                                    (result.arch_name == "gfx1250" &&
+                                     reason == ConSanSiteDispositionReason::IneligibleFence));
   }
 }
 

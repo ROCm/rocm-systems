@@ -3432,6 +3432,51 @@ TEST(ConSanMoi, FenceRecordPatchRejectsStaleCommunicationIdentityWithoutGuessing
             result.warnings.end());
 }
 
+TEST(ConSanMoi, FenceRecordTreatsUnownedRuntimeCommunicationAsNotApplicable) {
+  const std::vector<uint8_t> bytes = make_rdna4_atomic_fence_sequence_code_object();
+  ASSERT_FALSE(bytes.empty());
+  ConSanOptions inventory_options;
+  inventory_options.flavor = ConSanFlavor::Moi;
+  ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  ASSERT_TRUE(inventory.errors.empty());
+  ASSERT_EQ(inventory.moi_fence_candidates.size(), 2u);
+  for (const ConSanMoiFenceCandidate &candidate : inventory.moi_fence_candidates) {
+    ASSERT_TRUE(candidate.eligible);
+    const auto event = std::ranges::find(
+        inventory.sync_events, candidate.communication_event_identity, &ConSanSyncEvent::identity);
+    ASSERT_NE(event, inventory.sync_events.end());
+    event->execution_owners.clear();
+  }
+
+  ConSanOptions options = moi_options();
+  options.moi_track_atomics = true;
+  options.max_patches = 3;
+  options.scratch_vgpr = 8;
+  options.moi_owner_vgpr = 11;
+  options.moi_epoch_vgpr = 12;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(3, 0, 0, 0, 0, 3, 3);
+
+  const ConSanResult result =
+      try_patch_consan_moi(std::move(inventory), options, bytes, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(consan_patch_succeeded(result));
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
+                               &ConSanPatchInfo::kind),
+            0);
+  EXPECT_EQ(std::ranges::count(result.resource_plans, ConSanResourceSiteKind::Fence,
+                               &ConSanCandidateResourcePlan::site_kind),
+            0);
+  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanResourceSiteKind::Fence,
+                               &ConSanSiteDispositionRecord::site_kind),
+            2);
+  EXPECT_TRUE(std::ranges::all_of(result.site_dispositions, [](const auto &site) {
+    return site.site_kind != ConSanResourceSiteKind::Fence ||
+           (site.disposition == ConSanSiteDisposition::NotApplicable &&
+            site.reason == ConSanSiteDispositionReason::MissingCommunicationEvent);
+  }));
+}
+
 TEST(ConSanMoi, AtomicRecordMarksCompareExchangeOutcomeUnavailableUntilCaptured) {
   const std::vector<uint8_t> bytes = make_rdna4_ordered_flat_cas_code_object();
   ASSERT_FALSE(bytes.empty());

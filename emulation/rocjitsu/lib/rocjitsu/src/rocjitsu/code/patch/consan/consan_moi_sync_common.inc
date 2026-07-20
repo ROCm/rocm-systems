@@ -182,7 +182,8 @@ void append_fence_record_candidates(const ConSanResult &result,
     if (event == result.sync_events.end() ||
         (event->kind != ConSanSyncEventKind::Atomic &&
          event->kind != ConSanSyncEventKind::OrdinaryMemory) ||
-        event->container_name != fence.container_name || event->in_kernel != fence.in_kernel)
+        event->container_name != fence.container_name || event->in_kernel != fence.in_kernel ||
+        event->execution_owners.empty())
       continue;
     const auto append_from = [&](const auto &container,
                                  std::optional<uint64_t> descriptor_file_offset) {
