@@ -1343,9 +1343,18 @@ hipError_t hipFuncSetSharedMemConfig(const void* func, hipSharedMemConfig config
 }
 hipError_t hipGLGetDevices(unsigned int* pHipDeviceCount, int* pHipDevices,
                            unsigned int hipDeviceCount, hipGLDeviceList deviceList) {
+  auto const __rocm_in_pHipDeviceCount = pHipDeviceCount;
+  auto const __rocm_in_pHipDevices = pHipDevices;
+  auto const __rocm_in_hipDeviceCount = hipDeviceCount;
+  auto const __rocm_in_deviceList = deviceList;
+  rocm_trace_emit_hipGLGetDevices_enter(
+      (const void*)(uintptr_t)(__rocm_in_pHipDeviceCount),
+      (const void*)(uintptr_t)(__rocm_in_pHipDevices),
+      (__rocm_in_hipDeviceCount),
+      (int32_t)(__rocm_in_deviceList)); /* __ROCM_CURATED__: hipGLGetDevices */
   TRY;
-  return hip::GetHipDispatchTable()->hipGLGetDevices_fn(pHipDeviceCount, pHipDevices,
-                                                        hipDeviceCount, deviceList);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGLGetDevices, hip::GetHipDispatchTable()->hipGLGetDevices_fn(
+                                    pHipDeviceCount, pHipDevices, hipDeviceCount, deviceList));
   CATCH;
 }
 hipError_t hipGetChannelDesc(hipChannelFormatDesc* desc, hipArray_const_t array) {

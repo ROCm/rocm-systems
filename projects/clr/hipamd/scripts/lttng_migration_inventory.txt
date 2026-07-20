@@ -140,6 +140,7 @@ hipFuncGetAttributes	STATUS	hipError_t
 hipFuncSetAttribute	STATUS	hipError_t
 hipFuncSetCacheConfig	STATUS	hipError_t
 hipFuncSetSharedMemConfig	STATUS	hipError_t
+hipGLGetDevices	STATUS	hipError_t
 hipGetChannelDesc	STATUS	hipError_t
 hipGetDevice	STATUS	hipError_t
 hipGetDeviceCount	STATUS	hipError_t

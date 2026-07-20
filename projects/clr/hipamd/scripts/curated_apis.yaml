@@ -1724,3 +1724,6 @@
 
 - api: hipRuntimeGetVersion
   args: [runtimeVersion]
+
+- api: hipGLGetDevices
+  args: [pHipDeviceCount, pHipDevices, hipDeviceCount, deviceList]

@@ -2,7 +2,7 @@
  * Do not edit by hand — regenerate instead (see command below).
  *
  * SHA256(curated_apis.yaml) at generation:
- * e0f713ec35fb6791818e460632d50395b63e992d369dcd2703ca2cd7468c24fd
+ * c4229bb6818a0d72b49c0f1d04a6413ec5e18e78728d50239b723d32b7e47b78
  *
  * Per-API typed emit helpers for curated parameter capture. Every
  * helper takes (<captured-args...>, <status_type> status); status is
@@ -9836,6 +9836,25 @@ static inline void rocm_trace_emit_hipRuntimeGetVersion_exit(hipError_t status) 
   }
 }
 
+static inline void rocm_trace_emit_hipGLGetDevices_enter(const void* pHipDeviceCount,
+                                                         const void* pHipDevices,
+                                                         uint32_t hipDeviceCount,
+                                                         int32_t deviceList) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGLGetDevices)) {
+    lttng_ust_do_tracepoint(
+        rocm_hip, hipGLGetDevices, (int32_t)0, (uint64_t)(uintptr_t)(pHipDeviceCount),
+        (uint64_t)(uintptr_t)(pHipDevices), (uint32_t)(hipDeviceCount), (int32_t)(deviceList), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGLGetDevices_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGLGetDevices)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGLGetDevices, (int32_t)1, 0, 0, 0, 0, (int32_t)status);
+  }
+}
+
 
 #else /* HIP_ENABLE_LTTNG_UST not defined — all helpers are no-ops */
 
@@ -11270,6 +11289,9 @@ static inline void rocm_trace_emit_hipProfilerStop_enter() {}
 static inline void rocm_trace_emit_hipProfilerStop_exit(hipError_t) {}
 static inline void rocm_trace_emit_hipRuntimeGetVersion_enter(const void*) {}
 static inline void rocm_trace_emit_hipRuntimeGetVersion_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGLGetDevices_enter(const void*, const void*, uint32_t,
+                                                         int32_t) {}
+static inline void rocm_trace_emit_hipGLGetDevices_exit(hipError_t) {}
 
 #endif /* HIP_ENABLE_LTTNG_UST */
 
