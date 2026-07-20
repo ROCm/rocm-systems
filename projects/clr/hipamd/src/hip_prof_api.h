@@ -28,7 +28,7 @@ struct hip_api_trace_data_t {
 // HIP API callbacks spawner object macro
 #define HIP_CB_SPAWNER_OBJECT(operation_id)                                                        \
   api_callbacks_spawner_t<HIP_API_ID_##operation_id> __api_tracer(                                 \
-      [=](auto& api_data) { INIT_CB_ARGS_DATA(operation_id, api_data); });
+      [=]([[maybe_unused]] auto& api_data) { INIT_CB_ARGS_DATA(operation_id, api_data); });
 
 template <hip_api_id_t operation_id> class api_callbacks_spawner_t {
  public:
