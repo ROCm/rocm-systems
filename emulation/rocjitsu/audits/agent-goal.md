@@ -15,9 +15,9 @@ manual but not inferrable from the XML. The other should be gaps in rocjitsu. Su
 task.
 
 Architecture priority:
-RDNA4
-CDNA4
-CDNA3
-RDNA3
-Other archs
+1. RDNA4
+2. CDNA4
+3. CDNA3
+4. RDNA3
+5. Other archs
 
