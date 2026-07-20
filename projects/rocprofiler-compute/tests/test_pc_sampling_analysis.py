@@ -24,7 +24,6 @@ from rocprof_compute_analyze.analysis_db import db_analysis
 from utils import schema
 from utils.file_io import (
     build_agent_to_gpu_map_from_json,
-    discover_pc_sampling_result_files,
     load_pc_sampling_results,
     process_pc_sampling_kernel_trace,
 )
@@ -1073,65 +1072,62 @@ def test_nullify_unevaluated_metrics_empty_df_skipped() -> None:
 
 
 # ═══════════════════════════════════════════════════════════════
-# discover_pc_sampling_result_files
+# load_pc_sampling_results
 # ═══════════════════════════════════════════════════════════════
 
 
-def test_discover_pc_sampling_result_files_returns_all_numeric_candidates(
+def test_load_pc_sampling_results_loads_all_pid_files_in_numeric_order(
     tmp_path: Path,
 ) -> None:
-    first_path = tmp_path / "111_ps_file_results.json"
-    second_path = tmp_path / "222_ps_file_results.json"
-    first_path.touch()
-    second_path.touch()
+    write_results_json(tmp_path / "101_ps_file_results.json", pid=101)
+    write_results_json(tmp_path / "3_ps_file_results.json", pid=3)
+    write_results_json(tmp_path / "20_ps_file_results.json", pid=20)
 
-    selected_files = discover_pc_sampling_result_files(tmp_path)
-
-    assert set(selected_files) == {first_path, second_path}
-
-
-def test_discover_pc_sampling_result_files_prefers_pid_candidates_over_legacy(
-    tmp_path: Path,
-) -> None:
-    pid_path = tmp_path / "42_ps_file_results.json"
-    legacy_path = tmp_path / "ps_file_results.json"
-    pid_path.touch()
-    legacy_path.touch()
-
-    selected_files = discover_pc_sampling_result_files(tmp_path)
-
-    assert selected_files == (pid_path,)
-
-
-def test_discover_pc_sampling_result_files_falls_back_to_legacy(
-    tmp_path: Path,
-) -> None:
-    legacy_path = tmp_path / "ps_file_results.json"
-    legacy_path.touch()
-
-    selected_files = discover_pc_sampling_result_files(tmp_path)
-
-    assert selected_files == (legacy_path,)
-
-
-def test_discover_pc_sampling_result_files_returns_empty_selection(
-    tmp_path: Path,
-) -> None:
-    selected_files = discover_pc_sampling_result_files(tmp_path)
-
-    assert selected_files == ()
-
-
-def test_discover_pc_sampling_result_files_ignores_nested_candidates(
-    tmp_path: Path,
-) -> None:
     nested_path = tmp_path / "nested"
     nested_path.mkdir()
-    (nested_path / "42_ps_file_results.json").touch()
+    nested_result_path = nested_path / "1_ps_file_results.json"
+    write_results_json(nested_result_path, pid=1)
+    (tmp_path / "2_ps_file_results.json").symlink_to(nested_result_path)
+    write_results_json(tmp_path / "worker_ps_file_results.json", pid=2)
+    write_results_json(tmp_path / "4_ps_file_results.json.backup", pid=4)
+    (tmp_path / "5_ps_file_results.json").mkdir()
 
-    selected_files = discover_pc_sampling_result_files(tmp_path)
+    tool_data_records = load_pc_sampling_results(str(tmp_path))
 
-    assert selected_files == ()
+    assert [record["metadata"]["pid"] for record in tool_data_records] == [
+        3,
+        20,
+        101,
+    ]
+
+
+def test_load_pc_sampling_results_prefers_pid_files_over_legacy(
+    tmp_path: Path,
+) -> None:
+    write_results_json(tmp_path / "ps_file_results.json", pid=999)
+    write_results_json(tmp_path / "42_ps_file_results.json", pid=42)
+
+    tool_data_records = load_pc_sampling_results(str(tmp_path))
+
+    assert [record["metadata"]["pid"] for record in tool_data_records] == [42]
+
+
+def test_load_pc_sampling_results_falls_back_to_legacy(
+    tmp_path: Path,
+) -> None:
+    write_results_json(tmp_path / "ps_file_results.json", pid=77)
+
+    tool_data_records = load_pc_sampling_results(str(tmp_path))
+
+    assert [record["metadata"]["pid"] for record in tool_data_records] == [77]
+
+
+def test_load_pc_sampling_results_returns_empty_for_missing_folder(
+    tmp_path: Path,
+) -> None:
+    missing_workload_path = tmp_path / "missing"
+
+    assert load_pc_sampling_results(str(missing_workload_path)) == []
 
 
 # ═══════════════════════════════════════════════════════════════
