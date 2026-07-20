@@ -53,7 +53,7 @@ preserve the earlier green claim.
 
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
-| **P0 Qwen3-0.6B prefill** | 🟦 Current exact oracle and 1000/1000 accesses pass; closing paired baseline interrupted | 🟦 Current exact oracle, 1000/1000 accesses, and 46/46 barriers pass; closing paired baseline interrupted | 🟨 Current rerun interrupted during execution; no verdict | 🟨 Current rerun not reached; prior frozen bundle retained |
+| **P0 Qwen3-0.6B prefill** | 🟦 Current exact oracle and 1000/1000 accesses pass; closing paired baseline interrupted | 🟦 Current exact oracle, 1000/1000 accesses, and 46/46 barriers pass; closing paired baseline interrupted | 🟧 Isolated Rocjitsu run signals at ~255 seconds; independent software-GPU cross-check remains active through 600 seconds without a verdict; no accepted overhead | 🟧 Current isolated run signals at the final large-output dispatch after 552 seconds; no verdict or accepted overhead |
 | **P1 Sharktank TP1 prefill** | 🟩 Exact prefill oracle; 352/352 accesses; current paired 1.17x | 🟩 Exact prefill oracle; 352/352 accesses, 37/37 barriers; current paired 1.25x | 🟩 Exact prefill oracle; 352/352 accesses, 64/64 applicable barriers; current paired 1.51x | 🟩 Exact prefill oracle; 352/352 accesses, 37/37 barriers; current paired 2.11x |
 | **P1 Sharktank TP1 decode/combined** | 🟩 Exact decode/combined oracles; 704/704 accesses; current paired 1.09x | 🟩 Exact decode/combined oracles; 704/704 accesses, 74/74 barriers; current paired 1.16x | 🟩 Exact decode/combined oracles; 704/704 accesses, 128/128 applicable barriers; current paired 1.28x | 🟧 Compute-active through 600 seconds; no verdict or accepted overhead |
 | **P2 Sharktank TP2 family** | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained |
@@ -212,6 +212,17 @@ do not promote matrix cells without the end-to-end evidence above.
 | Four focused flavor verticals | 🟦 Four-engine bootstrap | A clean ping-pong cooperative-LDS workload passed its host-reference oracle with 4/4 accesses patched by SuperCollider.  Record/Replay passed with 4/4 accesses and 8/8 barriers patched and visible records.  Sampled passed with 4/4 accesses and two visible records, but 0/8 barriers.  Inline Shadow is statically and dynamically complete with 4/4 accesses, 8/8 barriers, and one visible record.  Fault/diagnostic behavior, replay qualification, and Sampled synchronization remain open. |
 
 ## Progress log
+
+- 2026-07-20: Current-tip Qwen revalidation replaces the interrupted Sampled
+  and Inline Shadow claims with measured contradictions.  Isolated Rocjitsu
+  Sampled artifacts `-052` and `-054` reproducibly receive signal 11 near 255
+  seconds at the final large-output dispatch; Inline Shadow artifact `-051`
+  receives the same signal there after 552 seconds.  A canonical Sampled
+  cross-check on an independent gfx1250 software GPU, artifact `-057`, passes
+  the Rocjitsu failure point but remains compute-active through the unchanged
+  600-second bound without an oracle or ConSan verdict.  This makes the crash
+  backend-specific evidence, but neither profile has current acceptance or a
+  paired overhead, so both cells are orange rather than inferred green.
 
 - 2026-07-20: Commit `e4df0064b1` closes the shared callable-barrier gap in
   Sampled without weakening coverage.  A physical callable now scans the
