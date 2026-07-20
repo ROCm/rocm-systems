@@ -849,6 +849,11 @@ class _AmdgpuProfileBase(IsaProfile):
         return 256
 
     @property
+    def descriptor_sgpr_count_encoded(self) -> bool:
+        """Whether zero SGPR granule fields still use descriptor encoding."""
+        return True
+
+    @property
     def has_acc_vgpr(self) -> bool:
         """True if this ISA has AccVGPRs (CDNA2/3/4 only)."""
         return False
@@ -1239,6 +1244,10 @@ class Rdna1Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def descriptor_sgpr_count_encoded(self) -> bool:
+        return False
+
+    @property
     def waitcnt_family(self) -> str:
         return 'gfx10'
 
@@ -1355,6 +1364,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
     @property
     def supports_wgp_mode(self) -> bool:
         return True
+
+    @property
+    def descriptor_sgpr_count_encoded(self) -> bool:
+        return False
 
     @property
     def waitcnt_family(self) -> str:
@@ -1496,6 +1509,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
     @property
     def uses_ttmp_workgroup_ids(self) -> bool:
         return True
+
+    @property
+    def descriptor_sgpr_count_encoded(self) -> bool:
+        return False
 
     @property
     def waitcnt_family(self) -> str:
