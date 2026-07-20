@@ -35,20 +35,6 @@ if(ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER S
   endif()
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Werror")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-error=deprecated-declarations")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")
-  # GCC <= 11 ignores [[maybe_unused]] on non-static data members and emits
-  # -Wattributes ("attribute ignored"), which -Werror promotes to an error. The
-  # attribute is still required for Clang's -Wunused-private-field, so silence the
-  # spurious GCC diagnostic. (GCC 12+ handles the attribute correctly.)
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-attributes")
-  endif()
-endif()
-
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
@@ -182,6 +168,7 @@ target_include_directories(amdhip64
 target_compile_definitions(amdhip64 PRIVATE __HIP_PLATFORM_AMD__)
 target_link_libraries(amdhip64 PRIVATE ${OPENGL_LIBRARIES})
 target_link_libraries(amdhip64 PRIVATE ${CMAKE_DL_LIBS})
+target_link_libraries(amdhip64 PRIVATE clr_warnings)
 # Add link to comgr, hsa-runtime and other required libraries in target files
 # This is required for static libraries
 if(NOT BUILD_SHARED_LIBS)
