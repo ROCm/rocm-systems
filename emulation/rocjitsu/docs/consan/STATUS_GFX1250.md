@@ -45,12 +45,11 @@ Two colors describe exceptional states outside that progress ladder:
 
 ## Current matrix
 
-Every workload retained in the active matrix is simultaneously green.  Final
-audit artifact `consan-validation-gfx1250-final-audit-149` reruns every one of
-the 40 cells at committed tip `9acc4dd9b0` with one hook identity.  Cell text
-reports progress within blue;
-successful process launch or focused unit coverage alone does not promote a
-cell.
+The historical final audit `consan-validation-gfx1250-final-audit-149` covered
+all 40 cells at commit `9acc4dd9b0`.  Current-tip paired revalidation is now
+replacing those values.  A red cell identifies a fresh contradiction found by
+that audit; successful process launch or focused unit coverage alone does not
+preserve the earlier green claim.
 
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
@@ -58,12 +57,12 @@ cell.
 | **P1 Sharktank TP1 prefill** | 🟩 Frozen clean/fault/resource bundle accepted; 352/352 accesses; qualified miss; 1.05x; 4-byte report | 🟩 Frozen clean/fault/resource bundle accepted; 352/352 accesses, 74/74 barriers; qualified miss; 1.06x; 858,416-byte peak | 🟩 Frozen clean/fault/resource bundle accepted; 352/352 accesses, 24/24 admitted barriers; qualified miss; 1.00x; 902,448-byte peak | 🟩 Frozen clean/fault/resource bundle accepted; 352/352 accesses, 74/74 barriers; race diagnosed; 1.99x; 4,943,392-byte peak |
 | **P1 Sharktank TP1 decode/combined** | 🟩 Frozen clean/fault/resource bundle accepted; 704/704 accesses; qualified miss; 1.05x; 4-byte report | 🟩 Frozen clean/fault/resource bundle accepted; 704/704 accesses, 148/148 barriers; qualified miss; 1.03x; 1,716,576-byte peak | 🟩 Frozen clean/fault/resource bundle accepted; 704/704 accesses, 48/48 admitted barriers; qualified miss; 1.01x; 1,804,640-byte peak | 🟩 Frozen clean/fault/resource bundle accepted; 704/704 accesses, 148/148 barriers; race diagnosed; 1.58x; 9,878,608-byte peak |
 | **P2 Sharktank TP2 family** | 🟩 Frozen clean/fault/resource bundle accepted; 2760/2760 accesses; qualified miss; 1.02x; 4-byte report | 🟩 Frozen clean/fault/resource bundle accepted; 2760/2760 accesses, 288/288 barriers; qualified miss; 1.08x; 3,738,400-byte peak | 🟩 Frozen clean/fault/resource bundle accepted; 2760/2760 accesses, 48/48 admitted barriers; qualified miss; 1.02x; 7,093,024-byte peak | 🟩 Frozen clean/fault/resource bundle accepted; 2760/2760 accesses, 288/288 barriers; race diagnosed; 2.15x; 29,733,520-byte peak |
-| **P4 hip-moi D128 block attention** | 🟩 Frozen clean/fault/resource bundle accepted; 18/18 accesses; 1.98x; 4-byte report | 🟩 Current paired 1.11x; 18/18 accesses, 4/4 barriers | 🟩 Frozen clean/fault/resource bundle accepted; 18/18 accesses; 1.18x; 23,760-byte peak | 🟩 Frozen clean/fault/resource bundle accepted; 18/18 accesses, 8/8 barriers; 1.19x; 12,600,672-byte peak |
-| **P4 hip-moi D128 pressure attention** | 🟩 Frozen clean/fault/resource bundle accepted; 40/40 accesses; 2.22x; 4-byte report | 🟩 Frozen clean/fault/resource bundle accepted; 32/32 accesses, 8/8 barriers; 1.14x; 463,792-byte peak | 🟩 Frozen clean/fault/resource bundle accepted; 32/32 accesses; 1.15x; 41,904-byte peak | 🟩 Frozen clean/fault/resource bundle accepted; 32/32 accesses, 8/8 barriers; barrier fault detected; 1.30x; 13,830,816-byte peak |
-| **P4 hip-moi WMMA attention** | 🟩 Frozen clean/fault/resource bundle accepted; 18/18 accesses; 2.27x; 4-byte report | 🟩 Frozen clean/fault/resource bundle accepted; 18/18 accesses, 8/8 barriers; 1.23x; 461,776-byte peak | 🟩 Frozen clean/fault/resource bundle accepted; 18/18 accesses; 1.23x; 23,760-byte peak | 🟩 Frozen clean/fault/resource bundle accepted; 18/18 accesses, 8/8 barriers; 1.25x; 12,600,672-byte peak |
-| **P4 hip-moi Stream-K arrival** | 🟩 Frozen clean/fault/resource bundle accepted; 4/4 accesses; 22.19x; 4-byte report | 🟩 Frozen clean/fault/resource bundle accepted; 4/4 accesses, 8/8 barriers, 10/10 atomics; 5.41x; 893,936-byte peak | 🟩 Frozen clean/fault/resource bundle accepted; 4/4 accesses, 10/10 atomics; 5.61x; 5,616-byte peak | 🟩 Frozen clean/fault/resource bundle accepted; 4/4 accesses, 8/8 barriers, 10/10 atomics; scope fault detected; 5.67x; 12,599,328-byte peak |
-| **P4 hip-moi tree atomic-OR** | 🟩 Frozen clean/fault/resource bundle accepted; 4/4 accesses; 16.54x; 4-byte report | 🟩 Frozen clean/fault/resource bundle accepted; 4/4 accesses, 8/8 barriers, 10/10 atomics, 16/16 fences; 3.96x; 893,936-byte peak | 🟩 Frozen clean/fault/resource bundle accepted; 4/4 accesses, 10/10 atomics; 4.14x; 5,616-byte peak | 🟩 Frozen clean/fault/resource bundle accepted; 4/4 accesses, 8/8 barriers, 10/10 atomics; scope fault diagnosed; 4.12x; 12,599,328-byte peak |
-| **P4 Jakub attention variants** | 🟩 Frozen clean/fault/resource bundle accepted; 62/62 accesses; 2.77x; 4-byte report | 🟩 Frozen clean/fault/resource bundle accepted; 31/31 accesses, 8/8 barriers; 1.55x; 463,648-byte peak | 🟩 Frozen clean/fault/resource bundle accepted; 31/31 accesses; 1.51x; 40,608-byte peak | 🟩 Frozen clean/fault/resource bundle accepted; 31/31 accesses, 8/8 barriers; race diagnosed; 1.68x; 12,601,920-byte peak |
+| **P4 hip-moi D128 block attention** | 🟩 Current paired 1.56x; 18/18 accesses | 🟩 Current paired 1.11x; 18/18 accesses, 4/4 barriers | 🟥 Current strict analysis incomplete on callable barrier variants | 🟩 Current paired 1.09x; 18/18 accesses, 4/4 barriers |
+| **P4 hip-moi D128 pressure attention** | 🟩 Current paired 1.84x; 40/40 accesses | 🟥 Current strict analysis rejects nonzero-offset flat loads | 🟥 Current strict analysis incomplete | 🟥 Current strict analysis rejects nonzero-offset flat loads |
+| **P4 hip-moi WMMA attention** | 🟩 Current paired 1.78x; 18/18 accesses | 🟩 Current paired 1.17x; 18/18 accesses, 4/4 barriers | 🟥 Current strict analysis incomplete on callable barrier variants | 🟩 Current paired 1.17x; 18/18 accesses, 4/4 barriers |
+| **P4 hip-moi Stream-K arrival** | 🟩 Current paired 7.38x; 4/4 accesses | 🟩 Current paired 2.41x; 4/4 accesses, 4/4 barriers, 10/10 atomics, 16/16 fences | 🟥 Current strict analysis incomplete on callable barrier variants | 🟩 Current paired 2.62x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
+| **P4 hip-moi tree atomic-OR** | 🟩 Current paired 6.55x; 4/4 accesses | 🟩 Current paired 2.04x; 4/4 accesses, 4/4 barriers, 10/10 atomics, 16/16 fences | 🟥 Current strict analysis incomplete on callable barrier variants | 🟩 Current paired 2.19x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
+| **P4 Jakub attention variants** | 🟩 Current paired 2.52x; 31/31 accesses | 🟥 Current strict analysis incomplete | 🟥 Current strict analysis incomplete | 🟥 Current strict analysis incomplete |
 
 CLIP BF16 is intentionally omitted from the current acceptance matrix.  Its
 uninstrumented execution is not presently practical in the software GPU
