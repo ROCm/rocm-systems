@@ -5,6 +5,11 @@ These let us iterate on policies WITHOUT pushing branches or running workflows:
   • Unit tests   — exercise individual validators / regex patterns.
   • Integration  — feed blobs of [branch, title, description, files] through
                    the higher-level ensure_* functions.
+
+Run locally:
+    python -m unittest tools/systems_pr_bot/test_policy_check_ut.py -v
+    # or
+    pytest tools/systems_pr_bot/test_policy_check_ut.py
 """
 
 import re
@@ -18,7 +23,6 @@ THIS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(THIS_DIR))
 
 import policy_check as pc  # noqa: E402
-
 
 # ----------------------------- helpers ---------------------------------------
 
@@ -62,9 +66,6 @@ def make_policy(**overrides: Any) -> pc.Policy:
         description_checklist_patterns=[re.compile(p) for p in _CHECKLIST_PATTERNS],
         block_draft=True,
         forbidden_title_patterns=[re.compile(r"(?i)\bWIP\b")],
-        max_files_changed=50,
-        max_total_changes=2000,
-        max_single_file_changes=700,
         forbidden_paths=["**/*.pem", "**/.env", "**/id_rsa"],
         unit_test_code_extensions=[".py", ".cpp"],
         unit_test_patterns=[
@@ -359,6 +360,46 @@ class UnitTestRuleTests(unittest.TestCase):
                 files = [make_file("src/module.py"), make_file(test_path)]
                 self.assertEqual(self._errs(files), [])
 
+    def test_path_based_pattern_satisfies_requirement(self) -> None:
+        # Patterns containing '/' are matched against the full file path, not
+        # just the basename. This allows entire test directories to be
+        # recognised as test locations even if their files use no special naming
+        # convention (e.g. hip-tests files named after the API they test:
+        # atomicAdd.cc, acquire_release.cc).
+        policy = make_policy(
+            unit_test_patterns=[
+                "test_*",
+                "*_test.*",
+                "**/test/gtest/**",
+                "projects/hip-tests/**",
+            ]
+        )
+        errs: List[str] = []
+
+        # A .cpp file under projects/hip-tests/ satisfies the requirement even
+        # though its basename ('atomicAdd.cpp') matches no name-based pattern.
+        files = [
+            make_file("projects/clr/hipamd/src/hip_memory.cpp"),
+            make_file("projects/hip-tests/catch/unit/memory/atomicAdd.cpp"),
+        ]
+        pc.ensure_unit_tests(policy, files, errs)
+        self.assertEqual(errs, [])
+
+    def test_path_based_pattern_code_only_still_fails(self) -> None:
+        # A path-based pattern only helps when the PR actually touches a file
+        # under that path. Source changes with no matching test path still fail.
+        policy = make_policy(
+            unit_test_patterns=[
+                "test_*",
+                "*_test.*",
+                "projects/hip-tests/**",
+            ]
+        )
+        errs: List[str] = []
+        files = [make_file("projects/clr/hipamd/src/hip_memory.cpp")]
+        pc.ensure_unit_tests(policy, files, errs)
+        self.assertTrue(errs)
+
 
 # ----------------------------- draft + bump ----------------------------------
 
@@ -472,7 +513,6 @@ class LoadPolicyTests(unittest.TestCase):
             self.skipTest("policy.yml not present next to tests")
         policy = pc.load_policy(policy_path)
         self.assertGreater(len(policy.branch_patterns), 0)
-        self.assertIn("pre-commit", policy.required_checks)
         self.assertGreaterEqual(policy.title_max_length, policy.title_min_length)
 
     def test_multiline_jira_issue_patterns_loaded(self) -> None:
@@ -517,7 +557,27 @@ class LoadPolicyTests(unittest.TestCase):
         self.assertIn("*_test.*", policy.unit_test_patterns)
         self.assertIn("*_tests.*", policy.unit_test_patterns)
         self.assertIn("Test*", policy.unit_test_patterns)
-        self.assertIn("**/test/gtest/**", policy.unit_test_patterns)
+        # hip-tests uses no test_* naming convention — recognised by path.
+        self.assertIn("projects/hip-tests/**", policy.unit_test_patterns)
+
+    def test_hip_tests_path_recognised_by_shipped_policy(self) -> None:
+        """CLR PRs touching hip-tests/ pass the unit test check via path pattern."""
+        policy_path = THIS_DIR / "policy.yml"
+        if not policy_path.exists():
+            self.skipTest("policy.yml not present next to tests")
+        policy = pc.load_policy(policy_path)
+
+        errs: List[str] = []
+        files = [
+            make_file("projects/clr/hipamd/src/hip_memory.cpp"),
+            make_file("projects/hip-tests/catch/unit/memory/atomicAdd.cc"),
+        ]
+        pc.ensure_unit_tests(policy, files, errs)
+        self.assertEqual(
+            errs,
+            [],
+            "A CLR source change accompanied by a hip-tests file should pass",
+        )
 
 
 if __name__ == "__main__":

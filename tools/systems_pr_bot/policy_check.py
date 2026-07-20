@@ -739,7 +739,9 @@ def build_policy_table_comment(
     else:
         footer = "\n\n> 🎉 All policy checks passed!"
 
-    faq_url = "https://github.com/ROCm/rocm-systems/tree/develop/docs/SYSTEMS_PR_BOT_FAQ.md"
+    faq_url = (
+        "https://github.com/ROCm/rocm-systems/tree/develop/docs/SYSTEMS_PR_BOT_FAQ.md"
+    )
 
     faq_link = (
         "\n\n📖 **Need help?** See the "
@@ -996,6 +998,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if is_bump_pr(policy, author):
         marker = "<!-- therock-pr-bot-policy-check -->"
         note = (
+            f"{marker}\n"
             f"🤖 **Bump PR detected** (author `@{author}`). All policy checks "
             "are auto-approved for automated dependency bumps."
         )
