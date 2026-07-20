@@ -61,8 +61,6 @@ subtrees:
     title: Performance determinism
   - file: conceptual/ras.md
     title: Reliability, availability, serviceability (RAS)
-  - file: conceptual/test-design.md
-    title: Test suite design
 
 - caption: Tutorials
   entries:
