@@ -32,6 +32,14 @@ inline bool IsEnvFlagEnabled(const char* name) {
   return IsEnvFlagValueEnabled(os::GetEnvVar(env_name));
 }
 
+inline bool IsPresentationModeEnabled() {
+  static const bool Enabled = [] {
+    if (IsEnvFlagEnabled("HSA_HOTSWAP_DISABLE")) return false;
+    return IsEnvFlagEnabled("HSA_HOTSWAP_PRESENT_ISA");
+  }();
+  return Enabled;
+}
+
 }  // namespace hotswap
 }  // namespace rocr
 

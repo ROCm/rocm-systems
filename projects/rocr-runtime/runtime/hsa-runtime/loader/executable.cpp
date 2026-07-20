@@ -246,11 +246,7 @@ static void UpdateHotSwapKernelObjectLaunchMetadata(uint64_t address,
 // (HSA_HOTSWAP_PRESENT_ISA set and HotSwap not disabled). When false every
 // HotSwap check below short-circuits and the runtime behaves as it does today.
 bool ShouldCheckHotSwapDispatchKernelObjects() {
-  static const bool Enabled = [] {
-    if (rocr::hotswap::IsEnvFlagEnabled("HSA_HOTSWAP_DISABLE")) return false;
-    return rocr::hotswap::IsEnvFlagEnabled("HSA_HOTSWAP_PRESENT_ISA");
-  }();
-  return Enabled;
+  return rocr::hotswap::IsPresentationModeEnabled();
 }
 
 #endif

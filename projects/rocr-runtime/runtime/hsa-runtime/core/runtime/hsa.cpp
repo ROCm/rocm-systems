@@ -2147,8 +2147,7 @@ hsa_status_t LoadSizedCodeObject(
 }
 
 bool HotswapPresentationModeEnabled() {
-  if (hotswap::IsEnvFlagEnabled("HSA_HOTSWAP_DISABLE")) return false;
-  return hotswap::IsEnvFlagEnabled("HSA_HOTSWAP_PRESENT_ISA");
+  return hotswap::IsPresentationModeEnabled();
 }
 
 } // namespace anonymous
