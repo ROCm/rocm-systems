@@ -3,6 +3,7 @@
 
 """Unit tests for analysis_db.py static methods."""
 
+import copy
 import json
 from pathlib import Path
 from typing import Optional
@@ -881,7 +882,7 @@ def test_add_pc_sampling_data_no_tool_data_is_noop(db_session):
     workload = orm.Workload(name="w", sub_name="s")
     db_session.add(workload)
     analyzer = db_analysis(MagicMock(), {})
-    analyzer._pc_sampling_tool_data_per_workload = {"/fake/workload": None}
+    analyzer._pc_sampling_tool_data_per_workload = {"/fake/workload": []}
 
     analyzer.add_pc_sampling_data("/fake/workload", workload, {})
     db_session.commit()
@@ -905,7 +906,7 @@ def test_add_pc_sampling_data_populates_and_attributes_kernels(db_session):
 
     analyzer = db_analysis(MagicMock(), {})
     analyzer._pc_sampling_tool_data_per_workload = {
-        workload_path: make_pc_sampling_tool_data()
+        workload_path: [make_pc_sampling_tool_data()]
     }
     analyzer.add_pc_sampling_data(workload_path, workload, kernel_objs)
     db_session.commit()
@@ -928,28 +929,40 @@ def test_add_pc_sampling_data_populates_and_attributes_kernels(db_session):
     } == {"WAITCNT"}
 
 
-def test_add_pc_sampling_data_drops_lines_without_kernel(db_session):
-    """Lines whose kernel is absent from kernel_objs (filtered out) are dropped
-    along with their sample state and child counts, not attributed to no kernel."""
+def test_add_pc_sampling_data_keeps_shared_code_object_ids_per_pid(db_session):
     workload_path = "/fake/workload"
     workload = orm.Workload(name="w", sub_name="s")
     db_session.add(workload)
-    # Only vecCopy survives filtering; vecAdd's line must be dropped.
-    kernel_objs = {"vecCopy": orm.Kernel(kernel_name="vecCopy", workload=workload)}
-    db_session.add(kernel_objs["vecCopy"])
+    kernel_objs = {
+        "vecCopy": orm.Kernel(kernel_name="vecCopy", workload=workload),
+        "vecAdd": orm.Kernel(kernel_name="vecAdd", workload=workload),
+    }
+    for kernel in kernel_objs.values():
+        db_session.add(kernel)
+
+    first_tool_data = make_pc_sampling_tool_data()
+    second_tool_data = copy.deepcopy(first_tool_data)
+    second_tool_data["metadata"]["pid"] = 99
+    second_tool_data["code_objects"][0]["load_base"] = 0x3000
 
     analyzer = db_analysis(MagicMock(), {})
     analyzer._pc_sampling_tool_data_per_workload = {
-        workload_path: make_pc_sampling_tool_data()
+        workload_path: [first_tool_data, second_tool_data]
     }
     analyzer.add_pc_sampling_data(workload_path, workload, kernel_objs)
     db_session.commit()
 
-    lines = db_session.query(orm.InstructionLine).all()
-    assert [line.code_object_offset for line in lines] == [0x10]
-    assert all(line.kernel is not None for line in lines)
-    # No orphaned child rows for the dropped line.
-    assert db_session.query(orm.PCSampleState).count() == 1
+    code_object_stores = db_session.query(orm.CodeObjectStore).all()
+    assert {(store.pid, store.code_object_id) for store in code_object_stores} == {
+        (42, 5),
+        (99, 5),
+    }
+    total_vec_copy_samples = sum(
+        line.pc_sample_state.total_count
+        for line in db_session.query(orm.InstructionLine).all()
+        if line.kernel.kernel_name == "vecCopy"
+    )
+    assert total_vec_copy_samples == 2
 
 
 # =============================================================================
@@ -1044,7 +1057,7 @@ def test_add_code_object_isa_adds_unsampled_lines(db_session):
 
         analyzer = db_analysis(MagicMock(), {})
         analyzer._pc_sampling_tool_data_per_workload = {
-            workload_path: make_pc_sampling_tool_data()
+            workload_path: [make_pc_sampling_tool_data()]
         }
         analyzer.add_pc_sampling_data(workload_path, workload, kernel_objs)
         analyzer.add_code_object_isa(workload_path, workload, kernel_objs)
@@ -1105,7 +1118,7 @@ def test_add_code_object_isa_creates_store_for_unsampled_code_object(db_session)
         db_session.add(helper)
 
         analyzer = db_analysis(MagicMock(), {})
-        analyzer._pc_sampling_tool_data_per_workload = {workload_path: tool_data}
+        analyzer._pc_sampling_tool_data_per_workload = {workload_path: [tool_data]}
         analyzer.add_pc_sampling_data(workload_path, workload, {"helper": helper})
         analyzer.add_code_object_isa(workload_path, workload, {"helper": helper})
         db_session.commit()
@@ -1156,7 +1169,7 @@ def test_add_code_object_isa_skips_code_object_without_load_base(db_session):
         db_session.add(helper)
 
         analyzer = db_analysis(MagicMock(), {})
-        analyzer._pc_sampling_tool_data_per_workload = {workload_path: tool_data}
+        analyzer._pc_sampling_tool_data_per_workload = {workload_path: [tool_data]}
         analyzer.add_pc_sampling_data(workload_path, workload, {"helper": helper})
         analyzer.add_code_object_isa(workload_path, workload, {"helper": helper})
         db_session.commit()
@@ -1166,3 +1179,104 @@ def test_add_code_object_isa_skips_code_object_without_load_base(db_session):
         assert store.instruction_lines == []
     finally:
         common.clean_output_dir(True, workload_path)
+
+
+def test_add_code_object_isa_scopes_disassembly_by_pid(db_session):
+    workload_path = common.get_output_dir()
+    Path(workload_path).mkdir(parents=True, exist_ok=True)
+    try:
+        first_tool_data = make_pc_sampling_tool_data()
+        second_tool_data = copy.deepcopy(first_tool_data)
+        second_tool_data["metadata"]["pid"] = 99
+        second_tool_data["code_objects"][0]["load_base"] = 0x3000
+
+        (Path(workload_path) / "42_code_obj_info.json").write_text(
+            json.dumps({
+                "code_objects": [
+                    make_disasm_code_object(
+                        5,
+                        [
+                            {
+                                "virtual_address": 0x1000 + 0x30,
+                                "name": "s_pid_42",
+                                "comment": "",
+                            }
+                        ],
+                        symbol_name="_Z7vecCopyv",
+                    )
+                ]
+            }),
+            encoding="utf-8",
+        )
+        (Path(workload_path) / "99_code_obj_info.json").write_text(
+            json.dumps({
+                "code_objects": [
+                    make_disasm_code_object(
+                        5,
+                        [
+                            {
+                                "virtual_address": 0x3000 + 0x40,
+                                "name": "s_pid_99",
+                                "comment": "",
+                            }
+                        ],
+                        symbol_name="_Z7vecCopyv",
+                    )
+                ]
+            }),
+            encoding="utf-8",
+        )
+
+        workload = orm.Workload(name="w", sub_name="s")
+        db_session.add(workload)
+        kernel_objs = {
+            "vecCopy": orm.Kernel(kernel_name="vecCopy", workload=workload),
+            "vecAdd": orm.Kernel(kernel_name="vecAdd", workload=workload),
+        }
+        for kernel in kernel_objs.values():
+            db_session.add(kernel)
+
+        analyzer = db_analysis(MagicMock(), {})
+        analyzer._pc_sampling_tool_data_per_workload = {
+            workload_path: [first_tool_data, second_tool_data]
+        }
+        analyzer.add_pc_sampling_data(workload_path, workload, kernel_objs)
+        analyzer.add_code_object_isa(workload_path, workload, kernel_objs)
+        db_session.commit()
+
+        lines_by_pid = {
+            store.pid: {
+                line.code_object_offset: line for line in store.instruction_lines
+            }
+            for store in db_session.query(orm.CodeObjectStore).all()
+        }
+        assert lines_by_pid[42][0x30].instruction == "s_pid_42"
+        assert lines_by_pid[99][0x40].instruction == "s_pid_99"
+        assert 0x40 not in lines_by_pid[42]
+        assert 0x30 not in lines_by_pid[99]
+    finally:
+        common.clean_output_dir(True, workload_path)
+
+
+def test_add_pc_sampling_data_drops_lines_without_kernel(db_session):
+    """Lines whose kernel is absent from kernel_objs (filtered out) are dropped
+    along with their sample state and child counts, not attributed to no kernel."""
+    workload_path = "/fake/workload"
+    workload = orm.Workload(name="w", sub_name="s")
+    db_session.add(workload)
+    # Only vecCopy survives filtering; vecAdd's line must be dropped.
+    kernel_objs = {"vecCopy": orm.Kernel(kernel_name="vecCopy", workload=workload)}
+    db_session.add(kernel_objs["vecCopy"])
+
+    analyzer = db_analysis(MagicMock(), {})
+    analyzer._pc_sampling_tool_data_per_workload = {
+        workload_path: [make_pc_sampling_tool_data()]
+    }
+    analyzer.add_pc_sampling_data(workload_path, workload, kernel_objs)
+    db_session.commit()
+
+    lines = db_session.query(orm.InstructionLine).all()
+    assert [line.code_object_offset for line in lines] == [0x10]
+    assert all(line.kernel is not None for line in lines)
+    # No orphaned child rows for the dropped line.
+    assert db_session.query(orm.PCSampleState).count() == 1
