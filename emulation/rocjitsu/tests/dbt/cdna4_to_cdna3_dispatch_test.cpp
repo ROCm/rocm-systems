@@ -914,7 +914,7 @@ void run_buffer_async_triton_matmul(const std::vector<uint8_t> &elf_bytes,
 
   if (observed)
     *observed = std::move(c_host);
-  // Resources released by HsaDispatchResources::~ (queue first).
+  // Resources released by HsaDispatchResources destructor (queue first).
 }
 
 void run_flash_attention_triton(const std::vector<uint8_t> &elf_bytes, const DispatchTarget &target,
