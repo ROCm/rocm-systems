@@ -526,6 +526,8 @@ def test_literal_fma_can_share_with_matching_operand_layouts_only():
 
     assert rdna_codegen._can_share_execute('s_fmaak_f32', enc_name='ENC_SOP2')
     assert not gfx_codegen._can_share_execute('s_fmaak_f32', enc_name='ENC_SOP2')
+    # Only ENC_SOP2 is shared, so querying ENC_SOP1 must NOT match
+    assert not rdna_codegen._can_share_execute('s_fmaak_f32', enc_name='ENC_SOP1')
 
 
 # ---------------------------------------------------------------------------

@@ -6313,11 +6313,14 @@ class CodeGenerator:
             return arch in info.isa_names and len(info.isa_names) >= 2
         # Check family_shared — keyed by (mnemonic, encoding_name) tuples.
         # A mnemonic may appear in multiple families and with different
-        # encodings. Search all families for any entry matching this mnemonic
-        # that includes the current ISA.
+        # encodings. Match the full (mnemonic, encoding) key when the caller
+        # specifies an encoding. When enc_name is None the caller does not
+        # constrain the encoding, so any entry for the mnemonic is considered.
         for fam_insts in self.shared_plan.family_shared.values():
-            for (mn, enc_name), info in fam_insts.items():
+            for (mn, entry_enc), info in fam_insts.items():
                 if mn != mnemonic:
+                    continue
+                if enc_name is not None and entry_enc != enc_name:
                     continue
                 if info.semantic_class in self._NON_SHAREABLE_CLASSES:
                     return False
