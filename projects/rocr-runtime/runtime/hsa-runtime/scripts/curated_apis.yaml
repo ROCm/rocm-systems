@@ -100,3 +100,158 @@
 
 - api: hsa_amd_queue_wait_external_semaphore
   args: [queue, sem, value]
+
+- api: hsa_signal_create
+  args: [initial_value, num_consumers, consumers, signal]
+  out: [signal]
+
+- api: hsa_signal_destroy
+  args: [signal]
+
+- api: hsa_amd_signal_create
+  args: [initial_value, num_consumers, consumers, attributes, signal]
+  out: [signal]
+  notes: |
+    Verified against /opt/rocm/include/hsa/hsa_ext_amd.h. Same as
+    hsa_signal_create with one extra IN attributes:uint64.
+
+- api: hsa_signal_load_relaxed
+  args: [signal]
+
+- api: hsa_signal_load_scacquire
+  args: [signal]
+
+- api: hsa_signal_store_relaxed
+  args: [signal, value]
+
+- api: hsa_signal_store_screlease
+  args: [signal, value]
+
+- api: hsa_signal_silent_store_relaxed
+  args: [signal, value]
+
+- api: hsa_signal_silent_store_screlease
+  args: [signal, value]
+
+- api: hsa_signal_wait_relaxed
+  args: [signal, condition, compare_value, timeout_hint, wait_state_hint]
+
+- api: hsa_signal_wait_scacquire
+  args: [signal, condition, compare_value, timeout_hint, wait_state_hint]
+
+- api: hsa_signal_group_create
+  args: [num_signals, signals, num_consumers, consumers, signal_group]
+
+- api: hsa_signal_group_destroy
+  args: [signal_group]
+
+- api: hsa_signal_group_wait_any_relaxed
+  args: [signal_group, conditions, compare_values, wait_state_hint, signal, value]
+
+- api: hsa_signal_group_wait_any_scacquire
+  args: [signal_group, conditions, compare_values, wait_state_hint, signal, value]
+
+- api: hsa_signal_and_relaxed
+  args: [signal, value]
+
+- api: hsa_signal_and_scacquire
+  args: [signal, value]
+
+- api: hsa_signal_and_screlease
+  args: [signal, value]
+
+- api: hsa_signal_and_scacq_screl
+  args: [signal, value]
+
+- api: hsa_signal_or_relaxed
+  args: [signal, value]
+
+- api: hsa_signal_or_scacquire
+  args: [signal, value]
+
+- api: hsa_signal_or_screlease
+  args: [signal, value]
+
+- api: hsa_signal_or_scacq_screl
+  args: [signal, value]
+
+- api: hsa_signal_xor_relaxed
+  args: [signal, value]
+
+- api: hsa_signal_xor_scacquire
+  args: [signal, value]
+
+- api: hsa_signal_xor_screlease
+  args: [signal, value]
+
+- api: hsa_signal_xor_scacq_screl
+  args: [signal, value]
+
+- api: hsa_signal_add_relaxed
+  args: [signal, value]
+
+- api: hsa_signal_add_scacquire
+  args: [signal, value]
+
+- api: hsa_signal_add_screlease
+  args: [signal, value]
+
+- api: hsa_signal_add_scacq_screl
+  args: [signal, value]
+
+- api: hsa_signal_subtract_relaxed
+  args: [signal, value]
+
+- api: hsa_signal_subtract_scacquire
+  args: [signal, value]
+
+- api: hsa_signal_subtract_screlease
+  args: [signal, value]
+
+- api: hsa_signal_subtract_scacq_screl
+  args: [signal, value]
+
+- api: hsa_signal_exchange_relaxed
+  args: [signal, value]
+
+- api: hsa_signal_exchange_scacquire
+  args: [signal, value]
+
+- api: hsa_signal_exchange_screlease
+  args: [signal, value]
+
+- api: hsa_signal_exchange_scacq_screl
+  args: [signal, value]
+
+- api: hsa_signal_cas_relaxed
+  args: [signal, expected, value]
+
+- api: hsa_signal_cas_scacquire
+  args: [signal, expected, value]
+
+- api: hsa_signal_cas_screlease
+  args: [signal, expected, value]
+
+- api: hsa_signal_cas_scacq_screl
+  args: [signal, expected, value]
+
+- api: hsa_amd_signal_async_handler
+  args: [signal, cond, value, handler, arg]
+
+- api: hsa_amd_signal_wait_all
+  args: [signal_count, signals, conds, values, timeout_hint, wait_hint, satisfying_values]
+
+- api: hsa_amd_signal_wait_any
+  args: [signal_count, signals, conds, values, timeout_hint, wait_hint, satisfying_value]
+
+- api: hsa_amd_ipc_signal_create
+  args: [signal, handle]
+
+- api: hsa_amd_ipc_signal_attach
+  args: [handle, signal]
+
+- api: hsa_amd_signal_value_pointer
+  args: [signal, value_ptr]
+
+- api: hsa_amd_signal_get_event_id
+  args: [signal, event_id]
