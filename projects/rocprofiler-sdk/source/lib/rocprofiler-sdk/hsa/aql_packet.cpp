@@ -168,7 +168,9 @@ TraceMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
     }
 
     // Device (SQTT output) buffer: the shared manager is the single source, handing out
-    // one buffer per ring slot (output_buffer_index), reused across contexts.
+    // one buffer per ring slot (output_buffer_index), reused across contexts. Marker and
+    // control packets allocate only host memory (above), so this device path is used
+    // solely for SQTT output slots and never aliases them with other allocations.
     const size_t index  = pool.output_buffer_index++;
     void*        shared = thread_trace::acquire_shared_buffer(pool, index, size);
     if(shared == nullptr) return HSA_STATUS_ERROR;
@@ -180,6 +182,8 @@ TraceMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
 void
 TraceMemoryPool::Free(void* ptr, void* data)
 {
+    if(ptr == nullptr) return;
+
     // Shared device buffers are owned by the manager (freed once in free_shared_buffers());
     // skip them here to avoid a double free. Only per-call host buffers are freed.
     if(thread_trace::is_shared_buffer(ptr)) return;
