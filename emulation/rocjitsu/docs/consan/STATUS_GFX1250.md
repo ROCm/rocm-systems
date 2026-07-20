@@ -58,11 +58,11 @@ preserve the earlier green claim.
 | **P1 Sharktank TP1 decode/combined** | 🟩 Exact decode/combined oracles; 704/704 accesses; current paired 1.09x | 🟩 Exact decode/combined oracles; 704/704 accesses, 74/74 barriers; current paired 1.16x | 🟩 Exact decode/combined oracles; 704/704 accesses, 128/128 applicable barriers; current paired 1.28x | 🟧 Compute-active through 600 seconds; no verdict or accepted overhead |
 | **P2 Sharktank TP2 family** | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained |
 | **P4 hip-moi D128 block attention** | 🟩 Current paired 1.56x; 18/18 accesses | 🟩 Current paired 1.11x; 18/18 accesses, 4/4 barriers | 🟥 Current strict analysis incomplete on callable barrier variants | 🟩 Current paired 1.09x; 18/18 accesses, 4/4 barriers |
-| **P4 hip-moi D128 pressure attention** | 🟩 Current paired 1.84x; 40/40 accesses | 🟦 Current exact oracle; 40/40 accesses, 4/4 barriers | 🟥 Current strict analysis incomplete | 🟧 Current 40/40-access run remained compute-active through 120 seconds; isolated rerun pending |
+| **P4 hip-moi D128 pressure attention** | 🟩 Current paired 1.84x; 40/40 accesses | 🟩 Current paired 1.13x; 40/40 accesses, 4/4 barriers | 🟥 Current strict analysis incomplete | 🟧 Current isolated run remained compute-active through 300 seconds; no verdict |
 | **P4 hip-moi WMMA attention** | 🟩 Current paired 1.78x; 18/18 accesses | 🟩 Current paired 1.17x; 18/18 accesses, 4/4 barriers | 🟥 Current strict analysis incomplete on callable barrier variants | 🟩 Current paired 1.17x; 18/18 accesses, 4/4 barriers |
 | **P4 hip-moi Stream-K arrival** | 🟩 Current paired 7.38x; 4/4 accesses | 🟩 Current paired 2.41x; 4/4 accesses, 4/4 barriers, 10/10 atomics, 16/16 fences | 🟥 Current strict analysis incomplete on callable barrier variants | 🟩 Current paired 2.62x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
 | **P4 hip-moi tree atomic-OR** | 🟩 Current paired 6.55x; 4/4 accesses | 🟩 Current paired 2.04x; 4/4 accesses, 4/4 barriers, 10/10 atomics, 16/16 fences | 🟥 Current strict analysis incomplete on callable barrier variants | 🟩 Current paired 2.19x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
-| **P4 Jakub attention variants** | 🟩 Current paired 2.52x; 31/31 accesses | 🟦 Current exact oracle; 62/62 accesses, 4/4 barriers | 🟥 Current strict analysis incomplete | 🟦 Current exact oracle; 62/62 accesses, 4/4 barriers |
+| **P4 Jakub attention variants** | 🟩 Current paired 2.52x; 31/31 accesses | 🟩 Current paired 1.44x; 62/62 accesses, 4/4 barriers | 🟥 Current strict analysis incomplete | 🟩 Current paired 1.55x; 62/62 accesses, 4/4 barriers |
 
 CLIP BF16 is intentionally omitted from the current acceptance matrix.  Its
 uninstrumented execution is not presently practical in the software GPU
@@ -219,8 +219,20 @@ do not promote matrix cells without the end-to-end evidence above.
   Record/Replay and Inline Shadow at 62/62 accesses and 4/4 barriers, and
   D128-pressure Record/Replay at 40/40 accesses and 4/4 barriers.  The
   concurrent D128-pressure Inline Shadow run reached complete static lowering
-  but remained compute-active through its 120-second bound; it is not accepted
-  and moves to an isolated run before paired measurement.
+  but remained compute-active through its 120-second bound.  Its isolated
+  repeat remained compute-active through 300 seconds as well, so it is not
+  accepted and the bound is not extended again.
+
+- 2026-07-20: Current-tip one-repetition paired artifact wave `045` promotes
+  Jakub-attention Record/Replay and Inline Shadow to green.  Record/Replay is
+  1.44x against a 1.857-second paired baseline and Inline Shadow is 1.55x
+  against a 1.824-second paired baseline; both retain the exact oracle,
+  62/62 access coverage, and 4/4 barrier coverage.
+
+- 2026-07-20: The same paired wave promotes D128-pressure Record/Replay to
+  green at 1.13x against a 12.424-second paired baseline.  The exact oracle,
+  all 40/40 access sites, and all 4/4 barrier sites accept after signed FLAT
+  displacement lowering.
 
 - 2026-07-20: F16 sparse closure and the dependent Tensile opcode survey
   promote to green in Record/Replay.  Clean artifact `365` and paired artifact
