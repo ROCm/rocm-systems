@@ -53,7 +53,7 @@ preserve the earlier green claim.
 
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
-| **P0 Qwen3-0.6B prefill** | 🟩 Current paired 1.94x; exact oracle and 1000/1000 accesses | 🟦 Current exact oracle, 1000/1000 accesses, and 46/46 barriers pass; closing paired baseline interrupted | 🟧 Isolated Rocjitsu run signals at ~255 seconds; independent software-GPU cross-check remains active through 600 seconds without a verdict; no accepted overhead | 🟧 Current isolated run signals at the final large-output dispatch after 552 seconds; no verdict or accepted overhead |
+| **P0 Qwen3-0.6B prefill** | 🟩 Current paired 1.94x; exact oracle and 1000/1000 accesses | 🟩 Current paired 5.33x; exact oracle, 1000/1000 accesses, and 46/46 barriers | 🟧 Isolated Rocjitsu run signals at ~255 seconds; independent software-GPU cross-check remains active through 600 seconds without a verdict; no accepted overhead | 🟧 Current isolated run signals at the final large-output dispatch after 552 seconds; no verdict or accepted overhead |
 | **P1 Sharktank TP1 prefill** | 🟩 Exact prefill oracle; 352/352 accesses; current paired 1.17x | 🟩 Exact prefill oracle; 352/352 accesses, 37/37 barriers; current paired 1.25x | 🟩 Exact prefill oracle; 352/352 accesses, 64/64 applicable barriers; current paired 1.51x | 🟩 Exact prefill oracle; 352/352 accesses, 37/37 barriers; current paired 2.11x |
 | **P1 Sharktank TP1 decode/combined** | 🟩 Exact decode/combined oracles; 704/704 accesses; current paired 1.09x | 🟩 Exact decode/combined oracles; 704/704 accesses, 74/74 barriers; current paired 1.16x | 🟩 Exact decode/combined oracles; 704/704 accesses, 128/128 applicable barriers; current paired 1.28x | 🟧 Compute-active through 600 seconds; no verdict or accepted overhead |
 | **P2 Sharktank TP2 family** | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained |
@@ -212,6 +212,14 @@ do not promote matrix cells without the end-to-end evidence above.
 | Four focused flavor verticals | 🟦 Four-engine bootstrap | A clean ping-pong cooperative-LDS workload passed its host-reference oracle with 4/4 accesses patched by SuperCollider.  Record/Replay passed with 4/4 accesses and 8/8 barriers patched and visible records.  Sampled passed with 4/4 accesses and two visible records, but 0/8 barriers.  Inline Shadow is statically and dynamically complete with 4/4 accesses, 8/8 barriers, and one visible record.  Fault/diagnostic behavior, replay qualification, and Sampled synchronization remain open. |
 
 ## Progress log
+
+- 2026-07-20: Current-tip Qwen/Record-Replay paired artifact
+  `consan-revalidation-gfx1250-20260720-qwen-record-replay-paired-058`
+  accepts at 5.33x against a 64,016.01 ms bracketing baseline.  The opening
+  and closing controls are 63,800.54 and 64,231.47 ms; the instrumented row
+  is 340,994.41 ms and retains the exact oracle, 1000/1000 accesses, 46/46
+  barriers, and complete static and dynamic analysis.  The cell returns to
+  green.
 
 - 2026-07-20: Current-tip Qwen/SuperCollider paired artifact
   `consan-revalidation-gfx1250-20260720-qwen-supercollider-paired-058`
