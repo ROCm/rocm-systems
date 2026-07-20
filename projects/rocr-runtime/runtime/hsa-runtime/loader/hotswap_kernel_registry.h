@@ -7,6 +7,7 @@
 #ifndef HSA_RUNTIME_LOADER_HOTSWAP_KERNEL_REGISTRY_H_
 #define HSA_RUNTIME_LOADER_HOTSWAP_KERNEL_REGISTRY_H_
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
@@ -14,6 +15,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 // Bookkeeping for the HotSwap dispatch intercept. The loader records every
 // kernel object it loads here so the dispatch-time hook can, given a packet's
@@ -209,10 +211,9 @@ inline bool DeriveHotSwapKernelRecordName(const std::string& symbol_name,
   return true;
 }
 
-// Thread-safe map from kernel object address to its HotSwapKernelRecord. Owned by
-// the loader; entries are added as kernels load and removed as code objects are
-// destroyed. Lookups also match addresses that fall within a registered ROCr blit
-// object's range.
+// Thread-safe registry from exact kernel object address to its HotSwap record.
+// ROCr blit shaders are also tracked in a small side list so range fallback only
+// scans runtime-owned blit records, not every user kernel loaded in the process.
 class HotSwapKernelRegistry {
  public:
   std::shared_ptr<HotSwapKernelRecord> RegisterKernelObject(
@@ -252,6 +253,7 @@ class HotSwapKernelRegistry {
     if (records_.find(address) != records_.end())
       ReportHotSwapRegistryError("duplicate ROCR blit kernel object address");
     records_[address] = record;
+    rocr_blit_records_.push_back(record);
     return record;
   }
 
@@ -267,6 +269,12 @@ class HotSwapKernelRegistry {
     auto it = records_.find(address);
     if (it == records_.end() || it->second->SourceKind != "rocr_blit")
       return false;
+    auto blit_it =
+        std::find(rocr_blit_records_.begin(), rocr_blit_records_.end(),
+                  it->second);
+    if (blit_it == rocr_blit_records_.end())
+      ReportHotSwapRegistryError("missing ROCR blit range record");
+    rocr_blit_records_.erase(blit_it);
     records_.erase(it);
     return true;
   }
@@ -275,8 +283,8 @@ class HotSwapKernelRegistry {
     std::lock_guard<std::mutex> guard(mutex_);
     auto it = records_.find(address);
     if (it != records_.end()) return it->second;
-    for (const auto& entry : records_) {
-      if (entry.second->IsRegisteredRocrBlit(address)) return entry.second;
+    for (const auto& record : rocr_blit_records_) {
+      if (record->IsRegisteredRocrBlit(address)) return record;
     }
     return nullptr;
   }
@@ -298,6 +306,7 @@ class HotSwapKernelRegistry {
  private:
   mutable std::mutex mutex_;
   std::unordered_map<uint64_t, std::shared_ptr<HotSwapKernelRecord>> records_;
+  std::vector<std::shared_ptr<HotSwapKernelRecord>> rocr_blit_records_;
 };
 
 }  // namespace loader

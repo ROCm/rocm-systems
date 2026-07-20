@@ -234,6 +234,7 @@ void TestRocrBlitRegistryRangeAndLifetime() {
 
   EXPECT_TRUE(registry.UnregisterRocrBlitTargetKernelObject(0x1000));
   EXPECT_FALSE(registry.Lookup(0x1000));
+  EXPECT_FALSE(registry.Lookup(0x107f));
 }
 
 void TestInvalidRocrBlitRegistrationIsNotAllowed() {
@@ -314,6 +315,19 @@ void TestRocrBlitUnregisterDoesNotRemoveOtherKinds() {
 
   EXPECT_FALSE(registry.UnregisterRocrBlitTargetKernelObject(0x1900));
   EXPECT_TRUE(registry.Lookup(0x1900).get() == source.get());
+}
+
+void TestRocrBlitRangeDoesNotHideExactKernelObject() {
+  rocr::amd::hsa::loader::HotSwapKernelRegistry registry;
+  auto blit = registry.RegisterRocrBlitTargetKernelObject(
+      0x2000, 0x100, "gfx942", "embedded_rocr_target_blit_shader",
+      "invalid");
+  auto source = registry.RegisterKernelObject(
+      0x2080, "kernel", rocr::amd::hsa::loader::HotSwapKernelKind::LazySource,
+      nullptr);
+
+  EXPECT_TRUE(registry.Lookup(0x207f).get() == blit.get());
+  EXPECT_TRUE(registry.Lookup(0x2080).get() == source.get());
 }
 
 void TestLoadedKernelUnregisterKeepsPinnedTranslatedTarget() {
@@ -495,6 +509,7 @@ int main() {
   TestDuplicateKernelObjectRegistrationAborts();
   TestInvalidRocrBlitDuplicateAddressAborts();
   TestRocrBlitUnregisterDoesNotRemoveOtherKinds();
+  TestRocrBlitRangeDoesNotHideExactKernelObject();
   TestLoadedKernelUnregisterKeepsPinnedTranslatedTarget();
   TestLaunchMetadataUpdate();
   TestSegmentSizePatchAddsDynamicDelta();
