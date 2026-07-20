@@ -1214,7 +1214,7 @@ def test_load_pc_sampling_results_loads_all_pid_files_in_numeric_order(
     nested_path.mkdir()
     nested_result_path = nested_path / "1_ps_file_results.json"
     write_results_json(nested_result_path, pid=1)
-    (tmp_path / "2_ps_file_results.json").symlink_to(nested_result_path)
+    (tmp_path / "1_ps_file_results.json").symlink_to(nested_result_path)
     write_results_json(tmp_path / "worker_ps_file_results.json", pid=2)
     write_results_json(tmp_path / "4_ps_file_results.json.backup", pid=4)
     (tmp_path / "5_ps_file_results.json").mkdir()
@@ -1222,6 +1222,7 @@ def test_load_pc_sampling_results_loads_all_pid_files_in_numeric_order(
     tool_data_records = load_pc_sampling_results(str(tmp_path))
 
     assert [record["metadata"]["pid"] for record in tool_data_records] == [
+        1,
         3,
         20,
         101,
