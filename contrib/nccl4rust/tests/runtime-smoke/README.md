@@ -4,13 +4,21 @@ This standalone package exercises the Rust host wrappers and the CUDA-Oxide
 device boundary on two GPUs in one process. Each rank runs on its own host
 thread and current CUDA device. The smoke:
 
-1. initializes a two-rank communicator with `Communicator::init_rank`;
-2. verifies a typed `f32` all-reduce;
-3. creates and copies a public NCCL device-communicator image;
-4. launches the CUDA-Oxide `nccl4rust_query_smoke` kernel from the linked
-   device cubin and validates its world/LSA query results; and
-5. explicitly destroys the device communicator and finalizes the host
-   communicator.
+1. initializes a two-rank communicator and verifies a typed host `f32`
+   all-reduce;
+2. allocates and registers symmetric source and destination windows;
+3. creates a public NCCL device communicator with two LSA barriers and copies
+   its image to each GPU;
+4. validates scalar queries, typed world/LSA/rail teams, and rank translation;
+5. validates local, LSA, world, and typed-team self-pointer mappings at two
+   window offsets while leaving multimem disabled;
+6. runs a partitioned 17-element LSA reduce-sum-copy twice, reusing the barrier
+   indices and checking the non-16-byte tail and surrounding guards; and
+7. destroys the device communicator before deregistering the windows and
+   finalizing the host communicator.
+
+Both visible GPUs must belong to one two-rank LSA team. Runtime multimem is not
+covered by this smoke.
 
 Build the matching NCCL library, shim, and CUDA-Oxide cubin first. Then run on
 a node with at least two `sm_90` GPUs:
@@ -33,7 +41,7 @@ devices explicitly:
 srun -p h100x8-cicd -N1 -n1 --exclusive -c16 --mem=64G -t 00:10:00 \
   bash -lc 'export CUDA_VISIBLE_DEVICES=0,3; \
     export LD_LIBRARY_PATH="$NCCL_LIB_DIR:$CUDA_HOME/lib64"; \
-    timeout 180s cargo run --release --offline'
+    timeout 240s cargo run --release --offline'
 ```
 
 Build NCCL with `-DCMAKE_CUDA_ARCHITECTURES=90` for this node. A library that

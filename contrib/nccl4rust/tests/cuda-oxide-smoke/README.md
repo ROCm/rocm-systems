@@ -1,8 +1,23 @@
 # CUDA-Oxide compile-and-link smoke
 
-This package ensures CUDA-Oxide can lower both the query wrappers and an LSA
-barrier/reduce-sum-copy sequence, then resolves their NCCL device calls through
-nvJitLink. The link-only smoke does not load CUDA or require a working GPU.
+This package ensures CUDA-Oxide can lower the complete Rust-facing NCCL device
+surface, then resolves every raw shim call through nvJitLink. Its compile-only
+kernels cover:
+
+- communicator queries;
+- world, LSA, and rail teams derived from scalar communicator queries, plus
+  typed rank translation;
+- local, LSA, world, team, explicit-multimem, and LSA-multimem pointers with
+  several Rust pointee types; multimem calls remain link-covered behind a
+  runtime flag so the kernel can also execute without multimem support;
+- thread-, warp-, and CTA-cooperative LSA barriers, including runtime `u32`
+  indices and false, true, and runtime boolean argument mapping; and
+- the CTA `f32` LSA reduce-sum-copy building block.
+
+Before linking, the host driver also verifies that the emitted PTX or NVVM IR
+references every symbol in the raw device shim. This guards against a wrapper
+or compile-only kernel silently dropping out of code generation. The link-only
+smoke does not load CUDA or require a working GPU.
 
 ## Hopper-native PTX + LTOIR link (default)
 
@@ -18,6 +33,10 @@ cd tests/cuda-oxide-smoke
 CUDA_HOME=/path/to/cuda cargo oxide build nccl4rust-cuda-oxide-smoke --arch=sm_90
 CUDA_HOME=/path/to/cuda cargo run --offline
 ```
+
+Use the CUDA-Oxide codegen backend from the revision pinned in `Cargo.toml`.
+The dependency revision and backend must agree; a newer backend may reject or
+lower device-extern signatures differently.
 
 The defaults are:
 

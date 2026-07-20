@@ -60,11 +60,13 @@ The initial device layer covers:
 - thread, warp, and CTA LSA barriers; and
 - a CTA `f32` LSA reduce-sum-copy instantiation.
 
-The compile-and-link CUDA-Oxide smoke covers communicator queries and an LSA
-barrier/reduce-sum-copy sequence without requiring a GPU. The runtime smoke
-executes the query kernel and a host `f32` all-reduce on two GPUs. GIN, hybrid
-barriers, low-latency all-to-all, additional reduce/copy types, and an end-to-end
-window/reduce-copy runtime test are follow-on work.
+The compile-and-link CUDA-Oxide smoke covers all 16 raw device-shim calls and
+the complete initial Rust wrapper surface without requiring a GPU. The runtime
+smoke exercises scalar and typed team queries, rank translation, window pointer
+translation, LSA barriers, and an offset/tail-sensitive registered-window
+reduce-sum-copy in addition to a host `f32` all-reduce. GIN, hybrid barriers,
+low-latency all-to-all, additional reduce/copy types, and runtime multimem
+coverage are follow-on work.
 
 ## Requirements
 
@@ -193,14 +195,17 @@ a node with two visible compatible GPUs:
 ```bash
 cd ../runtime-smoke
 export NCCL4RUST_CUBIN=../cuda-oxide-smoke/nccl4rust_cuda_oxide_smoke_sm_90.cubin
-timeout 180s cargo run --release --offline
+timeout 240s cargo run --release --offline
 ```
 
-The test uses one Rust thread and CUDA device per rank. It validates communicator
-queries, a typed `f32` all-reduce, device-communicator creation and byte copying,
-execution of the CUDA-Oxide query kernel, explicit device-communicator teardown,
-and host finalization. See `tests/runtime-smoke/README.md` for the complete
-environment and launch contract.
+The test uses one Rust thread and CUDA device per rank. It validates a typed
+host `f32` all-reduce, device-communicator creation and byte copying, scalar and
+typed world/LSA/rail queries, rank translation, self-pointer translation at two
+window offsets, and a 17-element device LSA reduce-sum-copy. The device reduction
+runs for two barrier epochs over registered source and destination windows and
+checks surrounding guards before explicit device-communicator teardown and host
+finalization. See `tests/runtime-smoke/README.md` for the complete environment
+and launch contract.
 
 ## Host/device ownership boundary
 
@@ -230,21 +235,31 @@ communicators do not require per-module registration.
   functions are unsafe until an API can carry completion-dependent lifetimes.
 - Device pointer translation is unsafe because byte offsets, element types,
   peer membership, and window lifetimes are caller invariants.
-- Device barriers and reduce/copy calls are unsafe because every required
-  thread and rank must participate convergently with matching arguments.
+- Device barriers are unsafe because every required thread and rank must
+  participate convergently with matching arguments. Reduce/copy invocations
+  are not rank-collective: callers must assign each output region to one issuer
+  or to issuers with disjoint regions, while arranging any required barriers
+  separately.
 
 ## Validation status
 
 The public-header CUDA shim is compile-checked for `sm_90` with CUDA 13.2, and
 its output has the expected raw LTOIR magic (`ed 43 4e 7f`). CUDA-Oxide's Rust
-PTX and that shim LTOIR also link successfully into a native `sm_90` cubin.
-The host binding and wrapper tests pass against matching freshly built NCCL
-2.31 headers and `libnccl.so`, including a loaded-library version check.
+PTX and that shim LTOIR also link successfully into a native `sm_90` cubin. The
+link smoke verifies that all 16 shim identifiers survive code generation. Host
+binding and wrapper tests cover raw ABI signatures, public-structure layout,
+every initial device wrapper's argument mapping, and invalid or overflowing
+device-communicator requirements. They pass against matching freshly built
+NCCL 2.31 headers and `libnccl.so`, including a loaded-library version check.
 
-The runtime smoke passes on two H100 NVL GPUs with NCCL 2.31.0a7 and CUDA 13.2:
-the host all-reduce returns `3.0` on both ranks, and the real device kernel
-returns world/LSA queries `[0, 2, 0, 2]` and `[1, 2, 1, 2]`. The NCCL library
-was built with native `sm_90` SASS for compatibility with the node's driver.
+The runtime smoke passes repeatedly on two directly connected H100 GPUs with
+NCCL 2.31.0a7 and CUDA 13.2. Both host and device reductions return `3.0` on
+both ranks; the kernels also validate scalar queries, world/LSA/rail teams and
+rank translation, local/LSA/world/team self-pointer mappings at two offsets,
+two reused LSA barrier epochs, a 17-element non-16-byte-aligned reduction tail,
+and untouched guard regions. Runtime multimem is intentionally disabled. The
+NCCL library was built with native `sm_90` SASS for compatibility with the
+node's driver.
 
 ## License
 

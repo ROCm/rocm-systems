@@ -50,24 +50,6 @@ unsafe extern "C" {
     pub fn nccl4rust_dev_comm_lsa_rank(comm: *const ncclDevComm_t) -> i32;
     pub fn nccl4rust_dev_comm_lsa_size(comm: *const ncclDevComm_t) -> i32;
 
-    pub fn nccl4rust_team_world(
-        comm: *const ncclDevComm_t,
-        n_ranks: *mut i32,
-        rank: *mut i32,
-        stride: *mut i32,
-    );
-    pub fn nccl4rust_team_lsa(
-        comm: *const ncclDevComm_t,
-        n_ranks: *mut i32,
-        rank: *mut i32,
-        stride: *mut i32,
-    );
-    pub fn nccl4rust_team_rail(
-        comm: *const ncclDevComm_t,
-        n_ranks: *mut i32,
-        rank: *mut i32,
-        stride: *mut i32,
-    );
     pub fn nccl4rust_team_rank_to_world(
         comm: *const ncclDevComm_t,
         team_n_ranks: i32,
@@ -140,3 +122,92 @@ const _: () = {
     assert!(core::mem::size_of::<bool>() == 1);
     assert!(core::mem::align_of::<bool>() == 1);
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::mem::{align_of, offset_of, size_of};
+
+    #[test]
+    fn team_layout_and_fields_match_the_public_abi() {
+        let team = ncclTeam_t {
+            n_ranks: 8,
+            rank: 3,
+            stride: 2,
+        };
+
+        assert_eq!(size_of::<ncclTeam_t>(), 3 * size_of::<i32>());
+        assert_eq!(align_of::<ncclTeam_t>(), align_of::<i32>());
+        assert_eq!(offset_of!(ncclTeam_t, n_ranks), 0);
+        assert_eq!(offset_of!(ncclTeam_t, rank), size_of::<i32>());
+        assert_eq!(offset_of!(ncclTeam_t, stride), 2 * size_of::<i32>());
+        assert_eq!((team.n_ranks, team.rank, team.stride), (8, 3, 2));
+    }
+
+    #[test]
+    fn multimem_handle_is_one_pointer_wide() {
+        let pointer = core::ptr::without_provenance_mut::<c_void>(0x1234);
+        let handle = ncclMultimemHandle_t {
+            mc_base_ptr: pointer,
+        };
+
+        assert_eq!(size_of::<ncclMultimemHandle_t>(), size_of::<*mut c_void>());
+        assert_eq!(
+            align_of::<ncclMultimemHandle_t>(),
+            align_of::<*mut c_void>()
+        );
+        assert_eq!(offset_of!(ncclMultimemHandle_t, mc_base_ptr), 0);
+        assert_eq!(handle.mc_base_ptr, pointer);
+    }
+
+    #[test]
+    fn opaque_handles_have_the_expected_representation() {
+        assert_eq!(size_of::<ncclDevComm_t>(), 0);
+        assert_eq!(align_of::<ncclDevComm_t>(), 1);
+        assert_eq!(size_of::<ncclWindow_t>(), size_of::<*mut c_void>());
+        assert_eq!(align_of::<ncclWindow_t>(), align_of::<*mut c_void>());
+    }
+
+    #[cfg(not(feature = "cuda-oxide"))]
+    mod host_c_abi_signatures {
+        use super::*;
+
+        // These assignments intentionally have no runtime assertions:
+        // compiling them detects accidental changes to the host C ABI
+        // declarations. `#[device]` gives these declarations Rust ABI inside
+        // a CUDA-Oxide build, so that configuration is compile-checked by the
+        // device smoke package instead.
+        const _: unsafe extern "C" fn(*const ncclDevComm_t) -> i32 = nccl4rust_dev_comm_rank;
+        const _: unsafe extern "C" fn(*const ncclDevComm_t) -> i32 = nccl4rust_dev_comm_n_ranks;
+        const _: unsafe extern "C" fn(*const ncclDevComm_t) -> i32 = nccl4rust_dev_comm_lsa_rank;
+        const _: unsafe extern "C" fn(*const ncclDevComm_t) -> i32 = nccl4rust_dev_comm_lsa_size;
+        const _: unsafe extern "C" fn(*const ncclDevComm_t, i32, i32, i32, i32) -> i32 =
+            nccl4rust_team_rank_to_world;
+        const _: unsafe extern "C" fn(*const ncclDevComm_t, i32, i32, i32, i32) -> i32 =
+            nccl4rust_team_rank_to_lsa;
+        const _: unsafe extern "C" fn(ncclWindow_t, usize) -> *mut c_void =
+            nccl4rust_get_local_pointer;
+        const _: unsafe extern "C" fn(ncclWindow_t, usize, i32) -> *mut c_void =
+            nccl4rust_get_lsa_pointer;
+        const _: unsafe extern "C" fn(ncclWindow_t, usize, i32) -> *mut c_void =
+            nccl4rust_get_peer_pointer;
+        const _: unsafe extern "C" fn(ncclWindow_t, usize, i32, i32, i32, i32) -> *mut c_void =
+            nccl4rust_get_peer_pointer_team;
+        const _: unsafe extern "C" fn(ncclWindow_t, usize, *mut c_void) -> *mut c_void =
+            nccl4rust_get_multimem_pointer;
+        const _: unsafe extern "C" fn(ncclWindow_t, usize, *const ncclDevComm_t) -> *mut c_void =
+            nccl4rust_get_lsa_multimem_pointer;
+        const _: unsafe extern "C" fn(*const ncclDevComm_t, u32, bool) =
+            nccl4rust_lsa_barrier_thread;
+        const _: unsafe extern "C" fn(*const ncclDevComm_t, u32, bool) = nccl4rust_lsa_barrier_warp;
+        const _: unsafe extern "C" fn(*const ncclDevComm_t, u32, bool) = nccl4rust_lsa_barrier_cta;
+        const _: unsafe extern "C" fn(
+            *const ncclDevComm_t,
+            ncclWindow_t,
+            usize,
+            ncclWindow_t,
+            usize,
+            usize,
+        ) = nccl4rust_lsa_reduce_sum_copy_f32_cta;
+    }
+}

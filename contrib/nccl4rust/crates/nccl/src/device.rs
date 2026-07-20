@@ -178,6 +178,172 @@ impl DeviceCommRequirements {
         self.raw.ginVaSignalsRequired = required;
         self
     }
+
+    fn validate_for_communicator(&self, communicator: sys::ncclComm_t) -> Result<()> {
+        // These public host helpers return value types and are valid for every
+        // active communicator. The team sizes are needed to mirror NCCL's
+        // device-resource sizing expressions before entering C++.
+        let world = unsafe { sys::ncclTeamWorld(communicator) };
+        let lsa = unsafe { sys::ncclTeamLsa(communicator) };
+        let rail = unsafe { sys::ncclTeamRail(communicator) };
+        self.validate_team_sizes(world.nRanks, lsa.nRanks, rail.nRanks)
+    }
+
+    fn validate_team_sizes(&self, world_size: i32, lsa_size: i32, rail_size: i32) -> Result<()> {
+        for (name, value) in [
+            ("world team size", world_size),
+            ("LSA team size", lsa_size),
+            ("rail team size", rail_size),
+        ] {
+            if value <= 0 {
+                return Err(Error::local(format!(
+                    "NCCL returned an invalid {name}: {value}"
+                )));
+            }
+        }
+
+        for (name, value) in [
+            ("barrier count", self.raw.barrierCount),
+            ("LSA barrier count", self.raw.lsaBarrierCount),
+            ("rail GIN barrier count", self.raw.railGinBarrierCount),
+            ("LSA LLA2A block count", self.raw.lsaLLA2ABlockCount),
+            ("LSA LLA2A slot count", self.raw.lsaLLA2ASlotCount),
+            ("GIN context count", self.raw.ginContextCount),
+            ("GIN signal count", self.raw.ginSignalCount),
+            ("GIN counter count", self.raw.ginCounterCount),
+            ("GIN queue depth", self.raw.ginQueueDepth),
+            ("world GIN barrier count", self.raw.worldGinBarrierCount),
+        ] {
+            require_nonnegative(name, value)?;
+        }
+
+        // ncclLsaBarrierCreateRequirement computes
+        //   (3*nBarriers + nBarriers*team.nRanks)
+        // as signed int before converting to size_t.
+        checked_lsa_barrier_resources(
+            "hybrid LSA barrier resources",
+            self.raw.barrierCount,
+            lsa_size,
+        )?;
+        checked_lsa_barrier_resources("LSA barrier resources", self.raw.lsaBarrierCount, lsa_size)?;
+
+        // The GIN helpers multiply barrier counts by team sizes as signed int,
+        // then ncclDevrCommCreateInternal accumulates every signal count in an
+        // int and multiplies it by the context count.
+        let hybrid_rail_signals = checked_nonnegative_product(
+            "hybrid rail GIN barrier resources",
+            &[self.raw.barrierCount, rail_size],
+        )?;
+        let hybrid_world_signals = checked_nonnegative_product(
+            "hybrid world GIN barrier resources",
+            &[self.raw.barrierCount, world_size],
+        )?;
+        let rail_signals = checked_nonnegative_product(
+            "rail GIN barrier resources",
+            &[self.raw.railGinBarrierCount, rail_size],
+        )?;
+        let world_signals = checked_nonnegative_product(
+            "world GIN barrier resources",
+            &[self.raw.worldGinBarrierCount, world_size],
+        )?;
+        let signal_total = checked_nonnegative_sum(
+            "GIN signal resources",
+            &[
+                self.raw.ginSignalCount,
+                hybrid_rail_signals,
+                hybrid_world_signals,
+                rail_signals,
+                world_signals,
+            ],
+        )?;
+        checked_nonnegative_product(
+            "GIN context signal shadows",
+            &[self.raw.ginContextCount, signal_total],
+        )?;
+
+        if self.raw.ginForceEnable || self.raw.ginConnectionType != sys::NCCL_GIN_CONNECTION_NONE {
+            // A backend may expose up to four GIN connections. ROUNDUP first
+            // adds connection_count-1 in signed arithmetic, then the GDAKI
+            // backend sizes QPs and signal/counter tables with signed products.
+            let rounded_context_bound =
+                checked_add("GIN context count", self.raw.ginContextCount, 3)?;
+            let world_with_local = checked_add("world team size", world_size, 1)?;
+            checked_nonnegative_product(
+                "GIN communication QPs",
+                &[rounded_context_bound, world_size],
+            )?;
+            checked_nonnegative_product(
+                "GIN companion QPs",
+                &[rounded_context_bound, world_size, 2],
+            )?;
+            checked_nonnegative_product(
+                "GIN local and communication QPs",
+                &[rounded_context_bound, world_with_local],
+            )?;
+            checked_nonnegative_product(
+                "GIN signal table",
+                &[rounded_context_bound, signal_total],
+            )?;
+            checked_nonnegative_product(
+                "GIN counter table",
+                &[rounded_context_bound, self.raw.ginCounterCount],
+            )?;
+        }
+
+        // ncclLLA2ACreateRequirement uses nBlocks*(1 + 2*nSlots)*16 in
+        // signed arithmetic. This release does not consume these fields yet,
+        // but validating the public contract keeps the wrapper safe when it
+        // does and matches the helper backing that API.
+        let slots_twice = checked_nonnegative_product(
+            "LSA LLA2A slot resources",
+            &[self.raw.lsaLLA2ASlotCount, 2],
+        )?;
+        let slots_with_control = checked_add("LSA LLA2A slot resources", slots_twice, 1)?;
+        checked_nonnegative_product(
+            "LSA LLA2A resources",
+            &[self.raw.lsaLLA2ABlockCount, slots_with_control, 16],
+        )?;
+
+        Ok(())
+    }
+}
+
+fn require_nonnegative(name: &str, value: i32) -> Result<()> {
+    if value < 0 {
+        Err(Error::local(format!(
+            "{name} must be nonnegative, got {value}"
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+fn checked_add(name: &str, left: i32, right: i32) -> Result<i32> {
+    left.checked_add(right)
+        .ok_or_else(|| Error::local(format!("{name} exceeds NCCL's signed resource limit")))
+}
+
+fn checked_nonnegative_product(name: &str, factors: &[i32]) -> Result<i32> {
+    factors.iter().try_fold(1_i32, |product, &factor| {
+        require_nonnegative(name, factor)?;
+        product
+            .checked_mul(factor)
+            .ok_or_else(|| Error::local(format!("{name} exceeds NCCL's signed resource limit")))
+    })
+}
+
+fn checked_lsa_barrier_resources(name: &str, count: i32, team_size: i32) -> Result<i32> {
+    let control_words = checked_nonnegative_product(name, &[3, count])?;
+    let rank_words = checked_nonnegative_product(name, &[count, team_size])?;
+    checked_add(name, control_words, rank_words)
+}
+
+fn checked_nonnegative_sum(name: &str, terms: &[i32]) -> Result<i32> {
+    terms.iter().try_fold(0_i32, |sum, &term| {
+        require_nonnegative(name, term)?;
+        sum.checked_add(term)
+            .ok_or_else(|| Error::local(format!("{name} exceeds NCCL's signed resource limit")))
+    })
 }
 
 /// An owned host image of `ncclDevComm_t` and its NCCL-side resources.
@@ -210,6 +376,7 @@ impl Communicator {
     ) -> Result<DeviceCommunicator<'comm>> {
         ensure_no_active_group("NCCL device-communicator creation")?;
         let communicator = self.active_raw()?;
+        requirements.validate_for_communicator(communicator)?;
         // NCCL's implementation initializes the entire public image (including
         // padding) before returning. Starting zeroed also keeps failure cleanup
         // and byte-copy instrumentation deterministic.
@@ -369,6 +536,95 @@ mod tests {
         );
         assert!(!requirements.raw.ginStrongSignalsRequired);
         assert!(requirements.raw.ginVaSignalsRequired);
+    }
+
+    #[test]
+    fn device_resource_counts_must_be_nonnegative() {
+        macro_rules! assert_rejected {
+            ($field:ident) => {{
+                let mut requirements = DeviceCommRequirements::default();
+                requirements.raw.$field = -1;
+                let error = requirements.validate_team_sizes(8, 4, 2).unwrap_err();
+                assert!(
+                    error.message().contains("nonnegative"),
+                    "{} produced unexpected error: {error}",
+                    stringify!($field)
+                );
+            }};
+        }
+
+        assert_rejected!(barrierCount);
+        assert_rejected!(lsaBarrierCount);
+        assert_rejected!(railGinBarrierCount);
+        assert_rejected!(lsaLLA2ABlockCount);
+        assert_rejected!(lsaLLA2ASlotCount);
+        assert_rejected!(ginContextCount);
+        assert_rejected!(ginSignalCount);
+        assert_rejected!(ginCounterCount);
+        assert_rejected!(ginQueueDepth);
+        assert_rejected!(worldGinBarrierCount);
+    }
+
+    #[test]
+    fn device_resource_arithmetic_is_checked_before_nccl() {
+        let lsa_barriers = DeviceCommRequirements::default().lsa_barrier_count(i32::MAX);
+        assert!(
+            lsa_barriers
+                .validate_team_sizes(8, 4, 2)
+                .unwrap_err()
+                .message()
+                .contains("signed resource limit")
+        );
+
+        let mut gin_shadows = DeviceCommRequirements::default().gin_context_count(2);
+        gin_shadows.raw.ginSignalCount = i32::MAX;
+        assert!(
+            gin_shadows
+                .validate_team_sizes(8, 4, 2)
+                .unwrap_err()
+                .message()
+                .contains("signed resource limit")
+        );
+
+        let lla2a = DeviceCommRequirements::default().lsa_lla2a(i32::MAX, 1);
+        assert!(
+            lla2a
+                .validate_team_sizes(8, 4, 2)
+                .unwrap_err()
+                .message()
+                .contains("signed resource limit")
+        );
+
+        let contexts = DeviceCommRequirements::default()
+            .gin_connection_type(GinConnectionType::Full)
+            .gin_context_count(i32::MAX);
+        assert!(
+            contexts
+                .validate_team_sizes(8, 4, 2)
+                .unwrap_err()
+                .message()
+                .contains("signed resource limit")
+        );
+
+        let mut context_counters = DeviceCommRequirements::default()
+            .gin_connection_type(GinConnectionType::Full)
+            .gin_context_count(i32::MAX / 4);
+        context_counters.raw.ginCounterCount = 8;
+        assert!(
+            context_counters
+                .validate_team_sizes(1, 1, 1)
+                .unwrap_err()
+                .message()
+                .contains("signed resource limit")
+        );
+    }
+
+    #[test]
+    fn runtime_smoke_device_requirements_pass_resource_validation() {
+        DeviceCommRequirements::default()
+            .lsa_barrier_count(2)
+            .validate_team_sizes(2, 2, 1)
+            .unwrap();
     }
 
     #[test]

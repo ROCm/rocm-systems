@@ -13,12 +13,6 @@ __device__ int nccl4rust_dev_comm_n_ranks(ncclDevComm_t const* comm);
 __device__ int nccl4rust_dev_comm_lsa_rank(ncclDevComm_t const* comm);
 __device__ int nccl4rust_dev_comm_lsa_size(ncclDevComm_t const* comm);
 
-__device__ void nccl4rust_team_world(
-  ncclDevComm_t const* comm, int* nRanks, int* rank, int* stride);
-__device__ void nccl4rust_team_lsa(
-  ncclDevComm_t const* comm, int* nRanks, int* rank, int* stride);
-__device__ void nccl4rust_team_rail(
-  ncclDevComm_t const* comm, int* nRanks, int* rank, int* stride);
 __device__ int nccl4rust_team_rank_to_world(
   ncclDevComm_t const* comm, int teamNRanks, int teamRank, int teamStride, int rank);
 __device__ int nccl4rust_team_rank_to_lsa(

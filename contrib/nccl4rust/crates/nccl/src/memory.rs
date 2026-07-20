@@ -266,12 +266,17 @@ impl<T> Window<'_, '_, T> {
         ensure_no_active_group("NCCL memory-window user-pointer query")?;
         let mut pointer: *mut c_void = ptr::null_mut();
         check(unsafe {
-            sys::ncclWinGetUserPtr(self.communicator.raw(), self.raw(), &mut pointer)
+            sys::ncclWinGetUserPtr(self.communicator.raw(), self.as_raw(), &mut pointer)
         })?;
         Ok(pointer.cast::<T>())
     }
 
-    pub(crate) fn raw(&self) -> sys::ncclWindow_t {
+    /// Return the borrowed public NCCL window handle.
+    ///
+    /// This handle is the value passed to device kernels using the NCCL
+    /// window API. It remains valid only while this `Window` is alive; kernel
+    /// launches using it must complete before the window is dropped.
+    pub fn as_raw(&self) -> sys::ncclWindow_t {
         self.handle
             .expect("live Window must contain a raw handle")
             .as_ptr()

@@ -38,28 +38,6 @@ NCCL4RUST_EXPORT int nccl4rust_dev_comm_lsa_size(ncclDevComm_t const* comm) {
   return comm->lsaSize;
 }
 
-__device__ __forceinline__ void nccl4rust_store_team(
-    ncclTeam_t team, int* nRanks, int* rank, int* stride) {
-  *nRanks = team.nRanks;
-  *rank = team.rank;
-  *stride = team.stride;
-}
-
-NCCL4RUST_EXPORT void nccl4rust_team_world(
-    ncclDevComm_t const* comm, int* nRanks, int* rank, int* stride) {
-  nccl4rust_store_team(ncclTeamWorld(*comm), nRanks, rank, stride);
-}
-
-NCCL4RUST_EXPORT void nccl4rust_team_lsa(
-    ncclDevComm_t const* comm, int* nRanks, int* rank, int* stride) {
-  nccl4rust_store_team(ncclTeamLsa(*comm), nRanks, rank, stride);
-}
-
-NCCL4RUST_EXPORT void nccl4rust_team_rail(
-    ncclDevComm_t const* comm, int* nRanks, int* rank, int* stride) {
-  nccl4rust_store_team(ncclTeamRail(*comm), nRanks, rank, stride);
-}
-
 NCCL4RUST_EXPORT int nccl4rust_team_rank_to_world(
     ncclDevComm_t const* comm, int teamNRanks, int teamRank, int teamStride, int rank) {
   ncclTeam_t team = {teamNRanks, teamRank, teamStride};
