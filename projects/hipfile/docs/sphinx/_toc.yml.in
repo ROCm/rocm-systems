@@ -10,6 +10,8 @@ subtrees:
         title: Install Python bindings
       - file: install/setup-local-nvme
         title: Set up a local NVMe drive
+      - file: install/setup-nvmeof
+        title: Set up an NVMeoF disk
   - caption: How to
     entries:
       - file: how-to/register-file-and-buffer
