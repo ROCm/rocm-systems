@@ -24,6 +24,8 @@
 
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
+#include <hsa/hsa.h>
+
 #include <cstddef>
 #include <unordered_map>
 
@@ -56,9 +58,11 @@ record_alloc(void* ptr, size_t size);
 void
 record_free(void* ptr);
 
-// Frozen copy of the inventory taken under a brief read lock. Used by memory_snapshot at snap time.
+// Frozen ptr->size view of the inventory restricted to allocations owned by `agent`, taken under a
+// brief read lock. Used by memory_snapshot at snap time so each replay only snapshots/restores its
+// own agent's device memory.
 alloc_map_t
-snap_inventory();
+snap_inventory(hsa_agent_t agent);
 
 // Install inventory wrappers on top of the existing table function pointers.
 void
