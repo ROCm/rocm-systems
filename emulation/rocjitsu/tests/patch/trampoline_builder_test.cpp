@@ -484,6 +484,33 @@ TEST(SoppBranchRelayPlanner, UsesDistinctRelaysToAdmitAllFeasibleSources) {
   EXPECT_TRUE(plan->rejected_source_indices.empty());
 }
 
+TEST(SoppBranchRelayPlanner, ScalesAcrossLargeGeneratedCoordinateSets) {
+  constexpr size_t kRouteCount = 1400u;
+  constexpr uint64_t kMaximumForwardHop = 4u + 32767u * 4u;
+  std::vector<uint64_t> sources;
+  std::vector<uint64_t> relays;
+  std::vector<uint64_t> islands;
+  sources.reserve(kRouteCount);
+  relays.reserve(kRouteCount);
+  islands.reserve(kRouteCount);
+  for (size_t index = 0; index < kRouteCount; ++index) {
+    sources.push_back(index * sizeof(uint32_t));
+    relays.push_back(kMaximumForwardHop + index * sizeof(uint32_t));
+    islands.push_back(2u * kMaximumForwardHop + index * sizeof(uint32_t));
+  }
+
+  const auto plan = plan_forward_sopp_branch_relays(sources, relays, islands);
+
+  ASSERT_TRUE(plan);
+  ASSERT_EQ(plan->routes.size(), kRouteCount);
+  EXPECT_TRUE(plan->rejected_source_indices.empty());
+  for (size_t index = 0; index < kRouteCount; ++index) {
+    EXPECT_EQ(plan->routes[index].source_index, index);
+    EXPECT_EQ(plan->routes[index].relay_offsets, std::vector<uint64_t>({relays[index]}));
+    EXPECT_EQ(plan->routes[index].island_offset, islands[index]);
+  }
+}
+
 TEST(SoppBranchRelayPlanner, SharesNeitherRelayNorIslandAcrossRoutes) {
   constexpr uint64_t kHop = 4u + 32767u * 4u;
   const std::vector<uint64_t> sources = {0, 8};

@@ -309,10 +309,71 @@ plan_forward_sopp_branch_relays(std::span<const uint64_t> source_offsets,
     }
   }
 
+  // In this one-dimensional forward interval graph, earliest-endpoint-first
+  // routing is maximum-cardinality. At a relay or island, suppose a solution
+  // serves a route B while route A has an earlier endpoint. A can take B's
+  // suffix, and B can take A's suffix (every point reachable from A is also
+  // reachable from the later B), so exchanging them never reduces the number
+  // of completed routes. Repeating that exchange proves the greedy order.
+  //
+  // Keep the residual-flow implementation below as a small-instance oracle
+  // with precise min-cut diagnostics. Large generated code objects need this
+  // O(N log N) path: even an interval-compressed exact-flow graph can require
+  // many expensive blocking-flow phases for tens of thousands of sites.
+  constexpr size_t kGreedyRelayPlannerThreshold = 4096u;
+  if (coordinates.size() > kGreedyRelayPlannerThreshold) {
+    struct GreedyRouteState {
+      std::vector<uint64_t> relay_offsets;
+      std::optional<uint64_t> island_offset;
+    };
+    using ActiveRoute = std::pair<uint64_t, size_t>; // endpoint, source input index.
+    std::priority_queue<ActiveRoute, std::vector<ActiveRoute>, std::greater<>> active;
+    std::vector<GreedyRouteState> route_states(source_offsets.size());
+    std::vector<std::pair<uint64_t, uint64_t>> cut_hops;
+    for (const Coordinate &coordinate : coordinates) {
+      if (coordinate.kind == 0u) {
+        active.emplace(coordinate.offset, coordinate.input_index);
+        continue;
+      }
+      while (!active.empty() &&
+             !compute_sopp_branch_simm16(active.top().first, coordinate.offset)) {
+        cut_hops.emplace_back(active.top().first, coordinate.offset);
+        active.pop();
+      }
+      if (active.empty())
+        continue;
+      const auto [endpoint, source_index] = active.top();
+      (void)endpoint;
+      active.pop();
+      if (coordinate.kind == 1u) {
+        route_states[source_index].relay_offsets.push_back(coordinate.offset);
+        active.emplace(coordinate.offset, source_index);
+      } else {
+        route_states[source_index].island_offset = coordinate.offset;
+      }
+    }
+
+    SoppBranchRelayPlan plan;
+    plan.min_cut_hops = std::move(cut_hops);
+    plan.routes.reserve(std::min(source_offsets.size(), island_offsets.size()));
+    for (size_t source_index = 0; source_index < route_states.size(); ++source_index) {
+      GreedyRouteState &state = route_states[source_index];
+      if (!state.island_offset) {
+        plan.rejected_source_indices.push_back(source_index);
+        continue;
+      }
+      plan.routes.push_back({.source_index = source_index,
+                             .island_offset = *state.island_offset,
+                             .relay_offsets = std::move(state.relay_offsets)});
+    }
+    return plan;
+  }
+
   struct Edge {
     size_t to = 0;
     size_t reverse = 0;
-    uint8_t capacity = 0;
+    uint32_t capacity = 0;
+    uint32_t initial_capacity = 0;
     bool original = false;
   };
   // A relay is split into in/out nodes so its instruction word has capacity
@@ -324,14 +385,11 @@ plan_forward_sopp_branch_relays(std::span<const uint64_t> source_offsets,
   const size_t island_base = relay_out_base + relay_offsets.size();
   const size_t super_sink = island_base + island_offsets.size();
   std::vector<std::vector<Edge>> graph(super_sink + 1);
-  const auto add_edge = [&](size_t from, size_t to) {
+  const auto add_edge = [&](size_t from, size_t to, uint32_t capacity = 1u) {
     const size_t forward_index = graph[from].size();
     const size_t reverse_index = graph[to].size();
-    graph[from].push_back({to, reverse_index, 1, true});
-    graph[to].push_back({from, forward_index, 0, false});
-  };
-  const auto can_hop = [](uint64_t from, uint64_t to) {
-    return to > from && compute_sopp_branch_simm16(from, to).has_value();
+    graph[from].push_back({to, reverse_index, capacity, capacity, true});
+    graph[to].push_back({from, forward_index, 0, 0, false});
   };
 
   std::vector<size_t> source_order(source_offsets.size());
@@ -362,61 +420,142 @@ plan_forward_sopp_branch_relays(std::span<const uint64_t> source_offsets,
     add_edge(relay_in_base + relay, relay_out_base + relay);
   for (size_t island : island_order)
     add_edge(island_base + island, super_sink);
-  for (size_t source : source_order) {
-    for (size_t relay : relay_order) {
-      if (can_hop(source_offsets[source], relay_offsets[relay]))
-        add_edge(source_base + source, relay_in_base + relay);
-    }
-    for (size_t island : island_order) {
-      if (can_hop(source_offsets[source], island_offsets[island]))
-        add_edge(source_base + source, island_base + island);
-    }
-  }
-  for (size_t relay : relay_order) {
-    for (size_t next : relay_order) {
-      if (can_hop(relay_offsets[relay], relay_offsets[next]))
-        add_edge(relay_out_base + relay, relay_in_base + next);
-    }
-    for (size_t island : island_order) {
-      if (can_hop(relay_offsets[relay], island_offsets[island]))
-        add_edge(relay_out_base + relay, island_base + island);
-    }
-  }
 
-  // Unit-capacity Edmonds-Karp is exact here and bounded by the number of
-  // sources: at most one breadth-first augmentation per admitted route.
+  struct HopTarget {
+    uint64_t offset = 0;
+    size_t node = 0;
+  };
+  std::vector<HopTarget> hop_targets;
+  hop_targets.reserve(relay_offsets.size() + island_offsets.size());
+  for (size_t relay : relay_order)
+    hop_targets.push_back({relay_offsets[relay], relay_in_base + relay});
+  for (size_t island : island_order)
+    hop_targets.push_back({island_offsets[island], island_base + island});
+  std::ranges::sort(hop_targets, [](const HopTarget &lhs, const HopTarget &rhs) {
+    return std::tie(lhs.offset, lhs.node) < std::tie(rhs.offset, rhs.node);
+  });
+
+  // Every origin reaches one contiguous interval of later coordinates. A
+  // segment-tree range graph represents all such edges in O(N log N) space,
+  // rather than materializing the quadratic source/relay cross product seen
+  // in large generated code objects.
+  struct TargetTreeNode {
+    size_t graph_node = 0;
+    size_t begin = 0;
+    size_t end = 0;
+    size_t left = std::numeric_limits<size_t>::max();
+    size_t right = std::numeric_limits<size_t>::max();
+  };
+  std::vector<TargetTreeNode> target_tree;
+  const auto build_target_tree = [&](auto &&self, size_t begin, size_t end) -> size_t {
+    const size_t tree_index = target_tree.size();
+    const size_t graph_node = graph.size();
+    graph.emplace_back();
+    target_tree.push_back({.graph_node = graph_node, .begin = begin, .end = end});
+    if (end - begin == 1u) {
+      add_edge(graph_node, hop_targets[begin].node, static_cast<uint32_t>(source_offsets.size()));
+      return tree_index;
+    }
+    const size_t middle = begin + (end - begin) / 2u;
+    const size_t left = self(self, begin, middle);
+    const size_t right = self(self, middle, end);
+    target_tree[tree_index].left = left;
+    target_tree[tree_index].right = right;
+    add_edge(graph_node, target_tree[left].graph_node,
+             static_cast<uint32_t>(source_offsets.size()));
+    add_edge(graph_node, target_tree[right].graph_node,
+             static_cast<uint32_t>(source_offsets.size()));
+    return tree_index;
+  };
+  const std::optional<size_t> target_tree_root =
+      hop_targets.empty()
+          ? std::nullopt
+          : std::optional<size_t>(build_target_tree(build_target_tree, 0, hop_targets.size()));
+  const auto add_target_interval = [&](auto &&self, size_t origin_node, size_t query_begin,
+                                       size_t query_end, size_t tree_index) -> void {
+    const TargetTreeNode &tree_node = target_tree[tree_index];
+    if (query_end <= tree_node.begin || tree_node.end <= query_begin)
+      return;
+    if (query_begin <= tree_node.begin && tree_node.end <= query_end) {
+      add_edge(origin_node, tree_node.graph_node, static_cast<uint32_t>(source_offsets.size()));
+      return;
+    }
+    self(self, origin_node, query_begin, query_end, tree_node.left);
+    self(self, origin_node, query_begin, query_end, tree_node.right);
+  };
+  constexpr uint64_t kMaximumForwardSoppBranchBytes = 4u + 32767u * 4u;
+  const auto connect_origin = [&](size_t origin_node, uint64_t offset) {
+    if (!target_tree_root)
+      return;
+    const uint64_t maximum_target =
+        offset > std::numeric_limits<uint64_t>::max() - kMaximumForwardSoppBranchBytes
+            ? std::numeric_limits<uint64_t>::max()
+            : offset + kMaximumForwardSoppBranchBytes;
+    const size_t begin =
+        static_cast<size_t>(std::ranges::upper_bound(hop_targets, offset, {}, &HopTarget::offset) -
+                            hop_targets.begin());
+    const size_t end = static_cast<size_t>(
+        std::ranges::upper_bound(hop_targets, maximum_target, {}, &HopTarget::offset) -
+        hop_targets.begin());
+    if (begin != end)
+      add_target_interval(add_target_interval, origin_node, begin, end, *target_tree_root);
+  };
+  for (size_t source : source_order)
+    connect_origin(source_base + source, source_offsets[source]);
+  for (size_t relay : relay_order)
+    connect_origin(relay_out_base + relay, relay_offsets[relay]);
+
+  // Dinic blocking flow preserves the exact maximum-cardinality result while
+  // augmenting many routes per residual traversal.
   for (;;) {
-    constexpr size_t kNoNode = std::numeric_limits<size_t>::max();
-    std::vector<size_t> parent_node(graph.size(), kNoNode);
-    std::vector<size_t> parent_edge(graph.size(), kNoNode);
+    std::vector<int32_t> level(graph.size(), -1);
     std::queue<size_t> queue;
-    parent_node[super_source] = super_source;
+    level[super_source] = 0;
     queue.push(super_source);
-    while (!queue.empty() && parent_node[super_sink] == kNoNode) {
+    while (!queue.empty()) {
       const size_t from = queue.front();
       queue.pop();
-      for (size_t edge_index = 0; edge_index < graph[from].size(); ++edge_index) {
-        const Edge &edge = graph[from][edge_index];
-        if (edge.capacity == 0 || parent_node[edge.to] != kNoNode)
+      for (const Edge &edge : graph[from]) {
+        if (edge.capacity == 0 || level[edge.to] != -1)
           continue;
-        parent_node[edge.to] = from;
-        parent_edge[edge.to] = edge_index;
+        level[edge.to] = level[from] + 1;
         queue.push(edge.to);
       }
     }
-    if (parent_node[super_sink] == kNoNode)
+    if (level[super_sink] == -1)
       break;
-    for (size_t node = super_sink; node != super_source; node = parent_node[node]) {
-      Edge &edge = graph[parent_node[node]][parent_edge[node]];
-      --edge.capacity;
-      ++graph[node][edge.reverse].capacity;
+    std::vector<size_t> next_edge(graph.size(), 0u);
+    const auto push_flow = [&](auto &&self, size_t from, uint32_t limit) -> uint32_t {
+      if (from == super_sink)
+        return limit;
+      for (size_t &edge_index = next_edge[from]; edge_index < graph[from].size(); ++edge_index) {
+        Edge &edge = graph[from][edge_index];
+        if (edge.capacity == 0 || level[edge.to] != level[from] + 1)
+          continue;
+        const uint32_t pushed = self(self, edge.to, std::min(limit, edge.capacity));
+        if (pushed == 0)
+          continue;
+        edge.capacity -= pushed;
+        graph[edge.to][edge.reverse].capacity += pushed;
+        return pushed;
+      }
+      return 0u;
+    };
+    while (push_flow(push_flow, super_source, static_cast<uint32_t>(source_offsets.size())) != 0u) {
     }
   }
-
-  const auto used_original_edge_to = [&](size_t from) -> std::optional<size_t> {
-    for (const Edge &edge : graph[from]) {
-      if (edge.original && edge.capacity == 0)
-        return edge.to;
+  const auto take_used_original_edge_to = [&](size_t from) -> std::optional<size_t> {
+    for (Edge &edge : graph[from]) {
+      if (!edge.original || edge.initial_capacity == edge.capacity)
+        continue;
+      ++edge.capacity;
+      Edge &reverse = graph[edge.to][edge.reverse];
+      if (reverse.capacity == 0) {
+        report(error_out, "SOPP relay planner: inconsistent residual flow");
+        return std::nullopt;
+      }
+      --reverse.capacity;
+      return edge.to;
     }
     return std::nullopt;
   };
@@ -469,7 +608,10 @@ plan_forward_sopp_branch_relays(std::span<const uint64_t> source_offsets,
                             plan.min_cut_hops.end());
   }
   plan.routes.reserve(std::min(source_offsets.size(), island_offsets.size()));
-  for (size_t source_index = 0; source_index < source_offsets.size(); ++source_index) {
+  // Decompose shared range-tree flow in coordinate order to retain the
+  // planner's documented deterministic tie-breaking, then restore input order
+  // in the returned vectors.
+  for (size_t source_index : source_order) {
     bool admitted = false;
     for (const Edge &edge : graph[super_source]) {
       if (edge.to != source_base + source_index || edge.capacity != 0)
@@ -478,7 +620,7 @@ plan_forward_sopp_branch_relays(std::span<const uint64_t> source_offsets,
       route.source_index = source_index;
       size_t node = source_base + source_index;
       for (;;) {
-        const auto next = used_original_edge_to(node);
+        const auto next = take_used_original_edge_to(node);
         if (!next) {
           report(error_out, "SOPP relay planner: internal flow decomposition failure");
           return std::nullopt;
@@ -487,15 +629,22 @@ plan_forward_sopp_branch_relays(std::span<const uint64_t> source_offsets,
         if (node >= relay_in_base && node < relay_out_base) {
           const size_t relay = node - relay_in_base;
           route.relay_offsets.push_back(relay_offsets[relay]);
-          node = relay_out_base + relay;
+          const auto relay_out = take_used_original_edge_to(node);
+          if (!relay_out || *relay_out != relay_out_base + relay) {
+            report(error_out, "SOPP relay planner: relay capacity flow is inconsistent");
+            return std::nullopt;
+          }
+          node = *relay_out;
           continue;
         }
         if (node >= island_base && node < super_sink) {
           route.island_offset = island_offsets[node - island_base];
           break;
         }
-        report(error_out, "SOPP relay planner: internal flow path has an invalid node");
-        return std::nullopt;
+        if (node <= super_sink) {
+          report(error_out, "SOPP relay planner: internal flow path has an invalid node");
+          return std::nullopt;
+        }
       }
       plan.routes.push_back(std::move(route));
       admitted = true;
@@ -504,6 +653,8 @@ plan_forward_sopp_branch_relays(std::span<const uint64_t> source_offsets,
     if (!admitted)
       plan.rejected_source_indices.push_back(source_index);
   }
+  std::ranges::sort(plan.routes, {}, &SoppBranchRelayRoute::source_index);
+  std::ranges::sort(plan.rejected_source_indices);
   return plan;
 }
 
