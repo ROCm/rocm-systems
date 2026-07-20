@@ -651,10 +651,8 @@ void* MemoryRegion::BlockAllocator::alloc(size_t request_size, size_t& allocated
   // The block's driver identity is reconstructed from base address and length
   // on free (see BlockAllocator::free), so the handle is not retained here.
   core::DriverMemoryHandle handle{};
-  core::MemoryRegion::AllocateFlags flags = core::MemoryRegion::AllocateDirect;
-  if (region_.IsLocalMemory()) flags |= core::MemoryRegion::AllocateRestrict;
-
-  hsa_status_t err = region_.AllocateImpl(bsize, flags, 0, &handle);
+  hsa_status_t err = region_.AllocateImpl(
+      bsize, core::MemoryRegion::AllocateRestrict | core::MemoryRegion::AllocateDirect, 0, &handle);
   if (err != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(err, "MemoryRegion::BlockAllocator::alloc failed.");
   assert(handle.vaddr != nullptr && "Region returned nullptr on success.");
