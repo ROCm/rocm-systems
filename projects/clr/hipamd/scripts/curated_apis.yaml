@@ -1586,3 +1586,6 @@
 
 - api: hipIpcOpenMemHandle
   args: [devPtr, flags]
+
+- api: hipExtGetLinkTypeAndHopCount
+  args: [device1, device2, linktype, hopcount]

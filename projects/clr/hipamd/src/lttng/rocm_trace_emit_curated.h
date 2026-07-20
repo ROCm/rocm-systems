@@ -2,7 +2,7 @@
  * Do not edit by hand — regenerate instead (see command below).
  *
  * SHA256(curated_apis.yaml) at generation:
- * 5eb9e8989aee8524f1c93f7c2cb71676778f6fd3148eedafb83b97bae0389c07
+ * 4931c93bd8238ceb7a88bdb0d66dac17e9ba6a3176ad443456b9b782bab51a0c
  *
  * Per-API typed emit helpers for curated parameter capture. Every
  * helper takes (<captured-args...>, <status_type> status); status is
@@ -9101,6 +9101,26 @@ static inline void rocm_trace_emit_hipIpcOpenMemHandle_exit(hipError_t status) {
   }
 }
 
+static inline void rocm_trace_emit_hipExtGetLinkTypeAndHopCount_enter(int32_t device1,
+                                                                      int32_t device2,
+                                                                      const void* linktype,
+                                                                      const void* hopcount) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExtGetLinkTypeAndHopCount)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExtGetLinkTypeAndHopCount, (int32_t)0, (int32_t)(device1),
+                            (int32_t)(device2), (uint64_t)(uintptr_t)(linktype),
+                            (uint64_t)(uintptr_t)(hopcount), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipExtGetLinkTypeAndHopCount_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExtGetLinkTypeAndHopCount)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExtGetLinkTypeAndHopCount, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
 
 #else /* HIP_ENABLE_LTTNG_UST not defined — all helpers are no-ops */
 
@@ -10426,6 +10446,9 @@ static inline void rocm_trace_emit_hipIpcOpenEventHandle_enter(const void*) {}
 static inline void rocm_trace_emit_hipIpcOpenEventHandle_exit(hipError_t) {}
 static inline void rocm_trace_emit_hipIpcOpenMemHandle_enter(const void*, uint32_t) {}
 static inline void rocm_trace_emit_hipIpcOpenMemHandle_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipExtGetLinkTypeAndHopCount_enter(int32_t, int32_t, const void*,
+                                                                      const void*) {}
+static inline void rocm_trace_emit_hipExtGetLinkTypeAndHopCount_exit(hipError_t) {}
 
 #endif /* HIP_ENABLE_LTTNG_UST */
 

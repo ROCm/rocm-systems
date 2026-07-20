@@ -103,6 +103,7 @@ hipExecutionCtxRecordEvent	STATUS	hipError_t
 hipExecutionCtxStreamCreate	STATUS	hipError_t
 hipExecutionCtxSynchronize	STATUS	hipError_t
 hipExecutionCtxWaitEvent	STATUS	hipError_t
+hipExtGetLinkTypeAndHopCount	STATUS	hipError_t
 hipExtLaunchKernel	STATUS	hipError_t
 hipExtLaunchMultiKernelMultiDevice	STATUS	hipError_t
 hipExtMallocWithFlags	STATUS	hipError_t

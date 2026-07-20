@@ -1031,9 +1031,18 @@ hipError_t hipEventSynchronize(hipEvent_t event) {
 }
 hipError_t hipExtGetLinkTypeAndHopCount(int device1, int device2, uint32_t* linktype,
                                         uint32_t* hopcount) {
+  auto const __rocm_in_device1 = device1;
+  auto const __rocm_in_device2 = device2;
+  auto const __rocm_in_linktype = linktype;
+  auto const __rocm_in_hopcount = hopcount;
+  rocm_trace_emit_hipExtGetLinkTypeAndHopCount_enter(
+      (__rocm_in_device1),
+      (__rocm_in_device2),
+      (const void*)(uintptr_t)(__rocm_in_linktype),
+      (const void*)(uintptr_t)(__rocm_in_hopcount)); /* __ROCM_CURATED__: hipExtGetLinkTypeAndHopCount */
   TRY;
-  return hip::GetHipDispatchTable()->hipExtGetLinkTypeAndHopCount_fn(device1, device2, linktype,
-                                                                     hopcount);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipExtGetLinkTypeAndHopCount, hip::GetHipDispatchTable()->hipExtGetLinkTypeAndHopCount_fn(
+                                    device1, device2, linktype, hopcount));
   CATCH;
 }
 extern "C" hipError_t hipExtLaunchKernel(const void* function_address, dim3 numBlocks,
