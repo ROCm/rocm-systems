@@ -777,8 +777,10 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_AnyOrder") {
     ticks_per_ms = 1000000;
   }
   // wait in first kernel.
-  int ticks_per_100us = ticks_per_ms; //(ticks_per_ms / 1000) * 100;
-  hipModule_t module;
+  int ticks_per_100us = ticks_per_ms / 10;
+  if (ticks_per_100us == 0) {
+    ticks_per_100us = 1;
+  }
   hipFunction_t first;
   hipFunction_t second;
   HIP_CHECK(hipModuleLoad(&module, "anyOrderLaunch.code"));
