@@ -6,6 +6,10 @@
 
 #pragma once
 
+#include <cstddef>
+
+#include "top.hpp"
+
 /*! \addtogroup GPU GPU Device Implementation
  *  @{
  */

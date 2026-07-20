@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <cstddef>
+
 /*! \addtogroup PAL PAL Resource Implementation
  *  @{
  */
