@@ -428,3 +428,39 @@
     Skipped fabric_handle (hsa_fabric_handle_t): non-handle by-value struct
     containing a fixed-size 16-byte array; it is not representable by the
     curated DSL.
+
+- api: hsa_iterate_agents
+  args: [callback, data]
+
+- api: hsa_agent_get_info
+  args: [agent, attribute, value]
+
+- api: hsa_agent_get_exception_policies
+  args: [agent, profile, mask]
+
+- api: hsa_cache_get_info
+  args: [cache, attribute, value]
+
+- api: hsa_agent_iterate_caches
+  args: [agent, callback, data]
+
+- api: hsa_agent_extension_supported
+  args: [extension, agent, version_major, version_minor, result]
+
+- api: hsa_agent_major_extension_supported
+  args: [extension, agent, version_major, version_minor, result]
+
+- api: hsa_agent_iterate_isas
+  args: [agent, callback, data]
+
+- api: hsa_amd_coherency_get_type
+  args: [agent, type]
+
+- api: hsa_amd_coherency_set_type
+  args: [agent, type]
+
+- api: hsa_amd_agent_preload
+  args: [agent, flags]
+
+- api: hsa_amd_agent_set_async_scratch_limit
+  args: [agent, threshold]

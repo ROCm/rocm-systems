@@ -1,3 +1,10 @@
+hsa_iterate_agents	STATUS	hsa_status_t
+hsa_agent_get_info	STATUS	hsa_status_t
+hsa_agent_get_exception_policies	STATUS	hsa_status_t
+hsa_cache_get_info	STATUS	hsa_status_t
+hsa_agent_iterate_caches	STATUS	hsa_status_t
+hsa_agent_extension_supported	STATUS	hsa_status_t
+hsa_agent_major_extension_supported	STATUS	hsa_status_t
 hsa_queue_create	STATUS	hsa_status_t
 hsa_soft_queue_create	STATUS	hsa_status_t
 hsa_queue_destroy	STATUS	hsa_status_t
@@ -68,6 +75,10 @@ hsa_signal_cas_relaxed	I64	hsa_signal_value_t
 hsa_signal_cas_scacquire	I64	hsa_signal_value_t
 hsa_signal_cas_screlease	I64	hsa_signal_value_t
 hsa_signal_cas_scacq_screl	I64	hsa_signal_value_t
+hsa_agent_iterate_isas	STATUS	hsa_status_t
+hsa_amd_coherency_get_type	STATUS	hsa_status_t
+hsa_amd_coherency_set_type	STATUS	hsa_status_t
+hsa_amd_agent_preload	STATUS	hsa_status_t
 hsa_amd_signal_async_handler	STATUS	hsa_status_t
 hsa_amd_signal_wait_all	STATUS	uint32_t
 hsa_amd_signal_wait_any	STATUS	uint32_t
@@ -122,6 +133,7 @@ hsa_amd_vmem_export_shareable_handle	STATUS	hsa_status_t
 hsa_amd_vmem_import_shareable_handle	STATUS	hsa_status_t
 hsa_amd_vmem_retain_alloc_handle	STATUS	hsa_status_t
 hsa_amd_vmem_get_alloc_properties_from_handle	STATUS	hsa_status_t
+hsa_amd_agent_set_async_scratch_limit	STATUS	hsa_status_t
 hsa_amd_queue_get_info	STATUS	hsa_status_t
 hsa_amd_counted_queue_acquire	STATUS	hsa_status_t
 hsa_amd_counted_queue_release	STATUS	hsa_status_t
