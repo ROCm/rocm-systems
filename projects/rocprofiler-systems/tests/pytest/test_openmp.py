@@ -280,10 +280,12 @@ class TestOpenMPFortran(RocprofsysTest):
             sys_run_pass_regex=["omp_parallel"],
         )
 
-    # OMPT task-detach tracing exercises the early_fulfill task-schedule
-    # callback. rocprofiler-sdk < 1.3.2 aborts on the trailing early_fulfill
-    # callback (state_prior == nullptr), so gate this test behind the SDK
-    # version that carries the fix.
+    # OMPT task-detach tracing exercises both the early_fulfill and late_fulfill
+    # task-schedule callbacks. For a detached task the runtime emits task_complete
+    # and the fulfill callback in an unspecified order; older rocprofiler-sdk builds
+    # abort on the trailing fulfill callback (state_prior == nullptr). This must be
+    # gated behind the SDK version that retires the task on either callback -- bump
+    # the minimum below to the version that carries the late_fulfill fix.
     @pytest.mark.rocprofiler_sdk_min_version("1.3.2")
     @pytest.mark.parametrize("mode", ["baseline", "sampling", "sys_run"])
     @pytest.mark.gpu

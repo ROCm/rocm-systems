@@ -23,6 +23,7 @@
 
 program task_detach_routes
     use omp_lib
+    use, intrinsic :: iso_fortran_env, only : output_unit
     implicit none
 
     ! Pin the whole program to two OpenMP threads regardless of the launching
@@ -59,6 +60,7 @@ contains
         result = 0.0d0
 
         print *, "[phase 1] late fulfill by a sibling task"
+        flush (output_unit)
 
         !$omp parallel num_threads(2) shared(result, event)
         !$omp single
@@ -76,6 +78,7 @@ contains
         !$omp end parallel
 
         print *, "[phase 1] result =", result
+        flush (output_unit)
     end subroutine run_late_sibling_fulfill
 
     ! ------------------------------------------------------------------ !
@@ -92,6 +95,7 @@ contains
         result = 0.0d0
 
         print *, "[phase 2] early fulfill from inside the detached task"
+        flush (output_unit)
 
         !$omp parallel num_threads(2) shared(result, event)
         !$omp single
@@ -106,6 +110,7 @@ contains
         !$omp end parallel
 
         print *, "[phase 2] result =", result
+        flush (output_unit)
     end subroutine run_early_self_fulfill
 
     ! ------------------------------------------------------------------ !
@@ -122,6 +127,7 @@ contains
         result = 0.0d0
 
         print *, "[phase 3] fulfill by the generating thread"
+        flush (output_unit)
 
         !$omp parallel num_threads(2) shared(result, event)
         !$omp single
@@ -137,6 +143,7 @@ contains
         !$omp end parallel
 
         print *, "[phase 3] result =", result
+        flush (output_unit)
     end subroutine run_generator_fulfill
 
     ! ------------------------------------------------------------------ !
@@ -157,6 +164,7 @@ contains
         r3 = 0
 
         print *, "[phase 4] many detached tasks, fulfilled out of order"
+        flush (output_unit)
 
         !$omp parallel num_threads(2) shared(ev1, ev2, ev3, r1, r2, r3)
         !$omp single
@@ -193,6 +201,7 @@ contains
         !$omp end parallel
 
         print *, "[phase 4] results =", r1, r2, r3
+        flush (output_unit)
     end subroutine run_fanout_fulfill
 
     ! ------------------------------------------------------------------ !

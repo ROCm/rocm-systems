@@ -190,12 +190,20 @@ ompt_task_schedule_callback(ompt_data_t*       prior_task_data,
     auto* state_prior = as_task_state(pprior);
     if(state_prior == nullptr)
     {
-        // An empty slot is only expected for the trailing early_fulfill case; a
+        // An empty slot is only expected for a trailing completion callback; a
         // non-empty slot here is an implicit task (ompt_save_state), which has no
         // explicit-task correlation to pop/retire -- fall through to handle next_task.
+        //
+        // A detached task is retired via an unspecified ordering of task_complete
+        // and early/late_fulfill, and the first of these to run deletes the slot.
+        // Any of them can therefore arrive as a trailing callback that observes an
+        // already-empty slot, so ignore it rather than treating it as fatal.
         if(pprior->ptr == nullptr)
         {
-            if(prior_task_status == ompt_task_early_fulfill) return;
+            if(prior_task_status == ompt_task_early_fulfill ||
+               prior_task_status == ompt_task_late_fulfill ||
+               prior_task_status == ompt_task_complete)
+                return;
             ROCP_FATAL << "state_prior == nullptr prior_task_status: " << prior_task_status << ".";
         }
     }
@@ -219,8 +227,13 @@ ompt_task_schedule_callback(ompt_data_t*       prior_task_data,
     if(prior_task_status == ompt_task_yield || prior_task_status == ompt_task_detach ||
        prior_task_status == ompt_task_switch || prior_task_status == ompt_task_early_fulfill)
         return;
-    // the prior (explicit) task is done
-    if(state_prior != nullptr && prior_task_status == ompt_task_complete)
+    // The prior (explicit) task is done. A detached task is retired by whichever of
+    // task_complete / late_fulfill runs first while the slot is still populated:
+    // some runtimes emit late_fulfill without any trailing task_complete, so both
+    // statuses must release the saved state -- otherwise the task correlation id
+    // leaks and is reported as a dangling id during finalization.
+    if(state_prior != nullptr &&
+       (prior_task_status == ompt_task_complete || prior_task_status == ompt_task_late_fulfill))
     {
         assert(state_prior->task_flags != 0);
         state_prior->corr_id->sub_ref_count();
@@ -852,8 +865,8 @@ ompt_impl<OpIdx>::end(ompt_data_t* data, Args... args)
     auto  ancestor_corr_id = corr_id->ancestor;
 
     ROCP_FATAL_IF(common::get_tid() != state->thr_id)
-        << "MIsmatch of OMPT begin/end thread id: "
-        << " current=" << common::get_tid() << ", expected= " << state->thr_id;
+        << "MIsmatch of OMPT begin/end thread id: " << " current=" << common::get_tid()
+        << ", expected= " << state->thr_id;
 
     if(!callback_contexts.empty())
     {
