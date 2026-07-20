@@ -72,7 +72,6 @@ void GDABackend::mlx5_create_qps(int sq_length) {
 
 void GDABackend::mlx5_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   mlx5_devx_qp& qp = mlx5_qps[conn_num];
-  qp.dump(conn_num);
 
   /*
    * struct mlx5_devx_qp {

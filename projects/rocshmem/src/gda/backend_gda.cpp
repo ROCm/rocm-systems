@@ -1736,6 +1736,7 @@ void GDABackend::initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
     mlx5_initialize_gpu_qp(gpu_qp, conn_num);
+    mlx5_qps[conn_num].dump(conn_num);
     break;
 #endif
   default:
