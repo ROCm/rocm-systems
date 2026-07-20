@@ -334,9 +334,11 @@ add_executable(
     matmul_test.cpp
     vector_add_test.cpp
     gfx1250_sim_test.cpp
+    sparse_memory_test.cpp
     simdojo_sim_test.cpp
     simulated_kfd_test.cpp
     decode_smoke_test.cpp
+    buffer_operand_test.cpp
     smem_sbase_operand_test.cpp
     shared_infra_test.cpp
     transcendental_test.cpp
@@ -356,7 +358,9 @@ add_executable(
     sysfs_test.cpp
     kfd_ioctl_test.cpp
     waitcnt_counter_test.cpp
+    register_access_test.cpp
     instruction_execution_harness_test.cpp
+    scalar_scc_test.cpp
     cdna3_predicate_mask_test.cpp
     decode_execute_benchmark.cpp
     util_simd_test.cpp
@@ -530,6 +534,9 @@ set(RJ_CDNA4_KMD_2GPU_CONFIG
     "${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd_2gpu.json"
 )
 set(RJ_CDNA3_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3_kmd.json")
+set(RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG
+    "${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_simulated_gfx942.json"
+)
 set(RJ_HIP_TEST_ARCH
     "gfx950"
     CACHE STRING
@@ -546,6 +553,12 @@ set(RJ_HIP_TEST_2GPU_CONFIG
     "rocjitsu config used by basic two-GPU HIP tests"
 )
 get_filename_component(RJ_CDNA4_KMD_CONFIG_NAME "${RJ_CDNA4_KMD_CONFIG}" NAME)
+get_filename_component(RJ_CDNA3_KMD_CONFIG_NAME "${RJ_CDNA3_KMD_CONFIG}" NAME)
+get_filename_component(
+    RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG_NAME
+    "${RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG}"
+    NAME
+)
 get_filename_component(
     RJ_CDNA4_KMD_2GPU_CONFIG_NAME
     "${RJ_CDNA4_KMD_2GPU_CONFIG}"
@@ -619,6 +632,54 @@ target_include_directories(
 target_link_libraries(guest_kfd_test PRIVATE Threads::Threads GTest::gtest_main)
 rj_configure_target(guest_kfd_test TEST)
 add_dependencies(guest_kfd_test rocjitsu_bin rocjitsu_shared rocjitsu_hooks)
+rj_add_test(
+    NAME "GuestKfdFailureTest.NonexistentSimulatorConfigFailsCleanly"
+    COMMAND
+        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        $<TARGET_FILE:guest_kfd_test>
+        --gtest_filter=GuestKfdFailureTest.NonexistentSimulatorConfigFailsCleanly
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+    INSTALL_COMMAND
+        "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+        "--config"
+        "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA3_KMD_CONFIG_NAME}"
+        "--"
+        "bin/guest_kfd_test"
+        "--gtest_filter=GuestKfdFailureTest.NonexistentSimulatorConfigFailsCleanly"
+)
+rj_add_test(
+    NAME "GuestKfdFailureTest.SimulatorHostIsaMismatchFailsCleanly"
+    COMMAND
+        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        $<TARGET_FILE:guest_kfd_test>
+        --gtest_filter=GuestKfdFailureTest.SimulatorHostIsaMismatchFailsCleanly
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+    INSTALL_COMMAND
+        "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+        "--config"
+        "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA3_KMD_CONFIG_NAME}"
+        "--"
+        "bin/guest_kfd_test"
+        "--gtest_filter=GuestKfdFailureTest.SimulatorHostIsaMismatchFailsCleanly"
+)
+rj_add_test(
+    NAME "GuestKfdFailureTest.SimulatorOversizedLdsFailsCleanly"
+    COMMAND
+        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        $<TARGET_FILE:guest_kfd_test>
+        --gtest_filter=GuestKfdFailureTest.SimulatorOversizedLdsFailsCleanly
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+    INSTALL_COMMAND
+        "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+        "--config"
+        "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA3_KMD_CONFIG_NAME}"
+        "--"
+        "bin/guest_kfd_test"
+        "--gtest_filter=GuestKfdFailureTest.SimulatorOversizedLdsFailsCleanly"
+)
 if(RJ_HAS_GFX1201_GPU)
     add_test(
         NAME "GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay"
@@ -802,6 +863,38 @@ foreach(
             "--"
             "bin/interposer_dup_test"
             "--gtest_filter=InterposerDupTest.${_interposer_dup_test}"
+    )
+endforeach()
+
+foreach(
+    _interposer_gem_test
+    IN
+    ITEMS
+        ReusedDmabufFdMintsDistinctHandles
+        UnmapWithWrongHandleFails
+        MapSucceedsAfterExportFdClosed
+        ReplaceEvictsOverlappingDifferentSizeRange
+        ReplaceTransfersOwnershipAcrossOldOwnerClose
+        ClearUpdatesOwnerBookkeeping
+)
+    rj_add_test(
+        NAME "InterposerGemTest.${_interposer_gem_test}"
+        COMMAND
+            ${RJ_CLI}
+            --config
+            ${RJ_CDNA4_KMD_CONFIG}
+            --
+            $<TARGET_FILE:interposer_dup_test>
+            "--gtest_filter=InterposerGemTest.${_interposer_gem_test}"
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
+        INSTALL_COMMAND
+            "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+            "--config"
+            "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
+            "--"
+            "bin/interposer_dup_test"
+            "--gtest_filter=InterposerGemTest.${_interposer_gem_test}"
     )
 endforeach()
 
@@ -1208,7 +1301,13 @@ if(HSA_RUNTIME64)
             ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
             PRIVATE HAS_HOST_AMDGPU=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
         )
-        add_dependencies(${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE} device_kernels)
+        add_dependencies(
+            ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
+            device_kernels
+            rocjitsu_bin
+            rocjitsu_shared
+            rocjitsu_hooks
+        )
         rj_configure_target(${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE} TEST)
         if(RJ_INSTALL_TESTS)
             rj_install_test_target(${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE})
@@ -1235,15 +1334,75 @@ if(HSA_RUNTIME64)
             )
         endforeach()
 
-        if(HAS_CDNA3_GPU)
-            set(RJ_CDNA4_TO_CDNA3_DISPATCH_RUN_TESTS
-                DynamicCopyLoopDispatchAndRun
-                TritonDynamicMatmulDispatchAndRun
-                TritonBufferAsyncMatmulDispatchAndRun
-                TritonBufferAsyncMatmulConservativeLivenessDispatchAndRun
-                TritonFlashAttentionNoAsyncDispatchAndRun
-                TritonFlashAttentionBufferAsyncDispatchAndRun
+        _rj_path_from_installed_test_bin(
+            _rj_installed_cdna3_kmd_config
+            "${CMAKE_INSTALL_DATADIR}/rocjitsu/configs"
+            "${RJ_CDNA3_KMD_CONFIG_NAME}"
+        )
+        _rj_path_from_installed_test_bin(
+            _rj_installed_cdna4_to_cdna3_sim_dbt_config
+            "${CMAKE_INSTALL_DATADIR}/rocjitsu/configs"
+            "${RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG_NAME}"
+        )
+
+        set(RJ_CDNA4_TO_CDNA3_DISPATCH_RUN_TESTS
+            DynamicCopyLoopDispatchAndRun
+            TritonDynamicMatmulDispatchAndRun
+            TritonBufferAsyncMatmulDispatchAndRun
+            TritonBufferAsyncMatmulConservativeLivenessDispatchAndRun
+            TritonFlashAttentionNoAsyncDispatchAndRun
+            TritonFlashAttentionBufferAsyncDispatchAndRun
+        )
+        foreach(_test_name IN LISTS RJ_CDNA4_TO_CDNA3_DISPATCH_RUN_TESTS)
+            rj_add_test(
+                NAME "Cdna4ToCdna3SimulatedDispatchTest.${_test_name}"
+                COMMAND
+                    ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+                    $<TARGET_FILE:${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}>
+                    --gtest_filter=Cdna4ToCdna3DispatchTest.${_test_name}
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 300
+                INSTALL_COMMAND
+                    "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+                    "--config"
+                    "${_rj_installed_cdna3_kmd_config}"
+                    "--"
+                    "bin/${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}"
+                    "--gtest_filter=Cdna4ToCdna3DispatchTest.${_test_name}"
             )
+        endforeach()
+        message(STATUS "CDNA4->CDNA3 simulator dispatch tests enabled")
+
+        set(RJ_CDNA4_TO_CDNA3_DBT_GUEST_TESTS
+            DynamicCopyLoopDispatchAndRun
+            TritonDynamicMatmulDispatchAndRun
+            TritonBufferAsyncMatmulDispatchAndRun
+            TritonFlashAttentionNoAsyncDispatchAndRun
+            TritonFlashAttentionBufferAsyncDispatchAndRun
+        )
+        # The conservative-liveness variant injects BinaryTranslatorOptions
+        # directly and cannot be expressed through the public DBT hook. Running
+        # it here would duplicate the default buffer-async guest path.
+        foreach(_test_name IN LISTS RJ_CDNA4_TO_CDNA3_DBT_GUEST_TESTS)
+            rj_add_test(
+                NAME "Cdna4ToCdna3DbtGuestTest.${_test_name}"
+                COMMAND
+                    ${RJ_CLI} --config ${RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG} --
+                    $<TARGET_FILE:${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}>
+                    --gtest_filter=Cdna4ToCdna3DbtGuestTest.${_test_name}
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 300
+                INSTALL_COMMAND
+                    "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+                    "--config"
+                    "${_rj_installed_cdna4_to_cdna3_sim_dbt_config}"
+                    "--"
+                    "bin/${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}"
+                    "--gtest_filter=Cdna4ToCdna3DbtGuestTest.${_test_name}"
+            )
+        endforeach()
+
+        if(HAS_CDNA3_GPU)
             foreach(_test_name IN LISTS RJ_CDNA4_TO_CDNA3_DISPATCH_RUN_TESTS)
                 rj_add_test(
                     NAME "Cdna4ToCdna3DispatchTest.${_test_name}"
@@ -1264,7 +1423,7 @@ if(HSA_RUNTIME64)
         else()
             message(
                 STATUS
-                "CDNA4->CDNA3 dispatch tests built but NOT registered with CTest "
+                "CDNA4->CDNA3 hardware dispatch tests built but NOT registered with CTest "
                 "(no CDNA3 GPU)"
             )
         endif()
@@ -1815,96 +1974,6 @@ if(RJ_ENABLE_HIP_TESTS)
             STATUS
             "CDNA4 HIP tests disabled (libamdhip64 does not advertise gfx950 support)"
         )
-    endif()
-
-    # --- rocBLAS GEMM test ---
-    find_library(ROCBLAS_LIB rocblas PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
-    if(ROCBLAS_LIB)
-        if(RJ_HIP_RUNTIME_SUPPORTS_GFX950)
-            rj_add_hip_test(hip_gemm_test ARCH gfx950 EXTRA_LIBS ${ROCBLAS_LIB})
-
-            foreach(
-                TC
-                IN
-                ITEMS
-                    Tiny_2x2x3
-                    Square_4x4
-                    Square_8x8
-                    Square_16x16
-                    Square_32x32
-                    Square_64x64
-                    Rect_16x32x8
-                    Rect_1x64x1
-                    Rect_64x1x64
-                    Rect_7x11x13
-                    AlphaBeta
-                    BetaZero
-                    Large_2048x2048
-            )
-                if(TC STREQUAL "Large_2048x2048")
-                    rj_add_hip_test_case(
-                        hip_gemm_test
-                        "RocblasGemmTest.${TC}"
-                        TIMEOUT 300
-                    )
-                else()
-                    rj_add_hip_test_case(hip_gemm_test "RocblasGemmTest.${TC}")
-                endif()
-            endforeach()
-            foreach(I RANGE 0 4)
-                rj_add_hip_test_case(hip_gemm_test "RocblasGemmFuzz.Iter${I}")
-            endforeach()
-            message(
-                STATUS
-                "rocBLAS GEMM gfx950 tests enabled (found ${ROCBLAS_LIB})"
-            )
-        endif()
-
-        if(RJ_HIP_RUNTIME_SUPPORTS_GFX942)
-            rj_add_hip_test(
-                hip_gemm_test_cdna3
-                ARCH gfx942
-                SOURCE hip_gemm_test.cpp
-                EXTRA_LIBS ${ROCBLAS_LIB}
-            )
-
-            foreach(
-                TC
-                IN
-                ITEMS Tiny_2x2x3 Square_16x16 Square_32x32 Rect_7x11x13
-            )
-                rj_add_hip_test_case(
-                    hip_gemm_test_cdna3
-                    "RocblasGemmTest.${TC}"
-                    CONFIG ${RJ_CDNA3_KMD_CONFIG}
-                    NAME "RocblasGemmCdna3.${TC}"
-                )
-            endforeach()
-            foreach(I RANGE 0 2)
-                rj_add_hip_test_case(
-                    hip_gemm_test_cdna3
-                    "RocblasGemmFuzz.Iter${I}"
-                    CONFIG ${RJ_CDNA3_KMD_CONFIG}
-                    NAME "RocblasGemmCdna3.Fuzz_Iter${I}"
-                )
-            endforeach()
-            message(
-                STATUS
-                "rocBLAS GEMM gfx942 tests enabled (found ${ROCBLAS_LIB})"
-            )
-        endif()
-
-        if(
-            NOT RJ_HIP_RUNTIME_SUPPORTS_GFX950
-            AND NOT RJ_HIP_RUNTIME_SUPPORTS_GFX942
-        )
-            message(
-                STATUS
-                "rocBLAS GEMM test disabled (libamdhip64 does not advertise gfx950 or gfx942 support)"
-            )
-        endif()
-    else()
-        message(STATUS "rocBLAS GEMM test disabled (librocblas not found)")
     endif()
 
     message(STATUS "HIP tests enabled (found ${AMDCXX})")

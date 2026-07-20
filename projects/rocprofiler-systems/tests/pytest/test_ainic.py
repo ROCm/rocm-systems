@@ -2,29 +2,56 @@
 # SPDX-License-Identifier: MIT
 
 """
-AI NIC tests using AMD SMI RDMA metrics (amdsmi_get_nic_rdma_dev_info).
+AI NIC tests.
 
-These tests verify that rocprofiler-systems correctly collects all AI NIC
-RDMA counters per device and writes them to both the Perfetto (.proto) trace
-and the ROCpd (.db) database.
+Two independent checks live here:
 
-AI NIC devices are discovered at runtime via ``amd-smi static | grep -i netdev``.
-The test is skipped automatically when no AI NIC devices are present on the system.
+* ``test_settings_present`` — a hardware-independent build-artifact check that
+  verifies AI NIC support was compiled in. The AI NIC settings (e.g.
+  ``ROCPROFSYS_USE_AINIC``) are only registered when the binaries are built with
+  ``ROCPROFSYS_BUILD_AINIC=ON``, so their presence in ``rocprof-sys-avail
+  --settings`` is a direct indicator of compile-time support. No NIC hardware is
+  required.
+
+* ``test_performance_tracks`` — verifies that rocprofiler-systems correctly
+  collects the AI NIC RDMA counters per device and writes them to both the
+  Perfetto (.proto) trace and the ROCpd (.db) database. AI NIC devices are
+  discovered at runtime via ``amd-smi static | grep -i netdev``; this test is
+  skipped automatically when no AI NIC devices are present on the system.
 """
 
 from __future__ import annotations
 
 import os
+import subprocess
 import pytest
 import shutil
 from pathlib import Path
 from conftest import RocprofsysTest
+from rocprofsys import RocprofsysConfig
 
-pytestmark = [pytest.mark.ainic, pytest.mark.network]
+# AI NIC support is only compiled in when AMD SMI >= 26.3.
+pytestmark = [
+    pytest.mark.amdsmi_min_version("26.3"),
+    pytest.mark.ainic,
+]
 
 # =============================================================================
 # Constants
 # =============================================================================
+
+# Settings registered only when ROCPROFSYS_BUILD_AINIC=ON (see cmake/Packages.cmake
+# and the guarded ROCPROFSYS_CONFIG_SETTING blocks in config.cpp).
+AINIC_SETTINGS = [
+    "ROCPROFSYS_USE_AINIC",
+    "ROCPROFSYS_SAMPLING_AINICS",
+]
+
+# Targets whose --help=sampling output should advertise the AI NIC flags.
+TARGETS = [
+    pytest.param("rocprof-sys-run", marks=pytest.mark.sys_run, id="run"),
+    pytest.param("rocprof-sys-sample", marks=pytest.mark.sampling, id="sample"),
+]
 
 # Substrings used to match the 10 Perfetto counter track names via LIKE.
 # Full name format: "NIC [<device_id>] <METRIC> (S)"
@@ -91,12 +118,59 @@ def ainic_rocpd_rules(validation_rules_dir) -> list[Path]:
 
 
 class TestAINIC(RocprofsysTest):
-    """Tests for AI NIC performance using AMD SMI Phase 2 RDMA metrics."""
+    """Tests for AI NIC support and performance metric collection."""
 
     PERFETTO_PASS_REGEX = [r"perfetto-trace\.proto validated"]
     PERFETTO_FAIL_REGEX = [r"Failure validating.*perfetto-trace\.proto"]
 
+    # This test does _not_ requires NIC hardware, so "mark.ainic_required" is not added.
+    @pytest.mark.timeout(30)
+    def test_settings_present(self, rocprof_config: RocprofsysConfig):
+        """AI NIC settings must be listed by ``rocprof-sys-avail --settings``.
+
+        These settings are only registered when the binaries are compiled with
+        ROCPROFSYS_BUILD_AINIC=ON, so their presence proves AI NIC support was
+        compiled in. No NIC hardware is required.
+        """
+        result = subprocess.run(
+            [str(rocprof_config.rocprofsys_avail), "--settings"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        assert result.returncode == 0, f"rocprof-sys-avail failed: {result.stderr}"
+
+        settings = result.stdout
+        missing = [s for s in AINIC_SETTINGS if s not in settings]
+        assert not missing, (
+            "AI NIC settings not reported by rocprof-sys-avail --settings — "
+            "were the binaries built with ROCPROFSYS_BUILD_AINIC=OFF?\n"
+            f"Missing: {missing}"
+        )
+
+    # No NIC hardware required; the module-level amdsmi_min_version("26.3") gate
+    # skips this on builds where AI NIC support is not compiled in.
+    @pytest.mark.parametrize("target", TARGETS)
+    @pytest.mark.timeout(30)
+    def test_sampling_ainics_help(self, target):
+        """--sampling-ainics must appear in the sampling help output.
+
+        The flag is only registered (and therefore only shown by
+        ``--help=sampling``) when the binary was built with
+        ROCPROFSYS_BUILD_AINIC=ON.
+        """
+        result = self.run_test(
+            "baseline",
+            target=target,
+            run_args=["--help=sampling"],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=[r"--sampling-ainics"])
+
+    @pytest.mark.ainic_required
+    @pytest.mark.network
     @pytest.mark.rocpd("ainic_perf_env")
+    @pytest.mark.timeout(120)
     def test_performance_tracks(
         self,
         ainic_perf_env,

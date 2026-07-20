@@ -36,8 +36,7 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
-  if (comm->nRanks < 2 || comm->nRanks > kDdaMaxNranks ||
-      comm->bootstrap == nullptr) {
+  if (comm->nRanks < 2 || comm->nRanks > kDdaMaxNranks || comm->bootstrap == nullptr) {
     return ncclSuccess;
   }
 
@@ -53,9 +52,7 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   // is unavailable the fabric path is skipped (DDA disabled, normal RCCL path
   // used). ncclCuMemAlloc rounds size up to the allocation granularity.
   if (!ncclCuMemEnable()) {
-    INFO(
-        NCCL_INIT,
-        "ncclDdaFabricCommInit: VMM unavailable; skipping fabric DDA path");
+    INFO(NCCL_INIT, "ncclDdaFabricCommInit: VMM unavailable; skipping fabric DDA path");
     return ncclSuccess;
   }
 
@@ -71,25 +68,20 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   const int nBlocksMax = ddaFabricMaxNBlocksForScratch();
   ncclResult_t res = ncclSuccess;
 
-  res = ncclCuMemAlloc(
-      &scratch, &scratchHandle, ncclCuMemHandleType, bytes, comm->memManager);
+  res = ncclCuMemAlloc(&scratch, &scratchHandle, ncclCuMemHandleType, bytes, comm->memManager);
   if (res != ncclSuccess || scratch == nullptr) {
-    INFO(
-        NCCL_INIT,
-        "ncclDdaFabricCommInit: VMM scratch alloc failed; skipping fabric DDA path");
+    INFO(NCCL_INIT, "ncclDdaFabricCommInit: VMM scratch alloc failed; skipping fabric DDA path");
     scratch = nullptr;
     goto fail;
   }
 
-  handler = new (std::nothrow)
-      ncclFabricMemHandler(comm->bootstrap, comm->rank, nRanks, comm->memManager);
+  handler = new (std::nothrow) ncclFabricMemHandler(comm->bootstrap, comm->rank, nRanks, comm->memManager);
   if (handler == nullptr) {
     WARN("ncclDdaFabricCommInit: OOM allocating ncclFabricMemHandler");
     goto fail;
   }
 
-  NCCLCHECKGOTO(
-      handler->addSelfDeviceMem(scratch, scratchHandle, bytes), res, fail);
+  NCCLCHECKGOTO(handler->addSelfDeviceMem(scratch, scratchHandle, bytes), res, fail);
   NCCLCHECKGOTO(handler->exchangeMemPtrs(), res, fail);
 
   CUDACHECKGOTO(cudaMalloc(&peerDev, nRanks * sizeof(void*)), res, fail);
@@ -98,15 +90,11 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
     NCCLCHECKGOTO(handler->getPeerDeviceMemPtr(i, &h_ptrs[i]), res, fail);
   }
 
-  CUDACHECKGOTO(
-      cudaMemcpy(
-          peerDev, h_ptrs.data(), nRanks * sizeof(void*),
-          cudaMemcpyHostToDevice),
-      res, fail);
+  CUDACHECKGOTO(cudaMemcpy(peerDev, h_ptrs.data(), nRanks * sizeof(void*), cudaMemcpyHostToDevice), res, fail);
 
   {
-    auto barrierPair = meta::comms::FabricGpuBarrier::mallocAndInit(
-        nRanks, nBlocksMax, comm->rank, comm->bootstrap, comm->memManager);
+    auto barrierPair =
+      meta::comms::FabricGpuBarrier::mallocAndInit(nRanks, nBlocksMax, comm->rank, comm->bootstrap, comm->memManager);
     if (!barrierPair.first) {
       WARN("ncclDdaFabricCommInit: FabricGpuBarrier malloc/init failed");
       goto fail;
@@ -128,12 +116,9 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   comm->ddaPeerPtrsDev = peerDev;
   comm->ddaFabricBarrierState = barrierState;
   comm->ddaFabricMaxBlocks = nBlocksMax;
-  INFO(
-      NCCL_INIT,
-      "ncclDdaFabricCommInit: nRanks %d, scratch %zu bytes (vmm), FabricGpuBarrier nBlocks=%d, peer table on device",
-      nRanks,
-      bytes,
-      nBlocksMax);
+  INFO(NCCL_INIT,
+       "ncclDdaFabricCommInit: nRanks %d, scratch %zu bytes (vmm), FabricGpuBarrier nBlocks=%d, peer table on device",
+       nRanks, bytes, nBlocksMax);
   return ncclSuccess;
 
 fail:

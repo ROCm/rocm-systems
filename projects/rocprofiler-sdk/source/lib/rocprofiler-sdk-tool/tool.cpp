@@ -23,6 +23,7 @@
 #define _GNU_SOURCE     1
 #define _DEFAULT_SOURCE 1
 
+#include "att_no_intercept.hpp"
 #include "config.hpp"
 #include "execution_profile.hpp"
 #include "graph_stack.hpp"
@@ -107,6 +108,7 @@
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <dlfcn.h>
@@ -1098,6 +1100,9 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                     output_filename,
                     obj_data);
             }
+
+            if(tool::get_config().advanced_thread_trace && tool::get_config().att_no_intercept)
+                tool::att_no_intercept::code_object_load(*obj_data);
         }
         else if(record.phase == ROCPROFILER_CALLBACK_PHASE_UNLOAD)
         {
@@ -1123,7 +1128,6 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
             ROCP_WARNING_IF(!success)
                 << "duplicate kernel symbol data for kernel_id=" << sym_data->kernel_id;
 
-            // add the kernel to the kernel_targets if
             if(success)
             {
                 // if kernel name is provided by user then by default all kernels in the
@@ -1136,14 +1140,15 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
                 std::string_view include_regex(kernel_filter_include);
                 std::string_view exclude_regex(kernel_filter_exclude);
-                if(rocprofiler::common::regex::regex_search(kernel_info->formatted_kernel_name,
-                                                            include_regex))
-                {
-                    if(kernel_filter_exclude.empty() ||
-                       !rocprofiler::common::regex::regex_search(kernel_info->formatted_kernel_name,
-                                                                 exclude_regex))
-                        add_kernel_target(sym_data->kernel_id, kernel_filter_range);
-                }
+                const auto       is_targeted = rocprofiler::common::regex::regex_search(
+                                             kernel_info->formatted_kernel_name, include_regex) &&
+                                         (kernel_filter_exclude.empty() ||
+                                          !rocprofiler::common::regex::regex_search(
+                                              kernel_info->formatted_kernel_name, exclude_regex));
+                if(is_targeted) add_kernel_target(sym_data->kernel_id, kernel_filter_range);
+
+                if(tool::get_config().advanced_thread_trace && tool::get_config().att_no_intercept)
+                    tool::att_no_intercept::kernel_symbol_load(*sym_data, is_targeted);
             }
         }
     }
@@ -1702,13 +1707,13 @@ pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
 }
 
 void
-att_shader_data_callback(rocprofiler_agent_id_t                       agent,
-                         int64_t                                      se_id,
-                         void*                                        se_data,
-                         size_t                                       data_size,
-                         rocprofiler_thread_trace_shader_data_flags_t flags,
-                         rocprofiler_user_data_t                      userdata)
+att_shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
+                         rocprofiler_user_data_t                userdata)
 {
+    auto agent = shader_data.agent;
+    auto se_id = shader_data.shader_engine_id;
+    auto flags = shader_data.flags;
+
     if((flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL) != 0)
         ROCP_CI_LOG(WARNING) << "Thread trace buffer full!";
     std::lock_guard<std::mutex> lock(att_shader_data);
@@ -1722,7 +1727,7 @@ att_shader_data_callback(rocprofiler_agent_id_t                       agent,
     auto        output_stream   = get_output_stream(tool::get_config(), filename.str(), ".att");
     std::string output_filename = get_output_filename(tool::get_config(), filename.str(), ".att");
 
-    output_stream.stream->write(reinterpret_cast<char*>(se_data), data_size);
+    output_stream.stream->write(reinterpret_cast<char*>(shader_data.data), shader_data.data_size);
     auto key = tool::att_dispatch_agent_key_t{dispatch_id, agent.handle};
     tool_metadata->att_filenames[key].emplace_back(output_filename);
 }
@@ -2547,6 +2552,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     client_finalizer = fini_func;
 
+    if(tool::get_config().advanced_thread_trace && tool::get_config().att_no_intercept &&
+       !tool::att_no_intercept::is_supported())
+    {
+        ROCP_WARNING << "--att-no-intercept is unavailable: this rocprofv3 build does not include "
+                        "ATT quick-scan support. Falling back to --att.";
+        tool::get_config().att_no_intercept = false;
+    }
+
     const uint64_t buffer_size      = 16 * common::units::get_page_size();
     const uint64_t buffer_watermark = 15 * common::units::get_page_size();
 
@@ -2895,6 +2908,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         bool     exclude_nontarget = tool::get_config().att_param_target_only;
         auto&    att_perf          = tool::get_config().att_param_perfcounters;
         bool     att_serialize_all = tool::get_config().att_serialize_all;
+        bool     att_no_intercept  = tool::get_config().att_no_intercept;
 
         global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {target_cu}});
         global_parameters.push_back(
@@ -2904,6 +2918,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             {ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {shader_mask}});
         global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SERIALIZE_ALL,
                                      {static_cast<uint64_t>(att_serialize_all)}});
+        if(att_no_intercept)
+            global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_NUM_BUFFERS, {6}});
 
         if(exclude_nontarget)
         {
@@ -2944,10 +2960,20 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         const auto handle_marker_trace        = tool::get_config().selected_regions;
         rocprofiler_user_data_t user{.value = 0};
 
-        ROCP_ERROR_IF(handle_consecutive_kernels && handle_marker_trace)
-            << "selected-regions and att-consecutive-kernels options are mutually exclusive";
+        if(att_no_intercept && handle_marker_trace)
+        {
+            ROCP_WARNING << "--selected-regions does not control --att-no-intercept captures; "
+                            "ATT no-intercept will quick-scan device thread-trace chunks after "
+                            "the first code-object upload for each selected GPU agent";
+        }
 
-        if(handle_marker_trace)
+        if(!att_no_intercept)
+        {
+            ROCP_ERROR_IF(handle_consecutive_kernels && handle_marker_trace)
+                << "selected-regions and att-consecutive-kernels options are mutually exclusive";
+        }
+
+        if(!att_no_intercept && handle_marker_trace)
         {
             // Marker-controlled device thread trace:
             // Context is registered for pause/resume control and starts stopped.
@@ -2958,7 +2984,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             att_device_trace_id.store(0);
             create_pause_resume_ctx(att_device_context, "advanced thread trace (ATT)");
         }
-        else if(handle_consecutive_kernels)
+        else if(!att_no_intercept && handle_consecutive_kernels)
         {
             // TODO: Fix DeviceThreadTracer to handle remaining thread traces before stopping
             // contexts so the following call can function correctly with marker trace:
@@ -2977,6 +3003,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                              "dispatch tracing service configure");
         }
 
+        if(att_no_intercept)
+            tool::att_no_intercept::configure(callbacks.att_shader_data,
+                                              tool::get_config().kernel_filter_range);
+
         for(auto& [id, agent] : tool_metadata->agents_map)
         {
             if(agent.type != ROCPROFILER_AGENT_TYPE_GPU) continue;
@@ -2986,7 +3016,20 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             auto agent_params = global_parameters;
             for(auto& counter : get_att_perfcounter_params(id, att_perf))
                 agent_params.push_back(counter);
-            if(!handle_consecutive_kernels && !handle_marker_trace)
+            if(att_no_intercept)
+            {
+                auto trace_config = tool::att_no_intercept::configure_agent(
+                    id, tool::get_config().att_consecutive_kernels);
+                ROCPROFILER_CALL(rocprofiler_configure_device_thread_trace_service(
+                                     trace_config.context,
+                                     id,
+                                     agent_params.data(),
+                                     agent_params.size(),
+                                     tool::att_no_intercept::shader_data_callback,
+                                     trace_config.userdata),
+                                 "thread trace service configure");
+            }
+            else if(!handle_consecutive_kernels && !handle_marker_trace)
             {
                 ROCPROFILER_CALL(
                     rocprofiler_configure_dispatch_thread_trace_service(get_client_ctx(),
@@ -3703,6 +3746,8 @@ tool_detach(void* /*tool_data*/)
     // Flush all buffers, stop context to ensure in-flight GPU operations complete,
     // then flush again to capture any final events (same pattern as tool_fini).
     flush();
+    if(tool::get_config().advanced_thread_trace && tool::get_config().att_no_intercept)
+        tool::att_no_intercept::finalize();
     rocprofiler_stop_context(get_client_ctx());
     flush();
 
@@ -3758,6 +3803,8 @@ tool_fini(void* /*tool_data*/)
     auto _fini_timer = common::simple_timer{"[rocprofv3] tool finalization"};
 
     flush();
+    if(tool::get_config().advanced_thread_trace && tool::get_config().att_no_intercept)
+        tool::att_no_intercept::finalize();
     rocprofiler_stop_context(get_client_ctx());
     flush();
 

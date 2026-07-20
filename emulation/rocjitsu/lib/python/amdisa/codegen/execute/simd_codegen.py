@@ -839,8 +839,10 @@ SIMD_VOP2_CARRY: dict[str, str] = {
 # shapes, all built on the single-rounded fused multiply-add (the scalar bodies
 # use std::fma). The functor is invoked as
 #   fma_op(simd<T> src0, simd<T> vsrc1, simd<T> vdst, simd<T> k) -> simd<T>
-# inside try_execute_ternary_vop2_simd; `k` is the broadcast inline literal
-# (`k_literal_expr`, an inst.-qualified expression, or "0u" when there is none).
+# inside try_execute_ternary_vop2_simd for literal forms, or
+# try_execute_ternary_vop2_acc_simd for dst-accumulate forms; `k` is the
+# broadcast inline literal (`k_literal_expr`, an inst.-qualified expression, or
+# "0u" when there is none).
 # Shapes:
 #   dst-accumulate (fmac/mac):     fma(s0, s1, dvst)        -- ignores k
 #   literal addend (fmaak/madak):  fma(s0, s1, k)           -- ignores dvst
@@ -895,6 +897,14 @@ SIMD_VOP2_TERNARY: dict[str, tuple[str, str, str]] = {
     # FMA functor as v_madak_f16, differing only in the literal field (simm32_ vs
     # simm32.encoding_value_); the SIMD path is identical to the tested madak_f16.
     'v_fmaak_f16_vop2': ('uint32_t', 'inst.simm32_', _FMA_ADDK_F16),
+}
+
+SIMD_VOP2_TERNARY_ACCUMULATE = {
+    'v_fmac_f16_vop2',
+    'v_fmac_f32_vop2',
+    'v_fmac_dx9_zero_f32_vop2',
+    'v_mac_f16_vop2',
+    'v_mac_f32_vop2',
 }
 
 
@@ -2559,7 +2569,12 @@ def simd_probe_line(template_name: str, *, true16_vop3: bool = False) -> str | N
     spect = SIMD_VOP2_TERNARY.get(template_name)
     if spect is not None:
         cpp_t, k_expr, cpp_op = spect
-        return f'  ROCJITSU_TRY_SIMD_VOP2_TERNARY({cpp_t}, {k_expr}, {cpp_op});'
+        macro = (
+            'ROCJITSU_TRY_SIMD_VOP2_TERNARY_ACC'
+            if template_name in SIMD_VOP2_TERNARY_ACCUMULATE
+            else 'ROCJITSU_TRY_SIMD_VOP2_TERNARY'
+        )
+        return f'  {macro}({cpp_t}, {k_expr}, {cpp_op});'
     specf64 = SIMD_VOP2_FMA_F64.get(template_name)
     if specf64 is not None:
         return f'  ROCJITSU_TRY_SIMD_VOP2_FMA_F64({specf64});'
