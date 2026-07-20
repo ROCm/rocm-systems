@@ -786,7 +786,7 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_AnyOrder") {
   HIP_CHECK(hipModuleGetFunction(&second, module, "second"));
 
   int* res;
-  HIP_CHECK(hipHostMalloc(&res, sizeof(int), hipHostAllocMapped));
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&res), sizeof(int), hipHostAllocMapped));
   *res = 0;
 
   int *dres;
