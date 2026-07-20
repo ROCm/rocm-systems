@@ -200,6 +200,18 @@
       ]
     },
 
+    "cast_grh": {
+      "extends": "cast_base",
+      "description": "GRH/GID addressing on the CAST path.",
+      "tests": [
+        {
+          "name": "A17_Cast_GrhSetOnRoceQp",
+          "description": "RoCE QPs use global (GRH/GID) addressing: is_global=1 read back from the driver via ibv_query_qp on every RoCE QP, plus a data-integrity send/recv.",
+          "test_filter": "NetIbMPITest.CastGrhSetOnRoceQp"
+        }
+      ]
+    },
+
     "gin_proxy": {
       "extends": "gtest_base",
       "timeout": 600,
@@ -484,6 +496,7 @@
     { "config": "cts_on_depth32",        "enabled": true, "smoke": true },
     { "config": "cast_wrr",              "enabled": true, "smoke": true },
     { "config": "cast_fault_injection",  "enabled": true, "smoke": true },
+    { "config": "cast_grh",              "enabled": true, "smoke": true },
     { "config": "gin_proxy",             "enabled": true, "smoke": true },
     { "config": "gin_enable_gate",       "enabled": true },
     { "config": "gin_ainic_backend",     "enabled": true },
