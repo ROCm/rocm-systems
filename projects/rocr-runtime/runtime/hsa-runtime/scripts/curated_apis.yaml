@@ -595,3 +595,36 @@
 
 - api: hsa_isa_compatible
   args: [code_object_isa, agent_isa, result]
+
+- api: hsa_table_interface_init
+  args: [apiTable]
+
+- api: hsa_table_interface_get_table
+  args: []
+
+- api: hsa_init
+  args: []
+
+- api: hsa_shut_down
+  args: []
+
+- api: hsa_system_get_info
+  args: [attribute, value]
+
+- api: hsa_extension_get_name
+  args: [extension, name]
+
+- api: hsa_system_extension_supported
+  args: [extension, version_major, version_minor, result]
+
+- api: hsa_system_major_extension_supported
+  args: [extension, version_major, version_minor, result]
+
+- api: hsa_system_get_extension_table
+  args: [extension, version_major, version_minor, table]
+
+- api: hsa_system_get_major_extension_table
+  args: [extension, version_major, table_length, table]
+
+- api: hsa_status_string
+  args: [status, status_string]

@@ -1,3 +1,13 @@
+hsa_table_interface_init	VOID	void
+hsa_table_interface_get_table	PTR	const HsaApiTable *
+hsa_init	STATUS	hsa_status_t
+hsa_shut_down	STATUS	hsa_status_t
+hsa_system_get_info	STATUS	hsa_status_t
+hsa_extension_get_name	STATUS	hsa_status_t
+hsa_system_extension_supported	STATUS	hsa_status_t
+hsa_system_major_extension_supported	STATUS	hsa_status_t
+hsa_system_get_extension_table	STATUS	hsa_status_t
+hsa_system_get_major_extension_table	STATUS	hsa_status_t
 hsa_iterate_agents	STATUS	hsa_status_t
 hsa_agent_get_info	STATUS	hsa_status_t
 hsa_agent_get_exception_policies	STATUS	hsa_status_t
@@ -114,6 +124,7 @@ hsa_executable_symbol_get_info	STATUS	hsa_status_t
 hsa_executable_iterate_symbols	STATUS	hsa_status_t
 hsa_executable_iterate_agent_symbols	STATUS	hsa_status_t
 hsa_executable_iterate_program_symbols	STATUS	hsa_status_t
+hsa_status_string	STATUS	hsa_status_t
 hsa_amd_coherency_get_type	STATUS	hsa_status_t
 hsa_amd_coherency_set_type	STATUS	hsa_status_t
 hsa_amd_agent_preload	STATUS	hsa_status_t

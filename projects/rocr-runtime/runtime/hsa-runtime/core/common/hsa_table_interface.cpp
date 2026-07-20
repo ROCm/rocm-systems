@@ -145,63 +145,118 @@ static const AmdExtTable* amdExtTable;
 static const ToolsApiTable* toolsApiTable;
 
 void hsa_table_interface_init(const HsaApiTable* apiTable) {
-    hsaApiTable = apiTable;
-    coreApiTable = apiTable->core_;
-    amdExtTable = apiTable->amd_ext_;
-    toolsApiTable = apiTable->tools_;
+  auto const __rocm_in_apiTable = apiTable;
+  rocm_trace_emit_hsa_table_interface_init_enter(
+      (const void*)(uintptr_t)(__rocm_in_apiTable)); /* __ROCM_CURATED__: hsa_table_interface_init */
+  hsaApiTable = apiTable;
+  coreApiTable = apiTable->core_;
+  amdExtTable = apiTable->amd_ext_;
+  toolsApiTable = apiTable->tools_;
+  rocm_trace_emit_hsa_table_interface_init_exit();
+  
 }
 
 const HsaApiTable* hsa_table_interface_get_table() {
-  return hsaApiTable;
+  rocm_trace_emit_hsa_table_interface_get_table_enter(); /* __ROCM_CURATED__: hsa_table_interface_get_table */
+  ROCR_TRACE_API_RET_PTR_CURATED_HSA_NOARGS(hsa_table_interface_get_table, auto, hsaApiTable);
 }
 
 // Pass through stub functions
 hsa_status_t HSA_API hsa_init() {
+  rocm_trace_emit_hsa_init_enter(); /* __ROCM_CURATED__: hsa_init */
+  
   // We initialize the api tables here once more since the code above is prone to a
   // link-time ordering condition: This compilation unit here may get its global
   // variables initialized earlier than the global objects in other compilation units.
   // In particular Init::Init may get called earlier than that the underlying hsa_api_table_
   // object in hsa_api_trace.cpp has been initialized.
   rocr::core::LoadInitialHsaApiTable();
-  return coreApiTable->hsa_init_fn();
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_init, coreApiTable->hsa_init_fn());
 }
 
-hsa_status_t HSA_API hsa_shut_down() { return coreApiTable->hsa_shut_down_fn(); }
+hsa_status_t HSA_API hsa_shut_down() {
+  rocm_trace_emit_hsa_shut_down_enter(); /* __ROCM_CURATED__: hsa_shut_down */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_shut_down, coreApiTable->hsa_shut_down_fn());
+}
 
-hsa_status_t HSA_API
-    hsa_system_get_info(hsa_system_info_t attribute, void* value) {
-  return coreApiTable->hsa_system_get_info_fn(attribute, value);
+hsa_status_t HSA_API hsa_system_get_info(hsa_system_info_t attribute, void* value) {
+  auto const __rocm_in_attribute = attribute;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hsa_system_get_info_enter(
+      (int32_t)(__rocm_in_attribute),
+      (const void*)(uintptr_t)(__rocm_in_value)); /* __ROCM_CURATED__: hsa_system_get_info */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_system_get_info, coreApiTable->hsa_system_get_info_fn(attribute, value));
 }
 
 hsa_status_t HSA_API hsa_extension_get_name(uint16_t extension, const char** name) {
-  return coreApiTable->hsa_extension_get_name_fn(extension, name);
+  auto const __rocm_in_extension = extension;
+  auto const __rocm_in_name = name;
+  rocm_trace_emit_hsa_extension_get_name_enter(
+      (__rocm_in_extension),
+      (const void*)(uintptr_t)(__rocm_in_name)); /* __ROCM_CURATED__: hsa_extension_get_name */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_extension_get_name, coreApiTable->hsa_extension_get_name_fn(extension, name));
 }
 
-hsa_status_t HSA_API
-    hsa_system_extension_supported(uint16_t extension, uint16_t version_major,
-                                   uint16_t version_minor, bool* result) {
-  return coreApiTable->hsa_system_extension_supported_fn(
-      extension, version_major, version_minor, result);
+hsa_status_t HSA_API hsa_system_extension_supported(uint16_t extension, uint16_t version_major,
+                                                    uint16_t version_minor, bool* result) {
+  auto const __rocm_in_extension = extension;
+  auto const __rocm_in_version_major = version_major;
+  auto const __rocm_in_version_minor = version_minor;
+  auto const __rocm_in_result = result;
+  rocm_trace_emit_hsa_system_extension_supported_enter(
+      (__rocm_in_extension),
+      (__rocm_in_version_major),
+      (__rocm_in_version_minor),
+      (const void*)(uintptr_t)(__rocm_in_result)); /* __ROCM_CURATED__: hsa_system_extension_supported */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_system_extension_supported, coreApiTable->hsa_system_extension_supported_fn(
+                                            extension, version_major, version_minor, result));
 }
 
 hsa_status_t HSA_API hsa_system_major_extension_supported(uint16_t extension,
                                                           uint16_t version_major,
                                                           uint16_t* version_minor, bool* result) {
-  return coreApiTable->hsa_system_major_extension_supported_fn(extension, version_major,
-                                                               version_minor, result);
+  auto const __rocm_in_extension = extension;
+  auto const __rocm_in_version_major = version_major;
+  auto const __rocm_in_version_minor = version_minor;
+  auto const __rocm_in_result = result;
+  rocm_trace_emit_hsa_system_major_extension_supported_enter(
+      (__rocm_in_extension),
+      (__rocm_in_version_major),
+      (const void*)(uintptr_t)(__rocm_in_version_minor),
+      (const void*)(uintptr_t)(__rocm_in_result)); /* __ROCM_CURATED__: hsa_system_major_extension_supported */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_system_major_extension_supported, coreApiTable->hsa_system_major_extension_supported_fn(
+                                            extension, version_major, version_minor, result));
 }
 
 hsa_status_t HSA_API hsa_system_get_extension_table(uint16_t extension, uint16_t version_major,
                                                     uint16_t version_minor, void* table) {
-  return coreApiTable->hsa_system_get_extension_table_fn(
-      extension, version_major, version_minor, table);
+  auto const __rocm_in_extension = extension;
+  auto const __rocm_in_version_major = version_major;
+  auto const __rocm_in_version_minor = version_minor;
+  auto const __rocm_in_table = table;
+  rocm_trace_emit_hsa_system_get_extension_table_enter(
+      (__rocm_in_extension),
+      (__rocm_in_version_major),
+      (__rocm_in_version_minor),
+      (const void*)(uintptr_t)(__rocm_in_table)); /* __ROCM_CURATED__: hsa_system_get_extension_table */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_system_get_extension_table, coreApiTable->hsa_system_get_extension_table_fn(
+                                            extension, version_major, version_minor, table));
 }
 
 hsa_status_t HSA_API hsa_system_get_major_extension_table(uint16_t extension,
                                                           uint16_t version_major,
                                                           size_t table_length, void* table) {
-  return coreApiTable->hsa_system_get_major_extension_table_fn(extension, version_major,
-                                                               table_length, table);
+  auto const __rocm_in_extension = extension;
+  auto const __rocm_in_version_major = version_major;
+  auto const __rocm_in_table_length = table_length;
+  auto const __rocm_in_table = table;
+  rocm_trace_emit_hsa_system_get_major_extension_table_enter(
+      (__rocm_in_extension),
+      (__rocm_in_version_major),
+      (__rocm_in_table_length),
+      (const void*)(uintptr_t)(__rocm_in_table)); /* __ROCM_CURATED__: hsa_system_get_major_extension_table */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_system_get_major_extension_table, coreApiTable->hsa_system_get_major_extension_table_fn(
+                                            extension, version_major, table_length, table));
 }
 
 hsa_status_t HSA_API hsa_iterate_agents(hsa_status_t (*callback)(hsa_agent_t agent, void* data),
@@ -1574,10 +1629,13 @@ hsa_status_t HSA_API hsa_executable_iterate_program_symbols(
 
 //===--- Runtime Notifications --------------------------------------------===//
 
-hsa_status_t HSA_API hsa_status_string(
-    hsa_status_t status,
-    const char **status_string) {
-  return coreApiTable->hsa_status_string_fn(status, status_string);
+hsa_status_t HSA_API hsa_status_string(hsa_status_t status, const char** status_string) {
+  auto const __rocm_in_status = status;
+  auto const __rocm_in_status_string = status_string;
+  rocm_trace_emit_hsa_status_string_enter(
+      (int32_t)(__rocm_in_status),
+      (const void*)(uintptr_t)(__rocm_in_status_string)); /* __ROCM_CURATED__: hsa_status_string */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_status_string, coreApiTable->hsa_status_string_fn(status, status_string));
 }
 
 /*
