@@ -88,7 +88,8 @@ struct triple_buffer_shared_data_t
     /// count bounded; the public API rejects values above this.
     static constexpr size_t MAX_SLOTS = 16;
 
-    att_queue_t* queue{nullptr};  // non-owning; ThreadTracerAgent owns the queue
+    att_queue_t* queue{nullptr};  // non-owning; owned by the shared-queue manager
+                                  // (freed in free_shared_queues())
 
     /// Global shutdown flag. Producer sets true after draining final chunks
     /// and notifies every slot's cv so consumers can exit.

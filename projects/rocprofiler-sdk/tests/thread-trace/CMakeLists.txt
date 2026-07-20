@@ -74,6 +74,31 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "ATT_LARGE_BUFFER_TEST=1"
     DISABLED ${IS_DISABLED})
 
+# Shared-buffer/queue stress (AIPROFSDK-102): allocate hundreds of ~1GB contexts with
+# varying params and run each once, decoding each trace to verify real waves land in the
+# selected SIMDs with valid PCs. Only fits in memory / the HSA queue limit because all
+# contexts on an agent share one buffer and one queue; per-context (old impl) would need
+# ~400GB and exhaust the per-agent queue limit. Exercised in device and dispatch modes.
+rocprofiler_add_integration_execute_test(
+    thread-trace-api-many-contexts-test
+    TARGET thread-trace-test-app
+    TIMEOUT 300
+    LABELS "integration-tests"
+    PRELOAD "$<TARGET_FILE:thread-trace-many-contexts-tool>"
+    # The app emits 2 dispatches/iteration; device rotation advances ~1 context every 2-3
+    # dispatches, so keep well above ~3x num_contexts of dispatches for margin.
+    ENVIRONMENT "ATT_NUM_CONTEXTS=400;ATT_APP_LOOPCOUNT=1600;ATT_TRACE_MODE=device"
+    DISABLED ${IS_DISABLED})
+
+rocprofiler_add_integration_execute_test(
+    thread-trace-api-many-contexts-dispatch-test
+    TARGET thread-trace-test-app
+    TIMEOUT 300
+    LABELS "integration-tests"
+    PRELOAD "$<TARGET_FILE:thread-trace-many-contexts-tool>"
+    ENVIRONMENT "ATT_NUM_CONTEXTS=400;ATT_APP_LOOPCOUNT=800;ATT_TRACE_MODE=dispatch"
+    DISABLED ${IS_DISABLED})
+
 # Test occupancy mode
 rocprofiler_add_integration_execute_test(
     thread-trace-api-extra-args

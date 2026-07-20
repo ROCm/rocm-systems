@@ -25,6 +25,7 @@
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/shared_trace_buffer.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/shared_trace_lease.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/shared_trace_queue.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/threading.hpp"
 
 #include "lib/common/container/stable_vector.hpp"
@@ -146,11 +147,12 @@ ThreadTracerAgent::ThreadTracerAgent(thread_trace_parameter_pack _params,
     const auto* agent =
         CHECK_NOTNULL(rocprofiler::agent::get_agent_cache(rocprofiler::agent::get_agent(agent_id)));
 
+    // All contexts on an agent share one queue (only one trace is active per agent at
+    // a time); a queue per context would exhaust the HSA per-agent queue limit. The
+    // shared queue's CPU staging buffers are sized to the max buffer_size/num_buffers
+    // registered across contexts (see register_shared_queue_size).
     hw_agent = agent->get_hsa_agent();
-
-    size_t staging_size = (params.num_buffers > 1) ? params.buffer_size : 0ul;
-    size_t staging_n    = (params.num_buffers > 1) ? params.num_buffers : 0ul;
-    queue               = make_att_queue(*agent, staging_size, staging_n);
+    queue    = CHECK_NOTNULL(acquire_shared_queue(*agent, params.buffer_size, params.num_buffers));
 
     factory = std::make_unique<aql::ThreadTraceAQLPacketFactory>(*agent, this->params, *core, *ext);
     control_packet = factory->construct_control_packet();
@@ -345,7 +347,7 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
         // producer thread continues the sequence from 1.
 
         auto worker_data         = std::make_shared<triple_buffer_shared_data_t>();
-        worker_data->queue       = queue.get();  // non-owning; ThreadTracerAgent owns queue
+        worker_data->queue       = queue;  // non-owning; owned by the shared-queue manager
         worker_data->num_buffers = params.num_buffers;
 
         // Wire each slot to its CPU staging buffer. Slots default to FREE.
@@ -455,15 +457,32 @@ DispatchThreadTracer::resource_deinit()
     agents.clear();
 }
 
-void
-DispatchThreadTracer::register_shared_buffer_sizes()
+namespace
 {
-    auto lk = std::unique_lock{agents_map_mut};
+// Report each context's per-agent buffer and queue staging requirements to the shared
+// managers before resource_init builds them, so both are sized to the max. Caller holds
+// the tracer's own params lock; templated because Dispatch and Device store params in
+// different container types.
+template <typename ParamsMap>
+void
+register_shared_sizes_locked(const ParamsMap& params)
+{
     for(const auto& [agent_id, pack] : params)
     {
         auto hsa_agent = rocprofiler::agent::get_hsa_agent(agent_id);
-        if(hsa_agent.has_value()) register_shared_buffer_size(*hsa_agent, pack.buffer_size);
+        if(!hsa_agent.has_value()) continue;
+        register_shared_buffer_size(*hsa_agent, pack.buffer_size);
+        register_shared_queue_size(*hsa_agent, pack.buffer_size, pack.num_buffers);
     }
+}
+}  // namespace
+
+void
+DispatchThreadTracer::register_shared_sizes()
+{
+    // Read-only over params; register_shared_*_size modify the (separate) manager state.
+    auto lk = std::shared_lock{agents_map_mut};
+    register_shared_sizes_locked(params);
 }
 
 /**
@@ -636,14 +655,10 @@ DeviceThreadTracer::resource_deinit()
 }
 
 void
-DeviceThreadTracer::register_shared_buffer_sizes()
+DeviceThreadTracer::register_shared_sizes()
 {
     std::unique_lock<std::mutex> lk(agent_mut);
-    for(const auto& [agent_id, pack] : params)
-    {
-        auto hsa_agent = rocprofiler::agent::get_hsa_agent(agent_id);
-        if(hsa_agent.has_value()) register_shared_buffer_size(*hsa_agent, pack.buffer_size);
-    }
+    register_shared_sizes_locked(params);
 }
 
 void
@@ -714,12 +729,12 @@ initialize(HsaApiTable* table)
 {
     ROCP_FATAL_IF(!table->core_ || !table->amd_ext_);
 
-    // Register every context's buffer sizes before resource_init builds buffers,
-    // so the shared per-agent buffers are sized to the max requested size.
+    // Register every context's buffer and queue sizes before resource_init builds
+    // them, so the shared per-agent buffer and queue are sized to the max requested.
     for(auto& ctx : context::get_registered_contexts())
     {
-        if(ctx->device_thread_trace) ctx->device_thread_trace->register_shared_buffer_sizes();
-        if(ctx->dispatch_thread_trace) ctx->dispatch_thread_trace->register_shared_buffer_sizes();
+        if(ctx->device_thread_trace) ctx->device_thread_trace->register_shared_sizes();
+        if(ctx->dispatch_thread_trace) ctx->dispatch_thread_trace->register_shared_sizes();
     }
 
     for(auto& ctx : context::get_registered_contexts())
@@ -770,9 +785,10 @@ finalize()
         if(ctx->dispatch_thread_trace) ctx->dispatch_thread_trace->resource_deinit();
     }
 
-    // ThreadTracerAgents and their packets are gone; release the shared buffers and
-    // per-agent leases (all safe to destroy now that no agent can submit).
+    // ThreadTracerAgents and their packets are gone; release the shared buffers,
+    // queues, and per-agent leases (all safe to destroy now that no agent can submit).
     free_shared_buffers();
+    free_shared_queues();
     free_agent_leases();
 
     code_object::finalize();
