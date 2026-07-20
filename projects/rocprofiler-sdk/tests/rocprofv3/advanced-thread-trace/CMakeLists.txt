@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -287,6 +287,38 @@ rocprofiler_add_integration_execute_test(
     WILL_FAIL
     DISABLED ${IS_DISABLED}
     FAIL_REGULAR_EXPRESSION "Invalid GPU Device Index")
+
+# Check that invalid ATT parameters are rejected with a parameter-specific message and a
+# non-zero exit. The TIMEOUT guards against a regression of that hang (a deadlock trips
+# the timeout, which WILL_FAIL does not invert). FAIL_REGULAR_EXPRESSION checks that the
+# relevant diagnostic message is emitted.
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-target-cu-out-of-range-will-fail
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
+        ${CMAKE_CURRENT_BINARY_DIR}/att-bad-target-cu --att --att-target-cu 99999
+        --log-level warning -- $<TARGET_FILE:vector-ops>
+    DEPENDS vector-ops
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    WILL_FAIL
+    DISABLED ${IS_DISABLED}
+    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    FAIL_REGULAR_EXPRESSION "Invalid thread trace target CU")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-buffer-size-too-small-will-fail
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
+        ${CMAKE_CURRENT_BINARY_DIR}/att-bad-buffer-size --att --att-buffer-size 4096
+        --log-level warning -- $<TARGET_FILE:vector-ops>
+    DEPENDS vector-ops
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    WILL_FAIL
+    DISABLED ${IS_DISABLED}
+    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    FAIL_REGULAR_EXPRESSION "Invalid thread trace buffer size")
 
 #
 # Test --att-perfcounter-target-cu option This test verifies that perfcounter events are
