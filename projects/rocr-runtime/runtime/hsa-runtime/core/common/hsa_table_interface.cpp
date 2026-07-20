@@ -1745,9 +1745,13 @@ hsa_status_t HSA_API hsa_amd_signal_async_handler(hsa_signal_t signal, hsa_signa
 }
 
 // Mirrors Amd Extension Apis
-hsa_status_t HSA_API
-    hsa_amd_async_function(void (*callback)(void* arg), void* arg) {
-  return amdExtTable->hsa_amd_async_function_fn(callback, arg);
+hsa_status_t HSA_API hsa_amd_async_function(void (*callback)(void* arg), void* arg) {
+  auto const __rocm_in_callback = callback;
+  auto const __rocm_in_arg = arg;
+  rocm_trace_emit_hsa_amd_async_function_enter(
+      (const void*)(uintptr_t)(__rocm_in_callback),
+      (const void*)(uintptr_t)(__rocm_in_arg)); /* __ROCM_CURATED__: hsa_amd_async_function */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_async_function, amdExtTable->hsa_amd_async_function_fn(callback, arg));
 }
 
 // Mirrors Amd Extension Apis
@@ -2187,27 +2191,51 @@ hsa_status_t HSA_API hsa_amd_interop_unmap_buffer(void* ptr) {
 }
 
 // Mirrors Amd Extension Apis
-hsa_status_t HSA_API hsa_amd_image_create(
-  hsa_agent_t agent,
-  const hsa_ext_image_descriptor_t *image_descriptor,
-  const hsa_amd_image_descriptor_t *image_layout,
-  const void *image_data,
-  hsa_access_permission_t access_permission,
-  hsa_ext_image_t *image) {
-  return amdExtTable->hsa_amd_image_create_fn(agent, image_descriptor,
-                          image_layout, image_data, access_permission, image);
+hsa_status_t HSA_API hsa_amd_image_create(hsa_agent_t agent,
+                                          const hsa_ext_image_descriptor_t* image_descriptor,
+                                          const hsa_amd_image_descriptor_t* image_layout,
+                                          const void* image_data,
+                                          hsa_access_permission_t access_permission,
+                                          hsa_ext_image_t* image) {
+  auto const __rocm_in_agent = agent;
+  auto const __rocm_in_image_descriptor = image_descriptor;
+  auto const __rocm_in_image_layout = image_layout;
+  auto const __rocm_in_image_data = image_data;
+  auto const __rocm_in_access_permission = access_permission;
+  auto const __rocm_in_image = image;
+  rocm_trace_emit_hsa_amd_image_create_enter(
+      (uint64_t)((__rocm_in_agent).handle),
+      (const void*)(uintptr_t)(__rocm_in_image_descriptor),
+      (const void*)(uintptr_t)(__rocm_in_image_layout),
+      (const void*)(uintptr_t)(__rocm_in_image_data),
+      (int32_t)(__rocm_in_access_permission),
+      (const void*)(uintptr_t)(__rocm_in_image)); /* __ROCM_CURATED__: hsa_amd_image_create */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_image_create, amdExtTable->hsa_amd_image_create_fn(agent, image_descriptor, image_layout, image_data,
+                                           access_permission, image));
 }
 
 // Mirrors Amd Extension Apis
-hsa_status_t HSA_API hsa_amd_image_create_v2(
-  hsa_agent_t agent,
-  const hsa_ext_image_descriptor_v2_t* image_descriptor,
-  const hsa_amd_image_descriptor_t* image_layout,
-  const void* image_data,
-  hsa_access_permission_t access_permission,
-  hsa_ext_image_t* image) {
-  return amdExtTable->hsa_amd_image_create_v2_fn(agent, image_descriptor,
-                           image_layout, image_data, access_permission, image);
+hsa_status_t HSA_API hsa_amd_image_create_v2(hsa_agent_t agent,
+                                             const hsa_ext_image_descriptor_v2_t* image_descriptor,
+                                             const hsa_amd_image_descriptor_t* image_layout,
+                                             const void* image_data,
+                                             hsa_access_permission_t access_permission,
+                                             hsa_ext_image_t* image) {
+  auto const __rocm_in_agent = agent;
+  auto const __rocm_in_image_descriptor = image_descriptor;
+  auto const __rocm_in_image_layout = image_layout;
+  auto const __rocm_in_image_data = image_data;
+  auto const __rocm_in_access_permission = access_permission;
+  auto const __rocm_in_image = image;
+  rocm_trace_emit_hsa_amd_image_create_v2_enter(
+      (uint64_t)((__rocm_in_agent).handle),
+      (const void*)(uintptr_t)(__rocm_in_image_descriptor),
+      (const void*)(uintptr_t)(__rocm_in_image_layout),
+      (const void*)(uintptr_t)(__rocm_in_image_data),
+      (int32_t)(__rocm_in_access_permission),
+      (const void*)(uintptr_t)(__rocm_in_image)); /* __ROCM_CURATED__: hsa_amd_image_create_v2 */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_image_create_v2, amdExtTable->hsa_amd_image_create_v2_fn(agent, image_descriptor, image_layout, image_data,
+                                              access_permission, image));
 }
 
 // Mirrors Amd Extension Apis
@@ -2315,9 +2343,14 @@ hsa_status_t HSA_API hsa_amd_ipc_signal_attach(const hsa_amd_ipc_signal_t* handl
 }
 
 // Mirrors Amd Extension Apis
-hsa_status_t HSA_API hsa_amd_register_system_event_handler(
-    hsa_amd_system_event_callback_t callback, void* data) {
-  return amdExtTable->hsa_amd_register_system_event_handler_fn(callback, data);
+hsa_status_t HSA_API hsa_amd_register_system_event_handler(hsa_amd_system_event_callback_t callback,
+                                                           void* data) {
+  auto const __rocm_in_callback = callback;
+  auto const __rocm_in_data = data;
+  rocm_trace_emit_hsa_amd_register_system_event_handler_enter(
+      (const void*)(uintptr_t)(__rocm_in_callback),
+      (const void*)(uintptr_t)(__rocm_in_data)); /* __ROCM_CURATED__: hsa_amd_register_system_event_handler */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_register_system_event_handler, amdExtTable->hsa_amd_register_system_event_handler_fn(callback, data));
 }
 
 // Mirrors Amd Extension Apis
@@ -2345,16 +2378,27 @@ hsa_status_t HSA_API hsa_amd_queue_create(hsa_agent_t agent, hsa_amd_queue_creat
 }
 
 // Mirrors Amd Extension Apis
-hsa_status_t HSA_API hsa_amd_register_deallocation_callback(void* ptr,
-                                                    hsa_amd_deallocation_callback_t callback,
-                                                    void* user_data) {
-  return amdExtTable->hsa_amd_register_deallocation_callback_fn(ptr, callback, user_data);
+hsa_status_t HSA_API hsa_amd_register_deallocation_callback(
+    void* ptr, hsa_amd_deallocation_callback_t callback, void* user_data) {
+  auto const __rocm_in_ptr = ptr;
+  auto const __rocm_in_callback = callback;
+  auto const __rocm_in_user_data = user_data;
+  rocm_trace_emit_hsa_amd_register_deallocation_callback_enter(
+      (const void*)(uintptr_t)(__rocm_in_ptr),
+      (const void*)(uintptr_t)(__rocm_in_callback),
+      (const void*)(uintptr_t)(__rocm_in_user_data)); /* __ROCM_CURATED__: hsa_amd_register_deallocation_callback */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_register_deallocation_callback, amdExtTable->hsa_amd_register_deallocation_callback_fn(ptr, callback, user_data));
 }
 
 // Mirrors Amd Extension Apis
-hsa_status_t HSA_API hsa_amd_deregister_deallocation_callback(void* ptr,
-                                                      hsa_amd_deallocation_callback_t callback) {
-  return amdExtTable->hsa_amd_deregister_deallocation_callback_fn(ptr, callback);
+hsa_status_t HSA_API
+hsa_amd_deregister_deallocation_callback(void* ptr, hsa_amd_deallocation_callback_t callback) {
+  auto const __rocm_in_ptr = ptr;
+  auto const __rocm_in_callback = callback;
+  rocm_trace_emit_hsa_amd_deregister_deallocation_callback_enter(
+      (const void*)(uintptr_t)(__rocm_in_ptr),
+      (const void*)(uintptr_t)(__rocm_in_callback)); /* __ROCM_CURATED__: hsa_amd_deregister_deallocation_callback */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_deregister_deallocation_callback, amdExtTable->hsa_amd_deregister_deallocation_callback_fn(ptr, callback));
 }
 
 // Mirrors Amd Extension Apis
@@ -2424,20 +2468,39 @@ hsa_status_t HSA_API hsa_amd_svm_prefetch_async(void* ptr, size_t size, hsa_agen
 
 // Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_spm_acquire(hsa_agent_t agent) {
-  return amdExtTable->hsa_amd_spm_acquire_fn(agent);
+  auto const __rocm_in_preferred_agent = agent;
+  rocm_trace_emit_hsa_amd_spm_acquire_enter(
+      (uint64_t)((__rocm_in_preferred_agent).handle)); /* __ROCM_CURATED__: hsa_amd_spm_acquire */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_spm_acquire, amdExtTable->hsa_amd_spm_acquire_fn(agent));
 }
 
 // Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_spm_release(hsa_agent_t agent) {
-  return amdExtTable->hsa_amd_spm_release_fn(agent);
+  auto const __rocm_in_preferred_agent = agent;
+  rocm_trace_emit_hsa_amd_spm_release_enter(
+      (uint64_t)((__rocm_in_preferred_agent).handle)); /* __ROCM_CURATED__: hsa_amd_spm_release */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_spm_release, amdExtTable->hsa_amd_spm_release_fn(agent));
 }
 
 // Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_spm_set_dest_buffer(hsa_agent_t agent, size_t size, uint32_t* timeout,
                                                  uint32_t* size_copied, void* dest,
                                                  bool* is_data_loss) {
-  return amdExtTable->hsa_amd_spm_set_dest_buffer_fn(agent, size, timeout, size_copied, dest,
-                                                     is_data_loss);
+  auto const __rocm_in_preferred_agent = agent;
+  auto const __rocm_in_size_in_bytes = size;
+  auto const __rocm_in_timeout = timeout;
+  auto const __rocm_in_size_copied = size_copied;
+  auto const __rocm_in_dest = dest;
+  auto const __rocm_in_is_data_loss = is_data_loss;
+  rocm_trace_emit_hsa_amd_spm_set_dest_buffer_enter(
+      (uint64_t)((__rocm_in_preferred_agent).handle),
+      (__rocm_in_size_in_bytes),
+      (const void*)(uintptr_t)(__rocm_in_timeout),
+      (const void*)(uintptr_t)(__rocm_in_size_copied),
+      (const void*)(uintptr_t)(__rocm_in_dest),
+      (const void*)(uintptr_t)(__rocm_in_is_data_loss)); /* __ROCM_CURATED__: hsa_amd_spm_set_dest_buffer */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_spm_set_dest_buffer, amdExtTable->hsa_amd_spm_set_dest_buffer_fn(agent, size, timeout, size_copied, dest,
+                                                  is_data_loss));
 }
 
 // Mirrors Amd Extension Apis
@@ -2684,21 +2747,48 @@ hsa_status_t HSA_API hsa_amd_queue_get_info(hsa_queue_t* queue,
 }
 
 hsa_status_t HSA_API hsa_amd_enable_logging(uint8_t* flags, void* file) {
-  return amdExtTable->hsa_amd_enable_logging_fn(flags, file);
+  auto const __rocm_in_flags = flags;
+  auto const __rocm_in_file = file;
+  rocm_trace_emit_hsa_amd_enable_logging_enter(
+      (const void*)(uintptr_t)(__rocm_in_flags),
+      (const void*)(uintptr_t)(__rocm_in_file)); /* __ROCM_CURATED__: hsa_amd_enable_logging */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_enable_logging, amdExtTable->hsa_amd_enable_logging_fn(flags, file));
 }
 
-hsa_status_t HSA_API hsa_amd_ais_file_write(hsa_amd_ais_file_handle_t handle, void *devicePtr,
+hsa_status_t HSA_API hsa_amd_ais_file_write(hsa_amd_ais_file_handle_t handle, void* devicePtr,
                                             uint64_t size, int64_t file_offset,
-                                            uint64_t *size_copied, int32_t *status) {
-  return amdExtTable->hsa_amd_ais_file_write_fn(handle, devicePtr, size, file_offset,
-                                            size_copied, status);
+                                            uint64_t* size_copied, int32_t* status) {
+  auto const __rocm_in_devicePtr = devicePtr;
+  auto const __rocm_in_size = size;
+  auto const __rocm_in_file_offset = file_offset;
+  auto const __rocm_in_size_copied = size_copied;
+  auto const __rocm_in_status = status;
+  rocm_trace_emit_hsa_amd_ais_file_write_enter(
+      (const void*)(uintptr_t)(__rocm_in_devicePtr),
+      (__rocm_in_size),
+      (__rocm_in_file_offset),
+      (const void*)(uintptr_t)(__rocm_in_size_copied),
+      (const void*)(uintptr_t)(__rocm_in_status)); /* __ROCM_CURATED__: hsa_amd_ais_file_write */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_ais_file_write, amdExtTable->hsa_amd_ais_file_write_fn(handle, devicePtr, size, file_offset, size_copied,
+                                             status));
 }
 
-hsa_status_t HSA_API hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, void *devicePtr,
+hsa_status_t HSA_API hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, void* devicePtr,
                                            uint64_t size, int64_t file_offset,
-                                           uint64_t *size_copied, int32_t *status) {
-  return amdExtTable->hsa_amd_ais_file_read_fn(handle, devicePtr, size, file_offset,
-                                           size_copied, status);
+                                           uint64_t* size_copied, int32_t* status) {
+  auto const __rocm_in_devicePtr = devicePtr;
+  auto const __rocm_in_size = size;
+  auto const __rocm_in_file_offset = file_offset;
+  auto const __rocm_in_size_copied = size_copied;
+  auto const __rocm_in_status = status;
+  rocm_trace_emit_hsa_amd_ais_file_read_enter(
+      (const void*)(uintptr_t)(__rocm_in_devicePtr),
+      (__rocm_in_size),
+      (__rocm_in_file_offset),
+      (const void*)(uintptr_t)(__rocm_in_size_copied),
+      (const void*)(uintptr_t)(__rocm_in_status)); /* __ROCM_CURATED__: hsa_amd_ais_file_read */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_ais_file_read, amdExtTable->hsa_amd_ais_file_read_fn(handle, devicePtr, size, file_offset, size_copied,
+                                            status));
 }
 
 hsa_status_t HSA_API hsa_amd_counted_queue_acquire(
@@ -2763,16 +2853,24 @@ hsa_status_t HSA_API hsa_amd_signal_get_event_id(hsa_signal_t signal, uint32_t* 
 
 // Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_external_semaphore_handle_open(
-    hsa_agent_t agent,
-    const hsa_amd_external_semaphore_handle_descriptor_t *desc,
-    hsa_amd_external_semaphore_t *out_sem) {
-  return amdExtTable->hsa_amd_external_semaphore_handle_open_fn(agent, desc, out_sem);
+    hsa_agent_t agent, const hsa_amd_external_semaphore_handle_descriptor_t* desc,
+    hsa_amd_external_semaphore_t* out_sem) {
+  auto const __rocm_in_agent = agent;
+  auto const __rocm_in_desc = desc;
+  auto const __rocm_in_out_sem = out_sem;
+  rocm_trace_emit_hsa_amd_external_semaphore_handle_open_enter(
+      (uint64_t)((__rocm_in_agent).handle),
+      (const void*)(uintptr_t)(__rocm_in_desc),
+      (const void*)(uintptr_t)(__rocm_in_out_sem)); /* __ROCM_CURATED__: hsa_amd_external_semaphore_handle_open */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_external_semaphore_handle_open, amdExtTable->hsa_amd_external_semaphore_handle_open_fn(agent, desc, out_sem));
 }
 
 // Mirrors Amd Extension Apis
-hsa_status_t HSA_API hsa_amd_external_semaphore_handle_close(
-    hsa_amd_external_semaphore_t sem) {
-  return amdExtTable->hsa_amd_external_semaphore_handle_close_fn(sem);
+hsa_status_t HSA_API hsa_amd_external_semaphore_handle_close(hsa_amd_external_semaphore_t sem) {
+  auto const __rocm_in_sem = sem;
+  rocm_trace_emit_hsa_amd_external_semaphore_handle_close_enter(
+      (uint64_t)((__rocm_in_sem).handle)); /* __ROCM_CURATED__: hsa_amd_external_semaphore_handle_close */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_external_semaphore_handle_close, amdExtTable->hsa_amd_external_semaphore_handle_close_fn(sem));
 }
 
 // Mirrors Amd Extension Apis

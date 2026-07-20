@@ -643,3 +643,53 @@
 
 - api: hsa_amd_profiling_convert_tick_to_system_domain
   args: [agent, agent_tick, system_tick]
+
+- api: hsa_amd_async_function
+  args: [callback, arg]
+
+- api: hsa_amd_image_create
+  args: [agent, image_descriptor, image_layout, image_data, access_permission, image]
+
+- api: hsa_amd_register_system_event_handler
+  args: [callback, data]
+
+- api: hsa_amd_register_deallocation_callback
+  args: [ptr, callback, user_data]
+
+- api: hsa_amd_deregister_deallocation_callback
+  args: [ptr, callback]
+
+- api: hsa_amd_spm_acquire
+  args: [preferred_agent]
+
+- api: hsa_amd_spm_release
+  args: [preferred_agent]
+
+- api: hsa_amd_spm_set_dest_buffer
+  args: [preferred_agent, size_in_bytes, timeout, size_copied, dest, is_data_loss]
+
+- api: hsa_amd_enable_logging
+  args: [flags, file]
+
+- api: hsa_amd_ais_file_write
+  args: [devicePtr, size, file_offset, size_copied, status]
+  notes: |
+    Skipped handle (hsa_amd_ais_file_handle_t): non-handle by-value struct
+    containing a platform-specific union and fixed-size padding; it is not
+    representable by the curated DSL.
+
+- api: hsa_amd_ais_file_read
+  args: [devicePtr, size, file_offset, size_copied, status]
+  notes: |
+    Skipped handle (hsa_amd_ais_file_handle_t): non-handle by-value struct
+    containing a platform-specific union and fixed-size padding; it is not
+    representable by the curated DSL.
+
+- api: hsa_amd_image_create_v2
+  args: [agent, image_descriptor, image_layout, image_data, access_permission, image]
+
+- api: hsa_amd_external_semaphore_handle_open
+  args: [agent, desc, out_sem]
+
+- api: hsa_amd_external_semaphore_handle_close
+  args: [sem]
