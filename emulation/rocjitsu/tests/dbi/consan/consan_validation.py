@@ -1590,6 +1590,24 @@ def _run_process(
     return returncode, elapsed, output
 
 
+def _launcher_from_json(value: str | None) -> list[str]:
+    if value is None:
+        return []
+    try:
+        launcher = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise ValidationError(f"invalid --launcher-json: {error}") from error
+    if (
+        not isinstance(launcher, list)
+        or not launcher
+        or any(not isinstance(item, str) or not item for item in launcher)
+    ):
+        raise ValidationError(
+            "--launcher-json must be a nonempty JSON array of nonempty strings"
+        )
+    return launcher
+
+
 def _run_profile(
     workspace: Path,
     target: str,
@@ -1599,6 +1617,7 @@ def _run_profile(
     artifact_root: Path,
     timeout: int,
     row_label: str | None = None,
+    launcher: list[str] | None = None,
 ) -> dict:
     profile_id = profile or "baseline"
     row_dir = artifact_root / workload.id / phase / (row_label or profile_id)
@@ -1619,6 +1638,8 @@ def _run_profile(
         command = _workload_command(
             workspace, target, workload, phase, benchmark_path
         )
+        if launcher:
+            command = [*launcher, *command]
         log_path = row_dir / f"run-{index}.log"
         environment = _clean_environment(profile, workload, hook, target)
         returncode, elapsed, output = _run_process(
@@ -2769,6 +2790,7 @@ def _run(args: argparse.Namespace) -> int:
     if not doctor["ok"]:
         raise ValidationError("workspace doctor failed; run the doctor subcommand")
     artifact_root = args.artifact_root.resolve()
+    launcher = _launcher_from_json(args.launcher_json)
     artifact_root.mkdir(parents=True, exist_ok=True)
     _write_provenance(
         workspace, target, workload, artifact_root / workload.id / args.phase
@@ -2793,6 +2815,7 @@ def _run(args: argparse.Namespace) -> int:
             artifact_root,
             args.timeout,
             row_label,
+            launcher,
         )
         results.append(result)
         if (
@@ -2861,6 +2884,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     run.add_argument("--artifact-root", type=Path, required=True)
     run.add_argument("--timeout", type=int, default=TIMEOUT_SECONDS)
     run.add_argument("--include-baseline", action="store_true")
+    run.add_argument(
+        "--launcher-json",
+        help="JSON argv prefix used to launch each workload process",
+    )
 
     inventory = subparsers.add_parser(
         "inventory", help="record target-specific fault sites without mutation"

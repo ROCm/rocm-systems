@@ -17,6 +17,16 @@ from consan_validation_test_support import temporary_root
 
 
 class ConSanValidationTest(unittest.TestCase):
+    def test_launcher_json_is_an_exact_argv_prefix(self) -> None:
+        self.assertEqual(
+            validation._launcher_from_json('["env", "-u", "HSA_MODEL_LIB", "tool", "--"]'),
+            ["env", "-u", "HSA_MODEL_LIB", "tool", "--"],
+        )
+        self.assertEqual(validation._launcher_from_json(None), [])
+        for malformed in ('"tool"', "[]", '["tool", ""]', "not-json"):
+            with self.assertRaises(validation.ValidationError):
+                validation._launcher_from_json(malformed)
+
     def test_run_process_timeout_contains_descendants(self) -> None:
         parent = (
             "import subprocess,sys,time; "
