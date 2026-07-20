@@ -9,6 +9,7 @@
 
 #include "rocjitsu/base/api.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "rocjitsu/vm/amdgpu/instruction_compute_unit_view.h"
 #include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 #include "rocjitsu/vm/plugins/wavefront_state.h"
@@ -25,6 +26,7 @@ namespace amdgpu {
 
 // Forward declaration - wavefront accesses registers through its CU.
 class ComputeUnitCore;
+class Lds;
 
 /// @brief Wavefront execution state.
 enum class WfState : uint8_t {
@@ -45,7 +47,8 @@ struct RegAllocation {
 ///
 /// @details The wavefront does not own its register storage, the parent
 /// ComputeUnitCore holds the physical SGPR and VGPR files. Callers access
-/// registers via `wf.cu().read_sgpr(wf.sgpr_alloc().base + idx)` etc.
+/// registers through Operand or RegisterAccess in instruction code and through the owning CU in VM
+/// code.
 ///
 /// Each wavefront is permanently bound to a ComputeUnitCore and a slot index
 /// (wf_id) at construction time. These persist across reset()/dispatch
@@ -167,6 +170,17 @@ public:
   /// @brief Set the per-WG LDS base offset.
   void set_lds_base(uint32_t base) { lds_base_ = base; }
 
+  /// @brief Return the LDS backing selected for this workgroup placement.
+  ///
+  /// CU-mode workgroups use their owning CU's LDS. WGP-mode workgroups can
+  /// instead use a backing shared by the two sibling CUs in the WGP.
+  Lds &lds();
+  const Lds &lds() const;
+
+  /// @brief Override the LDS backing for this workgroup placement.
+  /// Passing nullptr restores the owning CU's LDS.
+  void set_lds(Lds *lds) { lds_ = lds; }
+
   /// @brief Return this workgroup's rank within its cluster.
   uint32_t cluster_rank() const { return cluster_rank_; }
 
@@ -187,20 +201,33 @@ public:
   /// @returns Const reference to the VGPR allocation slice.
   const RegAllocation &vgpr_alloc() const { return vgpr_alloc_; }
 
-  /// @brief Return the parent compute unit.
-  /// @returns Reference to the owning ComputeUnitCore.
-  ComputeUnitCore &cu() { return cu_; }
+  /// @brief Return the instruction-facing compute-unit service view.
+  /// @returns Narrow view over the owning compute unit.
+  InstructionComputeUnitView &cu() { return cu_view_; }
 
-  /// @returns Const reference to the owning ComputeUnitCore.
-  const ComputeUnitCore &cu() const { return cu_; }
+  /// @returns Const narrow view over the owning compute unit.
+  const InstructionComputeUnitView &cu() const { return cu_view_; }
 
   /// @brief Return the EXEC mask.
   /// @returns EXEC mask (one bit per lane, 1 = active).
-  uint64_t exec() const { return exec_; }
+  uint64_t exec() const { return exec_ & lane_mask(); }
 
-  /// @brief Set the EXEC mask.
+  /// @brief Return the raw architectural EXEC register pair.
+  ///
+  /// Wave32 instructions may use EXEC_HI as scalar scratch even though its
+  /// bits do not select active lanes. Operand decoding therefore needs the
+  /// unmasked register value, while vector execution should use exec().
+  uint64_t exec_raw() const { return exec_; }
+
+  /// @brief Set the active-lane portion of the EXEC register pair.
   /// @param val New EXEC mask value.
-  void set_exec(uint64_t val) { exec_ = val & lane_mask(); }
+  ///
+  /// Wave32 leaves EXEC_HI available as scalar scratch. Vector instructions
+  /// that update the execution mask must therefore preserve the non-lane bits.
+  void set_exec(uint64_t val) { exec_ = (exec_ & ~lane_mask()) | (val & lane_mask()); }
+
+  /// @brief Set the raw architectural EXEC register pair.
+  void set_exec_raw(uint64_t val) { exec_ = val; }
 
   /// @brief Return the VCC scalar register pair.
   /// @returns Raw VCC register value.
@@ -439,6 +466,8 @@ public:
     wg_id_ = 0;
     dispatch_id_ = 0;
     process_id_ = 0;
+    lds_base_ = 0;
+    lds_ = nullptr;
     cluster_rank_ = 0;
     cluster_size_ = 1;
     num_sgprs_ = 0;
@@ -471,14 +500,17 @@ protected:
   /// @param max_vgprs Maximum VGPRs per wavefront (ISA-fixed).
   Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t wf_size, uint32_t max_sgprs,
             uint32_t max_vgprs)
-      : cu_(cu), wf_id_(wf_id), wf_size_(wf_size), max_sgprs_(max_sgprs), max_vgprs_(max_vgprs) {}
+      : cu_(cu), cu_view_(cu), wf_id_(wf_id), wf_size_(wf_size), max_sgprs_(max_sgprs),
+        max_vgprs_(max_vgprs) {}
 
-  ComputeUnitCore &cu_;       ///< Parent CU (permanent, set at construction).
+  ComputeUnitCore &cu_; ///< Parent CU (permanent, set at construction).
+  InstructionComputeUnitView cu_view_;
   uint32_t wf_id_ = 0;        ///< Slot index within the CU (permanent).
   uint32_t wg_id_ = 0;        ///< Workgroup ID (set per dispatch).
   uint32_t dispatch_id_ = 0;  ///< Dispatch ID (set per dispatch, unique per dispatch).
   uint32_t process_id_ = 0;   ///< Owning process ID (PASID analog, set per dispatch).
   uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
+  Lds *lds_ = nullptr;        ///< Placement-selected LDS backing; nullptr means CU-local LDS.
   uint32_t cluster_rank_ = 0; ///< Workgroup rank inside the dispatch cluster.
   uint32_t cluster_size_ = 1; ///< Number of workgroups in the dispatch cluster.
 
@@ -492,6 +524,9 @@ protected:
   RegAllocation vgpr_alloc_; ///< Slice in CU's VGPR file.
 
 private:
+  ComputeUnitCore &raw_cu() { return cu_; }
+  const ComputeUnitCore &raw_cu() const { return cu_; }
+
   uint64_t lane_mask() const { return wf_size_ >= 64 ? ~0ULL : ((1ULL << wf_size_) - 1ULL); }
 
   uint64_t exec_ = ~0ULL;            ///< EXEC mask -- one bit per lane (1 = active).
@@ -536,6 +571,14 @@ private:
   WaitTarget wait_target_; ///< Current s_waitcnt thresholds.
 
   friend class ComputeUnitCore; // CU sets allocation fields during dispatch.
+
+  // Memory pipelines complete deferred VM loads into physical SGPR/VGPR
+  // storage. They intentionally bypass instruction read-observation because
+  // completion writes produced memory results rather than instruction source
+  // reads.
+  friend class GlobalMemPipeline;
+  friend class LocalMemPipeline;
+  friend class ScalarMemPipeline;
 };
 
 inline uint32_t apply_gpr_idx(const Wavefront &wf, uint32_t vgpr_off, bool is_dst) {

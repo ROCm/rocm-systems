@@ -119,7 +119,7 @@ def _team_split_strided_tracked(parent, start, stride, size,
     Records every successfully created team handle in ``_live_teams`` so
     finalize_with_torch can destroy any leaked teams before
     rocshmem_finalize.  Returns ``(status, team_handle)`` matching the
-    raw pybind signature.  Callers that intentionally bypass this wrapper
+    raw extension signature.  Callers that intentionally bypass this wrapper
     via ``_rocshmem4py.rocshmem_team_split_strided`` own the returned team
     handle and must destroy it themselves.
 
@@ -167,7 +167,7 @@ from _rocshmem4py import rocshmem_team_translate_pe  # noqa: E402
 # Full host AMO matrix (re-export by symbol-name discovery)
 # ---------------------------------------------------------------------------
 #
-# The pybind layer generates host AMO bindings via macros.  Hand-listing
+# The binding layer generates host AMO bindings via macros.  Hand-listing
 # them in the import block is fragile — instead, walk the extension module
 # and re-export every name matching the AMO naming convention.  These are
 # runtime-backed host APIs; IPC no-MPI support for host AMOs needs to be 
