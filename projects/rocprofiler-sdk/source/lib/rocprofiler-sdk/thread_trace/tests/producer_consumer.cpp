@@ -37,6 +37,7 @@
 
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <map>
 #include <unordered_set>
 
 namespace rocprofiler
@@ -68,6 +69,7 @@ test_init()
 }
 
 constexpr size_t MOCK_BUFFER_SIZE = 1u << 20;
+constexpr size_t MOCK_NUM_BUFFERS = 3;
 
 void
 mock_submit(const att_queue_t&, hsa_ext_amd_aql_pm4_packet_t*, hsa_signal_t*)
@@ -82,7 +84,7 @@ copy_data_mock(void* dst, const void* src, hsa_agent_t, hsa_agent_t, size_t size
 att_queue_ptr_t
 make_mock_queue(const hsa::AgentCache& agent)
 {
-    auto q       = make_att_queue(agent, MOCK_BUFFER_SIZE);
+    auto q       = make_att_queue(agent, MOCK_BUFFER_SIZE, MOCK_NUM_BUFFERS);
     q->submit_fn = mock_submit;
     return q;
 }
@@ -104,8 +106,15 @@ struct consumer_producer_t
 {
     att_queue_ptr_t                   mock_queue{};  // destroyed last — must outlive threads
     std::shared_ptr<std::atomic<int>> flag{};
-    std::thread                       consumer{};
+    std::vector<std::thread>          consumers{};
     std::thread                       producer{};
+
+    void join_all()
+    {
+        if(producer.joinable()) producer.join();
+        for(auto& t : consumers)
+            if(t.joinable()) t.join();
+    }
 };
 
 consumer_producer_t
@@ -135,7 +144,7 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     auto running_flag = std::make_shared<std::atomic<int>>(WORKER_FLAG_RUNNING);
 
     auto params              = thread_trace_parameter_pack{};
-    params.triple_buffering  = true;
+    params.num_buffers       = MOCK_NUM_BUFFERS;
     params.buffer_size       = MOCK_BUFFER_SIZE;
     params.shader_cb_fn      = cb_fn;
     params.callback_userdata = userdata;
@@ -143,15 +152,23 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     auto factory = std::make_unique<aql::ThreadTraceAQLPacketFactory>(
         *agent, params, *table.core_, *table.amd_ext_);
     auto control_packet = factory->construct_control_packet();
-    auto buffer_packet  = std::make_unique<MockPackets>(control_packet->GetHandle(), query_fn);
+    // Mirror ThreadTracerAgent::start_thread_trace: the producer loop submits the
+    // start packets (before_krn_pkt) and, on stop, after_krn_pkt.at(0). Those
+    // vectors are only filled by populate_before()/populate_after(), so populate
+    // them here or the producer aborts with small_vector::at out_of_range.
+    control_packet->populate_before();
+    control_packet->populate_after();
+    auto buffer_packet = std::make_unique<MockPackets>(control_packet->GetHandle(), query_fn);
 
-    auto mock_queue    = make_mock_queue(*agent);
-    auto worker_data   = std::make_shared<triple_buffer_shared_data_t>();
-    worker_data->queue = mock_queue.get();
+    auto mock_queue          = make_mock_queue(*agent);
+    auto worker_data         = std::make_shared<triple_buffer_shared_data_t>();
+    worker_data->queue       = mock_queue.get();
+    worker_data->num_buffers = MOCK_NUM_BUFFERS;
 
-    // Initialize buffer memory pointers from the queue's triple buffer
-    for(size_t i = 0; i < worker_data->buffers.size(); i++)
-        worker_data->buffers.at(i).memory = mock_queue->triple_buffer_memory.at(i);
+    // Initialize buffer memory pointers from the queue's CPU staging buffers.
+    // Slots default to FREE.
+    for(size_t i = 0; i < worker_data->num_buffers; i++)
+        worker_data->buffers[i].memory = mock_queue->cpu_buffers.at(i);
 
     auto start_signal =
         std::shared_ptr<hsa_signal_t>(new hsa_signal_t{signal_create()}, [](hsa_signal_t* s) {
@@ -167,16 +184,21 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     producer_data.shared           = worker_data;
     producer_data.buffer_packet    = std::move(buffer_packet);
 
-    auto consumer_data        = triple_buffer_consumer_data_t{};
-    consumer_data.callback_fn = params.shader_cb_fn;
-    consumer_data.userdata    = params.callback_userdata;
-    consumer_data.shared      = worker_data;
-
     consumer_producer_t ret{};
     ret.mock_queue = std::move(mock_queue);
     ret.producer   = std::thread{producer_loop, std::move(producer_data)};
-    ret.consumer   = std::thread{consumer_loop, std::move(consumer_data)};
-    ret.flag       = running_flag;
+    // One consumer thread per slot.
+    ret.consumers.reserve(MOCK_NUM_BUFFERS);
+    for(size_t i = 0; i < MOCK_NUM_BUFFERS; i++)
+    {
+        auto consumer_data        = triple_buffer_consumer_data_t{};
+        consumer_data.callback_fn = params.shader_cb_fn;
+        consumer_data.userdata    = params.callback_userdata;
+        consumer_data.shared      = worker_data;
+        consumer_data.slot_index  = i;
+        ret.consumers.emplace_back(consumer_loop, std::move(consumer_data));
+    }
+    ret.flag = running_flag;
 
     return ret;
 }
@@ -189,20 +211,14 @@ TEST(thread_trace, init_shutdown)
     rocprofiler::thread_trace::test_init();
 
     // Sanity check: threads should spin and exit cleanly when the running flag flips.
-    auto empty_cb = [](rocprofiler_agent_id_t,
-                       int64_t,
-                       void*,
-                       size_t,
-                       rocprofiler_thread_trace_shader_data_flags_t,
-                       rocprofiler_user_data_t) {};
+    auto empty_cb = [](rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t) {};
 
     auto always_null = []() { return std::nullopt; };
 
     auto userdata = rocprofiler_user_data_t{};
     auto threads  = rocprofiler::thread_trace::start_threads(empty_cb, always_null, userdata);
     threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
-    threads.consumer.join();
-    threads.producer.join();
+    threads.join_all();
 }
 
 TEST(thread_trace, status_query)
@@ -210,12 +226,7 @@ TEST(thread_trace, status_query)
     rocprofiler::thread_trace::test_init();
 
     // Ensure the producer polls even when the GPU reports "nothing to copy".
-    auto empty_cb = [](rocprofiler_agent_id_t,
-                       int64_t,
-                       void*,
-                       size_t,
-                       rocprofiler_thread_trace_shader_data_flags_t,
-                       rocprofiler_user_data_t) {};
+    auto empty_cb = [](rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t) {};
 
     auto status_called = std::atomic<bool>{false};
     auto always_null   = [&]() {
@@ -230,8 +241,7 @@ TEST(thread_trace, status_query)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
     threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
-    threads.consumer.join();
-    threads.producer.join();
+    threads.join_all();
 }
 
 TEST(thread_trace, multiple_calls)
@@ -243,13 +253,9 @@ TEST(thread_trace, multiple_calls)
 
     // Accumulate the payload sizes so we can verify every buffer reported by the
     // mock GPU eventually reaches the consumer.
-    auto fetch_cb = [](rocprofiler_agent_id_t,
-                       int64_t,
-                       void*,
-                       size_t data_size,
-                       rocprofiler_thread_trace_shader_data_flags_t,
-                       rocprofiler_user_data_t userdata) {
-        static_cast<std::atomic<size_t>*>(userdata.ptr)->fetch_add(data_size);
+    auto fetch_cb = [](rocprofiler_thread_trace_shader_data_t shader_data,
+                       rocprofiler_user_data_t                userdata) {
+        static_cast<std::atomic<size_t>*>(userdata.ptr)->fetch_add(shader_data.data_size);
     };
 
     auto input_buffer = std::vector<size_t>();
@@ -274,38 +280,83 @@ TEST(thread_trace, multiple_calls)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
     threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
-    threads.consumer.join();
-    threads.producer.join();
+    threads.join_all();
 
-    EXPECT_EQ(data_received.load(), status_called.load() * BUFFER_SIZE);
+    // The producer always emits a 32-byte warmup header at chunk_index 0 before
+    // any GPU-sourced buffers, so user-visible bytes include that header.
+    constexpr size_t HEADER_BYTES = 4 * sizeof(uint64_t);
+    EXPECT_EQ(data_received.load(), status_called.load() * BUFFER_SIZE + HEADER_BYTES);
+}
+
+TEST(thread_trace, read_offset)
+{
+    rocprofiler::thread_trace::test_init();
+    const size_t BUFFER_SIZE = rocprofiler::thread_trace::MOCK_BUFFER_SIZE;
+
+    constexpr uint64_t EXPECTED_READ_OFFSET = 128;
+    auto               read_offset_received = std::atomic<uint64_t>{0};
+
+    auto fetch_cb = [](rocprofiler_thread_trace_shader_data_t shader_data,
+                       rocprofiler_user_data_t                userdata) {
+        if(shader_data.chunk_index > 0 && shader_data.read_offset != 0)
+            static_cast<std::atomic<uint64_t>*>(userdata.ptr)->store(shader_data.read_offset);
+    };
+
+    auto input_buffer = std::vector<size_t>();
+    input_buffer.resize(BUFFER_SIZE / sizeof(size_t));
+
+    auto return_offset_status = [&]() -> std::optional<rocprofiler::hsa::sqtt_buffer_status_t> {
+        if(read_offset_received.load() != 0) return std::nullopt;
+
+        auto status        = rocprofiler::hsa::sqtt_buffer_status_t{};
+        status.data        = input_buffer.data();
+        status.size        = BUFFER_SIZE;
+        status.read_offset = EXPECTED_READ_OFFSET;
+        return status;
+    };
+
+    auto userdata = rocprofiler_user_data_t{.ptr = &read_offset_received};
+    auto threads =
+        rocprofiler::thread_trace::start_threads(fetch_cb, return_offset_status, userdata);
+
+    while(read_offset_received.load() == 0)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
+    threads.join_all();
+
+    EXPECT_EQ(read_offset_received.load(), EXPECTED_READ_OFFSET);
 }
 
 TEST(thread_trace, data_integrity)
 {
-    using pair_t = std::pair<std::atomic<int>, std::vector<size_t>>;
+    // With multiple per-slot consumer threads, callbacks may arrive out of
+    // order — we use chunk_index to reassemble. The producer fills chunk N
+    // with values [N*W, N*W+1, ...]; verifying the reassembled stream is
+    // [0, 1, 2, ...] confirms no chunk was dropped or corrupted.
+    struct state_t
+    {
+        std::atomic<int>                        received{0};
+        std::mutex                              mut;
+        std::map<uint64_t, std::vector<size_t>> chunks;
+    };
 
     rocprofiler::thread_trace::test_init();
     const size_t BUFFER_SIZE = rocprofiler::thread_trace::MOCK_BUFFER_SIZE;
 
-    auto  pair          = pair_t{};
-    auto& output_buffer = pair.second;
-    output_buffer.reserve(128 * BUFFER_SIZE / sizeof(size_t));
+    auto state = state_t{};
 
-    // Capture every word of the buffer so we can assert exact ordering after many copies.
-    auto fetch_cb = [](rocprofiler_agent_id_t,
-                       int64_t,
-                       void*  datain,
-                       size_t data_size,
-                       rocprofiler_thread_trace_shader_data_flags_t,
-                       rocprofiler_user_data_t userdata) {
-        auto* buf  = static_cast<pair_t*>(userdata.ptr);
-        auto* data = static_cast<size_t*>(datain);
-
-        for(size_t i = 0; i < data_size / sizeof(size_t); i++)
+    auto fetch_cb = [](rocprofiler_thread_trace_shader_data_t shader_data,
+                       rocprofiler_user_data_t                userdata) {
+        auto* s     = static_cast<state_t*>(userdata.ptr);
+        auto* data  = static_cast<size_t*>(shader_data.data);
+        auto  chunk = std::vector<size_t>(
+            data, data + static_cast<size_t>(shader_data.data_size) / sizeof(size_t));
         {
-            buf->second.emplace_back(data[i]);
+            std::lock_guard lk{s->mut};
+            s->chunks.emplace(shader_data.chunk_index, std::move(chunk));
         }
-        buf->first += 1;
+        s->received.fetch_add(1);
     };
 
     auto input_buffer = std::vector<size_t>();
@@ -313,7 +364,7 @@ TEST(thread_trace, data_integrity)
 
     auto status_called = std::atomic<int>{0};
     auto return_synced = [&]() -> std::optional<rocprofiler::hsa::sqtt_buffer_status_t> {
-        if(status_called > pair.first + 1) return std::nullopt;
+        if(status_called > state.received + 1) return std::nullopt;
         auto called = status_called.fetch_add(1);
 
         for(size_t i = 0; i < input_buffer.size(); i++)
@@ -325,21 +376,39 @@ TEST(thread_trace, data_integrity)
         return status;
     };
 
-    auto userdata = rocprofiler_user_data_t{.ptr = &pair};
+    auto userdata = rocprofiler_user_data_t{.ptr = &state};
     auto threads  = rocprofiler::thread_trace::start_threads(fetch_cb, return_synced, userdata);
 
     while(status_called < 100)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
     threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
-    threads.consumer.join();
-    threads.producer.join();
+    threads.join_all();
 
-    EXPECT_EQ(output_buffer.size() * sizeof(size_t), status_called.load() * BUFFER_SIZE);
+    // The producer always emits a 32-byte warmup header at chunk_index 0 ahead
+    // of the GPU-sourced chunks; the test verifies the trailing real chunks.
+    constexpr size_t HEADER_BYTES = 4 * sizeof(uint64_t);
 
-    for(size_t i = 0; i < output_buffer.size(); i++)
+    size_t total_words = 0;
+    for(const auto& [idx, chunk] : state.chunks)
     {
-        ASSERT_EQ(i, output_buffer[i]);
+        if(idx == 0) continue;  // warmup header, not a GPU chunk
+        total_words += chunk.size();
+    }
+    EXPECT_EQ(total_words * sizeof(size_t), status_called.load() * BUFFER_SIZE);
+    EXPECT_EQ(state.chunks.at(0).size() * sizeof(size_t), HEADER_BYTES);
+
+    // std::map iterates in chunk_index order; skipping the header chunk, the
+    // reassembled stream must be the strictly increasing sequence 0, 1, 2, ...
+    size_t expected = 0;
+    for(const auto& [idx, chunk] : state.chunks)
+    {
+        if(idx == 0) continue;
+        for(size_t v : chunk)
+        {
+            ASSERT_EQ(expected, v);
+            expected++;
+        }
     }
 }
 
@@ -352,14 +421,10 @@ TEST(thread_trace, slow_cpu)
 
     // Simulate a user callback that cannot keep up; the producer should flag a
     // CPU buffer stall so the consumer can drain and exit.
-    auto fetch_cb = [](rocprofiler_agent_id_t,
-                       int64_t,
-                       void*,
-                       size_t,
-                       rocprofiler_thread_trace_shader_data_flags_t flags,
-                       rocprofiler_user_data_t                      userdata) {
+    auto fetch_cb = [](rocprofiler_thread_trace_shader_data_t shader_data,
+                       rocprofiler_user_data_t                userdata) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        if(flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL)
+        if(shader_data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL)
             static_cast<std::atomic<bool>*>(userdata.ptr)->store(true);
     };
 
@@ -383,8 +448,7 @@ TEST(thread_trace, slow_cpu)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
     threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
-    threads.consumer.join();
-    threads.producer.join();
+    threads.join_all();
 
     EXPECT_EQ(interrupt_received.load(), true);
 }
@@ -398,13 +462,9 @@ TEST(thread_trace, slow_gpu)
 
     // Simulate a GPU buffer overflow; the producer should flag a GPU buffer full
     // condition when the hardware reports it cannot keep up.
-    auto fetch_cb = [](rocprofiler_agent_id_t,
-                       int64_t,
-                       void*,
-                       size_t,
-                       rocprofiler_thread_trace_shader_data_flags_t flags,
-                       rocprofiler_user_data_t                      userdata) {
-        if(flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL)
+    auto fetch_cb = [](rocprofiler_thread_trace_shader_data_t shader_data,
+                       rocprofiler_user_data_t                userdata) {
+        if(shader_data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL)
             static_cast<std::atomic<bool>*>(userdata.ptr)->store(true);
     };
 
@@ -429,8 +489,7 @@ TEST(thread_trace, slow_gpu)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
     threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
-    threads.consumer.join();
-    threads.producer.join();
+    threads.join_all();
 
     EXPECT_EQ(interrupt_received.load(), true);
 }
@@ -451,17 +510,13 @@ TEST(thread_trace, restart_after_overflow)
     auto state = std::make_shared<callback_state_t>();
 
     // Track callbacks before, during, and after an overflow event to verify restart.
-    auto fetch_cb = [](rocprofiler_agent_id_t,
-                       int64_t,
-                       void*,
-                       size_t,
-                       rocprofiler_thread_trace_shader_data_flags_t flags,
-                       rocprofiler_user_data_t                      userdata) {
+    auto fetch_cb = [](rocprofiler_thread_trace_shader_data_t shader_data,
+                       rocprofiler_user_data_t                userdata) {
         auto* s = static_cast<callback_state_t*>(userdata.ptr);
         s->total_callbacks.fetch_add(1);
 
-        if(flags & (ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL |
-                    ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL))
+        if(shader_data.flags & (ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL |
+                                ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL))
         {
             s->overflow_count.fetch_add(1);
             s->seen_overflow.store(true);
@@ -502,8 +557,7 @@ TEST(thread_trace, restart_after_overflow)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
     threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
-    threads.consumer.join();
-    threads.producer.join();
+    threads.join_all();
 
     // Verify that we saw both overflow and recovery
     EXPECT_TRUE(state->seen_overflow.load()) << "Should have seen at least one overflow event";
@@ -525,28 +579,22 @@ TEST(thread_trace, buffer_alternation)
     struct callback_state_t
     {
         std::atomic<int>          callback_count{0};
+        std::mutex                mut;
         std::unordered_set<void*> buffer_addresses{};
-        void*                     last_address{nullptr};
     };
     auto callback_state = callback_state_t{};
 
-    // Track which buffer addresses we receive to verify the producer alternates between
-    // the two double-buffers (parity 0 and parity 1) as intended.
-    auto fetch_cb = [](rocprofiler_agent_id_t,
-                       int64_t,
-                       void* data,
-                       size_t,
-                       rocprofiler_thread_trace_shader_data_flags_t,
-                       rocprofiler_user_data_t userdata) {
+    // Track which buffer addresses we receive. With per-slot consumer threads
+    // running in parallel, the order in which callbacks land is racy, so the
+    // best invariant we can assert is that the producer used more than one
+    // staging slot and never exceeded the configured pool size.
+    auto fetch_cb = [](rocprofiler_thread_trace_shader_data_t shader_data,
+                       rocprofiler_user_data_t                userdata) {
         auto* state = static_cast<callback_state_t*>(userdata.ptr);
-        state->buffer_addresses.insert(data);
-
-        // Verify alternation as we go: consecutive callbacks should use different buffers
-        if(state->last_address != nullptr)
         {
-            EXPECT_NE(data, state->last_address) << "Buffers should alternate between calls";
+            std::lock_guard lk{state->mut};
+            state->buffer_addresses.insert(shader_data.data);
         }
-        state->last_address = data;
         state->callback_count.fetch_add(1);
     };
 
@@ -573,13 +621,15 @@ TEST(thread_trace, buffer_alternation)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
     threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
-    threads.consumer.join();
-    threads.producer.join();
+    threads.join_all();
 
     // Verify we received callbacks
     EXPECT_GT(callback_state.callback_count.load(), 10);
-    // The triple_buffer implementation uses write_index % buffer.size() where buffer.size() == 3.
-    // This means we should only ever see 3 distinct buffer addresses.
-    EXPECT_EQ(callback_state.buffer_addresses.size(), 3)
-        << "Expected exactly 3 unique buffer addresses for triple-buffering";
+    // The producer scans for the lowest free slot, so a fast consumer can
+    // legitimately keep traffic on just a couple of slots; the upper bound
+    // is the configured pool size.
+    EXPECT_GE(callback_state.buffer_addresses.size(), 2u)
+        << "Expected at least 2 buffer addresses to demonstrate alternation";
+    EXPECT_LE(callback_state.buffer_addresses.size(), rocprofiler::thread_trace::MOCK_NUM_BUFFERS)
+        << "Should not exceed the configured number of staging buffers";
 }

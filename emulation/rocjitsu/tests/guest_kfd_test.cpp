@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/kmd/linux/rpc.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_ioctl.h"
@@ -13,10 +14,17 @@ RJ_DIAGNOSTIC_POP
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <optional>
+#include <sstream>
 #include <string>
+#include <string_view>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
@@ -37,6 +45,117 @@ constexpr int kStressThreadCount = 8;
 constexpr int kStressIterations = 25;
 constexpr uint64_t kAllocVa = 0x1000000000ULL;
 constexpr uint64_t kAllocSize = 4096;
+
+// Resolve the directory holding the config-path handoff file, mirroring the exact
+// precedence in load_dbt_guest_config_from_runtime_config() so a config the test
+// installs is the one the in-process DBT guest hook actually reads:
+//   1. $ROCJITSU_INVOCATION_DIR (the launcher's per-invocation dir), then
+//   2. <$ROCJITSU_RUNTIME_DIR>/<pid>/ (the per-PID tier the reader probes next;
+//      the test and the hook share this process, so getpid() matches), then
+//   3. <$ROCJITSU_RUNTIME_DIR>/ (the well-known location for the no-launcher case).
+// The reader opens the FIRST tier whose config_path handoff actually exists, so this
+// must probe them in the same order rather than short-circuiting on tier 1 merely
+// being set: an $ROCJITSU_INVOCATION_DIR pointing at a dir without config_path must
+// still fall through to the per-PID/base tiers a valid handoff may live in. When no
+// tier has a handoff yet, return the highest-priority writable tier so
+// install_inline_dbt_config() writes where the reader looks first.
+// rpc_default_runtime_dir() already treats an unset OR empty $ROCJITSU_RUNTIME_DIR as
+// "use $XDG_RUNTIME_DIR/rocjitsu or /tmp/rocjitsu-<uid>", so this never returns
+// nullopt on that account — otherwise the test would write nowhere while the runtime
+// hook still reads the default location.
+std::optional<std::filesystem::path> config_handoff_dir() {
+  std::vector<std::filesystem::path> tiers;
+  if (const char *inv = std::getenv("ROCJITSU_INVOCATION_DIR"); inv && *inv)
+    tiers.emplace_back(inv);
+  const std::filesystem::path base(rocjitsu::rpc_default_runtime_dir());
+  tiers.push_back(base / std::to_string(getpid()));
+  tiers.push_back(base);
+
+  std::error_code ec;
+  for (const auto &tier : tiers) {
+    if (std::filesystem::exists(tier / "config_path", ec))
+      return tier;
+  }
+  // No handoff exists yet: install into the highest-priority tier the reader probes.
+  return tiers.front();
+}
+
+std::optional<std::string> read_active_config_json() {
+  const auto dir = config_handoff_dir();
+  if (!dir)
+    return std::nullopt;
+
+  std::ifstream active_config(*dir / "config_path");
+  std::string configured_path;
+  if (!std::getline(active_config, configured_path) || configured_path.empty())
+    return std::nullopt;
+
+  std::ifstream config(std::filesystem::absolute(configured_path).lexically_normal());
+  if (!config)
+    return std::nullopt;
+  return std::string(std::istreambuf_iterator<char>(config), std::istreambuf_iterator<char>());
+}
+
+bool install_inline_dbt_config(std::string simulator_json, const char *host_isa,
+                               uint32_t lds_size_kb, std::string_view external_host_config = {}) {
+  const auto dir = config_handoff_dir();
+  if (!dir)
+    return false;
+
+  try {
+    const std::filesystem::path runtime(*dir);
+    std::filesystem::create_directories(runtime);
+    const std::filesystem::path config_path = runtime / "inline_dbt_failure_config.json";
+
+    const size_t insert_pos = simulator_json.find('{');
+    if (insert_pos == std::string::npos)
+      return false;
+    std::ostringstream dbt_guest;
+    dbt_guest << R"(
+  "dbt_guest": {
+    "enabled": true,
+    "guest_isa": "gfx950",
+    "host_isa": ")"
+              << host_isa << R"(",
+    "execution_backend": "simulator",)";
+    if (!external_host_config.empty())
+      dbt_guest << R"(
+    "simulator_config": ")"
+                << external_host_config << R"(",)";
+    dbt_guest << R"(
+    "guest_device": {
+      "gpu_id": 38144,
+      "gfx_target_version": 90500,
+      "simd_count": 64,
+      "max_waves_per_simd": 8,
+      "num_shader_engines": 4,
+      "num_cu_per_sh": 4,
+      "simd_per_cu": 4,
+      "wave_front_size": 64,
+      "max_slots_scratch_cu": 32,
+      "lds_size_kb": )"
+              << lds_size_kb << R"(
+    }
+  },)";
+    simulator_json.insert(insert_pos + 1, dbt_guest.str());
+
+    std::ofstream config(config_path);
+    if (!config)
+      return false;
+    config << simulator_json;
+    config.close();
+    if (!config)
+      return false;
+
+    std::ofstream active_config(runtime / "config_path");
+    if (!active_config)
+      return false;
+    active_config << config_path.string() << '\n';
+    return active_config.good();
+  } catch (const std::filesystem::filesystem_error &) {
+    return false;
+  }
+}
 
 bool read_gpu_id(const std::string &path, uint32_t *gpu_id) {
   FILE *file = fopen(path.c_str(), "r");
@@ -269,6 +388,46 @@ TEST(GuestKfdMemoryTest, GuestAllocationMmapOffsetIsRejected) {
   free_args.handle = alloc.handle;
   EXPECT_EQ(ioctl(fd, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0) << std::strerror(errno);
   close(fd);
+}
+
+TEST(GuestKfdFailureTest, NonexistentSimulatorConfigFailsCleanly) {
+  const auto dir = config_handoff_dir();
+  ASSERT_TRUE(dir.has_value());
+  const std::string nonexistent = (*dir / "nonexistent_simulator_config.json").string();
+  ASSERT_TRUE(install_inline_dbt_config(R"({"max_ticks": 1})", "gfx942", 64, nonexistent));
+
+  errno = 0;
+  const int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
+  EXPECT_EQ(fd, -1);
+  EXPECT_EQ(errno, ENODEV);
+  if (fd >= 0)
+    close(fd);
+}
+
+TEST(GuestKfdFailureTest, SimulatorHostIsaMismatchFailsCleanly) {
+  const auto simulator_json = read_active_config_json();
+  ASSERT_TRUE(simulator_json.has_value());
+  ASSERT_TRUE(install_inline_dbt_config(*simulator_json, "gfx940", 64));
+
+  errno = 0;
+  const int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
+  EXPECT_EQ(fd, -1);
+  EXPECT_EQ(errno, ENODEV);
+  if (fd >= 0)
+    close(fd);
+}
+
+TEST(GuestKfdFailureTest, SimulatorOversizedLdsFailsCleanly) {
+  const auto simulator_json = read_active_config_json();
+  ASSERT_TRUE(simulator_json.has_value());
+  ASSERT_TRUE(install_inline_dbt_config(*simulator_json, "gfx942", 65));
+
+  errno = 0;
+  const int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
+  EXPECT_EQ(fd, -1);
+  EXPECT_EQ(errno, ENODEV);
+  if (fd >= 0)
+    close(fd);
 }
 
 // Overwriting the interposer's hidden real /dev/kfd fd number via dup2 must not

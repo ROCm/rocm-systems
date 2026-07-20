@@ -150,8 +150,8 @@ TEST(Vop2FmaF64SimdCorrectness, LaneLayoutRoundTrip) {
     expected[lane] = v;
     fx.write64(vb + 0, lane, v);
   }
-  const uint32_t *lo = reinterpret_cast<const uint32_t *>(fx.cu->vgpr_data(vb + 0));
-  const uint32_t *hi = reinterpret_cast<const uint32_t *>(fx.cu->vgpr_data(vb + 1));
+  const uint32_t *lo = reinterpret_cast<const uint32_t *>(fx.cu->raw_vgpr_data(vb + 0));
+  const uint32_t *hi = reinterpret_cast<const uint32_t *>(fx.cu->raw_vgpr_data(vb + 1));
   constexpr std::size_t W = util::native_width64;
   for (uint32_t base = 0; base < WF_SIZE; base += static_cast<uint32_t>(W)) {
     util::native<uint64_t> v = util::load64<uint64_t>(lo + base, hi + base);
