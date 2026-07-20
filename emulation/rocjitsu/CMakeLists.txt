@@ -338,13 +338,6 @@ set(FLATBUFFERS_BUILD_FLATLIB ON CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(googletest flatbuffers)
 
-# flatc executes during the build and uses uninstrumented host libraries. Keep
-# that host tool runnable while the rocjitsu targets remain MSan-instrumented.
-if(RJ_ENABLE_MSAN)
-    target_compile_options(flatc PRIVATE -fno-sanitize=memory)
-    target_link_options(flatc PRIVATE -fno-sanitize=memory)
-endif()
-
 include(rj_flatbuffers)
 
 # Set include paths before adding subdirectories so all targets can find them.

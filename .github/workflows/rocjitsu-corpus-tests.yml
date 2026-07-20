@@ -65,7 +65,6 @@ jobs:
             enable_msan: 0
             enable_expensive_checks: 0
             sanitizer_runtime: STATIC
-            run_tests: 1
           - name: asan-ubsan
             allow_failure: true
             test_regex: ''
@@ -76,7 +75,6 @@ jobs:
             enable_msan: 0
             enable_expensive_checks: 1
             sanitizer_runtime: SHARED
-            run_tests: 1
           - name: tsan
             allow_failure: true
             test_regex: ''
@@ -87,7 +85,6 @@ jobs:
             enable_msan: 0
             enable_expensive_checks: 1
             sanitizer_runtime: SHARED
-            run_tests: 1
           - name: asan-ubsan-gcc
             allow_failure: true
             test_regex: ''
@@ -98,25 +95,8 @@ jobs:
             enable_msan: 0
             enable_expensive_checks: 1
             sanitizer_runtime: SHARED
-            run_tests: 1
             c_compiler: gcc
             cxx_compiler: g++
-          - name: msan-auto
-            allow_failure: false
-            # MSan requires instrumented runtime dependencies. Keep this gate
-            # to configuration and final linkage without running the binary.
-            test_regex: ''
-            build_type: RelWithDebInfo
-            enable_asan: 0
-            enable_ubsan: 0
-            enable_tsan: 0
-            enable_msan: 1
-            enable_expensive_checks: 0
-            sanitizer_runtime: AUTO
-            run_tests: 0
-            build_target: early_mmap_driver
-            c_compiler: clang
-            cxx_compiler: clang++
           - name: tsan-sparse-memory
             allow_failure: false
             # The simulator-wide stress tests exceed TSan's fixed 128-lock
@@ -129,7 +109,6 @@ jobs:
             enable_tsan: 1
             enable_msan: 0
             sanitizer_runtime: STATIC
-            run_tests: 1
 
     steps:
       - name: Install base dependencies
@@ -140,7 +119,6 @@ jobs:
             ca-certificates \
             cmake \
             git \
-            libclang-rt-dev \
             libdrm-dev \
             ninja-build \
             clang
@@ -251,41 +229,17 @@ jobs:
 
           # Set a conservative number of workers to avoid OOM and excessive system load.
           WORKERS="$(( ($(nproc) + 1) / 2 ))"
-          BUILD_TARGET=()
-          if [[ -n "${{ matrix.build_target }}" ]]; then
-            BUILD_TARGET=(--target "${{ matrix.build_target }}")
-          fi
-          cmake --build "${ROCJITSU_BUILD_DIR}" "${BUILD_TARGET[@]}" -j "${WORKERS}"
+          cmake --build "${ROCJITSU_BUILD_DIR}" -j "${WORKERS}"
 
-          if [[ "${{ matrix.name }}" == "msan-auto" ]]; then
-            set +e
-            MSAN_SHARED_OUTPUT="$(
-              ROCM_PATH=`rocm-sdk path --root` \
-                cmake -S . -B "${ROCJITSU_BUILD_DIR}" \
-                  -DRJ_SANITIZER_RUNTIME=SHARED 2>&1
-            )"
-            MSAN_SHARED_STATUS=$?
-            set -e
-            if [[ "${MSAN_SHARED_STATUS}" -eq 0 ]] || \
-              ! grep -Fq "MemorySanitizer has no supported shared runtime" \
-                <<< "${MSAN_SHARED_OUTPUT}"; then
-              echo "Expected shared MSan configuration to be rejected"
-              echo "${MSAN_SHARED_OUTPUT}"
-              exit 1
-            fi
+          CTEST_SELECTION=()
+          if [[ -n "${{ matrix.test_regex }}" ]]; then
+            CTEST_SELECTION=(-R "${{ matrix.test_regex }}")
           fi
-
-          if [[ "${{ matrix.run_tests }}" == "1" ]]; then
-            CTEST_SELECTION=()
-            if [[ -n "${{ matrix.test_regex }}" ]]; then
-              CTEST_SELECTION=(-R "${{ matrix.test_regex }}")
-            fi
-            ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
-              "${CTEST_SELECTION[@]}" \
-              -E "${EXCLUDED_TESTS}" \
-              --output-on-failure \
-              -j "${WORKERS}"
-          fi
+          ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
+            "${CTEST_SELECTION[@]}" \
+            -E "${EXCLUDED_TESTS}" \
+            --output-on-failure \
+            -j "${WORKERS}"
 
           echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
           echo "CXXFLAGS=" >> "${GITHUB_ENV}"
