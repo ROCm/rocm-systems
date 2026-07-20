@@ -85,7 +85,7 @@ constexpr uint32_t kGfx1250VgprEncodingGranule = 16;
 constexpr uint32_t kGfx1250SimdsPerCu = 4;
 constexpr uint32_t kGfx1250MaxWavesPerSimd = 20;
 constexpr uint32_t kGfx1250WaveSlotsPerCu = kGfx1250SimdsPerCu * kGfx1250MaxWavesPerSimd;
-constexpr uint32_t kGfx1250LdsSizeKb = 160;
+constexpr uint32_t kGfx1250LdsSizeKb = 320;
 constexpr uint32_t kSdmaOpCopy = 1;
 constexpr uint32_t kSdmaOpFence = 5;
 constexpr uint32_t kSdmaOpPollRegmem = 8;
@@ -221,7 +221,7 @@ std::string make_single_se_gfx1250_config(uint32_t num_cus) {
          R"({"key":"num_wf_slots","value":"80"},)"
          R"({"key":"sgprs_per_wf","value":"128"},)"
          R"({"key":"vgprs_per_wf","value":"1024"},)"
-         R"({"key":"lds_size_kb","value":"160"})"
+         R"({"key":"lds_size_kb","value":"320"})"
          R"(]}]}]}]},"links":[)" +
          links + R"(]}})";
 }

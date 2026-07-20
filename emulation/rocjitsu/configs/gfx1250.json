@@ -21,7 +21,7 @@
         "simd_per_cu": 4,
         "wave_front_size": 32,
         "local_mem_size": 309237645312,
-        "lds_size_kb": 160,
+        "lds_size_kb": 320,
         "mem_width": 8192,
         "mem_clk_max": 1600,
         "l2_size_kb": 4096,
@@ -54,7 +54,7 @@
                   { "key": "num_wf_slots", "value": "80" },
                   { "key": "sgprs_per_wf", "value": "128" },
                   { "key": "vgprs_per_wf", "value": "1024" },
-                  { "key": "lds_size_kb", "value": "160" }
+                  { "key": "lds_size_kb", "value": "320" }
                 ]
               }]
             }
