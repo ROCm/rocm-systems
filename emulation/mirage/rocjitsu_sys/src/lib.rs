@@ -77,6 +77,10 @@ pub struct RjVmCmd {
     pub result: i32,
     /// `[out]` Backing handle for shareable allocations, or -1.
     pub shared_handle: RjHandle,
+    /// `[in/out]` Client-provided fd (e.g. a debugger notifier), or -1.
+    /// In daemon mode the VM substitutes it into DBG_TRAP ENABLE and, on
+    /// adoption, clears it to -1 so the caller does not close it.
+    pub in_handle: RjHandle,
 }
 
 /// Device memory mapping descriptor (`rj_vm_map_t`).
@@ -483,8 +487,9 @@ mod tests {
     fn struct_sizes_match_c_abi() {
         assert_eq!(std::mem::size_of::<RjVmMap>(), 40);
         assert_eq!(std::mem::size_of::<RjVmUnmap>(), 16);
-        // rj_vm_cmd_t: u32 + (pad) + ptr + usize + i32 + i32 on 64-bit.
-        assert_eq!(std::mem::size_of::<RjVmCmd>(), 32);
+        // rj_vm_cmd_t: u32 + (pad) + ptr + usize + i32 + i32 + i32 + (pad)
+        // on 64-bit.
+        assert_eq!(std::mem::size_of::<RjVmCmd>(), 40);
         assert_eq!(RjVmMode::Daemon as i32, 2);
         // rj_vm_gpu_info_t — must match the 312-byte RpcGpuInfo the
         // daemon handshake embeds (static_assert in rpc.h).

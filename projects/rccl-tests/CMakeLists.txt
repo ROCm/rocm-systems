@@ -18,6 +18,8 @@ project(rccl-tests LANGUAGES CXX)
 # Build options
 #==================================================================================================
 option(USE_MPI                     "Build RCCL-tests with MPI support."           OFF)
+option(ENABLE_DEVICE_API           "Build with NCCL Device API support (GIN)."    OFF)
+option(ENABLE_ROCSHMEM             "Build with rocshmem GIN backend support."     OFF)
 option(BUILD_LOCAL_GPU_TARGET_ONLY "Build only for GPUs detected on this machine" OFF)
 
 if (NOT CMAKE_BUILD_TYPE)
@@ -109,7 +111,7 @@ endif()
 # Set CMAKE flags
 #==================================================================================================
 set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "")
-set(CMAKE_CXX_STANDARD   14)   # We use C++14 features, this will add compile option: -std=c++14
+set(CMAKE_CXX_STANDARD   17)   # rocshmem GIN QP device headers require C++17
 set(CMAKE_CXX_EXTENSIONS OFF)  # Without this line, it will add -std=gnu++14 instead, which has some issues.
 set(CPACK_PACKAGING_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Path to install to when packaged.")
 if(ROCM_PATH)
@@ -199,6 +201,61 @@ if (USE_MPI)
     endif()
 else()
     message ("-- MPI support disabled")
+endif()
+
+if (ENABLE_DEVICE_API)
+    message(STATUS "NCCL Device API (GIN) support enabled")
+    add_definitions(-DENABLE_DEVICE_API)
+endif()
+
+if (ENABLE_ROCSHMEM)
+    message(STATUS "rocshmem GIN backend support enabled")
+    add_definitions(-DENABLE_ROCSHMEM)
+    add_definitions(-DENABLE_ROCSHMEM_GIN)
+    if (NOT ROCSHMEM_INSTALL_DIR)
+        message(FATAL_ERROR "ENABLE_ROCSHMEM is ON but ROCSHMEM_INSTALL_DIR is not set")
+    endif()
+    # Device headers include <rocshmem/rocshmem.hpp> when ENABLE_ROCSHMEM is set
+    include_directories(${ROCSHMEM_INSTALL_DIR}/include)
+    # Auto-detect RCCL_SOURCE_DIR from mono-repo layout if not provided
+    if (NOT RCCL_SOURCE_DIR)
+        get_filename_component(_mono_root "${CMAKE_SOURCE_DIR}/../.." ABSOLUTE)
+        if(EXISTS "${_mono_root}/projects/rccl/CMakeLists.txt")
+            set(RCCL_SOURCE_DIR "${_mono_root}/projects/rccl")
+            message(STATUS "rccl-tests: found rccl source at ${RCCL_SOURCE_DIR}")
+        endif()
+    endif()
+    # Auto-detect ROCSHMEM_SOURCE_DIR from mono-repo layout if not provided
+    if (NOT ROCSHMEM_SOURCE_DIR)
+        get_filename_component(_mono_root "${CMAKE_SOURCE_DIR}/../.." ABSOLUTE)
+        if(EXISTS "${_mono_root}/projects/rocshmem/CMakeLists.txt")
+            set(ROCSHMEM_SOURCE_DIR "${_mono_root}/projects/rocshmem")
+            message(STATUS "rccl-tests: found rocshmem source at ${ROCSHMEM_SOURCE_DIR}")
+        endif()
+    endif()
+    if (ROCSHMEM_SOURCE_DIR)
+        include_directories(${ROCSHMEM_SOURCE_DIR}/src)
+        include_directories(${ROCSHMEM_SOURCE_DIR}/include)
+        if (ROCSHMEM_BUILD_DIR)
+            include_directories(${ROCSHMEM_BUILD_DIR})
+        else()
+            include_directories(${ROCSHMEM_SOURCE_DIR}/build/include)
+        endif()
+    endif()
+    # rccl-tests device code calls rocshmem device functions via GIN template
+    # specializations. librocshmem.a is compiled with -fgpu-rdc, so tests that
+    # use GIN must also use -fgpu-rdc and device-link with it.
+    find_library(ROCSHMEM_LIBRARY rocshmem HINTS ${ROCSHMEM_INSTALL_DIR}/lib)
+    if (NOT ROCSHMEM_LIBRARY)
+        message(FATAL_ERROR "librocshmem not found in ${ROCSHMEM_INSTALL_DIR}/lib")
+    endif()
+    set(_rocshmem_offload_arch_flags "")
+    foreach(_gpu_raw ${GPU_TARGETS})
+        string(REGEX REPLACE ":.*" "" _gpu "${_gpu_raw}")
+        list(APPEND _rocshmem_offload_arch_flags "--offload-arch=${_gpu}")
+    endforeach()
+    list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
+    message(STATUS "rocshmem: ${ROCSHMEM_LIBRARY}, arches: ${_rocshmem_offload_arch_flags}")
 endif()
 
 set(ROCM_USE_DEV_COMPONENT OFF)  # This repo doesn't have a dev component

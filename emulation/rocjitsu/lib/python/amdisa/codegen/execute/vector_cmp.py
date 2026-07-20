@@ -18,9 +18,9 @@ def _write_explicit_lane_mask(dst: str, value: str) -> list[str]:
     """Emit a write to an explicit SGPR lane-mask destination."""
     return [
         '  if (wf.wf_size() <= 32)',
-        f'    {dst}.write_scalar(wf, static_cast<uint32_t>({value}));',
+        f'    amdgpu::RegisterAccess(wf).write_scalar({dst}, static_cast<uint32_t>({value}));',
         '  else',
-        f'    {dst}.write_scalar64(wf, {value});',
+        f'    amdgpu::RegisterAccess(wf).write_scalar64({dst}, {value});',
     ]
 
 
@@ -47,11 +47,13 @@ def gen_vector_cmp_class(
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     if dtype == 'f64':
         L.append(
-            f'    double s0 = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));'
+            f'    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64({src[0]}, lane));'
         )
         if is_vop3:
             L.extend(vop3_src_mod('s0', 0, has_abs))
-        L.append(f'    uint32_t mask = {src[1]}.read_lane(wf, lane);')
+        L.append(
+            f'    uint32_t mask = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
+        )
         L.append('    bool match = false;')
         L.append(
             '    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) == 0) match = true;'
@@ -88,7 +90,7 @@ def gen_vector_cmp_class(
             )
         else:
             L.append(
-                f'    uint16_t s0_raw = static_cast<uint16_t>({src[0]}.read_lane(wf, lane));'
+                f'    uint16_t s0_raw = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
             )
         if is_vop3:
             # VOP3 abs/neg apply to the f16 value: abs clears the sign bit, neg
@@ -96,7 +98,14 @@ def gen_vector_cmp_class(
             if has_abs:
                 L.append('    if (inst_.abs & (1u << 0)) s0_raw &= 0x7FFFu;')
             L.append('    if (inst_.neg & (1u << 0)) s0_raw ^= 0x8000u;')
-        L.append(f'    uint32_t mask = {src[1]}.read_lane(wf, lane);')
+        if is_vop3:
+            L.append(
+                f'    uint32_t mask = ::rocjitsu::amdgpu::read_vop3_true16_src({src[1]}, wf, lane, opsel, 1);'
+            )
+        else:
+            L.append(
+                f'    uint32_t mask = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
+            )
         L.append('    bool match = false;')
         L.append('    uint16_t f16_exp = (s0_raw >> 10) & 0x1F;')
         L.append('    uint16_t f16_mant = s0_raw & 0x3FF;')
@@ -121,10 +130,14 @@ def gen_vector_cmp_class(
         L.append('    if ((mask & 0x100) && is_normal && !f16_sign) match = true;')
         L.append('    if ((mask & 0x200) && is_inf && !f16_sign) match = true;')
     else:
-        L.append(f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
+        L.append(
+            f'    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
+        )
         if is_vop3:
             L.extend(vop3_src_mod('s0', 0, has_abs))
-        L.append(f'    uint32_t mask = {src[1]}.read_lane(wf, lane);')
+        L.append(
+            f'    uint32_t mask = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
+        )
         L.append('    bool match = false;')
         L.append(
             '    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) == 0) match = true;'
@@ -182,10 +195,10 @@ def _cmp_condition(
     if is_fp:
         if dtype == 'f64':
             L.append(
-                f'    double s0 = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));'
+                f'    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64({src[0]}, lane));'
             )
             L.append(
-                f'    double s1 = std::bit_cast<double>({src[1]}.read_lane64(wf, lane));'
+                f'    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64({src[1]}, lane));'
             )
         elif dtype == 'f16':
             if is_vop3:
@@ -197,17 +210,17 @@ def _cmp_condition(
                 )
             else:
                 L.append(
-                    f'    float s0 = util::f16_to_f32(static_cast<uint16_t>({src[0]}.read_lane(wf, lane)));'
+                    f'    float s0 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane)));'
                 )
                 L.append(
-                    f'    float s1 = util::f16_to_f32(static_cast<uint16_t>({src[1]}.read_lane(wf, lane)));'
+                    f'    float s1 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane)));'
                 )
         else:
             L.append(
-                f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));'
+                f'    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
             )
             L.append(
-                f'    float s1 = std::bit_cast<float>({src[1]}.read_lane(wf, lane));'
+                f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
             )
         if is_vop3:
             L.extend(vop3_src_mod('s0', 0, has_abs))
@@ -242,18 +255,26 @@ def _cmp_condition(
         return f's0 == s1 /* TODO: {op} */'
     elif dtype in ('i64',):
         L.append(
-            f'    int64_t s0 = static_cast<int64_t>({src[0]}.read_lane64(wf, lane));'
+            f'    int64_t s0 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64({src[0]}, lane));'
         )
         L.append(
-            f'    int64_t s1 = static_cast<int64_t>({src[1]}.read_lane64(wf, lane));'
+            f'    int64_t s1 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64({src[1]}, lane));'
         )
     elif dtype in ('u64',):
-        L.append(f'    uint64_t s0 = {src[0]}.read_lane64(wf, lane);')
-        L.append(f'    uint64_t s1 = {src[1]}.read_lane64(wf, lane);')
+        L.append(
+            f'    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64({src[0]}, lane);'
+        )
+        L.append(
+            f'    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64({src[1]}, lane);'
+        )
     elif dtype in ('i16',):
         if is_vop3:
-            L.append(f'    uint32_t s0_raw = {src[0]}.read_lane(wf, lane);')
-            L.append(f'    uint32_t s1_raw = {src[1]}.read_lane(wf, lane);')
+            L.append(
+                f'    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
+            )
+            L.append(
+                f'    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
+            )
             L.append('    if (opsel & (1u << 0)) s0_raw >>= 16;')
             L.append('    if (opsel & (1u << 1)) s1_raw >>= 16;')
             L.append(
@@ -264,36 +285,44 @@ def _cmp_condition(
             )
         else:
             L.append(
-                f'    int16_t s0 = static_cast<int16_t>({src[0]}.read_lane(wf, lane) & 0xFFFF);'
+                f'    int16_t s0 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane) & 0xFFFF);'
             )
             L.append(
-                f'    int16_t s1 = static_cast<int16_t>({src[1]}.read_lane(wf, lane) & 0xFFFF);'
+                f'    int16_t s1 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane) & 0xFFFF);'
             )
     elif dtype in ('u16',):
         if is_vop3:
-            L.append(f'    uint32_t s0_raw = {src[0]}.read_lane(wf, lane);')
-            L.append(f'    uint32_t s1_raw = {src[1]}.read_lane(wf, lane);')
+            L.append(
+                f'    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
+            )
+            L.append(
+                f'    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
+            )
             L.append('    if (opsel & (1u << 0)) s0_raw >>= 16;')
             L.append('    if (opsel & (1u << 1)) s1_raw >>= 16;')
             L.append('    uint16_t s0 = static_cast<uint16_t>(s0_raw);')
             L.append('    uint16_t s1 = static_cast<uint16_t>(s1_raw);')
         else:
             L.append(
-                f'    uint16_t s0 = static_cast<uint16_t>({src[0]}.read_lane(wf, lane));'
+                f'    uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
             )
             L.append(
-                f'    uint16_t s1 = static_cast<uint16_t>({src[1]}.read_lane(wf, lane));'
+                f'    uint16_t s1 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
             )
     elif dtype in ('i32',):
         L.append(
-            f'    int32_t s0 = static_cast<int32_t>({src[0]}.read_lane(wf, lane));'
+            f'    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
         )
         L.append(
-            f'    int32_t s1 = static_cast<int32_t>({src[1]}.read_lane(wf, lane));'
+            f'    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
         )
     else:
-        L.append(f'    uint32_t s0 = {src[0]}.read_lane(wf, lane);')
-        L.append(f'    uint32_t s1 = {src[1]}.read_lane(wf, lane);')
+        L.append(
+            f'    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
+        )
+        L.append(
+            f'    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
+        )
     cmp_map = {
         'eq': '==',
         'ne': '!=',
@@ -410,15 +439,17 @@ def gen_vector_add_co(
     L.append('  uint64_t exec = wf.exec();')
     if _is_vop3 and op in ('addc', 'subbc', 'subbrevco') and len(src) > 2:
         # VOP3: carry-in from explicit src2 SGPR pair.
-        L.append(f'  uint64_t old_vcc = {src[2]}.read_scalar64(wf);')
+        L.append(
+            f'  uint64_t old_vcc = amdgpu::RegisterAccess(wf).read_scalar64({src[2]});'
+        )
     elif op in ('addc', 'subbc', 'subbrevco'):
         # VOP2: carry-in from VCC.
         L.append('  uint64_t old_vcc = wf.vcc();')
     L.append('  uint64_t vcc = wf.vcc();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
-    L.append(f'    uint32_t sv0 = {s0}.read_lane(wf, lane);')
-    L.append(f'    uint32_t sv1 = {s1}.read_lane(wf, lane);')
+    L.append(f'    uint32_t sv0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);')
+    L.append(f'    uint32_t sv1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);')
 
     if op == 'add':
         L.append(
@@ -456,7 +487,9 @@ def gen_vector_add_co(
             '    bool borrow = static_cast<uint64_t>(sv1) < static_cast<uint64_t>(sv0) + cin;'
         )
 
-    L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(wide));')
+    L.append(
+        f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, static_cast<uint32_t>(wide));'
+    )
 
     if op in ('add', 'addc'):
         L.append(

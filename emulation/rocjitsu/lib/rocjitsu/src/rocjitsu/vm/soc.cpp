@@ -168,17 +168,4 @@ const std::vector<amdgpu::ComputeUnitCore *> &SoC::all_cus() {
   return all_cus_cache_;
 }
 
-void SoC::run_to_idle() {
-  if (exec_mode_ == simdojo::ExecMode::FUNCTIONAL) {
-    bool progress = true;
-    while (progress) {
-      progress = false;
-      for (auto *xcd : xcds_)
-        for (auto *se : xcd->shader_engines())
-          if (se->spi().step())
-            progress = true;
-    }
-  }
-}
-
 } // namespace rocjitsu

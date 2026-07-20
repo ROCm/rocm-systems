@@ -56,8 +56,10 @@ class CommandProcessor;
 /// back to this CU and its slot index (wf_id).
 ///
 /// dispatch_wf() finds the first idle slot, allocates registers, and
-/// activates it. retire_halted_wfs() frees register allocations and calls
-/// clear() so the slot can be reused.
+/// activates it. When a wavefront reaches s_endpgm it halts: free_wavefront_resources()
+/// frees its register allocations and resets the slot for reuse, mirroring how real
+/// hardware reclaims a wave's resources at termination (there is no separate lazy
+/// retirement pass).
 ///
 /// Each step() call picks the next active wavefront (round-robin) and executes
 /// one instruction using the ISA-specific decoder.
@@ -99,22 +101,33 @@ public:
   /// and initializes the slot's dynamic state (wg_id, pc, allocations).
   /// @param wg_id Workgroup ID for this wavefront.
   /// @param pc Kernel entry point (byte address).
-  /// @param sgprs Number of scalar registers to allocate.
-  /// @param vgprs Number of vector registers to allocate.
+  /// @param num_sgprs Number of scalar registers to allocate.
+  /// @param num_vgprs Number of vector registers to allocate.
   /// @returns Pointer to the activated wavefront, or nullptr if no free slot
   ///          or insufficient register space.
-  Wavefront *dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sgprs, uint32_t vgprs);
+  Wavefront *dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs, uint32_t num_vgprs);
 
-  /// @brief Execute one instruction on the next active wavefront.
-  /// @retval true An instruction was executed.
-  /// @retval false No active wavefronts remain.
+  /// @brief Advance every RUNNING wavefront by one instruction, then report
+  /// residency.
+  /// @details Issues one instruction to each wavefront currently in the RUNNING
+  /// state (waves stalled on WAITCNT/BARRIER, or halted, issue nothing this tick).
+  /// @retval true At least one wavefront is still resident (active), regardless of
+  ///         whether any instruction issued this call — so a fully WAITCNT/BARRIER-
+  ///         stalled CU still returns true.
+  /// @retval false No wavefronts remain resident (the CU is idle).
   bool step() override;
 
-  /// @brief Clear all halted wavefront slots and free their register allocations.
-  void retire_halted_wfs();
+  /// @brief Free a halted wavefront's register allocations and reset its slot.
+  /// @details Called from Wavefront::halt() at s_endpgm so a terminated wave
+  /// releases its SGPR/VGPR blocks immediately, exactly as hardware reclaims
+  /// resources at wave termination. LDS is per-workgroup and reclaimed separately
+  /// via maybe_reset_lds_alloc() once the whole workgroup completes.
+  void free_wavefront_resources(Wavefront &wf);
 
-  /// @brief Like retire_halted_wfs but without resetting the LDS allocator.
-  void retire_halted_wfs_no_lds_reset();
+  /// @brief Reset the per-WG LDS bump allocator once the CU has fully drained.
+  /// @details No-op while any wavefront is resident or a cluster pin is held (peer
+  /// cluster workgroups may still multicast into LDS after the source wave halts).
+  void maybe_reset_lds_alloc();
 
   /// @brief Check whether this CU can accept an entire workgroup.
   ///
@@ -127,18 +140,22 @@ public:
   bool can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes = 0) const;
 
   /// @brief Execute up to kFunctionalQuantum instructions, then yield.
-  virtual bool advance() = 0;
+  virtual bool execute_quantum() = 0;
 
-  /// @brief Signal that work has been dispatched; begin processing.
+  /// @brief End the current functional-mode quantum after this instruction.
   ///
-  /// @details Schedules an engine event that calls advance() repeatedly
-  /// until all wavefronts are exhausted. Called by the command processor
-  /// after dispatch_wf().
-  virtual void activate() = 0;
+  /// Used by wait-like instructions such as s_sleep so other simulated
+  /// components can publish the state on which the wavefront is polling.
+  void request_functional_yield() { functional_yield_requested_ = true; }
+
+  /// @brief Schedule the tick event if the CU is not already executing.
+  /// Called from dispatch_wf() and the cpl_ port handler.
+  virtual void schedule_work() = 0;
 
   /// @brief Check whether this CU has no active wavefronts.
   /// @retval true No wavefronts are actively executing.
   /// @retval false At least one wavefront is active.
+  /// @warning NOT thread-safe (see has_active_wfs()): engine-thread only.
   virtual bool is_idle() const { return !has_active_wfs(); }
 
   /// @brief Register a callback invoked when this CU becomes idle.
@@ -170,7 +187,7 @@ public:
 
   /// @brief Register a new workgroup with its expected WF count.
   /// @details Called by the DispatchController when assigning a WG to this CU.
-  /// Initializes the refcount so retire_halted_wfs() can detect WG completion.
+  /// Initializes the refcount so release_wf() can detect WG completion.
   void begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint32_t wf_count) {
     active_wgs_[wg_key(dispatch_id, wg_id)] = wf_count;
   }
@@ -180,6 +197,14 @@ public:
   /// and the CP is notified via notify_wg_complete.
   void release_wf(uint32_t dispatch_id, uint32_t wg_id);
 
+  /// @brief Roll back a committed-but-never-run workgroup on a dispatch error.
+  /// @details Used to unwind an already-committed cluster peer when a later peer in
+  /// the same clustered dispatch fails. Frees the WG's resident waves and drops its
+  /// refcount WITHOUT firing the completion hook or CP notify (the WG never executed),
+  /// then reclaims LDS if the CU is now idle and unpinned. The caller is responsible
+  /// for unpinning any CP-side cluster LDS pin.
+  void abort_workgroup(uint32_t dispatch_id, uint32_t wg_id);
+
   /// @brief Set the execution plugin group (shared ownership).
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
@@ -188,8 +213,10 @@ public:
   /// @brief Return the execution plugin group.
   ExecutionPluginGroup &plugin_group() { return *plugin_group_; }
 
-  /// @brief Return the number of dispatched (active or halted) wavefront slots.
-  /// @returns Count of non-idle wavefront slots.
+  /// @brief Return the number of resident (not-yet-halted) wavefront slots.
+  /// @details A wave frees its resources and its slot at s_endpgm, so halted
+  /// waves are not counted. Equivalent to the number of active wavefronts.
+  /// @returns Count of resident wavefront slots.
   size_t num_wfs() const;
 
   /// @brief Return the total number of wavefront slots.
@@ -225,6 +252,7 @@ public:
 
   /// @brief Return the Local Data Share (LDS).
   Lds &lds() { return lds_; }
+  const Lds &lds() const { return lds_; }
 
   /// @brief Clear LDS contents (zero-fill).
   void clear_lds() { lds_.clear(); }
@@ -340,6 +368,9 @@ public:
   /// @brief Check whether any wavefront slot is actively executing.
   /// @retval true At least one wavefront is not halted.
   /// @retval false All wavefronts are halted.
+  /// @warning NOT thread-safe: reads the non-atomic per-wave state_. Safe only on the
+  ///   shared partition engine thread (CP and its CUs share one partition, asserted in
+  ///   CommandProcessor::startup()); callers on any other thread would race a halt().
   bool has_active_wfs() const {
     for (const auto &w : wfs_)
       if (!w->is_halted())
@@ -359,6 +390,12 @@ public:
   uint64_t cycle_count() const { return cycle_counter_; }
 
   /// @brief Read a scalar register from the physical SGPR file.
+  /// @details This is the VM-level scalar register accessor. It notifies the
+  /// plugin group of an SGPR read when the physical register is currently owned
+  /// by a wavefront. Instruction operand implementations use this to implement
+  /// scalar operand semantics. VGPR reads from instruction emulators should not
+  /// use the analogous CU physical VGPR accessors directly; use Operand or
+  /// RegisterAccess APIs instead.
   /// @param reg_idx Physical register index.
   /// @returns Register value.
   // TODO(newling) consider cmake flag to build without plugins, this call
@@ -371,23 +408,48 @@ public:
   }
 
   /// @brief Write a scalar register in the physical SGPR file.
+  /// @details VM-level scalar register write used for scalar operand
+  /// destinations and dispatch/runtime state setup. This does not imply a VGPR
+  /// read and does not participate in VGPR read observation.
   /// @param reg_idx Physical register index.
   /// @param val Value to write.
   void write_sgpr(uint32_t reg_idx, uint32_t val) { sgpr_file_[reg_idx] = val; }
 
-  void notify_vgpr_read(const Wavefront *wf, uint32_t reg_idx, uint32_t lane_begin,
-                        uint32_t lane_end, uint8_t byte_mask = 0xF) const {
-    if (wf)
-      plugin_group_->onAmdgpuReadVgprs(wf, reg_idx, lane_begin, lane_end, byte_mask);
+  /// @brief Notify plugins that a wavefront read lanes of a physical VGPR.
+  /// @details Low-level notification primitive used by RegisterAccess and the
+  /// concrete CU implementation. Instruction emulators should acquire observed
+  /// VGPR values through RegisterAccess rather than manually pairing raw
+  /// storage access with this hook.
+  void notify_vgpr_read(const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
+                        uint8_t byte_mask = 0xF) const {
+    if (wf && lane_mask != 0)
+      plugin_group_->onAmdgpuReadVgprLanes(wf, reg_idx, lane_mask, byte_mask);
   }
 
+  /// @brief Notify plugins that lanes of a physical VGPR were read.
+  /// @details Resolves the owning wavefront from the physical register index.
+  /// Intended for RegisterAccess and CU internals, not as a direct instruction
+  /// emulator API.
+  virtual void notify_vgpr_read_by_reg(uint32_t reg_idx, uint64_t lane_mask,
+                                       uint8_t byte_mask = 0xF) const = 0;
+
   /// @brief Read a vector register lane from the physical VGPR file.
+  /// @details VM/storage-level scalar lane accessor. The concrete
+  /// implementation reports the read to plugins. Instruction-visible VGPR
+  /// reads should still go through Operand or RegisterAccess so the read
+  /// intent, lane mask, byte mask, and region lifetime remain explicit and
+  /// enforceable.
   /// @param reg_idx Physical register index.
   /// @param lane Lane index within the wavefront.
   /// @returns Lane value.
   virtual uint32_t read_vgpr(uint32_t reg_idx, uint32_t lane) const = 0;
 
   /// @brief Write a vector register lane in the physical VGPR file.
+  /// @details VM/storage-level scalar lane write. Instruction emulators should
+  /// prefer Operand or RegisterAccess write APIs for instruction-visible VGPR
+  /// writes. Use this directly only in VM/runtime code paths that deliberately
+  /// operate on physical register storage, such as dispatch setup or memory
+  /// completion.
   /// @param reg_idx Physical register index.
   /// @param lane Lane index within the wavefront.
   /// @param val Value to write.
@@ -398,35 +460,46 @@ public:
   /// @returns Pointer to the contiguous SGPR data.
   const uint32_t *sgpr_data(uint32_t base) const { return &sgpr_file_[base]; }
 
-  /// @brief Return a pointer to a wavefront's VGPR data in the physical file.
+  /// @brief Return a raw pointer to a wavefront's VGPR data in the physical file.
+  /// @details This bypasses plugin read hooks and should not be used directly
+  /// by instruction emulators. It is reserved for RegisterAccess, VM storage
+  /// code, serialization/checkpointing, diagnostics, and tightly controlled
+  /// internals that have a separate observation contract.
   /// @param base Base register index in the VGPR file.
   /// @returns Const pointer to the raw VGPR data.
-  virtual const uint8_t *vgpr_data(uint32_t base) const = 0;
+  virtual const uint8_t *raw_vgpr_data(uint32_t base) const = 0;
 
-  /// @brief Return a mutable pointer to a wavefront's VGPR data.
+  /// @brief Return a mutable raw pointer to a wavefront's VGPR data.
+  /// @details This bypasses the instruction-facing RegisterAccess boundary.
+  /// It is intended for VM storage operations such as memory completion,
+  /// checkpoint restore, RegisterAccess view implementation, and other
+  /// tightly controlled internals. Instruction emulators should use Operand or
+  /// RegisterAccess write APIs instead.
   /// @param base Base register index in the VGPR file.
   /// @returns Mutable pointer to the raw VGPR data.
-  virtual uint8_t *vgpr_data(uint32_t base) = 0;
+  virtual uint8_t *raw_vgpr_data(uint32_t base) = 0;
 
   /// @brief Number of physical VGPR registers in one allocation block.
   virtual uint32_t vgpr_allocation_block_size() const = 0;
 
-  /// @brief Typed view of a single VGPR as the file's @c simdojo::VectorReg.
+  /// @brief Raw typed view of a single VGPR as the file's @c simdojo::VectorReg.
   /// @details The abstract CU exposes the VGPR file only as a byte pointer
-  /// (@c vgpr_data), which erases the wavefront-size template parameter. The
+  /// (@c raw_vgpr_data), which erases the wavefront-size template parameter. The
   /// file actually stores @c simdojo::VectorReg<N,uint32_t>, so this recovers
   /// the typed register with the design's single localized @c reinterpret_cast.
+  /// Like @c raw_vgpr_data, this bypasses plugin hooks and is for
+  /// RegisterAccess/VM internals rather than instruction emulator call sites.
   /// The @c static_assert pins @c VectorReg<N> to @c N contiguous @c uint32_t
   /// (no padding / vtable) so the byte view and the typed view coincide.
-  template <size_t N> simdojo::VectorReg<N, uint32_t> &vgpr_reg(uint32_t base) {
+  template <size_t N> simdojo::VectorReg<N, uint32_t> &raw_vgpr_reg(uint32_t base) {
     static_assert(sizeof(simdojo::VectorReg<N, uint32_t>) == N * sizeof(uint32_t),
                   "VectorReg must be layout-compatible with raw lane storage");
-    return *reinterpret_cast<simdojo::VectorReg<N, uint32_t> *>(vgpr_data(base));
+    return *reinterpret_cast<simdojo::VectorReg<N, uint32_t> *>(raw_vgpr_data(base));
   }
-  template <size_t N> const simdojo::VectorReg<N, uint32_t> &vgpr_reg(uint32_t base) const {
+  template <size_t N> const simdojo::VectorReg<N, uint32_t> &raw_vgpr_reg(uint32_t base) const {
     static_assert(sizeof(simdojo::VectorReg<N, uint32_t>) == N * sizeof(uint32_t),
                   "VectorReg must be layout-compatible with raw lane storage");
-    return *reinterpret_cast<const simdojo::VectorReg<N, uint32_t> *>(vgpr_data(base));
+    return *reinterpret_cast<const simdojo::VectorReg<N, uint32_t> *>(raw_vgpr_data(base));
   }
 
   /// @brief Return the SGPR register file (for serialization).
@@ -452,13 +525,6 @@ public:
   /// @param inst The decoded instruction.
   /// @param wf The wavefront executing the instruction.
   virtual void execute_instruction(Instruction *inst, Wavefront &wf) = 0;
-
-  /// @brief Reset all wavefront slots to halted state.
-  ///
-  /// Frees all register allocations and resets every slot.  Used by the
-  /// instruction execution test harness between instructions.
-  /// @warning NOT thread-safe.  Must not be called while step() is running.
-  void reset_all_wf();
 
 protected:
   ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory, L2Cache *l2,
@@ -537,13 +603,43 @@ protected:
   simdojo::Port *cpl_ = nullptr; ///< Completer port: dispatch activation from CP.
   simdojo::Port *req_ = nullptr; ///< Requester port: L2 cache request (structural).
   uint64_t step_count_ = 0;
+  bool functional_yield_requested_ = false;
 };
+
+inline GpuMemory *InstructionComputeUnitView::memory() const { return raw_cu().memory(); }
+inline L1ScalarCache &InstructionComputeUnitView::l1_scalar() { return raw_cu().l1_scalar(); }
+inline L1VectorCache &InstructionComputeUnitView::l1_vector() { return raw_cu().l1_vector(); }
+inline L2Cache *InstructionComputeUnitView::l2() const { return raw_cu().l2(); }
+inline Lds &InstructionComputeUnitView::lds() { return raw_cu().lds(); }
+inline bool InstructionComputeUnitView::sram_ecc() const { return raw_cu().sram_ecc(); }
+inline rj_code_arch_t InstructionComputeUnitView::arch() const { return raw_cu().arch(); }
+inline uint32_t InstructionComputeUnitView::wf_size() const { return raw_cu().wf_size(); }
+inline uint32_t InstructionComputeUnitView::sgprs_per_wf() const {
+  return raw_cu().config().sgprs_per_wf;
+}
+inline uint32_t InstructionComputeUnitView::vgpr_allocation_block_size() const {
+  return raw_cu().vgpr_allocation_block_size();
+}
+inline std::string InstructionComputeUnitView::full_path() const { return raw_cu().full_path(); }
+inline simdojo::ComponentID InstructionComputeUnitView::id() const { return raw_cu().id(); }
+inline simdojo::SimulationEngine *InstructionComputeUnitView::engine() const {
+  return raw_cu().engine();
+}
+inline void InstructionComputeUnitView::request_functional_yield() {
+  raw_cu().request_functional_yield();
+}
+inline uint32_t InstructionComputeUnitView::read_sgpr(uint32_t reg_idx) const {
+  return raw_cu().read_sgpr(reg_idx);
+}
+inline void InstructionComputeUnitView::write_sgpr(uint32_t reg_idx, uint32_t value) {
+  raw_cu().write_sgpr(reg_idx, value);
+}
 
 /// @brief Execution-mode-aware compute unit shell.
 ///
 /// @details Adds event-driven activation on top of ComputeUnitCore.
 ///
-/// In FUNCTIONAL mode, advance() executes up to kFunctionalQuantum
+/// In FUNCTIONAL mode, execute_quantum() runs up to kFunctionalQuantum
 /// instructions, then yields to the simulation event loop. This
 /// interleaving ensures forward progress when wavefronts on different
 /// CUs synchronize via global memory (e.g., spin-locks, semaphores).
@@ -554,32 +650,65 @@ public:
   using ComputeUnitCore::ComputeUnitCore;
 
   /// @brief Execute work up to the quantum limit, then yield.
-  bool advance() override {
+  bool execute_quantum() override {
     if constexpr (Mode == simdojo::ExecMode::FUNCTIONAL) {
+      // A request left by direct step() execution must not shorten this quantum.
+      functional_yield_requested_ = false;
+      last_quantum_executed_ = 0;
       for (uint32_t i = 0; i < kFunctionalQuantum && step(); ++i) {
+        ++last_quantum_executed_;
+        if (std::exchange(functional_yield_requested_, false))
+          break;
       }
     } else {
       /// @todo: Support CLOCKED pipeline cycle.
     }
     if (is_idle()) {
       notify_idle();
-      return !is_idle();
+      if (is_idle()) {
+        executing_ = false;
+        return false;
+      }
     }
     return true;
   }
 
-  /// @brief Schedule CU execution via the event loop.
-  void activate() override {
+  void schedule_work() override {
+    // Never wake an idle CU. The CP nudges the CU through the cp->cu.cpl port,
+    // gated on has_active_wfs() when sent, but that port carries link latency, so a
+    // nudge can arrive a tick after the last wavefront has halted and freed itself.
+    // Waking the CU then would run an empty tick with no wave to issue — pure waste.
+    // Work is scheduled only when there is work to do.
+    //
+    // ENGINE-THREAD ONLY: executing_ and tick_event_ are touched without
+    // synchronization, and schedule_event() pushes to the partition's event queue
+    // non-thread-safely. All callers (dispatch_wf(), the cpl_ port handler, and the
+    // CP on the same partition) run on this CU's owning partition engine thread. A
+    // cross-partition schedule_work() would be an executing_ data race plus an
+    // unsynchronized event-queue push.
+    if (executing_ || !this->engine() || !this->has_active_wfs())
+      return;
+    executing_ = true;
     auto now = this->engine()->context(this->partition_id()).current_tick();
-    this->schedule_event(&work_event_, now + 1);
+    this->schedule_event(&tick_event_, now + 1);
   }
 
 private:
-  simdojo::Event work_event_{this, simdojo::EventType::TIMER_CALLBACK,
-                             [this](simdojo::Tick now, simdojo::Message *) {
-                               if (advance())
-                                 this->schedule_event(&work_event_, now + 1);
-                             }};
+  // Reschedule by the number of quantum loop iterations taken, not a fixed
+  // kFunctionalQuantum: a wavefront that requests a yield after k<kFunctionalQuantum
+  // iterations (e.g. s_sleep, vendor-dep retry) resumes at now+k so a peer
+  // component's published state is observed promptly rather than leaping a full
+  // quantum ahead. Note this counts loop iterations, not instructions issued —
+  // step() advances even when every wave is WAITCNT/BARRIER-stalled — so a fully
+  // stalled CU still advances by the full quantum. max(1,...) keeps the event
+  // strictly in the future so re-entries never collapse onto one tick.
+  simdojo::Event tick_event_{
+      this, simdojo::EventType::TIMER_CALLBACK, [this](simdojo::Tick now, simdojo::Message *) {
+        if (execute_quantum())
+          this->schedule_event(&tick_event_, now + std::max<uint64_t>(1, last_quantum_executed_));
+      }};
+  uint64_t last_quantum_executed_ = 0;
+  bool executing_ = false;
 };
 
 /// @brief ISA-parameterized compute unit owning the typed VGPR register file.
@@ -620,10 +749,14 @@ public:
 
   /// @returns Lane value from the VGPR file.
   uint32_t read_vgpr(uint32_t reg_idx, uint32_t lane) const override {
-    if (auto *wf = vgpr_to_wave_[reg_idx]) {
-      this->plugin_group_->onAmdgpuReadVgprs(wf, reg_idx, lane, lane + 1);
-    }
+    notify_vgpr_read_by_reg(reg_idx, uint64_t{1} << lane);
     return vgpr_file_[reg_idx][lane];
+  }
+
+  void notify_vgpr_read_by_reg(uint32_t reg_idx, uint64_t lane_mask,
+                               uint8_t byte_mask = 0xF) const override {
+    if (auto *wf = vgpr_to_wave_[reg_idx])
+      this->notify_vgpr_read(wf, reg_idx, lane_mask, byte_mask);
   }
 
   void fill_vgpr_to_wave(uint32_t base, uint32_t count, Wavefront *wf) override {
@@ -636,12 +769,12 @@ public:
   }
 
   /// @returns Const pointer to the raw VGPR data.
-  const uint8_t *vgpr_data(uint32_t base) const override {
+  const uint8_t *raw_vgpr_data(uint32_t base) const override {
     return reinterpret_cast<const uint8_t *>(&vgpr_file_[base]);
   }
 
   /// @returns Mutable pointer to the raw VGPR data.
-  uint8_t *vgpr_data(uint32_t base) override {
+  uint8_t *raw_vgpr_data(uint32_t base) override {
     return reinterpret_cast<uint8_t *>(&vgpr_file_[base]);
   }
 

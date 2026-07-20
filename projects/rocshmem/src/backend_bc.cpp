@@ -43,6 +43,8 @@
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <vector>
 
 namespace rocshmem {
 
@@ -114,6 +116,8 @@ void Backend::init(void) {
       hipHostMalloc(reinterpret_cast<void**>(&done_init), sizeof(uint8_t)));
 
   psync_allocator_ = get_default_allocator();
+
+  max_symm_regions_ = envvar::max_symm_regions;
 }
 
 void Backend::init_mpi_once(MPI_Comm comm) {
@@ -412,6 +416,374 @@ int Backend::buffer_unregister(void *addr) {
 
 void Backend::buffer_unregister_all() {
   user_buffer_regions.clear();
+}
+
+int Backend::buffer_register_symmetric(void *addr, size_t length,
+                                       void **registered_addr) {
+#if HIP_VERSION >= 70000000
+  if (registered_addr == nullptr) {
+    return ROCSHMEM_ERROR;
+  }
+
+  HIPAllocator *alloc = heap.get_allocator();
+
+  /*
+   * Symmetric registration is restricted to HIP VMM device memory. Validate
+   * the buffer against the heap's own allocator (mirrors NVSHMEM's per-buffer
+   * checks): this rejects non-VMM heaps, null/zero/granularity-misaligned
+   * sizes, non-VMM pointers, memory on the wrong device, and handle-type
+   * mismatches.
+   */
+  if (!alloc->ValidateVMMRegistration(addr, length, hip_dev_id)) {
+    return ROCSHMEM_ERROR;
+  }
+
+  /* Enforce the configured maximum number of symmetric registrations. */
+  if (symm_buffer_regions.size() >= max_symm_regions_) {
+    return ROCSHMEM_ERROR;
+  }
+
+  /*
+   * Overlap detection is performed against the user's *original* address
+   * range. Aliases are freshly reserved virtual addresses and never overlap,
+   * so checking them would be meaningless.
+   */
+  uintptr_t orig_start = reinterpret_cast<uintptr_t>(addr);
+
+  // Check for overflow when computing end address
+  if (orig_start > UINTPTR_MAX - length) {
+    return ROCSHMEM_ERROR;
+  }
+
+  uintptr_t orig_end = orig_start + length;
+
+  // Find first entry with base >= our base
+  auto it = symm_orig_regions.lower_bound(orig_start);
+
+  // Check entry at or after our base for overlap
+  if (it != symm_orig_regions.end() && it->first < orig_end) {
+    return ROCSHMEM_ERROR;
+  }
+
+  // Check entry just before our base for overlap
+  if (it != symm_orig_regions.begin()) {
+    auto prev = std::prev(it);
+    uintptr_t prev_end = prev->first + prev->second;
+    if (prev_end > orig_start) {
+      return ROCSHMEM_ERROR;
+    }
+  }
+
+  /*
+   * Map the user's buffer to a fresh rocSHMEM-owned virtual address. This
+   * alias refers to the same physical memory but at a distinct address that
+   * the caller uses for RMA and unregistration.
+   */
+  void *alias = nullptr;
+  if (create_symm_alias(addr, length, &alias) != hipSuccess) {
+    return ROCSHMEM_ERROR;
+  }
+
+  uintptr_t alias_start = reinterpret_cast<uintptr_t>(alias);
+  symm_buffer_regions[alias_start] = SymmRegion{length, orig_start};
+  symm_orig_regions[orig_start] = length;
+  *registered_addr = alias;
+  return ROCSHMEM_SUCCESS;
+#else
+  (void)addr;
+  (void)length;
+  (void)registered_addr;
+  return ROCSHMEM_ERROR;
+#endif
+}
+
+int Backend::buffer_unregister_symmetric(void *addr) {
+#if HIP_VERSION >= 70000000
+  if (addr == nullptr) {
+    return ROCSHMEM_ERROR;
+  }
+
+  uintptr_t base = reinterpret_cast<uintptr_t>(addr);
+
+  auto it = symm_buffer_regions.find(base);
+  if (it == symm_buffer_regions.end()) {
+    return ROCSHMEM_ERROR;
+  }
+
+  /* Release the rocSHMEM-owned alias mapping created at registration. */
+  destroy_symm_alias(addr, it->second.length);
+
+  /* Drop the original-range entry used for overlap detection. */
+  symm_orig_regions.erase(it->second.orig_base);
+
+  symm_buffer_regions.erase(it);
+  return ROCSHMEM_SUCCESS;
+#else
+  (void)addr;
+  return ROCSHMEM_ERROR;
+#endif
+}
+
+void Backend::symm_allgather(void* inout, size_t bytes_per_pe) {
+  if (backend_comm != MPI_COMM_NULL) {
+    NET_CHECK(mpilib_ftable_.Allgather(MPI_IN_PLACE, bytes_per_pe, MPI_CHAR,
+                                       inout, bytes_per_pe, MPI_CHAR,
+                                       backend_comm));
+  } else {
+    assert(backend_bootstr != nullptr);
+    backend_bootstr->allGather(inout, bytes_per_pe);
+  }
+}
+
+hipError_t Backend::create_symm_alias(void *addr, size_t length,
+                                      void **alias) {
+#if HIP_VERSION >= 70000000
+  return heap.get_allocator()->MapLocalAlias(addr, length, alias);
+#else
+  (void)addr;
+  (void)length;
+  (void)alias;
+  return hipErrorNotSupported;
+#endif
+}
+
+void Backend::destroy_symm_alias(void *alias, size_t length) {
+#if HIP_VERSION >= 70000000
+  (void)heap.get_allocator()->UnmapLocalAlias(alias, length);
+#else
+  (void)alias;
+  (void)length;
+#endif
+}
+
+void Backend::alloc_ipc_symm_table() {
+#if HIP_VERSION >= 70000000
+  /*
+   * Device-visible symmetric-registration table shared by all contexts via
+   * IpcImpl (so registrations are observed without re-propagation).
+   */
+  int capacity = static_cast<int>(max_symm_regions_);
+  if (capacity <= 0) {
+    capacity = 1;
+  }
+
+  IpcSymmTable *table{nullptr};
+  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&table), sizeof(IpcSymmTable)));
+  assert(table);
+  CHECK_HIP(hipMemset(table, 0, sizeof(IpcSymmTable)));
+
+  IpcSymmRegion *regions{nullptr};
+  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&regions),
+                      sizeof(IpcSymmRegion) * capacity));
+  assert(regions);
+  CHECK_HIP(hipMemset(regions, 0, sizeof(IpcSymmRegion) * capacity));
+
+  IpcSymmTable host_table{};
+  host_table.count = 0;
+  host_table.capacity = capacity;
+  host_table.regions = regions;
+  CHECK_HIP(hipMemcpy(table, &host_table, sizeof(IpcSymmTable),
+                      hipMemcpyHostToDevice));
+  ipcImpl.symm_table = table;
+#endif
+}
+
+void Backend::free_ipc_symm_table() {
+#if HIP_VERSION >= 70000000
+  if (ipcImpl.symm_table == nullptr) {
+    return;
+  }
+  IpcSymmTable host_table{};
+  CHECK_HIP(hipMemcpy(&host_table, ipcImpl.symm_table, sizeof(IpcSymmTable),
+                      hipMemcpyDeviceToHost));
+  if (host_table.regions != nullptr) {
+    CHECK_HIP(hipFree(host_table.regions));
+  }
+  CHECK_HIP(hipFree(ipcImpl.symm_table));
+  ipcImpl.symm_table = nullptr;
+#endif
+}
+
+int Backend::register_ipc_symm_region([[maybe_unused]] void *symm_addr,
+                                      [[maybe_unused]] void *export_addr,
+                                      [[maybe_unused]] size_t length,
+                                      [[maybe_unused]] const std::vector<int>& peer_global,
+                                      [[maybe_unused]] int self_index) {
+#if HIP_VERSION >= 70000000
+  IpcSymmTable *table = ipcImpl.symm_table;
+  if (table == nullptr) {
+    return ROCSHMEM_ERROR;
+  }
+
+  HIPAllocator *alloc = heap.get_allocator();
+  int num_peers = static_cast<int>(peer_global.size());
+  size_t handle_size = alloc->GetIpcHandleSize();
+
+  /*
+   * The handle vector spans all PEs so the all-gather below lands each PE's
+   * handle at its global index; only the peers listed in peer_global are
+   * subsequently opened.
+   */
+  HIPIpcHandleVec *vec = alloc->AllocateIpcHandleVec(num_pes);
+
+  /* Export this PE's handle; make the outcome collective before the gather. */
+  int export_ok = (alloc->GetIpcHandleFromPtr(export_addr, length,
+                       vec->GetHandleVecElem(my_pe)) == hipSuccess) ? 1 : 0;
+  if (!all_pes_succeeded(export_ok)) {
+    if (export_ok) {
+      (void)alloc->CloseExportedHandle(vec->GetHandleVecElem(my_pe));
+    }
+    delete vec;
+    return ROCSHMEM_ERROR;
+  }
+
+  /* Keep this PE's handle bytes so the export can be released later. */
+  std::vector<char> local_handle(handle_size);
+  std::memcpy(local_handle.data(), vec->GetHandleVecElem(my_pe), handle_size);
+
+  /* Collective exchange of IPC handles across all PEs. */
+  symm_allgather(vec->GetHandleVecElem(0), handle_size);
+
+  /* Open the handles of the requested peers into peer-mapped base addresses. */
+  std::vector<char *> host_peer_bases(num_peers, nullptr);
+  int open_ok = 1;
+  for (int i = 0; i < num_peers; i++) {
+    if (i == self_index) {
+      host_peer_bases[i] = reinterpret_cast<char *>(symm_addr);
+      continue;
+    }
+    void *p{nullptr};
+    if (alloc->OpenIpcHandle(&p, vec->GetHandleVecElem(peer_global[i])) !=
+        hipSuccess) {
+      for (int j = 0; j < i; j++) {
+        if (j == self_index) {
+          continue;
+        }
+        (void)alloc->CloseIpcHandle(host_peer_bases[j]);
+        host_peer_bases[j] = nullptr;
+      }
+      open_ok = 0;
+      break;
+    }
+    host_peer_bases[i] = reinterpret_cast<char *>(p);
+  }
+
+  if (!all_pes_succeeded(open_ok)) {
+    if (open_ok) {
+      for (int i = 0; i < num_peers; i++) {
+        if (i == self_index) {
+          continue;
+        }
+        (void)alloc->CloseIpcHandle(host_peer_bases[i]);
+      }
+    }
+    (void)alloc->CloseExportedHandle(local_handle.data());
+    delete vec;
+    return ROCSHMEM_ERROR;
+  }
+
+  delete vec;
+
+  /* Publish the peer-base array into device memory for ipcPeerPtr. */
+  char **peer_bases{nullptr};
+  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&peer_bases),
+                      num_peers * sizeof(char *)));
+  CHECK_HIP(hipMemcpy(peer_bases, host_peer_bases.data(),
+                      num_peers * sizeof(char *), hipMemcpyHostToDevice));
+
+  IpcSymmTable host_table{};
+  CHECK_HIP(hipMemcpy(&host_table, table, sizeof(IpcSymmTable),
+                      hipMemcpyDeviceToHost));
+  int slot = host_table.count;
+  if (slot >= host_table.capacity) {
+    for (int i = 0; i < num_peers; i++) {
+      if (i == self_index) {
+        continue;
+      }
+      (void)alloc->CloseIpcHandle(host_peer_bases[i]);
+    }
+    (void)hipFree(peer_bases);
+    (void)alloc->CloseExportedHandle(local_handle.data());
+    return ROCSHMEM_ERROR;
+  }
+
+  IpcSymmRegion host_region{};
+  host_region.local_base = reinterpret_cast<uintptr_t>(symm_addr);
+  host_region.length = length;
+  host_region.peer_bases = peer_bases;
+  CHECK_HIP(hipMemcpy(&host_table.regions[slot], &host_region,
+                      sizeof(IpcSymmRegion), hipMemcpyHostToDevice));
+
+  host_table.count = slot + 1;
+  CHECK_HIP(hipMemcpy(table, &host_table, sizeof(IpcSymmTable),
+                      hipMemcpyHostToDevice));
+
+  IpcSymmRecord rec;
+  rec.slot = slot;
+  rec.num_peers = num_peers;
+  rec.self_index = self_index;
+  rec.dev_peer_bases = peer_bases;
+  rec.peer_bases = std::move(host_peer_bases);
+  rec.local_handle = std::move(local_handle);
+  ipc_symm_records_[reinterpret_cast<uintptr_t>(symm_addr)] = std::move(rec);
+  return ROCSHMEM_SUCCESS;
+#else
+  return ROCSHMEM_ERROR;
+#endif
+}
+
+int Backend::unregister_ipc_symm_region([[maybe_unused]] void *symm_addr) {
+#if HIP_VERSION >= 70000000
+  IpcSymmTable *table = ipcImpl.symm_table;
+  if (table == nullptr) {
+    return ROCSHMEM_ERROR;
+  }
+
+  uintptr_t key = reinterpret_cast<uintptr_t>(symm_addr);
+  auto it = ipc_symm_records_.find(key);
+  if (it == ipc_symm_records_.end()) {
+    return ROCSHMEM_ERROR;
+  }
+
+  HIPAllocator *alloc = heap.get_allocator();
+  int slot = it->second.slot;
+  int num_peers = it->second.num_peers;
+  int self_index = it->second.self_index;
+  std::vector<char *> &peer_bases = it->second.peer_bases;
+
+  for (int i = 0; i < num_peers; i++) {
+    if (i == self_index) {
+      continue;
+    }
+    CHECK_HIP(alloc->CloseIpcHandle(peer_bases[i]));
+  }
+  (void)alloc->CloseExportedHandle(it->second.local_handle.data());
+
+  /* Compact the device table by moving the last region into the freed slot. */
+  IpcSymmTable host_table{};
+  CHECK_HIP(hipMemcpy(&host_table, table, sizeof(IpcSymmTable),
+                      hipMemcpyDeviceToHost));
+  int last = host_table.count - 1;
+  if (slot != last) {
+    CHECK_HIP(hipMemcpy(&host_table.regions[slot], &host_table.regions[last],
+                        sizeof(IpcSymmRegion), hipMemcpyDeviceToDevice));
+    for (auto &kv : ipc_symm_records_) {
+      if (kv.second.slot == last) {
+        kv.second.slot = slot;
+        break;
+      }
+    }
+  }
+  host_table.count = last;
+  CHECK_HIP(hipMemcpy(table, &host_table, sizeof(IpcSymmTable),
+                      hipMemcpyHostToDevice));
+
+  CHECK_HIP(hipFree(it->second.dev_peer_bases));
+  ipc_symm_records_.erase(it);
+  return ROCSHMEM_SUCCESS;
+#else
+  return ROCSHMEM_ERROR;
+#endif
 }
 
 }  // namespace rocshmem

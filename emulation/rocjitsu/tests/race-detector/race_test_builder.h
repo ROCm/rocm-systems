@@ -111,10 +111,10 @@ public:
     waves_[wave]->dispatch(PendingWaitCount{vmcnt, lgkmcnt});
   }
 
-  /// Barrier: flush all waves' WAVE_COMPLETE events (simulates s_barrier).
+  /// Barrier: flush all waves' barrier-pending events (simulates s_barrier).
   void barrier() {
     for (auto *w : waves_) {
-      w->flushWaveCompleteMemoryEvents();
+      w->flushBarrierPendingEvents();
     }
   }
 
@@ -128,6 +128,10 @@ public:
   /// A race fires only when the pending load's bytes overlap the read's bytes.
   void checkVgprRead(int wave, int reg, int lane, uint8_t byteMask = 0xF) {
     waves_[wave]->checkVgprRead(reg, lane, byteMask);
+  }
+
+  void checkVgprReadLanes(int wave, int reg, uint64_t laneMask, uint8_t byteMask = 0xF) {
+    waves_[wave]->checkVgprReadLanes(reg, laneMask, byteMask);
   }
 
   void checkSgprRead(int wave, int reg) { waves_[wave]->checkSgprRead(reg); }
