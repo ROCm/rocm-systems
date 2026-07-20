@@ -8,6 +8,7 @@
 #include "hip_internal.hpp"
 #include "utils/flags.hpp"
 #include "utils/debug.hpp"
+#include "lttng/rocm_trace_emit.h"
 #include <exception>
 #include <tuple>
 
@@ -22,8 +23,7 @@ const HipToolsDispatchTable* GetHipToolsDispatchTable();
 
 // ================================================================================================
 // Generic exception handler - returns default value for non-hipError_t types
-template <typename T>
-__forceinline T HandleException() {
+template <typename T> __forceinline T HandleException() {
   std::ignore = HandleException<hipError_t>();
   return T();
 }
@@ -50,10 +50,91 @@ template <> hipError_t HandleException<hipError_t>() {
 }  // namespace hip
 
 #define TRY try {
-#define CATCH } catch(...) { HIP_RETURN(hip::HandleException<hipError_t>()); }
-#define CATCHRET(RETURN_TYPE) } catch(...) { return hip::HandleException<RETURN_TYPE>(); }
+#define CATCH                                                                                      \
+  }                                                                                                \
+  catch (...) {                                                                                    \
+    HIP_RETURN(hip::HandleException<hipError_t>());                                                \
+  }
+#define CATCHRET(RETURN_TYPE)                                                                      \
+  }                                                                                                \
+  catch (...) {                                                                                    \
+    return hip::HandleException<RETURN_TYPE>();                                                    \
+  }
 
-extern "C" hipError_t __hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem,
+/* ---------- Curated combined-event return macros (schema v1) ----------
+ * Each curated API is ONE combined LTTng event fired twice per call. The
+ * wrapper emits the ENTER record up front via rocm_trace_emit_<api>_enter(...)
+ * (IN args); these return macros emit the matching EXIT record via
+ * rocm_trace_emit_<api>_exit(<OUT args...>, status) after the real call, then
+ * return. STATUS/PTR/VOID/I32 select the return-field encoding; each has a
+ * captured-OUT-args form and a _NOARGS form (all-IN wrappers, whose EXIT
+ * record carries only phase + the return field).
+ */
+
+/* Captured-OUT-args variants. __VA_ARGS__ carries the wrapper's OUT pointers
+ * (non-empty by construction; all-IN wrappers use the _NOARGS variants). */
+#define ROCM_TRACE_RET_STATUS_CURATED(api, expr, ...)                                              \
+  do {                                                                                             \
+    const hipError_t __rocm_status = (expr);                                                       \
+    rocm_trace_emit_##api##_exit(__VA_ARGS__, __rocm_status);                                      \
+    return __rocm_status;                                                                          \
+  } while (0)
+
+/* PTR: the combined event's return field is the actual returned pointer
+ * (retptr), captured as a uint64_t hex value. PTR-returning curated APIs have
+ * no OUT args, so the exit helper takes only the return value. */
+#define ROCM_TRACE_RET_PTR_CURATED(api, ptr_type, expr, ...)                                       \
+  do {                                                                                             \
+    ptr_type const __rocm_ptr = (expr);                                                            \
+    rocm_trace_emit_##api##_exit(__VA_ARGS__, (uint64_t)(uintptr_t)__rocm_ptr);                    \
+    return __rocm_ptr;                                                                             \
+  } while (0)
+
+#define ROCM_TRACE_RET_VOID_CURATED(api, expr, ...)                                                \
+  do {                                                                                             \
+    (expr);                                                                                        \
+    rocm_trace_emit_##api##_exit(__VA_ARGS__, hipSuccess);                                         \
+    return;                                                                                        \
+  } while (0)
+
+#define ROCM_TRACE_RET_I32_CURATED(api, expr, ...)                                                 \
+  do {                                                                                             \
+    const int __rocm_rv = (expr);                                                                  \
+    rocm_trace_emit_##api##_exit(__VA_ARGS__, (int32_t)__rocm_rv);                                 \
+    return __rocm_rv;                                                                              \
+  } while (0)
+
+/* Zero-captured-args variants. Separate macros to avoid empty
+ * __VA_ARGS__ expansion in the captured-args macros above. */
+#define ROCM_TRACE_RET_STATUS_CURATED_NOARGS(api, expr)                                            \
+  do {                                                                                             \
+    const hipError_t __rocm_status = (expr);                                                       \
+    rocm_trace_emit_##api##_exit(__rocm_status);                                                   \
+    return __rocm_status;                                                                          \
+  } while (0)
+
+#define ROCM_TRACE_RET_PTR_CURATED_NOARGS(api, ptr_type, expr)                                     \
+  do {                                                                                             \
+    ptr_type const __rocm_ptr = (expr);                                                            \
+    rocm_trace_emit_##api##_exit((uint64_t)(uintptr_t)__rocm_ptr);                                 \
+    return __rocm_ptr;                                                                             \
+  } while (0)
+
+/* VOID has no return field: the all-IN EXIT record carries only phase, so the
+ * exit helper takes no argument at all. */
+#define ROCM_TRACE_RET_VOID_CURATED_NOARGS(api, expr)                                              \
+  do {                                                                                             \
+    (expr);                                                                                        \
+    rocm_trace_emit_##api##_exit();                                                                \
+    return;                                                                                        \
+  } while (0)
+
+#define ROCM_TRACE_RET_I32_CURATED_NOARGS(api, expr)                                               \
+  do {                                                                                             \
+    const int __rocm_rv = (expr);                                                                  \
+    rocm_trace_emit_##api##_exit((int32_t)__rocm_rv);                                              \
+    return __rocm_rv;                                                                              \
+  } extern "C" hipError_t __hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem,
                                                 hipStream_t* stream) {
   TRY;
   return hip::GetHipCompilerDispatchTable()->__hipPopCallConfiguration_fn(gridDim, blockDim,

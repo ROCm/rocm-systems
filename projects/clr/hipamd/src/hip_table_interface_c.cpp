@@ -6,6 +6,7 @@
 
 #include <hip/amd_detail/hip_api_trace.hpp>
 #include "hip_internal.hpp"
+#include "lttng/rocm_trace_emit.h"
 namespace hip {
 const HipDispatchTable* GetHipDispatchTable();
 const HipCompilerDispatchTable* GetHipCompilerDispatchTable();
@@ -21,9 +22,28 @@ template <> hipError_t HandleException<hipError_t>();
 #endif  // !_WIN32
 
 #define TRY try {
-#define CATCH } catch(...) { HIP_RETURN(hip::HandleException<hipError_t>()); }
+#define CATCH                                                                                      \
+  }                                                                                                \
+  catch (...) {                                                                                    \
+    HIP_RETURN(hip::HandleException<hipError_t>());                                                \
+  }
 
-DllExport hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
+/* See hip_table_interface.cpp for full doc on these macros (schema v1). Both
+ * wrappers here are STATUS (hipError_t) and all-IN, so only the _NOARGS
+ * variant is used; the captured form is provided for completeness. */
+#define ROCM_TRACE_RET_STATUS_CURATED(api, expr, ...)                                              \
+  do {                                                                                             \
+    const hipError_t __rocm_status = (expr);                                                       \
+    rocm_trace_emit_##api##_exit(__VA_ARGS__, __rocm_status);                                      \
+    return __rocm_status;                                                                          \
+  } while (0)
+
+#define ROCM_TRACE_RET_STATUS_CURATED_NOARGS(api, expr)                                            \
+  do {                                                                                             \
+    const hipError_t __rocm_status = (expr);                                                       \
+    rocm_trace_emit_##api##_exit(__rocm_status);                                                   \
+    return __rocm_status;                                                                          \
+  } DllExport hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
                                               uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
                                               uint32_t localWorkSizeX, uint32_t localWorkSizeY,
                                               uint32_t localWorkSizeZ, size_t sharedMemBytes,

@@ -1,0 +1,18 @@
+# Curated HIP APIs for typed parameter capture.
+#
+# Schema (see shared/lttng/scripts/lttng_curated_lib.py for full details):
+#   - api: <name>                  # must match the real HIP header function name
+#     args: [<name>, ...]          # allowlist of captured params, in header order
+#     out: [<name>, ...]           # optional; subset of args captured OUT (default: all IN)
+#     pack_dim3: [<name>, ...]     # optional; dim3 args packed into one uint64 field
+#     strings: [<name>, ...]       # optional; char*/const char* args captured as strings
+#     types: {<name>: <DSL type>}  # optional; explicit override for a genuinely
+#                                  # ambiguous real C type (see lttng_curated_verify.py)
+#
+# Per-arg DSL type and the field-budget check are resolved and enforced
+# automatically from the real HIP header via a live libclang parse (see
+# lttng_curated_verify.py's infer_dsl_type()/expand_compact_apis()). Arg
+# names are cross-checked against the real header signature by the same
+# libclang-based drift verifier.
+
+# --- streams + sync ---

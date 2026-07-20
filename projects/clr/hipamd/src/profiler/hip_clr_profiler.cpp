@@ -31,6 +31,7 @@
 #include "platform/activity.hpp"
 #include "../hip_internal.hpp"
 #include "../hip_global.hpp"
+#include "../lttng/rocm_trace_emit.h"
 
 #include "rocclr/os/os.hpp"
 #include "platform/runtime.hpp"
@@ -2773,6 +2774,27 @@ uint64_t HipProfilerDisableExt() {
 }
 
 // ============================================================
+// Public C extension API
+// ============================================================
+
+/* Typed curated combined-event return macros for the hipError_t wrappers
+ * below (schema v1). Mirrors the status variants in hip_table_interface.cpp;
+ * kept local here since these wrappers don't go through the dispatch-table
+ * TRY/CATCH machinery. The wrapper emits the ENTER record via its
+ * rocm_trace_emit_<api>_enter(...) call; these macros emit the EXIT record. */
+#define ROCM_TRACE_RET_STATUS_CURATED(api, expr, ...)                                              \
+  do {                                                                                             \
+    const hipError_t __rocm_status = (expr);                                                       \
+    rocm_trace_emit_##api##_exit(__VA_ARGS__, __rocm_status);                                      \
+    return __rocm_status;                                                                          \
+  } while (0)
+
+#define ROCM_TRACE_RET_STATUS_CURATED_NOARGS(api, expr)                                            \
+  do {                                                                                             \
+    const hipError_t __rocm_status = (expr);                                                       \
+    rocm_trace_emit_##api##_exit(__rocm_status);                                                   \
+    return __rocm_status;                                                                          \
+  } // ============================================================
 // Public C extension API
 // ============================================================
 extern "C" {

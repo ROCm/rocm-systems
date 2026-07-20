@@ -22,6 +22,23 @@
 #include "utils/debug.hpp"
 #include "os/os.hpp"
 
+/* LTTng-UST per-packet dispatch tracepoint emit helper. The include path
+ * (hipamd/src/lttng) and the HIP_ENABLE_LTTNG_UST define are added to the
+ * rocclr target by hipamd's CMakeLists.txt when -DHIP_ENABLE_LTTNG_UST=ON.
+ * The header degrades to no-op stubs when the macro is undefined, so guarding
+ * the include is unnecessary as long as the include path is always available. */
+#if defined(HIP_ENABLE_LTTNG_UST) && HIP_ENABLE_LTTNG_UST
+#include "rocm_trace_emit.h"
+#else
+/* No-op stubs duplicated here so the call sites in this file compile without
+ * the LTTng include path. Keep these in sync with the !HIP_ENABLE_LTTNG_UST
+ * branch of hipamd/src/lttng/rocm_trace_emit.h. */
+static inline void rocm_trace_emit_hip_aql_kernel_dispatch_submit(
+    uint32_t a, uint64_t b, uint64_t c, uint64_t d) {
+    (void)a; (void)b; (void)c; (void)d;
+}
+#endif
+
 #include <fstream>
 #include <limits>
 
@@ -1573,6 +1590,26 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   AqlPacket* aql_loc = &((AqlPacket*)(gpu_queue_->base_address))[index & queueMask];
   writePacketToRingBuffer(aql_loc, packet, header, rest, index & queueMask);
 
+  /* LTTng: emit per-packet dispatch tracepoint, but only for KERNEL_DISPATCH
+   * packets (barriers and PM4 vendor-specific packets share this dispatch
+   * helper and are filtered out below). The tracepoint represents HIP's
+   * intent before any HSA intercept rewrite; the helper internally mints
+   * its own corr_id and reads the TLS slot for parent_corr_id (= the
+   * launching HIP API's corr_id). Fields are read from the source |packet|,
+   * not the ring slot, so this stays correct on the write-combining ring. */
+  {
+    const uint8_t pkt_type = extractAqlBits(header, HSA_PACKET_HEADER_TYPE,
+                                            HSA_PACKET_HEADER_WIDTH_TYPE);
+    if (pkt_type == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
+      auto* kdp = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet);
+      rocm_trace_emit_hip_aql_kernel_dispatch_submit(
+          gpu_queue_->id,
+          index,
+          kdp->kernel_object,
+          kdp->completion_signal.handle);
+    }
+  }
+
   if (IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
     if constexpr (std::is_same_v<AqlPacket, hsa_amd_ext_kernel_dispatch_packet_t>) {
       // setup travels in `rest`, not in the local packet struct, so the log
@@ -2098,6 +2135,36 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
         amd::movdir64b_copy64(dst, &stg);
         if (needKernelNamesReported || kLogBatch) {
           reportBatchPacket(i, slotIdx, packetSignal);
+        }
+      }
+    }
+
+    // LTTng: emit per-packet dispatch tracepoint for each KERNEL_DISPATCH
+    // packet in this chunk. Done after this chunk's headers and completion
+    // signals have been published (NT fixup loop / MOVDIR64B path above) so
+    // the emitted handle is final. The emit helper is a one-atomic-load no-op
+    // when no LTTng session is active. The helper internally mints its own
+    // corr_id per packet and reads the TLS slot for parent_corr_id (= the
+    // launching HIP API's corr_id). kernel_object is read from the host-side
+    // flat buffer (the write-combining ring cannot be read back reliably);
+    // completion_signal is read from the ring slot, where it was just patched
+    // in this thread and drained by the store fence / movdir64b above.
+    {
+      for (size_t i = chunkStart; i < chunkEnd; ++i) {
+        const uint16_t hdr_i = static_cast<uint16_t>(validFullHeaders[i]);
+        if (extractAqlBits(hdr_i, HSA_PACKET_HEADER_TYPE,
+                           HSA_PACKET_HEADER_WIDTH_TYPE) ==
+            HSA_PACKET_TYPE_KERNEL_DISPATCH) {
+          const auto* hostPkt = reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(
+              flatPacketData.data() + i * kPacketSize);
+          const uint64_t slotIdx_i = (startIndex + i) & queueMask;
+          auto* slot_i = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
+              queueBase + slotIdx_i * kPacketSize);
+          rocm_trace_emit_hip_aql_kernel_dispatch_submit(
+              gpu_queue_->id,
+              startIndex + i,
+              hostPkt->kernel_object,
+              slot_i->completion_signal.handle);
         }
       }
     }
