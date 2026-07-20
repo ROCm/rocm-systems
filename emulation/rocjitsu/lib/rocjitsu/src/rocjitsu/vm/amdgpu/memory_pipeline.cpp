@@ -57,8 +57,7 @@ std::vector<ClusterLdsTarget> resolve_lds_write_targets(VectorMemState &d, Wavef
   return targets;
 }
 
-void write_lds_dst_load_direct(const VectorMemState &d, ComputeUnitCore &cu,
-                               uint32_t per_lane_bytes) {
+void write_lds_dst_load_direct(const VectorMemState &d, Lds &lds, uint32_t per_lane_bytes) {
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
     if ((d.lane_mask & (1ULL << lane)) == 0)
       continue;
@@ -70,7 +69,7 @@ void write_lds_dst_load_direct(const VectorMemState &d, ComputeUnitCore &cu,
     }
     uint32_t lds_addr =
         d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * per_lane_bytes;
-    cu.lds().write(lds_addr, &d.response_data[data_offset], per_lane_bytes);
+    lds.write(lds_addr, &d.response_data[data_offset], per_lane_bytes);
   }
 }
 
@@ -106,7 +105,7 @@ MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, C
   });
 
   if (!d.cluster_multicast || cluster_downgrades_to_ordinary) {
-    write_lds_dst_load_direct(d, cu, per_lane_bytes);
+    write_lds_dst_load_direct(d, wf.lds(), per_lane_bytes);
     return MemoryAccessCompletion::Complete;
   }
 
@@ -117,9 +116,8 @@ MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, C
                                                        : MemoryAccessCompletion::Complete;
 }
 
-MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf,
+MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, ComputeUnitCore &cu,
                                        MemoryAccessDeferredCompletion complete) {
-  ComputeUnitCore &cu = wf.cu();
   if (!d.is_load)
     return MemoryAccessCompletion::Complete;
 
@@ -223,7 +221,7 @@ ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
   auto &d = *inst.data_as<ScalarMemState>();
   if (!d.is_load)
     return MemoryAccessCompletion::Complete;
-  auto &cu = wf.cu();
+  auto &cu = wf.raw_cu();
   for (uint32_t i = 0; i < d.num_dwords; ++i) {
     cu.write_sgpr(d.dst_reg_base + i, d.response_data[i]);
   }
@@ -490,10 +488,10 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   if (d.is_load) {
     d.response_data.resize(d.wf_size * d.num_elems * d.elem_size);
     l1_->load(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.response_data.data(),
-              d.mtype, d.non_temporal, d.request_force_l1_bypass, wf.process_id());
+              d.mtype, d.non_temporal, d.request_force_l1_bypass, d.wf_size, wf.process_id());
   } else {
     l1_->store(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.store_data.data(),
-               d.mtype, d.non_temporal, wf.process_id());
+               d.mtype, d.non_temporal, d.wf_size, wf.process_id());
   }
 }
 
@@ -502,11 +500,12 @@ MemoryAccessCompletion GlobalMemPipeline::complete_access(Instruction &inst, Wav
   auto &d = *inst.data_as<VectorMemState>();
   if (d.transpose != 0)
     transpose_response(d);
-  return vector_complete(d, wf, std::move(complete));
+  return vector_complete(d, wf, wf.raw_cu(), std::move(complete));
 }
 
 void LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<VectorMemState>();
+  auto &lds = wf.lds();
   if (d.cu_path.empty()) {
     d.cu_path = wf.cu().full_path();
     d.wg_id = wf.wg_id();
@@ -514,18 +513,18 @@ void LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   }
 
   if (d.atomic_op != AtomicOp::NONE) {
-    execute_lds_atomic_rmw(d, lds_);
+    execute_lds_atomic_rmw(d, &lds);
     return;
   }
 
   if (d.is_load) {
     d.response_data.resize(d.wf_size * d.num_elems * d.elem_size);
-    lds_->vector_load(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
-                      d.response_data.data());
+    lds.vector_load(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
+                    d.response_data.data());
     if (d.ds2_active) {
       d.ds2_response_data.resize(d.wf_size * d.num_elems * d.elem_size);
-      lds_->vector_load(d.ds2_per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
-                        d.ds2_response_data.data());
+      lds.vector_load(d.ds2_per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
+                      d.ds2_response_data.data());
     }
     // Per-lane LDS load trace: log addresses and loaded values for first 4 lanes.
     util::Logger::vm([&](auto &os) {
@@ -588,11 +587,11 @@ void LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
         }
       }
     });
-    lds_->vector_store(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
-                       d.store_data.data());
+    lds.vector_store(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
+                     d.store_data.data());
     if (d.ds2_active) {
-      lds_->vector_store(d.ds2_per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
-                         d.ds2_store_data.data());
+      lds.vector_store(d.ds2_per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
+                       d.ds2_store_data.data());
     }
   }
 }
@@ -602,11 +601,11 @@ MemoryAccessCompletion LocalMemPipeline::complete_access(Instruction &inst, Wave
   auto &d = *inst.data_as<VectorMemState>();
   if (d.transpose != 0)
     transpose_response(d);
-  MemoryAccessCompletion completion = vector_complete(d, wf, std::move(complete));
+  MemoryAccessCompletion completion = vector_complete(d, wf, wf.raw_cu(), std::move(complete));
 
   // DS dual-access (ds_read2/ds_write2): write the second access results.
   if (d.ds2_active && d.is_load) {
-    auto &cu = wf.cu();
+    auto &cu = wf.raw_cu();
     uint32_t vgpr_count = d.elem_size / 4;
     for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
       if (!(d.lane_mask & (1ULL << lane)))
