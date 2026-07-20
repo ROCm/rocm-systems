@@ -863,7 +863,7 @@ def test_load_pc_sampling_data_no_tool_data() -> None:
     assert df.empty
 
 
-def test_canonical_record_collection_preserves_legacy_analysis_table() -> None:
+def test_pc_sampling_single_result_preserves_legacy_analysis_table() -> None:
     """A one-record collection produces the unchanged legacy display table."""
     tool_data = make_tool_data(
         stochastic=[
@@ -1248,14 +1248,14 @@ def test_load_pc_sampling_results_returns_empty_for_missing_folder(
 # ═══════════════════════════════════════════════════════════════
 
 
-def test_canonical_record_collection_preserves_legacy_analysis_empty_loader(
+def test_pc_sampling_empty_results_preserve_legacy_loader_behavior(
     tmp_path: Path,
 ) -> None:
     """Return an empty list when the results json is absent."""
     assert load_pc_sampling_results(str(tmp_path)) == []
 
 
-def test_canonical_record_collection_preserves_legacy_analysis_loader(
+def test_pc_sampling_single_result_preserves_legacy_loader_behavior(
     tmp_path: Path,
 ) -> None:
     """Return a list containing the rocprofiler-sdk-tool[0] dict."""
@@ -1418,7 +1418,7 @@ def test_load_pc_sampling_tool_data_gate(tmp_path: Path) -> None:
     assert instance.load_pc_sampling_tool_data(str(tmp_path)) == []
 
 
-def test_canonical_record_collection_preserves_legacy_analysis_scaffolding(
+def test_pc_sampling_single_result_preserves_legacy_analysis_scaffolding(
     tmp_path: Path,
 ) -> None:
     """Repeated legacy dispatches retain their top-kernel and dispatch rows."""
@@ -1680,7 +1680,7 @@ def test_calc_dispatch_data_uses_provided_tool_data(tmp_path: Path) -> None:
     assert df.iloc[0]["gpu_id"] == 0
 
 
-def test_canonical_record_collection_preserves_legacy_analysis_db_dispatches(
+def test_pc_sampling_single_result_preserves_legacy_db_dispatches(
     tmp_path: Path,
 ) -> None:
     """Database preprocessing retains every dispatch from one legacy record."""
@@ -1699,7 +1699,7 @@ def test_canonical_record_collection_preserves_legacy_analysis_db_dispatches(
     assert result[str(tmp_path)]["dispatch_id"].tolist() == [1, 2]
 
 
-def test_canonical_record_collection_preserves_legacy_analysis_empty_db(
+def test_pc_sampling_empty_results_preserve_legacy_db_behavior(
     tmp_path: Path,
 ) -> None:
     """An empty collection retains the legacy missing-results warning."""
@@ -1819,7 +1819,7 @@ def test_pc_sampling_analyze_sorting_type(
     common.clean_output_dir(True, workload_dir)
 
 
-def test_canonical_record_collection_preserves_legacy_analysis_database_and_csv(
+def test_pc_sampling_single_result_preserves_legacy_database_and_csv(
     binary_handler_analyze_rocprof_compute,
     monkeypatch,
 ) -> None:
