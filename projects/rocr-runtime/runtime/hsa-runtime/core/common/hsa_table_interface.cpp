@@ -43,6 +43,102 @@
 #include "inc/hsa_api_trace.h"
 #include "core/inc/hsa_api_trace_int.h"
 
+#include "lttng/rocm_trace_emit.h"
+
+/* HSA curated combined-event return macros (schema v1). The wrapper emits the
+ * ENTER record up front via rocm_trace_emit_<api>_enter(...) (IN args); these
+ * macros emit the matching EXIT record via rocm_trace_emit_<api>_exit(<OUT
+ * args...>, <return value>) after the call, then return. STATUS-returning
+ * wrappers pass the hsa_status_t (which is both the return field and the OUT
+ * success gate); U64/I64/U32/PTR pass the full-width return value (they have
+ * no OUT args). Each kind has a captured-OUT-args form and a _NOARGS form. */
+#define ROCR_TRACE_API_RET_STATUS_CURATED_HSA(api, expr, ...)                                      \
+  do {                                                                                             \
+    const auto __rocm_rv = (expr);                                                                 \
+    const hsa_status_t __rocm_status = static_cast<hsa_status_t>(__rocm_rv);                       \
+    rocm_trace_emit_##api##_exit(__VA_ARGS__, __rocm_status);                                      \
+    return __rocm_rv;                                                                              \
+  } while (0)
+
+#define ROCR_TRACE_API_RET_PTR_CURATED_HSA(api, ptr_type, expr, ...)                               \
+  do {                                                                                             \
+    ptr_type const __rocm_ptr = (expr);                                                            \
+    rocm_trace_emit_##api##_exit(__VA_ARGS__, (uint64_t)(uintptr_t)__rocm_ptr);                    \
+    return __rocm_ptr;                                                                             \
+  } while (0)
+
+#define ROCR_TRACE_API_RET_VOID_CURATED_HSA(api, expr, ...)                                        \
+  do {                                                                                             \
+    (expr);                                                                                        \
+    rocm_trace_emit_##api##_exit(__VA_ARGS__, HSA_STATUS_SUCCESS);                                 \
+    return;                                                                                        \
+  } while (0)
+
+#define ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(api, expr)                                    \
+  do {                                                                                             \
+    const auto __rocm_rv = (expr);                                                                 \
+    const hsa_status_t __rocm_status = static_cast<hsa_status_t>(__rocm_rv);                       \
+    rocm_trace_emit_##api##_exit(__rocm_status);                                                   \
+    return __rocm_rv;                                                                              \
+  } while (0)
+
+#define ROCR_TRACE_API_RET_PTR_CURATED_HSA_NOARGS(api, ptr_type, expr)                             \
+  do {                                                                                             \
+    ptr_type const __rocm_ptr = (expr);                                                            \
+    rocm_trace_emit_##api##_exit((uint64_t)(uintptr_t)__rocm_ptr);                                 \
+    return __rocm_ptr;                                                                             \
+  } while (0)
+
+/* VOID has no return field; the all-IN EXIT record carries only phase. */
+#define ROCR_TRACE_API_RET_VOID_CURATED_HSA_NOARGS(api, expr)                                      \
+  do {                                                                                             \
+    (expr);                                                                                        \
+    rocm_trace_emit_##api##_exit();                                                                \
+    return;                                                                                        \
+  } while (0)
+
+#define ROCR_TRACE_API_RET_U64_CURATED_HSA(api, expr, ...)                                         \
+  do {                                                                                             \
+    const uint64_t __rocm_rv = static_cast<uint64_t>(expr);                                        \
+    rocm_trace_emit_##api##_exit(__VA_ARGS__, __rocm_rv);                                          \
+    return __rocm_rv;                                                                              \
+  } while (0)
+
+#define ROCR_TRACE_API_RET_U64_CURATED_HSA_NOARGS(api, expr)                                       \
+  do {                                                                                             \
+    const uint64_t __rocm_rv = static_cast<uint64_t>(expr);                                        \
+    rocm_trace_emit_##api##_exit(__rocm_rv);                                                       \
+    return __rocm_rv;                                                                              \
+  } while (0)
+
+#define ROCR_TRACE_API_RET_I64_CURATED_HSA(api, expr, ...)                                         \
+  do {                                                                                             \
+    const int64_t __rocm_rv = static_cast<int64_t>(expr);                                          \
+    rocm_trace_emit_##api##_exit(__VA_ARGS__, __rocm_rv);                                          \
+    return __rocm_rv;                                                                              \
+  } while (0)
+
+#define ROCR_TRACE_API_RET_I64_CURATED_HSA_NOARGS(api, expr)                                       \
+  do {                                                                                             \
+    const int64_t __rocm_rv = static_cast<int64_t>(expr);                                          \
+    rocm_trace_emit_##api##_exit(__rocm_rv);                                                       \
+    return __rocm_rv;                                                                              \
+  } while (0)
+
+#define ROCR_TRACE_API_RET_U32_CURATED_HSA(api, expr, ...)                                         \
+  do {                                                                                             \
+    const uint32_t __rocm_rv = static_cast<uint32_t>(expr);                                        \
+    rocm_trace_emit_##api##_exit(__VA_ARGS__, __rocm_rv);                                          \
+    return __rocm_rv;                                                                              \
+  } while (0)
+
+#define ROCR_TRACE_API_RET_U32_CURATED_HSA_NOARGS(api, expr)                                       \
+  do {                                                                                             \
+    const uint32_t __rocm_rv = static_cast<uint32_t>(expr);                                        \
+    rocm_trace_emit_##api##_exit(__rocm_rv);                                                       \
+    return __rocm_rv;                                                                              \
+  } while (0)
+
 static const HsaApiTable* hsaApiTable;
 static const CoreApiTable* coreApiTable;
 static const AmdExtTable* amdExtTable;

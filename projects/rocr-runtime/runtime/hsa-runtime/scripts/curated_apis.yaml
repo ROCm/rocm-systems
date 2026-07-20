@@ -1,0 +1,4 @@
+# HSA curated APIs for typed parameter capture.
+# Schema is the same as the HIP equivalent (projects/clr/hipamd/scripts/curated_apis.yaml).
+
+# --- hsa_queues ---
