@@ -373,6 +373,8 @@ build_flat_store_b32(uint16_t vaddr, uint16_t vsrc, rj_code_arch_t arch, uint32_
     return copy_words(
         build_cdna4_flat_store_b32(vaddr, vsrc, static_cast<uint16_t>(byte_offset), arch));
   }
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return copy_words(build_gfx1250_flat_store_b32(vaddr, vsrc, byte_offset, arch));
   return copy_words(rocjitsu::build_flat_store_b32_vaddr_vsrc(vaddr, vsrc, arch, byte_offset));
 }
 
@@ -384,6 +386,8 @@ build_flat_load_b32(uint16_t vaddr, uint16_t vdst, rj_code_arch_t arch, uint32_t
     return copy_words(
         build_cdna4_flat_load_b32(vaddr, vdst, static_cast<uint16_t>(byte_offset), arch));
   }
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return copy_words(build_gfx1250_flat_load_b32(vaddr, vdst, byte_offset, arch));
   return copy_words(rocjitsu::build_flat_load_b32_vaddr_vdst(vaddr, vdst, arch, byte_offset));
 }
 
@@ -469,6 +473,9 @@ build_ds_load_b32(uint16_t vdst, uint16_t vaddr, uint8_t byte_offset, rj_code_ar
 [[nodiscard]] inline std::optional<std::vector<uint32_t>>
 build_flat_atomic_add_u32(uint16_t vaddr, uint16_t vsrc, uint16_t vdst, bool return_old_value,
                           uint8_t scope, rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return copy_words(
+        build_gfx1250_flat_atomic_add_u32(vaddr, vsrc, vdst, return_old_value, scope, arch));
   return arch == ROCJITSU_CODE_ARCH_CDNA4
              ? copy_words(build_cdna4_flat_atomic_add_u32(vaddr, vsrc, vdst, return_old_value,
                                                           scope, arch))
@@ -479,6 +486,9 @@ build_flat_atomic_add_u32(uint16_t vaddr, uint16_t vsrc, uint16_t vdst, bool ret
 [[nodiscard]] inline std::optional<std::vector<uint32_t>>
 build_flat_atomic_or_u32(uint16_t vaddr, uint16_t vsrc, uint16_t vdst, bool return_old_value,
                          uint8_t scope, rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return copy_words(
+        build_gfx1250_flat_atomic_or_u32(vaddr, vsrc, vdst, return_old_value, scope, arch));
   return arch == ROCJITSU_CODE_ARCH_CDNA4
              ? copy_words(
                    build_cdna4_flat_atomic_or_u32(vaddr, vsrc, vdst, return_old_value, scope, arch))
@@ -489,6 +499,9 @@ build_flat_atomic_or_u32(uint16_t vaddr, uint16_t vsrc, uint16_t vdst, bool retu
 [[nodiscard]] inline std::optional<std::vector<uint32_t>>
 build_flat_atomic_cmpswap_b32(uint16_t vaddr, uint16_t vsrc, uint16_t vdst, bool return_old_value,
                               uint8_t scope, rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return copy_words(
+        build_gfx1250_flat_atomic_cmpswap_b32(vaddr, vsrc, vdst, return_old_value, scope, arch));
   return arch == ROCJITSU_CODE_ARCH_CDNA4
              ? copy_words(build_cdna4_flat_atomic_cmpswap_b32(vaddr, vsrc, vdst, return_old_value,
                                                               scope, arch))
@@ -499,6 +512,9 @@ build_flat_atomic_cmpswap_b32(uint16_t vaddr, uint16_t vsrc, uint16_t vdst, bool
 [[nodiscard]] inline std::optional<std::vector<uint32_t>>
 build_flat_atomic_swap_b64(uint16_t vaddr, uint16_t vsrc, uint16_t vdst, bool return_old_value,
                            uint8_t scope, rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return copy_words(
+        build_gfx1250_flat_atomic_swap_b64(vaddr, vsrc, vdst, return_old_value, scope, arch));
   return arch == ROCJITSU_CODE_ARCH_CDNA4
              ? copy_words(build_cdna4_flat_atomic_swap_b64(vaddr, vsrc, vdst, return_old_value,
                                                            scope, arch))
@@ -509,6 +525,9 @@ build_flat_atomic_swap_b64(uint16_t vaddr, uint16_t vsrc, uint16_t vdst, bool re
 [[nodiscard]] inline std::optional<std::vector<uint32_t>>
 build_flat_atomic_add_u64(uint16_t vaddr, uint16_t vsrc, uint16_t vdst, bool return_old_value,
                           uint8_t scope, rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return copy_words(
+        build_gfx1250_flat_atomic_add_u64(vaddr, vsrc, vdst, return_old_value, scope, arch));
   return arch == ROCJITSU_CODE_ARCH_CDNA4
              ? copy_words(build_cdna4_flat_atomic_add_u64(vaddr, vsrc, vdst, return_old_value,
                                                           scope, arch))

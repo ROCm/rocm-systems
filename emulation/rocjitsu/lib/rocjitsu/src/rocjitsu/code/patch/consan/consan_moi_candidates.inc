@@ -15,7 +15,7 @@ inline constexpr uint32_t kMaxSgprs = 106;
 inline constexpr uint16_t kGfx12HwRegHwId1 = 23;
 inline constexpr uint16_t kGfx12HwIdOwnerBits = 10;
 inline constexpr uint8_t kRdna4ScopeDevice = 2;
-inline constexpr uint32_t kRdna4FlatNoSaddr = 0x7F;
+inline constexpr uint32_t kVectorFlatNoSaddr = 0x7C;
 
 [[nodiscard]] std::optional<uint16_t> gfx1250_vgpr_msb_mode_at(std::span<const uint8_t> bytes,
                                                                uint64_t text_file_offset,

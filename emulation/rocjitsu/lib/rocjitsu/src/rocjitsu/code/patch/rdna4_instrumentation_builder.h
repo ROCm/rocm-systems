@@ -7,6 +7,7 @@
 #pragma once
 
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/operand_types.h"
 
 namespace rocjitsu {
 
@@ -428,9 +429,9 @@ build_v_mov_b32_e64_literal(uint16_t vdst, uint32_t literal, rj_code_arch_t arch
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
 build_flat_store_b32_vaddr_vsrc(uint16_t vaddr, uint16_t vsrc, rj_code_arch_t arch,
                                 uint32_t byte_offset = 0) {
-  if (!is_rdna4_family_arch(arch) || vaddr > 255 || vsrc > 255 || byte_offset > 0xffffffu)
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vaddr > 255 || vsrc > 255 || byte_offset > 0xffffffu)
     return std::nullopt;
-  constexpr uint32_t kRdna4FlatNoSaddr = 0x7F;
+  constexpr uint32_t kRdna4FlatNoSaddr = rdna4::OPR_SREG_NULL;
   return std::array<uint32_t, 3>{0xEC068000u | kRdna4FlatNoSaddr,
                                  static_cast<uint32_t>(vsrc) << 23u,
                                  static_cast<uint32_t>(vaddr) | (byte_offset << 8u)};
@@ -440,9 +441,9 @@ build_flat_store_b32_vaddr_vsrc(uint16_t vaddr, uint16_t vsrc, rj_code_arch_t ar
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
 build_flat_load_b32_vaddr_vdst(uint16_t vaddr, uint16_t vdst, rj_code_arch_t arch,
                                uint32_t byte_offset = 0) {
-  if (!is_rdna4_family_arch(arch) || vaddr > 255 || vdst > 255 || byte_offset > 0xffffffu)
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vaddr > 255 || vdst > 255 || byte_offset > 0xffffffu)
     return std::nullopt;
-  constexpr uint32_t kRdna4FlatNoSaddr = 0x7F;
+  constexpr uint32_t kRdna4FlatNoSaddr = rdna4::OPR_SREG_NULL;
   return std::array<uint32_t, 3>{0xEC050000u | kRdna4FlatNoSaddr, static_cast<uint32_t>(vdst),
                                  static_cast<uint32_t>(vaddr) | (byte_offset << 8u)};
 }
@@ -558,9 +559,9 @@ build_s_wait_alu_sa_sdst0(rj_code_arch_t arch) {
 build_flat_atomic_add_u32_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uint16_t vdst,
                                           bool return_old_value, uint8_t scope,
                                           rj_code_arch_t arch) {
-  if (!is_rdna4_family_arch(arch) || vaddr > 255 || vsrc > 255 || vdst > 255 || scope > 3)
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vaddr > 255 || vsrc > 255 || vdst > 255 || scope > 3)
     return std::nullopt;
-  constexpr uint32_t kRdna4FlatNoSaddr = 0x7F;
+  constexpr uint32_t kRdna4FlatNoSaddr = rdna4::OPR_SREG_NULL;
   constexpr uint32_t kRdna4AtomicReturnTh = 1;
   const uint32_t th = return_old_value ? kRdna4AtomicReturnTh : 0u;
   return std::array<uint32_t, 3>{0xEC0D4000u | kRdna4FlatNoSaddr,
@@ -579,9 +580,9 @@ build_flat_atomic_add_u32_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uint16_
 build_flat_atomic_or_u32_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uint16_t vdst,
                                          bool return_old_value, uint8_t scope,
                                          rj_code_arch_t arch) {
-  if (!is_rdna4_family_arch(arch) || vaddr > 255 || vsrc > 255 || vdst > 255 || scope > 3)
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vaddr > 255 || vsrc > 255 || vdst > 255 || scope > 3)
     return std::nullopt;
-  constexpr uint32_t kRdna4FlatNoSaddr = 0x7F;
+  constexpr uint32_t kRdna4FlatNoSaddr = rdna4::OPR_SREG_NULL;
   constexpr uint32_t kRdna4AtomicReturnTh = 1;
   const uint32_t th = return_old_value ? kRdna4AtomicReturnTh : 0u;
   return std::array<uint32_t, 3>{0xEC0F4000u | kRdna4FlatNoSaddr,
@@ -597,19 +598,11 @@ build_flat_atomic_or_u32_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uint16_t
 build_flat_atomic_cmpswap_b32_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uint16_t vdst,
                                               bool return_old_value, uint8_t scope,
                                               rj_code_arch_t arch) {
-  if (!is_rdna4_family_arch(arch) || vaddr > 254 || vsrc > 254 || vdst > 255 || scope > 3)
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vaddr > 254 || vsrc > 254 || vdst > 255 || scope > 3)
     return std::nullopt;
-  constexpr uint32_t kRdna4FlatNoSaddr = 0x7F;
+  constexpr uint32_t kRdna4FlatNoSaddr = rdna4::OPR_SREG_NULL;
   constexpr uint32_t kRdna4AtomicReturnTh = 1;
   const uint32_t th = return_old_value ? kRdna4AtomicReturnTh : 0u;
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
-    return gfx1250::build_vflat(gfx1250::kFlatAtomicCmpswapB32Vflat,
-                                {.saddr = kRdna4FlatNoSaddr,
-                                 .vdst = static_cast<uint8_t>(vdst),
-                                 .scope = scope,
-                                 .th = static_cast<uint8_t>(th),
-                                 .vsrc = static_cast<uint8_t>(vsrc),
-                                 .vaddr = static_cast<uint8_t>(vaddr)});
   return std::array<uint32_t, 3>{0xEC0D0000u | kRdna4FlatNoSaddr,
                                  static_cast<uint32_t>(vdst) |
                                      (static_cast<uint32_t>(scope) << 18u) | (th << 20u) |
@@ -628,19 +621,11 @@ build_flat_atomic_cmpswap_b32_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uin
 build_flat_atomic_swap_b64_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uint16_t vdst,
                                            bool return_old_value, uint8_t scope,
                                            rj_code_arch_t arch) {
-  if (!is_rdna4_family_arch(arch) || vaddr > 254 || vsrc > 254 || vdst > 254 || scope > 3)
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vaddr > 254 || vsrc > 254 || vdst > 254 || scope > 3)
     return std::nullopt;
-  constexpr uint32_t kRdna4FlatNoSaddr = 0x7F;
+  constexpr uint32_t kRdna4FlatNoSaddr = rdna4::OPR_SREG_NULL;
   constexpr uint32_t kRdna4AtomicReturnTh = 1;
   const uint32_t th = return_old_value ? kRdna4AtomicReturnTh : 0u;
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
-    return gfx1250::build_vflat(gfx1250::kFlatAtomicSwapB64Vflat,
-                                {.saddr = kRdna4FlatNoSaddr,
-                                 .vdst = static_cast<uint8_t>(vdst),
-                                 .scope = scope,
-                                 .th = static_cast<uint8_t>(th),
-                                 .vsrc = static_cast<uint8_t>(vsrc),
-                                 .vaddr = static_cast<uint8_t>(vaddr)});
   return std::array<uint32_t, 3>{0xEC104000u | kRdna4FlatNoSaddr,
                                  static_cast<uint32_t>(vdst) |
                                      (static_cast<uint32_t>(scope) << 18u) | (th << 20u) |
@@ -657,19 +642,11 @@ build_flat_atomic_swap_b64_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uint16
 build_flat_atomic_add_u64_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uint16_t vdst,
                                           bool return_old_value, uint8_t scope,
                                           rj_code_arch_t arch) {
-  if (!is_rdna4_family_arch(arch) || vaddr > 254 || vsrc > 254 || vdst > 254 || scope > 3)
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vaddr > 254 || vsrc > 254 || vdst > 254 || scope > 3)
     return std::nullopt;
-  constexpr uint32_t kRdna4FlatNoSaddr = 0x7F;
+  constexpr uint32_t kRdna4FlatNoSaddr = rdna4::OPR_SREG_NULL;
   constexpr uint32_t kRdna4AtomicReturnTh = 1;
   const uint32_t th = return_old_value ? kRdna4AtomicReturnTh : 0u;
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
-    return gfx1250::build_vflat(gfx1250::kFlatAtomicAddU64Vflat,
-                                {.saddr = kRdna4FlatNoSaddr,
-                                 .vdst = static_cast<uint8_t>(vdst),
-                                 .scope = scope,
-                                 .th = static_cast<uint8_t>(th),
-                                 .vsrc = static_cast<uint8_t>(vsrc),
-                                 .vaddr = static_cast<uint8_t>(vaddr)});
   return std::array<uint32_t, 3>{0xEC10C000u | kRdna4FlatNoSaddr,
                                  static_cast<uint32_t>(vdst) |
                                      (static_cast<uint32_t>(scope) << 18u) | (th << 20u) |

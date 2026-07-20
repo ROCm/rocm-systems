@@ -2558,7 +2558,7 @@ class CodeGenerator:
             template <typename VmemMachineInst>
             uint32_t vflat_vaddr_bits(const VmemMachineInst *inst) {
               // SADDR == NULL selects a 64-bit vector address; otherwise VADDR is a 32-bit offset.
-              return inst->saddr == 0x7Fu ? 64 : 32;
+              return inst->saddr == static_cast<uint32_t>(OPR_SREG_NULL) ? 64 : 32;
             }
             } // namespace''')
 

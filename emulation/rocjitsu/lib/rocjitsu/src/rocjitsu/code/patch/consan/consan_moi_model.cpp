@@ -2198,7 +2198,7 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
   if (!site.addr_vgpr || !site.data_vgpr || *site.raw_vaddr != *site.addr_vgpr)
     return reject(ConSanMoiAtomicAddressSupport::MissingAddressOperands);
 
-  constexpr uint32_t kFlatNoSaddr = 0x7fu;
+  constexpr uint32_t kFlatNoSaddr = 0x7cu;
   const uint32_t flat_no_saddr = arch == ROCJITSU_CODE_ARCH_CDNA4 ? 0u : kFlatNoSaddr;
   constexpr int32_t kSigned24Min = -(1 << 23);
   constexpr int32_t kSigned24Max = (1 << 23) - 1;

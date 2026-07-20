@@ -270,12 +270,12 @@ classify_consan_moi_inline_atomic_support(const ConSanAtomicSite &site,
   (void)event_kind;
   if (site.width_bits != 32)
     return ConSanMoiInlineAtomicSupport::UnsupportedWidth;
-  const bool rdna4_flat_encoding =
-      is_flat && site.size == 3u * sizeof(uint32_t) && site.raw_saddr && *site.raw_saddr == 0x7fu;
+  const bool vector_flat_encoding = is_flat && site.size == 3u * sizeof(uint32_t) &&
+                                    site.raw_saddr && *site.raw_saddr == 0x7cu;
   const bool cdna4_flat_encoding =
       is_flat && site.size == 2u * sizeof(uint32_t) && site.raw_saddr && *site.raw_saddr == 0u;
   const bool vglobal_encoding = is_vglobal && site.size == 3u * sizeof(uint32_t);
-  if (!rdna4_flat_encoding && !cdna4_flat_encoding && !vglobal_encoding)
+  if (!vector_flat_encoding && !cdna4_flat_encoding && !vglobal_encoding)
     return ConSanMoiInlineAtomicSupport::UnsupportedEncoding;
   if (!site.raw_ioffset || (is_flat && *site.raw_ioffset != 0))
     return ConSanMoiInlineAtomicSupport::NonzeroOffset;
@@ -283,7 +283,7 @@ classify_consan_moi_inline_atomic_support(const ConSanAtomicSite &site,
       (is_compare_exchange && (!site.dst_vgpr || *site.data_vgpr >= 255)))
     return ConSanMoiInlineAtomicSupport::MissingOperands;
   if (!site.raw_scope || !site.returns_old_value ||
-      ((rdna4_flat_encoding || vglobal_encoding) && !site.raw_th))
+      ((vector_flat_encoding || vglobal_encoding) && !site.raw_th))
     return ConSanMoiInlineAtomicSupport::MissingOrderingMetadata;
   // Wave scope is not an inter-wave handoff. Workgroup, agent, and system
   // atomics are all valid causal publication/import events; the Inline keys

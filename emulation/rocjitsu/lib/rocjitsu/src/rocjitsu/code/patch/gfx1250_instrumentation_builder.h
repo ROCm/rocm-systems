@@ -7,6 +7,7 @@
 #pragma once
 
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/operand_types.h"
 
 namespace rocjitsu {
 
@@ -40,6 +41,85 @@ build_gfx1250_v_cmp_ne_u16_vcc(uint16_t src0, uint16_t vsrc1, rj_code_arch_t arc
     return std::nullopt;
   return gfx1250::build_vopc(gfx1250::kVCmpNeU16Vopc,
                              {.src0 = src0, .vsrc1 = static_cast<uint8_t>(vsrc1)})[0];
+}
+
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
+build_gfx1250_flat_store_b32(uint16_t vaddr, uint16_t vsrc, uint32_t byte_offset,
+                             rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_GFX1250 || vaddr > 255 || vsrc > 255 || byte_offset > 0xffffffu)
+    return std::nullopt;
+  return gfx1250::build_vflat(gfx1250::kFlatStoreB32Vflat,
+                              {.saddr = static_cast<uint8_t>(gfx1250::OPR_SREG_NULL),
+                               .vsrc = static_cast<uint8_t>(vsrc),
+                               .vaddr = static_cast<uint8_t>(vaddr),
+                               .ioffset = byte_offset});
+}
+
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
+build_gfx1250_flat_load_b32(uint16_t vaddr, uint16_t vdst, uint32_t byte_offset,
+                            rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_GFX1250 || vaddr > 255 || vdst > 255 || byte_offset > 0xffffffu)
+    return std::nullopt;
+  return gfx1250::build_vflat(gfx1250::kFlatLoadB32Vflat,
+                              {.saddr = static_cast<uint8_t>(gfx1250::OPR_SREG_NULL),
+                               .vdst = static_cast<uint8_t>(vdst),
+                               .vaddr = static_cast<uint8_t>(vaddr),
+                               .ioffset = byte_offset});
+}
+
+template <uint16_t Opcode>
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
+build_gfx1250_flat_atomic(uint16_t vaddr, uint16_t vsrc, uint16_t vdst, bool return_old_value,
+                          uint8_t scope, rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_GFX1250 || vaddr > 255 || vsrc > 255 || vdst > 255 || scope > 3)
+    return std::nullopt;
+  return gfx1250::build_vflat(Opcode, {.saddr = static_cast<uint8_t>(gfx1250::OPR_SREG_NULL),
+                                       .vdst = static_cast<uint8_t>(vdst),
+                                       .scope = scope,
+                                       .th = static_cast<uint8_t>(return_old_value ? 1u : 0u),
+                                       .vsrc = static_cast<uint8_t>(vsrc),
+                                       .vaddr = static_cast<uint8_t>(vaddr)});
+}
+
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
+build_gfx1250_flat_atomic_add_u32(uint16_t vaddr, uint16_t vsrc, uint16_t vdst,
+                                  bool return_old_value, uint8_t scope, rj_code_arch_t arch) {
+  return build_gfx1250_flat_atomic<gfx1250::kFlatAtomicAddU32Vflat>(vaddr, vsrc, vdst,
+                                                                    return_old_value, scope, arch);
+}
+
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
+build_gfx1250_flat_atomic_or_u32(uint16_t vaddr, uint16_t vsrc, uint16_t vdst,
+                                 bool return_old_value, uint8_t scope, rj_code_arch_t arch) {
+  return build_gfx1250_flat_atomic<gfx1250::kFlatAtomicOrB32Vflat>(vaddr, vsrc, vdst,
+                                                                   return_old_value, scope, arch);
+}
+
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
+build_gfx1250_flat_atomic_cmpswap_b32(uint16_t vaddr, uint16_t vsrc, uint16_t vdst,
+                                      bool return_old_value, uint8_t scope, rj_code_arch_t arch) {
+  if (vaddr > 254 || vsrc > 254)
+    return std::nullopt;
+  return build_gfx1250_flat_atomic<gfx1250::kFlatAtomicCmpswapB32Vflat>(
+      vaddr, vsrc, vdst, return_old_value, scope, arch);
+}
+
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
+build_gfx1250_flat_atomic_swap_b64(uint16_t vaddr, uint16_t vsrc, uint16_t vdst,
+                                   bool return_old_value, uint8_t scope, rj_code_arch_t arch) {
+  if (vaddr > 254 || vsrc > 254 || vdst > 254)
+    return std::nullopt;
+  return build_gfx1250_flat_atomic<gfx1250::kFlatAtomicSwapB64Vflat>(vaddr, vsrc, vdst,
+                                                                     return_old_value, scope, arch);
+}
+
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
+build_gfx1250_flat_atomic_add_u64(uint16_t vaddr, uint16_t vsrc, uint16_t vdst,
+                                  bool return_old_value, uint8_t scope, rj_code_arch_t arch) {
+  if (vaddr > 254 || vsrc > 254 || vdst > 254)
+    return std::nullopt;
+  return build_gfx1250_flat_atomic<gfx1250::kFlatAtomicAddU64Vflat>(vaddr, vsrc, vdst,
+                                                                    return_old_value, scope, arch);
 }
 
 } // namespace rocjitsu

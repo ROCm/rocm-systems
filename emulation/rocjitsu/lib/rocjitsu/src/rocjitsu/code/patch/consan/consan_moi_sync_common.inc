@@ -230,7 +230,7 @@ void append_fence_record_candidates(const ConSanResult &result,
       *site.dst_vgpr >= *site.addr_vgpr && *site.dst_vgpr < *site.addr_vgpr + 2u;
   return returned_value_aliases_address ||
                  (site.mnemonic.starts_with("global_atomic") &&
-                  (site.raw_saddr.value_or(kRdna4FlatNoSaddr) != kRdna4FlatNoSaddr ||
+                  (site.raw_saddr.value_or(kVectorFlatNoSaddr) != kVectorFlatNoSaddr ||
                    site.raw_ioffset.value_or(0) != 0))
              ? 5u
              : 3u;

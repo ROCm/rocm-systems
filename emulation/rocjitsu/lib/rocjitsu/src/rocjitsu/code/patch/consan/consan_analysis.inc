@@ -1525,7 +1525,7 @@ void fill_ordinary_memory_raw(ConSanOrdinaryMemorySite &site, const Raw &raw) {
   site.raw_scope = static_cast<uint32_t>(raw.scope);
   site.raw_th = static_cast<uint32_t>(raw.th);
   site.address_vgpr = static_cast<uint16_t>(raw.vaddr);
-  if (raw.saddr != 0x7fu)
+  if (raw.saddr != rdna4::OPR_SREG_NULL)
     site.address_sgpr = static_cast<uint16_t>(raw.saddr);
   if (site.operation == ConSanOrdinaryMemoryOperation::Load)
     site.destination_vgpr = static_cast<uint16_t>(raw.vdst);

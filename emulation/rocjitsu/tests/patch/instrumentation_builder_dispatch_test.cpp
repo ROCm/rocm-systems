@@ -71,12 +71,15 @@ TEST(InstrumentationBuilderDispatch, VariableLengthRecipesSelectTargetBackend) {
       ib::build_v_mul_lo_u32_literal(10, 11, 0x85ebca6bu, 10, ROCJITSU_CODE_ARCH_RDNA4);
   const auto cdna_store = ib::build_flat_store_b32(2, 7, ROCJITSU_CODE_ARCH_CDNA4);
   const auto rdna_store = ib::build_flat_store_b32(2, 7, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto gfx1250_store = ib::build_flat_store_b32(2, 7, ROCJITSU_CODE_ARCH_GFX1250);
   const auto cdna_private = ib::build_private_store_b32(7, 4, ROCJITSU_CODE_ARCH_CDNA4);
   const auto rdna_private = ib::build_private_store_b32(7, 4, ROCJITSU_CODE_ARCH_RDNA4);
   const auto cdna_atomic =
       ib::build_flat_atomic_add_u32(2, 7, 8, true, 2, ROCJITSU_CODE_ARCH_CDNA4);
   const auto rdna_atomic =
       ib::build_flat_atomic_add_u32(2, 7, 8, true, 2, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto gfx1250_atomic =
+      ib::build_flat_atomic_add_u32(2, 7, 8, true, 2, ROCJITSU_CODE_ARCH_GFX1250);
   const auto cdna_barrier = ib::build_workgroup_barrier(ROCJITSU_CODE_ARCH_CDNA4);
   const auto rdna_barrier = ib::build_workgroup_barrier(ROCJITSU_CODE_ARCH_RDNA4);
   const auto cdna_barrier_only = ib::build_workgroup_barrier_only(ROCJITSU_CODE_ARCH_CDNA4);
@@ -89,8 +92,9 @@ TEST(InstrumentationBuilderDispatch, VariableLengthRecipesSelectTargetBackend) {
       /*literal=*/13080u, /*vsrc1=*/3, ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_TRUE(cdna_mov && rdna_mov && cdna_add && rdna_add && cdna_literal_add &&
               rdna_literal_add && cdna_multiply && rdna_multiply && cdna_store && rdna_store &&
-              cdna_private && rdna_private && cdna_atomic && rdna_atomic && cdna_barrier &&
-              rdna_barrier && gfx1250_lds64 && gfx1250_lds128 && gfx1250_bounds);
+              gfx1250_store && cdna_private && rdna_private && cdna_atomic && rdna_atomic &&
+              gfx1250_atomic && cdna_barrier && rdna_barrier && gfx1250_lds64 && gfx1250_lds128 &&
+              gfx1250_bounds);
 
   EXPECT_EQ(*cdna_mov, (std::vector<uint32_t>{0x7e1402ffu, 0x12345678u}));
   EXPECT_EQ(cdna_mov->size(), 2u);
@@ -103,12 +107,16 @@ TEST(InstrumentationBuilderDispatch, VariableLengthRecipesSelectTargetBackend) {
   EXPECT_EQ(rdna_multiply->size(), 3u);
   EXPECT_EQ(cdna_store->size(), 2u);
   EXPECT_EQ(rdna_store->size(), 3u);
+  EXPECT_EQ((*rdna_store)[0] & 0x7fu, static_cast<uint32_t>(rdna4::OPR_SREG_NULL));
+  EXPECT_EQ((*gfx1250_store)[0] & 0x7fu, static_cast<uint32_t>(gfx1250::OPR_SREG_NULL));
   EXPECT_EQ(cdna_private->size(), 2u);
   EXPECT_EQ(rdna_private->size(), 3u);
   EXPECT_EQ(ib::build_s_wait_private_load0(ROCJITSU_CODE_ARCH_CDNA4), 0xbf8c0f70u);
   EXPECT_EQ(ib::build_s_wait_private_store0(ROCJITSU_CODE_ARCH_CDNA4), 0xbf8c0f70u);
   EXPECT_EQ(cdna_atomic->size(), 2u);
   EXPECT_EQ(rdna_atomic->size(), 3u);
+  EXPECT_EQ((*rdna_atomic)[0] & 0x7fu, static_cast<uint32_t>(rdna4::OPR_SREG_NULL));
+  EXPECT_EQ((*gfx1250_atomic)[0] & 0x7fu, static_cast<uint32_t>(gfx1250::OPR_SREG_NULL));
   EXPECT_EQ(*cdna_barrier, (std::vector<uint32_t>{0xbf8c0070u, 0xbf8a0000u}));
   EXPECT_EQ(rdna_barrier->size(), 3u);
   ASSERT_TRUE(cdna_barrier_only && rdna_barrier_only);
