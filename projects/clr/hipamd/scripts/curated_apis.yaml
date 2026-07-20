@@ -673,3 +673,91 @@
 
 - api: hipEventRecord_spt
   args: [event, stream]
+
+- api: hipLaunchKernel
+  args: [function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream]
+  pack_dim3: [numBlocks, dimBlocks]
+
+- api: hipLaunchCooperativeKernel
+  args: [f, gridDim, blockDimX, kernelParams, sharedMemBytes, stream]
+  pack_dim3: [gridDim, blockDimX]
+
+- api: hipLaunchCooperativeKernelMultiDevice
+  args: [launchParamsList, numDevices, flags]
+
+- api: hipModuleLaunchKernel
+  args: [f, sharedMemBytes, stream, kernelParams, extra]
+
+- api: hipExtLaunchKernel
+  args: [function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream, startEvent, stopEvent, flags]
+  pack_dim3: [numBlocks, dimBlocks]
+
+- api: hipExtLaunchMultiKernelMultiDevice
+  args: [launchParamsList, numDevices, flags]
+
+- api: __hipPopCallConfiguration
+  args: [gridDim, blockDim, sharedMem, stream]
+
+- api: __hipPushCallConfiguration
+  args: [gridDim, blockDim, sharedMem, stream]
+  pack_dim3: [gridDim, blockDim]
+
+- api: hipConfigureCall
+  args: [gridDim, blockDim, sharedMem, stream]
+  pack_dim3: [gridDim, blockDim]
+
+- api: hipDrvLaunchKernelEx
+  args: [config, f, kernel, extra]
+
+- api: hipExtModuleLaunchKernel
+  args: [f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes, hStream, kernelParams, extra, startEvent, stopEvent, flags]
+
+- api: hipHccModuleLaunchKernel
+  args: [f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes, hStream, kernelParams, extra, startEvent, stopEvent]
+
+- api: hipLaunchByPtr
+  args: [func]
+
+- api: hipLaunchCooperativeKernel_spt
+  args: [f, gridDim, blockDim, kernelParams, sharedMemBytes, hStream]
+  pack_dim3: [gridDim, blockDim]
+
+- api: hipLaunchHostFunc
+  args: [stream, fn, userData]
+
+- api: hipLaunchHostFunc_spt
+  args: [stream, fn, userData]
+
+- api: hipLaunchKernelExC
+  args: [config, fPtr, args]
+
+- api: hipLaunchKernel_spt
+  args: [function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream]
+  pack_dim3: [numBlocks, dimBlocks]
+
+- api: hipModuleLaunchCooperativeKernel
+  args: [f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, sharedMemBytes, stream, kernelParams]
+
+- api: hipModuleLaunchCooperativeKernelMultiDevice
+  args: [launchParamsList, numDevices, flags]
+
+- api: hipOccupancyAvailableDynamicSMemPerBlock
+  args: [dynamicSmemSize, f, numBlocks, blockSize]
+
+- api: hipOccupancyMaxActiveBlocksPerMultiprocessor
+  args: [numBlocks, f, blockSize, dynSharedMemPerBlk]
+
+- api: hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags
+  args: [numBlocks, f, blockSize, dynSharedMemPerBlk, flags]
+
+- api: hipOccupancyMaxActiveClusters
+  args: [numClusters, func, launchConfig]
+
+- api: hipOccupancyMaxPotentialBlockSize
+  args: [gridSize, blockSize, f, dynSharedMemPerBlk, blockSizeLimit]
+
+- api: hipOccupancyMaxPotentialClusterSize
+  args: [clusterSize, func, config]
+
+- api: hipSetupArgument
+  args: [arg, size, offset]

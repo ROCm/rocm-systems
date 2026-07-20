@@ -2,7 +2,7 @@
  * Do not edit by hand — regenerate instead (see command below).
  *
  * SHA256(curated_apis.yaml) at generation:
- * 3680ae6bb4451dd407bd5e6374445f946876e033930d7a083bc4d0b6657db0f8
+ * adb004e5795b642c33fee303ed62bfe766622680b824d0195f2722ad2a84ea20
  *
  * Per-API typed emit helpers for curated parameter capture. Every
  * helper takes (<captured-args...>, <status_type> status); status is
@@ -41,6 +41,7 @@
 #define __HIP_PLATFORM_AMD__ 1
 #endif
 #include <hip/hip_runtime_api.h>
+#include "rocm_dim3_pack.h"
 
 #if defined(HIP_ENABLE_LTTNG_UST) && HIP_ENABLE_LTTNG_UST
 
@@ -3855,6 +3856,601 @@ static inline void rocm_trace_emit_hipEventRecord_spt_exit(hipError_t status) {
   }
 }
 
+static inline void rocm_trace_emit_hipLaunchKernel_enter(const void* function_address,
+                                                         dim3 numBlocks, dim3 dimBlocks,
+                                                         const void* args, size_t sharedMemBytes,
+                                                         uint64_t stream) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipLaunchKernel)) {
+    const uint64_t numBlocks_packed = ROCM_DIM3_PACK(numBlocks);
+    const uint64_t dimBlocks_packed = ROCM_DIM3_PACK(dimBlocks);
+    lttng_ust_do_tracepoint(rocm_hip, hipLaunchKernel, (int32_t)0,
+                            (uint64_t)(uintptr_t)(function_address), numBlocks_packed,
+                            dimBlocks_packed, (uint64_t)(uintptr_t)(args),
+                            (uint64_t)(sharedMemBytes), (uint64_t)(uintptr_t)(stream), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipLaunchKernel_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipLaunchKernel)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipLaunchKernel, (int32_t)1, 0, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipLaunchCooperativeKernel_enter(const void* f, dim3 gridDim,
+                                                                    dim3 blockDimX,
+                                                                    const void* kernelParams,
+                                                                    uint32_t sharedMemBytes,
+                                                                    uint64_t stream) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipLaunchCooperativeKernel)) {
+    const uint64_t gridDim_packed = ROCM_DIM3_PACK(gridDim);
+    const uint64_t blockDimX_packed = ROCM_DIM3_PACK(blockDimX);
+    lttng_ust_do_tracepoint(rocm_hip, hipLaunchCooperativeKernel, (int32_t)0,
+                            (uint64_t)(uintptr_t)(f), gridDim_packed, blockDimX_packed,
+                            (uint64_t)(uintptr_t)(kernelParams), (uint32_t)(sharedMemBytes),
+                            (uint64_t)(uintptr_t)(stream), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipLaunchCooperativeKernel_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipLaunchCooperativeKernel)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipLaunchCooperativeKernel, (int32_t)1, 0, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipLaunchCooperativeKernelMultiDevice_enter(
+    const void* launchParamsList, int32_t numDevices, uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipLaunchCooperativeKernelMultiDevice)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipLaunchCooperativeKernelMultiDevice, (int32_t)0,
+                            (uint64_t)(uintptr_t)(launchParamsList), (int32_t)(numDevices),
+                            (uint32_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipLaunchCooperativeKernelMultiDevice_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipLaunchCooperativeKernelMultiDevice)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipLaunchCooperativeKernelMultiDevice, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipModuleLaunchKernel_enter(uint64_t f, uint32_t sharedMemBytes,
+                                                               uint64_t stream,
+                                                               const void* kernelParams,
+                                                               const void* extra) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipModuleLaunchKernel)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipModuleLaunchKernel, (int32_t)0, (uint64_t)(uintptr_t)(f),
+                            (uint32_t)(sharedMemBytes), (uint64_t)(uintptr_t)(stream),
+                            (uint64_t)(uintptr_t)(kernelParams), (uint64_t)(uintptr_t)(extra), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipModuleLaunchKernel_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipModuleLaunchKernel)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipModuleLaunchKernel, (int32_t)1, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipExtLaunchKernel_enter(const void* function_address,
+                                                            dim3 numBlocks, dim3 dimBlocks,
+                                                            const void* args, size_t sharedMemBytes,
+                                                            uint64_t stream, uint64_t startEvent,
+                                                            uint64_t stopEvent, int32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExtLaunchKernel) ||
+      lttng_ust_tracepoint_enabled(rocm_hip, hipExtLaunchKernel_2)) {
+    const uint64_t numBlocks_packed = ROCM_DIM3_PACK(numBlocks);
+    const uint64_t dimBlocks_packed = ROCM_DIM3_PACK(dimBlocks);
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipExtLaunchKernel)) {
+      lttng_ust_do_tracepoint(
+          rocm_hip, hipExtLaunchKernel, (int32_t)0, (uint64_t)(uintptr_t)(function_address),
+          numBlocks_packed, dimBlocks_packed, (uint64_t)(uintptr_t)(args),
+          (uint64_t)(sharedMemBytes), (uint64_t)(uintptr_t)(stream),
+          (uint64_t)(uintptr_t)(startEvent), (uint64_t)(uintptr_t)(stopEvent), (int32_t)(flags));
+    }
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipExtLaunchKernel_2)) {
+      lttng_ust_do_tracepoint(rocm_hip, hipExtLaunchKernel_2, (int32_t)0, 0);
+    }
+  }
+}
+
+static inline void rocm_trace_emit_hipExtLaunchKernel_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExtLaunchKernel) ||
+      lttng_ust_tracepoint_enabled(rocm_hip, hipExtLaunchKernel_2)) {
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipExtLaunchKernel)) {
+      lttng_ust_do_tracepoint(rocm_hip, hipExtLaunchKernel, (int32_t)1, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    }
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipExtLaunchKernel_2)) {
+      lttng_ust_do_tracepoint(rocm_hip, hipExtLaunchKernel_2, (int32_t)1, (int32_t)status);
+    }
+  }
+}
+
+static inline void rocm_trace_emit_hipExtLaunchMultiKernelMultiDevice_enter(
+    const void* launchParamsList, int32_t numDevices, uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExtLaunchMultiKernelMultiDevice)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExtLaunchMultiKernelMultiDevice, (int32_t)0,
+                            (uint64_t)(uintptr_t)(launchParamsList), (int32_t)(numDevices),
+                            (uint32_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipExtLaunchMultiKernelMultiDevice_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExtLaunchMultiKernelMultiDevice)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExtLaunchMultiKernelMultiDevice, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit___hipPopCallConfiguration_enter(const void* gridDim,
+                                                                   const void* blockDim,
+                                                                   const void* sharedMem,
+                                                                   const void* stream) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, __hipPopCallConfiguration)) {
+    lttng_ust_do_tracepoint(rocm_hip, __hipPopCallConfiguration, (int32_t)0,
+                            (uint64_t)(uintptr_t)(gridDim), (uint64_t)(uintptr_t)(blockDim),
+                            (uint64_t)(uintptr_t)(sharedMem), (uint64_t)(uintptr_t)(stream), 0);
+  }
+}
+
+static inline void rocm_trace_emit___hipPopCallConfiguration_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, __hipPopCallConfiguration)) {
+    lttng_ust_do_tracepoint(rocm_hip, __hipPopCallConfiguration, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit___hipPushCallConfiguration_enter(dim3 gridDim, dim3 blockDim,
+                                                                    size_t sharedMem,
+                                                                    uint64_t stream) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, __hipPushCallConfiguration)) {
+    const uint64_t gridDim_packed = ROCM_DIM3_PACK(gridDim);
+    const uint64_t blockDim_packed = ROCM_DIM3_PACK(blockDim);
+    lttng_ust_do_tracepoint(rocm_hip, __hipPushCallConfiguration, (int32_t)0, gridDim_packed,
+                            blockDim_packed, (uint64_t)(sharedMem), (uint64_t)(uintptr_t)(stream),
+                            0);
+  }
+}
+
+static inline void rocm_trace_emit___hipPushCallConfiguration_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, __hipPushCallConfiguration)) {
+    lttng_ust_do_tracepoint(rocm_hip, __hipPushCallConfiguration, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipConfigureCall_enter(dim3 gridDim, dim3 blockDim,
+                                                          size_t sharedMem, uint64_t stream) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipConfigureCall)) {
+    const uint64_t gridDim_packed = ROCM_DIM3_PACK(gridDim);
+    const uint64_t blockDim_packed = ROCM_DIM3_PACK(blockDim);
+    lttng_ust_do_tracepoint(rocm_hip, hipConfigureCall, (int32_t)0, gridDim_packed, blockDim_packed,
+                            (uint64_t)(sharedMem), (uint64_t)(uintptr_t)(stream), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipConfigureCall_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipConfigureCall)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipConfigureCall, (int32_t)1, 0, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDrvLaunchKernelEx_enter(const void* config, uint64_t f,
+                                                              const void* kernel,
+                                                              const void* extra) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDrvLaunchKernelEx)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDrvLaunchKernelEx, (int32_t)0,
+                            (uint64_t)(uintptr_t)(config), (uint64_t)(uintptr_t)(f),
+                            (uint64_t)(uintptr_t)(kernel), (uint64_t)(uintptr_t)(extra), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDrvLaunchKernelEx_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDrvLaunchKernelEx)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDrvLaunchKernelEx, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipExtModuleLaunchKernel_enter(
+    uint64_t f, uint32_t globalWorkSizeX, uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
+    uint32_t localWorkSizeX, uint32_t localWorkSizeY, uint32_t localWorkSizeZ,
+    size_t sharedMemBytes, uint64_t hStream, const void* kernelParams, const void* extra,
+    uint64_t startEvent, uint64_t stopEvent, uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExtModuleLaunchKernel) ||
+      lttng_ust_tracepoint_enabled(rocm_hip, hipExtModuleLaunchKernel_2)) {
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipExtModuleLaunchKernel)) {
+      lttng_ust_do_tracepoint(
+          rocm_hip, hipExtModuleLaunchKernel, (int32_t)0, (uint64_t)(uintptr_t)(f),
+          (uint32_t)(globalWorkSizeX), (uint32_t)(globalWorkSizeY), (uint32_t)(globalWorkSizeZ),
+          (uint32_t)(localWorkSizeX), (uint32_t)(localWorkSizeY), (uint32_t)(localWorkSizeZ),
+          (uint64_t)(sharedMemBytes), (uint64_t)(uintptr_t)(hStream));
+    }
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipExtModuleLaunchKernel_2)) {
+      lttng_ust_do_tracepoint(rocm_hip, hipExtModuleLaunchKernel_2, (int32_t)0,
+                              (uint64_t)(uintptr_t)(kernelParams), (uint64_t)(uintptr_t)(extra),
+                              (uint64_t)(uintptr_t)(startEvent), (uint64_t)(uintptr_t)(stopEvent),
+                              (uint32_t)(flags), 0);
+    }
+  }
+}
+
+static inline void rocm_trace_emit_hipExtModuleLaunchKernel_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExtModuleLaunchKernel) ||
+      lttng_ust_tracepoint_enabled(rocm_hip, hipExtModuleLaunchKernel_2)) {
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipExtModuleLaunchKernel)) {
+      lttng_ust_do_tracepoint(rocm_hip, hipExtModuleLaunchKernel, (int32_t)1, 0, 0, 0, 0, 0, 0, 0,
+                              0, 0);
+    }
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipExtModuleLaunchKernel_2)) {
+      lttng_ust_do_tracepoint(rocm_hip, hipExtModuleLaunchKernel_2, (int32_t)1, 0, 0, 0, 0, 0,
+                              (int32_t)status);
+    }
+  }
+}
+
+static inline void rocm_trace_emit_hipHccModuleLaunchKernel_enter(
+    uint64_t f, uint32_t globalWorkSizeX, uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
+    uint32_t localWorkSizeX, uint32_t localWorkSizeY, uint32_t localWorkSizeZ,
+    size_t sharedMemBytes, uint64_t hStream, const void* kernelParams, const void* extra,
+    uint64_t startEvent, uint64_t stopEvent) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipHccModuleLaunchKernel) ||
+      lttng_ust_tracepoint_enabled(rocm_hip, hipHccModuleLaunchKernel_2)) {
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipHccModuleLaunchKernel)) {
+      lttng_ust_do_tracepoint(
+          rocm_hip, hipHccModuleLaunchKernel, (int32_t)0, (uint64_t)(uintptr_t)(f),
+          (uint32_t)(globalWorkSizeX), (uint32_t)(globalWorkSizeY), (uint32_t)(globalWorkSizeZ),
+          (uint32_t)(localWorkSizeX), (uint32_t)(localWorkSizeY), (uint32_t)(localWorkSizeZ),
+          (uint64_t)(sharedMemBytes), (uint64_t)(uintptr_t)(hStream));
+    }
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipHccModuleLaunchKernel_2)) {
+      lttng_ust_do_tracepoint(rocm_hip, hipHccModuleLaunchKernel_2, (int32_t)0,
+                              (uint64_t)(uintptr_t)(kernelParams), (uint64_t)(uintptr_t)(extra),
+                              (uint64_t)(uintptr_t)(startEvent), (uint64_t)(uintptr_t)(stopEvent),
+                              0);
+    }
+  }
+}
+
+static inline void rocm_trace_emit_hipHccModuleLaunchKernel_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipHccModuleLaunchKernel) ||
+      lttng_ust_tracepoint_enabled(rocm_hip, hipHccModuleLaunchKernel_2)) {
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipHccModuleLaunchKernel)) {
+      lttng_ust_do_tracepoint(rocm_hip, hipHccModuleLaunchKernel, (int32_t)1, 0, 0, 0, 0, 0, 0, 0,
+                              0, 0);
+    }
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipHccModuleLaunchKernel_2)) {
+      lttng_ust_do_tracepoint(rocm_hip, hipHccModuleLaunchKernel_2, (int32_t)1, 0, 0, 0, 0,
+                              (int32_t)status);
+    }
+  }
+}
+
+static inline void rocm_trace_emit_hipLaunchByPtr_enter(const void* func) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipLaunchByPtr)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipLaunchByPtr, (int32_t)0, (uint64_t)(uintptr_t)(func), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipLaunchByPtr_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipLaunchByPtr)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipLaunchByPtr, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipLaunchCooperativeKernel_spt_enter(const void* f, dim3 gridDim,
+                                                                        dim3 blockDim,
+                                                                        const void* kernelParams,
+                                                                        uint32_t sharedMemBytes,
+                                                                        uint64_t hStream) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipLaunchCooperativeKernel_spt)) {
+    const uint64_t gridDim_packed = ROCM_DIM3_PACK(gridDim);
+    const uint64_t blockDim_packed = ROCM_DIM3_PACK(blockDim);
+    lttng_ust_do_tracepoint(rocm_hip, hipLaunchCooperativeKernel_spt, (int32_t)0,
+                            (uint64_t)(uintptr_t)(f), gridDim_packed, blockDim_packed,
+                            (uint64_t)(uintptr_t)(kernelParams), (uint32_t)(sharedMemBytes),
+                            (uint64_t)(uintptr_t)(hStream), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipLaunchCooperativeKernel_spt_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipLaunchCooperativeKernel_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipLaunchCooperativeKernel_spt, (int32_t)1, 0, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipLaunchHostFunc_enter(uint64_t stream, const void* fn,
+                                                           const void* userData) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipLaunchHostFunc)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipLaunchHostFunc, (int32_t)0, (uint64_t)(uintptr_t)(stream),
+                            (uint64_t)(uintptr_t)(fn), (uint64_t)(uintptr_t)(userData), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipLaunchHostFunc_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipLaunchHostFunc)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipLaunchHostFunc, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipLaunchHostFunc_spt_enter(uint64_t stream, const void* fn,
+                                                               const void* userData) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipLaunchHostFunc_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipLaunchHostFunc_spt, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (uint64_t)(uintptr_t)(fn),
+                            (uint64_t)(uintptr_t)(userData), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipLaunchHostFunc_spt_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipLaunchHostFunc_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipLaunchHostFunc_spt, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipLaunchKernelExC_enter(const void* config, const void* fPtr,
+                                                            const void* args) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipLaunchKernelExC)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipLaunchKernelExC, (int32_t)0, (uint64_t)(uintptr_t)(config),
+                            (uint64_t)(uintptr_t)(fPtr), (uint64_t)(uintptr_t)(args), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipLaunchKernelExC_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipLaunchKernelExC)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipLaunchKernelExC, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipLaunchKernel_spt_enter(const void* function_address,
+                                                             dim3 numBlocks, dim3 dimBlocks,
+                                                             const void* args,
+                                                             size_t sharedMemBytes,
+                                                             uint64_t stream) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipLaunchKernel_spt)) {
+    const uint64_t numBlocks_packed = ROCM_DIM3_PACK(numBlocks);
+    const uint64_t dimBlocks_packed = ROCM_DIM3_PACK(dimBlocks);
+    lttng_ust_do_tracepoint(rocm_hip, hipLaunchKernel_spt, (int32_t)0,
+                            (uint64_t)(uintptr_t)(function_address), numBlocks_packed,
+                            dimBlocks_packed, (uint64_t)(uintptr_t)(args),
+                            (uint64_t)(sharedMemBytes), (uint64_t)(uintptr_t)(stream), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipLaunchKernel_spt_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipLaunchKernel_spt)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipLaunchKernel_spt, (int32_t)1, 0, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipModuleLaunchCooperativeKernel_enter(
+    uint64_t f, uint32_t gridDimX, uint32_t gridDimY, uint32_t gridDimZ, uint32_t blockDimX,
+    uint32_t blockDimY, uint32_t blockDimZ, uint32_t sharedMemBytes, uint64_t stream,
+    const void* kernelParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipModuleLaunchCooperativeKernel) ||
+      lttng_ust_tracepoint_enabled(rocm_hip, hipModuleLaunchCooperativeKernel_2)) {
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipModuleLaunchCooperativeKernel)) {
+      lttng_ust_do_tracepoint(rocm_hip, hipModuleLaunchCooperativeKernel, (int32_t)0,
+                              (uint64_t)(uintptr_t)(f), (uint32_t)(gridDimX), (uint32_t)(gridDimY),
+                              (uint32_t)(gridDimZ), (uint32_t)(blockDimX), (uint32_t)(blockDimY),
+                              (uint32_t)(blockDimZ), (uint32_t)(sharedMemBytes),
+                              (uint64_t)(uintptr_t)(stream));
+    }
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipModuleLaunchCooperativeKernel_2)) {
+      lttng_ust_do_tracepoint(rocm_hip, hipModuleLaunchCooperativeKernel_2, (int32_t)0,
+                              (uint64_t)(uintptr_t)(kernelParams), 0);
+    }
+  }
+}
+
+static inline void rocm_trace_emit_hipModuleLaunchCooperativeKernel_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipModuleLaunchCooperativeKernel) ||
+      lttng_ust_tracepoint_enabled(rocm_hip, hipModuleLaunchCooperativeKernel_2)) {
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipModuleLaunchCooperativeKernel)) {
+      lttng_ust_do_tracepoint(rocm_hip, hipModuleLaunchCooperativeKernel, (int32_t)1, 0, 0, 0, 0, 0,
+                              0, 0, 0, 0);
+    }
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hipModuleLaunchCooperativeKernel_2)) {
+      lttng_ust_do_tracepoint(rocm_hip, hipModuleLaunchCooperativeKernel_2, (int32_t)1, 0,
+                              (int32_t)status);
+    }
+  }
+}
+
+static inline void rocm_trace_emit_hipModuleLaunchCooperativeKernelMultiDevice_enter(
+    const void* launchParamsList, uint32_t numDevices, uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipModuleLaunchCooperativeKernelMultiDevice)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipModuleLaunchCooperativeKernelMultiDevice, (int32_t)0,
+                            (uint64_t)(uintptr_t)(launchParamsList), (uint32_t)(numDevices),
+                            (uint32_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipModuleLaunchCooperativeKernelMultiDevice_exit(
+    hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipModuleLaunchCooperativeKernelMultiDevice)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipModuleLaunchCooperativeKernelMultiDevice, (int32_t)1, 0, 0,
+                            0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipOccupancyAvailableDynamicSMemPerBlock_enter(
+    const void* dynamicSmemSize, const void* f, int32_t numBlocks, int32_t blockSize) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipOccupancyAvailableDynamicSMemPerBlock)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipOccupancyAvailableDynamicSMemPerBlock, (int32_t)0,
+                            (uint64_t)(uintptr_t)(dynamicSmemSize), (uint64_t)(uintptr_t)(f),
+                            (int32_t)(numBlocks), (int32_t)(blockSize), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipOccupancyAvailableDynamicSMemPerBlock_exit(
+    hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipOccupancyAvailableDynamicSMemPerBlock)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipOccupancyAvailableDynamicSMemPerBlock, (int32_t)1, 0, 0, 0,
+                            0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipOccupancyMaxActiveBlocksPerMultiprocessor_enter(
+    const void* numBlocks, const void* f, int32_t blockSize, size_t dynSharedMemPerBlk) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipOccupancyMaxActiveBlocksPerMultiprocessor)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipOccupancyMaxActiveBlocksPerMultiprocessor, (int32_t)0,
+                            (uint64_t)(uintptr_t)(numBlocks), (uint64_t)(uintptr_t)(f),
+                            (int32_t)(blockSize), (uint64_t)(dynSharedMemPerBlk), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipOccupancyMaxActiveBlocksPerMultiprocessor_exit(
+    hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipOccupancyMaxActiveBlocksPerMultiprocessor)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipOccupancyMaxActiveBlocksPerMultiprocessor, (int32_t)1, 0,
+                            0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_enter(
+    const void* numBlocks, const void* f, int32_t blockSize, size_t dynSharedMemPerBlk,
+    uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip,
+                                   hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags,
+                            (int32_t)0, (uint64_t)(uintptr_t)(numBlocks), (uint64_t)(uintptr_t)(f),
+                            (int32_t)(blockSize), (uint64_t)(dynSharedMemPerBlk), (uint32_t)(flags),
+                            0);
+  }
+}
+
+static inline void rocm_trace_emit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_exit(
+    hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip,
+                                   hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags,
+                            (int32_t)1, 0, 0, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipOccupancyMaxActiveClusters_enter(const void* numClusters,
+                                                                       const void* func,
+                                                                       const void* launchConfig) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipOccupancyMaxActiveClusters)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipOccupancyMaxActiveClusters, (int32_t)0,
+                            (uint64_t)(uintptr_t)(numClusters), (uint64_t)(uintptr_t)(func),
+                            (uint64_t)(uintptr_t)(launchConfig), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipOccupancyMaxActiveClusters_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipOccupancyMaxActiveClusters)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipOccupancyMaxActiveClusters, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipOccupancyMaxPotentialBlockSize_enter(
+    const void* gridSize, const void* blockSize, const void* f, size_t dynSharedMemPerBlk,
+    int32_t blockSizeLimit) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipOccupancyMaxPotentialBlockSize)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipOccupancyMaxPotentialBlockSize, (int32_t)0,
+                            (uint64_t)(uintptr_t)(gridSize), (uint64_t)(uintptr_t)(blockSize),
+                            (uint64_t)(uintptr_t)(f), (uint64_t)(dynSharedMemPerBlk),
+                            (int32_t)(blockSizeLimit), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipOccupancyMaxPotentialBlockSize_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipOccupancyMaxPotentialBlockSize)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipOccupancyMaxPotentialBlockSize, (int32_t)1, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipOccupancyMaxPotentialClusterSize_enter(
+    const void* clusterSize, const void* func, const void* config) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipOccupancyMaxPotentialClusterSize)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipOccupancyMaxPotentialClusterSize, (int32_t)0,
+                            (uint64_t)(uintptr_t)(clusterSize), (uint64_t)(uintptr_t)(func),
+                            (uint64_t)(uintptr_t)(config), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipOccupancyMaxPotentialClusterSize_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipOccupancyMaxPotentialClusterSize)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipOccupancyMaxPotentialClusterSize, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipSetupArgument_enter(const void* arg, size_t size,
+                                                          size_t offset) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipSetupArgument)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipSetupArgument, (int32_t)0, (uint64_t)(uintptr_t)(arg),
+                            (uint64_t)(size), (uint64_t)(offset), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipSetupArgument_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipSetupArgument)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipSetupArgument, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
 
 #else /* HIP_ENABLE_LTTNG_UST not defined — all helpers are no-ops */
 
@@ -4405,6 +5001,102 @@ static inline void rocm_trace_emit_hipEventRecordWithFlags_enter(uint64_t, uint6
 static inline void rocm_trace_emit_hipEventRecordWithFlags_exit(hipError_t) {}
 static inline void rocm_trace_emit_hipEventRecord_spt_enter(uint64_t, uint64_t) {}
 static inline void rocm_trace_emit_hipEventRecord_spt_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipLaunchKernel_enter(const void*, dim3, dim3, const void*,
+                                                         size_t, uint64_t) {}
+static inline void rocm_trace_emit_hipLaunchKernel_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipLaunchCooperativeKernel_enter(const void*, dim3, dim3,
+                                                                    const void*, uint32_t,
+                                                                    uint64_t) {}
+static inline void rocm_trace_emit_hipLaunchCooperativeKernel_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipLaunchCooperativeKernelMultiDevice_enter(const void*, int32_t,
+                                                                               uint32_t) {}
+static inline void rocm_trace_emit_hipLaunchCooperativeKernelMultiDevice_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipModuleLaunchKernel_enter(uint64_t, uint32_t, uint64_t,
+                                                               const void*, const void*) {}
+static inline void rocm_trace_emit_hipModuleLaunchKernel_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipExtLaunchKernel_enter(const void*, dim3, dim3, const void*,
+                                                            size_t, uint64_t, uint64_t, uint64_t,
+                                                            int32_t) {}
+static inline void rocm_trace_emit_hipExtLaunchKernel_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipExtLaunchMultiKernelMultiDevice_enter(const void*, int32_t,
+                                                                            uint32_t) {}
+static inline void rocm_trace_emit_hipExtLaunchMultiKernelMultiDevice_exit(hipError_t) {}
+static inline void rocm_trace_emit___hipPopCallConfiguration_enter(const void*, const void*,
+                                                                   const void*, const void*) {}
+static inline void rocm_trace_emit___hipPopCallConfiguration_exit(hipError_t) {}
+static inline void rocm_trace_emit___hipPushCallConfiguration_enter(dim3, dim3, size_t, uint64_t) {}
+static inline void rocm_trace_emit___hipPushCallConfiguration_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipConfigureCall_enter(dim3, dim3, size_t, uint64_t) {}
+static inline void rocm_trace_emit_hipConfigureCall_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDrvLaunchKernelEx_enter(const void*, uint64_t, const void*,
+                                                              const void*) {}
+static inline void rocm_trace_emit_hipDrvLaunchKernelEx_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipExtModuleLaunchKernel_enter(uint64_t, uint32_t, uint32_t,
+                                                                  uint32_t, uint32_t, uint32_t,
+                                                                  uint32_t, size_t, uint64_t,
+                                                                  const void*, const void*,
+                                                                  uint64_t, uint64_t, uint32_t) {}
+static inline void rocm_trace_emit_hipExtModuleLaunchKernel_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipHccModuleLaunchKernel_enter(uint64_t, uint32_t, uint32_t,
+                                                                  uint32_t, uint32_t, uint32_t,
+                                                                  uint32_t, size_t, uint64_t,
+                                                                  const void*, const void*,
+                                                                  uint64_t, uint64_t) {}
+static inline void rocm_trace_emit_hipHccModuleLaunchKernel_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipLaunchByPtr_enter(const void*) {}
+static inline void rocm_trace_emit_hipLaunchByPtr_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipLaunchCooperativeKernel_spt_enter(const void*, dim3, dim3,
+                                                                        const void*, uint32_t,
+                                                                        uint64_t) {}
+static inline void rocm_trace_emit_hipLaunchCooperativeKernel_spt_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipLaunchHostFunc_enter(uint64_t, const void*, const void*) {}
+static inline void rocm_trace_emit_hipLaunchHostFunc_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipLaunchHostFunc_spt_enter(uint64_t, const void*, const void*) {
+}
+static inline void rocm_trace_emit_hipLaunchHostFunc_spt_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipLaunchKernelExC_enter(const void*, const void*, const void*) {
+}
+static inline void rocm_trace_emit_hipLaunchKernelExC_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipLaunchKernel_spt_enter(const void*, dim3, dim3, const void*,
+                                                             size_t, uint64_t) {}
+static inline void rocm_trace_emit_hipLaunchKernel_spt_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipModuleLaunchCooperativeKernel_enter(uint64_t, uint32_t,
+                                                                          uint32_t, uint32_t,
+                                                                          uint32_t, uint32_t,
+                                                                          uint32_t, uint32_t,
+                                                                          uint64_t, const void*) {}
+static inline void rocm_trace_emit_hipModuleLaunchCooperativeKernel_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipModuleLaunchCooperativeKernelMultiDevice_enter(const void*,
+                                                                                     uint32_t,
+                                                                                     uint32_t) {}
+static inline void rocm_trace_emit_hipModuleLaunchCooperativeKernelMultiDevice_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipOccupancyAvailableDynamicSMemPerBlock_enter(const void*,
+                                                                                  const void*,
+                                                                                  int32_t,
+                                                                                  int32_t) {}
+static inline void rocm_trace_emit_hipOccupancyAvailableDynamicSMemPerBlock_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipOccupancyMaxActiveBlocksPerMultiprocessor_enter(const void*,
+                                                                                      const void*,
+                                                                                      int32_t,
+                                                                                      size_t) {}
+static inline void rocm_trace_emit_hipOccupancyMaxActiveBlocksPerMultiprocessor_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_enter(
+    const void*, const void*, int32_t, size_t, uint32_t) {}
+static inline void rocm_trace_emit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_exit(
+    hipError_t) {}
+static inline void rocm_trace_emit_hipOccupancyMaxActiveClusters_enter(const void*, const void*,
+                                                                       const void*) {}
+static inline void rocm_trace_emit_hipOccupancyMaxActiveClusters_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipOccupancyMaxPotentialBlockSize_enter(const void*, const void*,
+                                                                           const void*, size_t,
+                                                                           int32_t) {}
+static inline void rocm_trace_emit_hipOccupancyMaxPotentialBlockSize_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipOccupancyMaxPotentialClusterSize_enter(const void*,
+                                                                             const void*,
+                                                                             const void*) {}
+static inline void rocm_trace_emit_hipOccupancyMaxPotentialClusterSize_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipSetupArgument_enter(const void*, size_t, size_t) {}
+static inline void rocm_trace_emit_hipSetupArgument_exit(hipError_t) {}
 
 #endif /* HIP_ENABLE_LTTNG_UST */
 
