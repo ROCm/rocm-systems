@@ -701,8 +701,7 @@ kfd_readlines(const std::string_view str, void(handler)(std::string_view))
         assert(char_count > 0);
         std::string_view event_str{cursor, char_count};
 
-        if(VLOG_IS_ON(ROCP_LOG_LEVEL_TRACE))
-        {
+        ROCP_TRACE << fmt::format("KFD event: [{}]", [&]() {
             auto escaped = std::string{};
             escaped.reserve(event_str.size());
             for(unsigned char c : event_str)
@@ -712,8 +711,8 @@ kfd_readlines(const std::string_view str, void(handler)(std::string_view))
                 else
                     escaped += fmt::format("\\x{:02x}", c);
             }
-            ROCP_TRACE << fmt::format("KFD event: [{}]", escaped);
-        }
+            return escaped;
+        }());
         handler(event_str);
 
         cursor = pos + 1;
