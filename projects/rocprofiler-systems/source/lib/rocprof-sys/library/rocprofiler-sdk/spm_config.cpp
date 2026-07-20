@@ -57,8 +57,9 @@ validate_beta_request(const beta_request&             request,
                       const std::vector<std::string>& dispatch_counter_events,
                       const std::string&              device_counter_events)
 {
-    // Backstop for direct library load paths. rocprof-sys-run/sample reject SPM
-    // earlier in the launcher, but tool_init must also fail closed for PR1.
+    // Backstop for direct library load paths. Tool initialization must validate
+    // SPM requests and fail closed when required settings or mutual exclusions
+    // are not satisfied.
     if(!request.requested()) return true;
 
     if(request.events.empty())

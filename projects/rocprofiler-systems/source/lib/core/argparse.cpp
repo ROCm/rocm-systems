@@ -1226,8 +1226,8 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .action([&](parser_t& p) {
                 auto _events =
                     fmt::format("{}", fmt::join(p.get<strvec_t>("spm-events"), ","));
-                update_env(_data, "ROCPROFSYS_ROCM_SPM_ENABLED", true);
-                update_env(_data, "ROCPROFSYS_ROCM_SPM_EVENTS", _events);
+                update_env(_data, env_vars::ROCM_SPM_ENABLED, true);
+                update_env(_data, env_vars::ROCM_SPM_EVENTS, _events);
             });
 
         _data.reg.processed_environs.emplace("spm_events");
@@ -1243,7 +1243,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .count(1)
             .dtype("integral")
             .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL",
+                update_env(_data, env_vars::ROCM_SPM_SAMPLE_INTERVAL,
                            p.get<std::uint64_t>("spm-sample-interval"));
             });
 
@@ -1260,7 +1260,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("string")
             .choices({ std::string{ common::rocm_spm_sample_interval_unit_sclk_cycles } })
             .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT",
+                update_env(_data, env_vars::ROCM_SPM_SAMPLE_INTERVAL_UNIT,
                            p.get<std::string>("spm-sample-interval-unit"));
             });
 

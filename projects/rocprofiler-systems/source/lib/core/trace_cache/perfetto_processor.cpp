@@ -1421,26 +1421,25 @@ perfetto_processor_t::handle([[maybe_unused]] const spm_sample& _spm)
         return;
     }
 
-    auto get_counter_name = [&](std::uint64_t counter_id) -> std::string {
-        if(auto it = m_spm_counter_name_cache.find(counter_id);
-           it != m_spm_counter_name_cache.end())
-            return it->second;
-
-        auto info = rocprofiler_counter_info_v0_t{};
-        auto status =
-            rocprofiler_query_counter_info(rocprofiler_counter_id_t{ counter_id },
-                                           ROCPROFILER_COUNTER_INFO_VERSION_0, &info);
-        auto name = (status == ROCPROFILER_STATUS_SUCCESS && info.name != nullptr)
-                        ? std::string{ info.name }
-                        : fmt::format("counter_{}", counter_id);
-        m_spm_counter_name_cache.emplace(counter_id, name);
-        return name;
+    auto get_counter_name = [&](std::uint64_t counter_id) -> const std::string& {
+        auto [itr, inserted] = m_spm_counter_name_cache.try_emplace(counter_id);
+        if(inserted)
+        {
+            auto info = rocprofiler_counter_info_v0_t{};
+            auto status =
+                rocprofiler_query_counter_info(rocprofiler_counter_id_t{ counter_id },
+                                               ROCPROFILER_COUNTER_INFO_VERSION_0, &info);
+            itr->second = (status == ROCPROFILER_STATUS_SUCCESS && info.name != nullptr)
+                              ? std::string{ info.name }
+                              : fmt::format("counter_{}", counter_id);
+        }
+        return itr->second;
     };
 
     for(const auto& sample : _spm.samples)
     {
-        const auto counter_name = get_counter_name(sample.counter_id);
-        const auto track_name =
+        const auto& counter_name = get_counter_name(sample.counter_id);
+        const auto  track_name =
             fmt::format("GPU SPM {} [{}] XCC {} SE {} Instance {}", counter_name,
                         device_id, sample.xcc, sample.shader_engine, sample.instance);
         const auto track_key = std::hash<std::string>{}(
