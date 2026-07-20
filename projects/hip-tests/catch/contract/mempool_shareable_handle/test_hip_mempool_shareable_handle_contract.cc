@@ -59,7 +59,11 @@ hipMemPool_t CreatePosixFdPoolOrSkip() {
   const auto props = PosixFdPoolProps();
   hipMemPool_t pool = nullptr;
   const hipError_t status = hipMemPoolCreate(&pool, &props);
-  if (status == hipErrorNotSupported) {
+  if (status == hipErrorNotSupported
+#if defined(_WIN32)
+      || status == hipErrorInvalidValue
+#endif
+  ) {
     HIP_SKIP_TEST("Shareable memory pool handles are not supported by this runtime path.");
   }
   HIP_CHECK(status);
