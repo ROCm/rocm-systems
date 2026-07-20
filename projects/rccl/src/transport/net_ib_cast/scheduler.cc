@@ -467,8 +467,6 @@ extern "C" ncclResult_t ncclIbCastGetSchedState(void* sendComm, struct ncclIbCas
 // Returns ncclInvalidArgument if comm or out is null.
 extern "C" ncclResult_t ncclIbCastGetGrhState(void* sendComm, struct ncclIbCastGrhState* out) {
   if (!sendComm || !out) return ncclInvalidArgument;
-  // Zero the whole struct so entries beyond nqps are well-defined even if the
-  // caller passed an uninitialized stack struct.
   memset(out, 0, sizeof(*out));
   struct ncclIbNetCommBase* base = castBase(sendComm);
 
