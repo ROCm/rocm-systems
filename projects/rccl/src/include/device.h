@@ -351,6 +351,7 @@ struct alignas(16) ncclDevWorkP2p {
   uint8_t sendChunkSize_u32fp8, recvChunkSize_u32fp8;
 
   uint8_t sendProtoLL:1, recvProtoLL:1;
+  uint8_t sendProtoLL128:1, recvProtoLL128:1;
   uint8_t sendNetReg:1, recvNetReg:1;
   uint8_t sendIpcReg:1, recvIpcReg:1;
 

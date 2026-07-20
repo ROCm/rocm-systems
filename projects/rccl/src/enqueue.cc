@@ -1072,6 +1072,12 @@ static ncclResult_t scheduleCollTasksToPlan(
 NCCL_PARAM(P2pLLThreshold, "P2P_LL_THRESHOLD", 8192);
 RCCL_PARAM(P2pNetThreshold, "P2P_NET_THRESHOLD", 131072);
 NCCL_PARAM(ChunkSize, "CHUNK_SIZE", 0);
+// Opt-in (default off) enablement of the LL128 protocol for send/recv kernels.
+// Currently restricted to gfx1250 (MI450X). When enabled, LL128 takes precedence
+// over LL. P2P_LL128_THRESHOLD bounds the per-channel payload (bytes) that may use
+// LL128; 0 means no upper bound (use LL128 for all message sizes when eligible).
+NCCL_PARAM(P2pLL128Enable, "P2P_LL128_ENABLE", 0);
+NCCL_PARAM(P2pLL128Threshold, "P2P_LL128_THRESHOLD", 0);
 
 
 // Need this temporary parameter to disable p2p batching to avoid some dips at 4MB - 32 MB message size at large scale
@@ -1111,6 +1117,10 @@ static ncclResult_t addP2pToPlan(
   void* addrs[2] = {recvAddr, sendAddr};
   ssize_t bytes[2] = {recvBytes, sendBytes};
   bool protoLL[2] = {!selfSend, !selfSend};
+  // LL128 for send/recv is opt-in and currently limited to gfx1250 (MI450X).
+  bool p2pLL128Eligible = ncclParamP2pLL128Enable() && !selfSend &&
+      IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
+  bool protoLL128[2] = {p2pLL128Eligible, p2pLL128Eligible};
   bool network[2] = {false, false};
   bool proxySameProcess[2] = {true, true};
   void** handles[2] = {NULL, NULL};
@@ -1142,6 +1152,7 @@ static ncclResult_t addP2pToPlan(
         struct ncclConnector* conn = dir ? &channelPeers[peerRank]->send[connIndex[dir]]
                                          : &channelPeers[peerRank]->recv[connIndex[dir]];
         protoLL[dir] &= conn->conn.buffs[NCCL_PROTO_LL] != nullptr && !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx12");
+        protoLL128[dir] &= conn->conn.buffs[NCCL_PROTO_LL128] != nullptr;
         network[dir] |= conn->transportComm == (dir ? &netTransport.send : &netTransport.recv);
         proxySameProcess[dir] &= conn->proxyConn.sameProcess;
       }
@@ -1183,10 +1194,23 @@ static ncclResult_t addP2pToPlan(
     // Update number of channels propagated to the profiler
     if (p2pTasks[dir]) p2pTasks[dir]->nChannels = nChannels[dir];
 
-    // Select protocol (LL vs SIMPLE) used based on payload per channel
+    // Select protocol (LL128 vs LL vs SIMPLE) used based on payload per channel.
     if (bytes[dir] != -1)
       protoLL[dir] &= bytes[dir] <= nChannels[dir] * ncclParamP2pLLThreshold();
-    protocol[dir] = protoLL[dir] ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE;
+    if (bytes[dir] != -1) {
+      ssize_t ll128Threshold = ncclParamP2pLL128Threshold();
+      if (ll128Threshold > 0)
+        protoLL128[dir] &= bytes[dir] <= nChannels[dir] * ll128Threshold;
+    } else {
+      protoLL128[dir] = false;
+    }
+    // LL128 takes precedence over LL when eligible.
+    if (protoLL128[dir]) {
+      protoLL[dir] = false;
+      protocol[dir] = NCCL_PROTO_LL128;
+    } else {
+      protocol[dir] = protoLL[dir] ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE;
+    }
 
     stepSize[dir] = comm->buffSizes[protocol[dir]]/NCCL_STEPS;
     if (protocol[dir] == NCCL_PROTO_SIMPLE) stepSize[dir] = comm->p2pChunkSize;
@@ -1201,10 +1225,12 @@ static ncclResult_t addP2pToPlan(
 
     chunkDataSize[dir] = chunkSize[dir];
     if (protocol[dir] == NCCL_PROTO_LL) chunkDataSize[dir] /= 2;
+    else if (protocol[dir] == NCCL_PROTO_LL128) chunkDataSize[dir] = (chunkDataSize[dir] / comm->ll128LineElems) * comm->ll128DataElems;
     chunkDataSize_u32fp8[dir] = u32fp8Encode(chunkDataSize[dir]);
     chunkDataSize[dir] = u32fp8Decode(chunkDataSize_u32fp8[dir]);
     chunkSize[dir] = chunkDataSize[dir];
     if (protocol[dir] == NCCL_PROTO_LL) chunkSize[dir] *= 2;
+    else if (protocol[dir] == NCCL_PROTO_LL128) chunkSize[dir] = (chunkSize[dir] / comm->ll128DataElems) * comm->ll128LineElems;
 
     if (network[dir]) {
       bool pxnUsed = !ncclPxnDisable(comm) && comm->isAllNvlink && comm->maxLocalRanks > 1;
@@ -1278,6 +1304,7 @@ static ncclResult_t addP2pToPlan(
   work->channelBase = base;
   work->nSendChannels = nChannels[1];
   work->sendProtoLL = protoLL[1];
+  work->sendProtoLL128 = protoLL128[1];
   work->sendNetReg = netRegistered[1];
   work->sendIpcReg = ipcRegistered[1];
   work->sendChunkSize_u32fp8 = chunkDataSize_u32fp8[1];
@@ -1288,6 +1315,7 @@ static ncclResult_t addP2pToPlan(
   work->sendOpCount = sendOpCount;
   work->nRecvChannels = nChannels[0];
   work->recvProtoLL = protoLL[0];
+  work->recvProtoLL128 = protoLL128[0];
   work->recvNetReg = netRegistered[0];
   work->recvIpcReg = ipcRegistered[0];
   work->recvChunkSize_u32fp8 = chunkDataSize_u32fp8[0];
