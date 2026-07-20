@@ -219,18 +219,12 @@ void Runtime::RegisterAgent(Agent* agent, bool Enabled) {
       // Default system pool must support kernarg
       for (auto pool : system_regions_fine_) {
         if (pool->kernarg()) {
-          // Capture a raw pointer (not the shared_ptr) so the closure state is
-          // trivially destructible and stored inline in std::function.  The
-          // region outlives the closure via system_regions_fine_ and the owning
-          // CPU agent, and this avoids a heap-buffer-overflow when the closure
-          // copy held by BaseShared is torn down during Unload().
-          const core::MemoryRegion* pool_ptr = pool.get();
-          system_allocator_ = [pool_ptr](size_t size, size_t alignment,
+          system_allocator_ = [pool](size_t size, size_t alignment,
                                      MemoryRegion::AllocateFlags alloc_flags, int agent_node_id) -> void* {
             assert(alignment <= 4096);
             void* ptr = NULL;
             return (HSA_STATUS_SUCCESS ==
-                    core::Runtime::runtime_singleton_->AllocateMemory(pool_ptr, size, alloc_flags,
+                    core::Runtime::runtime_singleton_->AllocateMemory(pool.get(), size, alloc_flags,
                                                                       &ptr, agent_node_id))
                 ? ptr
                 : NULL;
@@ -2740,13 +2734,6 @@ void Runtime::Unload() {
   // contain allocations from memory regions owned by agents.
   SharedSignalPool.clear();
   EventPool.clear();
-
-  // Release static allocators while agents and the thunk are still valid so
-  // system memory regions kept alive by the allocator closures can run
-  // fragment heap teardown safely.
-  system_allocator_ = {};
-  system_deallocator_ = {};
-  BaseShared::SetAllocateAndFree({}, {});
 
   // Clear system regions before destroying agents to prevent use-after-free
   // when agent destructors access region memory.
