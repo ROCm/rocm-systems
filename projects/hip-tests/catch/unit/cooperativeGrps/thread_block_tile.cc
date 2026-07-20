@@ -843,9 +843,7 @@ void runAggregationRandomForType(AggregationType aggType, dim3 blockDim)
 }
 
 template <bool Coalesced, class T, int WarpSize, class Op = void>
-void runAggregationRandomForOps(AggregationType aggType, const std::tuple<>)
-{
-}
+void runAggregationRandomForOps(AggregationType, const std::tuple<>) {}
 
 template <bool Coalesced, class T, int WarpSize, class Op, class... Ops>
 void runAggregationRandomForOps(AggregationType aggType, const std::tuple<Op, Ops...>)
