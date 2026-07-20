@@ -146,7 +146,7 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
       std::vector<CodeRange> merged_ranges;
       for (const CodeRange &range : section_ranges) {
         if (merged_ranges.empty() ||
-            merged_ranges.back().start_offset + merged_ranges.back().size < range.start_offset) {
+            merged_ranges.back().start_offset + merged_ranges.back().size <= range.start_offset) {
           merged_ranges.push_back(range);
           continue;
         }
@@ -162,8 +162,23 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
       uint64_t byte_offset = range.start_offset;
       const uint64_t range_end = range.start_offset + range.size;
       while (byte_offset < range_end) {
+        // Kernel symbols may include zero alignment padding after their
+        // terminal s_endpgm. Do not ask the ISA decoder to interpret that
+        // non-executable tail as instructions.
+        if (!decoded.empty() && decoded.back()->mnemonic() == std::string_view("s_endpgm")) {
+          const auto *tail_begin = reinterpret_cast<const uint8_t *>(sec->data()) + byte_offset;
+          const auto tail = std::span<const uint8_t>(tail_begin, range_end - byte_offset);
+          if (std::ranges::all_of(tail, [](uint8_t byte) { return byte == 0u; }))
+            break;
+        }
         const size_t pc = static_cast<size_t>(byte_offset / sizeof(uint32_t));
-        auto *raw_inst = decoder.decode(&inst_data[pc], byte_offset);
+        Instruction *raw_inst = nullptr;
+        try {
+          raw_inst = decoder.decode(&inst_data[pc], byte_offset);
+        } catch (const std::exception &error) {
+          throw std::runtime_error("Cannot decode basic-block instruction at text offset " +
+                                   std::to_string(byte_offset) + ": " + error.what());
+        }
         std::unique_ptr<Instruction> inst(raw_inst);
         const uint32_t inst_size_bytes = static_cast<uint32_t>(inst->size());
         if (inst_size_bytes == 0 || inst_size_bytes > range_end - byte_offset)
