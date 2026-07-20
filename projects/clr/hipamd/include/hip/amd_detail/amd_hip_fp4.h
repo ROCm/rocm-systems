@@ -371,7 +371,7 @@ struct __hip_fp4_e2m1 {
     union {
       __amd_bf16x8_storage_t bf16x8;
       __amd_bf16x2_storage_t bf16x2[4];
-    } bhalf;
+    } bhalf{};
     union {
       unsigned int ui32;
       __amd_fp4x2_storage_t fp4x2[4];
@@ -456,7 +456,7 @@ struct __hip_fp4x2_e2m1 {
     union {
       __amd_bf16x8_storage_t bf16x8;
       __amd_bf16x2_storage_t bf16x2[4];
-    } bhalf;
+    } bhalf{};
     union {
       unsigned int ui32;
       __amd_fp4x2_storage_t fp4x2[4];
@@ -487,7 +487,7 @@ struct __hip_fp4x2_e2m1 {
     } u{0};
     u.fp4x2[0] = __x;
 
-    // Even though its x8, we call it x2 so that we have a common return line
+    // Even though it's x8, we call it x2 so that we have a common return line
     __amd_floatx8_storage_t fp32x2{};
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scale_pk8_f32_fp4))
       fp32x2 = __builtin_amdgcn_cvt_scale_pk8_f32_fp4(u.ui32, 0x7F7Fu, 0);
