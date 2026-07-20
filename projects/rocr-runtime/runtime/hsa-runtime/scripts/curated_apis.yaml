@@ -628,3 +628,18 @@
 
 - api: hsa_status_string
   args: [status, status_string]
+
+- api: hsa_amd_profiling_set_profiler_enabled
+  args: [queue, enable]
+
+- api: hsa_amd_profiling_async_copy_enable
+  args: [enable]
+
+- api: hsa_amd_profiling_get_dispatch_time
+  args: [agent, signal, time]
+
+- api: hsa_amd_profiling_get_async_copy_time
+  args: [signal, time]
+
+- api: hsa_amd_profiling_convert_tick_to_system_domain
+  args: [agent, agent_tick, system_tick]

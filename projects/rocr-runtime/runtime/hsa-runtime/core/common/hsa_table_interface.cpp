@@ -1663,15 +1663,20 @@ hsa_status_t HSA_API hsa_amd_coherency_set_type(hsa_agent_t agent, hsa_amd_coher
 }
 
 // Mirrors Amd Extension Apis
-hsa_status_t HSA_API
-    hsa_amd_profiling_set_profiler_enabled(hsa_queue_t* queue, int enable) {
-  return amdExtTable->hsa_amd_profiling_set_profiler_enabled_fn(
-                                     queue, enable);
+hsa_status_t HSA_API hsa_amd_profiling_set_profiler_enabled(hsa_queue_t* queue, int enable) {
+  auto const __rocm_in_queue = queue;
+  auto const __rocm_in_enable = enable;
+  rocm_trace_emit_hsa_amd_profiling_set_profiler_enabled_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue),
+      (__rocm_in_enable)); /* __ROCM_CURATED__: hsa_amd_profiling_set_profiler_enabled */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_profiling_set_profiler_enabled, amdExtTable->hsa_amd_profiling_set_profiler_enabled_fn(queue, enable));
 }
 
-hsa_status_t HSA_API
-  hsa_amd_profiling_async_copy_enable(bool enable) {
-    return amdExtTable->hsa_amd_profiling_async_copy_enable_fn(enable);
+hsa_status_t HSA_API hsa_amd_profiling_async_copy_enable(bool enable) {
+  auto const __rocm_in_enable = enable;
+  rocm_trace_emit_hsa_amd_profiling_async_copy_enable_enter(
+      (__rocm_in_enable)); /* __ROCM_CURATED__: hsa_amd_profiling_async_copy_enable */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_profiling_async_copy_enable, amdExtTable->hsa_amd_profiling_async_copy_enable_fn(enable));
 }
 
 hsa_status_t HSA_API hsa_amd_agent_preload(hsa_agent_t agent, uint64_t flags) {
@@ -1684,26 +1689,41 @@ hsa_status_t HSA_API hsa_amd_agent_preload(hsa_agent_t agent, uint64_t flags) {
 }
 
 // Mirrors Amd Extension Apis
-hsa_status_t HSA_API hsa_amd_profiling_get_dispatch_time(
-    hsa_agent_t agent, hsa_signal_t signal,
-    hsa_amd_profiling_dispatch_time_t* time) {
-  return amdExtTable->hsa_amd_profiling_get_dispatch_time_fn(
-                                     agent, signal, time);
+hsa_status_t HSA_API hsa_amd_profiling_get_dispatch_time(hsa_agent_t agent, hsa_signal_t signal,
+                                                         hsa_amd_profiling_dispatch_time_t* time) {
+  auto const __rocm_in_agent = agent;
+  auto const __rocm_in_signal = signal;
+  auto const __rocm_in_time = time;
+  rocm_trace_emit_hsa_amd_profiling_get_dispatch_time_enter(
+      (uint64_t)((__rocm_in_agent).handle),
+      (uint64_t)((__rocm_in_signal).handle),
+      (const void*)(uintptr_t)(__rocm_in_time)); /* __ROCM_CURATED__: hsa_amd_profiling_get_dispatch_time */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_profiling_get_dispatch_time, amdExtTable->hsa_amd_profiling_get_dispatch_time_fn(agent, signal, time));
 }
 
-hsa_status_t HSA_API
-  hsa_amd_profiling_get_async_copy_time(
+hsa_status_t HSA_API hsa_amd_profiling_get_async_copy_time(
     hsa_signal_t hsa_signal, hsa_amd_profiling_async_copy_time_t* time) {
-      return amdExtTable->hsa_amd_profiling_get_async_copy_time_fn(hsa_signal, time);
+  auto const __rocm_in_signal = hsa_signal;
+  auto const __rocm_in_time = time;
+  rocm_trace_emit_hsa_amd_profiling_get_async_copy_time_enter(
+      (uint64_t)((__rocm_in_signal).handle),
+      (const void*)(uintptr_t)(__rocm_in_time)); /* __ROCM_CURATED__: hsa_amd_profiling_get_async_copy_time */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_profiling_get_async_copy_time, amdExtTable->hsa_amd_profiling_get_async_copy_time_fn(hsa_signal, time));
 }
 
 // Mirrors Amd Extension Apis
-hsa_status_t HSA_API
-    hsa_amd_profiling_convert_tick_to_system_domain(hsa_agent_t agent,
-                                                    uint64_t agent_tick,
-                                                    uint64_t* system_tick) {
-  return amdExtTable->hsa_amd_profiling_convert_tick_to_system_domain_fn(
-                                     agent, agent_tick, system_tick);
+hsa_status_t HSA_API hsa_amd_profiling_convert_tick_to_system_domain(hsa_agent_t agent,
+                                                                     uint64_t agent_tick,
+                                                                     uint64_t* system_tick) {
+  auto const __rocm_in_agent = agent;
+  auto const __rocm_in_agent_tick = agent_tick;
+  auto const __rocm_in_system_tick = system_tick;
+  rocm_trace_emit_hsa_amd_profiling_convert_tick_to_system_domain_enter(
+      (uint64_t)((__rocm_in_agent).handle),
+      (__rocm_in_agent_tick),
+      (const void*)(uintptr_t)(__rocm_in_system_tick)); /* __ROCM_CURATED__: hsa_amd_profiling_convert_tick_to_system_domain */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_profiling_convert_tick_to_system_domain, amdExtTable->hsa_amd_profiling_convert_tick_to_system_domain_fn(agent, agent_tick,
+                                                                      system_tick));
 }
 
 // Mirrors Amd Extension Apis
