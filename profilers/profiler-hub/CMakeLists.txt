@@ -269,8 +269,17 @@ endforeach()
 # otherwise get no transitive link requirements at all. Explicitly restore
 # the ones that are genuinely resolvable by real consumers; queries,
 # sqlite3, and profiler-hub-objects itself are always in-tree-only and
-# never belong here. profiler-hub (SHARED) needs no such list: its
-# dependencies are already fully baked into the .so.
+# never belong here. nlohmann_json is deliberately excluded too: it is a
+# PRIVATE, header-only dependency of profiler-hub-objects that never appears
+# in the installed public headers, so it carries no link symbols a static
+# consumer needs. profiler-hub (SHARED) needs no such list: its dependencies
+# are already fully baked into the .so.
+#
+# Each dependency added here must also get a matching find_dependency() call
+# in profiler-hub-config.cmake.in (accumulated below into
+# profiler_hub_static_find_dependencies), or a consumer's find_package(
+# profiler-hub) + link against profiler-hub-static fails at generate time
+# because the INSTALL_INTERFACE target below is unresolvable.
 #
 # Deliberately not keyed off ${_dep}_FOUND: that variable just reflects the
 # most recent find_package(${_dep}) call in this directory scope, and can
@@ -285,7 +294,8 @@ endforeach()
 # scope, so check the target's actual IMPORTED-ness instead of the latching
 # _FOUND variable.
 set(profiler_hub_static_iface_libs "")
-foreach(_dep fmt spdlog nlohmann_json)
+set(profiler_hub_static_find_dependencies "")
+foreach(_dep fmt spdlog)
     set(_profiler_hub_dep_target "${_dep}::${_dep}")
     if(TARGET ${_profiler_hub_dep_target})
         get_target_property(
@@ -306,6 +316,10 @@ foreach(_dep fmt spdlog nlohmann_json)
                 APPEND profiler_hub_static_iface_libs
                 "$<INSTALL_INTERFACE:${_dep}::${_dep}>"
             )
+            string(
+                APPEND profiler_hub_static_find_dependencies
+                "find_dependency(${_dep})\n"
+            )
         endif()
     endif()
 endforeach()
@@ -313,9 +327,17 @@ unset(_profiler_hub_dep_target)
 unset(_profiler_hub_dep_aliased)
 unset(_profiler_hub_dep_is_imported)
 if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
+    # rocprofiler-sdk-rocpd is only ever discovered via find_package() (see
+    # cmake/rocprofiler-sdk-rocpd.cmake); unlike fmt/spdlog it has no in-tree
+    # FetchContent fallback, so the target is always IMPORTED here and needs
+    # no IMPORTED-ness check.
     list(
         APPEND profiler_hub_static_iface_libs
         "$<INSTALL_INTERFACE:rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd>"
+    )
+    string(
+        APPEND profiler_hub_static_find_dependencies
+        "find_dependency(rocprofiler-sdk-rocpd)\n"
     )
 endif()
 set_target_properties(
@@ -365,34 +387,19 @@ install(
 set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 set(LIB_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR})
 
-# See the comment above profiler_hub_static_iface_libs: keyed off fmt::fmt's
-# actual IMPORTED-ness rather than fmt_FOUND, for the same reason.
-set(_profiler_hub_fmt_target "fmt::fmt")
-if(TARGET ${_profiler_hub_fmt_target})
-    get_target_property(
-        _profiler_hub_fmt_aliased
-        ${_profiler_hub_fmt_target}
-        ALIASED_TARGET
-    )
-    if(_profiler_hub_fmt_aliased)
-        set(_profiler_hub_fmt_target "${_profiler_hub_fmt_aliased}")
-    endif()
-    get_target_property(
-        _profiler_hub_fmt_is_imported
-        ${_profiler_hub_fmt_target}
-        IMPORTED
-    )
-endif()
-if(_profiler_hub_fmt_is_imported)
-    set(PROFILER_HUB_FMT_FIND_DEPENDENCY
-        "include(CMakeFindDependencyMacro)\nfind_dependency(fmt)"
+# Built from profiler_hub_static_iface_libs's accompanying
+# profiler_hub_static_find_dependencies (see the comment above that loop):
+# one find_dependency() per real, IMPORTED target that profiler-hub-static's
+# INTERFACE_LINK_LIBRARIES references, so a consumer's find_package(
+# profiler-hub) can resolve every one of them before profiler-hub-targets.cmake
+# is included.
+if(NOT profiler_hub_static_find_dependencies STREQUAL "")
+    set(PROFILER_HUB_FIND_DEPENDENCIES
+        "include(CMakeFindDependencyMacro)\n${profiler_hub_static_find_dependencies}"
     )
 else()
-    set(PROFILER_HUB_FMT_FIND_DEPENDENCY "")
+    set(PROFILER_HUB_FIND_DEPENDENCIES "")
 endif()
-unset(_profiler_hub_fmt_target)
-unset(_profiler_hub_fmt_aliased)
-unset(_profiler_hub_fmt_is_imported)
 
 configure_package_config_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/profiler-hub-config.cmake.in
