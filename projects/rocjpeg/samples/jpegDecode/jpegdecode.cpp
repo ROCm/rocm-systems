@@ -51,11 +51,8 @@ int main(int argc, char **argv) {
     uint64_t num_jpegs_with_411_subsampling = 0;
     uint64_t num_jpegs_with_unknown_subsampling = 0;
     uint64_t num_jpegs_with_unsupported_resolution = 0;
-    // decode mode: 0 = sync (default), 1 = async
-    int decode_mode = 0;
-    int num_iterations = 1;
 
-    RocJpegUtils::ParseCommandLine(input_path, output_file_path, save_images, device_id, rocjpeg_backend, decode_params, nullptr, nullptr, argc, argv, &decode_mode, &num_iterations);
+    RocJpegUtils::ParseCommandLine(input_path, output_file_path, save_images, device_id, rocjpeg_backend, decode_params, nullptr, nullptr, argc, argv);
 
     bool is_roi_valid = false;
     uint32_t roi_width;
@@ -163,116 +160,9 @@ int main(int argc, char **argv) {
         }
         std::cout << "Decoding started, please wait! ... " << std::endl;
         auto start_time = std::chrono::high_resolution_clock::now();
-        if (decode_mode == 0) {
-            for (int iter = 0; iter < num_iterations; iter++) {
-                CHECK_ROCJPEG(rocJpegDecode(rocjpeg_handle, rocjpeg_stream_handle, &decode_params, &output_image));
-            }
-        } else {
-            // Async mode: submit and sync in separate threads
-            const int buf_num = 5;
-            std::vector<RocJpegImage> pipeline_images(buf_num);
-            for (int p = 0; p < buf_num; p++) {
-                memset(&pipeline_images[p], 0, sizeof(RocJpegImage));
-                for (uint32_t c = 0; c < num_channels; c++) {
-                    pipeline_images[p].pitch[c] = output_image.pitch[c];
-                    CHECK_HIP(hipMalloc(&pipeline_images[p].channel[c], channel_sizes[c]));
-                }
-            }
-
-            std::queue<RocJpegImage*> pending_queue;
-            std::queue<RocJpegImage*> available_queue;
-            std::mutex mtx;
-            std::condition_variable cv_pending, cv_available;
-            RocJpegImage* last_sync_image = nullptr;
-            RocJpegStatus status = ROCJPEG_STATUS_SUCCESS;
-            bool sync_error = false;
-
-            for (int p = 0; p < buf_num; p++)
-                available_queue.push(&pipeline_images[p]);
-
-            // Sync thread: waits for submitted decodes and syncs them
-            std::thread sync_thread([&]() {
-                CHECK_HIP(hipSetDevice(device_id));
-                for (int iter = 0; iter < num_iterations; iter++) {
-                    RocJpegImage* img;
-                    {
-                        std::unique_lock<std::mutex> lock(mtx);
-                        cv_pending.wait(lock, [&]{ return !pending_queue.empty() || sync_error; });
-                        if (sync_error) return;
-                        img = pending_queue.front();
-                        pending_queue.pop();
-                    }
-                    status = rocJpegDecodeSync(rocjpeg_handle, img);
-                    if (status != ROCJPEG_STATUS_SUCCESS) {
-                        {
-                            std::lock_guard<std::mutex> lock(mtx);
-                            sync_error = true;
-                        }
-                        cv_available.notify_one();
-                        return;
-                    }
-                    last_sync_image = img;
-                    {
-                        std::lock_guard<std::mutex> lock(mtx);
-                        available_queue.push(img);
-                    }
-                    cv_available.notify_one();
-                }
-            });
-
-            // Main thread: submits decodes
-            for (int iter = 0; iter < num_iterations; iter++) {
-                RocJpegImage* img;
-                {
-                    std::unique_lock<std::mutex> lock(mtx);
-                    cv_available.wait(lock, [&]{ return !available_queue.empty() || sync_error; });
-                    if (sync_error) break;
-                    img = available_queue.front();
-                    available_queue.pop();
-                }
-                status = rocJpegDecodeAsync(rocjpeg_handle, rocjpeg_stream_handle, &decode_params, img);
-                if (status != ROCJPEG_STATUS_SUCCESS) {
-                    std::cout << "rocJpegDecodeAsync return: " << rocJpegGetErrorName(status) << std::endl;
-                    {
-                        std::lock_guard<std::mutex> lock(mtx);
-                        sync_error = true;
-                    }
-                    cv_pending.notify_one();
-                    break;
-                }
-                {
-                    std::lock_guard<std::mutex> lock(mtx);
-                    pending_queue.push(img);
-                }
-                cv_pending.notify_one();
-            }
-
-            sync_thread.join();
-            if (sync_error) {
-                std::cerr << "ERROR: Sync thread failed with " << rocJpegGetErrorName(status) << std::endl;
-                return EXIT_FAILURE;
-            }
-
-            // Copy last result to output_image for saving
-            if (save_images && last_sync_image != nullptr) {
-                for (uint32_t c = 0; c < num_channels; c++) {
-                    if (last_sync_image->channel[c] != nullptr && output_image.channel[c] != nullptr) {
-                        CHECK_HIP(hipMemcpy(output_image.channel[c], last_sync_image->channel[c], channel_sizes[c], hipMemcpyDeviceToDevice));
-                    }
-                }
-            }
-
-            // Free pipeline buffers
-            for (int p = 0; p < buf_num; p++) {
-                for (int c = 0; c < ROCJPEG_MAX_COMPONENT; c++) {
-                    if (pipeline_images[p].channel[c] != nullptr) {
-                        CHECK_HIP(hipFree(pipeline_images[p].channel[c]));
-                    }
-                }
-            }
-        }
+        CHECK_ROCJPEG(rocJpegDecode(rocjpeg_handle, rocjpeg_stream_handle, &decode_params, &output_image));
         auto end_time = std::chrono::high_resolution_clock::now();
-        double time_per_image_in_milli_sec = std::chrono::duration<double, std::milli>(end_time - start_time).count() / num_iterations;
+        double time_per_image_in_milli_sec = std::chrono::duration<double, std::milli>(end_time - start_time).count();
         double image_size_in_mpixels = (static_cast<double>(widths[0]) * static_cast<double>(heights[0]) / 1000000);
         image_count++;
 
