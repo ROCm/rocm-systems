@@ -229,9 +229,9 @@ function(write_install_test_definition TEST_NAME TEST_COMMAND TEST_LABELS TEST_T
             # Relative from working dir: ../../../../share/rocshmem/test_wrapper.sh
             list(APPEND INSTALL_CMD_PARTS "../../../../share/rocshmem/test_wrapper.sh")
         elseif("${part}" STREQUAL "$<TARGET_FILE:rocshmem_functional_tests>")
-            # Executable is at: <install>/share/rocshmem/rocshmem_functional_tests
-            # Relative from working dir: ../../../../share/rocshmem/rocshmem_functional_tests
-            list(APPEND INSTALL_CMD_PARTS "../../../../share/rocshmem/rocshmem_functional_tests")
+            # Executable is at: <install>/bin/rocshmem_functional_tests
+            # Relative from working dir bin/rocshmem/tests/functional: ../../../rocshmem_functional_tests
+            list(APPEND INSTALL_CMD_PARTS "../../../rocshmem_functional_tests")
         elseif("${part}" STREQUAL "${CMAKE_COMMAND}")
             # Replace build-host cmake path with portable system env
             # This prevents build-host absolute paths from leaking into install files
