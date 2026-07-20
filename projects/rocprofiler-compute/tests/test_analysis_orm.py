@@ -258,11 +258,12 @@ def test_pc_sampling_view_flattens_normalized_tables(db_session):
 
     row = db_session.execute(
         text(
-            "SELECT kernel_name, offset, instruction, source, count, "
+            "SELECT pid, kernel_name, offset, instruction, source, count, "
             "count_issue, count_stall, stall_reason FROM compute_pc_sampling_view"
         )
     ).fetchone()
     assert row == (
+        1,
         "vecCopy",
         0x10,
         "v_mov",

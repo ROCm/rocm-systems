@@ -642,6 +642,7 @@ class Database:
             ),
             "pc_sampling": select(
                 CodeObjectStore.workload_id.label("workload_id"),
+                CodeObjectStore.pid.label("pid"),
                 Kernel.kernel_uuid.label("kernel_uuid"),
                 Kernel.kernel_name,
                 InstructionLine.code_object_offset.label("offset"),

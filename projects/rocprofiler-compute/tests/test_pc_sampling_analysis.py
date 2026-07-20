@@ -2054,6 +2054,7 @@ def test_pc_sampling_single_result_preserves_legacy_csv(
         csv_kernel = pd.read_csv(csv_dir / "kernel.csv")
         assert len(csv_pc_sampling) == 14
         assert csv_pc_sampling["count"].sum() == 390
+        assert csv_pc_sampling["pid"].unique().tolist() == [1429079]
         assert csv_kernel.iloc[0]["dispatch_count"] == 3
     finally:
         common.clean_output_dir(True, str(workload_dir))
