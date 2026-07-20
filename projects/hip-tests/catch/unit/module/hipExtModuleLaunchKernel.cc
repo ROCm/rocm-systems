@@ -771,7 +771,7 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_AnyOrder") {
     return;
   }
   int ticks_per_ms = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeWallClockRate, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeWallClockRate, device));
   //TODO: Remove this once we gets correct wall clock rate from ROCR/KFD.
   if (ticks_per_ms == 0) {
     ticks_per_ms = 1000000;
