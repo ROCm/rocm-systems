@@ -46,6 +46,7 @@ ncclResult_t ncclTuningRingModelInit(struct ncclComm* comm, int id, int* /*enabl
 
     int intraHw, interHw;
     ncclTuningGetHwIndexes(comm, algo, &intraHw, &interHw);
+    int hwLevel = comm->nNodes == 1 ? intraHw : interHw;
 
     float intraLat = comm->tuningContext.tuningConstants.hwLatencies[intraHw][algo][proto];
     // Preserve the pre-refactor model: with one rank per node, Ring inter-node steps use the exposed Tree NET latency.
@@ -61,14 +62,14 @@ ncclResult_t ncclTuningRingModelInit(struct ncclComm* comm, int id, int* /*enabl
     if (proto == NCCL_PROTO_SIMPLE) interLat += comm->graphs[algo].latencyInter;
 
     if ((c == ncclFuncReduce || c == ncclFuncBroadcast)) {
-      float lat = comm->tuningContext.tuningConstants.hwLatencies[intraHw][algo][proto];
+      float lat = comm->tuningContext.tuningConstants.hwLatencies[hwLevel][algo][proto];
       if (comm->graphs[algo].sameChannels) {
         comm->tuningContext.generalLatencies[c][algo][proto] += lat;
       } else {
         if (proto == NCCL_PROTO_SIMPLE)
           lat =
             comm->tuningContext.tuningConstants
-              .hwLatencies[intraHw][NCCL_ALGO_TREE][proto]; // Add some chunk latency, waiting for proper chunk modeling
+              .hwLatencies[hwLevel][NCCL_ALGO_TREE][proto]; // Add some chunk latency, waiting for proper chunk modeling
         comm->tuningContext.generalLatencies[c][algo][proto] += nSteps * lat;
       }
     } else {
