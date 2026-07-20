@@ -414,8 +414,8 @@ get_internal_libs_data_impl()
     auto _libs   = std::vector<std::string>{};
     _libs.assign(_libs_v.begin(), _libs_v.end());
 
-    auto _rocprofsys_base_path = filepath::dirname(
-        filepath::dirname(rocprofsys::path::realpath("/proc/self/exe")));
+    auto _rocprofsys_base_path =
+        rocprofsys::path::parent_path(rocprofsys::path::realpath("/proc/self/exe"), 2);
     auto _rocprofsys_lib_path = std::string{};
 
     for(const auto* itr : { "lib", "lib64" })
