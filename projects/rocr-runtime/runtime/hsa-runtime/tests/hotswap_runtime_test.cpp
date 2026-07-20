@@ -223,7 +223,7 @@ void TestRocrBlitRegistryRangeAndLifetime() {
       0x1000, 0x80, "gfx942", "embedded_rocr_target_blit_shader",
       "invalid");
 
-  EXPECT_EQ(record->Kind,
+  EXPECT_EQ(record->Kind.load(),
             rocr::amd::hsa::loader::HotSwapKernelKind::RuntimeTargetInternal);
   EXPECT_TRUE(record->IsRegisteredRocrBlit(0x1000));
   EXPECT_TRUE(record->IsRegisteredRocrBlit(0x107f));
@@ -242,7 +242,7 @@ void TestInvalidRocrBlitRegistrationIsNotAllowed() {
   auto record = registry.RegisterRocrBlitTargetKernelObject(
       0, 0x80, "<unknown>", "embedded_rocr_target_blit_shader", "invalid");
 
-  EXPECT_EQ(record->Kind,
+  EXPECT_EQ(record->Kind.load(),
             rocr::amd::hsa::loader::HotSwapKernelKind::Untranslated);
   EXPECT_EQ(record->Failure, std::string("invalid"));
   EXPECT_FALSE(record->IsRegisteredRocrBlit(0));
@@ -373,6 +373,28 @@ void TestSegmentSizePatchAddsDynamicDelta() {
       record, 20, 40, patchedPrivate, patchedGroup, failure));
   EXPECT_EQ(patchedPrivate, 68u);
   EXPECT_EQ(patchedGroup, 136u);
+  EXPECT_TRUE(failure.empty());
+}
+
+void TestTranslatedDispatchPatchRewritesSourcePacket() {
+  rocr::amd::hsa::loader::HotSwapKernelRecord record;
+  record.Kind.store(rocr::amd::hsa::loader::HotSwapKernelKind::Translated);
+  record.SourcePrivateSegmentSize = 16;
+  record.SourceGroupSegmentSize = 32;
+  record.TargetKernelObject = 0x5000;
+  record.TargetPrivateSegmentSize = 64;
+  record.TargetGroupSegmentSize = 128;
+  record.TargetGroupSegmentLimit = 256;
+
+  uint64_t kernelObject = 0x1000;
+  uint32_t privateSegmentSize = 20;
+  uint32_t groupSegmentSize = 40;
+  std::string failure;
+  EXPECT_TRUE(rocr::amd::hsa::loader::PatchHotSwapTranslatedDispatch(
+      record, kernelObject, privateSegmentSize, groupSegmentSize, failure));
+  EXPECT_EQ(kernelObject, 0x5000u);
+  EXPECT_EQ(privateSegmentSize, 68u);
+  EXPECT_EQ(groupSegmentSize, 136u);
   EXPECT_TRUE(failure.empty());
 }
 
@@ -513,6 +535,7 @@ int main() {
   TestLoadedKernelUnregisterKeepsPinnedTranslatedTarget();
   TestLaunchMetadataUpdate();
   TestSegmentSizePatchAddsDynamicDelta();
+  TestTranslatedDispatchPatchRewritesSourcePacket();
   TestSegmentSizePatchRefusesUnderflow();
   TestSegmentSizePatchRefusesTargetLdsOverflow();
   TestPresentationTargetRequiresExplicitTarget();

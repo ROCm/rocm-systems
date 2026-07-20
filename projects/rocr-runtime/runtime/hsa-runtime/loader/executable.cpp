@@ -199,8 +199,9 @@ void RegisterHotSwapRocrBlitTargetKernelObject(uint64_t address,
   std::shared_ptr<HotSwapKernelRecord> Record =
       HotSwapKernelRegistryInstance().RegisterRocrBlitTargetKernelObject(
           address, size, TargetGfx, Reason, InvalidReason);
-  const bool HasTargetIsa =
-      Record->Kind == HotSwapKernelKind::RuntimeTargetInternal;
+  const HotSwapKernelKind Kind =
+      Record->Kind.load(std::memory_order_acquire);
+  const bool HasTargetIsa = Kind == HotSwapKernelKind::RuntimeTargetInternal;
 
   std::ostringstream proof;
   proof << "\"event\":\"hotswap_runtime_target_internal_registered\""
@@ -887,6 +888,7 @@ static bool LoadLazyTranslatedKernel(std::shared_ptr<HotSwapKernelRecord> record
         HotSwapRuntimeLifetimeTranslatedExecutablesMutex());
     HotSwapRuntimeLifetimeTranslatedExecutables().push_back(std::move(targetExec));
   }
+  record->Kind.store(HotSwapKernelKind::Translated, std::memory_order_release);
   if (comgrResult.handle) {
     AppendHotSwapComgrProof("hotswap_result", comgrResult, targetBytes.size());
     amd_comgr_destroy_hotswap_transpile_result(comgrResult);
@@ -922,6 +924,31 @@ static bool LoadLazyTranslatedKernel(std::shared_ptr<HotSwapKernelRecord> record
   std::abort();
 }
 
+// Applies the translated-target rewrite at dispatch time and preserves the
+// existing fail-closed diagnostics and proof logging on any patch failure.
+static void PatchHotSwapDispatchToTargetOrAbort(
+    const std::shared_ptr<HotSwapKernelRecord>& record, uint64_t* address,
+    uint32_t* private_segment_size, uint32_t* group_segment_size,
+    HotSwapKernelKind kind) {
+  const uint64_t sourceKernelObject = *address;
+  std::string segmentFailure;
+  if (!PatchHotSwapTranslatedDispatch(
+          *record, *address, *private_segment_size, *group_segment_size,
+          segmentFailure))
+    FatalHotSwapDispatch(sourceKernelObject, record->Name, kind, segmentFailure);
+
+  std::ostringstream proof;
+  proof << "\"event\":\"hotswap_lazy_dispatch_patch\""
+        << ",\"kernel_name\":\"" << JsonEscape(record->Name) << "\""
+        << ",\"source_kernel_object\":\"0x" << std::hex << sourceKernelObject
+        << "\""
+        << ",\"target_kernel_object\":\"0x" << record->TargetKernelObject
+        << "\"" << std::dec
+        << ",\"private_segment_size\":" << *private_segment_size
+        << ",\"group_segment_size\":" << *group_segment_size;
+  AppendHotSwapProofJson(proof.str());
+}
+
 // Dispatch-time hook invoked by the AQL doorbell intercept for each dispatched
 // kernel. Given the packet's kernel_object it looks up the HotSwap record and, on
 // success, rewrites *address (and the segment sizes) to the translated target
@@ -941,13 +968,17 @@ bool PrepareHotSwapDispatchKernelObject(uint64_t* address,
     FatalHotSwapDispatch(*address, "", HotSwapKernelKind::Untranslated,
                          "unregistered kernel object");
 
-  if (record->Kind == HotSwapKernelKind::Translated) {
+  HotSwapKernelKind kind = record->Kind.load(std::memory_order_acquire);
+  if (kind == HotSwapKernelKind::Translated) {
+    if (record->TargetKernelObject != 0)
+      PatchHotSwapDispatchToTargetOrAbort(record, address, private_segment_size,
+                                          group_segment_size, kind);
     return true;
   }
 
-  if (record->Kind == HotSwapKernelKind::RuntimeTargetInternal) {
+  if (kind == HotSwapKernelKind::RuntimeTargetInternal) {
     if (!record->IsRegisteredRocrBlit(*address))
-      FatalHotSwapDispatch(*address, record->Name, record->Kind,
+      FatalHotSwapDispatch(*address, record->Name, kind,
                            "runtime target-internal kernel is not a registered ROCR blit shader",
                            record->SourceKind, record->TargetGfx);
 
@@ -967,8 +998,8 @@ bool PrepareHotSwapDispatchKernelObject(uint64_t* address,
     return true;
   }
 
-  if (record->Kind != HotSwapKernelKind::LazySource)
-    FatalHotSwapDispatch(*address, record->Name, record->Kind,
+  if (kind != HotSwapKernelKind::LazySource)
+    FatalHotSwapDispatch(*address, record->Name, kind,
                          record->Failure.empty()
                              ? "kernel object is not translated"
                              : record->Failure,
@@ -983,37 +1014,18 @@ bool PrepareHotSwapDispatchKernelObject(uint64_t* address,
     // than letting a bad dispatch escape to hardware.
     if (!LoadLazyTranslatedKernel(record, failure)) {
       record->Failure = failure;
-      FatalHotSwapDispatch(*address, record->Name, record->Kind, failure);
+      FatalHotSwapDispatch(*address, record->Name, kind, failure);
     }
   }
   if (!record->TranslationSucceeded || record->TargetKernelObject == 0)
-    FatalHotSwapDispatch(*address, record->Name, record->Kind,
+    FatalHotSwapDispatch(*address, record->Name, kind,
                          record->Failure.empty()
                              ? "lazy translation did not produce a target kernel"
                              : record->Failure);
 
-  uint32_t patchedPrivateSegmentSize = 0;
-  uint32_t patchedGroupSegmentSize = 0;
-  std::string segmentFailure;
-  if (!ComputeHotSwapPatchedSegmentSizes(
-          *record, *private_segment_size, *group_segment_size,
-          patchedPrivateSegmentSize, patchedGroupSegmentSize, segmentFailure))
-    FatalHotSwapDispatch(*address, record->Name, record->Kind, segmentFailure);
-
-  const uint64_t sourceKernelObject = *address;
-  *address = record->TargetKernelObject;
-  *private_segment_size = patchedPrivateSegmentSize;
-  *group_segment_size = patchedGroupSegmentSize;
-
-  std::ostringstream proof;
-  proof << "\"event\":\"hotswap_lazy_dispatch_patch\""
-        << ",\"kernel_name\":\"" << JsonEscape(record->Name) << "\""
-        << ",\"source_kernel_object\":\"0x" << std::hex << sourceKernelObject << "\""
-        << ",\"target_kernel_object\":\"0x" << record->TargetKernelObject << "\""
-        << std::dec
-        << ",\"private_segment_size\":" << *private_segment_size
-        << ",\"group_segment_size\":" << *group_segment_size;
-  AppendHotSwapProofJson(proof.str());
+  kind = record->Kind.load(std::memory_order_acquire);
+  PatchHotSwapDispatchToTargetOrAbort(record, address, private_segment_size,
+                                      group_segment_size, kind);
 
   return true;
 }

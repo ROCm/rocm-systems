@@ -8,6 +8,7 @@
 #define HSA_RUNTIME_LOADER_HOTSWAP_KERNEL_REGISTRY_H_
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
@@ -39,7 +40,9 @@ struct HotSwapLazyCodeObject;
 // How a registered kernel object should be treated at dispatch:
 //   Untranslated          - not a HotSwap kernel; must not reach the hardware.
 //   LazySource            - source-ISA kernel to translate via COMGR on first use.
-//   Translated            - already translated to the execution ISA; pass through.
+//   Translated            - already translated to the execution ISA; pass
+//                           through target records or rewrite promoted source
+//                           records to their target kernel object.
 //   RuntimeTargetInternal - runtime-owned kernel already built for the execution
 //                           ISA (e.g. ROCr blit shaders); pass through.
 enum class HotSwapKernelKind {
@@ -65,10 +68,12 @@ inline const char* HotSwapKernelKindName(HotSwapKernelKind Kind) {
 
 // Per-kernel-object state: identity and kind, the retained lazy source (until
 // translated), the resulting target kernel object, and the source/target segment
-// sizes used to patch each dispatch packet. Guarded by Mutex during translation.
+// sizes used to patch each dispatch packet. Kind is atomic so a successful lazy
+// translation can publish a terminal Translated state after target metadata is
+// complete; the other mutable translation fields are guarded by Mutex.
 struct HotSwapKernelRecord {
   std::string Name;
-  HotSwapKernelKind Kind = HotSwapKernelKind::Untranslated;
+  std::atomic<HotSwapKernelKind> Kind{HotSwapKernelKind::Untranslated};
   std::string SourceKind;
   std::string TargetGfx;
   std::shared_ptr<HotSwapLazyCodeObject> LazyCodeObject;
@@ -86,7 +91,8 @@ struct HotSwapKernelRecord {
   uint32_t TargetGroupSegmentLimit = UINT32_MAX;
 
   bool IsRegisteredRocrBlit(uint64_t address) const {
-    return Kind == HotSwapKernelKind::RuntimeTargetInternal &&
+    return Kind.load(std::memory_order_acquire) ==
+               HotSwapKernelKind::RuntimeTargetInternal &&
            SourceKind == "rocr_blit" && address >= SourceKernelObject &&
            address - SourceKernelObject < ObjectSize;
   }
@@ -132,6 +138,32 @@ inline bool ComputeHotSwapPatchedSegmentSizes(
     failure = "patched group segment size exceeds target LDS limit";
     return false;
   }
+  return true;
+}
+
+// Rewrites a source-ISA dispatch packet to the translated target kernel while
+// preserving any dynamic segment-size deltas carried by the packet.
+inline bool PatchHotSwapTranslatedDispatch(
+    const HotSwapKernelRecord& record, uint64_t& address,
+    uint32_t& private_segment_size, uint32_t& group_segment_size,
+    std::string& failure) {
+  if (record.TargetKernelObject == 0) {
+    failure = "translated kernel object is missing";
+    return false;
+  }
+
+  uint32_t patched_private_segment_size = 0;
+  uint32_t patched_group_segment_size = 0;
+  if (!ComputeHotSwapPatchedSegmentSizes(record, private_segment_size,
+                                         group_segment_size,
+                                         patched_private_segment_size,
+                                         patched_group_segment_size, failure))
+    return false;
+
+  address = record.TargetKernelObject;
+  private_segment_size = patched_private_segment_size;
+  group_segment_size = patched_group_segment_size;
+  failure.clear();
   return true;
 }
 
@@ -226,7 +258,7 @@ class HotSwapKernelRegistry {
       ReportHotSwapRegistryError("duplicate kernel object address");
     auto record = std::make_shared<HotSwapKernelRecord>();
     record->Name = name;
-    record->Kind = kind;
+    record->Kind.store(kind, std::memory_order_relaxed);
     record->SourceKernelObject = address;
     record->LazyCodeObject = std::move(lazy_code_object);
     records_[address] = record;
@@ -242,8 +274,9 @@ class HotSwapKernelRegistry {
     std::lock_guard<std::mutex> guard(mutex_);
     auto record = std::make_shared<HotSwapKernelRecord>();
     record->Name = "rocr_blit";
-    record->Kind = valid ? HotSwapKernelKind::RuntimeTargetInternal
-                         : HotSwapKernelKind::Untranslated;
+    record->Kind.store(valid ? HotSwapKernelKind::RuntimeTargetInternal
+                             : HotSwapKernelKind::Untranslated,
+                       std::memory_order_relaxed);
     record->SourceKind = "rocr_blit";
     record->TargetGfx = target_gfx;
     record->Failure = valid ? reason : invalid_reason;
