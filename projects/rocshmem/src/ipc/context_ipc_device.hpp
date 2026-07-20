@@ -432,6 +432,13 @@ class IPCContext : public Context {
   __device__ void fcollectmem_linear_wg(rocshmem_team_t team, void *dest,
                                   const void *source, int nelems);
 
+ template <typename T>
+  __device__ void alltoall_linear_wg(rocshmem_team_t team, T *dest,
+                                  const T *source, int nelems);
+  template <typename T>
+  __device__ void alltoall_linear_thread_puts_wg(rocshmem_team_t team, T *dest,
+                                  const T *source, int nelems);
+
   __device__ void internal_alltoallmem_wg(rocshmem_team_t team, void *dst,
                                           const void *src, int nelems);
 
