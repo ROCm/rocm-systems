@@ -25,6 +25,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -54,6 +55,9 @@
 #include <hsa/hsa_ext_amd.h>
 
 #include <atomic>
+#include <memory>
+#include <mutex>
+#include <unordered_map>
 #include <utility>
 
 // static assert for rocprofiler_packet ABI compatibility
@@ -96,6 +100,26 @@ struct replay_pass_state_t
     rocprofiler_dispatch_id_t fixed_dispatch_id = 0;
     hsa_signal_t              pass_done         = {.handle = 0};
 };
+
+// Per-agent replay serialization. Concurrent replays on the same agent must not interleave their
+// device-memory snapshot/restore (they would clobber each other's captured regions), so the whole
+// drain->snap->passes->restore window is guarded by this per-agent mutex. Different agents use
+// different mutexes and run concurrently; combined with agent-scoped snapshots this keeps multi-GPU
+// replay isolated.
+std::mutex&
+agent_replay_mutex(hsa_agent_t agent)
+{
+    using lock_map_t    = std::unordered_map<uint64_t, std::unique_ptr<std::mutex>>;
+    static auto*& locks = common::static_object<common::Synchronized<lock_map_t>>::construct();
+
+    std::mutex* mtx = nullptr;
+    locks->wlock([&](lock_map_t& _map) {
+        auto& slot = _map[agent.handle];
+        if(!slot) slot = std::make_unique<std::mutex>();
+        mtx = slot.get();
+    });
+    return *mtx;
+}
 
 template <typename DomainT, typename... Args>
 inline bool
@@ -784,13 +808,14 @@ WriteInterceptor(const void* packets,
 
         if(replay_plan.replay_requested)
         {
-            // Runs synchronously on the calling (WriteInterceptor) thread and assumes a single
-            // agent driven by a single thread (matching the original #7960 prototype). Concurrent
-            // dispatches -- multiple app threads, queues, or GPUs -- are NOT yet safe: snap()/
-            // restore() copy shared device memory with no mutual exclusion, so overlapping replays
-            // corrupt each other (GPU memory-access faults) and the blocking copies can deadlock.
-            // See the design doc "Future Work" for the per-agent snapshot scoping + locking plan.
-            const auto& core = queue.core_api();
+            // Runs synchronously on the calling (WriteInterceptor) thread. Concurrent replays are
+            // isolated by (a) a per-agent lock that serializes this whole drain->snap->passes->
+            // restore window so same-agent replays never interleave, and (b) agent-scoped snapshots
+            // so a replay only saves/restores its own agent's device memory (other GPUs untouched).
+            // Different agents hold different locks and run concurrently.
+            const auto& core         = queue.core_api();
+            hsa_agent_t replay_agent = queue.get_agent().get_hsa_agent();
+            const auto replay_guard = std::lock_guard<std::mutex>{agent_replay_mutex(replay_agent)};
 
             // The app's original completion signal (completion_signal is at the same offset for
             // dispatch and ext-dispatch packets, per the static_asserts at the top of this file).
@@ -799,8 +824,8 @@ WriteInterceptor(const void* packets,
             // indefinite loop.
             hsa_signal_t app_completion_signal = dispatch_pkt.kernel_dispatch.completion_signal;
 
-            // Drain barrier: fence the CPU against all prior in-flight GPU work so device memory is
-            // stable before snapshotting.
+            // Drain barrier: fence the CPU against all prior in-flight GPU work on this queue so
+            // device memory is stable before snapshotting.
             hsa_signal_t drain_signal = null_hsa_signal;
             Queue::create_signal(0, &drain_signal, /*use_pool=*/false);
             {
@@ -811,9 +836,25 @@ WriteInterceptor(const void* packets,
                     drain_signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
             }
 
-            // Save all tracked device allocations so every pass runs against identical inputs.
-            kernel_replay::memory_snapshot::Snapshot snapshot{};
-            snapshot.snap();
+            // Agent-wide drain: sibling queues on this agent can have kernels in flight that mutate
+            // device memory concurrently with snapshot/restore. The per-agent replay lock blocks
+            // other threads' *replayed* dispatches (every kernel dispatch passes through this
+            // gate), but not work already submitted to their queues. Wait for every queue on this
+            // agent to finish its outstanding kernels before snapshotting. (Async SDMA copies
+            // bypass both the AQL queues and the replay gate; serializing those is a separate
+            // follow-up -- see the design doc "replay-scoped per-agent quiesce".)
+            if(auto* queue_controller = get_queue_controller())
+            {
+                queue_controller->iterate_queues([&replay_agent](const Queue* sibling) {
+                    if(sibling != nullptr &&
+                       sibling->get_agent().get_hsa_agent().handle == replay_agent.handle)
+                        sibling->sync();
+                });
+            }
+
+            // Save this agent's tracked device allocations so every pass runs against identical
+            // inputs.
+            const auto snapshot = kernel_replay::memory_snapshot::snap(replay_agent);
 
             // pass_done is reused across passes: reset to 1 before each submit so the barrier
             // appended in process_packet_batch decrements it to 0 when the pass completes.
@@ -854,7 +895,7 @@ WriteInterceptor(const void* packets,
                 if(!kernel_replay::should_continue_replay(replay_plan, pass, is_final)) break;
 
                 // Restore device memory between passes so the next pass sees identical inputs.
-                snapshot.restore();
+                kernel_replay::memory_snapshot::restore(snapshot);
             }
 
             kernel_replay::execute_config_phase_exit(
