@@ -81,10 +81,48 @@ separate cache arena is used, so internal cache-arena fragmentation is absent;
 ordinary allocator fragmentation is outside the live-byte counters.
 
 File-backed readers retain their existing private read-only mapping. They use
-the same in-process content cache as memory readers. No persistent file cache is
-implemented here. A future disk cache must independently define its trust
-boundary, permissions, atomic publication, COMGR/toolchain version salt,
-corruption handling, and invalidation policy.
+the same in-process content cache as memory readers.
+
+## Disk-persistent tier
+
+The disk tier layers cross-process/cross-run persistence under the single-flight
+producer: on a cold miss the leader reads disk before running COMGR, and on a
+COMGR success it enqueues an asynchronous write. Because this runs only on the
+single-flight leader, disk I/O is coalesced across waiters and never serializes
+the in-memory cache.
+
+Its trust model, key strength, and eviction policy are deliberate and defined
+here (per the requirement above that a disk cache define its own boundary):
+
+- **Trust boundary — per-user, non-adversarial.** The cache root defaults to
+  `$XDG_CACHE_HOME/rocm/hotswap` else `$HOME/.cache/rocm/hotswap`, inside the
+  user's own trust boundary. Entries written by the owning user are trusted; a
+  user who can already run code in their own process gains nothing by planting a
+  cache entry, so this is not a defended threat. `HSA_HOTSWAP_CACHE_DIR` is an
+  opt-in override; pointing it at a shared/world-writable location steps outside
+  the per-user model by explicit choice.
+- **Toolchain salt.** Entries are namespaced by a salt derived from the loaded
+  COMGR library identity (path + size + mtime + format version). A toolchain
+  change yields a fresh salt subtree, so entries built by a different COMGR are
+  never read back.
+- **Entry identity — 64-bit key, no on-read content compare.** The lookup key is
+  a 64-bit hash over (source bytes, source ISA, target ISA, flags), used as the
+  filename; reads validate magic/version/salt/payload-size but do not re-verify
+  payload against source bytes. Unlike the in-memory tier — whose exact `memcmp`
+  makes correctness independent of hash strength — the disk tier's correctness is
+  probabilistic in the key. This is an intentional cost/benefit choice: a true
+  exact-compare would require storing and re-reading the full source blob on every
+  hit (hundreds of MB for large code objects), and merely widening the digest
+  would only shift the collision exponent without providing the exact-compare
+  invariant. For a per-user cache the 64-bit birthday-collision probability is
+  well below ambient hardware error rates at any realistic cache size.
+- **Atomic publication.** Writes go to a unique temp file, are `fsync`'d, then
+  `rename`'d into place, so a reader never observes a partially written entry. A
+  crash can lose a not-yet-published entry (a future miss), never corrupt one.
+- **No eviction.** There is no LRU/TTL/size cap; stale salt subtrees from prior
+  toolchains are not swept. Footprint is bounded per toolchain by the set of
+  objects actually loaded. A best-effort stale-salt sweep is possible future
+  work if disk footprint becomes an operational concern.
 
 ## Memory and latency bounds
 
