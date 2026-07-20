@@ -257,7 +257,6 @@ parent_path(std::string_view fpath, std::uint16_t levels)
     return result.string();
 }
 
-
 /** @brief Read the symbolic link target.
  *  @param path The filesystem path to inspect.
  *  @return The link target as a string, or @p path unchanged if @p path is not
