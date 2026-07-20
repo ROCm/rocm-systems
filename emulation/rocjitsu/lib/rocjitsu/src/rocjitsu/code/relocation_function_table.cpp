@@ -54,7 +54,7 @@ struct PairValue {
   uint64_t value = 0;
   uint64_t source_getpc_offset = 0;
   uint64_t source_address_add_offset = 0;
-  uint64_t got_slot_vaddr = 0;
+  uint64_t source_table_address_vaddr = 0;
 
   friend bool operator==(const PairValue &, const PairValue &) = default;
 };
@@ -98,6 +98,14 @@ table_for_got_slot(std::span<const RelocationFunctionTable> tables, uint64_t vad
   return std::nullopt;
 }
 
+[[nodiscard]] std::optional<size_t>
+table_at_address(std::span<const RelocationFunctionTable> tables, uint64_t vaddr) {
+  const auto table = std::ranges::find(tables, vaddr, &RelocationFunctionTable::table_vaddr);
+  if (table == tables.end())
+    return std::nullopt;
+  return static_cast<size_t>(table - tables.begin());
+}
+
 void transfer_instruction(PairState &state, const Instruction &inst,
                           std::span<const RelocationFunctionTable> tables, uint64_t text_vaddr,
                           std::vector<RelocationTableDispatch> *dispatches) {
@@ -120,7 +128,8 @@ void transfer_instruction(PairState &state, const Instruction &inst,
                                .source_getpc_offset = value->second.source_getpc_offset,
                                .source_address_add_offset =
                                    value->second.source_address_add_offset,
-                               .got_slot_vaddr = value->second.got_slot_vaddr});
+                               .source_table_address_vaddr =
+                                   value->second.source_table_address_vaddr});
       }
     }
     kill_defined_pairs(state, inst);
@@ -152,8 +161,19 @@ void transfer_instruction(PairState &state, const Instruction &inst,
       const auto address = state.find(*address_pair);
       if (address != state.end() && address->second.kind == PairValueKind::Address) {
         result = address->second;
-        result->value += *addend;
-        result->source_address_add_offset = inst.src_loc();
+        if (*addend <= std::numeric_limits<uint64_t>::max() - result->value) {
+          result->value += *addend;
+          result->source_address_add_offset = inst.src_loc();
+          // RCCL materializes ncclDevFuncTable_{1,2,4} directly with getpc plus
+          // a literal and then performs an indexed s_load_b64 from that base.
+          if (const auto table = table_at_address(tables, result->value)) {
+            result->kind = PairValueKind::TableBase;
+            result->value = *table;
+            result->source_table_address_vaddr = tables[*table].table_vaddr;
+          }
+        } else {
+          result.reset();
+        }
       }
     }
   } else if (mnemonic == "s_load_b64" && dst_pair && src0_pair) {
@@ -167,7 +187,7 @@ void transfer_instruction(PairState &state, const Instruction &inst,
                              .source_getpc_offset = base->second.source_getpc_offset,
                              .source_address_add_offset =
                                  base->second.source_address_add_offset,
-                             .got_slot_vaddr = table->second};
+                             .source_table_address_vaddr = table->second};
         }
       } else if (base->second.kind == PairValueKind::TableBase) {
         result = base->second;
@@ -323,7 +343,9 @@ discover_relocation_function_tables(const AmdGpuCodeObject &object) {
 
   std::vector<RelocationFunctionTable> tables;
   for (ObjectCandidate &candidate : candidates) {
-    if (candidate.entries.empty() || candidate.got_slots.empty())
+    // RCCL addresses its relocation-backed function tables directly from
+    // executable text, so a GOT reference is useful evidence but not required.
+    if (candidate.entries.empty())
       continue;
     std::ranges::sort(candidate.entries, {}, &RelocationFunctionPointer::slot_vaddr);
     std::ranges::sort(candidate.got_slots);

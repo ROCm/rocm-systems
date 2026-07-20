@@ -88,6 +88,32 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
   return {raw, raw + inst.size() / sizeof(uint32_t)};
 }
 
+/// @brief Recognize clang's gfx1250 body for an unreachable kernel specialization.
+///
+/// @details rocPRIM emits one trampoline specialization per supported target.
+/// Specializations which cannot be selected for the compiled device end in
+/// `__builtin_unreachable()`. Current clang lowers those empty gfx1250 bodies to
+/// one 64-bit `s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1`
+/// instruction, followed by zero alignment padding. WAVE_MODE[25] is
+/// REPLAY_MODE; the instruction is ordinary prologue state rather than a CFG
+/// terminator, but the source function has no defined fallthrough execution.
+///
+/// Keep the match deliberately exact. Other reachable fallthrough into opaque
+/// text remains a hard error, including a longer block which merely ends with
+/// this instruction.
+[[nodiscard]] bool is_gfx1250_compiler_unreachable_stub(const BasicBlock &block,
+                                                        rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_GFX1250 || !block.falls_through_to_undecodable_text() ||
+      block.num_instructions() != 1 || block.size() != 2 * sizeof(uint32_t))
+    return false;
+
+  const Instruction *inst = block.terminator();
+  if (inst == nullptr || inst->mnemonic() != "s_setreg_imm32_b32" || inst->size() != 8)
+    return false;
+  const uint32_t *words = inst->raw_encoding();
+  return words != nullptr && words[0] == 0xb9800641u && words[1] == 1u;
+}
+
 [[nodiscard]] uint32_t text_word_at(std::span<const uint8_t> text, uint64_t offset) {
   uint32_t word = 0;
   if (offset + sizeof(word) <= text.size())
@@ -1224,9 +1250,11 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       return leave_unchanged();
     }
 
-    const auto opaque_fallthrough = std::ranges::find_if(scope.blocks, [](const BasicBlock *block) {
-      return block != nullptr && block->falls_through_to_undecodable_text();
-    });
+    const auto opaque_fallthrough =
+        std::ranges::find_if(scope.blocks, [&](const BasicBlock *block) {
+          return block != nullptr && block->falls_through_to_undecodable_text() &&
+                 !is_gfx1250_compiler_unreachable_stub(*block, guest_arch_);
+        });
     if (opaque_fallthrough != scope.blocks.end()) {
       auto failure =
           make_kernel_failure(DiagnosticKind::Legalization,
@@ -1739,7 +1767,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       data_relocations.push_back(
           {.target_getpc_offset = getpc->second + target_delta,
            .target_literal_offset = add->second + target_delta + sizeof(uint32_t),
-           .source_target_vaddr = dispatch.got_slot_vaddr});
+           .source_target_vaddr = dispatch.source_table_address_vaddr});
     }
 
     // Phase 5: now that every emitted source block has a final target offset,

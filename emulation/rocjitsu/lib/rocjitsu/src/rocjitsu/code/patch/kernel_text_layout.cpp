@@ -452,10 +452,16 @@ void append_direct_branch_island_pool(std::vector<uint8_t> &kernel_text, KernelT
     return std::nullopt;
 
   // The supported conditional SOPP opcodes are encoded in adjacent false/true
-  // pairs on AMDGPU targets handled by this patcher. Flip the low opcode bit
-  // while preserving the translated ISA's SOPP opcode numbering.
+  // pairs, but the first opcode in each pair is odd. XORing the low bit would
+  // therefore cross pair boundaries (and turns gfx1250 s_cbranch_execnz opcode
+  // 38 into invalid opcode 39). Move explicitly to the adjacent inverse while
+  // preserving the translated ISA's SOPP opcode numbering.
   const uint32_t op = (translated_word >> 16) & 0x7fu;
-  return build_sopp_encoding(arch, op ^ 1u, static_cast<uint16_t>(*skip));
+  const std::string_view mnemonic = inst.mnemonic();
+  const bool invert_to_next = mnemonic == "s_cbranch_scc0" || mnemonic == "s_cbranch_vccz" ||
+                              mnemonic == "s_cbranch_execz";
+  return build_sopp_encoding(arch, invert_to_next ? op + 1u : op - 1u,
+                             static_cast<uint16_t>(*skip));
 }
 
 [[nodiscard]] std::optional<uint16_t> direct_call_return_sgpr(const Instruction &inst,

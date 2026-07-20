@@ -215,6 +215,58 @@ std::vector<uint32_t> make_table_dispatch_text() {
   return words;
 }
 
+std::vector<uint32_t> make_direct_table_dispatch_text() {
+  std::vector<uint32_t> words;
+  auto append32 = [&](uint32_t word) { words.push_back(word); };
+  auto append64 = [&](uint64_t encoding) {
+    words.push_back(static_cast<uint32_t>(encoding));
+    words.push_back(static_cast<uint32_t>(encoding >> 32));
+  };
+
+  auto getpc = std::bit_cast<gfx1250::Sop1MachineInst>(0xbe804700u);
+  getpc.sdst = 54;
+  append32(std::bit_cast<uint32_t>(getpc));
+
+  auto add = std::bit_cast<gfx1250::Sop2MachineInst>(0xa9800000u);
+  add.sdst = 54;
+  add.ssrc0 = 54;
+  add.ssrc1 = 254;
+  append32(std::bit_cast<uint32_t>(add));
+  append64(0x2000u - 0x1004u);
+
+  auto table_load = std::bit_cast<gfx1250::SmemMachineInst>(uint64_t{0xf4002000u});
+  table_load.sbase = 27; // encoded in SGPR-pair units: s[54:55].
+  table_load.sdata = 0;
+  table_load.scale_offset = 1;
+  table_load.soffset = 2;
+  append64(std::bit_cast<uint64_t>(table_load));
+
+  auto swap = std::bit_cast<gfx1250::Sop1MachineInst>(0xbe804900u);
+  swap.sdst = 30;
+  swap.ssrc0 = 0;
+  append32(std::bit_cast<uint32_t>(swap));
+  append32(0xbfb00000u); // s_endpgm continuation
+
+  auto setpc = std::bit_cast<gfx1250::Sop1MachineInst>(0xbe804800u);
+  setpc.ssrc0 = 30;
+  append32(std::bit_cast<uint32_t>(setpc));
+  return words;
+}
+
+void remove_got_reference(std::vector<uint8_t> &image) {
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  std::vector<Elf64_Shdr> sections(ehdr.e_shnum);
+  std::memcpy(sections.data(), image.data() + ehdr.e_shoff,
+              sections.size() * sizeof(Elf64_Shdr));
+  const auto rela = std::ranges::find(sections, SHT_RELA, &Elf64_Shdr::sh_type);
+  ASSERT_NE(rela, sections.end());
+  Elf64_Rela first{};
+  std::memcpy(&first, image.data() + rela->sh_offset, sizeof(first));
+  first.r_info = relocation_info(0, 0);
+  std::memcpy(image.data() + rela->sh_offset, &first, sizeof(first));
+}
+
 TEST(RelocationFunctionTable, DiscoversGotReferencedRelativeTextPointers) {
   const auto image = make_relocation_function_table_elf();
   const AmdGpuCodeObject object(image.data(), image.size());
@@ -293,7 +345,32 @@ TEST(RelocationFunctionTable, ResolvesDynamicDispatchThroughGotAndTableLoads) {
   EXPECT_EQ(dispatches[0].return_sreg, 30u);
   EXPECT_EQ(dispatches[0].source_getpc_offset, 0u);
   EXPECT_EQ(dispatches[0].source_address_add_offset, 4u);
-  EXPECT_EQ(dispatches[0].got_slot_vaddr, 0x3000u);
+  EXPECT_EQ(dispatches[0].source_table_address_vaddr, 0x3000u);
+}
+
+TEST(RelocationFunctionTable, ResolvesRcclDirectIndexedTableDispatch) {
+  const auto text_words = make_direct_table_dispatch_text();
+  auto image = make_relocation_function_table_elf(text_words);
+  remove_got_reference(image);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+
+  const auto tables = discover_relocation_function_tables(object);
+  ASSERT_EQ(tables.size(), 1u);
+  EXPECT_TRUE(tables[0].got_slot_vaddrs.empty());
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::array<uint64_t, 1> leaders{32};
+  const auto blocks = BasicBlock::build(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
+  const auto dispatches = discover_relocation_table_dispatches(blocks, tables, 0x1000);
+  ASSERT_EQ(dispatches.size(), 1u);
+  EXPECT_EQ(dispatches[0].table_index, 0u);
+  EXPECT_EQ(dispatches[0].source_call_offset, 24u);
+  EXPECT_EQ(dispatches[0].return_sreg, 30u);
+  EXPECT_EQ(dispatches[0].source_getpc_offset, 0u);
+  EXPECT_EQ(dispatches[0].source_address_add_offset, 4u);
+  EXPECT_EQ(dispatches[0].source_table_address_vaddr, 0x2000u);
 }
 
 } // namespace

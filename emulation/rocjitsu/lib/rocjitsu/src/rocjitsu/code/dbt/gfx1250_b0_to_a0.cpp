@@ -30,7 +30,7 @@ namespace {
 /// @details Keep this list aligned with the implemented B0-to-A0 reference
 /// patches. Prefix-classified WMMA/SWMMAC and cluster-load instructions are
 /// handled separately because their contextual workarounds apply to families.
-inline constexpr std::array<std::string_view, 18> kExactErrataMnemonics = {
+inline constexpr std::array<std::string_view, 19> kExactErrataMnemonics = {
     "s_barrier_signal_isfirst",
     "ds_load_2addr_b32",
     "ds_load_2addr_b64",
@@ -46,9 +46,9 @@ inline constexpr std::array<std::string_view, 18> kExactErrataMnemonics = {
     "ds_storexchg_2addr_stride64_rtn_b64",
     "ds_load_addtid_b32",
     "ds_store_addtid_b32",
-    "tensor_load_to_lds",
     "v_cvt_pk_fp8_f32",
     "v_cvt_sr_fp8_f32",
+    "tensor_load_to_lds",
 };
 
 [[nodiscard]] bool requires_errata_expansion(std::string_view mnemonic) {
@@ -298,6 +298,66 @@ ExpandResult expand_gfx1250_ds2(const Instruction &inst, uint32_t, uint64_t,
     append_words(words, second);
   }
   append_words(words, gfx1250::build_sopp(gfx1250::kSWaitDscntSopp, {.simm16 = 0}));
+  return ExpandResult::success(std::move(words));
+}
+
+/// @brief Disable Tensor-DMA multicast for one A0 tensor load.
+///
+/// @details TENSOR_LOAD_TO_LDS does not encode multicast in the instruction.
+/// Descriptor group 1 bits [15:0], held in the first SGPR named by VADDR1,
+/// select the workgroups which receive a multicast load.  On A0 those bits
+/// must therefore be cleared for every tensor load; inspecting only the
+/// instruction cannot prove that the runtime descriptor mask is zero.
+/// Preserve the guest descriptor value around the load because later tensor
+/// instructions commonly reuse and update the same descriptor.
+ExpandResult expand_gfx1250_tensor_load_to_lds(
+    const Instruction &inst, uint32_t, uint64_t, std::span<const uint8_t>,
+    const LivenessAnalysis &liveness, TranslationContext &, const LaneLayout *,
+    const LaneLayout *) {
+  if (inst.mnemonic() != "tensor_load_to_lds" ||
+      inst.size() != static_cast<int>(sizeof(gfx1250::VimageMachineInst)) ||
+      inst.raw_encoding() == nullptr) {
+    return ExpandResult::failed(
+        "gfx1250 tensor-load mask rule received an unsupported instruction");
+  }
+
+  gfx1250::VimageMachineInst source{};
+  std::memcpy(&source, inst.raw_encoding(), sizeof(source));
+  constexpr uint8_t kSgprNull = 124;
+  constexpr uint8_t kLastOrdinarySgpr = 105;
+  const uint8_t descriptor_base = static_cast<uint8_t>(source.vaddr1);
+  if (descriptor_base == kSgprNull || descriptor_base > kLastOrdinarySgpr - 7u) {
+    return ExpandResult::failed(
+        "gfx1250 tensor-load group-1 descriptor is not a valid eight-SGPR tuple",
+        {"Provide TENSOR_LOAD_TO_LDS VADDR1 as an ordinary eight-SGPR descriptor."});
+  }
+
+  const std::optional<uint16_t> scratch = liveness.find_free_sgpr(&inst);
+  if (!scratch || *scratch > kLastOrdinarySgpr) {
+    return ExpandResult::failed(
+        "gfx1250 tensor-load mask rule could not allocate a dead scratch SGPR",
+        {"Provide one dead ordinary SGPR to preserve the descriptor mask word."});
+  }
+
+  std::vector<uint32_t> words;
+  words.reserve(6);
+  append_words(words,
+               gfx1250::build_sop1(gfx1250::kSMovB32Sop1,
+                                   {.ssrc0 = descriptor_base,
+                                    .sdst = static_cast<uint8_t>(*scratch)}));
+  // PACK_HH forms {SRC1[31:16], SRC0[31:16]}. Inline zero as SRC0 clears
+  // D1[15:0] while preserving all descriptor fields in D1[31:16].
+  append_words(words,
+               gfx1250::build_sop2(gfx1250::kSPackHhB32B16Sop2,
+                                   {.ssrc0 = 128,
+                                    .ssrc1 = descriptor_base,
+                                    .sdst = descriptor_base}));
+  words.insert(words.end(), inst.raw_encoding(),
+               inst.raw_encoding() + sizeof(gfx1250::VimageMachineInst) / sizeof(uint32_t));
+  append_words(words,
+               gfx1250::build_sop1(gfx1250::kSMovB32Sop1,
+                                   {.ssrc0 = static_cast<uint8_t>(*scratch),
+                                    .sdst = descriptor_base}));
   return ExpandResult::success(std::move(words));
 }
 
@@ -705,74 +765,6 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
   return ExpandResult::success(std::move(words));
 }
 
-/// @brief Mask the tensor D# group-1 workgroup mask for A0.
-///
-/// @details `tensor_load_to_lds` names the eight-SGPR D# group 1 through
-/// VIMAGE.VADDR1. Its first SGPR bits [15:0] are `workgroup_mask`, which routes
-/// multicast loads through cluster operations on B0. A0 requires that field to
-/// be zero. Preserve the guest value through a dead scratch SGPR because the D#
-/// group is a source operand and may be reused after the tensor load.
-ExpandResult expand_gfx1250_tensor_load_to_lds(const Instruction &inst, uint32_t, uint64_t,
-                                               std::span<const uint8_t>,
-                                               const LivenessAnalysis &liveness,
-                                               TranslationContext &, const LaneLayout *,
-                                               const LaneLayout *) {
-  const uint32_t *raw = inst.raw_encoding();
-  if (raw == nullptr || static_cast<size_t>(inst.size()) < sizeof(gfx1250::VimageMachineInst)) {
-    return ExpandResult::failed("gfx1250 tensor_load_to_lds has no complete VIMAGE encoding");
-  }
-
-  gfx1250::VimageMachineInst source{};
-  std::memcpy(&source, raw, sizeof(source));
-  constexpr uint16_t kDescriptorSgprs = 8;
-  constexpr uint16_t kMaxGfx1250Sgprs = 106;
-  const uint16_t descriptor_base = source.vaddr1;
-  if (static_cast<uint32_t>(descriptor_base) + kDescriptorSgprs > kMaxGfx1250Sgprs) {
-    return ExpandResult::failed(
-        "gfx1250 tensor_load_to_lds group descriptor is not an encodable SGPR tuple");
-  }
-
-  // gfx1250 allocates all 106 normal SGPRs to every wave; there is no
-  // descriptor-declared unused tail that a lowering may claim. Reuse only a
-  // register proven dead by kernel CFG liveness. This target-specific scan
-  // includes s102-s105, which the generic cross-ISA allocator intentionally
-  // excludes because CDNA exposes only 102 ordinary SGPRs. VCC in s106:s107,
-  // trap temporaries, and the special/hidden s124:s127 locations are never
-  // candidates.
-  const RegisterSet &live = liveness.live_before(inst);
-  std::optional<uint16_t> scratch;
-  for (uint16_t candidate = 0; candidate < kMaxGfx1250Sgprs; ++candidate) {
-    if (!live.contains({RegClass::SGPR, candidate, 1})) {
-      scratch = candidate;
-      break;
-    }
-  }
-  if (!scratch) {
-    return ExpandResult::failed(
-        "gfx1250 tensor_load_to_lds could not find a dead SGPR for descriptor preservation",
-        {"Add scalar spilling for gfx1250 semantic lowerings or reduce SGPR pressure."});
-  }
-
-  std::vector<uint32_t> words;
-  words.reserve(3 + static_cast<size_t>(inst.size()) / sizeof(uint32_t));
-  append_words(words, gfx1250::build_sop1(gfx1250::kSMovB32Sop1,
-                                          {.ssrc0 = static_cast<uint8_t>(descriptor_base),
-                                           .sdst = static_cast<uint8_t>(*scratch)}));
-  // S_PACK_HH_B32_B16 D, S0, S1 computes D={S1[31:16],S0[31:16]}.
-  // Inline constant 0 is selector 128, so this preserves bits [31:16] and
-  // clears D#.workgroup_mask in bits [15:0].
-  append_words(words, gfx1250::build_sop2(gfx1250::kSPackHhB32B16Sop2,
-                                          {.ssrc0 = 128,
-                                           .ssrc1 = static_cast<uint8_t>(descriptor_base),
-                                           .sdst = static_cast<uint8_t>(descriptor_base)}));
-  words.insert(words.end(), raw, raw + inst.size() / sizeof(uint32_t));
-  append_words(words, gfx1250::build_sop1(gfx1250::kSMovB32Sop1,
-                                          {.ssrc0 = static_cast<uint8_t>(*scratch),
-                                           .sdst = static_cast<uint8_t>(descriptor_base)}));
-
-  return ExpandResult::success(std::move(words));
-}
-
 // The semantic translator binary-searches this table, so entries must stay
 // sorted by the full encoding ID and then opcode. VDS encoding IDs include the
 // high opcode bits, hence the four consecutive kVdsOpHi* groups below.
@@ -801,8 +793,8 @@ inline constexpr std::array<TranslationRule, 25> kGfx1250B0ToA0ExpandRules = {{
      0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF1616x16x128Bf8Bf8Vop3p, RuleAction::Expand, 0,
      0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
-    {gfx1250::encoding::kVimage, gfx1250::kTensorLoadToLdsVimage, RuleAction::Expand, 0, 0, nullptr,
-     expand_gfx1250_tensor_load_to_lds, nullptr, nullptr},
+    {gfx1250::encoding::kVimage, gfx1250::kTensorLoadToLdsVimage, RuleAction::Expand, 0, 0,
+     nullptr, expand_gfx1250_tensor_load_to_lds, nullptr, nullptr},
     {gfx1250::encoding::kVds, gfx1250::kDsStore2addrB32Vds, RuleAction::Expand, 0, 0, nullptr,
      expand_gfx1250_ds2, nullptr, nullptr},
     {gfx1250::encoding::kVds, gfx1250::kDsStore2addrStride64B32Vds, RuleAction::Expand, 0, 0,

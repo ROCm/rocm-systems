@@ -3862,7 +3862,7 @@ TEST(BinaryTranslatorE2E, DirectBranchRelocationUsesLongBranchWindowWhenExpanded
   std::vector<uint32_t> words;
   words.reserve(kTargetWord + 1);
   words.push_back(
-      rocjitsu::pack_sopp(cdna3::kSCbranchScc1Sopp, static_cast<uint16_t>(kTargetWord - 1)));
+      rocjitsu::pack_sopp(cdna3::kSCbranchExecnzSopp, static_cast<uint16_t>(kTargetWord - 1)));
   for (size_t i = 1; i < kTargetWord; ++i)
     words.push_back(rocjitsu::pack_sopp(cdna3::kSCbranchScc0Sopp, 0));
   words.push_back(kCdna4SEndpgm);
@@ -3885,13 +3885,48 @@ TEST(BinaryTranslatorE2E, DirectBranchRelocationUsesLongBranchWindowWhenExpanded
 
   // The source branch is in range, but reserving branch windows for the many
   // intervening branches pushes the relocated target outside the SOPP simm16
-  // range. DBT inverts the condition to skip over the long transfer when SCC0
-  // is true, then rebuilds the target PC in a descriptor-backed SGPR pair.
-  EXPECT_EQ(target_words[0], rocjitsu::pack_sopp(cdna3::kSCbranchScc0Sopp,
+  // range. DBT inverts the condition to skip over the long transfer when EXEC
+  // is zero, then rebuilds the target PC in a descriptor-backed SGPR pair. This
+  // specifically guards the highest adjacent conditional pair: opcode 38 must
+  // invert to 37, not invalid opcode 39.
+  EXPECT_EQ(target_words[0], rocjitsu::pack_sopp(cdna3::kSCbranchExeczSopp,
                                                  rocjitsu::kMaxDirectBranchTransferWords - 1));
   EXPECT_EQ(target_words[1], build_s_getpc_b64(kLongBranchScratchSgpr, ROCJITSU_CODE_ARCH_CDNA3));
   EXPECT_EQ(target_words[5], build_s_setpc_b64(kLongBranchScratchSgpr, ROCJITSU_CODE_ARCH_CDNA3));
   EXPECT_EQ(target_words[6], rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250LongBranchInvertsExecNzToExecZ) {
+  constexpr size_t kTargetWord = 20000;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+
+  std::vector<uint32_t> words;
+  words.reserve(kTargetWord + 1);
+  words.push_back(
+      rocjitsu::pack_sopp(gfx1250::kSCbranchExecnzSopp, static_cast<uint16_t>(kTargetWord - 1)));
+  for (size_t i = 1; i < kTargetWord; ++i)
+    words.push_back(rocjitsu::pack_sopp(gfx1250::kSCbranchScc0Sopp, 0));
+  words.push_back(kGfx1250SEndpgm);
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[0], rocjitsu::pack_sopp(gfx1250::kSCbranchExeczSopp,
+                                                 rocjitsu::kMaxDirectBranchTransferWords - 1));
 }
 
 TEST(BinaryTranslatorE2E, DirectBranchWindowKeepsSevenKibibyteBranchesCompact) {
@@ -7588,10 +7623,10 @@ TEST(BinaryTranslatorE2E, Gfx1250K128WmmaSplitCombinesInputCrossingAndAccumulato
   EXPECT_EQ(target_words[7], kGfx1250SEndpgm);
 }
 
-TEST(BinaryTranslatorE2E, Gfx1250TensorLoadMasksAndRestoresGroupDescriptorForA0) {
-  // The tensor uses s[0:7] as its group descriptor and s[8:11] as its other
-  // scalar operand. Liveness must therefore skip both ranges and choose s12
-  // for the temporary descriptor save.
+TEST(BinaryTranslatorE2E, Gfx1250TensorLoadAlwaysClearsDynamicMulticastMask) {
+  // Multicast is selected dynamically by D# group-1 bits [15:0], not by an
+  // instruction bit. A0 must therefore clear the runtime mask for every tensor
+  // load and restore the descriptor word after the instruction.
   constexpr auto source_tensor = gfx1250::build_vimage(
       gfx1250::kTensorLoadToLdsVimage,
       {.vaddr4 = 124, .vaddr0 = 8, .vaddr1 = 0, .vaddr2 = 124, .vaddr3 = 124});
@@ -7613,15 +7648,20 @@ TEST(BinaryTranslatorE2E, Gfx1250TensorLoadMasksAndRestoresGroupDescriptorForA0)
   ASSERT_GE(translated.text_sections()[0]->size(), 7 * sizeof(uint32_t));
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
-  EXPECT_EQ(target_words[0],
-            gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = 0, .sdst = 12})[0]);
-  EXPECT_EQ(target_words[1], gfx1250::build_sop2(gfx1250::kSPackHhB32B16Sop2,
-                                                 {.ssrc0 = 128, .ssrc1 = 0, .sdst = 0})[0]);
+  // D0 occupies s[8:11] and D1 occupies s[0:7], so the first dead ordinary
+  // scalar register is s12.
+  constexpr auto save_d1 =
+      gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = 0, .sdst = 12});
+  constexpr auto clear_mask = gfx1250::build_sop2(
+      gfx1250::kSPackHhB32B16Sop2, {.ssrc0 = 128, .ssrc1 = 0, .sdst = 0});
+  constexpr auto restore_d1 =
+      gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = 12, .sdst = 0});
+  EXPECT_EQ(target_words[0], save_d1[0]);
+  EXPECT_EQ(target_words[1], clear_mask[0]);
   EXPECT_EQ(target_words[2], source_tensor[0]);
   EXPECT_EQ(target_words[3], source_tensor[1]);
   EXPECT_EQ(target_words[4], source_tensor[2]);
-  EXPECT_EQ(target_words[5],
-            gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = 12, .sdst = 0})[0]);
+  EXPECT_EQ(target_words[5], restore_d1[0]);
   EXPECT_EQ(target_words[6], kGfx1250SEndpgm);
 }
 
@@ -7796,6 +7836,27 @@ TEST(BinaryTranslatorE2E, Gfx1250RejectsReachableUndecodableFallthrough) {
   EXPECT_TRUE(rocjitsu::has_error_containing(
       result, rocjitsu::DiagnosticKind::Legalization,
       "reachable kernel code falls through into undecodable .text bytes"));
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250AcceptsClangUnreachableKernelStub) {
+  // clang emits this one-instruction body for rocPRIM target-specialized
+  // trampolines whose source ends in __builtin_unreachable(). The following
+  // zero is alignment padding, not a second instruction.
+  constexpr uint32_t kSetReplayMode = 0xb9800641u;
+  constexpr uint32_t kLiteralOne = 1u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {kSetReplayMode, kLiteralOne, 0});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+
+  EXPECT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
 }
 
 TEST(BinaryTranslatorE2E, MatchedSemanticExpandRuleFailureIsDiagnostic) {

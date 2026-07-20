@@ -37,7 +37,12 @@ struct RelocationTableDispatch {
   uint16_t return_sreg = 0;
   uint64_t source_getpc_offset = 0;
   uint64_t source_address_add_offset = 0;
-  uint64_t got_slot_vaddr = 0;
+  /// Non-executable address materialized by the source getpc/add sequence.
+  ///
+  /// This is either a GOT slot containing the table base or, as used by RCCL,
+  /// the table address itself. DBT keeps this address stable when relocated
+  /// text changes the PC observed by s_get_pc_i64.
+  uint64_t source_table_address_vaddr = 0;
 };
 
 /// @brief Discover finite device-call tables from ELF symbols and relocations.
@@ -52,10 +57,11 @@ discover_relocation_function_tables(const AmdGpuCodeObject &object);
 /// @brief Resolve decoded dynamic calls back to relocation-discovered tables.
 ///
 /// @details The analysis propagates only a small SGPR-pair lattice:
-/// `s_get_pc_i64 + s_add_nc_u64 literal64` produces an address, loading a
-/// discovered GOT slot produces a table base, and loading through that base
-/// produces a table entry. A call is reported only when that entry reaches an
-/// `s_swap_pc_i64`; conflicting CFG paths erase the fact.
+/// `s_get_pc_i64 + s_add_nc_u64 literal64` produces an address. That address
+/// may name the table directly (the RCCL pattern) or a GOT slot whose load
+/// produces the table base. Loading through the table base produces a table
+/// entry. A call is reported only when that entry reaches an `s_swap_pc_i64`;
+/// conflicting CFG paths erase the fact.
 [[nodiscard]] std::vector<RelocationTableDispatch>
 discover_relocation_table_dispatches(
     std::span<const std::unique_ptr<BasicBlock>> blocks,

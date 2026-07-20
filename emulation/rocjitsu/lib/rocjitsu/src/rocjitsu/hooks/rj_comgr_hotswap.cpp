@@ -71,7 +71,7 @@ std::atomic<uint64_t> g_cache_temp_sequence{0};
 // Bump this whenever the B0 -> A0 translation policy or serialized output
 // changes incompatibly. The input and ISA names are also part of the key.
 constexpr std::string_view kCacheSchema =
-    "rocjitsu-comgr-gfx1250-b0-a0-v1-skip-failed-kernels";
+    "rocjitsu-comgr-gfx1250-b0-a0-v3-tensor-mask";
 
 [[nodiscard]] bool env_flag_enabled(const char *name) {
   const char *value = std::getenv(name);
@@ -88,7 +88,10 @@ template <typename... Args> void verbose_log(const char *format, Args... args) {
   if (!env_flag_enabled("HSA_HOTSWAP_VERBOSE"))
     return;
   std::fputs("[rocjitsu-comgr] ", stderr);
-  std::fprintf(stderr, format, args...);
+  if constexpr (sizeof...(Args) == 0)
+    std::fputs(format, stderr);
+  else
+    std::fprintf(stderr, format, args...);
 }
 
 void dump_failed_input(const DataObject &object) {
