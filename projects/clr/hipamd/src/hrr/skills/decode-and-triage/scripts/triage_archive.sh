@@ -7,6 +7,7 @@ ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
 ANALYZER="$SCRIPT_DIR/analyze_replay_finding.py"
 ENSURE="$SCRIPT_DIR/ensure_playback.sh"
 REPLAY_DOCKER="$SCRIPT_DIR/replay_docker.sh"
+COMPAT="$SCRIPT_DIR/check_replay_compat.py"
 
 ARCHIVE=""
 REPLAY_MODE="auto"
@@ -100,6 +101,23 @@ run_native_replay() {
 mode="$(pick_replay_mode)"
 echo "[triage] archive=$ARCHIVE replay=$mode" >&2
 
+run_replay_preflight() {
+  local replay_mode="$1" gpu="$2"
+  [[ -f "$COMPAT" ]] || return 0
+  [[ "${HRR_SKIP_COMPAT:-}" == "1" ]] && {
+    echo "[triage] skipping replay preflight (HRR_SKIP_COMPAT=1)" >&2
+    return 0
+  }
+  local compat_args=(python3 "$COMPAT" --archive "$ARCHIVE" --gpu "$gpu")
+  if [[ "$replay_mode" == "docker" ]]; then
+    compat_args+=(--mode docker --docker-image "${HRR_DOCKER_IMAGE:?HRR_DOCKER_IMAGE required for docker preflight}")
+  fi
+  [[ "${HRR_STRICT_VERSION:-}" == "1" ]] && compat_args+=(--strict-version)
+  [[ "${HRR_STRICT_ARCH:-}" == "1" ]] && compat_args+=(--strict-arch)
+  echo "[triage] replay preflight (manifest metadata from #8680)" >&2
+  "${compat_args[@]}"
+}
+
 if [[ "$mode" != "skip" && -x "$ENSURE" ]]; then
   HRR_PLAYBACK="$("$ENSURE" --build)" || {
     echo "error: ensure_playback.sh --build failed (see SKILL.md; do not patch source)" >&2
@@ -108,11 +126,17 @@ if [[ "$mode" != "skip" && -x "$ENSURE" ]]; then
   export HRR_PLAYBACK
 fi
 
+REPLAY_GPU="${GPU:-$(pick_gpu)}"
+if [[ "$mode" != "skip" ]]; then
+  run_replay_preflight "$mode" "$REPLAY_GPU"
+fi
+
 if [[ "$mode" == "docker" ]]; then
   LOG="$WORKDIR/hrr-replay-${name}-${ts}.log"
-  set +e; "$REPLAY_DOCKER" --archive "$ARCHIVE" --log "$LOG" --gpu "${GPU:-0}"; set -e
+  set +e; "$REPLAY_DOCKER" --archive "$ARCHIVE" --log "$LOG" --gpu "$REPLAY_GPU"; set -e
 elif [[ "$mode" == "native" ]]; then
   LOG="$WORKDIR/hrr-replay-${name}-${ts}.log"
+  GPU="$REPLAY_GPU"
   set +e; run_native_replay "$HRR_PLAYBACK" "$LOG"; set -e
 fi
 

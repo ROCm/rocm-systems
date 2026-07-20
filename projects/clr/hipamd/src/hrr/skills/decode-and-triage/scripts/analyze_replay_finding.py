@@ -79,6 +79,10 @@ class Finding:
     archive_kernels: int | None = None
     archive_complete: str | None = None
     capture_hip_so: str | None = None
+    capture_hip_runtime_version: str | None = None
+    capture_comgr_version: str | None = None
+    capture_device_count: int | None = None
+    capture_gcn_arch: str | None = None
     sources: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
@@ -297,6 +301,10 @@ def render_markdown(f: Finding, sweep: list[dict[str, Any]] | None = None) -> st
         f"- **Kernels (archive)**: {f.archive_kernels or 'n/a'}",
         f"- **Complete**: {f.archive_complete or 'n/a'}",
         f"- **Capture HIP**: `{f.capture_hip_so or 'n/a'}`",
+        f"- **Capture HIP runtime**: `{f.capture_hip_runtime_version or 'n/a'}`",
+        f"- **Capture comgr**: `{f.capture_comgr_version or 'n/a'}`",
+        f"- **Capture device count**: {f.capture_device_count if f.capture_device_count is not None else 'n/a'}",
+        f"- **Capture GPU arch**: `{f.capture_gcn_arch or 'n/a'}`",
         f"- **Suballoc OOB reports**: {f.suballoc_oob_count} (args: {f.suballoc_oob_args or []})",
         "",
         "## Sources",
@@ -315,6 +323,27 @@ def render_markdown(f: Finding, sweep: list[dict[str, Any]] | None = None) -> st
                 f"| {r.get('run','')} | {r.get('gpu','')} | {r.get('outcome','')} | {r.get('fault_addr','')} |"
             )
     return "\n".join(lines) + "\n"
+
+
+def apply_manifest_metadata(finding: Finding, archive: Path) -> None:
+    try:
+        from check_replay_compat import load_capture_metadata
+    except ImportError:
+        return
+    meta = load_capture_metadata(archive)
+    if meta is None:
+        finding.notes.append("manifest metadata absent (legacy capture)")
+        return
+    finding.capture_hip_runtime_version = meta.hip_runtime_version
+    finding.capture_comgr_version = meta.comgr_version
+    finding.capture_device_count = meta.device_count
+    if meta.devices:
+        props = meta.devices[0].get("properties")
+        if isinstance(props, dict):
+            finding.capture_gcn_arch = props.get("gcn_arch_name")
+        else:
+            finding.capture_gcn_arch = meta.devices[0].get("gcn_arch_name")
+    finding.sources.append(str(archive / "manifest.json"))
 
 
 def main() -> int:
@@ -342,6 +371,7 @@ def main() -> int:
 
     if args.archive:
         arch = Path(args.archive)
+        apply_manifest_metadata(finding, arch)
         info = run_archive_info(arch, args.hrr_playback)
         if info:
             parse_text(info, f"{arch} (--info)", finding)
