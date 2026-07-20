@@ -464,3 +464,109 @@
 
 - api: hsa_amd_agent_set_async_scratch_limit
   args: [agent, threshold]
+
+- api: hsa_code_object_serialize
+  args: [code_object, alloc_callback, callback_data, options, serialized_code_object, serialized_code_object_size]
+  strings: [options]
+
+- api: hsa_code_object_deserialize
+  args: [serialized_code_object, serialized_code_object_size, options, code_object]
+  strings: [options]
+
+- api: hsa_code_object_destroy
+  args: [code_object]
+
+- api: hsa_code_object_get_info
+  args: [code_object, attribute, value]
+
+- api: hsa_code_object_get_symbol
+  args: [code_object, symbol_name, symbol]
+  strings: [symbol_name]
+
+- api: hsa_code_object_get_symbol_from_name
+  args: [code_object, module_name, symbol_name, symbol]
+  strings: [module_name, symbol_name]
+
+- api: hsa_code_symbol_get_info
+  args: [code_symbol, attribute, value]
+
+- api: hsa_code_object_iterate_symbols
+  args: [code_object, callback, data]
+
+- api: hsa_code_object_reader_create_from_file
+  args: [file, code_object_reader]
+
+- api: hsa_code_object_reader_create_from_memory
+  args: [code_object, size, code_object_reader]
+
+- api: hsa_code_object_reader_destroy
+  args: [code_object_reader]
+
+- api: hsa_executable_create
+  args: [profile, executable_state, options, executable]
+  strings: [options]
+
+- api: hsa_executable_create_alt
+  args: [profile, default_float_rounding_mode, options, executable]
+  strings: [options]
+
+- api: hsa_executable_destroy
+  args: [executable]
+
+- api: hsa_executable_load_code_object
+  args: [executable, agent, code_object, options]
+  strings: [options]
+
+- api: hsa_executable_load_program_code_object
+  args: [executable, code_object_reader, options, loaded_code_object]
+  strings: [options]
+
+- api: hsa_executable_load_agent_code_object
+  args: [executable, agent, code_object_reader, options, loaded_code_object]
+  strings: [options]
+
+- api: hsa_executable_freeze
+  args: [executable, options]
+  strings: [options]
+
+- api: hsa_executable_get_info
+  args: [executable, attribute, value]
+
+- api: hsa_executable_global_variable_define
+  args: [executable, variable_name, address]
+  strings: [variable_name]
+
+- api: hsa_executable_agent_global_variable_define
+  args: [executable, agent, variable_name, address]
+  strings: [variable_name]
+
+- api: hsa_executable_readonly_variable_define
+  args: [executable, agent, variable_name, address]
+  strings: [variable_name]
+
+- api: hsa_executable_validate
+  args: [executable, result]
+
+- api: hsa_executable_validate_alt
+  args: [executable, options, result]
+  strings: [options]
+
+- api: hsa_executable_get_symbol
+  args: [executable, module_name, symbol_name, agent, call_convention, symbol]
+  strings: [module_name, symbol_name]
+
+- api: hsa_executable_get_symbol_by_name
+  args: [executable, symbol_name, agent, symbol]
+  strings: [symbol_name]
+
+- api: hsa_executable_symbol_get_info
+  args: [executable_symbol, attribute, value]
+
+- api: hsa_executable_iterate_symbols
+  args: [executable, callback, data]
+
+- api: hsa_executable_iterate_agent_symbols
+  args: [executable, agent, callback, data]
+
+- api: hsa_executable_iterate_program_symbols
+  args: [executable, callback, data]

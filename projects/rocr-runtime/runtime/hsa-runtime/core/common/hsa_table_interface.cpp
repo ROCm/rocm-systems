@@ -1117,260 +1117,422 @@ hsa_status_t HSA_API hsa_isa_iterate_wavefronts(
 
 /* deprecated */ hsa_status_t HSA_API hsa_code_object_serialize(
     hsa_code_object_t code_object,
-    hsa_status_t (*alloc_callback)(size_t size,
-                                   hsa_callback_data_t data,
-                                   void **address),
-    hsa_callback_data_t callback_data,
-    const char *options,
-    void **serialized_code_object,
-    size_t *serialized_code_object_size) {
-  return coreApiTable->hsa_code_object_serialize_fn(
-      code_object, alloc_callback, callback_data, options,
-      serialized_code_object, serialized_code_object_size);
+    hsa_status_t (*alloc_callback)(size_t size, hsa_callback_data_t data, void** address),
+    hsa_callback_data_t callback_data, const char* options, void** serialized_code_object,
+    size_t* serialized_code_object_size) {
+  auto const __rocm_in_code_object = code_object;
+  auto const __rocm_in_alloc_callback = alloc_callback;
+  auto const __rocm_in_callback_data = callback_data;
+  auto const __rocm_in_options = options;
+  auto const __rocm_in_serialized_code_object = serialized_code_object;
+  auto const __rocm_in_serialized_code_object_size = serialized_code_object_size;
+  rocm_trace_emit_hsa_code_object_serialize_enter(
+      (uint64_t)((__rocm_in_code_object).handle),
+      (const void*)(uintptr_t)(__rocm_in_alloc_callback),
+      (uint64_t)((__rocm_in_callback_data).handle),
+      (const char*)(__rocm_in_options),
+      (const void*)(uintptr_t)(__rocm_in_serialized_code_object),
+      (const void*)(uintptr_t)(__rocm_in_serialized_code_object_size)); /* __ROCM_CURATED__: hsa_code_object_serialize */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_code_object_serialize, coreApiTable->hsa_code_object_serialize_fn(code_object, alloc_callback, callback_data,
+                                                 options, serialized_code_object,
+                                                 serialized_code_object_size));
 }
 
-/* deprecated */ hsa_status_t HSA_API hsa_code_object_deserialize(
-    void *serialized_code_object,
-    size_t serialized_code_object_size,
-    const char *options,
-    hsa_code_object_t *code_object) {
-  return coreApiTable->hsa_code_object_deserialize_fn(
-      serialized_code_object, serialized_code_object_size, options,
-      code_object);
+/* deprecated */ hsa_status_t HSA_API
+hsa_code_object_deserialize(void* serialized_code_object, size_t serialized_code_object_size,
+                            const char* options, hsa_code_object_t* code_object) {
+  auto const __rocm_in_serialized_code_object = serialized_code_object;
+  auto const __rocm_in_serialized_code_object_size = serialized_code_object_size;
+  auto const __rocm_in_options = options;
+  auto const __rocm_in_code_object = code_object;
+  rocm_trace_emit_hsa_code_object_deserialize_enter(
+      (const void*)(uintptr_t)(__rocm_in_serialized_code_object),
+      (__rocm_in_serialized_code_object_size),
+      (const char*)(__rocm_in_options),
+      (const void*)(uintptr_t)(__rocm_in_code_object)); /* __ROCM_CURATED__: hsa_code_object_deserialize */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_code_object_deserialize, coreApiTable->hsa_code_object_deserialize_fn(
+          serialized_code_object, serialized_code_object_size, options, code_object));
 }
 
-/* deprecated */ hsa_status_t HSA_API hsa_code_object_destroy(
-    hsa_code_object_t code_object) {
-  return coreApiTable->hsa_code_object_destroy_fn(code_object);
+/* deprecated */ hsa_status_t HSA_API hsa_code_object_destroy(hsa_code_object_t code_object) {
+  auto const __rocm_in_code_object = code_object;
+  rocm_trace_emit_hsa_code_object_destroy_enter(
+      (uint64_t)((__rocm_in_code_object).handle)); /* __ROCM_CURATED__: hsa_code_object_destroy */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_code_object_destroy, coreApiTable->hsa_code_object_destroy_fn(code_object));
 }
 
-/* deprecated */ hsa_status_t HSA_API hsa_code_object_get_info(
-    hsa_code_object_t code_object,
-    hsa_code_object_info_t attribute,
-    void *value) {
-  return coreApiTable->hsa_code_object_get_info_fn(
-      code_object, attribute, value);
+/* deprecated */ hsa_status_t HSA_API hsa_code_object_get_info(hsa_code_object_t code_object,
+                                                               hsa_code_object_info_t attribute,
+                                                               void* value) {
+  auto const __rocm_in_code_object = code_object;
+  auto const __rocm_in_attribute = attribute;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hsa_code_object_get_info_enter(
+      (uint64_t)((__rocm_in_code_object).handle),
+      (int32_t)(__rocm_in_attribute),
+      (const void*)(uintptr_t)(__rocm_in_value)); /* __ROCM_CURATED__: hsa_code_object_get_info */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_code_object_get_info, coreApiTable->hsa_code_object_get_info_fn(code_object, attribute, value));
 }
 
-/* deprecated */ hsa_status_t HSA_API hsa_code_object_get_symbol(
-    hsa_code_object_t code_object,
-    const char *symbol_name,
-    hsa_code_symbol_t *symbol) {
-  return coreApiTable->hsa_code_object_get_symbol_fn(
-      code_object, symbol_name, symbol);
+/* deprecated */ hsa_status_t HSA_API hsa_code_object_get_symbol(hsa_code_object_t code_object,
+                                                                 const char* symbol_name,
+                                                                 hsa_code_symbol_t* symbol) {
+  auto const __rocm_in_code_object = code_object;
+  auto const __rocm_in_symbol_name = symbol_name;
+  auto const __rocm_in_symbol = symbol;
+  rocm_trace_emit_hsa_code_object_get_symbol_enter(
+      (uint64_t)((__rocm_in_code_object).handle),
+      (const char*)(__rocm_in_symbol_name),
+      (const void*)(uintptr_t)(__rocm_in_symbol)); /* __ROCM_CURATED__: hsa_code_object_get_symbol */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_code_object_get_symbol, coreApiTable->hsa_code_object_get_symbol_fn(code_object, symbol_name, symbol));
 }
 
-/* deprecated */ hsa_status_t HSA_API hsa_code_object_get_symbol_from_name(
-    hsa_code_object_t code_object,
-    const char *module_name,
-    const char *symbol_name,
-    hsa_code_symbol_t *symbol) {
-  return coreApiTable->hsa_code_object_get_symbol_from_name_fn(
-      code_object, module_name, symbol_name, symbol);
+/* deprecated */ hsa_status_t HSA_API
+hsa_code_object_get_symbol_from_name(hsa_code_object_t code_object, const char* module_name,
+                                     const char* symbol_name, hsa_code_symbol_t* symbol) {
+  auto const __rocm_in_code_object = code_object;
+  auto const __rocm_in_module_name = module_name;
+  auto const __rocm_in_symbol_name = symbol_name;
+  auto const __rocm_in_symbol = symbol;
+  rocm_trace_emit_hsa_code_object_get_symbol_from_name_enter(
+      (uint64_t)((__rocm_in_code_object).handle),
+      (const char*)(__rocm_in_module_name),
+      (const char*)(__rocm_in_symbol_name),
+      (const void*)(uintptr_t)(__rocm_in_symbol)); /* __ROCM_CURATED__: hsa_code_object_get_symbol_from_name */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_code_object_get_symbol_from_name, coreApiTable->hsa_code_object_get_symbol_from_name_fn(code_object, module_name, symbol_name,
+                                                            symbol));
 }
 
-/* deprecated */ hsa_status_t HSA_API hsa_code_symbol_get_info(
-    hsa_code_symbol_t code_symbol,
-    hsa_code_symbol_info_t attribute,
-    void *value) {
-  return coreApiTable->hsa_code_symbol_get_info_fn(
-      code_symbol, attribute, value);
+/* deprecated */ hsa_status_t HSA_API hsa_code_symbol_get_info(hsa_code_symbol_t code_symbol,
+                                                               hsa_code_symbol_info_t attribute,
+                                                               void* value) {
+  auto const __rocm_in_code_symbol = code_symbol;
+  auto const __rocm_in_attribute = attribute;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hsa_code_symbol_get_info_enter(
+      (uint64_t)((__rocm_in_code_symbol).handle),
+      (int32_t)(__rocm_in_attribute),
+      (const void*)(uintptr_t)(__rocm_in_value)); /* __ROCM_CURATED__: hsa_code_symbol_get_info */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_code_symbol_get_info, coreApiTable->hsa_code_symbol_get_info_fn(code_symbol, attribute, value));
 }
 
 /* deprecated */ hsa_status_t HSA_API hsa_code_object_iterate_symbols(
     hsa_code_object_t code_object,
-    hsa_status_t (*callback)(hsa_code_object_t code_object,
-                             hsa_code_symbol_t symbol,
-                             void *data),
-    void *data) {
-  return coreApiTable->hsa_code_object_iterate_symbols_fn(
-      code_object, callback, data);
+    hsa_status_t (*callback)(hsa_code_object_t code_object, hsa_code_symbol_t symbol, void* data),
+    void* data) {
+  auto const __rocm_in_code_object = code_object;
+  auto const __rocm_in_callback = callback;
+  auto const __rocm_in_data = data;
+  rocm_trace_emit_hsa_code_object_iterate_symbols_enter(
+      (uint64_t)((__rocm_in_code_object).handle),
+      (const void*)(uintptr_t)(__rocm_in_callback),
+      (const void*)(uintptr_t)(__rocm_in_data)); /* __ROCM_CURATED__: hsa_code_object_iterate_symbols */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_code_object_iterate_symbols, coreApiTable->hsa_code_object_iterate_symbols_fn(code_object, callback, data));
 }
 
 //===--- Executable -------------------------------------------------------===//
 
 hsa_status_t HSA_API hsa_code_object_reader_create_from_file(
-    hsa_file_t file,
-    hsa_code_object_reader_t *code_object_reader) {
-  return coreApiTable->hsa_code_object_reader_create_from_file_fn(
-      file, code_object_reader);
+    hsa_file_t file, hsa_code_object_reader_t* code_object_reader) {
+  auto const __rocm_in_file = file;
+  auto const __rocm_in_code_object_reader = code_object_reader;
+  rocm_trace_emit_hsa_code_object_reader_create_from_file_enter(
+      (__rocm_in_file),
+      (const void*)(uintptr_t)(__rocm_in_code_object_reader)); /* __ROCM_CURATED__: hsa_code_object_reader_create_from_file */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_code_object_reader_create_from_file, coreApiTable->hsa_code_object_reader_create_from_file_fn(file, code_object_reader));
 }
 
 hsa_status_t HSA_API hsa_code_object_reader_create_from_memory(
-    const void *code_object,
-    size_t size,
-    hsa_code_object_reader_t *code_object_reader) {
-  return coreApiTable->hsa_code_object_reader_create_from_memory_fn(
-      code_object, size, code_object_reader);
+    const void* code_object, size_t size, hsa_code_object_reader_t* code_object_reader) {
+  auto const __rocm_in_code_object = code_object;
+  auto const __rocm_in_size = size;
+  auto const __rocm_in_code_object_reader = code_object_reader;
+  rocm_trace_emit_hsa_code_object_reader_create_from_memory_enter(
+      (const void*)(uintptr_t)(__rocm_in_code_object),
+      (__rocm_in_size),
+      (const void*)(uintptr_t)(__rocm_in_code_object_reader)); /* __ROCM_CURATED__: hsa_code_object_reader_create_from_memory */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_code_object_reader_create_from_memory, coreApiTable->hsa_code_object_reader_create_from_memory_fn(
+                                            code_object, size, code_object_reader));
 }
 
-hsa_status_t HSA_API hsa_code_object_reader_destroy(
-    hsa_code_object_reader_t code_object_reader) {
-  return coreApiTable->hsa_code_object_reader_destroy_fn(code_object_reader);
+hsa_status_t HSA_API hsa_code_object_reader_destroy(hsa_code_object_reader_t code_object_reader) {
+  auto const __rocm_in_code_object_reader = code_object_reader;
+  rocm_trace_emit_hsa_code_object_reader_destroy_enter(
+      (uint64_t)((__rocm_in_code_object_reader).handle)); /* __ROCM_CURATED__: hsa_code_object_reader_destroy */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_code_object_reader_destroy, coreApiTable->hsa_code_object_reader_destroy_fn(code_object_reader));
 }
 
-/* deprecated */ hsa_status_t HSA_API hsa_executable_create(
-    hsa_profile_t profile,
-    hsa_executable_state_t executable_state,
-    const char *options,
-    hsa_executable_t *executable) {
-  return coreApiTable->hsa_executable_create_fn(
-      profile, executable_state, options, executable);
+/* deprecated */ hsa_status_t HSA_API hsa_executable_create(hsa_profile_t profile,
+                                                            hsa_executable_state_t executable_state,
+                                                            const char* options,
+                                                            hsa_executable_t* executable) {
+  auto const __rocm_in_profile = profile;
+  auto const __rocm_in_executable_state = executable_state;
+  auto const __rocm_in_options = options;
+  auto const __rocm_in_executable = executable;
+  rocm_trace_emit_hsa_executable_create_enter(
+      (int32_t)(__rocm_in_profile),
+      (int32_t)(__rocm_in_executable_state),
+      (const char*)(__rocm_in_options),
+      (const void*)(uintptr_t)(__rocm_in_executable)); /* __ROCM_CURATED__: hsa_executable_create */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_executable_create, coreApiTable->hsa_executable_create_fn(profile, executable_state, options, executable));
 }
 
 hsa_status_t HSA_API hsa_executable_create_alt(
-    hsa_profile_t profile,
-    hsa_default_float_rounding_mode_t default_float_rounding_mode,
-    const char *options,
-    hsa_executable_t *executable) {
-  return coreApiTable->hsa_executable_create_alt_fn(
-      profile, default_float_rounding_mode, options, executable);
+    hsa_profile_t profile, hsa_default_float_rounding_mode_t default_float_rounding_mode,
+    const char* options, hsa_executable_t* executable) {
+  auto const __rocm_in_profile = profile;
+  auto const __rocm_in_default_float_rounding_mode = default_float_rounding_mode;
+  auto const __rocm_in_options = options;
+  auto const __rocm_in_executable = executable;
+  rocm_trace_emit_hsa_executable_create_alt_enter(
+      (int32_t)(__rocm_in_profile),
+      (int32_t)(__rocm_in_default_float_rounding_mode),
+      (const char*)(__rocm_in_options),
+      (const void*)(uintptr_t)(__rocm_in_executable)); /* __ROCM_CURATED__: hsa_executable_create_alt */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_executable_create_alt, coreApiTable->hsa_executable_create_alt_fn(profile, default_float_rounding_mode, options,
+                                                 executable));
 }
 
-hsa_status_t HSA_API hsa_executable_destroy(
-    hsa_executable_t executable) {
-  return coreApiTable->hsa_executable_destroy_fn(executable);
+hsa_status_t HSA_API hsa_executable_destroy(hsa_executable_t executable) {
+  auto const __rocm_in_executable = executable;
+  rocm_trace_emit_hsa_executable_destroy_enter(
+      (uint64_t)((__rocm_in_executable).handle)); /* __ROCM_CURATED__: hsa_executable_destroy */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_executable_destroy, coreApiTable->hsa_executable_destroy_fn(executable));
 }
 
-/* deprecated */ hsa_status_t HSA_API hsa_executable_load_code_object(
-    hsa_executable_t executable,
-    hsa_agent_t agent,
-    hsa_code_object_t code_object,
-    const char *options) {
-  return coreApiTable->hsa_executable_load_code_object_fn(
-      executable, agent, code_object, options);
+/* deprecated */ hsa_status_t HSA_API hsa_executable_load_code_object(hsa_executable_t executable,
+                                                                      hsa_agent_t agent,
+                                                                      hsa_code_object_t code_object,
+                                                                      const char* options) {
+  auto const __rocm_in_executable = executable;
+  auto const __rocm_in_agent = agent;
+  auto const __rocm_in_code_object = code_object;
+  auto const __rocm_in_options = options;
+  rocm_trace_emit_hsa_executable_load_code_object_enter(
+      (uint64_t)((__rocm_in_executable).handle),
+      (uint64_t)((__rocm_in_agent).handle),
+      (uint64_t)((__rocm_in_code_object).handle),
+      (const char*)(__rocm_in_options)); /* __ROCM_CURATED__: hsa_executable_load_code_object */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_executable_load_code_object, coreApiTable->hsa_executable_load_code_object_fn(executable, agent, code_object, options));
 }
 
 hsa_status_t HSA_API hsa_executable_load_program_code_object(
-    hsa_executable_t executable,
-    hsa_code_object_reader_t code_object_reader,
-    const char *options,
-    hsa_loaded_code_object_t *loaded_code_object) {
-  return coreApiTable->hsa_executable_load_program_code_object_fn(
-      executable, code_object_reader, options, loaded_code_object);
+    hsa_executable_t executable, hsa_code_object_reader_t code_object_reader, const char* options,
+    hsa_loaded_code_object_t* loaded_code_object) {
+  auto const __rocm_in_executable = executable;
+  auto const __rocm_in_code_object_reader = code_object_reader;
+  auto const __rocm_in_options = options;
+  auto const __rocm_in_loaded_code_object = loaded_code_object;
+  rocm_trace_emit_hsa_executable_load_program_code_object_enter(
+      (uint64_t)((__rocm_in_executable).handle),
+      (uint64_t)((__rocm_in_code_object_reader).handle),
+      (const char*)(__rocm_in_options),
+      (const void*)(uintptr_t)(__rocm_in_loaded_code_object)); /* __ROCM_CURATED__: hsa_executable_load_program_code_object */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_executable_load_program_code_object, coreApiTable->hsa_executable_load_program_code_object_fn(executable, code_object_reader,
+                                                               options, loaded_code_object));
 }
 
 hsa_status_t HSA_API hsa_executable_load_agent_code_object(
-    hsa_executable_t executable,
-    hsa_agent_t agent,
-    hsa_code_object_reader_t code_object_reader,
-    const char *options,
-    hsa_loaded_code_object_t *loaded_code_object) {
-  return coreApiTable->hsa_executable_load_agent_code_object_fn(
-      executable, agent, code_object_reader, options, loaded_code_object);
+    hsa_executable_t executable, hsa_agent_t agent, hsa_code_object_reader_t code_object_reader,
+    const char* options, hsa_loaded_code_object_t* loaded_code_object) {
+  auto const __rocm_in_executable = executable;
+  auto const __rocm_in_agent = agent;
+  auto const __rocm_in_code_object_reader = code_object_reader;
+  auto const __rocm_in_options = options;
+  auto const __rocm_in_loaded_code_object = loaded_code_object;
+  rocm_trace_emit_hsa_executable_load_agent_code_object_enter(
+      (uint64_t)((__rocm_in_executable).handle),
+      (uint64_t)((__rocm_in_agent).handle),
+      (uint64_t)((__rocm_in_code_object_reader).handle),
+      (const char*)(__rocm_in_options),
+      (const void*)(uintptr_t)(__rocm_in_loaded_code_object)); /* __ROCM_CURATED__: hsa_executable_load_agent_code_object */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_executable_load_agent_code_object, coreApiTable->hsa_executable_load_agent_code_object_fn(executable, agent, code_object_reader,
+                                                             options, loaded_code_object));
 }
 
-hsa_status_t HSA_API hsa_executable_freeze(
-    hsa_executable_t executable,
-    const char *options) {
-  return coreApiTable->hsa_executable_freeze_fn(executable, options);
+hsa_status_t HSA_API hsa_executable_freeze(hsa_executable_t executable, const char* options) {
+  auto const __rocm_in_executable = executable;
+  auto const __rocm_in_options = options;
+  rocm_trace_emit_hsa_executable_freeze_enter(
+      (uint64_t)((__rocm_in_executable).handle),
+      (const char*)(__rocm_in_options)); /* __ROCM_CURATED__: hsa_executable_freeze */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_executable_freeze, coreApiTable->hsa_executable_freeze_fn(executable, options));
 }
 
-hsa_status_t HSA_API hsa_executable_get_info(
-    hsa_executable_t executable,
-    hsa_executable_info_t attribute,
-    void *value) {
-  return coreApiTable->hsa_executable_get_info_fn(executable, attribute, value);
+hsa_status_t HSA_API hsa_executable_get_info(hsa_executable_t executable,
+                                             hsa_executable_info_t attribute, void* value) {
+  auto const __rocm_in_executable = executable;
+  auto const __rocm_in_attribute = attribute;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hsa_executable_get_info_enter(
+      (uint64_t)((__rocm_in_executable).handle),
+      (int32_t)(__rocm_in_attribute),
+      (const void*)(uintptr_t)(__rocm_in_value)); /* __ROCM_CURATED__: hsa_executable_get_info */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_executable_get_info, coreApiTable->hsa_executable_get_info_fn(executable, attribute, value));
 }
 
-hsa_status_t HSA_API hsa_executable_global_variable_define(
-    hsa_executable_t executable,
-    const char *variable_name,
-    void *address) {
-  return coreApiTable->hsa_executable_global_variable_define_fn(
-      executable, variable_name, address);
+hsa_status_t HSA_API hsa_executable_global_variable_define(hsa_executable_t executable,
+                                                           const char* variable_name,
+                                                           void* address) {
+  auto const __rocm_in_executable = executable;
+  auto const __rocm_in_variable_name = variable_name;
+  auto const __rocm_in_address = address;
+  rocm_trace_emit_hsa_executable_global_variable_define_enter(
+      (uint64_t)((__rocm_in_executable).handle),
+      (const char*)(__rocm_in_variable_name),
+      (const void*)(uintptr_t)(__rocm_in_address)); /* __ROCM_CURATED__: hsa_executable_global_variable_define */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_executable_global_variable_define, coreApiTable->hsa_executable_global_variable_define_fn(executable, variable_name, address));
 }
 
-hsa_status_t HSA_API hsa_executable_agent_global_variable_define(
-    hsa_executable_t executable,
-    hsa_agent_t agent,
-    const char *variable_name,
-    void *address) {
-  return coreApiTable->hsa_executable_agent_global_variable_define_fn(
-      executable, agent, variable_name, address);
+hsa_status_t HSA_API hsa_executable_agent_global_variable_define(hsa_executable_t executable,
+                                                                 hsa_agent_t agent,
+                                                                 const char* variable_name,
+                                                                 void* address) {
+  auto const __rocm_in_executable = executable;
+  auto const __rocm_in_agent = agent;
+  auto const __rocm_in_variable_name = variable_name;
+  auto const __rocm_in_address = address;
+  rocm_trace_emit_hsa_executable_agent_global_variable_define_enter(
+      (uint64_t)((__rocm_in_executable).handle),
+      (uint64_t)((__rocm_in_agent).handle),
+      (const char*)(__rocm_in_variable_name),
+      (const void*)(uintptr_t)(__rocm_in_address)); /* __ROCM_CURATED__: hsa_executable_agent_global_variable_define */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_executable_agent_global_variable_define, coreApiTable->hsa_executable_agent_global_variable_define_fn(executable, agent, variable_name,
+                                                                   address));
 }
 
-hsa_status_t HSA_API hsa_executable_readonly_variable_define(
-    hsa_executable_t executable,
-    hsa_agent_t agent,
-    const char *variable_name,
-    void *address) {
-  return coreApiTable->hsa_executable_readonly_variable_define_fn(
-      executable, agent, variable_name, address);
+hsa_status_t HSA_API hsa_executable_readonly_variable_define(hsa_executable_t executable,
+                                                             hsa_agent_t agent,
+                                                             const char* variable_name,
+                                                             void* address) {
+  auto const __rocm_in_executable = executable;
+  auto const __rocm_in_agent = agent;
+  auto const __rocm_in_variable_name = variable_name;
+  auto const __rocm_in_address = address;
+  rocm_trace_emit_hsa_executable_readonly_variable_define_enter(
+      (uint64_t)((__rocm_in_executable).handle),
+      (uint64_t)((__rocm_in_agent).handle),
+      (const char*)(__rocm_in_variable_name),
+      (const void*)(uintptr_t)(__rocm_in_address)); /* __ROCM_CURATED__: hsa_executable_readonly_variable_define */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_executable_readonly_variable_define, coreApiTable->hsa_executable_readonly_variable_define_fn(executable, agent, variable_name,
+                                                               address));
 }
 
-hsa_status_t HSA_API hsa_executable_validate(
-    hsa_executable_t executable,
-    uint32_t *result) {
-  return coreApiTable->hsa_executable_validate_fn(executable, result);
+hsa_status_t HSA_API hsa_executable_validate(hsa_executable_t executable, uint32_t* result) {
+  auto const __rocm_in_executable = executable;
+  auto const __rocm_in_result = result;
+  rocm_trace_emit_hsa_executable_validate_enter(
+      (uint64_t)((__rocm_in_executable).handle),
+      (const void*)(uintptr_t)(__rocm_in_result)); /* __ROCM_CURATED__: hsa_executable_validate */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_executable_validate, coreApiTable->hsa_executable_validate_fn(executable, result));
 }
 
-hsa_status_t HSA_API hsa_executable_validate_alt(
-    hsa_executable_t executable,
-    const char *options,
-    uint32_t *result) {
-  return coreApiTable->hsa_executable_validate_alt_fn(
-      executable, options, result);
+hsa_status_t HSA_API hsa_executable_validate_alt(hsa_executable_t executable, const char* options,
+                                                 uint32_t* result) {
+  auto const __rocm_in_executable = executable;
+  auto const __rocm_in_options = options;
+  auto const __rocm_in_result = result;
+  rocm_trace_emit_hsa_executable_validate_alt_enter(
+      (uint64_t)((__rocm_in_executable).handle),
+      (const char*)(__rocm_in_options),
+      (const void*)(uintptr_t)(__rocm_in_result)); /* __ROCM_CURATED__: hsa_executable_validate_alt */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_executable_validate_alt, coreApiTable->hsa_executable_validate_alt_fn(executable, options, result));
 }
 
 /* deprecated */ hsa_status_t HSA_API hsa_executable_get_symbol(
-    hsa_executable_t executable,
-    const char *module_name,
-    const char *symbol_name,
-    hsa_agent_t agent,
-    int32_t call_convention,
-    hsa_executable_symbol_t *symbol) {
-  return coreApiTable->hsa_executable_get_symbol_fn(
-      executable, module_name, symbol_name, agent, call_convention, symbol);
+    hsa_executable_t executable, const char* module_name, const char* symbol_name,
+    hsa_agent_t agent, int32_t call_convention, hsa_executable_symbol_t* symbol) {
+  auto const __rocm_in_executable = executable;
+  auto const __rocm_in_module_name = module_name;
+  auto const __rocm_in_symbol_name = symbol_name;
+  auto const __rocm_in_agent = agent;
+  auto const __rocm_in_call_convention = call_convention;
+  auto const __rocm_in_symbol = symbol;
+  rocm_trace_emit_hsa_executable_get_symbol_enter(
+      (uint64_t)((__rocm_in_executable).handle),
+      (const char*)(__rocm_in_module_name),
+      (const char*)(__rocm_in_symbol_name),
+      (uint64_t)((__rocm_in_agent).handle),
+      (__rocm_in_call_convention),
+      (const void*)(uintptr_t)(__rocm_in_symbol)); /* __ROCM_CURATED__: hsa_executable_get_symbol */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_executable_get_symbol, coreApiTable->hsa_executable_get_symbol_fn(executable, module_name, symbol_name, agent,
+                                                 call_convention, symbol));
 }
 
-hsa_status_t HSA_API hsa_executable_get_symbol_by_name(
-    hsa_executable_t executable,
-    const char *symbol_name,
-    const hsa_agent_t *agent,
-    hsa_executable_symbol_t *symbol) {
-  return coreApiTable->hsa_executable_get_symbol_by_name_fn(
-      executable, symbol_name, agent, symbol);
+hsa_status_t HSA_API hsa_executable_get_symbol_by_name(hsa_executable_t executable,
+                                                       const char* symbol_name,
+                                                       const hsa_agent_t* agent,
+                                                       hsa_executable_symbol_t* symbol) {
+  auto const __rocm_in_executable = executable;
+  auto const __rocm_in_symbol_name = symbol_name;
+  auto const __rocm_in_agent = agent;
+  auto const __rocm_in_symbol = symbol;
+  rocm_trace_emit_hsa_executable_get_symbol_by_name_enter(
+      (uint64_t)((__rocm_in_executable).handle),
+      (const char*)(__rocm_in_symbol_name),
+      (const void*)(uintptr_t)(__rocm_in_agent),
+      (const void*)(uintptr_t)(__rocm_in_symbol)); /* __ROCM_CURATED__: hsa_executable_get_symbol_by_name */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_executable_get_symbol_by_name, coreApiTable->hsa_executable_get_symbol_by_name_fn(executable, symbol_name, agent, symbol));
 }
 
-hsa_status_t HSA_API hsa_executable_symbol_get_info(
-    hsa_executable_symbol_t executable_symbol,
-    hsa_executable_symbol_info_t attribute,
-    void *value) {
-  return coreApiTable->hsa_executable_symbol_get_info_fn(
-      executable_symbol, attribute, value);
+hsa_status_t HSA_API hsa_executable_symbol_get_info(hsa_executable_symbol_t executable_symbol,
+                                                    hsa_executable_symbol_info_t attribute,
+                                                    void* value) {
+  auto const __rocm_in_executable_symbol = executable_symbol;
+  auto const __rocm_in_attribute = attribute;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hsa_executable_symbol_get_info_enter(
+      (uint64_t)((__rocm_in_executable_symbol).handle),
+      (int32_t)(__rocm_in_attribute),
+      (const void*)(uintptr_t)(__rocm_in_value)); /* __ROCM_CURATED__: hsa_executable_symbol_get_info */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_executable_symbol_get_info, coreApiTable->hsa_executable_symbol_get_info_fn(executable_symbol, attribute, value));
 }
 
-/* deprecated */ hsa_status_t HSA_API hsa_executable_iterate_symbols(
-    hsa_executable_t executable,
-    hsa_status_t (*callback)(hsa_executable_t executable,
-                             hsa_executable_symbol_t symbol,
-                             void *data),
-    void *data) {
-  return coreApiTable->hsa_executable_iterate_symbols_fn(
-      executable, callback, data);
+/* deprecated */ hsa_status_t HSA_API
+hsa_executable_iterate_symbols(hsa_executable_t executable,
+                               hsa_status_t (*callback)(hsa_executable_t executable,
+                                                        hsa_executable_symbol_t symbol, void* data),
+                               void* data) {
+  auto const __rocm_in_executable = executable;
+  auto const __rocm_in_callback = callback;
+  auto const __rocm_in_data = data;
+  rocm_trace_emit_hsa_executable_iterate_symbols_enter(
+      (uint64_t)((__rocm_in_executable).handle),
+      (const void*)(uintptr_t)(__rocm_in_callback),
+      (const void*)(uintptr_t)(__rocm_in_data)); /* __ROCM_CURATED__: hsa_executable_iterate_symbols */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_executable_iterate_symbols, coreApiTable->hsa_executable_iterate_symbols_fn(executable, callback, data));
 }
 
 hsa_status_t HSA_API hsa_executable_iterate_agent_symbols(
-    hsa_executable_t executable,
-    hsa_agent_t agent,
-    hsa_status_t (*callback)(hsa_executable_t exec,
-                             hsa_agent_t agent,
-                             hsa_executable_symbol_t symbol,
-                             void *data),
-    void *data) {
-  return coreApiTable->hsa_executable_iterate_agent_symbols_fn(
-      executable, agent, callback, data);
+    hsa_executable_t executable, hsa_agent_t agent,
+    hsa_status_t (*callback)(hsa_executable_t exec, hsa_agent_t agent,
+                             hsa_executable_symbol_t symbol, void* data),
+    void* data) {
+  auto const __rocm_in_executable = executable;
+  auto const __rocm_in_agent = agent;
+  auto const __rocm_in_callback = callback;
+  auto const __rocm_in_data = data;
+  rocm_trace_emit_hsa_executable_iterate_agent_symbols_enter(
+      (uint64_t)((__rocm_in_executable).handle),
+      (uint64_t)((__rocm_in_agent).handle),
+      (const void*)(uintptr_t)(__rocm_in_callback),
+      (const void*)(uintptr_t)(__rocm_in_data)); /* __ROCM_CURATED__: hsa_executable_iterate_agent_symbols */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_executable_iterate_agent_symbols, coreApiTable->hsa_executable_iterate_agent_symbols_fn(executable, agent, callback, data));
 }
 
 hsa_status_t HSA_API hsa_executable_iterate_program_symbols(
     hsa_executable_t executable,
-    hsa_status_t (*callback)(hsa_executable_t exec,
-                             hsa_executable_symbol_t symbol,
-                             void *data),
-    void *data) {
-  return coreApiTable->hsa_executable_iterate_program_symbols_fn(
-      executable, callback, data);
+    hsa_status_t (*callback)(hsa_executable_t exec, hsa_executable_symbol_t symbol, void* data),
+    void* data) {
+  auto const __rocm_in_executable = executable;
+  auto const __rocm_in_callback = callback;
+  auto const __rocm_in_data = data;
+  rocm_trace_emit_hsa_executable_iterate_program_symbols_enter(
+      (uint64_t)((__rocm_in_executable).handle),
+      (const void*)(uintptr_t)(__rocm_in_callback),
+      (const void*)(uintptr_t)(__rocm_in_data)); /* __ROCM_CURATED__: hsa_executable_iterate_program_symbols */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_executable_iterate_program_symbols, coreApiTable->hsa_executable_iterate_program_symbols_fn(executable, callback, data));
 }
 
 //===--- Runtime Notifications --------------------------------------------===//
