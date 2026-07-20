@@ -135,23 +135,29 @@ TEST_F(PathTest, IsLink_SymbolicLink)
 
 TEST_F(PathTest, IsLink_NonexistentPath) { EXPECT_FALSE(is_link("/nonexistent/path")); }
 
-TEST_F(PathTest, Readlink_SymbolicLink)
+TEST_F(PathTest, ReadSymlink_SymbolicLink)
 {
-    std::string target    = create_file("readlink_target.txt");
-    std::string link_path = create_symlink(target, "readlink_link");
-    EXPECT_EQ(readlink(link_path), target);
+    std::string target    = create_file("read_symlink_target.txt");
+    std::string link_path = create_symlink(target, "read_symlink_link");
+    EXPECT_EQ(read_symlink(link_path), target);
 }
 
-TEST_F(PathTest, Readlink_NotALink)
+TEST_F(PathTest, ReadSymlink_NotALink)
 {
     std::string file_path = create_file("not_a_link.txt");
-    EXPECT_EQ(readlink(file_path), file_path);
+    EXPECT_EQ(read_symlink(file_path), file_path);
 }
 
-TEST_F(PathTest, Readlink_NonexistentPath)
+TEST_F(PathTest, ReadSymlink_NonexistentPath)
 {
     std::string path = "/nonexistent/path";
-    EXPECT_EQ(readlink(path), path);
+    EXPECT_EQ(read_symlink(path), path);
+}
+
+TEST_F(PathTest, ReadSymlink_BrokenSymlink)
+{
+    std::string link_path = create_symlink("/nonexistent/target", "broken_read_symlink");
+    EXPECT_EQ(read_symlink(link_path), "/nonexistent/target");
 }
 
 TEST_F(PathTest, Realpath_RelativePath)
