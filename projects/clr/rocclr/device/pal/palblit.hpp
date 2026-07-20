@@ -36,7 +36,7 @@ class DmaBlitManager : public device::HostBlitManager {
   virtual ~DmaBlitManager() {}
 
   //! Creates DmaBlitManager object
-  virtual bool create(amd::Device& device) { return true; }
+  virtual bool create([[maybe_unused]] amd::Device& device) { return true; }
 
   //! Copies a buffer object to system memory
   virtual bool readBuffer(
@@ -162,41 +162,6 @@ class DmaBlitManager : public device::HostBlitManager {
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
   ) const;
-
-  //! Stream memory write operation - Write a 'value' at 'memory'.
-  virtual bool streamOpsWrite(device::Memory& memory,  //!< Memory to write the 'value'
-                              uint64_t value, size_t offset, size_t sizeBytes) const {
-    assert(!"Unimplemented");
-    return false;
-  }
-
-  //! Stream memory increment operation - Increment memory by a 'value'.
-  virtual bool streamOpsIncrement(device::Memory& memory, uint64_t value, size_t offset,
-                                  size_t sizeBytes) const {
-    assert(!"Unimplemented");
-    return false;
-  }
-
-  //! Stream memory decrement operation - Decrement memory by a 'value'.
-  virtual bool streamOpsDecrement(device::Memory& memory, uint64_t value, size_t offset,
-                                  size_t sizeBytes) const {
-    assert(!"Unimplemented");
-    return false;
-  }
-
-  //! Stream memory ops- Waits for a 'value' at 'memory' and wait is released based on compare op.
-  virtual bool streamOpsWait(device::Memory& memory,  //!< Memory to compare the 'value' against
-                             uint64_t value, size_t offset, size_t sizeBytes, uint64_t flags,
-                             uint64_t mask) const {
-    assert(!"Unimplemented");
-    return false;
-  }
-
-  virtual bool initHeap(device::Memory* heap_to_initialize, device::Memory* initial_blocks,
-                        uint heap_size, uint number_of_initial_blocks) const {
-    assert(!"Unimplemented");
-    return false;
-  }
 
  protected:
   static constexpr uint MaxPinnedBuffers = 4;
@@ -469,7 +434,9 @@ class KernelBlitManager : public DmaBlitManager {
                         uint heap_size, uint number_of_initial_blocks) const;
 
   //! Batch memory ops- Submits batch of streamWaits and streamWrite operations.
-  virtual bool batchMemOps(const void* paramArray, size_t paramSize, uint32_t count) const {
+  virtual bool batchMemOps([[maybe_unused]] const void* paramArray,
+                           [[maybe_unused]] size_t paramSize,
+                           [[maybe_unused]] uint32_t count) const {
     assert(!"Unimplemented");
     return false;
   }
