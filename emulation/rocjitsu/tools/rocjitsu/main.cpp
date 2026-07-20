@@ -45,7 +45,8 @@ using namespace rocjitsu;
 
 namespace {
 
-int run_daemon_server(const char *config_path, int ready_fd = -1) {
+int run_daemon_server(const char *config_path, const std::string &socket_path = {},
+                      int ready_fd = -1) {
   sigset_t daemon_signals;
   sigemptyset(&daemon_signals);
   sigaddset(&daemon_signals, SIGINT);
@@ -59,7 +60,8 @@ int run_daemon_server(const char *config_path, int ready_fd = -1) {
   }
 
   rj_daemon_t *daemon = nullptr;
-  const std::string socket_path = rpc_default_socket_path();
+  const std::string resolved_socket_path =
+      socket_path.empty() ? rpc_default_socket_path() : socket_path;
   std::ifstream config_stream(config_path);
   const std::string json((std::istreambuf_iterator<char>(config_stream)),
                          std::istreambuf_iterator<char>());
@@ -71,9 +73,10 @@ int run_daemon_server(const char *config_path, int ready_fd = -1) {
     sigprocmask(SIG_SETMASK, &previous_signals, nullptr);
     return 1;
   }
-  if (rj_daemon_start(json.c_str(), socket_path.c_str(), &daemon) != ROCJITSU_STATUS_SUCCESS) {
+  if (rj_daemon_start(json.c_str(), resolved_socket_path.c_str(), &daemon) !=
+      ROCJITSU_STATUS_SUCCESS) {
     std::cerr << std::format("rocjitsu: failed to start daemon from {} at {}\n", config_path,
-                             socket_path);
+                             resolved_socket_path);
     if (ready_fd >= 0)
       close(ready_fd);
     sigprocmask(SIG_SETMASK, &previous_signals, nullptr);
@@ -105,6 +108,10 @@ int run_daemon_server(const char *config_path, int ready_fd = -1) {
 
   const bool failed = rj_daemon_status(daemon) == RJ_DAEMON_STATUS_ERROR;
   rj_daemon_stop(daemon);
+  if (!socket_path.empty()) {
+    std::error_code remove_error;
+    std::filesystem::remove(std::filesystem::path(socket_path).parent_path(), remove_error);
+  }
   sigprocmask(SIG_SETMASK, &previous_signals, nullptr);
   return failed ? 1 : 0;
 }
@@ -170,8 +177,8 @@ void prepend_env_path(const char *name, const std::string &value) {
   setenv(name, value.c_str(), 1);
 }
 
-bool write_config_file(const std::string &config_path) {
-  auto cfg_file = rpc_default_config_file_path();
+bool write_config_file(const std::string &config_path, pid_t pid) {
+  auto cfg_file = rpc_invocation_config_file_path(pid);
   std::filesystem::create_directories(std::filesystem::path(cfg_file).parent_path());
   std::ofstream ofs(cfg_file);
   if (!ofs)
@@ -180,9 +187,54 @@ bool write_config_file(const std::string &config_path) {
   return ofs.good();
 }
 
-void cleanup_local_runtime_files() {
-  auto cfg_file = rpc_default_config_file_path();
-  unlink(cfg_file.c_str());
+void cleanup_runtime_files(pid_t pid) {
+  std::error_code error;
+  std::filesystem::remove_all(rpc_invocation_runtime_dir(pid), error);
+}
+
+// Best-effort reap of per-PID runtime dirs left behind by prior invocations that
+// exited via execvp (which never returns, so cleanup_runtime_files does not run).
+// Each numeric <pid> subdir of the runtime root is removed if that PID is no
+// longer alive, so a recycled PID cannot inherit a stale config_path/daemon.sock.
+void reap_stale_runtime_dirs() {
+  // Never iterate an empty root: directory_iterator("") scans the CWD, which would
+  // let this reaper remove_all unrelated numeric directories. rpc_default_runtime_dir()
+  // already treats a set-but-empty $ROCJITSU_RUNTIME_DIR as unset, but guard here too
+  // since the loop body deletes.
+  const std::string root = rpc_default_runtime_dir();
+  if (root.empty())
+    return;
+  // Advance the iterator with an error_code (not the throwing operator++): another
+  // launcher may remove_all an entry concurrently, and a throw here would abort the
+  // launcher before exec. Best-effort — any filesystem error just ends the scan.
+  std::error_code error;
+  std::filesystem::directory_iterator it(root, error);
+  const std::filesystem::directory_iterator end;
+  for (; !error && it != end; it.increment(error)) {
+    // Only real per-PID directories are reapable. Use symlink_status() (which does
+    // NOT follow the link) and require a plain directory: is_directory() follows
+    // symlinks, so a numeric symlink pointing at a directory would otherwise pass
+    // and have its target remove_all'd — never chase a symlink out of the runtime
+    // root.
+    std::error_code status_error;
+    auto status = std::filesystem::symlink_status(it->path(), status_error);
+    if (status_error || status.type() != std::filesystem::file_type::directory)
+      continue;
+    const std::string name = it->path().filename().string();
+    if (!std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isdigit(c); }))
+      continue;
+    pid_t pid = 0;
+    auto [ptr, parse_error] = std::from_chars(name.data(), name.data() + name.size(), pid);
+    if (parse_error != std::errc{} || ptr != name.data() + name.size() || pid <= 0)
+      continue;
+    // kill(pid, 0) probes existence without signalling: ESRCH means the process
+    // is gone and its runtime dir is safe to reclaim. EPERM/success mean it is
+    // still alive (possibly another user's PID), so leave it alone.
+    if (kill(pid, 0) != 0 && errno == ESRCH) {
+      std::error_code remove_error;
+      std::filesystem::remove_all(it->path(), remove_error);
+    }
+  }
 }
 
 struct KfdGpuOrdinal {
@@ -466,6 +518,11 @@ int main(int argc, char *argv[]) {
 
   bool has_app = (separator_idx >= 0 && separator_idx + 1 < argc);
 
+  // Reclaim per-PID runtime dirs orphaned by prior runs (execvp never returns, so
+  // those invocations could not clean up after themselves). Done for every mode,
+  // including daemon-only, before this invocation creates its own directory.
+  reap_stale_runtime_dirs();
+
   if (daemon_mode && !has_app)
     return run_daemon_server(abs_config.c_str());
 
@@ -498,6 +555,8 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  pid_t my_pid = getpid();
+
   if (attach_mode) {
     auto sock_path = rpc_default_socket_path();
     if (!std::filesystem::exists(sock_path)) {
@@ -505,9 +564,19 @@ int main(int argc, char *argv[]) {
       return 1;
     }
   } else if (daemon_mode) {
+    auto socket_path = rpc_invocation_socket_path(my_pid);
+    std::error_code directory_error;
+    std::filesystem::create_directories(rpc_invocation_runtime_dir(my_pid), directory_error);
+    if (directory_error) {
+      std::cerr << std::format("rocjitsu: failed to create runtime directory: {}\n",
+                               directory_error.message());
+      return 1;
+    }
+
     int ready_pipe[2];
     if (pipe(ready_pipe) != 0) {
       std::cerr << std::format("rocjitsu: pipe failed: {}\n", strerror(errno));
+      cleanup_runtime_files(my_pid);
       return 1;
     }
 
@@ -516,13 +585,14 @@ int main(int argc, char *argv[]) {
       std::cerr << std::format("rocjitsu: fork failed: {}\n", strerror(errno));
       close(ready_pipe[0]);
       close(ready_pipe[1]);
+      cleanup_runtime_files(my_pid);
       return 1;
     }
 
     if (daemon_pid == 0) {
       close(ready_pipe[0]);
       prctl(PR_SET_PDEATHSIG, SIGTERM);
-      return run_daemon_server(abs_config.c_str(), ready_pipe[1]);
+      return run_daemon_server(abs_config.c_str(), socket_path, ready_pipe[1]);
     }
 
     close(ready_pipe[1]);
@@ -538,11 +608,13 @@ int main(int argc, char *argv[]) {
       std::cerr << "rocjitsu: daemon did not become ready\n";
       kill(daemon_pid, SIGKILL);
       waitpid(daemon_pid, nullptr, 0);
+      cleanup_runtime_files(my_pid);
       return 1;
     }
   } else {
-    if (!write_config_file(abs_config)) {
+    if (!write_config_file(abs_config, my_pid)) {
       std::cerr << "rocjitsu: failed to write config file\n";
+      cleanup_runtime_files(my_pid);
       return 1;
     }
   }
@@ -556,10 +628,14 @@ int main(int argc, char *argv[]) {
     setenv("HSA_TOOLS_DISABLE_REGISTER", "1", 1);
     setenv("HSA_TOOLS_LIB", hooks_path.c_str(), 1);
   }
+  // Export the invocation runtime dir so every descendant (including grandchild
+  // processes spawned through wrappers like ctest) inherits the exact directory
+  // holding config_path/daemon.sock. Attach mode creates no such dir.
+  if (!attach_mode)
+    setenv(rocjitsu::kRpcInvocationDirEnv, rpc_invocation_runtime_dir(my_pid).c_str(), 1);
   execvp(app_argv[0], app_argv);
 
   std::cerr << std::format("rocjitsu: execvp failed: {}\n", strerror(errno));
-  if (!daemon_mode && !attach_mode)
-    cleanup_local_runtime_files();
+  cleanup_runtime_files(my_pid);
   return 1;
 }

@@ -197,7 +197,9 @@ ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(const hsa::AgentCache& 
         aql_params.push_back(param);
     }
 
-    if(params.triple_buffering)
+    // GPU-side NUM_BUFFERS (how many ring buffers HW rotates through). Independent of
+    // the CPU-side staging buffer count exposed via the public NUM_BUFFERS parameter.
+    if(params.num_buffers > 1)
         aql_params.push_back({static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(
                                   AQLPROFILE_ATT_PARAMETER_NAME_NUM_BUFFERS),
                               {3}});

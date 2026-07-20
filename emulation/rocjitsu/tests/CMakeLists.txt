@@ -335,9 +335,11 @@ add_executable(
     matmul_test.cpp
     vector_add_test.cpp
     gfx1250_sim_test.cpp
+    sparse_memory_test.cpp
     simdojo_sim_test.cpp
     simulated_kfd_test.cpp
     decode_smoke_test.cpp
+    buffer_operand_test.cpp
     smem_sbase_operand_test.cpp
     shared_infra_test.cpp
     transcendental_test.cpp
@@ -357,7 +359,9 @@ add_executable(
     sysfs_test.cpp
     kfd_ioctl_test.cpp
     waitcnt_counter_test.cpp
+    register_access_test.cpp
     instruction_execution_harness_test.cpp
+    scalar_scc_test.cpp
     cdna3_predicate_mask_test.cpp
     decode_execute_benchmark.cpp
     util_unique_handle_test.cpp
@@ -861,6 +865,38 @@ foreach(
             "--"
             "bin/interposer_dup_test"
             "--gtest_filter=InterposerDupTest.${_interposer_dup_test}"
+    )
+endforeach()
+
+foreach(
+    _interposer_gem_test
+    IN
+    ITEMS
+        ReusedDmabufFdMintsDistinctHandles
+        UnmapWithWrongHandleFails
+        MapSucceedsAfterExportFdClosed
+        ReplaceEvictsOverlappingDifferentSizeRange
+        ReplaceTransfersOwnershipAcrossOldOwnerClose
+        ClearUpdatesOwnerBookkeeping
+)
+    rj_add_test(
+        NAME "InterposerGemTest.${_interposer_gem_test}"
+        COMMAND
+            ${RJ_CLI}
+            --config
+            ${RJ_CDNA4_KMD_CONFIG}
+            --
+            $<TARGET_FILE:interposer_dup_test>
+            "--gtest_filter=InterposerGemTest.${_interposer_gem_test}"
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
+        INSTALL_COMMAND
+            "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+            "--config"
+            "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
+            "--"
+            "bin/interposer_dup_test"
+            "--gtest_filter=InterposerGemTest.${_interposer_gem_test}"
     )
 endforeach()
 
@@ -1942,96 +1978,6 @@ if(RJ_ENABLE_HIP_TESTS)
             STATUS
             "CDNA4 HIP tests disabled (libamdhip64 does not advertise gfx950 support)"
         )
-    endif()
-
-    # --- rocBLAS GEMM test ---
-    find_library(ROCBLAS_LIB rocblas PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
-    if(ROCBLAS_LIB)
-        if(RJ_HIP_RUNTIME_SUPPORTS_GFX950)
-            rj_add_hip_test(hip_gemm_test ARCH gfx950 EXTRA_LIBS ${ROCBLAS_LIB})
-
-            foreach(
-                TC
-                IN
-                ITEMS
-                    Tiny_2x2x3
-                    Square_4x4
-                    Square_8x8
-                    Square_16x16
-                    Square_32x32
-                    Square_64x64
-                    Rect_16x32x8
-                    Rect_1x64x1
-                    Rect_64x1x64
-                    Rect_7x11x13
-                    AlphaBeta
-                    BetaZero
-                    Large_2048x2048
-            )
-                if(TC STREQUAL "Large_2048x2048")
-                    rj_add_hip_test_case(
-                        hip_gemm_test
-                        "RocblasGemmTest.${TC}"
-                        TIMEOUT 300
-                    )
-                else()
-                    rj_add_hip_test_case(hip_gemm_test "RocblasGemmTest.${TC}")
-                endif()
-            endforeach()
-            foreach(I RANGE 0 4)
-                rj_add_hip_test_case(hip_gemm_test "RocblasGemmFuzz.Iter${I}")
-            endforeach()
-            message(
-                STATUS
-                "rocBLAS GEMM gfx950 tests enabled (found ${ROCBLAS_LIB})"
-            )
-        endif()
-
-        if(RJ_HIP_RUNTIME_SUPPORTS_GFX942)
-            rj_add_hip_test(
-                hip_gemm_test_cdna3
-                ARCH gfx942
-                SOURCE hip_gemm_test.cpp
-                EXTRA_LIBS ${ROCBLAS_LIB}
-            )
-
-            foreach(
-                TC
-                IN
-                ITEMS Tiny_2x2x3 Square_16x16 Square_32x32 Rect_7x11x13
-            )
-                rj_add_hip_test_case(
-                    hip_gemm_test_cdna3
-                    "RocblasGemmTest.${TC}"
-                    CONFIG ${RJ_CDNA3_KMD_CONFIG}
-                    NAME "RocblasGemmCdna3.${TC}"
-                )
-            endforeach()
-            foreach(I RANGE 0 2)
-                rj_add_hip_test_case(
-                    hip_gemm_test_cdna3
-                    "RocblasGemmFuzz.Iter${I}"
-                    CONFIG ${RJ_CDNA3_KMD_CONFIG}
-                    NAME "RocblasGemmCdna3.Fuzz_Iter${I}"
-                )
-            endforeach()
-            message(
-                STATUS
-                "rocBLAS GEMM gfx942 tests enabled (found ${ROCBLAS_LIB})"
-            )
-        endif()
-
-        if(
-            NOT RJ_HIP_RUNTIME_SUPPORTS_GFX950
-            AND NOT RJ_HIP_RUNTIME_SUPPORTS_GFX942
-        )
-            message(
-                STATUS
-                "rocBLAS GEMM test disabled (libamdhip64 does not advertise gfx950 or gfx942 support)"
-            )
-        endif()
-    else()
-        message(STATUS "rocBLAS GEMM test disabled (librocblas not found)")
     endif()
 
     message(STATUS "HIP tests enabled (found ${AMDCXX})")

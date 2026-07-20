@@ -234,6 +234,7 @@ private:
 
     if (rj_vm_device_open(daemon_->vm, client_pid_, &process_id_) != ROCJITSU_STATUS_SUCCESS) {
       RpcHeader response{};
+      response.opcode = header.opcode;
       response.request_id = header.request_id;
       response.result = -1;
       rpc_send_exact(client_fd_, &response, sizeof(response));
@@ -264,6 +265,7 @@ private:
     handshake.drm_path_len = static_cast<uint32_t>(drm_length);
 
     RpcHeader response{};
+    response.opcode = header.opcode;
     response.request_id = header.request_id;
     response.payload_bytes =
         static_cast<uint32_t>(sizeof(handshake) + topology_length + drm_length);
@@ -281,6 +283,7 @@ private:
 
     close_device();
     RpcHeader response{};
+    response.opcode = header.opcode;
     response.request_id = header.request_id;
     rpc_send_exact(client_fd_, &response, sizeof(response));
     return RequestDisposition::Disconnect;
@@ -304,8 +307,9 @@ private:
       return RequestDisposition::Disconnect;
 
     RpcHeader response{};
+    response.opcode = header.opcode;
     response.request_id = header.request_id;
-    response.result = reinterpret_cast<void *>(map.mapped_addr) == MAP_FAILED ? -errno : 0;
+    response.result = reinterpret_cast<void *>(map.mapped_addr) == MAP_FAILED ? -map.map_errno : 0;
     response.payload_bytes = sizeof(RpcMmapResponse);
     RpcMmapResponse map_response{.mapped_addr = map.mapped_addr};
     uint8_t response_buffer[sizeof(response) + sizeof(map_response)];
@@ -336,6 +340,7 @@ private:
     if (rj_vm_device_unmap_as(daemon_->vm, process_id_, &unmap) != ROCJITSU_STATUS_SUCCESS)
       return RequestDisposition::Disconnect;
     RpcHeader response{};
+    response.opcode = header.opcode;
     response.request_id = header.request_id;
     return rpc_send_exact(client_fd_, &response, sizeof(response)) ? RequestDisposition::Continue
                                                                    : RequestDisposition::Disconnect;
@@ -477,6 +482,9 @@ void remove_owned_socket(const rj_daemon_t *daemon) {
 void teardown(rj_daemon_t *daemon) {
   daemon->status.store(RJ_DAEMON_STATUS_STOPPING, std::memory_order_release);
   interrupt_transport(daemon);
+  // Wake clients blocked inside an infinite-timeout device operation before
+  // joining their threads. Transport shutdown alone only interrupts socket I/O.
+  rj_vm_close_all_devices(daemon->vm);
   daemon->accept_thread.request_stop();
   if (daemon->accept_thread.joinable())
     daemon->accept_thread.join();

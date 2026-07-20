@@ -78,8 +78,6 @@ enum class AmdGpuMachineType : uint8
     Gfx1102 = 0x47,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1102
     Gfx1103 = 0x44,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1103
     Gfx1150 = 0x43,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1150
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 945
-#endif
     Gfx1151 = 0x4A,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1151
     Gfx1152 = 0x55,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1152
     Gfx1153 = 0x58,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1153
@@ -196,6 +194,11 @@ constexpr const char* PipelineAbiSymbolNameStrings[] =
     "_amdgpu_reserved40",
     "color_export_shader",
     "color_export_shader_dual_source",
+    "_amdgpu_api_vs_body",
+    "_amdgpu_hw_hs_body",            ///< For TCS
+    "_amdgpu_api_ds_body",           ///< For TES
+    "_amdgpu_hw_gs_body",
+    "_amdgpu_hw_gs_exports",
 };
 
 /// Pipeline category.
@@ -296,6 +299,39 @@ enum HardwareStageFlagBits : uint32
     HwShaderCs = (1 << uint32(HardwareStage::Cs)),
 };
 
+/// Used to represent shader stage in Shader Objects.
+enum class ShaderObjectType : uint32
+{
+    Task,               ///< API task shader
+    VertexLayout,       ///< Vertex layout elf/ICodeObject, used in DXCP GPP
+    Vs,                 ///< API vertex shader
+    VsExport,           ///< API vertex shader export
+    Hs,                 ///< API tcs shader
+    Ds,                 ///< API tes shader
+    DsExport,           ///< API tes shader export
+    Gs,                 ///< API geometry shader
+    PreRast,            ///< API pre-rasterization elf/ICodeObject, used in GPP/GPL
+    Mesh,               ///< API mesh shader
+    Ps,                 ///< API pixel shader
+    ColorExport,        ///< API color export shader
+    ColorExportDualSrc, ///< API color export dual source
+    Count
+};
+constexpr uint32 ShaderObjectTypeCount = static_cast<uint32>(ShaderObjectType::Count);
+static_assert(ShaderObjectTypeCount <= 32, "ShaderObjectType::Count exceeds uint32 bitmask capacity");
+
+/// Used to represent pre-rasterization partial pipeline type in Shader Objects.
+enum class ShaderObjectPipelineType : uint32
+{
+    Undefined = 0, ///< Used for NON-shaderobject pre-rasterization / GPP & GPL pipelines.
+    Vs        = (1 << uint32(ShaderObjectType::Vs)) | (1 << uint32(ShaderObjectType::VsExport)),
+    VsGs      = (1 << uint32(ShaderObjectType::Vs)) | (1 << uint32(ShaderObjectType::Gs)),
+    VsHsDs    = (1 << uint32(ShaderObjectType::Vs)) | (1 << uint32(ShaderObjectType::Hs)) |
+                (1 << uint32(ShaderObjectType::Ds)) | (1 << uint32(ShaderObjectType::DsExport)),
+    VsHsDsGs  = (1 << uint32(ShaderObjectType::Vs)) | (1 << uint32(ShaderObjectType::Hs)) |
+                (1 << uint32(ShaderObjectType::Ds)) | (1 << uint32(ShaderObjectType::Gs))
+};
+
 /// Used along with the symbol name strings to identify the symbol type.
 enum class PipelineSymbolType : uint32
 {
@@ -354,6 +390,11 @@ enum class PipelineSymbolType : uint32
     Reserved40,
     PsColorExportEntry,///< PS color export shader entry point. Optional.
     PsColorExportDualSourceEntry,///< PS color export shader with dual source on entry point. Optional.
+    ApiVsBody,         ///< ShaderObject VS entry point. Must exists in Shader Object based pipeline.
+    HwHsBody,          ///< ShaderObject TCS entry point. Optional.
+    ApiDsBody,         ///< ShaderObject TES entry point. Optional.
+    HwGsBody,          ///< ShaderObject GS entry point. Optional.
+    HwGsExports,       ///< ShaderObject GS Export entry point. Optional.
     Count,
 
     ShaderMainEntry   = LsMainEntry,        ///< Shorthand for the first shader's entry point
@@ -406,8 +447,17 @@ union ApiCompositeDataValue
         uint32 primInfo           : 2; ///< Number of vertex per primitive
         uint32 numSamples         : 5; ///< Number of coverage samples
         uint32 dynamicSourceBlend : 1; ///< Whether to enable dynamic dual source blend.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 995
         uint32 rasterStream       : 3; ///< Which vertex stream to rasterize. Reserved for future.
-        uint32 reserved           : 21;
+#else
+        uint32 rasterStream       : 2; ///< Which vertex stream to rasterize.
+#endif
+        uint32 patchControlPoints : 6; ///< Number of patch control points.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 995
+        uint32 reserved           : 15;
+#else
+        uint32 reserved           : 16;
+#endif
     };
 
     uint32 u32All; ///< Flags packed as 32-bit uint.
@@ -459,6 +509,17 @@ inline PipelineSymbolType GetSymbolTypeFromName(const char* pName)
     return type;
 }
 
+/// Helper function to get the symbol name when given a symbol type.
+///
+/// @param [in] type The symbol type.
+///
+/// @returns The corresponding symbol name.
+inline const char* GetNameFromSymbolType(PipelineSymbolType type)
+{
+    PAL_ASSERT(static_cast<uint32>(type) < static_cast<uint32>(PipelineSymbolType::Count));
+    return PipelineAbiSymbolNameStrings[static_cast<uint32>(type)];
+}
+
 /// User data entries can map to physical user data registers.  UserDataMapping describes the
 /// content of the registers.
 enum class UserDataMapping : uint32
@@ -480,6 +541,7 @@ enum class UserDataMapping : uint32
     EsGsLdsSize       = 0x1000000A, ///< Indicates that PAL will program this user-SGPR to contain the amount of LDS
                                     ///  space used for the ES/GS pseudo-ring-buffer for passing data between shader
                                     ///  stages.
+                                    ///  It is a legacy item. LLPC doesn't generate such user data SGPR.
     ViewId            = 0x1000000B, ///< View id (32-bit unsigned integer) identifies a view of graphic
                                     ///  pipeline instancing.
     StreamOutTable    = 0x1000000C, ///< 32-bit pointer to GPU memory containing the stream out target SRD table.  This
@@ -504,10 +566,12 @@ enum class UserDataMapping : uint32
                                          ///  extra shader work for generated prim counts in PipelineStats queries
     SampleInfo            = 0x10000018,  ///< Sample Info, 16-bit numsamples + 16-bit Sample Pattern
     ColorExportAddr       = 0x10000020,  ///< 32-bit pointer to GPU memory containing the color export shader
+    NextShaderAddr        = 0x10000021,  ///< The address of next shader stage in ShaderObject functionality.
     DynamicDualSrcBlendInfo = 0x10000022, ///< 32-bit dynamicDualSourceBlend info
 
-    CompositeData           = 0x10000023, ///< The composite structure that includes sample info, DynamicDualSrcBlendInfo
-                                          ///   and topology. It can be valid for various shader stages.
+    CompositeData         = 0x10000023,  ///< The composite structure that includes sample info, DynamicDualSrcBlendInfo
+                                         ///  and topology. It can be valid for various shader stages.
+    DynamicStateTable     = 0x10000024,  ///< 32-bit pointer to GPU memory containing dynamic state table.
 
     // Range of values for a user data PAL metadata register to be resolved at pipeline create time in PAL.
     // PipelineLinkStart+N is initialized by PAL to the (low 32 bits of the) address of symbol _amdgpu_pipelineLinkN
@@ -749,6 +813,35 @@ struct PrimShaderCbLayout
 
 static_assert(sizeof(PrimShaderCullingCb) == sizeof(PrimShaderCbLayout),
     "Transition structure (PrimShaderCullingCb) is not the same size as original structure (PrimShaderCbLayout)!");
+
+/// Number of HS output semantics, currently we only support HS built-in outputs, such as Position, PointSize,
+/// ClipDistance, CullDistance, Layer, ViewportIndex, TessLevelOuter, TessLevelInner.
+static constexpr uint32 MaxHsOutputSemantic = 8;
+
+/// Constant buffer used by tessellation evaluation shader for offchip parameter access.
+/// This is required in shader object mode where HS(TCS) and DS(TES) are compiled separately.
+struct TessConfigCb
+{
+    uint32 outputVertexCount;         ///< Number of output vertices per patch from the HS(TCS)
+    uint32 numPatchesPerGroup;        ///< Maximum number of patches per thread group
+    uint32 offchipOutputVertexStride; ///< Stride of output vertices in the offchip buffer (in dwords)
+    uint32 offchipOutputPatchSize;    ///< Size of output patch in the offchip buffer (in dwords)
+    uint32 offchipPatchConstSize;     ///< Size of per-patch constants in the offchip buffer (in dwords)
+    uint32 offchipPatchConstStart;    ///< Start offset of per-patch constants in the offchip buffer (in dwords)
+    uint32 primitiveMode;             ///< Primitive mode for tessellated patches, encoded as VGT_TF_PARAMS.TYPE.
+    /// HS output semantics for TES to read in shader object mode. Index order:
+    /// [0]=Position, [1]=PointSize, [2]=ClipDistance, [3]=CullDistance, [4]=Layer, [5]=ViewportIndex,
+    /// [6]=TessLevelOuter, [7]=TessLevelInner. Use InvalidValue if not present.
+    uint32 hsOutputSemantic[MaxHsOutputSemantic];
+    uint32 patchControlPoints;        ///< Number of control points per patch.
+};
+static_assert(sizeof(TessConfigCb) == 64, "TessConfigCb size is different than expected!");
+
+/// Constant buffer used for dynamic states
+struct DynamicStateCb
+{
+    TessConfigCb tessConfigCb; ///< Tessellation configuration CB for DS(TES)
+};
 
 /// Point sprite override selection.
 enum class PointSpriteSelect : uint32

@@ -1,0 +1,41 @@
+{
+  "_comment": [
+    "GIN / rocSHMEM test matrix for run-gin-ci.sh (baremetal translation of",
+    "docker_build_test.bash). Each test runs as:",
+    "  mpirun -np $NP <mca> <-x env> -x LD_LIBRARY_PATH <bin> <args>",
+    "kind: 'rocshmem' -> $ROCSHMEM_TESTS_BIN_DIR/<bin>; 'rccl-tests' -> $RCCL_TESTS_BIN_DIR/<bin>",
+    "{E} is replaced with NP*MSG_SIZE bytes. Tests are non-gating for now.",
+    "-D 3 is the rocSHMEM-SDMA path the script labels 'Crash' (kept for visibility).",
+    "debug_env: -x added to every test only when RCCL_CI_DEBUG=1.",
+    "  {LOGDIR} in debug_env is replaced by the runner with the per-job debug dir,",
+    "  so NCCL_DEBUG_FILE writes per-rank logs there instead of flooding stdout."
+  ],
+
+  "mca": "-mca pml ob1 -mca btl ^openib",
+
+  "debug_env": ["NCCL_DEBUG=INFO", "NCCL_DEBUG_SUBSYS=INIT,NET", "NCCL_DEBUG_FILE={LOGDIR}/nccl-debug.%h.%p.log"],
+
+  "tests": [
+    {
+      "name": "rocshmem-a2a-sdma",
+      "kind": "rocshmem",
+      "bin": "rocshmem_functional_tests",
+      "env": ["NCCL_DEBUG=VERSION", "ROCSHMEM_DEBUG_LEVEL=info:noversion", "ROCSHMEM_TEST_UUID=1"],
+      "args": "-a 19 -w 1 -z 256 -v {E} -n 100 -noverif"
+    },
+    {
+      "name": "rccl-gin-hostproxy-d1",
+      "kind": "rccl-tests",
+      "bin": "alltoall_perf",
+      "env": ["NCCL_CUMEM_ENABLE=1", "RCCL_ENABLE_INTRANET=1", "NCCL_DMABUF_ENABLE=1", "HSA_NO_SCRATCH_RECLAIM=1"],
+      "args": "-b 128 -e {E} -f 2 -g 1 -R 2 -D 1 -A 1"
+    },
+    {
+      "name": "rccl-gin-rocshmem-sdma-d3",
+      "kind": "rccl-tests",
+      "bin": "alltoall_perf",
+      "env": ["RCCL_ROCSHMEM_ENABLE=1", "ROCSHMEM_BACKEND=ipc", "ROCSHMEM_HEAP_SIZE=1073741824", "ROCSHMEM_SDMA_ENABLED=1", "NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=4", "NCCL_CUMEM_ENABLE=1", "RCCL_ENABLE_INTRANET=1", "NCCL_DMABUF_ENABLE=1", "NCCL_MSCCL_ENABLE=0", "HSA_NO_SCRATCH_RECLAIM=1"],
+      "args": "-b 128 -e {E} -f 2 -g 1 -R 2 -D 3 -A 1"
+    }
+  ]
+}
