@@ -1480,4 +1480,107 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// =============================================================================
+// Test: CastGrhSetOnRoceQp
+//
+// Validates that RoCE QPs use global (GRH/GID) addressing — the addressing path
+// every RoCE transfer depends on. On RoCE (Ethernet link layer) every QP must be
+// configured with a global AH (ah_attr.is_global=1) at RTR. This test reads back
+// the driver-programmed is_global via the ncclIbCastGetGrhState inspect accessor
+// (which calls ibv_query_qp), then does a data-integrity send/recv to confirm the
+// global-addressed QP actually carries traffic.
+//
+// Scope note: this exercises the always-on RoCE is_global=1 path, which predates
+// the NCCL 2.30.7 "GRH for ports that require it" work. That 2.30.7 feature
+// (the IBV_QPF_GRH_REQUIRED port flag) lives only in the InfiniBand link-layer
+// branch and does not apply to RoCE — so it is intentionally NOT covered here and
+// cannot be exercised on RoCE-only hardware (AINIC/Thor2).
+//
+// Scheduler-independent: does NOT require the WRR env vars (no CAST_ENV_CHECK).
+// Skips on InfiniBand link layer (global addressing there is subnet-dependent).
+// =============================================================================
+TEST_F(NetIbMPITest, CastGrhSetOnRoceQp) {
+    // IBV_LINK_LAYER_ETHERNET (RoCE); avoids depending on infiniband/verbs.h.
+    constexpr uint8_t kLinkLayerEthernet = 2;
+
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    // Skip if dev 0 lacks a routable GID: such a NIC sets up QPs fine but drops
+    // cross-node RDMA, which would surface as a spurious transfer timeout.
+    ncclNetProperties_t props;
+    memset(&props, 0, sizeof(props));
+    ASSERT_EQ(GetDeviceProperties(0, &props), ncclSuccess);
+    int skipFlag = (props.name && !HasRoutableGid(props.name)) ? 1 : 0;
+    MPI_Allreduce(MPI_IN_PLACE, &skipFlag, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    if (skipFlag) {
+        GTEST_SKIP() << "dev 0 has no routable GID (link-local only) on at least one rank";
+    }
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 1024;
+    char sendBuf[kMsgSize], recvBuf[kMsgSize];
+    for (size_t i = 0; i < kMsgSize; i++) sendBuf[i] = static_cast<char>((i * 7) & 0xFF);
+    memset(recvBuf, 0, sizeof(recvBuf));
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf) : static_cast<void*>(sendBuf);
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    // Sender side: assert GRH is set on every RoCE QP.
+    // Distinguish a real failure (broken accessor / unconnected sendComm) from a
+    // legitimate skip (IB link layer), and propagate both across ranks so sender
+    // and receiver take the same path. A unilateral ASSERT/return on rank 1 would
+    // hang rank 0 at the next collective, so failures are surfaced via an
+    // MPI_Allreduce'd flag and acted on symmetrically by both ranks.
+    int grhFail  = 0;  // accessor error or no QPs -> both ranks FAIL
+    int roceSkip = 0;  // IB link layer          -> both ranks SKIP
+    if (rank == 1) {
+        struct ncclIbCastGrhState grh = {};
+        if (ncclIbCastGetGrhState(sendComm, &grh) != ncclSuccess || grh.nqps <= 0) {
+            grhFail = 1;  // do not let a broken accessor masquerade as an IB skip
+        } else {
+            bool anyRoce = false;
+            for (int i = 0; i < grh.nqps; i++) {
+                if (grh.linkLayer[i] == kLinkLayerEthernet) {
+                    anyRoce = true;
+                    EXPECT_TRUE(grh.queryOk[i]) << "ibv_query_qp failed for QP " << i;
+                    if (grh.queryOk[i])
+                        EXPECT_EQ(grh.isGlobal[i], 1)
+                            << "RoCE QP " << i << " must have GRH (is_global=1)";
+                }
+            }
+            if (!anyRoce) roceSkip = 1;  // IB link layer — forced-GRH invariant N/A
+        }
+    }
+    MPI_Allreduce(MPI_IN_PLACE, &grhFail, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    MPI_Allreduce(MPI_IN_PLACE, &roceSkip, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    if (grhFail || roceSkip) {
+        // TeardownConnection performs its own MPI_Barrier — no separate barrier needed.
+        TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+        if (grhFail)
+            FAIL() << "ncclIbCastGetGrhState failed or returned no QPs on sendComm";
+        GTEST_SKIP() << "QPs are InfiniBand link layer; forced-GRH invariant is RoCE-only";
+    }
+
+    // Confirm the GRH-configured QP actually carries data.
+    CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSize, 900, mhandle);
+    if (rank == 0)
+        EXPECT_EQ(memcmp(sendBuf, recvBuf, kMsgSize), 0) << "data mismatch";
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
 #endif // MPI_TESTS_ENABLED
