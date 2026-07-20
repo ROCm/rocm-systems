@@ -47,6 +47,20 @@ def test_gfx1250_pk_f32_uses_literal_aware_pair_helper():
     assert 'read_lane64' not in cpp
 
 
+def test_cdna_pk_f32_reads_all_register_pairs():
+    cpp = gen_pk_binop_f32(
+        ['vdst'],
+        ['src0', 'src1'],
+        'add',
+        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
+    )
+
+    assert 'read_lane_pair32(src0, lane)' in cpp
+    assert 'const uint32_t s0_lo_w = s0_pair_w.lo' in cpp
+    assert 'const uint32_t s0_hi_w = s0_pair_w.hi' in cpp
+    assert 'encoding_value_ >= 256' not in cpp
+
+
 def test_gfx1250_mad_mix_f32_uses_helper_and_fma():
     cpp = gen_mad_mix_f32(
         ['vdst'],

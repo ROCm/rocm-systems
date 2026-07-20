@@ -86,6 +86,18 @@ constexpr std::array<uint32_t, 2> encode_cdna_vop3(uint32_t op, uint32_t vdst, u
           (src0 & 0x1FFu) | ((src1 & 0x1FFu) << 9) | ((src2 & 0x1FFu) << 18)};
 }
 
+constexpr std::array<uint32_t, 2> encode_cdna_vop3p(uint32_t op, uint32_t vdst, uint32_t src0,
+                                                    uint32_t src1, uint32_t src2,
+                                                    uint32_t op_sel = 0, uint32_t op_sel_hi = 0,
+                                                    uint32_t op_sel_hi_2 = 0, uint32_t neg = 0,
+                                                    uint32_t neg_hi = 0, uint32_t clamp = 0) {
+  return {(vdst & 0xFFu) | ((neg_hi & 0x7u) << 8) | ((op_sel & 0x7u) << 11) |
+              ((op_sel_hi_2 & 0x1u) << 14) | ((clamp & 0x1u) << 15) | ((op & 0x7Fu) << 16) |
+              (0x1A7u << 23),
+          (src0 & 0x1FFu) | ((src1 & 0x1FFu) << 9) | ((src2 & 0x1FFu) << 18) |
+              ((op_sel_hi & 0x3u) << 27) | ((neg & 0x7u) << 29)};
+}
+
 constexpr std::array<uint32_t, 2> encode_vop2(uint32_t op, uint32_t vdst, uint32_t src0,
                                               uint32_t vsrc1) {
   return {(src0 & 0x1FFu) | ((vsrc1 & 0xFFu) << 9) | ((vdst & 0xFFu) << 17) | ((op & 0x3Fu) << 25),
@@ -831,6 +843,70 @@ TEST(CdnaVop3True16Test, B16I16U16OpsUseOpSelAndCdnaDestinationPolicy) {
               "v_mad_i16");
       for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
         EXPECT_EQ(cu->read_vgpr(vb + 5, lane), 0xFFFF1234u)
+            << arch.name << " force_scalar=" << force_scalar << " lane " << lane;
+      }
+
+      if (!wf->is_halted())
+        wf->halt();
+    }
+  }
+}
+
+TEST(CdnaVop3pPackedF32Test, SgprSourcesReadBothRegisters) {
+  struct ArchCase {
+    rj_code_arch_t arch;
+    std::string_view name;
+  };
+
+  constexpr ArchCase arch_cases[] = {
+      {ROCJITSU_CODE_ARCH_CDNA3, "cdna3"},
+      {ROCJITSU_CODE_ARCH_CDNA4, "cdna4"},
+  };
+
+  for (const auto &arch : arch_cases) {
+    for (bool force_scalar : {false, true}) {
+      ForceScalarGuard guard(force_scalar);
+      const std::string suffix = force_scalar ? "_scalar" : "_simd";
+      amdgpu::GpuMemory gpu_mem(std::string(arch.name) + "_pk_f32_sgpr_mem" + suffix);
+      amdgpu::L2Cache l2(std::string(arch.name) + "_pk_f32_sgpr_l2" + suffix);
+
+      amdgpu::ComputeUnitCore::Config cfg{};
+      cfg.arch = arch.arch;
+      cfg.num_wf_slots = 1;
+      cfg.sgprs_per_wf = 106;
+      cfg.vgprs_per_wf = 256;
+      cfg.lds_size_kb = 64;
+
+      auto cu = amdgpu::ComputeUnitCore::create(std::string(arch.name), cfg, &gpu_mem, &l2);
+      ASSERT_NE(cu, nullptr);
+      auto decoder = Decoder::create(arch.arch);
+      ASSERT_NE(decoder, nullptr);
+      auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+      ASSERT_NE(wf, nullptr);
+      wf->set_exec(~uint64_t{0});
+
+      const uint32_t vb = wf->vgpr_alloc().base;
+      const uint32_t sb = wf->sgpr_alloc().base;
+      cu->write_sgpr(sb + 8, std::bit_cast<uint32_t>(4.0f));
+      cu->write_sgpr(sb + 9, std::bit_cast<uint32_t>(5.0f));
+      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+        cu->write_vgpr(vb + 0, lane, std::bit_cast<uint32_t>(2.0f));
+        cu->write_vgpr(vb + 1, lane, std::bit_cast<uint32_t>(3.0f));
+      }
+
+      // v_pk_fma_f32 v[2:3], v[0:1], s[8:9], 0
+      const auto words = encode_cdna_vop3p(
+          /*op=*/48, /*vdst=*/2, /*src0=*/256, /*src1=*/8, /*src2=*/128,
+          /*op_sel=*/0, /*op_sel_hi=*/3, /*op_sel_hi_2=*/1);
+      std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+      ASSERT_NE(inst, nullptr) << arch.name;
+      ASSERT_EQ(std::string_view(inst->mnemonic()), "v_pk_fma_f32") << arch.name;
+      cu->execute_instruction(inst.get(), *wf);
+
+      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+        EXPECT_EQ(cu->read_vgpr(vb + 2, lane), std::bit_cast<uint32_t>(8.0f))
+            << arch.name << " force_scalar=" << force_scalar << " lane " << lane;
+        EXPECT_EQ(cu->read_vgpr(vb + 3, lane), std::bit_cast<uint32_t>(15.0f))
             << arch.name << " force_scalar=" << force_scalar << " lane " << lane;
       }
 

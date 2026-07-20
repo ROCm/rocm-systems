@@ -409,9 +409,8 @@ inline util::native<float> apply_vop3_dst_mod_f32(util::native<float> v, uint32_
 /// In a VGPR pair {N, N+1}, register N holds the LO f32 of every lane and N+1
 /// the HI f32, so each half is a native-width native<float> read of one
 /// register (no 64-bit-lane / narrow32 detour). For a non-VGPR source the
-/// pk_f32 scalar bodies splat the single 32-bit operand into BOTH halves, so
-/// lo == hi == broadcast(read_scalar). The `p.lo != nullptr` gate is bit-exact
-/// to the scalar's `encoding_value_ in [256,511]` VGPR-range test.
+/// operand-pair view reads both halves of a 64-bit register or literal operand,
+/// while broadcasting a single 32-bit inline or immediate operand.
 struct PkF32Halves {
   util::native<float> lo;
   util::native<float> hi;

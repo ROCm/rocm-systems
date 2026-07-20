@@ -38,6 +38,11 @@
 
 namespace rocjitsu::amdgpu {
 
+struct OperandPair32 {
+  uint32_t lo;
+  uint32_t hi;
+};
+
 /// @brief Facade for instruction-visible register reads and writes.
 ///
 /// @details This class centralizes the observation contract for
@@ -388,14 +393,14 @@ public:
       static_assert(sizeof(T) == sizeof(uint32_t), "load_lo_native expects 32-bit lanes");
       assert((storage_.lo || scalar_fallback_) && "OperandReadPair32View has no source");
       return storage_.lo ? storage_.lo->template simd_load<T>(lane_base)
-                         : util::broadcast<T>(scalar_fallback());
+                         : util::broadcast<T>(scalar_fallback(/*high=*/false));
     }
 
     template <typename T> [[nodiscard]] util::native<T> load_hi_native(uint32_t lane_base) const {
       static_assert(sizeof(T) == sizeof(uint32_t), "load_hi_native expects 32-bit lanes");
       assert((storage_.hi || scalar_fallback_) && "OperandReadPair32View has no source");
       return storage_.hi ? storage_.hi->template simd_load<T>(lane_base)
-                         : util::broadcast<T>(scalar_fallback());
+                         : util::broadcast<T>(scalar_fallback(/*high=*/true));
     }
 
   private:
@@ -404,15 +409,17 @@ public:
     OperandReadPair32View(const Operand &op, const Wavefront &wf, ConstVgprStoragePair64 storage)
         : storage_(storage) {
       if (!storage_.lo)
-        scalar_fallback_.emplace(op.read_lane(wf, 0));
+        scalar_fallback_.emplace(RegisterAccess(wf).read_lane_pair32(op, 0));
     }
 
-    uint32_t scalar_fallback() const {
-      return RegisterAccess::require_scalar_fallback(scalar_fallback_, "OperandReadPair32View");
+    uint32_t scalar_fallback(bool high) const {
+      const OperandPair32 pair =
+          RegisterAccess::require_scalar_fallback(scalar_fallback_, "OperandReadPair32View");
+      return high ? pair.hi : pair.lo;
     }
 
     ConstVgprStoragePair64 storage_{};
-    std::optional<uint32_t> scalar_fallback_;
+    std::optional<OperandPair32> scalar_fallback_;
   };
 
   class OperandWritePair32View {
@@ -602,6 +609,18 @@ public:
   }
   [[nodiscard]] uint64_t read_lane64(const Operand &op, uint32_t lane) const {
     return op.read_lane64(wavefront(), lane);
+  }
+  [[nodiscard]] OperandPair32 read_lane_pair32(const Operand &op, uint32_t lane) const {
+    if (const auto literal = op.literal64_value())
+      return {static_cast<uint32_t>(*literal), static_cast<uint32_t>(*literal >> 32)};
+
+    if (const auto reg = op.to_register_ref(); reg && reg->width >= 2) {
+      const uint64_t pair = op.read_lane64(wavefront(), lane);
+      return {static_cast<uint32_t>(pair), static_cast<uint32_t>(pair >> 32)};
+    }
+
+    const uint32_t value = op.read_lane(wavefront(), lane);
+    return {value, value};
   }
   void write_scalar(const Operand &op, uint32_t value) const {
     op.write_scalar(mutable_wavefront(), value);

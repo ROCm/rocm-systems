@@ -29,16 +29,8 @@ struct PkF32Words {
 };
 
 PkF32Words read_pk_f32_words(const Operand &operand, const amdgpu::Wavefront &wf, uint32_t lane) {
-  if (auto literal = operand.literal64_value())
-    return {static_cast<uint32_t>(*literal), static_cast<uint32_t>(*literal >> 32)};
-
-  const uint32_t lo = amdgpu::RegisterAccess(wf).read_lane(operand, lane);
-  const auto reg = operand.to_register_ref();
-  if (!reg || reg->cls != RegClass::VGPR)
-    return {lo, lo};
-
-  const uint64_t raw = amdgpu::RegisterAccess(wf).read_lane64(operand, lane);
-  return {static_cast<uint32_t>(raw), static_cast<uint32_t>(raw >> 32)};
+  const auto pair = amdgpu::RegisterAccess(wf).read_lane_pair32(operand, lane);
+  return {pair.lo, pair.hi};
 }
 const char *gfx1250_matrix_fmt_name(uint32_t fmt) {
   switch (fmt) {

@@ -24,18 +24,10 @@ def _append_pk_f32_pair_read(
         L.append(f'    const auto {var} = read_pk_f32_words({src}, wf, lane);')
         return
     L.append(
-        f'    uint32_t {var}_lo_w = amdgpu::RegisterAccess(wf).read_lane({src}, lane);'
+        f'    const auto {var}_pair_w = amdgpu::RegisterAccess(wf).read_lane_pair32({src}, lane);'
     )
-    L.append(f'    uint32_t {var}_hi_w = {var}_lo_w;')
-    L.append(
-        f'    if ({src}.encoding_value_ >= 256 && {src}.encoding_value_ <= 511) {{'
-    )
-    L.append(
-        f'      uint64_t {var}_pair_w = amdgpu::RegisterAccess(wf).read_lane64({src}, lane);'
-    )
-    L.append(f'      {var}_lo_w = static_cast<uint32_t>({var}_pair_w);')
-    L.append(f'      {var}_hi_w = static_cast<uint32_t>({var}_pair_w >> 32);')
-    L.append('    }')
+    L.append(f'    const uint32_t {var}_lo_w = {var}_pair_w.lo;')
+    L.append(f'    const uint32_t {var}_hi_w = {var}_pair_w.hi;')
 
 
 def _pk_f32_word_expr(var: str, half: str, use_gfx1250_helpers: bool = False) -> str:
