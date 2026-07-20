@@ -287,29 +287,69 @@ hipError_t hipArrayGetInfo(hipChannelFormatDesc* desc, hipExtent* extent, unsign
 extern "C" hipError_t hipBindTexture(size_t* offset, const textureReference* tex,
                                      const void* devPtr, const hipChannelFormatDesc* desc,
                                      size_t size) {
+  auto const __rocm_in_offset = offset;
+  auto const __rocm_in_tex = tex;
+  auto const __rocm_in_devPtr = devPtr;
+  auto const __rocm_in_desc = desc;
+  auto const __rocm_in_size = size;
+  rocm_trace_emit_hipBindTexture_enter(
+      (const void*)(uintptr_t)(__rocm_in_offset),
+      (const void*)(uintptr_t)(__rocm_in_tex),
+      (const void*)(uintptr_t)(__rocm_in_devPtr),
+      (const void*)(uintptr_t)(__rocm_in_desc),
+      (__rocm_in_size)); /* __ROCM_CURATED__: hipBindTexture */
   TRY;
-  return hip::GetHipDispatchTable()->hipBindTexture_fn(offset, tex, devPtr, desc, size);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipBindTexture, hip::GetHipDispatchTable()->hipBindTexture_fn(offset, tex, devPtr, desc, size));
   CATCH;
 }
 hipError_t hipBindTexture2D(size_t* offset, const textureReference* tex, const void* devPtr,
                             const hipChannelFormatDesc* desc, size_t width, size_t height,
                             size_t pitch) {
+  auto const __rocm_in_offset = offset;
+  auto const __rocm_in_tex = tex;
+  auto const __rocm_in_devPtr = devPtr;
+  auto const __rocm_in_desc = desc;
+  auto const __rocm_in_width = width;
+  auto const __rocm_in_height = height;
+  auto const __rocm_in_pitch = pitch;
+  rocm_trace_emit_hipBindTexture2D_enter(
+      (const void*)(uintptr_t)(__rocm_in_offset),
+      (const void*)(uintptr_t)(__rocm_in_tex),
+      (const void*)(uintptr_t)(__rocm_in_devPtr),
+      (const void*)(uintptr_t)(__rocm_in_desc),
+      (__rocm_in_width),
+      (__rocm_in_height),
+      (__rocm_in_pitch)); /* __ROCM_CURATED__: hipBindTexture2D */
   TRY;
-  return hip::GetHipDispatchTable()->hipBindTexture2D_fn(offset, tex, devPtr, desc, width, height,
-                                                         pitch);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipBindTexture2D, hip::GetHipDispatchTable()->hipBindTexture2D_fn(offset, tex, devPtr, desc, width, height,
+                                                      pitch));
   CATCH;
 }
 hipError_t hipBindTextureToArray(const textureReference* tex, hipArray_const_t array,
                                  const hipChannelFormatDesc* desc) {
+  auto const __rocm_in_tex = tex;
+  auto const __rocm_in_array = array;
+  auto const __rocm_in_desc = desc;
+  rocm_trace_emit_hipBindTextureToArray_enter(
+      (const void*)(uintptr_t)(__rocm_in_tex),
+      (const void*)(uintptr_t)(__rocm_in_array),
+      (const void*)(uintptr_t)(__rocm_in_desc)); /* __ROCM_CURATED__: hipBindTextureToArray */
   TRY;
-  return hip::GetHipDispatchTable()->hipBindTextureToArray_fn(tex, array, desc);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipBindTextureToArray, hip::GetHipDispatchTable()->hipBindTextureToArray_fn(tex, array, desc));
   CATCH;
 }
 hipError_t hipBindTextureToMipmappedArray(const textureReference* tex,
                                           hipMipmappedArray_const_t mipmappedArray,
                                           const hipChannelFormatDesc* desc) {
+  auto const __rocm_in_tex = tex;
+  auto const __rocm_in_mipmappedArray = mipmappedArray;
+  auto const __rocm_in_desc = desc;
+  rocm_trace_emit_hipBindTextureToMipmappedArray_enter(
+      (const void*)(uintptr_t)(__rocm_in_tex),
+      (const void*)(uintptr_t)(__rocm_in_mipmappedArray),
+      (const void*)(uintptr_t)(__rocm_in_desc)); /* __ROCM_CURATED__: hipBindTextureToMipmappedArray */
   TRY;
-  return hip::GetHipDispatchTable()->hipBindTextureToMipmappedArray_fn(tex, mipmappedArray, desc);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipBindTextureToMipmappedArray, hip::GetHipDispatchTable()->hipBindTextureToMipmappedArray_fn(tex, mipmappedArray, desc));
   CATCH;
 }
 extern "C" hipError_t hipChooseDevice(int* device, const hipDeviceProp_t* prop) {
@@ -344,16 +384,30 @@ extern "C" hipError_t hipConfigureCall(dim3 gridDim, dim3 blockDim, size_t share
 }
 hipError_t hipCreateSurfaceObject(hipSurfaceObject_t* pSurfObject,
                                   const hipResourceDesc* pResDesc) {
+  auto const __rocm_in_pSurfObject = pSurfObject;
+  auto const __rocm_in_pResDesc = pResDesc;
+  rocm_trace_emit_hipCreateSurfaceObject_enter(
+      (const void*)(uintptr_t)(__rocm_in_pSurfObject),
+      (const void*)(uintptr_t)(__rocm_in_pResDesc)); /* __ROCM_CURATED__: hipCreateSurfaceObject */
   TRY;
-  return hip::GetHipDispatchTable()->hipCreateSurfaceObject_fn(pSurfObject, pResDesc);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipCreateSurfaceObject, hip::GetHipDispatchTable()->hipCreateSurfaceObject_fn(pSurfObject, pResDesc));
   CATCH;
 }
 hipError_t hipCreateTextureObject(hipTextureObject_t* pTexObject, const hipResourceDesc* pResDesc,
                                   const hipTextureDesc* pTexDesc,
                                   const struct hipResourceViewDesc* pResViewDesc) {
+  auto const __rocm_in_pTexObject = pTexObject;
+  auto const __rocm_in_pResDesc = pResDesc;
+  auto const __rocm_in_pTexDesc = pTexDesc;
+  auto const __rocm_in_pResViewDesc = pResViewDesc;
+  rocm_trace_emit_hipCreateTextureObject_enter(
+      (const void*)(uintptr_t)(__rocm_in_pTexObject),
+      (const void*)(uintptr_t)(__rocm_in_pResDesc),
+      (const void*)(uintptr_t)(__rocm_in_pTexDesc),
+      (const void*)(uintptr_t)(__rocm_in_pResViewDesc)); /* __ROCM_CURATED__: hipCreateTextureObject */
   TRY;
-  return hip::GetHipDispatchTable()->hipCreateTextureObject_fn(pTexObject, pResDesc, pTexDesc,
-                                                               pResViewDesc);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipCreateTextureObject, hip::GetHipDispatchTable()->hipCreateTextureObject_fn(
+                                    pTexObject, pResDesc, pTexDesc, pResViewDesc));
   CATCH;
 }
 extern "C" hipError_t hipCtxCreate(hipCtx_t* ctx, unsigned int flags, hipDevice_t device) {
@@ -447,13 +501,19 @@ hipError_t hipDestroyExternalSemaphore(hipExternalSemaphore_t extSem) {
   CATCH;
 }
 hipError_t hipDestroySurfaceObject(hipSurfaceObject_t surfaceObject) {
+  auto const __rocm_in_surfaceObject = surfaceObject;
+  rocm_trace_emit_hipDestroySurfaceObject_enter(
+      (const void*)(uintptr_t)(__rocm_in_surfaceObject)); /* __ROCM_CURATED__: hipDestroySurfaceObject */
   TRY;
-  return hip::GetHipDispatchTable()->hipDestroySurfaceObject_fn(surfaceObject);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipDestroySurfaceObject, hip::GetHipDispatchTable()->hipDestroySurfaceObject_fn(surfaceObject));
   CATCH;
 }
 hipError_t hipDestroyTextureObject(hipTextureObject_t textureObject) {
+  auto const __rocm_in_textureObject = textureObject;
+  rocm_trace_emit_hipDestroyTextureObject_enter(
+      (const void*)(uintptr_t)(__rocm_in_textureObject)); /* __ROCM_CURATED__: hipDestroyTextureObject */
   TRY;
-  return hip::GetHipDispatchTable()->hipDestroyTextureObject_fn(textureObject);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipDestroyTextureObject, hip::GetHipDispatchTable()->hipDestroyTextureObject_fn(textureObject));
   CATCH;
 }
 hipError_t hipDeviceCanAccessPeer(int* canAccessPeer, int deviceId, int peerDeviceId) {
@@ -1113,8 +1173,13 @@ hipError_t hipGLGetDevices(unsigned int* pHipDeviceCount, int* pHipDevices,
   CATCH;
 }
 hipError_t hipGetChannelDesc(hipChannelFormatDesc* desc, hipArray_const_t array) {
+  auto const __rocm_in_desc = desc;
+  auto const __rocm_in_array = array;
+  rocm_trace_emit_hipGetChannelDesc_enter(
+      (const void*)(uintptr_t)(__rocm_in_desc),
+      (const void*)(uintptr_t)(__rocm_in_array)); /* __ROCM_CURATED__: hipGetChannelDesc */
   TRY;
-  return hip::GetHipDispatchTable()->hipGetChannelDesc_fn(desc, array);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGetChannelDesc, hip::GetHipDispatchTable()->hipGetChannelDesc_fn(desc, array));
   CATCH;
 }
 hipError_t hipGetDevice(int* deviceId) {
@@ -1220,32 +1285,57 @@ hipError_t hipGetSymbolSize(size_t* size, const void* symbol) {
   CATCH;
 }
 hipError_t hipGetTextureAlignmentOffset(size_t* offset, const textureReference* texref) {
+  auto const __rocm_in_offset = offset;
+  auto const __rocm_in_texref = texref;
+  rocm_trace_emit_hipGetTextureAlignmentOffset_enter(
+      (const void*)(uintptr_t)(__rocm_in_offset),
+      (const void*)(uintptr_t)(__rocm_in_texref)); /* __ROCM_CURATED__: hipGetTextureAlignmentOffset */
   TRY;
-  return hip::GetHipDispatchTable()->hipGetTextureAlignmentOffset_fn(offset, texref);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGetTextureAlignmentOffset, hip::GetHipDispatchTable()->hipGetTextureAlignmentOffset_fn(offset, texref));
   CATCH;
 }
 hipError_t hipGetTextureObjectResourceDesc(hipResourceDesc* pResDesc,
                                            hipTextureObject_t textureObject) {
+  auto const __rocm_in_pResDesc = pResDesc;
+  auto const __rocm_in_textureObject = textureObject;
+  rocm_trace_emit_hipGetTextureObjectResourceDesc_enter(
+      (const void*)(uintptr_t)(__rocm_in_pResDesc),
+      (const void*)(uintptr_t)(__rocm_in_textureObject)); /* __ROCM_CURATED__: hipGetTextureObjectResourceDesc */
   TRY;
-  return hip::GetHipDispatchTable()->hipGetTextureObjectResourceDesc_fn(pResDesc, textureObject);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGetTextureObjectResourceDesc, hip::GetHipDispatchTable()->hipGetTextureObjectResourceDesc_fn(pResDesc, textureObject));
   CATCH;
 }
 hipError_t hipGetTextureObjectResourceViewDesc(struct hipResourceViewDesc* pResViewDesc,
                                                hipTextureObject_t textureObject) {
+  auto const __rocm_in_pResViewDesc = pResViewDesc;
+  auto const __rocm_in_textureObject = textureObject;
+  rocm_trace_emit_hipGetTextureObjectResourceViewDesc_enter(
+      (const void*)(uintptr_t)(__rocm_in_pResViewDesc),
+      (const void*)(uintptr_t)(__rocm_in_textureObject)); /* __ROCM_CURATED__: hipGetTextureObjectResourceViewDesc */
   TRY;
-  return hip::GetHipDispatchTable()->hipGetTextureObjectResourceViewDesc_fn(pResViewDesc,
-                                                                            textureObject);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGetTextureObjectResourceViewDesc, hip::GetHipDispatchTable()->hipGetTextureObjectResourceViewDesc_fn(
+                                    pResViewDesc, textureObject));
   CATCH;
 }
 hipError_t hipGetTextureObjectTextureDesc(hipTextureDesc* pTexDesc,
                                           hipTextureObject_t textureObject) {
+  auto const __rocm_in_pTexDesc = pTexDesc;
+  auto const __rocm_in_textureObject = textureObject;
+  rocm_trace_emit_hipGetTextureObjectTextureDesc_enter(
+      (const void*)(uintptr_t)(__rocm_in_pTexDesc),
+      (const void*)(uintptr_t)(__rocm_in_textureObject)); /* __ROCM_CURATED__: hipGetTextureObjectTextureDesc */
   TRY;
-  return hip::GetHipDispatchTable()->hipGetTextureObjectTextureDesc_fn(pTexDesc, textureObject);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGetTextureObjectTextureDesc, hip::GetHipDispatchTable()->hipGetTextureObjectTextureDesc_fn(pTexDesc, textureObject));
   CATCH;
 }
 hipError_t hipGetTextureReference(const textureReference** texref, const void* symbol) {
+  auto const __rocm_in_texref = texref;
+  auto const __rocm_in_symbol = symbol;
+  rocm_trace_emit_hipGetTextureReference_enter(
+      (const void*)(uintptr_t)(__rocm_in_texref),
+      (const void*)(uintptr_t)(__rocm_in_symbol)); /* __ROCM_CURATED__: hipGetTextureReference */
   TRY;
-  return hip::GetHipDispatchTable()->hipGetTextureReference_fn(texref, symbol);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipGetTextureReference, hip::GetHipDispatchTable()->hipGetTextureReference_fn(texref, symbol));
   CATCH;
 }
 hipError_t hipGraphAddChildGraphNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
@@ -4770,159 +4860,325 @@ hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count,
 hipError_t hipTexObjectCreate(hipTextureObject_t* pTexObject, const HIP_RESOURCE_DESC* pResDesc,
                               const HIP_TEXTURE_DESC* pTexDesc,
                               const HIP_RESOURCE_VIEW_DESC* pResViewDesc) {
+  auto const __rocm_in_pTexObject = pTexObject;
+  auto const __rocm_in_pResDesc = pResDesc;
+  auto const __rocm_in_pTexDesc = pTexDesc;
+  auto const __rocm_in_pResViewDesc = pResViewDesc;
+  rocm_trace_emit_hipTexObjectCreate_enter(
+      (const void*)(uintptr_t)(__rocm_in_pTexObject),
+      (const void*)(uintptr_t)(__rocm_in_pResDesc),
+      (const void*)(uintptr_t)(__rocm_in_pTexDesc),
+      (const void*)(uintptr_t)(__rocm_in_pResViewDesc)); /* __ROCM_CURATED__: hipTexObjectCreate */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexObjectCreate_fn(pTexObject, pResDesc, pTexDesc,
-                                                           pResViewDesc);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexObjectCreate, hip::GetHipDispatchTable()->hipTexObjectCreate_fn(
+                                    pTexObject, pResDesc, pTexDesc, pResViewDesc));
   CATCH;
 }
 hipError_t hipTexObjectDestroy(hipTextureObject_t texObject) {
+  auto const __rocm_in_texObject = texObject;
+  rocm_trace_emit_hipTexObjectDestroy_enter(
+      (const void*)(uintptr_t)(__rocm_in_texObject)); /* __ROCM_CURATED__: hipTexObjectDestroy */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexObjectDestroy_fn(texObject);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexObjectDestroy, hip::GetHipDispatchTable()->hipTexObjectDestroy_fn(texObject));
   CATCH;
 }
 hipError_t hipTexObjectGetResourceDesc(HIP_RESOURCE_DESC* pResDesc, hipTextureObject_t texObject) {
+  auto const __rocm_in_pResDesc = pResDesc;
+  auto const __rocm_in_texObject = texObject;
+  rocm_trace_emit_hipTexObjectGetResourceDesc_enter(
+      (const void*)(uintptr_t)(__rocm_in_pResDesc),
+      (const void*)(uintptr_t)(__rocm_in_texObject)); /* __ROCM_CURATED__: hipTexObjectGetResourceDesc */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexObjectGetResourceDesc_fn(pResDesc, texObject);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexObjectGetResourceDesc, hip::GetHipDispatchTable()->hipTexObjectGetResourceDesc_fn(pResDesc, texObject));
   CATCH;
 }
 hipError_t hipTexObjectGetResourceViewDesc(HIP_RESOURCE_VIEW_DESC* pResViewDesc,
                                            hipTextureObject_t texObject) {
+  auto const __rocm_in_pResViewDesc = pResViewDesc;
+  auto const __rocm_in_texObject = texObject;
+  rocm_trace_emit_hipTexObjectGetResourceViewDesc_enter(
+      (const void*)(uintptr_t)(__rocm_in_pResViewDesc),
+      (const void*)(uintptr_t)(__rocm_in_texObject)); /* __ROCM_CURATED__: hipTexObjectGetResourceViewDesc */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexObjectGetResourceViewDesc_fn(pResViewDesc, texObject);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexObjectGetResourceViewDesc, hip::GetHipDispatchTable()->hipTexObjectGetResourceViewDesc_fn(pResViewDesc, texObject));
   CATCH;
 }
 hipError_t hipTexObjectGetTextureDesc(HIP_TEXTURE_DESC* pTexDesc, hipTextureObject_t texObject) {
+  auto const __rocm_in_pTexDesc = pTexDesc;
+  auto const __rocm_in_texObject = texObject;
+  rocm_trace_emit_hipTexObjectGetTextureDesc_enter(
+      (const void*)(uintptr_t)(__rocm_in_pTexDesc),
+      (const void*)(uintptr_t)(__rocm_in_texObject)); /* __ROCM_CURATED__: hipTexObjectGetTextureDesc */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexObjectGetTextureDesc_fn(pTexDesc, texObject);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexObjectGetTextureDesc, hip::GetHipDispatchTable()->hipTexObjectGetTextureDesc_fn(pTexDesc, texObject));
   CATCH;
 }
 hipError_t hipTexRefGetAddress(hipDeviceptr_t* dev_ptr, const textureReference* texRef) {
+  auto const __rocm_in_dev_ptr = dev_ptr;
+  auto const __rocm_in_texRef = texRef;
+  rocm_trace_emit_hipTexRefGetAddress_enter(
+      (const void*)(uintptr_t)(__rocm_in_dev_ptr),
+      (const void*)(uintptr_t)(__rocm_in_texRef)); /* __ROCM_CURATED__: hipTexRefGetAddress */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefGetAddress_fn(dev_ptr, texRef);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefGetAddress, hip::GetHipDispatchTable()->hipTexRefGetAddress_fn(dev_ptr, texRef));
   CATCH;
 }
 hipError_t hipTexRefGetAddressMode(enum hipTextureAddressMode* pam, const textureReference* texRef,
                                    int dim) {
+  auto const __rocm_in_pam = pam;
+  auto const __rocm_in_texRef = texRef;
+  auto const __rocm_in_dim = dim;
+  rocm_trace_emit_hipTexRefGetAddressMode_enter(
+      (const void*)(uintptr_t)(__rocm_in_pam),
+      (const void*)(uintptr_t)(__rocm_in_texRef),
+      (__rocm_in_dim)); /* __ROCM_CURATED__: hipTexRefGetAddressMode */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefGetAddressMode_fn(pam, texRef, dim);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefGetAddressMode, hip::GetHipDispatchTable()->hipTexRefGetAddressMode_fn(pam, texRef, dim));
   CATCH;
 }
 hipError_t hipTexRefGetFilterMode(enum hipTextureFilterMode* pfm, const textureReference* texRef) {
+  auto const __rocm_in_pfm = pfm;
+  auto const __rocm_in_texRef = texRef;
+  rocm_trace_emit_hipTexRefGetFilterMode_enter(
+      (const void*)(uintptr_t)(__rocm_in_pfm),
+      (const void*)(uintptr_t)(__rocm_in_texRef)); /* __ROCM_CURATED__: hipTexRefGetFilterMode */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefGetFilterMode_fn(pfm, texRef);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefGetFilterMode, hip::GetHipDispatchTable()->hipTexRefGetFilterMode_fn(pfm, texRef));
   CATCH;
 }
 hipError_t hipTexRefGetFlags(unsigned int* pFlags, const textureReference* texRef) {
+  auto const __rocm_in_pFlags = pFlags;
+  auto const __rocm_in_texRef = texRef;
+  rocm_trace_emit_hipTexRefGetFlags_enter(
+      (const void*)(uintptr_t)(__rocm_in_pFlags),
+      (const void*)(uintptr_t)(__rocm_in_texRef)); /* __ROCM_CURATED__: hipTexRefGetFlags */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefGetFlags_fn(pFlags, texRef);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefGetFlags, hip::GetHipDispatchTable()->hipTexRefGetFlags_fn(pFlags, texRef));
   CATCH;
 }
 hipError_t hipTexRefGetFormat(hipArray_Format* pFormat, int* pNumChannels,
                               const textureReference* texRef) {
+  auto const __rocm_in_pFormat = pFormat;
+  auto const __rocm_in_pNumChannels = pNumChannels;
+  auto const __rocm_in_texRef = texRef;
+  rocm_trace_emit_hipTexRefGetFormat_enter(
+      (const void*)(uintptr_t)(__rocm_in_pFormat),
+      (const void*)(uintptr_t)(__rocm_in_pNumChannels),
+      (const void*)(uintptr_t)(__rocm_in_texRef)); /* __ROCM_CURATED__: hipTexRefGetFormat */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefGetFormat_fn(pFormat, pNumChannels, texRef);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefGetFormat, hip::GetHipDispatchTable()->hipTexRefGetFormat_fn(pFormat, pNumChannels, texRef));
   CATCH;
 }
 hipError_t hipTexRefGetMaxAnisotropy(int* pmaxAnsio, const textureReference* texRef) {
+  auto const __rocm_in_pmaxAnsio = pmaxAnsio;
+  auto const __rocm_in_texRef = texRef;
+  rocm_trace_emit_hipTexRefGetMaxAnisotropy_enter(
+      (const void*)(uintptr_t)(__rocm_in_pmaxAnsio),
+      (const void*)(uintptr_t)(__rocm_in_texRef)); /* __ROCM_CURATED__: hipTexRefGetMaxAnisotropy */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefGetMaxAnisotropy_fn(pmaxAnsio, texRef);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefGetMaxAnisotropy, hip::GetHipDispatchTable()->hipTexRefGetMaxAnisotropy_fn(pmaxAnsio, texRef));
   CATCH;
 }
 extern "C" hipError_t hipTexRefGetMipMappedArray(hipMipmappedArray_t* pArray,
                                                  const textureReference* texRef) {
+  auto const __rocm_in_pArray = pArray;
+  auto const __rocm_in_texRef = texRef;
+  rocm_trace_emit_hipTexRefGetMipMappedArray_enter(
+      (const void*)(uintptr_t)(__rocm_in_pArray),
+      (const void*)(uintptr_t)(__rocm_in_texRef)); /* __ROCM_CURATED__: hipTexRefGetMipMappedArray */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefGetMipMappedArray_fn(pArray, texRef);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefGetMipMappedArray, hip::GetHipDispatchTable()->hipTexRefGetMipMappedArray_fn(pArray, texRef));
   CATCH;
 }
 hipError_t hipTexRefGetMipmapFilterMode(enum hipTextureFilterMode* pfm,
                                         const textureReference* texRef) {
+  auto const __rocm_in_pfm = pfm;
+  auto const __rocm_in_texRef = texRef;
+  rocm_trace_emit_hipTexRefGetMipmapFilterMode_enter(
+      (const void*)(uintptr_t)(__rocm_in_pfm),
+      (const void*)(uintptr_t)(__rocm_in_texRef)); /* __ROCM_CURATED__: hipTexRefGetMipmapFilterMode */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefGetMipmapFilterMode_fn(pfm, texRef);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefGetMipmapFilterMode, hip::GetHipDispatchTable()->hipTexRefGetMipmapFilterMode_fn(pfm, texRef));
   CATCH;
 }
 hipError_t hipTexRefGetMipmapLevelBias(float* pbias, const textureReference* texRef) {
+  auto const __rocm_in_pbias = pbias;
+  auto const __rocm_in_texRef = texRef;
+  rocm_trace_emit_hipTexRefGetMipmapLevelBias_enter(
+      (const void*)(uintptr_t)(__rocm_in_pbias),
+      (const void*)(uintptr_t)(__rocm_in_texRef)); /* __ROCM_CURATED__: hipTexRefGetMipmapLevelBias */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefGetMipmapLevelBias_fn(pbias, texRef);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefGetMipmapLevelBias, hip::GetHipDispatchTable()->hipTexRefGetMipmapLevelBias_fn(pbias, texRef));
   CATCH;
 }
 hipError_t hipTexRefGetMipmapLevelClamp(float* pminMipmapLevelClamp, float* pmaxMipmapLevelClamp,
                                         const textureReference* texRef) {
+  auto const __rocm_in_pminMipmapLevelClamp = pminMipmapLevelClamp;
+  auto const __rocm_in_pmaxMipmapLevelClamp = pmaxMipmapLevelClamp;
+  auto const __rocm_in_texRef = texRef;
+  rocm_trace_emit_hipTexRefGetMipmapLevelClamp_enter(
+      (const void*)(uintptr_t)(__rocm_in_pminMipmapLevelClamp),
+      (const void*)(uintptr_t)(__rocm_in_pmaxMipmapLevelClamp),
+      (const void*)(uintptr_t)(__rocm_in_texRef)); /* __ROCM_CURATED__: hipTexRefGetMipmapLevelClamp */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefGetMipmapLevelClamp_fn(pminMipmapLevelClamp,
-                                                                     pmaxMipmapLevelClamp, texRef);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefGetMipmapLevelClamp, hip::GetHipDispatchTable()->hipTexRefGetMipmapLevelClamp_fn(
+                                    pminMipmapLevelClamp, pmaxMipmapLevelClamp, texRef));
   CATCH;
 }
 hipError_t hipTexRefSetAddress(size_t* ByteOffset, textureReference* texRef, hipDeviceptr_t dptr,
                                size_t bytes) {
+  auto const __rocm_in_ByteOffset = ByteOffset;
+  auto const __rocm_in_texRef = texRef;
+  auto const __rocm_in_dptr = dptr;
+  auto const __rocm_in_bytes = bytes;
+  rocm_trace_emit_hipTexRefSetAddress_enter(
+      (const void*)(uintptr_t)(__rocm_in_ByteOffset),
+      (const void*)(uintptr_t)(__rocm_in_texRef),
+      (uint64_t)(__rocm_in_dptr),
+      (__rocm_in_bytes)); /* __ROCM_CURATED__: hipTexRefSetAddress */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefSetAddress_fn(ByteOffset, texRef, dptr, bytes);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefSetAddress, hip::GetHipDispatchTable()->hipTexRefSetAddress_fn(ByteOffset, texRef, dptr, bytes));
   CATCH;
 }
 hipError_t hipTexRefSetAddress2D(textureReference* texRef, const HIP_ARRAY_DESCRIPTOR* desc,
                                  hipDeviceptr_t dptr, size_t Pitch) {
+  auto const __rocm_in_texRef = texRef;
+  auto const __rocm_in_desc = desc;
+  auto const __rocm_in_dptr = dptr;
+  auto const __rocm_in_Pitch = Pitch;
+  rocm_trace_emit_hipTexRefSetAddress2D_enter(
+      (const void*)(uintptr_t)(__rocm_in_texRef),
+      (const void*)(uintptr_t)(__rocm_in_desc),
+      (uint64_t)(__rocm_in_dptr),
+      (__rocm_in_Pitch)); /* __ROCM_CURATED__: hipTexRefSetAddress2D */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefSetAddress2D_fn(texRef, desc, dptr, Pitch);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefSetAddress2D, hip::GetHipDispatchTable()->hipTexRefSetAddress2D_fn(texRef, desc, dptr, Pitch));
   CATCH;
 }
 hipError_t hipTexRefSetAddressMode(textureReference* texRef, int dim,
                                    enum hipTextureAddressMode am) {
+  auto const __rocm_in_texRef = texRef;
+  auto const __rocm_in_dim = dim;
+  auto const __rocm_in_am = am;
+  rocm_trace_emit_hipTexRefSetAddressMode_enter(
+      (const void*)(uintptr_t)(__rocm_in_texRef),
+      (__rocm_in_dim),
+      (int32_t)(__rocm_in_am)); /* __ROCM_CURATED__: hipTexRefSetAddressMode */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefSetAddressMode_fn(texRef, dim, am);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefSetAddressMode, hip::GetHipDispatchTable()->hipTexRefSetAddressMode_fn(texRef, dim, am));
   CATCH;
 }
 hipError_t hipTexRefSetArray(textureReference* tex, hipArray_const_t array, unsigned int flags) {
+  auto const __rocm_in_tex = tex;
+  auto const __rocm_in_array = array;
+  auto const __rocm_in_flags = flags;
+  rocm_trace_emit_hipTexRefSetArray_enter(
+      (const void*)(uintptr_t)(__rocm_in_tex),
+      (const void*)(uintptr_t)(__rocm_in_array),
+      (__rocm_in_flags)); /* __ROCM_CURATED__: hipTexRefSetArray */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefSetArray_fn(tex, array, flags);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefSetArray, hip::GetHipDispatchTable()->hipTexRefSetArray_fn(tex, array, flags));
   CATCH;
 }
 hipError_t hipTexRefSetBorderColor(textureReference* texRef, float* pBorderColor) {
+  auto const __rocm_in_texRef = texRef;
+  auto const __rocm_in_pBorderColor = pBorderColor;
+  rocm_trace_emit_hipTexRefSetBorderColor_enter(
+      (const void*)(uintptr_t)(__rocm_in_texRef),
+      (const void*)(uintptr_t)(__rocm_in_pBorderColor)); /* __ROCM_CURATED__: hipTexRefSetBorderColor */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefSetBorderColor_fn(texRef, pBorderColor);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefSetBorderColor, hip::GetHipDispatchTable()->hipTexRefSetBorderColor_fn(texRef, pBorderColor));
   CATCH;
 }
 hipError_t hipTexRefSetFilterMode(textureReference* texRef, enum hipTextureFilterMode fm) {
+  auto const __rocm_in_texRef = texRef;
+  auto const __rocm_in_fm = fm;
+  rocm_trace_emit_hipTexRefSetFilterMode_enter(
+      (const void*)(uintptr_t)(__rocm_in_texRef),
+      (int32_t)(__rocm_in_fm)); /* __ROCM_CURATED__: hipTexRefSetFilterMode */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefSetFilterMode_fn(texRef, fm);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefSetFilterMode, hip::GetHipDispatchTable()->hipTexRefSetFilterMode_fn(texRef, fm));
   CATCH;
 }
 hipError_t hipTexRefSetFlags(textureReference* texRef, unsigned int Flags) {
+  auto const __rocm_in_texRef = texRef;
+  auto const __rocm_in_Flags = Flags;
+  rocm_trace_emit_hipTexRefSetFlags_enter(
+      (const void*)(uintptr_t)(__rocm_in_texRef),
+      (__rocm_in_Flags)); /* __ROCM_CURATED__: hipTexRefSetFlags */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefSetFlags_fn(texRef, Flags);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefSetFlags, hip::GetHipDispatchTable()->hipTexRefSetFlags_fn(texRef, Flags));
   CATCH;
 }
 hipError_t hipTexRefSetFormat(textureReference* texRef, hipArray_Format fmt,
                               int NumPackedComponents) {
+  auto const __rocm_in_texRef = texRef;
+  auto const __rocm_in_fmt = fmt;
+  auto const __rocm_in_NumPackedComponents = NumPackedComponents;
+  rocm_trace_emit_hipTexRefSetFormat_enter(
+      (const void*)(uintptr_t)(__rocm_in_texRef),
+      (int32_t)(__rocm_in_fmt),
+      (__rocm_in_NumPackedComponents)); /* __ROCM_CURATED__: hipTexRefSetFormat */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefSetFormat_fn(texRef, fmt, NumPackedComponents);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefSetFormat, hip::GetHipDispatchTable()->hipTexRefSetFormat_fn(texRef, fmt, NumPackedComponents));
   CATCH;
 }
 hipError_t hipTexRefSetMaxAnisotropy(textureReference* texRef, unsigned int maxAniso) {
+  auto const __rocm_in_texRef = texRef;
+  auto const __rocm_in_maxAniso = maxAniso;
+  rocm_trace_emit_hipTexRefSetMaxAnisotropy_enter(
+      (const void*)(uintptr_t)(__rocm_in_texRef),
+      (__rocm_in_maxAniso)); /* __ROCM_CURATED__: hipTexRefSetMaxAnisotropy */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefSetMaxAnisotropy_fn(texRef, maxAniso);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefSetMaxAnisotropy, hip::GetHipDispatchTable()->hipTexRefSetMaxAnisotropy_fn(texRef, maxAniso));
   CATCH;
 }
 hipError_t hipTexRefSetMipmapFilterMode(textureReference* texRef, enum hipTextureFilterMode fm) {
+  auto const __rocm_in_texRef = texRef;
+  auto const __rocm_in_fm = fm;
+  rocm_trace_emit_hipTexRefSetMipmapFilterMode_enter(
+      (const void*)(uintptr_t)(__rocm_in_texRef),
+      (int32_t)(__rocm_in_fm)); /* __ROCM_CURATED__: hipTexRefSetMipmapFilterMode */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefSetMipmapFilterMode_fn(texRef, fm);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefSetMipmapFilterMode, hip::GetHipDispatchTable()->hipTexRefSetMipmapFilterMode_fn(texRef, fm));
   CATCH;
 }
 hipError_t hipTexRefSetMipmapLevelBias(textureReference* texRef, float bias) {
+  auto const __rocm_in_texRef = texRef;
+  auto const __rocm_in_bias = bias;
+  rocm_trace_emit_hipTexRefSetMipmapLevelBias_enter(
+      (const void*)(uintptr_t)(__rocm_in_texRef),
+      (__rocm_in_bias)); /* __ROCM_CURATED__: hipTexRefSetMipmapLevelBias */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefSetMipmapLevelBias_fn(texRef, bias);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefSetMipmapLevelBias, hip::GetHipDispatchTable()->hipTexRefSetMipmapLevelBias_fn(texRef, bias));
   CATCH;
 }
 hipError_t hipTexRefSetMipmapLevelClamp(textureReference* texRef, float minMipMapLevelClamp,
                                         float maxMipMapLevelClamp) {
+  auto const __rocm_in_texRef = texRef;
+  auto const __rocm_in_minMipMapLevelClamp = minMipMapLevelClamp;
+  auto const __rocm_in_maxMipMapLevelClamp = maxMipMapLevelClamp;
+  rocm_trace_emit_hipTexRefSetMipmapLevelClamp_enter(
+      (const void*)(uintptr_t)(__rocm_in_texRef),
+      (__rocm_in_minMipMapLevelClamp),
+      (__rocm_in_maxMipMapLevelClamp)); /* __ROCM_CURATED__: hipTexRefSetMipmapLevelClamp */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefSetMipmapLevelClamp_fn(texRef, minMipMapLevelClamp,
-                                                                     maxMipMapLevelClamp);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefSetMipmapLevelClamp, hip::GetHipDispatchTable()->hipTexRefSetMipmapLevelClamp_fn(
+                                    texRef, minMipMapLevelClamp, maxMipMapLevelClamp));
   CATCH;
 }
 hipError_t hipTexRefSetMipmappedArray(textureReference* texRef,
                                       struct hipMipmappedArray* mipmappedArray,
                                       unsigned int Flags) {
+  auto const __rocm_in_texRef = texRef;
+  auto const __rocm_in_mipmappedArray = mipmappedArray;
+  auto const __rocm_in_Flags = Flags;
+  rocm_trace_emit_hipTexRefSetMipmappedArray_enter(
+      (const void*)(uintptr_t)(__rocm_in_texRef),
+      (const void*)(uintptr_t)(__rocm_in_mipmappedArray),
+      (__rocm_in_Flags)); /* __ROCM_CURATED__: hipTexRefSetMipmappedArray */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefSetMipmappedArray_fn(texRef, mipmappedArray, Flags);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefSetMipmappedArray, hip::GetHipDispatchTable()->hipTexRefSetMipmappedArray_fn(texRef, mipmappedArray, Flags));
   CATCH;
 }
 hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode) {
@@ -4934,8 +5190,11 @@ hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode) {
   CATCH;
 }
 extern "C" hipError_t hipUnbindTexture(const textureReference* tex) {
+  auto const __rocm_in_tex = tex;
+  rocm_trace_emit_hipUnbindTexture_enter(
+      (const void*)(uintptr_t)(__rocm_in_tex)); /* __ROCM_CURATED__: hipUnbindTexture */
   TRY;
-  return hip::GetHipDispatchTable()->hipUnbindTexture_fn(tex);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipUnbindTexture, hip::GetHipDispatchTable()->hipUnbindTexture_fn(tex));
   CATCH;
 }
 hipError_t hipUserObjectCreate(hipUserObject_t* object_out, void* ptr, hipHostFn_t destroy,
@@ -4986,8 +5245,23 @@ hipError_t hipWaitExternalSemaphoresAsync(const hipExternalSemaphore_t* extSemAr
 }
 extern "C" hipChannelFormatDesc hipCreateChannelDesc(int x, int y, int z, int w,
                                                      hipChannelFormatKind f) {
+  auto const __rocm_in_x = x;
+  auto const __rocm_in_y = y;
+  auto const __rocm_in_z = z;
+  auto const __rocm_in_w = w;
+  auto const __rocm_in_f = f;
+  rocm_trace_emit_hipCreateChannelDesc_enter(
+      (__rocm_in_x),
+      (__rocm_in_y),
+      (__rocm_in_z),
+      (__rocm_in_w),
+      (int32_t)(__rocm_in_f)); /* __ROCM_CURATED__: hipCreateChannelDesc */
   TRY;
-  return hip::GetHipDispatchTable()->hipCreateChannelDesc_fn(x, y, z, w, f);
+  do {
+    auto __rocm_rv = (hip::GetHipDispatchTable()->hipCreateChannelDesc_fn(x, y, z, w, f));
+    rocm_trace_emit_hipCreateChannelDesc_exit();
+    return __rocm_rv;
+  } while (0);
   CATCHRET(hipChannelFormatDesc)
 }
 
@@ -5670,13 +5944,23 @@ hipError_t hipExtGetLastError() {
   CATCH;
 }
 hipError_t hipTexRefGetBorderColor(float* pBorderColor, const textureReference* texRef) {
+  auto const __rocm_in_pBorderColor = pBorderColor;
+  auto const __rocm_in_texRef = texRef;
+  rocm_trace_emit_hipTexRefGetBorderColor_enter(
+      (const void*)(uintptr_t)(__rocm_in_pBorderColor),
+      (const void*)(uintptr_t)(__rocm_in_texRef)); /* __ROCM_CURATED__: hipTexRefGetBorderColor */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefGetBorderColor_fn(pBorderColor, texRef);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefGetBorderColor, hip::GetHipDispatchTable()->hipTexRefGetBorderColor_fn(pBorderColor, texRef));
   CATCH;
 }
 hipError_t hipTexRefGetArray(hipArray_t* pArray, const textureReference* texRef) {
+  auto const __rocm_in_pArray = pArray;
+  auto const __rocm_in_texRef = texRef;
+  rocm_trace_emit_hipTexRefGetArray_enter(
+      (const void*)(uintptr_t)(__rocm_in_pArray),
+      (const void*)(uintptr_t)(__rocm_in_texRef)); /* __ROCM_CURATED__: hipTexRefGetArray */
   TRY;
-  return hip::GetHipDispatchTable()->hipTexRefGetArray_fn(pArray, texRef);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipTexRefGetArray, hip::GetHipDispatchTable()->hipTexRefGetArray_fn(pArray, texRef));
   CATCH;
 }
 extern "C" hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion,

@@ -2,7 +2,7 @@
  * Do not edit by hand — regenerate instead (see command below).
  *
  * SHA256(curated_apis.yaml) at generation:
- * beef0034624da7600d96ad14547b4c9462f8e0e1ee5d5b1f9ea364fb75ebf90a
+ * 0214e757335b98a74e178b838a50d7b09fbbd4e479883c43061964009aaaef40
  *
  * Per-API typed emit helpers for curated parameter capture. Every
  * helper takes (<captured-args...>, <status_type> status); status is
@@ -7996,6 +7996,785 @@ static inline void rocm_trace_emit_hipModuleOccupancyMaxPotentialBlockSizeWithFl
   }
 }
 
+static inline void rocm_trace_emit_hipBindTexture_enter(const void* offset, const void* tex,
+                                                        const void* devPtr, const void* desc,
+                                                        size_t size) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipBindTexture)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipBindTexture, (int32_t)0, (uint64_t)(uintptr_t)(offset),
+                            (uint64_t)(uintptr_t)(tex), (uint64_t)(uintptr_t)(devPtr),
+                            (uint64_t)(uintptr_t)(desc), (uint64_t)(size), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipBindTexture_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipBindTexture)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipBindTexture, (int32_t)1, 0, 0, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipBindTexture2D_enter(const void* offset, const void* tex,
+                                                          const void* devPtr, const void* desc,
+                                                          size_t width, size_t height,
+                                                          size_t pitch) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipBindTexture2D)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipBindTexture2D, (int32_t)0, (uint64_t)(uintptr_t)(offset),
+                            (uint64_t)(uintptr_t)(tex), (uint64_t)(uintptr_t)(devPtr),
+                            (uint64_t)(uintptr_t)(desc), (uint64_t)(width), (uint64_t)(height),
+                            (uint64_t)(pitch), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipBindTexture2D_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipBindTexture2D)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipBindTexture2D, (int32_t)1, 0, 0, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipBindTextureToArray_enter(const void* tex, const void* array,
+                                                               const void* desc) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipBindTextureToArray)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipBindTextureToArray, (int32_t)0, (uint64_t)(uintptr_t)(tex),
+                            (uint64_t)(uintptr_t)(array), (uint64_t)(uintptr_t)(desc), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipBindTextureToArray_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipBindTextureToArray)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipBindTextureToArray, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipBindTextureToMipmappedArray_enter(const void* tex,
+                                                                        const void* mipmappedArray,
+                                                                        const void* desc) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipBindTextureToMipmappedArray)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipBindTextureToMipmappedArray, (int32_t)0,
+                            (uint64_t)(uintptr_t)(tex), (uint64_t)(uintptr_t)(mipmappedArray),
+                            (uint64_t)(uintptr_t)(desc), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipBindTextureToMipmappedArray_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipBindTextureToMipmappedArray)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipBindTextureToMipmappedArray, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipCreateChannelDesc_enter(int32_t x, int32_t y, int32_t z,
+                                                              int32_t w, int32_t f) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipCreateChannelDesc)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipCreateChannelDesc, (int32_t)0, (int32_t)(x), (int32_t)(y),
+                            (int32_t)(z), (int32_t)(w), (int32_t)(f));
+  }
+}
+
+static inline void rocm_trace_emit_hipCreateChannelDesc_exit(void) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipCreateChannelDesc)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipCreateChannelDesc, (int32_t)1, 0, 0, 0, 0, 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipCreateSurfaceObject_enter(const void* pSurfObject,
+                                                                const void* pResDesc) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipCreateSurfaceObject)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipCreateSurfaceObject, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pSurfObject), (uint64_t)(uintptr_t)(pResDesc), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipCreateSurfaceObject_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipCreateSurfaceObject)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipCreateSurfaceObject, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipCreateTextureObject_enter(const void* pTexObject,
+                                                                const void* pResDesc,
+                                                                const void* pTexDesc,
+                                                                const void* pResViewDesc) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipCreateTextureObject)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipCreateTextureObject, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pTexObject), (uint64_t)(uintptr_t)(pResDesc),
+                            (uint64_t)(uintptr_t)(pTexDesc), (uint64_t)(uintptr_t)(pResViewDesc),
+                            0);
+  }
+}
+
+static inline void rocm_trace_emit_hipCreateTextureObject_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipCreateTextureObject)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipCreateTextureObject, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDestroySurfaceObject_enter(const void* surfaceObject) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDestroySurfaceObject)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDestroySurfaceObject, (int32_t)0,
+                            (uint64_t)(uintptr_t)(surfaceObject), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDestroySurfaceObject_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDestroySurfaceObject)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDestroySurfaceObject, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDestroyTextureObject_enter(const void* textureObject) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDestroyTextureObject)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDestroyTextureObject, (int32_t)0,
+                            (uint64_t)(uintptr_t)(textureObject), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDestroyTextureObject_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDestroyTextureObject)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDestroyTextureObject, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetChannelDesc_enter(const void* desc, const void* array) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetChannelDesc)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetChannelDesc, (int32_t)0, (uint64_t)(uintptr_t)(desc),
+                            (uint64_t)(uintptr_t)(array), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetChannelDesc_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetChannelDesc)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetChannelDesc, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetTextureAlignmentOffset_enter(const void* offset,
+                                                                      const void* texref) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetTextureAlignmentOffset)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetTextureAlignmentOffset, (int32_t)0,
+                            (uint64_t)(uintptr_t)(offset), (uint64_t)(uintptr_t)(texref), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetTextureAlignmentOffset_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetTextureAlignmentOffset)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetTextureAlignmentOffset, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetTextureObjectResourceDesc_enter(
+    const void* pResDesc, const void* textureObject) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetTextureObjectResourceDesc)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetTextureObjectResourceDesc, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pResDesc), (uint64_t)(uintptr_t)(textureObject),
+                            0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetTextureObjectResourceDesc_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetTextureObjectResourceDesc)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetTextureObjectResourceDesc, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetTextureObjectResourceViewDesc_enter(
+    const void* pResViewDesc, const void* textureObject) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetTextureObjectResourceViewDesc)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetTextureObjectResourceViewDesc, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pResViewDesc),
+                            (uint64_t)(uintptr_t)(textureObject), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetTextureObjectResourceViewDesc_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetTextureObjectResourceViewDesc)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetTextureObjectResourceViewDesc, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetTextureObjectTextureDesc_enter(const void* pTexDesc,
+                                                                        const void* textureObject) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetTextureObjectTextureDesc)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetTextureObjectTextureDesc, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pTexDesc), (uint64_t)(uintptr_t)(textureObject),
+                            0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetTextureObjectTextureDesc_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetTextureObjectTextureDesc)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetTextureObjectTextureDesc, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetTextureReference_enter(const void* texref,
+                                                                const void* symbol) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetTextureReference)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetTextureReference, (int32_t)0,
+                            (uint64_t)(uintptr_t)(texref), (uint64_t)(uintptr_t)(symbol), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetTextureReference_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetTextureReference)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetTextureReference, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexObjectCreate_enter(const void* pTexObject,
+                                                            const void* pResDesc,
+                                                            const void* pTexDesc,
+                                                            const void* pResViewDesc) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexObjectCreate)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexObjectCreate, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pTexObject), (uint64_t)(uintptr_t)(pResDesc),
+                            (uint64_t)(uintptr_t)(pTexDesc), (uint64_t)(uintptr_t)(pResViewDesc),
+                            0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexObjectCreate_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexObjectCreate)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexObjectCreate, (int32_t)1, 0, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexObjectDestroy_enter(const void* texObject) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexObjectDestroy)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexObjectDestroy, (int32_t)0,
+                            (uint64_t)(uintptr_t)(texObject), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexObjectDestroy_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexObjectDestroy)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexObjectDestroy, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexObjectGetResourceDesc_enter(const void* pResDesc,
+                                                                     const void* texObject) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexObjectGetResourceDesc)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexObjectGetResourceDesc, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pResDesc), (uint64_t)(uintptr_t)(texObject), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexObjectGetResourceDesc_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexObjectGetResourceDesc)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexObjectGetResourceDesc, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexObjectGetResourceViewDesc_enter(const void* pResViewDesc,
+                                                                         const void* texObject) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexObjectGetResourceViewDesc)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexObjectGetResourceViewDesc, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pResViewDesc), (uint64_t)(uintptr_t)(texObject),
+                            0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexObjectGetResourceViewDesc_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexObjectGetResourceViewDesc)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexObjectGetResourceViewDesc, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexObjectGetTextureDesc_enter(const void* pTexDesc,
+                                                                    const void* texObject) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexObjectGetTextureDesc)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexObjectGetTextureDesc, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pTexDesc), (uint64_t)(uintptr_t)(texObject), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexObjectGetTextureDesc_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexObjectGetTextureDesc)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexObjectGetTextureDesc, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetAddress_enter(const void* dev_ptr,
+                                                             const void* texRef) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetAddress)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetAddress, (int32_t)0,
+                            (uint64_t)(uintptr_t)(dev_ptr), (uint64_t)(uintptr_t)(texRef), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetAddress_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetAddress)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetAddress, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetAddressMode_enter(const void* pam,
+                                                                 const void* texRef, int32_t dim) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetAddressMode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetAddressMode, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pam), (uint64_t)(uintptr_t)(texRef),
+                            (int32_t)(dim), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetAddressMode_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetAddressMode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetAddressMode, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetArray_enter(const void* pArray, const void* texRef) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetArray)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetArray, (int32_t)0, (uint64_t)(uintptr_t)(pArray),
+                            (uint64_t)(uintptr_t)(texRef), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetArray_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetArray)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetArray, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetBorderColor_enter(const void* pBorderColor,
+                                                                 const void* texRef) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetBorderColor)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetBorderColor, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pBorderColor), (uint64_t)(uintptr_t)(texRef), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetBorderColor_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetBorderColor)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetBorderColor, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetFilterMode_enter(const void* pfm,
+                                                                const void* texRef) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetFilterMode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetFilterMode, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pfm), (uint64_t)(uintptr_t)(texRef), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetFilterMode_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetFilterMode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetFilterMode, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetFlags_enter(const void* pFlags, const void* texRef) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetFlags)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetFlags, (int32_t)0, (uint64_t)(uintptr_t)(pFlags),
+                            (uint64_t)(uintptr_t)(texRef), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetFlags_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetFlags)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetFlags, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetFormat_enter(const void* pFormat,
+                                                            const void* pNumChannels,
+                                                            const void* texRef) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetFormat)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetFormat, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pFormat), (uint64_t)(uintptr_t)(pNumChannels),
+                            (uint64_t)(uintptr_t)(texRef), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetFormat_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetFormat)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetFormat, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetMaxAnisotropy_enter(const void* pmaxAnsio,
+                                                                   const void* texRef) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetMaxAnisotropy)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetMaxAnisotropy, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pmaxAnsio), (uint64_t)(uintptr_t)(texRef), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetMaxAnisotropy_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetMaxAnisotropy)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetMaxAnisotropy, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetMipMappedArray_enter(const void* pArray,
+                                                                    const void* texRef) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetMipMappedArray)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetMipMappedArray, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pArray), (uint64_t)(uintptr_t)(texRef), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetMipMappedArray_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetMipMappedArray)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetMipMappedArray, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetMipmapFilterMode_enter(const void* pfm,
+                                                                      const void* texRef) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetMipmapFilterMode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetMipmapFilterMode, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pfm), (uint64_t)(uintptr_t)(texRef), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetMipmapFilterMode_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetMipmapFilterMode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetMipmapFilterMode, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetMipmapLevelBias_enter(const void* pbias,
+                                                                     const void* texRef) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetMipmapLevelBias)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetMipmapLevelBias, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pbias), (uint64_t)(uintptr_t)(texRef), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetMipmapLevelBias_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetMipmapLevelBias)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetMipmapLevelBias, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetMipmapLevelClamp_enter(
+    const void* pminMipmapLevelClamp, const void* pmaxMipmapLevelClamp, const void* texRef) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetMipmapLevelClamp)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetMipmapLevelClamp, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pminMipmapLevelClamp),
+                            (uint64_t)(uintptr_t)(pmaxMipmapLevelClamp),
+                            (uint64_t)(uintptr_t)(texRef), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefGetMipmapLevelClamp_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefGetMipmapLevelClamp)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefGetMipmapLevelClamp, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetAddress_enter(const void* ByteOffset,
+                                                             const void* texRef, uint64_t dptr,
+                                                             size_t bytes) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetAddress)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetAddress, (int32_t)0,
+                            (uint64_t)(uintptr_t)(ByteOffset), (uint64_t)(uintptr_t)(texRef),
+                            (uint64_t)(dptr), (uint64_t)(bytes), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetAddress_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetAddress)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetAddress, (int32_t)1, 0, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetAddress2D_enter(const void* texRef, const void* desc,
+                                                               uint64_t dptr, size_t Pitch) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetAddress2D)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetAddress2D, (int32_t)0,
+                            (uint64_t)(uintptr_t)(texRef), (uint64_t)(uintptr_t)(desc),
+                            (uint64_t)(dptr), (uint64_t)(Pitch), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetAddress2D_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetAddress2D)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetAddress2D, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetAddressMode_enter(const void* texRef, int32_t dim,
+                                                                 int32_t am) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetAddressMode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetAddressMode, (int32_t)0,
+                            (uint64_t)(uintptr_t)(texRef), (int32_t)(dim), (int32_t)(am), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetAddressMode_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetAddressMode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetAddressMode, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetArray_enter(const void* tex, const void* array,
+                                                           uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetArray)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetArray, (int32_t)0, (uint64_t)(uintptr_t)(tex),
+                            (uint64_t)(uintptr_t)(array), (uint32_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetArray_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetArray)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetArray, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetBorderColor_enter(const void* texRef,
+                                                                 const void* pBorderColor) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetBorderColor)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetBorderColor, (int32_t)0,
+                            (uint64_t)(uintptr_t)(texRef), (uint64_t)(uintptr_t)(pBorderColor), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetBorderColor_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetBorderColor)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetBorderColor, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetFilterMode_enter(const void* texRef, int32_t fm) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetFilterMode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetFilterMode, (int32_t)0,
+                            (uint64_t)(uintptr_t)(texRef), (int32_t)(fm), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetFilterMode_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetFilterMode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetFilterMode, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetFlags_enter(const void* texRef, uint32_t Flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetFlags)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetFlags, (int32_t)0, (uint64_t)(uintptr_t)(texRef),
+                            (uint32_t)(Flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetFlags_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetFlags)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetFlags, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetFormat_enter(const void* texRef, int32_t fmt,
+                                                            int32_t NumPackedComponents) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetFormat)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetFormat, (int32_t)0, (uint64_t)(uintptr_t)(texRef),
+                            (int32_t)(fmt), (int32_t)(NumPackedComponents), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetFormat_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetFormat)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetFormat, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetMaxAnisotropy_enter(const void* texRef,
+                                                                   uint32_t maxAniso) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetMaxAnisotropy)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetMaxAnisotropy, (int32_t)0,
+                            (uint64_t)(uintptr_t)(texRef), (uint32_t)(maxAniso), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetMaxAnisotropy_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetMaxAnisotropy)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetMaxAnisotropy, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetMipmapFilterMode_enter(const void* texRef,
+                                                                      int32_t fm) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetMipmapFilterMode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetMipmapFilterMode, (int32_t)0,
+                            (uint64_t)(uintptr_t)(texRef), (int32_t)(fm), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetMipmapFilterMode_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetMipmapFilterMode)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetMipmapFilterMode, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetMipmapLevelBias_enter(const void* texRef,
+                                                                     float bias) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetMipmapLevelBias)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetMipmapLevelBias, (int32_t)0,
+                            (uint64_t)(uintptr_t)(texRef), (float)(bias), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetMipmapLevelBias_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetMipmapLevelBias)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetMipmapLevelBias, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetMipmapLevelClamp_enter(const void* texRef,
+                                                                      float minMipMapLevelClamp,
+                                                                      float maxMipMapLevelClamp) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetMipmapLevelClamp)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetMipmapLevelClamp, (int32_t)0,
+                            (uint64_t)(uintptr_t)(texRef), (float)(minMipMapLevelClamp),
+                            (float)(maxMipMapLevelClamp), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetMipmapLevelClamp_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetMipmapLevelClamp)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetMipmapLevelClamp, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetMipmappedArray_enter(const void* texRef,
+                                                                    const void* mipmappedArray,
+                                                                    uint32_t Flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetMipmappedArray)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetMipmappedArray, (int32_t)0,
+                            (uint64_t)(uintptr_t)(texRef), (uint64_t)(uintptr_t)(mipmappedArray),
+                            (uint32_t)(Flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipTexRefSetMipmappedArray_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipTexRefSetMipmappedArray)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipTexRefSetMipmappedArray, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipUnbindTexture_enter(const void* tex) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipUnbindTexture)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipUnbindTexture, (int32_t)0, (uint64_t)(uintptr_t)(tex), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipUnbindTexture_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipUnbindTexture)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipUnbindTexture, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
 
 #else /* HIP_ENABLE_LTTNG_UST not defined — all helpers are no-ops */
 
@@ -9168,6 +9947,114 @@ static inline void rocm_trace_emit_hipModuleOccupancyMaxPotentialBlockSizeWithFl
     const void*, const void*, uint64_t, size_t, int32_t, uint32_t) {}
 static inline void rocm_trace_emit_hipModuleOccupancyMaxPotentialBlockSizeWithFlags_exit(
     hipError_t) {}
+static inline void rocm_trace_emit_hipBindTexture_enter(const void*, const void*, const void*,
+                                                        const void*, size_t) {}
+static inline void rocm_trace_emit_hipBindTexture_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipBindTexture2D_enter(const void*, const void*, const void*,
+                                                          const void*, size_t, size_t, size_t) {}
+static inline void rocm_trace_emit_hipBindTexture2D_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipBindTextureToArray_enter(const void*, const void*,
+                                                               const void*) {}
+static inline void rocm_trace_emit_hipBindTextureToArray_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipBindTextureToMipmappedArray_enter(const void*, const void*,
+                                                                        const void*) {}
+static inline void rocm_trace_emit_hipBindTextureToMipmappedArray_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipCreateChannelDesc_enter(int32_t, int32_t, int32_t, int32_t,
+                                                              int32_t) {}
+static inline void rocm_trace_emit_hipCreateChannelDesc_exit() {}
+static inline void rocm_trace_emit_hipCreateSurfaceObject_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipCreateSurfaceObject_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipCreateTextureObject_enter(const void*, const void*,
+                                                                const void*, const void*) {}
+static inline void rocm_trace_emit_hipCreateTextureObject_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDestroySurfaceObject_enter(const void*) {}
+static inline void rocm_trace_emit_hipDestroySurfaceObject_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDestroyTextureObject_enter(const void*) {}
+static inline void rocm_trace_emit_hipDestroyTextureObject_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGetChannelDesc_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipGetChannelDesc_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGetTextureAlignmentOffset_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipGetTextureAlignmentOffset_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGetTextureObjectResourceDesc_enter(const void*, const void*) {
+}
+static inline void rocm_trace_emit_hipGetTextureObjectResourceDesc_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGetTextureObjectResourceViewDesc_enter(const void*,
+                                                                             const void*) {}
+static inline void rocm_trace_emit_hipGetTextureObjectResourceViewDesc_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGetTextureObjectTextureDesc_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipGetTextureObjectTextureDesc_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGetTextureReference_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipGetTextureReference_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexObjectCreate_enter(const void*, const void*, const void*,
+                                                            const void*) {}
+static inline void rocm_trace_emit_hipTexObjectCreate_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexObjectDestroy_enter(const void*) {}
+static inline void rocm_trace_emit_hipTexObjectDestroy_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexObjectGetResourceDesc_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipTexObjectGetResourceDesc_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexObjectGetResourceViewDesc_enter(const void*, const void*) {
+}
+static inline void rocm_trace_emit_hipTexObjectGetResourceViewDesc_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexObjectGetTextureDesc_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipTexObjectGetTextureDesc_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefGetAddress_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipTexRefGetAddress_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefGetAddressMode_enter(const void*, const void*,
+                                                                 int32_t) {}
+static inline void rocm_trace_emit_hipTexRefGetAddressMode_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefGetArray_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipTexRefGetArray_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefGetBorderColor_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipTexRefGetBorderColor_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefGetFilterMode_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipTexRefGetFilterMode_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefGetFlags_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipTexRefGetFlags_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefGetFormat_enter(const void*, const void*, const void*) {
+}
+static inline void rocm_trace_emit_hipTexRefGetFormat_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefGetMaxAnisotropy_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipTexRefGetMaxAnisotropy_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefGetMipMappedArray_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipTexRefGetMipMappedArray_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefGetMipmapFilterMode_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipTexRefGetMipmapFilterMode_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefGetMipmapLevelBias_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipTexRefGetMipmapLevelBias_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefGetMipmapLevelClamp_enter(const void*, const void*,
+                                                                      const void*) {}
+static inline void rocm_trace_emit_hipTexRefGetMipmapLevelClamp_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefSetAddress_enter(const void*, const void*, uint64_t,
+                                                             size_t) {}
+static inline void rocm_trace_emit_hipTexRefSetAddress_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefSetAddress2D_enter(const void*, const void*, uint64_t,
+                                                               size_t) {}
+static inline void rocm_trace_emit_hipTexRefSetAddress2D_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefSetAddressMode_enter(const void*, int32_t, int32_t) {}
+static inline void rocm_trace_emit_hipTexRefSetAddressMode_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefSetArray_enter(const void*, const void*, uint32_t) {}
+static inline void rocm_trace_emit_hipTexRefSetArray_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefSetBorderColor_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipTexRefSetBorderColor_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefSetFilterMode_enter(const void*, int32_t) {}
+static inline void rocm_trace_emit_hipTexRefSetFilterMode_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefSetFlags_enter(const void*, uint32_t) {}
+static inline void rocm_trace_emit_hipTexRefSetFlags_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefSetFormat_enter(const void*, int32_t, int32_t) {}
+static inline void rocm_trace_emit_hipTexRefSetFormat_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefSetMaxAnisotropy_enter(const void*, uint32_t) {}
+static inline void rocm_trace_emit_hipTexRefSetMaxAnisotropy_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefSetMipmapFilterMode_enter(const void*, int32_t) {}
+static inline void rocm_trace_emit_hipTexRefSetMipmapFilterMode_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefSetMipmapLevelBias_enter(const void*, float) {}
+static inline void rocm_trace_emit_hipTexRefSetMipmapLevelBias_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefSetMipmapLevelClamp_enter(const void*, float, float) {}
+static inline void rocm_trace_emit_hipTexRefSetMipmapLevelClamp_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipTexRefSetMipmappedArray_enter(const void*, const void*,
+                                                                    uint32_t) {}
+static inline void rocm_trace_emit_hipTexRefSetMipmappedArray_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipUnbindTexture_enter(const void*) {}
+static inline void rocm_trace_emit_hipUnbindTexture_exit(hipError_t) {}
 
 #endif /* HIP_ENABLE_LTTNG_UST */
 

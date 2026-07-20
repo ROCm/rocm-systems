@@ -1382,3 +1382,141 @@
 
 - api: hipModuleOccupancyMaxPotentialBlockSizeWithFlags
   args: [gridSize, blockSize, f, dynSharedMemPerBlk, blockSizeLimit, flags]
+
+- api: hipBindTexture
+  args: [offset, tex, devPtr, desc, size]
+
+- api: hipBindTexture2D
+  args: [offset, tex, devPtr, desc, width, height, pitch]
+
+- api: hipBindTextureToArray
+  args: [tex, array, desc]
+
+- api: hipBindTextureToMipmappedArray
+  args: [tex, mipmappedArray, desc]
+
+- api: hipCreateChannelDesc
+  args: [x, y, z, w, f]
+
+- api: hipCreateSurfaceObject
+  args: [pSurfObject, pResDesc]
+
+- api: hipCreateTextureObject
+  args: [pTexObject, pResDesc, pTexDesc, pResViewDesc]
+
+- api: hipDestroySurfaceObject
+  args: [surfaceObject]
+
+- api: hipDestroyTextureObject
+  args: [textureObject]
+
+- api: hipGetChannelDesc
+  args: [desc, array]
+
+- api: hipGetTextureAlignmentOffset
+  args: [offset, texref]
+
+- api: hipGetTextureObjectResourceDesc
+  args: [pResDesc, textureObject]
+
+- api: hipGetTextureObjectResourceViewDesc
+  args: [pResViewDesc, textureObject]
+
+- api: hipGetTextureObjectTextureDesc
+  args: [pTexDesc, textureObject]
+
+- api: hipGetTextureReference
+  args: [texref, symbol]
+
+- api: hipTexObjectCreate
+  args: [pTexObject, pResDesc, pTexDesc, pResViewDesc]
+
+- api: hipTexObjectDestroy
+  args: [texObject]
+
+- api: hipTexObjectGetResourceDesc
+  args: [pResDesc, texObject]
+
+- api: hipTexObjectGetResourceViewDesc
+  args: [pResViewDesc, texObject]
+
+- api: hipTexObjectGetTextureDesc
+  args: [pTexDesc, texObject]
+
+- api: hipTexRefGetAddress
+  args: [dev_ptr, texRef]
+
+- api: hipTexRefGetAddressMode
+  args: [pam, texRef, dim]
+
+- api: hipTexRefGetArray
+  args: [pArray, texRef]
+
+- api: hipTexRefGetBorderColor
+  args: [pBorderColor, texRef]
+
+- api: hipTexRefGetFilterMode
+  args: [pfm, texRef]
+
+- api: hipTexRefGetFlags
+  args: [pFlags, texRef]
+
+- api: hipTexRefGetFormat
+  args: [pFormat, pNumChannels, texRef]
+
+- api: hipTexRefGetMaxAnisotropy
+  args: [pmaxAnsio, texRef]
+
+- api: hipTexRefGetMipMappedArray
+  args: [pArray, texRef]
+
+- api: hipTexRefGetMipmapFilterMode
+  args: [pfm, texRef]
+
+- api: hipTexRefGetMipmapLevelBias
+  args: [pbias, texRef]
+
+- api: hipTexRefGetMipmapLevelClamp
+  args: [pminMipmapLevelClamp, pmaxMipmapLevelClamp, texRef]
+
+- api: hipTexRefSetAddress
+  args: [ByteOffset, texRef, dptr, bytes]
+
+- api: hipTexRefSetAddress2D
+  args: [texRef, desc, dptr, Pitch]
+
+- api: hipTexRefSetAddressMode
+  args: [texRef, dim, am]
+
+- api: hipTexRefSetArray
+  args: [tex, array, flags]
+
+- api: hipTexRefSetBorderColor
+  args: [texRef, pBorderColor]
+
+- api: hipTexRefSetFilterMode
+  args: [texRef, fm]
+
+- api: hipTexRefSetFlags
+  args: [texRef, Flags]
+
+- api: hipTexRefSetFormat
+  args: [texRef, fmt, NumPackedComponents]
+
+- api: hipTexRefSetMaxAnisotropy
+  args: [texRef, maxAniso]
+
+- api: hipTexRefSetMipmapFilterMode
+  args: [texRef, fm]
+
+- api: hipTexRefSetMipmapLevelBias
+  args: [texRef, bias]
+
+- api: hipTexRefSetMipmapLevelClamp
+  args: [texRef, minMipMapLevelClamp, maxMipMapLevelClamp]
+
+- api: hipTexRefSetMipmappedArray
+  args: [texRef, mipmappedArray, Flags]
+
+- api: hipUnbindTexture
+  args: [tex]
