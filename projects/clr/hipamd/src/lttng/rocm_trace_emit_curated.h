@@ -2,7 +2,7 @@
  * Do not edit by hand — regenerate instead (see command below).
  *
  * SHA256(curated_apis.yaml) at generation:
- * 0e4b1dfa1cd0856c48a6c12544f56efcdf3afd33de461b279c1cd96f3c4acd96
+ * 5311d00377b74c099ae837a83a767798785feaec8c3eec1f4b34427f02fc3e71
  *
  * Per-API typed emit helpers for curated parameter capture. Every
  * helper takes (<captured-args...>, <status_type> status); status is
@@ -9237,6 +9237,149 @@ static inline void rocm_trace_emit_hipPeekAtLastError_exit(hipError_t status) {
   }
 }
 
+static inline void rocm_trace_emit_hipDestroyExternalMemory_enter(const void* extMem) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDestroyExternalMemory)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDestroyExternalMemory, (int32_t)0,
+                            (uint64_t)(uintptr_t)(extMem), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDestroyExternalMemory_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDestroyExternalMemory)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDestroyExternalMemory, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDestroyExternalSemaphore_enter(const void* extSem) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDestroyExternalSemaphore)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDestroyExternalSemaphore, (int32_t)0,
+                            (uint64_t)(uintptr_t)(extSem), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDestroyExternalSemaphore_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDestroyExternalSemaphore)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDestroyExternalSemaphore, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipExternalMemoryGetMappedBuffer_enter(const void* devPtr,
+                                                                          const void* extMem,
+                                                                          const void* bufferDesc) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExternalMemoryGetMappedBuffer)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExternalMemoryGetMappedBuffer, (int32_t)0,
+                            (uint64_t)(uintptr_t)(devPtr), (uint64_t)(uintptr_t)(extMem),
+                            (uint64_t)(uintptr_t)(bufferDesc), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipExternalMemoryGetMappedBuffer_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExternalMemoryGetMappedBuffer)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExternalMemoryGetMappedBuffer, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipExternalMemoryGetMappedMipmappedArray_enter(
+    const void* mipmap, const void* extMem, const void* mipmapDesc) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExternalMemoryGetMappedMipmappedArray)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExternalMemoryGetMappedMipmappedArray, (int32_t)0,
+                            (uint64_t)(uintptr_t)(mipmap), (uint64_t)(uintptr_t)(extMem),
+                            (uint64_t)(uintptr_t)(mipmapDesc), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipExternalMemoryGetMappedMipmappedArray_exit(
+    hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExternalMemoryGetMappedMipmappedArray)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExternalMemoryGetMappedMipmappedArray, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipImportExternalMemory_enter(const void* extMem_out,
+                                                                 const void* memHandleDesc) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipImportExternalMemory)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipImportExternalMemory, (int32_t)0,
+                            (uint64_t)(uintptr_t)(extMem_out), (uint64_t)(uintptr_t)(memHandleDesc),
+                            0);
+  }
+}
+
+static inline void rocm_trace_emit_hipImportExternalMemory_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipImportExternalMemory)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipImportExternalMemory, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipImportExternalSemaphore_enter(const void* extSem_out,
+                                                                    const void* semHandleDesc) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipImportExternalSemaphore)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipImportExternalSemaphore, (int32_t)0,
+                            (uint64_t)(uintptr_t)(extSem_out), (uint64_t)(uintptr_t)(semHandleDesc),
+                            0);
+  }
+}
+
+static inline void rocm_trace_emit_hipImportExternalSemaphore_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipImportExternalSemaphore)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipImportExternalSemaphore, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipSignalExternalSemaphoresAsync_enter(const void* extSemArray,
+                                                                          const void* paramsArray,
+                                                                          uint32_t numExtSems,
+                                                                          uint64_t stream) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipSignalExternalSemaphoresAsync)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipSignalExternalSemaphoresAsync, (int32_t)0,
+                            (uint64_t)(uintptr_t)(extSemArray), (uint64_t)(uintptr_t)(paramsArray),
+                            (uint32_t)(numExtSems), (uint64_t)(uintptr_t)(stream), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipSignalExternalSemaphoresAsync_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipSignalExternalSemaphoresAsync)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipSignalExternalSemaphoresAsync, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipWaitExternalSemaphoresAsync_enter(const void* extSemArray,
+                                                                        const void* paramsArray,
+                                                                        uint32_t numExtSems,
+                                                                        uint64_t stream) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipWaitExternalSemaphoresAsync)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipWaitExternalSemaphoresAsync, (int32_t)0,
+                            (uint64_t)(uintptr_t)(extSemArray), (uint64_t)(uintptr_t)(paramsArray),
+                            (uint32_t)(numExtSems), (uint64_t)(uintptr_t)(stream), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipWaitExternalSemaphoresAsync_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipWaitExternalSemaphoresAsync)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipWaitExternalSemaphoresAsync, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
 
 #else /* HIP_ENABLE_LTTNG_UST not defined — all helpers are no-ops */
 
@@ -10581,6 +10724,27 @@ static inline void rocm_trace_emit_hipGetLastError_enter() {}
 static inline void rocm_trace_emit_hipGetLastError_exit(hipError_t) {}
 static inline void rocm_trace_emit_hipPeekAtLastError_enter() {}
 static inline void rocm_trace_emit_hipPeekAtLastError_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDestroyExternalMemory_enter(const void*) {}
+static inline void rocm_trace_emit_hipDestroyExternalMemory_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDestroyExternalSemaphore_enter(const void*) {}
+static inline void rocm_trace_emit_hipDestroyExternalSemaphore_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipExternalMemoryGetMappedBuffer_enter(const void*, const void*,
+                                                                          const void*) {}
+static inline void rocm_trace_emit_hipExternalMemoryGetMappedBuffer_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipExternalMemoryGetMappedMipmappedArray_enter(const void*,
+                                                                                  const void*,
+                                                                                  const void*) {}
+static inline void rocm_trace_emit_hipExternalMemoryGetMappedMipmappedArray_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipImportExternalMemory_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipImportExternalMemory_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipImportExternalSemaphore_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipImportExternalSemaphore_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipSignalExternalSemaphoresAsync_enter(const void*, const void*,
+                                                                          uint32_t, uint64_t) {}
+static inline void rocm_trace_emit_hipSignalExternalSemaphoresAsync_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipWaitExternalSemaphoresAsync_enter(const void*, const void*,
+                                                                        uint32_t, uint64_t) {}
+static inline void rocm_trace_emit_hipWaitExternalSemaphoresAsync_exit(hipError_t) {}
 
 #endif /* HIP_ENABLE_LTTNG_UST */
 

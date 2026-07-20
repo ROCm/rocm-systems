@@ -545,13 +545,19 @@ hipError_t hipCtxSynchronize(void) {
   CATCH;
 }
 hipError_t hipDestroyExternalMemory(hipExternalMemory_t extMem) {
+  auto const __rocm_in_extMem = extMem;
+  rocm_trace_emit_hipDestroyExternalMemory_enter(
+      (const void*)(uintptr_t)(__rocm_in_extMem)); /* __ROCM_CURATED__: hipDestroyExternalMemory */
   TRY;
-  return hip::GetHipDispatchTable()->hipDestroyExternalMemory_fn(extMem);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipDestroyExternalMemory, hip::GetHipDispatchTable()->hipDestroyExternalMemory_fn(extMem));
   CATCH;
 }
 hipError_t hipDestroyExternalSemaphore(hipExternalSemaphore_t extSem) {
+  auto const __rocm_in_extSem = extSem;
+  rocm_trace_emit_hipDestroyExternalSemaphore_enter(
+      (const void*)(uintptr_t)(__rocm_in_extSem)); /* __ROCM_CURATED__: hipDestroyExternalSemaphore */
   TRY;
-  return hip::GetHipDispatchTable()->hipDestroyExternalSemaphore_fn(extSem);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipDestroyExternalSemaphore, hip::GetHipDispatchTable()->hipDestroyExternalSemaphore_fn(extSem));
   CATCH;
 }
 hipError_t hipDestroySurfaceObject(hipSurfaceObject_t surfaceObject) {
@@ -1137,9 +1143,15 @@ hipError_t hipExtStreamGetCUMask(hipStream_t stream, uint32_t cuMaskSize, uint32
 }
 hipError_t hipExternalMemoryGetMappedBuffer(void** devPtr, hipExternalMemory_t extMem,
                                             const hipExternalMemoryBufferDesc* bufferDesc) {
+  auto const __rocm_in_devPtr = devPtr;
+  auto const __rocm_in_extMem = extMem;
+  auto const __rocm_in_bufferDesc = bufferDesc;
+  rocm_trace_emit_hipExternalMemoryGetMappedBuffer_enter(
+      (const void*)(uintptr_t)(__rocm_in_devPtr),
+      (const void*)(uintptr_t)(__rocm_in_extMem),
+      (const void*)(uintptr_t)(__rocm_in_bufferDesc)); /* __ROCM_CURATED__: hipExternalMemoryGetMappedBuffer */
   TRY;
-  return hip::GetHipDispatchTable()->hipExternalMemoryGetMappedBuffer_fn(devPtr, extMem,
-                                                                         bufferDesc);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipExternalMemoryGetMappedBuffer, hip::GetHipDispatchTable()->hipExternalMemoryGetMappedBuffer_fn(devPtr, extMem, bufferDesc));
   CATCH;
 }
 hipError_t hipFree(void* ptr) {
@@ -1349,9 +1361,16 @@ hipError_t hipGetMipmappedArrayLevel(hipArray_t* levelArray,
 hipError_t hipExternalMemoryGetMappedMipmappedArray(
     hipMipmappedArray_t* mipmap, hipExternalMemory_t extMem,
     const hipExternalMemoryMipmappedArrayDesc* mipmapDesc) {
+  auto const __rocm_in_mipmap = mipmap;
+  auto const __rocm_in_extMem = extMem;
+  auto const __rocm_in_mipmapDesc = mipmapDesc;
+  rocm_trace_emit_hipExternalMemoryGetMappedMipmappedArray_enter(
+      (const void*)(uintptr_t)(__rocm_in_mipmap),
+      (const void*)(uintptr_t)(__rocm_in_extMem),
+      (const void*)(uintptr_t)(__rocm_in_mipmapDesc)); /* __ROCM_CURATED__: hipExternalMemoryGetMappedMipmappedArray */
   TRY;
-  return hip::GetHipDispatchTable()->hipExternalMemoryGetMappedMipmappedArray_fn(mipmap, extMem,
-                                                                                 mipmapDesc);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipExternalMemoryGetMappedMipmappedArray, hip::GetHipDispatchTable()->hipExternalMemoryGetMappedMipmappedArray_fn(mipmap, extMem,
+                                                                              mipmapDesc));
   CATCH;
 }
 hipError_t hipGetSymbolAddress(void** devPtr, const void* symbol) {
@@ -2581,14 +2600,24 @@ hipError_t hipHostUnregister(void* hostPtr) {
 }
 hipError_t hipImportExternalMemory(hipExternalMemory_t* extMem_out,
                                    const hipExternalMemoryHandleDesc* memHandleDesc) {
+  auto const __rocm_in_extMem_out = extMem_out;
+  auto const __rocm_in_memHandleDesc = memHandleDesc;
+  rocm_trace_emit_hipImportExternalMemory_enter(
+      (const void*)(uintptr_t)(__rocm_in_extMem_out),
+      (const void*)(uintptr_t)(__rocm_in_memHandleDesc)); /* __ROCM_CURATED__: hipImportExternalMemory */
   TRY;
-  return hip::GetHipDispatchTable()->hipImportExternalMemory_fn(extMem_out, memHandleDesc);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipImportExternalMemory, hip::GetHipDispatchTable()->hipImportExternalMemory_fn(extMem_out, memHandleDesc));
   CATCH;
 }
 hipError_t hipImportExternalSemaphore(hipExternalSemaphore_t* extSem_out,
                                       const hipExternalSemaphoreHandleDesc* semHandleDesc) {
+  auto const __rocm_in_extSem_out = extSem_out;
+  auto const __rocm_in_semHandleDesc = semHandleDesc;
+  rocm_trace_emit_hipImportExternalSemaphore_enter(
+      (const void*)(uintptr_t)(__rocm_in_extSem_out),
+      (const void*)(uintptr_t)(__rocm_in_semHandleDesc)); /* __ROCM_CURATED__: hipImportExternalSemaphore */
   TRY;
-  return hip::GetHipDispatchTable()->hipImportExternalSemaphore_fn(extSem_out, semHandleDesc);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipImportExternalSemaphore, hip::GetHipDispatchTable()->hipImportExternalSemaphore_fn(extSem_out, semHandleDesc));
   CATCH;
 }
 hipError_t hipDrvGraphAddMemsetNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph,
@@ -4662,9 +4691,18 @@ extern "C" hipError_t hipSetupArgument(const void* arg, size_t size, size_t offs
 hipError_t hipSignalExternalSemaphoresAsync(const hipExternalSemaphore_t* extSemArray,
                                             const hipExternalSemaphoreSignalParams* paramsArray,
                                             unsigned int numExtSems, hipStream_t stream) {
+  auto const __rocm_in_extSemArray = extSemArray;
+  auto const __rocm_in_paramsArray = paramsArray;
+  auto const __rocm_in_numExtSems = numExtSems;
+  auto const __rocm_in_stream = stream;
+  rocm_trace_emit_hipSignalExternalSemaphoresAsync_enter(
+      (const void*)(uintptr_t)(__rocm_in_extSemArray),
+      (const void*)(uintptr_t)(__rocm_in_paramsArray),
+      (__rocm_in_numExtSems),
+      (uint64_t)(uintptr_t)(__rocm_in_stream)); /* __ROCM_CURATED__: hipSignalExternalSemaphoresAsync */
   TRY;
-  return hip::GetHipDispatchTable()->hipSignalExternalSemaphoresAsync_fn(extSemArray, paramsArray,
-                                                                         numExtSems, stream);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipSignalExternalSemaphoresAsync, hip::GetHipDispatchTable()->hipSignalExternalSemaphoresAsync_fn(
+                                    extSemArray, paramsArray, numExtSems, stream));
   CATCH;
 }
 hipError_t hipStreamAddCallback(hipStream_t stream, hipStreamCallback_t callback, void* userData,
@@ -5340,9 +5378,18 @@ hipError_t hipUserObjectRetain(hipUserObject_t object, unsigned int count) {
 hipError_t hipWaitExternalSemaphoresAsync(const hipExternalSemaphore_t* extSemArray,
                                           const hipExternalSemaphoreWaitParams* paramsArray,
                                           unsigned int numExtSems, hipStream_t stream) {
+  auto const __rocm_in_extSemArray = extSemArray;
+  auto const __rocm_in_paramsArray = paramsArray;
+  auto const __rocm_in_numExtSems = numExtSems;
+  auto const __rocm_in_stream = stream;
+  rocm_trace_emit_hipWaitExternalSemaphoresAsync_enter(
+      (const void*)(uintptr_t)(__rocm_in_extSemArray),
+      (const void*)(uintptr_t)(__rocm_in_paramsArray),
+      (__rocm_in_numExtSems),
+      (uint64_t)(uintptr_t)(__rocm_in_stream)); /* __ROCM_CURATED__: hipWaitExternalSemaphoresAsync */
   TRY;
-  return hip::GetHipDispatchTable()->hipWaitExternalSemaphoresAsync_fn(extSemArray, paramsArray,
-                                                                       numExtSems, stream);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipWaitExternalSemaphoresAsync, hip::GetHipDispatchTable()->hipWaitExternalSemaphoresAsync_fn(
+                                    extSemArray, paramsArray, numExtSems, stream));
   CATCH;
 }
 extern "C" hipChannelFormatDesc hipCreateChannelDesc(int x, int y, int z, int w,
