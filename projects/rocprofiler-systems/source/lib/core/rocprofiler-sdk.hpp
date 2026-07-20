@@ -7,12 +7,16 @@
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "core/config.hpp"
+#include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "logger/debug.hpp"
 
+#include <cctype>
+#include <initializer_list>
 #include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
+#include <concepts>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -31,10 +35,16 @@ namespace rocprofsys::rocprofiler_sdk
 
 struct version_info
 {
-    std::uint32_t major     = 0;
-    std::uint32_t minor     = 0;
-    std::uint32_t patch     = 0;
-    std::uint32_t formatted = 0;  // major * 10000 + minor * 100 + patch
+    std::uint32_t major = 0;
+    std::uint32_t minor = 0;
+    std::uint32_t patch = 0;
+
+    [[nodiscard]] auto formatted() const
+    {
+        constexpr auto major_multiplier = 10000u;
+        constexpr auto minor_multiplier = 100u;
+        return (major * major_multiplier) + (minor * minor_multiplier) + patch;
+    }
 };
 
 // Default Externals for sdk_core: reads settings and config from the global singletons.
@@ -78,66 +88,70 @@ struct default_sdk_externals
     {
         return ::rocprofsys::get_setting_value<std::string>(std::string{ s });
     }
+
+    using StateType = State;
+
+    static void set_state(StateType state) { ::rocprofsys::set_state(state); }
 };
+
+// Constrains TracingKind to the two tracing-kind types Wrapper exposes, so a
+// mismatched type fails at the get_operations_impl call site instead of deep inside it.
+template <typename Wrapper, typename TracingKind>
+concept tracing_kind_for =
+    std::same_as<TracingKind, typename Wrapper::callback_tracing_kind> ||
+    std::same_as<TracingKind, typename Wrapper::buffer_tracing_kind>;
 
 template <typename Wrapper, typename Externals = default_sdk_externals>
 class sdk_core
 {
 public:
+    // public
     static void config_settings(const std::shared_ptr<typename Externals::Settings>&);
 
+    // public
     static version_info& get_version();
 
-    // Reset cached state so the next tool_init call re-queries every Wrapper
-    // method exactly once.  For unit tests only — allows pinning Times(N).
-    // Direct assignment to s_version avoids calling get_version() (which would
-    // call Wrapper::get_version() via the cache-miss path before any EXPECT_CALL
-    // is registered, generating spurious "uninteresting" GMock warnings).
-    static void reset_version_cache() noexcept { s_version = version_info{ 0 }; }
-
-    static void reset_tracing_names_cache() noexcept
-    {
-        s_callback_names.reset();
-        s_buffer_names.reset();
-    }
-
+    // public
     static std::unordered_set<typename Wrapper::callback_tracing_kind>
     get_callback_domains();
 
+    // public
     static std::unordered_set<typename Wrapper::buffer_tracing_kind>
     get_buffered_domains();
 
+    // public
     static std::vector<std::int32_t> get_operations(
         typename Wrapper::callback_tracing_kind kindv);
 
+    // public
     static std::vector<std::int32_t> get_operations(
         typename Wrapper::buffer_tracing_kind kindv);
 
+    // public
     static std::vector<std::string> get_rocm_events();
 
+    // public
     static std::unordered_set<std::int32_t> get_backtrace_operations(
         typename Wrapper::callback_tracing_kind kindv);
 
+    // public
     static std::unordered_set<std::int32_t> get_backtrace_operations(
         typename Wrapper::buffer_tracing_kind kindv);
 
-    // Pure filtering logic — public so it can be unit-tested directly.
-    static std::vector<std::int32_t> get_operations_impl(
+private:
+    static std::vector<std::int32_t> filter_operations(
         const std::unordered_set<std::int32_t>& complete,
         const std::unordered_set<std::int32_t>& include,
         const std::unordered_set<std::int32_t>& exclude);
 
-    // Helper functions — public for direct unit testing.
     template <typename Tp>
     static std::string to_lower(const Tp& val);
-    static std::string get_setting_name(std::string val);
+    static std::string get_setting_name(const std::string& val);
 
-    // Test-only: directly inject operation options for a tracing kind without
-    // running config_settings(). Enables unit-testing get_operations() and
-    // get_backtrace_operations() without the settings infrastructure.
     static void set_operation_options(typename Wrapper::callback_tracing_kind kind,
                                       std::string include, std::string exclude,
                                       std::string backtrace);
+
     static void set_operation_options(typename Wrapper::buffer_tracing_kind kind,
                                       std::string include, std::string exclude,
                                       std::string backtrace);
@@ -154,37 +168,31 @@ public:
     static std::unordered_map<typename Wrapper::buffer_tracing_kind, operation_options>
         buffered_operation_option_names;
 
-    // Cached version — class-level so reset_version_cache() can clear it without
-    // going through the cache-miss path (which would call Wrapper::get_version()).
     static version_info s_version;
 
-    // Cached copies used by get_operations_impl; populated on first call and
-    // reset by reset_tracing_names_cache() so unit tests can pin Times(N).
     static std::optional<typename Wrapper::callback_name_info_t> s_callback_names;
     static std::optional<typename Wrapper::buffer_name_info_t>   s_buffer_names;
 
+    template <typename TracingKind>
+        requires tracing_kind_for<Wrapper, TracingKind>
     static std::unordered_set<std::int32_t> get_operations_impl(
-        typename Wrapper::callback_tracing_kind tracing_kind,
-        const std::string&                      operations_setting = {});
-
-    static std::unordered_set<std::int32_t> get_operations_impl(
-        typename Wrapper::buffer_tracing_kind tracing_kind,
-        const std::string&                    operations_setting = {});
+        TracingKind tracing_kind, const std::string& operations_setting = {});
 
     template <typename Tp>
     static auto insert_config_setting(
 
         const std::shared_ptr<typename Externals::Settings>& config,
         std::string_view env_name, std::string_view description, Tp initial_value,
-        std::initializer_list<std::string_view> extra_categories);
+        const std::initializer_list<std::string_view>& extra_categories);
 
-private:
     template <typename TracingKind, typename TracingNameTable,
               typename LoadTracingNamesFn>
     static std::unordered_set<std::int32_t> operation_ids_for_tracing_kind(
         TracingKind tracing_kind, const std::string& operations_setting,
         std::optional<TracingNameTable>& cached_tracing_names,
         LoadTracingNamesFn&&             load_tracing_names);
+
+    static void finalize_and_throw(std::string_view message_for_exception);
 };
 
 using core_sdk = sdk_core<backend>;
@@ -201,23 +209,31 @@ namespace rocprofsys::rocprofiler_sdk
 template <typename Wrapper, typename Externals>
 template <typename Tp>
 std::string
-sdk_core<Wrapper, Externals>::to_lower(const Tp& _val)
+sdk_core<Wrapper, Externals>::to_lower(const Tp& value)
 {
-    auto _v = std::string{ _val };
-    for(auto& itr : _v)
-        itr = ::tolower(itr);
-    return _v;
+    auto str_copy = std::string{ value };
+
+    for(auto& itr : str_copy)
+    {
+        itr = static_cast<char>(::tolower(itr));
+    }
+
+    return str_copy;
 }
 
 template <typename Wrapper, typename Externals>
 std::string
-sdk_core<Wrapper, Externals>::get_setting_name(std::string _v)
+sdk_core<Wrapper, Externals>::get_setting_name(const std::string& value)
 {
-    constexpr auto _prefix = std::string_view{ "rocprofsys_" };
-    for(auto& itr : _v)
-        itr = tolower(itr);
-    if(_v.starts_with(_prefix)) return _v.substr(_prefix.length());
-    return _v;
+    constexpr auto prefix             = std::string_view{ "rocprofsys_" };
+    const auto     lower_setting_name = to_lower(value);
+
+    if(value.starts_with(prefix))
+    {
+        return value.substr(prefix.length());
+    }
+
+    return value;
 }
 
 // ─── set_operation_options ────────────────────────────────────────────────────
@@ -265,8 +281,15 @@ std::optional<typename Wrapper::buffer_name_info_t>
 template <typename Wrapper, typename Externals>
 version_info sdk_core<Wrapper, Externals>::s_version{};
 
-// ─── get_operations_impl (tracing kind + optional setting) ───────────────────
+template <typename Wrapper, typename Externals>
+void
+sdk_core<Wrapper, Externals>::finalize_and_throw(std::string_view message_for_exception)
+{
+    Externals::set_state(Externals::State::Finalized);
+    throw std::runtime_error(std::string{ message_for_exception });
+}
 
+// ─── get_operations_impl (tracing kind + optional setting) ───────────────────
 template <typename Wrapper, typename Externals>
 template <typename TracingKind, typename TracingNameTable, typename LoadTracingNamesFn>
 std::unordered_set<std::int32_t>
@@ -298,11 +321,11 @@ sdk_core<Wrapper, Externals>::operation_ids_for_tracing_kind(
     auto operations_filter = Externals::get_setting_value(operations_setting);
     if(!operations_filter)
     {
-        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-        throw std::runtime_error(
+        finalize_and_throw(
             fmt::format("sdk_core::get_operations_impl: no registered setting '{}'",
                         operations_setting));
     }
+
     if(operations_filter->empty())
     {
         return {};
@@ -343,50 +366,53 @@ sdk_core<Wrapper, Externals>::operation_ids_for_tracing_kind(
 }
 
 template <typename Wrapper, typename Externals>
+template <typename TracingKind>
+    requires tracing_kind_for<Wrapper, TracingKind>
 std::unordered_set<std::int32_t>
-sdk_core<Wrapper, Externals>::get_operations_impl(
-    typename Wrapper::callback_tracing_kind tracing_kind,
-    const std::string&                      operations_setting)
+sdk_core<Wrapper, Externals>::get_operations_impl(TracingKind        tracing_kind,
+                                                  const std::string& operations_setting)
 {
-    return operation_ids_for_tracing_kind(
-        tracing_kind, operations_setting, s_callback_names,
-        [] { return Wrapper::get_callback_tracing_names(); });
-}
-
-template <typename Wrapper, typename Externals>
-std::unordered_set<std::int32_t>
-sdk_core<Wrapper, Externals>::get_operations_impl(
-    typename Wrapper::buffer_tracing_kind tracing_kind,
-    const std::string&                    operations_setting)
-{
-    return operation_ids_for_tracing_kind(
-        tracing_kind, operations_setting, s_buffer_names,
-        [] { return Wrapper::get_buffer_tracing_names(); });
+    if constexpr(std::same_as<TracingKind, typename Wrapper::callback_tracing_kind>)
+    {
+        return operation_ids_for_tracing_kind(
+            tracing_kind, operations_setting, s_callback_names,
+            [] { return Wrapper::get_callback_tracing_names(); });
+    }
+    else
+    {
+        return operation_ids_for_tracing_kind(
+            tracing_kind, operations_setting, s_buffer_names,
+            [] { return Wrapper::get_buffer_tracing_names(); });
+    }
 }
 
 template <typename Wrapper, typename Externals>
 std::vector<std::int32_t>
-sdk_core<Wrapper, Externals>::get_operations_impl(
-    const std::unordered_set<std::int32_t>& _complete,
-    const std::unordered_set<std::int32_t>& _include,
-    const std::unordered_set<std::int32_t>& _exclude)
+sdk_core<Wrapper, Externals>::filter_operations(
+    const std::unordered_set<std::int32_t>& complete_set,
+    const std::unordered_set<std::int32_t>& to_include,
+    const std::unordered_set<std::int32_t>& to_exclude)
 {
-    auto _convert = [](const auto& _dset) {
-        auto _dret = std::vector<std::int32_t>{};
-        _dret.reserve(_dset.size());
-        for(auto itr : _dset)
-            _dret.emplace_back(itr);
-        std::ranges::sort(_dret);
-        return _dret;
+    auto convert_to_vector = [](const auto& set_to_convert) {
+        auto result_vector = std::vector<std::int32_t>{};
+        result_vector.reserve(set_to_convert.size());
+        result_vector.insert(set_to_convert.begin(), set_to_convert.end());
+        std::ranges::sort(result_vector);
+        return result_vector;
     };
 
-    if(_include.empty() && _exclude.empty()) return _convert(_complete);
+    if(to_include.empty() && to_exclude.empty())
+    {
+        return convert_to_vector(complete_set);
+    }
 
-    auto _ret = (_include.empty()) ? _complete : _include;
-    for(auto itr : _exclude)
-        _ret.erase(itr);
+    auto result = to_include.empty() ? complete_set : to_include;
+    for(auto itr : to_exclude)
+    {
+        result.erase(itr);
+    }
 
-    return _convert(_ret);
+    return convert_to_vector(result);
 }
 
 template <typename Wrapper, typename Externals>
@@ -395,19 +421,20 @@ auto
 sdk_core<Wrapper, Externals>::insert_config_setting(
     const std::shared_ptr<typename Externals::Settings>& config,
     std::string_view env_name, std::string_view description, Tp initial_value,
-    std::initializer_list<std::string_view> extra_categories)
+    const std::initializer_list<std::string_view>& extra_categories)
 {
-    auto env_str    = std::string{ env_name };
+    const auto env_str = std::string{ env_name };
     auto categories = std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys" };
-    for(auto cat : extra_categories)
-        categories.emplace(cat);
+    categories.insert(extra_categories.begin(), extra_categories.end());
 
-    auto [it, inserted] = config->template insert<Tp, Tp>(
+    const auto [it, inserted] = config->template insert<Tp, Tp>(
         env_str, get_setting_name(env_str), std::string{ description },
         Tp{ std::move(initial_value) }, std::move(categories));
 
     if(!inserted)
+    {
         LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(env_str), env_str);
+    }
 
     return config->find(env_str)->second;
 }
@@ -420,18 +447,9 @@ template <typename Wrapper, typename Externals>
 version_info&
 sdk_core<Wrapper, Externals>::get_version()
 {
-    if(s_version.formatted == 0)
+    if(s_version.formatted() == 0)
     {
-        std::uint32_t _major = 0;
-        std::uint32_t _minor = 0;
-        std::uint32_t _patch = 0;
-
-        Wrapper::get_version(&_major, &_minor, &_patch);
-
-        s_version.major     = _major;
-        s_version.minor     = _minor;
-        s_version.patch     = _patch;
-        s_version.formatted = _major * 10000u + _minor * 100u + _patch;
+        Wrapper::get_version(&s_version.major, &s_version.minor, &s_version.patch);
     }
 
     return s_version;
@@ -445,7 +463,7 @@ sdk_core<Wrapper, Externals>::config_settings(
     const auto buffered_tracing_info = Wrapper::get_buffer_tracing_names();
     const auto callback_tracing_info = Wrapper::get_callback_tracing_names();
 
-    auto _skip_domains =
+    auto domains_to_skip =
         std::unordered_set<std::string_view>{ "none",
                                               "correlation_id_retirement",
                                               "marker_core_api",
@@ -453,97 +471,125 @@ sdk_core<Wrapper, Externals>::config_settings(
                                               "marker_name_api",
                                               "code_object" };
 
-    auto _domain_choices = std::vector<std::string>{};
-    auto _add_domain     = [&_domain_choices, &_skip_domains](std::string_view _domain) {
-        auto _v = to_lower(_domain);
-        if(!_skip_domains.contains(_v) &&
-           std::ranges::find(_domain_choices, _v) == _domain_choices.end())
-            _domain_choices.emplace_back(_v);
+    auto domain_choices = std::vector<std::string>{};
+    auto add_domain_f   = [&domain_choices,
+                         &domains_to_skip](std::string_view domain_to_add) {
+        auto domain_lowercase = to_lower(domain_to_add);
+        if(!domains_to_skip.contains(domain_lowercase) &&
+           std::ranges::find(domain_choices, domain_lowercase) == domain_choices.end())
+        {
+            domain_choices.emplace_back(domain_lowercase);
+        }
     };
 
-    static auto _option_names           = std::unordered_set<std::string>{};
-    auto        _add_operation_settings = [&_config, &_skip_domains](
-                                       std::string_view _domain_name, const auto& _domain,
-                                       auto& _operation_option_names) {
-        auto _v = to_lower(_domain_name);
+    static auto option_names             = std::unordered_set<std::string>{};
+    auto        add_operation_settings_f = [&_config, &domains_to_skip](
+                                        std::string_view domain_name, const auto& _domain,
+                                        auto& _operation_option_names) {
+        const auto domain_lowercase = to_lower(domain_name);
 
-        if(_skip_domains.contains(_v)) return;
+        if(domains_to_skip.contains(domain_lowercase))
+        {
+            return;
+        }
 
-        auto _op_option_name = fmt::format("ROCPROFSYS_ROCM_{}_OPERATIONS", _domain_name);
-        auto _eop_option_name =
-            fmt::format("ROCPROFSYS_ROCM_{}_OPERATIONS_EXCLUDE", _domain_name);
-        auto _bt_option_name =
-            fmt::format("ROCPROFSYS_ROCM_{}_OPERATIONS_ANNOTATE_BACKTRACE", _domain_name);
+        const auto all_operation_options_env =
+            fmt::format("ROCPROFSYS_ROCM_{}_OPERATIONS", domain_name);
+        const auto exclude_operation_options_env =
+            fmt::format("ROCPROFSYS_ROCM_{}_OPERATIONS_EXCLUDE", domain_name);
+        const auto annotate_backtrace_operation_options_env =
+            fmt::format("ROCPROFSYS_ROCM_{}_OPERATIONS_ANNOTATE_BACKTRACE", domain_name);
 
-        auto _op_choices = std::vector<std::string>{};
-        for(auto itr : _domain.operations)
-            _op_choices.emplace_back(std::string{ itr });
+        auto operation_choices = std::vector<std::string>{};
+        operation_choices.insert(_domain.operations.begin(), _domain.operations.end());
 
-        if(_op_choices.empty()) return;
+        if(operation_choices.empty())
+        {
+            return;
+        }
 
         _operation_option_names.emplace(
             _domain.value,
-            operation_options{ _op_option_name, _eop_option_name, _bt_option_name });
+            operation_options{ all_operation_options_env, exclude_operation_options_env,
+                               annotate_backtrace_operation_options_env });
 
-        if(_option_names.emplace(_op_option_name).second)
+        const auto [all_operations_iterator, is_all_operations_option_inserted] =
+            option_names.emplace(all_operation_options_env);
+        if(is_all_operations_option_inserted)
         {
             insert_config_setting<std::string>(
-                _config, _op_option_name,
+                _config, all_operation_options_env,
                 "Inclusive filter for domain operations (for API domains, this selects "
                 "the functions to trace) [regex supported]",
                 std::string{}, { "rocm", "rocprofiler-sdk", "advanced" })
-                ->set_choices(_op_choices);
+                ->set_choices(operation_choices);
         }
 
-        if(_option_names.emplace(_eop_option_name).second)
+        const auto [exclude_operations_iterator, is_exclude_operations_option_inserted] =
+            option_names.emplace(exclude_operation_options_env);
+        if(is_exclude_operations_option_inserted)
         {
             insert_config_setting<std::string>(
-                _config, _eop_option_name,
+                _config, exclude_operation_options_env,
                 "Exclusive filter for domain operations applied after the inclusive "
                 "filter (for API domains, removes function from trace) [regex supported]",
                 std::string{}, { "rocm", "rocprofiler-sdk", "advanced" })
-                ->set_choices(_op_choices);
+                ->set_choices(operation_choices);
         }
 
-        if(_option_names.emplace(_bt_option_name).second)
+        const auto [annotate_backtrace_iterator, is_annotate_backtrace_option_inserted] =
+            option_names.emplace(annotate_backtrace_operation_options_env);
+        if(is_annotate_backtrace_option_inserted)
         {
             insert_config_setting<std::string>(
-                _config, _bt_option_name,
+                _config, annotate_backtrace_operation_options_env,
                 "Specification of domain operations which will record a backtrace (for "
                 "API domains, this is a list of function names) [regex supported]",
                 std::string{}, { "rocm", "rocprofiler-sdk", "advanced" })
-                ->set_choices(_op_choices);
+                ->set_choices(operation_choices);
         }
     };
 
-    _domain_choices.reserve(buffered_tracing_info.size());
-    _domain_choices.reserve(callback_tracing_info.size());
-    _add_domain("hip_api");
-    _add_domain("hsa_api");
-    _add_domain("marker_api");
-    _add_domain("roctx");
-    if constexpr(Wrapper::compile_time_version >= 10000) _add_domain("kfd_events");
+    domain_choices.reserve(buffered_tracing_info.size());
+    domain_choices.reserve(callback_tracing_info.size());
+
+    add_domain_f("hip_api");
+    add_domain_f("hsa_api");
+    add_domain_f("marker_api");
+    add_domain_f("roctx");
+
+    if constexpr(Wrapper::compile_time_version >= 10000)
+    {
+        add_domain_f("kfd_events");
+    }
 
     for(const auto& itr : buffered_tracing_info)
-        _add_domain(itr.name);
+    {
+        add_domain_f(itr.name);
+    }
 
     for(const auto& itr : callback_tracing_info)
-        _add_domain(itr.name);
+    {
+        add_domain_f(itr.name);
+    }
 
-    std::ranges::sort(_domain_choices);
+    std::ranges::sort(domain_choices);
 
-    auto _domain_description =
+    const auto domain_description =
         fmt::format("Specification of ROCm domains to trace/profile. Choices: {}",
-                    fmt::join(_domain_choices, ", "));
-    auto _domain_defaults = std::string{ "hip_runtime_api,marker_api,kernel_dispatch,"
-                                         "memory_copy,scratch_memory" };
+                    fmt::join(domain_choices, ", "));
+    auto domain_defaults = std::string{ "hip_runtime_api,marker_api,kernel_dispatch,"
+                                        "memory_copy,scratch_memory" };
+
     if constexpr(Wrapper::compile_time_version < 10000)
-        _domain_defaults.append(",page_migration");
+    {
+        domain_defaults.append(",page_migration");
+    }
 
     insert_config_setting<std::string>(_config, env_vars::ROCM_DOMAINS,
-                                       _domain_description, _domain_defaults,
+                                       domain_description, domain_defaults,
                                        { "rocm", "rocprofiler-sdk" })
-        ->set_choices(_domain_choices);
+        ->set_choices(domain_choices);
 
     insert_config_setting<std::string>(
         _config, env_vars::ROCM_EVENTS,
@@ -552,26 +598,30 @@ sdk_core<Wrapper, Externals>::config_settings(
         "is collected on every available device",
         std::string{}, { "rocm", "hardware_counters" });
 
-    _skip_domains.emplace("kernel_dispatch");
-    _skip_domains.emplace("page_migration");
+    domains_to_skip.emplace("kernel_dispatch");
+    domains_to_skip.emplace("page_migration");
 
-    _add_operation_settings(
+    add_operation_settings_f(
         "MARKER_API", callback_tracing_info[Wrapper::CALLBACK_TRACING_MARKER_CORE_API],
         callback_operation_option_names);
 
     for(const auto& itr : callback_tracing_info)
-        _add_operation_settings(itr.name, itr, callback_operation_option_names);
+    {
+        add_operation_settings_f(itr.name, itr, callback_operation_option_names);
+    }
 
     for(const auto& itr : buffered_tracing_info)
-        _add_operation_settings(itr.name, itr, buffered_operation_option_names);
+    {
+        add_operation_settings_f(itr.name, itr, buffered_operation_option_names);
+    }
 
     // Add the ROCPROFSYS_ROCM_GROUP_BY_QUEUE setting if the hip_stream domain is present
     // in supported ROCProfiler-SDK domains.
-    auto _has_hip_stream =
-        std::ranges::find(_domain_choices, std::string{ "hip_stream" }) !=
-        _domain_choices.end();
+    const auto has_hip_stream =
+        std::ranges::find(domain_choices, std::string{ "hip_stream" }) !=
+        domain_choices.end();
 
-    if(_has_hip_stream)
+    if(has_hip_stream)
     {
         insert_config_setting<bool>(
             _config, env_vars::ROCM_GROUP_BY_QUEUE,
@@ -600,15 +650,16 @@ sdk_core<Wrapper, Externals>::get_callback_domains()
         Wrapper::CALLBACK_TRACING_CODE_OBJECT,
     };
 
-    auto _version = get_version();
-    if(_version.formatted == 0)
+    auto _version          = get_version();
+    auto formatted_version = _version.formatted();
+    if(formatted_version == 0)
     {
         LOG_WARNING("rocprofiler-sdk version not initialized");
     }
 
     if constexpr(Wrapper::compile_time_version >= 600)
     {
-        if(_version.formatted >= 600)
+        if(formatted_version >= 600)
         {
             // Argument tracing is supported in rocprofiler-sdk 0.6.0 and later
             supported.emplace(Wrapper::CALLBACK_TRACING_RCCL_API);
@@ -618,7 +669,7 @@ sdk_core<Wrapper, Externals>::get_callback_domains()
     }
     if constexpr(Wrapper::compile_time_version >= 700)
     {
-        if(_version.formatted >= 700)
+        if(formatted_version >= 700)
             supported.emplace(Wrapper::CALLBACK_TRACING_ROCJPEG_API);
     }
 
@@ -627,12 +678,12 @@ sdk_core<Wrapper, Externals>::get_callback_domains()
 
     if constexpr(Wrapper::compile_time_version >= 600)
     {
-        if(Externals::get_use_rcclp() && _version.formatted >= 600)
+        if(Externals::get_use_rcclp() && formatted_version >= 600)
         {
             // Translate ROCPROFSYS_USE_RCCLP to entry in ROCPROFSYS_ROCM_DOMAINS
             _data.emplace(Wrapper::CALLBACK_TRACING_RCCL_API);
         }
-        if(Externals::get_use_ompt() && _version.formatted >= 600)
+        if(Externals::get_use_ompt() && formatted_version >= 600)
         {
             // Translate some configuration settings to rocprofiler domains
             _data.emplace(Wrapper::CALLBACK_TRACING_OMPT);
@@ -651,8 +702,10 @@ sdk_core<Wrapper, Externals>::get_callback_domains()
     for(const auto& itr : _domains)
     {
         if(invalid_domain(itr))
+        {
             throw std::runtime_error(
                 fmt::format("unsupported ROCPROFSYS_ROCM_DOMAINS value: {}", itr));
+        }
 
         if(itr == "hsa_api")
         {
@@ -696,15 +749,23 @@ sdk_core<Wrapper, Externals>::get_buffered_domains()
 {
     using kind_t           = typename Wrapper::buffer_tracing_kind;
     const auto buffer_info = Wrapper::get_buffer_tracing_names();
-    auto       supported   = std::unordered_set<kind_t>{
+
+    auto supported = std::unordered_set<kind_t>{
         Wrapper::BUFFER_TRACING_KERNEL_DISPATCH,
         Wrapper::BUFFER_TRACING_MEMORY_COPY,
         Wrapper::BUFFER_TRACING_SCRATCH_MEMORY,
     };
+
     if constexpr(Wrapper::compile_time_version >= 600)
+    {
         supported.emplace(Wrapper::BUFFER_TRACING_MEMORY_ALLOCATION);
+    }
+
     if constexpr(Wrapper::compile_time_version < 10000)
+    {
         supported.emplace(Wrapper::BUFFER_TRACING_PAGE_MIGRATION);
+    }
+
     if constexpr(Wrapper::compile_time_version >= 10000)
     {
         supported.emplace(Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT);
@@ -742,8 +803,10 @@ sdk_core<Wrapper, Externals>::get_buffered_domains()
     for(const auto& itr : _domains)
     {
         if(invalid_domain(itr))
+        {
             throw std::runtime_error(
                 fmt::format("unsupported ROCPROFSYS_ROCM_DOMAINS value: {}", itr));
+        }
 
         if(itr == "hsa_api")
         {
@@ -872,25 +935,25 @@ sdk_core<Wrapper, Externals>::get_operations(
 {
     if(callback_operation_option_names.count(kindv) == 0)
     {
-        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-        throw std::runtime_error(
+        finalize_and_throw(
             fmt::format("sdk_core::get_operations: no options registered for "
                         "callback tracing kind {}",
                         static_cast<int>(kindv)));
     }
 
-    const auto& opts      = callback_operation_option_names.at(kindv);
-    auto        _complete = get_operations_impl(kindv);
+    auto complete_set = get_operations_impl(kindv);
+
+    const auto& opts = callback_operation_option_names.at(kindv);
     // Empty option string means "no filter" — produce an empty set so the
     // three-argument overload falls through to the complete set / removes nothing.
-    auto _include = opts.operations_include.empty()
-                        ? std::unordered_set<std::int32_t>{}
-                        : get_operations_impl(kindv, opts.operations_include);
-    auto _exclude = opts.operations_exclude.empty()
-                        ? std::unordered_set<std::int32_t>{}
-                        : get_operations_impl(kindv, opts.operations_exclude);
+    auto include_operations = opts.operations_include.empty()
+                                  ? std::unordered_set<std::int32_t>{}
+                                  : get_operations_impl(kindv, opts.operations_include);
+    auto exclude_operations = opts.operations_exclude.empty()
+                                  ? std::unordered_set<std::int32_t>{}
+                                  : get_operations_impl(kindv, opts.operations_exclude);
 
-    return get_operations_impl(_complete, _include, _exclude);
+    return filter_operations(complete_set, include_operations, exclude_operations);
 }
 
 template <typename Wrapper, typename Externals>
@@ -899,8 +962,7 @@ sdk_core<Wrapper, Externals>::get_operations(typename Wrapper::buffer_tracing_ki
 {
     if(buffered_operation_option_names.count(kindv) == 0)
     {
-        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-        throw std::runtime_error(
+        finalize_and_throw(
             fmt::format("sdk_core::get_operations: no options registered for "
                         "buffer tracing kind {}",
                         static_cast<int>(kindv)));
@@ -915,7 +977,7 @@ sdk_core<Wrapper, Externals>::get_operations(typename Wrapper::buffer_tracing_ki
                                 ? std::unordered_set<std::int32_t>{}
                                 : get_operations_impl(kindv, opts.operations_exclude);
 
-    return get_operations_impl(_complete, _include, _exclude);
+    return filter_operations(_complete, _include, _exclude);
 }
 
 template <typename Wrapper, typename Externals>
@@ -925,8 +987,7 @@ sdk_core<Wrapper, Externals>::get_backtrace_operations(
 {
     if(callback_operation_option_names.count(kindv) == 0)
     {
-        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-        throw std::runtime_error(
+        finalize_and_throw(
             fmt::format("sdk_core::get_backtrace_operations: no options registered for "
                         "callback tracing kind {}",
                         static_cast<int>(kindv)));
@@ -947,8 +1008,7 @@ sdk_core<Wrapper, Externals>::get_backtrace_operations(
 {
     if(buffered_operation_option_names.count(kindv) == 0)
     {
-        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-        throw std::runtime_error(
+        finalize_and_throw(
             fmt::format("sdk_core::get_backtrace_operations: no options registered for "
                         "buffer tracing kind {}",
                         static_cast<int>(kindv)));
