@@ -7,6 +7,7 @@
 #include "embedded_schema.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/vop3p.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
@@ -43,6 +44,54 @@ constexpr uint32_t SOPP_S_NOP = 0xBF800000;
 constexpr uint32_t SOPP_S_ENDPGM = 0xBF810000;
 
 using namespace rocjitsu;
+
+TEST(DsTransposeTest, ReadB64TrB16UsesMfmaCrossbarLayout) {
+  constexpr uint32_t wave_size = 64;
+  constexpr uint32_t bytes_per_lane = 8;
+  std::vector<uint8_t> data(wave_size * bytes_per_lane);
+  for (uint32_t lane = 0; lane < wave_size; ++lane) {
+    for (uint32_t byte = 0; byte < bytes_per_lane; ++byte)
+      data[lane * bytes_per_lane + byte] = static_cast<uint8_t>(lane * bytes_per_lane + byte);
+  }
+
+  amdgpu::transpose_b16(data, /*num_elems=*/2, wave_size);
+
+  for (uint32_t lane = 0; lane < wave_size; ++lane) {
+    const uint32_t source_halfword = lane & 3u;
+    const uint32_t block = lane & 0x30u;
+    const uint32_t intra = (lane >> 2) & 3u;
+    for (uint32_t i = 0; i < 4; ++i) {
+      const uint32_t source_lane = block + 4u * i + intra;
+      const uint32_t expected_offset = source_lane * bytes_per_lane + source_halfword * 2u;
+      EXPECT_EQ(data[lane * bytes_per_lane + i * 2u], static_cast<uint8_t>(expected_offset));
+      EXPECT_EQ(data[lane * bytes_per_lane + i * 2u + 1u],
+                static_cast<uint8_t>(expected_offset + 1u));
+    }
+  }
+}
+
+TEST(DsTransposeTest, ReadB64TrB8UsesMfmaCrossbarLayout) {
+  constexpr uint32_t wave_size = 64;
+  constexpr uint32_t bytes_per_lane = 8;
+  std::vector<uint8_t> data(wave_size * bytes_per_lane);
+  for (uint32_t lane = 0; lane < wave_size; ++lane) {
+    for (uint32_t byte = 0; byte < bytes_per_lane; ++byte)
+      data[lane * bytes_per_lane + byte] = static_cast<uint8_t>(lane * bytes_per_lane + byte);
+  }
+
+  amdgpu::transpose_b64(data, /*num_elems=*/2, wave_size);
+
+  for (uint32_t lane = 0; lane < wave_size; ++lane) {
+    const uint32_t source_byte = lane & 7u;
+    const uint32_t block = lane & 0x30u;
+    const uint32_t intra = (lane >> 3) & 1u;
+    for (uint32_t i = 0; i < bytes_per_lane; ++i) {
+      const uint32_t source_lane = block + 2u * i + intra;
+      const uint32_t expected_offset = source_lane * bytes_per_lane + source_byte;
+      EXPECT_EQ(data[lane * bytes_per_lane + i], static_cast<uint8_t>(expected_offset));
+    }
+  }
+}
 
 struct VmFixture {
   std::unique_ptr<simdojo::SimulationEngine> engine;
