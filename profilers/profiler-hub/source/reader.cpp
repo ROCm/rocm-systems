@@ -142,84 +142,10 @@ reader_t::get_flows_in_window(const std::vector<size_t>&         tracks,
     return m_impl->get_flows_in_window(tracks, window, max_edges);
 }
 
-std::optional<reader_types::region_data_t>
-reader_t::get_region_details(const reader_types::timeline_event_t& event) const
+std::optional<reader_types::event_detail_t>
+reader_t::get_event_detail(const reader_types::event_id_t& id) const
 {
-    return m_impl->get_region_details(event);
-}
-
-std::optional<reader_types::region_data_t>
-reader_t::get_region_details(const reader_types::event_id_t& id) const
-{
-    return m_impl->get_region_details(id);
-}
-
-std::optional<reader_types::kernel_dispatch_data_t>
-reader_t::get_kernel_dispatch_details(const reader_types::timeline_event_t& event) const
-{
-    return m_impl->get_kernel_dispatch_details(event);
-}
-
-std::optional<reader_types::kernel_dispatch_data_t>
-reader_t::get_kernel_dispatch_details(const reader_types::event_id_t& id) const
-{
-    return m_impl->get_kernel_dispatch_details(id);
-}
-
-std::optional<reader_types::memory_copy_data_t>
-reader_t::get_memory_copy_details(const reader_types::timeline_event_t& event) const
-{
-    return m_impl->get_memory_copy_details(event);
-}
-
-std::optional<reader_types::memory_copy_data_t>
-reader_t::get_memory_copy_details(const reader_types::event_id_t& id) const
-{
-    return m_impl->get_memory_copy_details(id);
-}
-
-std::optional<reader_types::memory_alloc_data_t>
-reader_t::get_memory_alloc_details(const reader_types::timeline_event_t& event) const
-{
-    return m_impl->get_memory_alloc_details(event);
-}
-
-std::optional<reader_types::memory_alloc_data_t>
-reader_t::get_memory_alloc_details(const reader_types::event_id_t& id) const
-{
-    return m_impl->get_memory_alloc_details(id);
-}
-
-std::optional<reader_types::sample_data_t>
-reader_t::get_sample_details(const reader_types::timeline_event_t& event) const
-{
-    (void) event;
-    return std::nullopt;
-}
-
-std::optional<reader_types::sample_data_t>
-reader_t::get_sample_details(const reader_types::event_id_t& id) const
-{
-    return m_impl->get_sample_details(id);
-}
-
-std::optional<reader_types::pmc_event_data_t>
-reader_t::get_pmc_event_details(const reader_types::timeline_event_t& event) const
-{
-    (void) event;
-    return std::nullopt;
-}
-
-std::optional<reader_types::pmc_event_data_t>
-reader_t::get_pmc_event_details(const reader_types::event_id_t& id) const
-{
-    return m_impl->get_pmc_event_details(id);
-}
-
-std::optional<reader_types::pmc_event_data_t>
-reader_t::get_scalar_details(const reader_types::event_id_t& id) const
-{
-    return m_impl->get_scalar_details(id);
+    return m_impl->get_event_detail(id);
 }
 
 reader_types::call_stack_t

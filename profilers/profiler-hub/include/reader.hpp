@@ -251,117 +251,24 @@ struct reader_t
         uint32_t                           max_edges) const;
 
     /**
-     *@section Event Details (On-Demand Query by db_id)
-     * Fetch full details for a timeline event. Queries database by db_id.
-     * Returns nullopt if type mismatch or db_id not found.
+     *@section Event Detail (On-Demand, Unified)
+     * One collapsed detail path for every event type.
      */
 
     /**
-     * @brief Get full region details for a timeline event
-     * @param event Timeline event to fetch details for
-     * @return Region data, or nullopt if type mismatch or not found
+     * @brief Get unified detail for any event, by its opaque handle.
+     *
+     * Dispatches on the handle's internal event type across all six event_type_t cases
+     * (region, kernel_dispatch, memory_copy, memory_allocate, sample, pmc_event) and
+     * returns a fixed common header (name, category, ts, te) plus a generic `properties`
+     * bag of named, typed values (see event_detail_t / arg_t). Point events (sample,
+     * pmc_event) carry `te == std::nullopt`. Linked entities are emitted as integer-id
+     * properties, not resolved sub-structs. Missing optional fields are omitted.
+     *
+     * @param id Opaque event handle (from get_interval_track / get_scalar_track / flows).
+     * @return Unified detail, or nullopt if the handle names no known event.
      */
-    [[nodiscard]] std::optional<reader_types::region_data_t> get_region_details(
-        const reader_types::timeline_event_t& event) const;
-
-    /**
-     * @brief Get full region details by event handle (from get_interval_track)
-     * @param id Opaque event handle
-     * @return Region data, or nullopt if the handle is not a region event or not found
-     */
-    [[nodiscard]] std::optional<reader_types::region_data_t> get_region_details(
-        const reader_types::event_id_t& id) const;
-
-    /**
-     * @brief Get full kernel dispatch details for a timeline event
-     * @param event Timeline event to fetch details for
-     * @return Kernel dispatch data, or nullopt if type mismatch or not found
-     */
-    [[nodiscard]] std::optional<reader_types::kernel_dispatch_data_t>
-    get_kernel_dispatch_details(const reader_types::timeline_event_t& event) const;
-
-    /**
-     * @brief Get full kernel dispatch details by event handle (from get_interval_track)
-     * @param id Opaque event handle
-     * @return Kernel dispatch data, or nullopt if the handle is not a kernel dispatch
-     *         event or not found
-     */
-    [[nodiscard]] std::optional<reader_types::kernel_dispatch_data_t>
-    get_kernel_dispatch_details(const reader_types::event_id_t& id) const;
-
-    /**
-     * @brief Get full memory copy details for a timeline event
-     * @param event Timeline event to fetch details for
-     * @return Memory copy data, or nullopt if type mismatch or not found
-     */
-    [[nodiscard]] std::optional<reader_types::memory_copy_data_t> get_memory_copy_details(
-        const reader_types::timeline_event_t& event) const;
-
-    /**
-     * @brief Get full memory copy details by event handle (from get_interval_track)
-     * @param id Opaque event handle
-     * @return Memory copy data, or nullopt if the handle is not a memory copy event or
-     *         not found
-     */
-    [[nodiscard]] std::optional<reader_types::memory_copy_data_t> get_memory_copy_details(
-        const reader_types::event_id_t& id) const;
-
-    /**
-     * @brief Get full memory alloc details for a timeline event
-     * @param event Timeline event to fetch details for
-     * @return Memory alloc data, or nullopt if type mismatch or not found
-     */
-    [[nodiscard]] std::optional<reader_types::memory_alloc_data_t>
-    get_memory_alloc_details(const reader_types::timeline_event_t& event) const;
-
-    /**
-     * @brief Get full memory alloc details by event handle
-     * @param id Opaque event handle
-     * @return Memory alloc data, or nullopt if the handle is not a memory allocate event
-     *         or not found
-     */
-    [[nodiscard]] std::optional<reader_types::memory_alloc_data_t>
-    get_memory_alloc_details(const reader_types::event_id_t& id) const;
-
-    /**
-     * @brief Get full sample details for a timeline event
-     * @param event Timeline event to fetch details for
-     * @return Sample data, or nullopt if type mismatch or not found
-     */
-    [[nodiscard]] std::optional<reader_types::sample_data_t> get_sample_details(
-        const reader_types::timeline_event_t& event) const;
-
-    /**
-     * @brief Get sample details by event handle
-     * @param id Opaque event handle
-     * @return Sample data, or nullopt if the handle is not a sample event or not found
-     */
-    [[nodiscard]] std::optional<reader_types::sample_data_t> get_sample_details(
-        const reader_types::event_id_t& id) const;
-
-    /**
-     * @brief Get full PMC event details for a timeline event
-     * @param event Timeline event to fetch details for
-     * @return PMC event data, or nullopt if type mismatch or not found
-     */
-    [[nodiscard]] std::optional<reader_types::pmc_event_data_t> get_pmc_event_details(
-        const reader_types::timeline_event_t& event) const;
-
-    /**
-     * @brief Get PMC event details by event handle
-     * @param id Opaque event handle
-     * @return PMC event data, or nullopt if the handle is not a PMC event or not found
-     */
-    [[nodiscard]] std::optional<reader_types::pmc_event_data_t> get_pmc_event_details(
-        const reader_types::event_id_t& id) const;
-
-    /**
-     * @brief Get combined scalar details (timestamp + value + names) for a counter sample
-     * @param id Opaque event handle (from scalar_event_t::id)
-     * @return Combined PMC event data, or nullopt if the handle is not a sample event or
-     *         not found
-     */
-    [[nodiscard]] std::optional<reader_types::pmc_event_data_t> get_scalar_details(
+    [[nodiscard]] std::optional<reader_types::event_detail_t> get_event_detail(
         const reader_types::event_id_t& id) const;
 
     /**

@@ -3071,4 +3071,154 @@ reader_t::impl::get_memory_alloc_details(const reader_types::event_id_t& id)
     return get_memory_alloc_details(event);
 }
 
+// ============================================================================
+// Unified event detail
+// ============================================================================
+
+// DESIGN DECISION (gap#4, 2026-07-20): full-replace of the seven typed get_*_details
+// public methods with this one collapsed path (draft §7). The typed methods survive as
+// private impl helpers, reused here to reuse their SQL + FK resolution; only their public
+// surface is gone. Optiq is the sole consumer and migrates to get_event_detail. Revisit
+// if a second consumer needs the rich typed structs back on the public API.
+std::optional<reader_types::event_detail_t>
+reader_t::impl::get_event_detail(const reader_types::event_id_t& id)
+{
+    using reader_types::event_type_t;
+
+    reader_types::event_detail_t detail;
+    detail.id = id;
+
+    // DESIGN DECISION (gap#4, 2026-07-20): property-key naming = the source struct's
+    // field name, snake_case; region call-arguments are keyed by the argument's own name.
+    // Values are typed (unsigned counts/ids/addresses -> uint64_t, counter value ->
+    // double, args
+    // -> string). Optional-field policy: an absent std::optional scalar or a null linked
+    // entity is OMITTED from the bag (not emitted as monostate/nullptr_t), applied
+    // uniformly. Revisit if a consumer needs presence-vs-absence disambiguation.
+    auto push_u = [&](std::string key, size_t v) {
+        detail.properties.push_back({ std::move(key), static_cast<uint64_t>(v) });
+    };
+    auto push_opt_u = [&](std::string key, const std::optional<size_t>& v) {
+        if(v.has_value()) push_u(std::move(key), v.value());
+    };
+
+    switch(reader_types::detail::event_id_access::type(id))
+    {
+        case event_type_t::region:
+        {
+            auto d = get_region_details(id);
+            if(!d) return std::nullopt;
+            detail.name = d->name;
+            if(d->event) detail.category = d->event->event_category;
+            detail.ts = d->start_timestamp;
+            detail.te = d->end_timestamp;
+
+            // Freeform region call-arguments as string-valued properties, keyed by name.
+            // (args are not populated by get_region_details; fetch them separately.)
+            reader_types::timeline_event_t ev{};
+            ev.unique_identifier = { reader_types::detail::event_id_access::row_id(id),
+                                     event_type_t::region };
+            for(const auto& a : get_arguments(ev))
+                detail.properties.push_back({ a->name, a->value });
+            break;
+        }
+        case event_type_t::kernel_dispatch:
+        {
+            auto d = get_kernel_dispatch_details(id);
+            if(!d) return std::nullopt;
+            detail.name = d->name;
+            if(d->event) detail.category = d->event->event_category;
+            detail.ts = d->start_timestamp;
+            detail.te = d->end_timestamp;
+            push_u("dispatch_id", d->dispatch_id);
+            push_u("workgroup_size_x", d->workgroup_size_x);
+            push_u("workgroup_size_y", d->workgroup_size_y);
+            push_u("workgroup_size_z", d->workgroup_size_z);
+            push_u("grid_size_x", d->grid_size_x);
+            push_u("grid_size_y", d->grid_size_y);
+            push_u("grid_size_z", d->grid_size_z);
+            push_opt_u("private_segment_size", d->private_segment_size);
+            push_opt_u("group_segment_size", d->group_segment_size);
+            // DESIGN DECISION (gap#4, 2026-07-20): linked entities collapse to their
+            // integer id (kernel_symbol_id, code_object_id, node_id, process_id,
+            // thread_id, ...), NOT the resolved sub-struct -- a deliberate collapse loss;
+            // the consumer does a follow-up lookup by id. Entities the detail row does
+            // not carry (kd agent/ stream/queue) are simply absent under the omit policy.
+            // Revisit if consumers need the resolved entity inline.
+            if(d->kernel_symbol_info)
+                push_u("kernel_symbol_id", d->kernel_symbol_info->id);
+            if(d->code_object_info) push_u("code_object_id", d->code_object_info->id);
+            if(d->node_info) push_u("node_id", d->node_info->node_id);
+            if(d->process_info) push_u("process_id", d->process_info->pid);
+            if(d->thread_info) push_u("thread_id", d->thread_info->thread_id);
+            if(d->agent_info) push_u("agent_id", d->agent_info->id);
+            if(d->stream_info) push_u("stream_id", d->stream_info->stream_id);
+            if(d->queue_info) push_u("queue_id", d->queue_info->queue_id);
+            break;
+        }
+        case event_type_t::memory_copy:
+        {
+            auto d = get_memory_copy_details(id);
+            if(!d) return std::nullopt;
+            detail.name = d->name;
+            if(d->event) detail.category = d->event->event_category;
+            detail.ts = d->start_timestamp;
+            detail.te = d->end_timestamp;
+            push_u("size", d->size);
+            push_opt_u("src_address", d->src_address);
+            push_opt_u("dst_address", d->dst_address);
+            if(!d->region_name.empty())
+                detail.properties.push_back({ "region_name", d->region_name });
+            if(d->src_agent_id) push_u("src_agent_id", d->src_agent_id->id);
+            if(d->dst_agent_id) push_u("dst_agent_id", d->dst_agent_id->id);
+            if(d->node_info) push_u("node_id", d->node_info->node_id);
+            if(d->process_info) push_u("process_id", d->process_info->pid);
+            if(d->thread_info) push_u("thread_id", d->thread_info->thread_id);
+            if(d->stream_info) push_u("stream_id", d->stream_info->stream_id);
+            if(d->queue_info) push_u("queue_id", d->queue_info->queue_id);
+            break;
+        }
+        case event_type_t::memory_allocate:
+        {
+            auto d = get_memory_alloc_details(id);
+            if(!d) return std::nullopt;
+            // memory_allocate has no name field -> empty header name.
+            if(d->event) detail.category = d->event->event_category;
+            detail.ts = d->start_timestamp;
+            detail.te = d->end_timestamp;
+            if(!d->type.empty()) detail.properties.push_back({ "type", d->type });
+            if(!d->level.empty()) detail.properties.push_back({ "level", d->level });
+            push_opt_u("address", d->address);
+            push_u("size", d->size);
+            if(d->node_info) push_u("node_id", d->node_info->node_id);
+            if(d->process_info) push_u("process_id", d->process_info->pid);
+            if(d->thread_info) push_u("thread_id", d->thread_info->thread_id);
+            if(d->agent_info) push_u("agent_id", d->agent_info->id);
+            if(d->stream_info) push_u("stream_id", d->stream_info->stream_id);
+            if(d->queue_info) push_u("queue_id", d->queue_info->queue_id);
+            break;
+        }
+        case event_type_t::sample:
+        {
+            auto d = get_sample_details(id);
+            if(!d) return std::nullopt;
+            // Point event: only timestamp; no end, no scalar payload of its own.
+            detail.ts = d->timestamp;
+            break;
+        }
+        case event_type_t::pmc_event:
+        {
+            auto d = get_pmc_event_details(id);
+            if(!d) return std::nullopt;
+            if(d->event) detail.category = d->event->event_category;
+            detail.ts = d->sample.timestamp;  // point event: te stays nullopt
+            detail.properties.push_back({ "value", d->value });
+            break;
+        }
+        default: return std::nullopt;
+    }
+
+    return detail;
+}
+
 }  // namespace profiler_hub

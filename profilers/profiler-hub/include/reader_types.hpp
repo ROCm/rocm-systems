@@ -12,6 +12,7 @@
 #include <string>
 #include <tuple>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 #include <profiler-hub/shared_types.hpp>
@@ -464,6 +465,22 @@ struct arg_data_t
 using arg_data_ptr_t  = std::shared_ptr<arg_data_t>;
 using arg_data_list_t = std::vector<arg_data_ptr_t>;
 
+// DESIGN DECISION (gap#4, 2026-07-20): detail property values are a typed variant, not
+// stringly. This deliberately mirrors the SDK rocpd writer's `struct sql_insert_value`
+// (rocprofiler-sdk/source/lib/output/generateRocpd.cpp) — the exact read/write seam
+// profiler-hub sits opposite — which uses the same alternatives. We define our own copy
+// rather than depend on the SDK header. `monostate` = present-but-empty; `nullptr_t` =
+// explicitly-absent optional. Revisit if the SDK value model changes.
+using arg_value_t =
+    std::variant<std::monostate, int64_t, uint64_t, double, std::string, std::nullptr_t>;
+
+/// A named, typed detail property in an event_detail_t property bag.
+struct arg_t
+{
+    std::string key;    ///< Property name (source struct field / argument name).
+    arg_value_t value;  ///< Typed value; see arg_value_t.
+};
+
 struct event_data_t
 {
     size_t stack_id;         ///< Unique identifier for this call stack instance
@@ -695,6 +712,25 @@ struct event_id_access
     static uint32_t     source_db(const event_id_t& h) { return h.m_source_db; }
 };
 }  // namespace detail
+
+/**
+ * @brief Unified detail record for any event, keyed by its opaque handle.
+ *
+ * One collapsed detail path across all six event_type_t cases (gap#4, draft §7): a fixed
+ * common header plus a generic `properties` bag of named, typed values. Replaces the
+ * seven typed get_*_details() accessors. Linked entities (agent, kernel_symbol,
+ * code_object, stream, queue, node/process/thread) appear in `properties` as their
+ * integer id, NOT as a resolved sub-struct — consumers do a follow-up lookup by id.
+ */
+struct event_detail_t
+{
+    event_id_t                    id;        ///< Opaque handle this detail describes.
+    std::string                   name;      ///< Type's name field; empty if none.
+    std::string                   category;  ///< Event category display string.
+    timestamp_ns_t                ts{};      ///< Start / only timestamp (nanoseconds).
+    std::optional<timestamp_ns_t> te;        ///< End timestamp; nullopt for point events.
+    std::vector<arg_t>            properties;  ///< All non-header fields, typed.
+};
 
 // --------------------- Track event types (track-scoped queries) ----------
 
