@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 591 | 591 | 0 |
-| **total** | **591** | **591** | **0** |
+| `contract` | 592 | 592 | 0 |
+| **total** | **592** | **592** | **0** |
 
 ## Tier: `contract`
 
@@ -943,7 +943,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_OccupancyExt_MaxActiveBlocksPerMultiprocessorWithFlags_DisableCachingOverrideSucceeds` | hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags | the disable-caching-override flag is accepted and yields a non-negative block count |
 | `Contract_OccupancyExt_MaxActiveBlocksPerMultiprocessorWithFlags_RejectsInvalidInputs` | hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags | rejects a null output pointer and an invalid flag value with hipErrorInvalidValue |
 
-### `occupancy_variable` (4 cases)
+### `occupancy_variable` (5 cases)
 
 | Case | API | Asserts |
 |---|---|---|
@@ -951,6 +951,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_OccupancyVariable_PotentialBlockSizeWithFlags_ReturnsUsableValues` | hipOccupancyMaxPotentialBlockSizeWithFlags | returns a non-negative min grid size and positive block size; the reserved flag does not change the contract |
 | `Contract_OccupancyVariable_VariableSMemWithFlags_ReturnsUsableValues` | hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags | accepts the smem functor and returns a non-negative min grid size and positive block size under the reserved default flag |
 | `Contract_OccupancyVariable_VariableSMem_ReturnsUsableValues` | hipOccupancyMaxPotentialBlockSizeVariableSMem | accepts a block-size-to-dynamic-smem functor and returns a non-negative min grid size and positive block size |
+| `Contract_OccupancyVariable_WindowsUnsupported_IsSkipped` | hipOccupancyMaxPotentialBlockSizeWithFlags | Windows runtime does not export the symbol; the contract is skipped until export parity exists |
 
 ### `peer_access` (6 cases)
 

@@ -20,11 +20,20 @@
 // PLATFORM-DIFF: hipOccupancyMaxPotentialBlockSizeWithFlags,
 // hipOccupancyMaxPotentialBlockSizeVariableSMem, and
 // hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags are not exported from the
-// Windows HIP runtime (absent from amdhip.def.in), so every case here is an
-// unresolved external at link time on Windows. The whole translation unit is
-// therefore additionally gated off on Windows (compiling to an empty test binary,
-// exactly as it already does on the NVIDIA backend). This platform gate can be
-// removed once the Windows runtime exports these symbols.
+// Windows HIP runtime (absent from amdhip.def.in), so the real contract cases
+// below cannot be linked on Windows. Keep a single Windows-only stub test so
+// CTest still generates the per-file manifest and the suite skips cleanly instead
+// of failing during discovery. This gate can be removed once the Windows runtime
+// exports these symbols.
+#if defined(_WIN32)
+// @asserts: hipOccupancyMaxPotentialBlockSizeWithFlags - Windows runtime does not export the symbol; the contract is skipped until export parity exists
+HIP_TEST_CASE(Contract_OccupancyVariable_WindowsUnsupported_IsSkipped) {
+  HIP_SKIP_TEST("hipOccupancyMaxPotentialBlockSize* occupancy contracts are not exported from the "
+                "Windows HIP runtime yet; the real cases are skipped here until export parity "
+                "exists.");
+}
+#endif
+
 #if HT_AMD && !defined(_WIN32)
 
 namespace {
