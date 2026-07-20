@@ -13,13 +13,13 @@ find_package(rocprofiler-sdk REQUIRED)
 # Check if PC sampling is disabled and whether we should skip the tests.
 rocprofiler_sdk_pc_sampling_disabled(IS_PC_SAMPLING_DISABLED)
 
-# TODO(pc-sampling): Temporarily quarantined (kept building, not run).
-# Under heavy host-trap multi-agent load (16 threads across all 8 agents at
-# --pc-sampling-interval 1) these tests intermittently (~0.25% of runs) trigger
-# a GPU hardware hang that escalates to a failed ASIC reset (PSP resume -62) and
-# requires a full node reboot. This is a runtime/driver-level issue, not a
-# test-logic bug: the other PC sampling test families pass 500/500 under the same
-# harness. Re-enable once the multi-agent host-trap hang is root-caused/fixed.
+# TODO(pc-sampling): Temporarily quarantined (kept building, not run). Under heavy
+# host-trap multi-agent load (16 threads across all 8 agents at --pc-sampling-interval 1)
+# these tests intermittently (~0.25% of runs) trigger a GPU hardware hang that escalates
+# to a failed ASIC reset (PSP resume -62) and requires a full node reboot. This is a
+# runtime/driver-level issue, not a test-logic bug: the other PC sampling test families
+# pass 500/500 under the same harness. Re-enable once the multi-agent host-trap hang is
+# root-caused/fixed.
 set(IS_PC_SAMPLING_DISABLED TRUE)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
