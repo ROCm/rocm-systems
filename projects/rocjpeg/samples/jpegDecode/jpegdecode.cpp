@@ -202,7 +202,7 @@ int main(int argc, char **argv) {
                         img = pending_queue.front();
                         pending_queue.pop();
                     }
-                    status = rocJpegSyncSurface(rocjpeg_handle, img);
+                    status = rocJpegDecodeSync(rocjpeg_handle, img);
                     if (status != ROCJPEG_STATUS_SUCCESS) {
                         {
                             std::lock_guard<std::mutex> lock(mtx);

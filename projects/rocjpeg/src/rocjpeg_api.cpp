@@ -330,9 +330,9 @@ RocJpegStatus ROCJPEGAPI rocJpegDecodeAsync(RocJpegHandle handle, RocJpegStreamH
 }
 
 /**
- * @brief Synchronizes an asynchronous JPEG decode surface and writes the decoded output.
+ * @brief Synchronizes an asynchronous JPEG decode associated with the specified RocJpegImage* and writes the decoded output.
  */
-RocJpegStatus ROCJPEGAPI rocJpegSyncSurface(RocJpegHandle handle, RocJpegImage *destination) {
+RocJpegStatus ROCJPEGAPI rocJpegDecodeSync(RocJpegHandle handle, RocJpegImage *destination) {
     FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(handle) + ", " + RocJpegFmtPtr(destination));
     if (handle == nullptr || destination == nullptr) {
         return ROCJPEG_STATUS_INVALID_PARAMETER;
@@ -340,7 +340,7 @@ RocJpegStatus ROCJPEGAPI rocJpegSyncSurface(RocJpegHandle handle, RocJpegImage *
     RocJpegStatus rocjpeg_status = ROCJPEG_STATUS_SUCCESS;
     auto rocjpeg_handle = static_cast<RocJpegDecoderHandle*>(handle);
     try {
-        rocjpeg_status = rocjpeg_handle->rocjpeg_decoder->SyncSurface(destination);
+        rocjpeg_status = rocjpeg_handle->rocjpeg_decoder->DecodeSync(destination);
     } catch (const std::exception& e) {
         rocjpeg_handle->CaptureError(e.what());
         ErrorLog(g_rocjpeg_logger, e.what());

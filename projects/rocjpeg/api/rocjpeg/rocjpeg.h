@@ -355,7 +355,7 @@ extern const char* ROCJPEGAPI rocJpegGetErrorName(RocJpegStatus rocjpeg_status);
 RocJpegStatus ROCJPEGAPI rocJpegDecodeAsync(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, const RocJpegDecodeParams *decode_params, RocJpegImage *destination);
 
 /**
- * @fn RocJpegStatus ROCJPEGAPI rocJpegSyncSurface(RocJpegHandle handle, RocJpegImage *destination);
+ * @fn RocJpegStatus ROCJPEGAPI rocJpegDecodeSync(RocJpegHandle handle, RocJpegImage *destination);
  * @ingroup group_amd_rocjpeg
  * @brief Synchronizes a pending asynchronous JPEG decode.
  *
@@ -363,7 +363,7 @@ RocJpegStatus ROCJPEGAPI rocJpegDecodeAsync(RocJpegHandle handle, RocJpegStreamH
  * @param destination A pointer to RocJpegImage where the decoded image will be stored.
  * @return A RocJpegStatus indicating the success or failure of the sync operation.
  */
-RocJpegStatus ROCJPEGAPI rocJpegSyncSurface(RocJpegHandle handle, RocJpegImage *destination);
+RocJpegStatus ROCJPEGAPI rocJpegDecodeSync(RocJpegHandle handle, RocJpegImage *destination);
 
 #if defined(__cplusplus)
   }

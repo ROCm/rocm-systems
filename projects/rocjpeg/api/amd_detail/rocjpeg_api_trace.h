@@ -58,7 +58,7 @@ typedef RocJpegStatus (ROCJPEGAPI *PfnRocJpegDecode)(RocJpegHandle handle, RocJp
 typedef RocJpegStatus (ROCJPEGAPI *PfnRocJpegDecodeBatched)(RocJpegHandle handle, RocJpegStreamHandle *jpeg_stream_handles, int batch_size, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations);
 typedef const char* (ROCJPEGAPI *PfnRocJpegGetErrorName)(RocJpegStatus rocjpeg_status);
 typedef RocJpegStatus (ROCJPEGAPI *PfnRocJpegDecodeAsync)(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, const RocJpegDecodeParams *decode_params, RocJpegImage *destination);
-typedef RocJpegStatus (ROCJPEGAPI *PfnRocJpegSyncSurface)(RocJpegHandle handle, RocJpegImage *destination);
+typedef RocJpegStatus (ROCJPEGAPI *PfnRocJpegDecodeSync)(RocJpegHandle handle, RocJpegImage *destination);
 
 // rocJPEG API dispatch table
 struct RocJpegDispatchTable {
@@ -77,7 +77,7 @@ struct RocJpegDispatchTable {
     // PLEASE DO NOT EDIT ABOVE!
     // ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION == 1
     PfnRocJpegDecodeAsync pfn_rocjpeg_decode_async;
-    PfnRocJpegSyncSurface pfn_rocjpeg_sync_surface;
+    PfnRocJpegDecodeSync pfn_rocjpeg_decode_sync;
 
     // PLEASE DO NOT EDIT ABOVE!
     // ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION == 2

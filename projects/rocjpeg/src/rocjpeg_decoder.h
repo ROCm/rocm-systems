@@ -109,11 +109,11 @@ public:
    RocJpegStatus DecodeAsync(RocJpegStreamHandle jpeg_stream, const RocJpegDecodeParams *decode_params, RocJpegImage *destination);
 
    /**
-    * @brief Synchronizes an asynchronous decode surface and copies/converts the output.
+    * @brief Synchronizes a pending asynchronous decode and copies/converts the output.
     * @param destination Pointer to the destination image.
     * @return The status of the sync operation.
     */
-   RocJpegStatus SyncSurface(RocJpegImage *destination);
+   RocJpegStatus DecodeSync(RocJpegImage *destination);
 
 private:
    struct AsyncDecodeState {
@@ -132,7 +132,7 @@ private:
    /**
     * @brief Waits for a submitted surface and copies/converts the decoded output.
     */
-   RocJpegStatus SyncDecodeSurface(VASurfaceID surface_id, const JpegStreamParameters *jpeg_stream_params, const RocJpegDecodeParams *decode_params, RocJpegImage *destination);
+   RocJpegStatus FinalizeDecode(VASurfaceID surface_id, const JpegStreamParameters *jpeg_stream_params, const RocJpegDecodeParams *decode_params, RocJpegImage *destination);
 
    /**
     * @brief Retrieves the height of the chroma channel.

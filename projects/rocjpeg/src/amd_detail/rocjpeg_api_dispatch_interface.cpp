@@ -56,6 +56,6 @@ const char* ROCJPEGAPI rocJpegGetErrorName(RocJpegStatus rocjpeg_status) {
 RocJpegStatus ROCJPEGAPI rocJpegDecodeAsync(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, const RocJpegDecodeParams *decode_params, RocJpegImage *destination) {
     return rocjpeg::GetRocJpegDispatchTable()->pfn_rocjpeg_decode_async(handle, jpeg_stream_handle, decode_params, destination);
 }
-RocJpegStatus ROCJPEGAPI rocJpegSyncSurface(RocJpegHandle handle, RocJpegImage *destination) {
-    return rocjpeg::GetRocJpegDispatchTable()->pfn_rocjpeg_sync_surface(handle, destination);
+RocJpegStatus ROCJPEGAPI rocJpegDecodeSync(RocJpegHandle handle, RocJpegImage *destination) {
+    return rocjpeg::GetRocJpegDispatchTable()->pfn_rocjpeg_decode_sync(handle, destination);
 }

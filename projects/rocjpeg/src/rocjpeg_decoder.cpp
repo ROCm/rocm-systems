@@ -147,7 +147,7 @@ RocJpegStatus RocJpegDecoder::Decode(RocJpegStreamHandle jpeg_stream_handle, con
     VASurfaceID current_surface_id;
     CHECK_ROCJPEG(jpeg_vaapi_decoder_.SubmitDecode(jpeg_stream_params, current_surface_id, decode_params));
 
-    RocJpegStatus rocjpeg_status = SyncDecodeSurface(current_surface_id, jpeg_stream_params, decode_params, destination);
+    RocJpegStatus rocjpeg_status = FinalizeDecode(current_surface_id, jpeg_stream_params, decode_params, destination);
     if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
         jpeg_vaapi_decoder_.SetSurfaceAsIdle(current_surface_id);
     }
@@ -191,9 +191,9 @@ RocJpegStatus RocJpegDecoder::DecodeAsync(RocJpegStreamHandle jpeg_stream_handle
 }
 
 /**
- * @brief Synchronizes an asynchronous decode surface and copies/converts the decoded output.
+ * @brief Synchronizes a pending asynchronous decode and copies/converts the decoded output.
  */
-RocJpegStatus RocJpegDecoder::SyncSurface(RocJpegImage *destination) {
+RocJpegStatus RocJpegDecoder::DecodeSync(RocJpegImage *destination) {
     FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(destination));
     if (destination == nullptr) {
         CriticalLog(g_rocjpeg_logger, "Null pointer");
@@ -215,7 +215,7 @@ RocJpegStatus RocJpegDecoder::SyncSurface(RocJpegImage *destination) {
     }
 
     // Sync the VA surface and copy the decoded output to the destination without holding the mutex
-    RocJpegStatus rocjpeg_status = SyncDecodeSurface(state.surface_id, &state.jpeg_stream_params, &state.decode_params, destination);
+    RocJpegStatus rocjpeg_status = FinalizeDecode(state.surface_id, &state.jpeg_stream_params, &state.decode_params, destination);
     if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
         jpeg_vaapi_decoder_.SetSurfaceAsIdle(state.surface_id);
         FunctionExitLog(g_rocjpeg_logger);
@@ -228,7 +228,7 @@ RocJpegStatus RocJpegDecoder::SyncSurface(RocJpegImage *destination) {
 /**
  * @brief Waits for a submitted VA surface, maps it through HIP interop, and writes the requested output.
  */
-RocJpegStatus RocJpegDecoder::SyncDecodeSurface(VASurfaceID current_surface_id, const JpegStreamParameters *jpeg_stream_params, const RocJpegDecodeParams *decode_params, RocJpegImage *destination) {
+RocJpegStatus RocJpegDecoder::FinalizeDecode(VASurfaceID current_surface_id, const JpegStreamParameters *jpeg_stream_params, const RocJpegDecodeParams *decode_params, RocJpegImage *destination) {
     if (jpeg_stream_params == nullptr || decode_params == nullptr || destination == nullptr) {
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
