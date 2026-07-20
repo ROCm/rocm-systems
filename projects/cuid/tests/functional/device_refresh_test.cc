@@ -66,7 +66,11 @@ void TestDeviceRefresh::Run() {
   // internal registry.
   uint32_t count = 0;
   status = amdcuid_get_all_handles(nullptr, &count);
-  EXPECT_GT(count, 0u) << "No devices found after refresh";
+  if (status == AMDCUID_STATUS_UNSUPPORTED) {
+    GTEST_SKIP() << "No supported devices found after refresh";
+  }
+  ASSERT_TRUE(status == AMDCUID_STATUS_INSUFFICIENT_SIZE || status == AMDCUID_STATUS_SUCCESS);
+  ASSERT_GT(count, 0u) << "No devices found after refresh";
 
   std::vector<amdcuid_id_t> handles(count);
   status = amdcuid_get_all_handles(handles.data(), &count);

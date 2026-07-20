@@ -206,6 +206,8 @@ void TestFileLockTimeout::Run() {
 
     int status;
     waitpid(pid, &status, 0);
+    EXPECT_TRUE(WIFEXITED(status));
+    EXPECT_EQ(WEXITSTATUS(status), 0);
 
     EXPECT_TRUE(lock.acquire_with_timeout(1));
   } else {

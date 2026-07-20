@@ -32,6 +32,10 @@ void TestBase::SetUp() {
   uint32_t count = 0;
   amdcuid_status_t status = amdcuid_get_all_handles(nullptr, &count);
 
+  if (status == AMDCUID_STATUS_UNSUPPORTED) {
+    device_handles_.clear();
+    return;
+  }
   if (status != AMDCUID_STATUS_INSUFFICIENT_SIZE && status != AMDCUID_STATUS_SUCCESS) {
     IF_VERB(1) {
       printf("  SetUp: amdcuid_get_all_handles (count query) returned %s\n",

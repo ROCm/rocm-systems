@@ -40,7 +40,7 @@ static void print_help() {
       "aborting\n"
       "  -h, --help         Show this help message\n"
       "\n"
-      "All unrecognised options are forwarded to GoogleTest.\n");
+      "GoogleTest flags must use --gtest_*; all other unrecognised options are ignored.\n");
 }
 
 void ProcessCmdline(CUIDTstGlobals* globals, int argc, char** argv) {
@@ -53,6 +53,6 @@ void ProcessCmdline(CUIDTstGlobals* globals, int argc, char** argv) {
       print_help();
       exit(0);
     }
-    // Unrecognised flags are left in argv for GTest to consume.
+    // Unrecognised flags are currently ignored (GoogleTest is initialized before ProcessCmdline()).
   }
 }
