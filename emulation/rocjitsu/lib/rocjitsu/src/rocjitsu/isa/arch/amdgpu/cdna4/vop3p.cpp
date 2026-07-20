@@ -22,6 +22,24 @@ namespace rocjitsu {
 namespace cdna4 {
 
 namespace {
+uint32_t cdna4_matrix_fmt_element_bits(uint32_t fmt) {
+  switch (fmt) {
+  case 2:
+  case 3:
+    return 6;
+  case 4:
+    return 4;
+  default:
+    return 8;
+  }
+}
+
+int cdna4_matrix_fmt_operand_size_bits(uint32_t fmt, uint32_t dim, uint32_t k) {
+  return static_cast<int>(dim * k * cdna4_matrix_fmt_element_bits(fmt) / 64);
+}
+} // namespace
+
+namespace {
 uint32_t mfma_src2_encoding(uint32_t value, bool acc_cd) {
   constexpr uint32_t vgpr_min =
       OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN;
@@ -831,7 +849,8 @@ void VAccvgprWriteVop3p::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VMfmaF3216x16x128F8f6f4Vop3pMfma::VMfmaF3216x16x128F8f6f4Vop3pMfma(const MachineInst *inst)
+VMfmaF3216x16x128F8f6f4Vop3pMfma::VMfmaF3216x16x128F8f6f4Vop3pMfma(const MachineInst *inst,
+                                                                   bool has_vop3px2_prefix)
     : Vop3pMfma("v_mfma_f32_16x16x128_f8f6f4", reinterpret_cast<const OpEncoding *>(inst),
                 make_exec_fn<VMfmaF3216x16x128F8f6f4Vop3pMfma>()),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
@@ -839,13 +858,17 @@ VMfmaF3216x16x128F8f6f4Vop3pMfma::VMfmaF3216x16x128F8f6f4Vop3pMfma(const Machine
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
                  : 0))),
-      src0(256, OperandType::OPR_SRC_VGPR_OR_ACCVGPR,
+      src0(cdna4_matrix_fmt_operand_size_bits(reinterpret_cast<const OpEncoding *>(inst)->cbsz, 16,
+                                              128),
+           OperandType::OPR_SRC_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->src0 +
             ((reinterpret_cast<const OpEncoding *>(inst)->acc & 0x1u)
                  ? (OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN -
                     OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN)
                  : 0))),
-      src1(256, OperandType::OPR_SRC_VGPR_OR_ACCVGPR,
+      src1(cdna4_matrix_fmt_operand_size_bits(reinterpret_cast<const OpEncoding *>(inst)->blgp, 16,
+                                              128),
+           OperandType::OPR_SRC_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->src1 +
             ((reinterpret_cast<const OpEncoding *>(inst)->acc & 0x2u)
                  ? (OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN -
@@ -861,9 +884,11 @@ VMfmaF3216x16x128F8f6f4Vop3pMfma::VMfmaF3216x16x128F8f6f4Vop3pMfma(const Machine
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MFMA;
-  size_ = 16;
-  raw_words_ = {inst[-2], inst[-1], inst[0], inst[1]};
-  raw_encoding_ = raw_words_.data();
+  if (has_vop3px2_prefix) {
+    size_ = 16;
+    raw_words_ = {inst[-2], inst[-1], inst[0], inst[1]};
+    raw_encoding_ = raw_words_.data();
+  }
 }
 
 void VMfmaF3216x16x128F8f6f4Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -895,7 +920,8 @@ void VMfmaF3216x16x128F8f6f4Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
     throw util::UnimplementedInst(mnemonic());
 }
 
-VMfmaF3232x32x64F8f6f4Vop3pMfma::VMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineInst *inst)
+VMfmaF3232x32x64F8f6f4Vop3pMfma::VMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineInst *inst,
+                                                                 bool has_vop3px2_prefix)
     : Vop3pMfma("v_mfma_f32_32x32x64_f8f6f4", reinterpret_cast<const OpEncoding *>(inst),
                 make_exec_fn<VMfmaF3232x32x64F8f6f4Vop3pMfma>()),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
@@ -903,13 +929,17 @@ VMfmaF3232x32x64F8f6f4Vop3pMfma::VMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineIn
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
                  : 0))),
-      src0(256, OperandType::OPR_SRC_VGPR_OR_ACCVGPR,
+      src0(cdna4_matrix_fmt_operand_size_bits(reinterpret_cast<const OpEncoding *>(inst)->cbsz, 32,
+                                              64),
+           OperandType::OPR_SRC_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->src0 +
             ((reinterpret_cast<const OpEncoding *>(inst)->acc & 0x1u)
                  ? (OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN -
                     OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN)
                  : 0))),
-      src1(256, OperandType::OPR_SRC_VGPR_OR_ACCVGPR,
+      src1(cdna4_matrix_fmt_operand_size_bits(reinterpret_cast<const OpEncoding *>(inst)->blgp, 32,
+                                              64),
+           OperandType::OPR_SRC_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->src1 +
             ((reinterpret_cast<const OpEncoding *>(inst)->acc & 0x2u)
                  ? (OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN -
@@ -925,9 +955,11 @@ VMfmaF3232x32x64F8f6f4Vop3pMfma::VMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineIn
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MFMA;
-  size_ = 16;
-  raw_words_ = {inst[-2], inst[-1], inst[0], inst[1]};
-  raw_encoding_ = raw_words_.data();
+  if (has_vop3px2_prefix) {
+    size_ = 16;
+    raw_words_ = {inst[-2], inst[-1], inst[0], inst[1]};
+    raw_encoding_ = raw_words_.data();
+  }
 }
 
 void VMfmaF3232x32x64F8f6f4Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
