@@ -283,33 +283,87 @@ namespace {
   return amdgpu::RdnaIsaBase::MAX_SGPRS_PER_WF;
 }
 
+// A kernel descriptor decoded out of the section that holds it, paired with its
+// file offset (for descriptor writeback).
+struct LocatedKernelDescriptor {
+  rocr::llvm::amdhsa::kernel_descriptor_t desc;
+  uint64_t file_offset;
+};
+
+// Find the allocated section whose address range covers @p kd_vaddr and decode
+// the descriptor out of that section's own bytes (no ELF re-walk). Returns
+// nullopt when no section covers the descriptor or it does not fully fit.
+[[nodiscard]] std::optional<LocatedKernelDescriptor>
+locate_kernel_descriptor(const std::vector<std::unique_ptr<Section>> &sections, uint64_t kd_vaddr) {
+  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+  for (const auto &section : sections) {
+    const uint64_t base = section->vaddr();
+    if (base == 0 || kd_vaddr < base)
+      continue;
+    const uint64_t off = kd_vaddr - base;
+    if (off + sizeof(KD) > section->size())
+      continue;
+    LocatedKernelDescriptor located;
+    std::memcpy(&located.desc, section->data() + off, sizeof(KD));
+    located.file_offset = section->sectionOffset() + off;
+    return located;
+  }
+  return std::nullopt;
+}
+
 } // namespace
 
 std::optional<uint32_t> AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t arch) const {
   namespace kd = rocr::llvm::amdhsa;
-  using KD = kd::kernel_descriptor_t;
 
   std::optional<uint32_t> min_count;
-  for (const auto &[name, kd_vaddr] : kd_offsets_) {
-    // Locate the section whose address range covers the .kd symbol, then read the
-    // descriptor out of that section's own bytes (no ELF re-walk).
-    for (const auto &section : all_sections()) {
-      const uint64_t base = section->vaddr();
-      if (base == 0 || kd_vaddr < base)
-        continue;
-      const uint64_t off = kd_vaddr - base;
-      if (off + sizeof(KD) > section->size())
-        continue;
-      KD desc;
-      std::memcpy(&desc, section->data() + off, sizeof(desc));
-      const uint32_t granulated = AMDHSA_BITS_GET(
-          desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
-      const uint32_t count = sgpr_count_from_granulated(granulated, arch);
-      min_count = min_count ? std::min(*min_count, count) : count;
-      break;
-    }
+  for (const auto &entry : kd_offsets_) {
+    const auto located = locate_kernel_descriptor(all_sections(), entry.second);
+    if (!located)
+      continue;
+    const uint32_t granulated = AMDHSA_BITS_GET(
+        located->desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
+    const uint32_t count = sgpr_count_from_granulated(granulated, arch);
+    min_count = min_count ? std::min(*min_count, count) : count;
   }
   return min_count;
+}
+
+std::vector<KernelDescriptorInfo> AmdGpuCodeObject::kernel_descriptors() const {
+  std::vector<KernelDescriptorInfo> out;
+  if (text_sections().empty())
+    return out;
+  const Section *text = text_sections().front();
+  const uint64_t text_vaddr = text->vaddr();
+  const uint64_t text_end = text_vaddr + text->size();
+
+  for (const auto &[name, kd_vaddr] : kd_offsets_) {
+    const auto located = locate_kernel_descriptor(all_sections(), kd_vaddr);
+    if (!located)
+      continue;
+
+    // kernel_code_entry_byte_offset is signed and relative to the descriptor's
+    // own address. Map it back to a .text-relative offset and drop entries that
+    // do not land inside .text.
+    const int64_t entry_vaddr_signed =
+        static_cast<int64_t>(kd_vaddr) + located->desc.kernel_code_entry_byte_offset;
+    if (entry_vaddr_signed < 0)
+      continue;
+    const uint64_t entry_vaddr = static_cast<uint64_t>(entry_vaddr_signed);
+    if (entry_vaddr < text_vaddr || entry_vaddr >= text_end)
+      continue;
+
+    out.push_back(KernelDescriptorInfo{
+        .name = name,
+        .descriptor_file_offset = located->file_offset,
+        .entry_text_offset = entry_vaddr - text_vaddr,
+        .private_segment_fixed_size = located->desc.private_segment_fixed_size,
+        .granulated_workitem_vgpr_count =
+            AMDHSA_BITS_GET(located->desc.compute_pgm_rsrc1,
+                            rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT),
+    });
+  }
+  return out;
 }
 
 } // namespace rocjitsu

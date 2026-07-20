@@ -14,6 +14,12 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/register_set.h"
 
+#include "rocjitsu/base/rj_compiler.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/AMDHSAKernelDescriptor.h"
+RJ_DIAGNOSTIC_POP
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -1593,6 +1599,136 @@ TEST(InstrumentorSpill, BuilderPlanFeedsSpillFormula) {
   EXPECT_FALSE(check_spill_policy(spill_hit, SpillPolicy::NoSpillsSupported, &err));
 }
 
+RegisterSet make_vgpr_set(std::initializer_list<uint16_t> indices) {
+  RegisterSet set;
+  for (uint16_t i : indices)
+    set.expand(RegisterRef{RegClass::VGPR, i, 1});
+  return set;
+}
+
+// plan_vgpr_spills reserves one slot per VGPR in for_each (ascending) order,
+// starting at align_up(original_private_bytes, kDbiZoneAlignment).
+TEST(InstrumentorSpill, PlanVgprSpillsReservesAscendingOffsets) {
+  SpillManager spills(/*original_private_bytes=*/64, /*per_lane_scratch_limit=*/4096);
+  std::vector<SpillSlot> out;
+  std::string err;
+  ASSERT_TRUE(plan_vgpr_spills(make_vgpr_set({5, 3}), spills, ROCJITSU_CODE_ARCH_CDNA4, out, &err))
+      << err;
+  ASSERT_EQ(out.size(), 2u);
+  EXPECT_EQ(out[0].vgpr, 3u);
+  EXPECT_EQ(out[0].byte_offset, 64u);
+  EXPECT_EQ(out[1].vgpr, 5u);
+  EXPECT_EQ(out[1].byte_offset, 68u);
+  EXPECT_EQ(spills.total_private_bytes(), 72u);
+}
+
+// An empty spill set succeeds with no reservations.
+TEST(InstrumentorSpill, PlanVgprSpillsEmptyIsSuccess) {
+  SpillManager spills(0, 4096);
+  std::vector<SpillSlot> out;
+  std::string err;
+  EXPECT_TRUE(plan_vgpr_spills(RegisterSet{}, spills, ROCJITSU_CODE_ARCH_CDNA4, out, &err));
+  EXPECT_TRUE(out.empty());
+}
+
+// A non-VGPR register in the spill set fails closed and is named; nothing reserved.
+TEST(InstrumentorSpill, PlanVgprSpillsRejectsNonVgpr) {
+  RegisterSet spill = make_vgpr_set({2});
+  spill.expand(RegisterRef{RegClass::SGPR, 7, 1});
+  SpillManager spills(0, 4096);
+  std::vector<SpillSlot> out;
+  std::string err;
+  EXPECT_FALSE(plan_vgpr_spills(spill, spills, ROCJITSU_CODE_ARCH_CDNA4, out, &err));
+  EXPECT_TRUE(out.empty());
+  EXPECT_NE(err.find("s7"), std::string::npos);
+}
+
+// An offset past the CDNA4 12-bit FLAT field fails even within the scratch limit.
+TEST(InstrumentorSpill, PlanVgprSpillsFailsWhenOffsetExceedsField) {
+  SpillManager spills(/*original_private_bytes=*/0x1000, /*per_lane_scratch_limit=*/0x4000);
+  std::vector<SpillSlot> out;
+  std::string err;
+  EXPECT_FALSE(plan_vgpr_spills(make_vgpr_set({1}), spills, ROCJITSU_CODE_ARCH_CDNA4, out, &err));
+  EXPECT_TRUE(out.empty());
+  EXPECT_NE(err.find("offset"), std::string::npos);
+}
+
+// Reserving past the per-lane scratch limit fails closed.
+TEST(InstrumentorSpill, PlanVgprSpillsFailsPastScratchLimit) {
+  SpillManager spills(/*original_private_bytes=*/0, /*per_lane_scratch_limit=*/4); // one slot
+  std::vector<SpillSlot> out;
+  std::string err;
+  EXPECT_FALSE(plan_vgpr_spills(make_vgpr_set({1, 2}), spills, ROCJITSU_CODE_ARCH_CDNA4, out, &err));
+  EXPECT_TRUE(out.empty());
+  EXPECT_NE(err.find("scratch limit"), std::string::npos);
+}
+
+// An arch with no scratch spill emitter fails closed.
+TEST(InstrumentorSpill, PlanVgprSpillsRejectsUnsupportedArch) {
+  SpillManager spills(0, 4096);
+  std::vector<SpillSlot> out;
+  std::string err;
+  EXPECT_FALSE(plan_vgpr_spills(make_vgpr_set({1}), spills, ROCJITSU_CODE_ARCH_CDNA2, out, &err));
+  EXPECT_TRUE(out.empty());
+}
+
+// RDNA4 uses the wide VSCRATCH offset and reserves normally.
+TEST(InstrumentorSpill, PlanVgprSpillsRdna4) {
+  SpillManager spills(0, 4096);
+  std::vector<SpillSlot> out;
+  std::string err;
+  ASSERT_TRUE(plan_vgpr_spills(make_vgpr_set({0}), spills, ROCJITSU_CODE_ARCH_RDNA4, out, &err))
+      << err;
+  ASSERT_EQ(out.size(), 1u);
+  EXPECT_EQ(out[0].vgpr, 0u);
+  EXPECT_EQ(out[0].byte_offset, 0u);
+}
+
+// plan_sgpr_spills reserves a slot per SGPR and picks the lowest VGPR that is
+// neither live nor already spilled as the bridge.
+TEST(InstrumentorSpill, PlanSgprSpillsPicksLowestDeadBridge) {
+  SpillManager spills(/*original_private_bytes=*/64, /*per_lane_scratch_limit=*/4096);
+  std::vector<SgprSpillSlot> out;
+  uint16_t bridge = 0xFFFF;
+  std::string err;
+  // v0,v1 live; v2 already a VGPR spill -> bridge must be v3.
+  const RegisterSet live = make_vgpr_set({0, 1});
+  const std::vector<SpillSlot> vgpr_spills{SpillSlot{2, 0}};
+  ASSERT_TRUE(plan_sgpr_spills(make_sgpr_set({7}), live, vgpr_spills, /*kernel_vgpr_count=*/8, spills,
+                              ROCJITSU_CODE_ARCH_CDNA4, out, bridge, &err))
+      << err;
+  ASSERT_EQ(out.size(), 1u);
+  EXPECT_EQ(out[0].sgpr, 7u);
+  EXPECT_EQ(out[0].byte_offset, 64u);
+  EXPECT_EQ(bridge, 3u);
+}
+
+// The bridge search is bounded by the kernel's allocated VGPR count: if every
+// VGPR in [0, count) is live, no bridge exists and the spill fails closed.
+TEST(InstrumentorSpill, PlanSgprSpillsFailsWhenNoBridgeWithinVgprCount) {
+  SpillManager spills(0, 4096);
+  std::vector<SgprSpillSlot> out;
+  uint16_t bridge = 0xFFFF;
+  std::string err;
+  const RegisterSet live = make_vgpr_set({0, 1}); // both allocated VGPRs live.
+  ASSERT_FALSE(plan_sgpr_spills(make_sgpr_set({7}), live, {}, /*kernel_vgpr_count=*/2, spills,
+                               ROCJITSU_CODE_ARCH_CDNA4, out, bridge, &err));
+  EXPECT_TRUE(out.empty());
+  EXPECT_NE(err.find("bridge VGPR"), std::string::npos) << "error was: " << err;
+}
+
+// A non-SGPR register in the spill set fails closed and is named.
+TEST(InstrumentorSpill, PlanSgprSpillsRejectsNonSgpr) {
+  SpillManager spills(0, 4096);
+  std::vector<SgprSpillSlot> out;
+  uint16_t bridge = 0xFFFF;
+  std::string err;
+  ASSERT_FALSE(plan_sgpr_spills(make_vgpr_set({2}), RegisterSet{}, {}, /*kernel_vgpr_count=*/8,
+                               spills, ROCJITSU_CODE_ARCH_CDNA4, out, bridge, &err));
+  EXPECT_TRUE(out.empty());
+  EXPECT_NE(err.find("v2"), std::string::npos) << "error was: " << err;
+}
+
 //==============================================================================
 // Section 7: Instrumentor probe-call patch end-to-end
 //
@@ -2002,6 +2138,307 @@ TEST(InstrumentorProbePatch, ProbeClobberingLinkPairFailsClosed) {
   EXPECT_TRUE(result.elf_bytes.empty());
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("return-link pair"), std::string::npos)
+      << "error was: " << result.errors.front();
+}
+
+//==============================================================================
+// Section: probe-call register spilling (end-to-end)
+//==============================================================================
+
+// v_mov_b32 encodings (gfx950 VOP1: [31:25]=0x3F, vdst[24:17], op=1<<9, src0[8:0];
+// VGPR src = 256 + index, SGPR src = index, inline 0 = 128).
+constexpr uint32_t kMovV3V2 = 0x7E060302u;   // v_mov_b32 v3, v2 -> reads v2 (v2 live).
+constexpr uint32_t kMovV3S8 = 0x7E060208u;   // v_mov_b32 v3, s8 -> reads s8 (s8 live).
+constexpr uint32_t kMovV2Zero = 0x7E040280u; // v_mov_b32 v2, 0  -> clobbers v2.
+constexpr uint32_t kMovS8Zero = 0xbe880080u; // s_mov_b32 s8, 0  -> clobbers s8.
+
+// gfx950 ET_DYN ELF with one kernel: a .kd descriptor (scratch = private_bytes,
+// SGPR granulation big enough for the s[30:31] link pair) plus a .text holding
+// `text_words`, entry at .text offset 0. Modeled on translate_test.cpp's
+// make_minimal_amdgpu_elf_with_descriptor_after_text so the descriptor is
+// discoverable via AmdGpuCodeObject::kernel_descriptors().
+std::vector<uint8_t> make_gfx950_kernel_elf(const std::vector<uint32_t> &text_words,
+                                            uint32_t private_bytes,
+                                            uint32_t granulated_sgpr_count = 3) {
+  namespace kd = rocr::llvm::amdhsa;
+  using KD = kd::kernel_descriptor_t;
+
+  constexpr uint64_t text_offset = 0x100;
+  constexpr uint64_t text_vaddr = 0x1100;
+  const uint64_t text_size = text_words.size() * sizeof(uint32_t);
+  constexpr uint64_t load_align = 0x1000;
+  constexpr uint64_t rodata_size = sizeof(KD);
+
+  std::vector<uint8_t> shstrtab{'\0'};
+  const uint32_t text_name = add_elf_name(shstrtab, ".text");
+  const uint32_t rodata_name = add_elf_name(shstrtab, ".rodata");
+  const uint32_t symtab_name = add_elf_name(shstrtab, ".symtab");
+  const uint32_t strtab_name = add_elf_name(shstrtab, ".strtab");
+  const uint32_t shstrtab_name = add_elf_name(shstrtab, ".shstrtab");
+
+  std::vector<uint8_t> strtab{'\0'};
+  const uint32_t kd_symbol_name = add_elf_name(strtab, "test_kernel.kd");
+
+  const uint64_t rodata_offset = text_offset + text_size;
+  const uint64_t rodata_vaddr = text_vaddr + text_size + load_align;
+  const uint64_t strtab_offset = rodata_offset + rodata_size;
+  const uint64_t symtab_offset = align_up_for_test(strtab_offset + strtab.size(), 8);
+  constexpr size_t sym_count = 2;
+  const uint64_t shstrtab_offset = symtab_offset + sym_count * sizeof(Elf64_Sym);
+  const uint64_t shoff = align_up_for_test(shstrtab_offset + shstrtab.size(), 8);
+  constexpr uint16_t section_count = 6;
+  constexpr uint16_t phdr_count = 2;
+
+  std::vector<uint8_t> image(shoff + section_count * sizeof(Elf64_Shdr), 0);
+
+  Elf64_Ehdr ehdr{};
+  std::memcpy(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
+  ehdr.e_ident[EI_CLASS] = ELFCLASS64;
+  ehdr.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
+  ehdr.e_type = ET_DYN;
+  ehdr.e_machine = EM_AMDGPU;
+  ehdr.e_version = 1;
+  ehdr.e_phoff = sizeof(Elf64_Ehdr);
+  ehdr.e_shoff = shoff;
+  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
+  ehdr.e_ehsize = sizeof(Elf64_Ehdr);
+  ehdr.e_phentsize = sizeof(Elf64_Phdr);
+  ehdr.e_phnum = phdr_count;
+  ehdr.e_shentsize = sizeof(Elf64_Shdr);
+  ehdr.e_shnum = section_count;
+  ehdr.e_shstrndx = 5;
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+
+  std::array<Elf64_Phdr, phdr_count> phdrs{};
+  phdrs[0].p_type = PT_LOAD;
+  phdrs[0].p_flags = 0x5; // PF_R | PF_X
+  phdrs[0].p_offset = text_offset;
+  phdrs[0].p_vaddr = text_vaddr;
+  phdrs[0].p_paddr = text_vaddr;
+  phdrs[0].p_filesz = text_size;
+  phdrs[0].p_memsz = text_size;
+  phdrs[0].p_align = load_align;
+
+  phdrs[1].p_type = PT_LOAD;
+  phdrs[1].p_flags = 0x4; // PF_R
+  phdrs[1].p_offset = rodata_offset;
+  phdrs[1].p_vaddr = rodata_vaddr;
+  phdrs[1].p_paddr = rodata_vaddr;
+  phdrs[1].p_filesz = rodata_size;
+  phdrs[1].p_memsz = rodata_size;
+  phdrs[1].p_align = load_align;
+  std::memcpy(image.data() + ehdr.e_phoff, phdrs.data(), phdrs.size() * sizeof(Elf64_Phdr));
+
+  std::memcpy(image.data() + text_offset, text_words.data(), text_size);
+
+  // Entry at .text offset 0; scratch and SGPR granulation set for spilling.
+  KD desc{};
+  desc.private_segment_fixed_size = private_bytes;
+  desc.kernel_code_entry_byte_offset =
+      static_cast<int64_t>(text_vaddr) - static_cast<int64_t>(rodata_vaddr);
+  AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  granulated_sgpr_count);
+  std::memcpy(image.data() + rodata_offset, &desc, sizeof(desc));
+  std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
+
+  // The .kd symbol must be a global STT_OBJECT of descriptor size: that is what
+  // replace_text keys on to keep kernel_code_entry_byte_offset coherent when the
+  // descriptor's section shifts (a plain STT_FUNC is silently left unadjusted).
+  std::array<Elf64_Sym, sym_count> syms{};
+  syms[1].st_name = kd_symbol_name;
+  syms[1].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
+  syms[1].st_shndx = 2; // .rodata
+  syms[1].st_value = rodata_vaddr;
+  syms[1].st_size = sizeof(KD);
+  std::memcpy(image.data() + symtab_offset, syms.data(), syms.size() * sizeof(Elf64_Sym));
+
+  std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
+
+  std::array<Elf64_Shdr, section_count> shdrs{};
+  shdrs[1].sh_name = text_name;
+  shdrs[1].sh_type = SHT_PROGBITS;
+  shdrs[1].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
+  shdrs[1].sh_addr = text_vaddr;
+  shdrs[1].sh_offset = text_offset;
+  shdrs[1].sh_size = text_size;
+  shdrs[1].sh_addralign = sizeof(uint32_t);
+
+  shdrs[2].sh_name = rodata_name;
+  shdrs[2].sh_type = SHT_PROGBITS;
+  shdrs[2].sh_flags = SHF_ALLOC;
+  shdrs[2].sh_addr = rodata_vaddr;
+  shdrs[2].sh_offset = rodata_offset;
+  shdrs[2].sh_size = rodata_size;
+  shdrs[2].sh_addralign = 64;
+
+  shdrs[3].sh_name = symtab_name;
+  shdrs[3].sh_type = SHT_SYMTAB;
+  shdrs[3].sh_offset = symtab_offset;
+  shdrs[3].sh_size = syms.size() * sizeof(Elf64_Sym);
+  shdrs[3].sh_link = 4;
+  shdrs[3].sh_info = 1;
+  shdrs[3].sh_addralign = 8;
+  shdrs[3].sh_entsize = sizeof(Elf64_Sym);
+
+  shdrs[4].sh_name = strtab_name;
+  shdrs[4].sh_type = SHT_STRTAB;
+  shdrs[4].sh_offset = strtab_offset;
+  shdrs[4].sh_size = strtab.size();
+  shdrs[4].sh_addralign = 1;
+
+  shdrs[5].sh_name = shstrtab_name;
+  shdrs[5].sh_type = SHT_STRTAB;
+  shdrs[5].sh_offset = shstrtab_offset;
+  shdrs[5].sh_size = shstrtab.size();
+  shdrs[5].sh_addralign = 1;
+
+  std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+  return image;
+}
+
+// Read back the (single) kernel's scratch size from a patched ELF.
+uint32_t patched_private_segment_size(const AmdGpuCodeObject &obj) {
+  const auto kernels = obj.kernel_descriptors();
+  return kernels.size() == 1 ? kernels.front().private_segment_fixed_size : 0xFFFFFFFFu;
+}
+
+// A VGPR live at the anchor and clobbered by the probe body spills to scratch:
+// the trampoline brackets the call with a scratch store/load, and the kernel's
+// private_segment_fixed_size grows to cover the appended slot.
+TEST(InstrumentorProbeSpill, Cdna4SpillsLiveClobberedVgpr) {
+  const uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  auto target = make_gfx950_kernel_elf({kMovV3V2, endpgm}, /*private_bytes=*/64);
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kMovV2Zero, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+  ASSERT_TRUE(obj.is_valid());
+  ASSERT_TRUE(probe_obj.is_valid());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0; // v_mov_b32 v3, v2 -> v2 live before the anchor.
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_TRUE(result.patches[0].is_probe_call);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+
+  // The spill bracket surrounds the call. v2 spills to the first slot of the DBI
+  // zone: base 64 is already 16-aligned, so the slot offset is 64.
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  constexpr size_t kOriginalTextWords = 2; // {v_mov, s_endpgm}.
+  ASSERT_GT(text.size(), kOriginalTextWords);
+  const std::vector<uint32_t> cave(text.begin() + kOriginalTextWords, text.end());
+  const auto store = build_scratch_store_dword(2, 64, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto load = build_scratch_load_dword(2, 64, ROCJITSU_CODE_ARCH_CDNA4);
+  const uint32_t wait = build_wait_loads_complete(ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_NE(std::search(cave.begin(), cave.end(), store.begin(), store.end()), cave.end());
+  EXPECT_NE(std::search(cave.begin(), cave.end(), load.begin(), load.end()), cave.end());
+  EXPECT_NE(std::find(cave.begin(), cave.end(), wait), cave.end());
+
+  // Descriptor scratch grew to cover the zone: 64 (aligned) + one 4-byte slot.
+  EXPECT_EQ(patched_private_segment_size(patched), 68u);
+}
+
+// A live+clobbered SGPR spills via a bridge VGPR (v0 here): prologue
+// writelane+store, epilogue load+wait+readlane; descriptor grows to cover it.
+TEST(InstrumentorProbeSpill, Cdna4SpillsLiveClobberedSgpr) {
+  const uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  auto target = make_gfx950_kernel_elf({kMovV3S8, endpgm}, /*private_bytes=*/64);
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kMovS8Zero, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+  ASSERT_TRUE(obj.is_valid());
+  ASSERT_TRUE(probe_obj.is_valid());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0; // v_mov_b32 v3, s8 -> s8 live before the anchor.
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_TRUE(result.patches[0].is_probe_call);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+
+  // s8 spills to the first DBI slot (offset 64) via bridge v0. The bracket words
+  // appear in the appended cave.
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  constexpr size_t kOriginalTextWords = 2; // {v_mov v3, s8, s_endpgm}.
+  ASSERT_GT(text.size(), kOriginalTextWords);
+  const std::vector<uint32_t> cave(text.begin() + kOriginalTextWords, text.end());
+
+  const auto writelane = build_v_writelane_b32(/*bridge=*/0, /*sgpr=*/8, /*lane=*/0,
+                                               ROCJITSU_CODE_ARCH_CDNA4);
+  const auto store = build_scratch_store_dword(/*bridge=*/0, 64, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto load = build_scratch_load_dword(/*bridge=*/0, 64, ROCJITSU_CODE_ARCH_CDNA4);
+  const uint32_t wait = build_wait_loads_complete(ROCJITSU_CODE_ARCH_CDNA4);
+  const auto readlane = build_v_readlane_b32(/*sgpr=*/8, /*bridge=*/0, /*lane=*/0,
+                                             ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_NE(std::search(cave.begin(), cave.end(), writelane.begin(), writelane.end()), cave.end());
+  EXPECT_NE(std::search(cave.begin(), cave.end(), store.begin(), store.end()), cave.end());
+  EXPECT_NE(std::search(cave.begin(), cave.end(), load.begin(), load.end()), cave.end());
+  EXPECT_NE(std::find(cave.begin(), cave.end(), wait), cave.end());
+  EXPECT_NE(std::search(cave.begin(), cave.end(), readlane.begin(), readlane.end()), cave.end());
+
+  EXPECT_EQ(patched_private_segment_size(patched), 68u);
+}
+
+// A kernel with zero fixed scratch cannot be spilled into (§9) and fails closed.
+TEST(InstrumentorProbeSpill, Cdna4ZeroScratchFailsClosed) {
+  const uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  auto target = make_gfx950_kernel_elf({kMovV3V2, endpgm}, /*private_bytes=*/0);
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kMovV2Zero, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  instr.add_point(pt);
+
+  auto result = instr.patch();
+  EXPECT_TRUE(result.elf_bytes.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("fixed scratch"), std::string::npos)
+      << "error was: " << result.errors.front();
+}
+
+// A base scratch size that pushes the spill slot past the CDNA4 12-bit FLAT
+// offset field fails closed rather than emitting a truncated offset (§7).
+TEST(InstrumentorProbeSpill, Cdna4ScratchOffsetPastFieldFailsClosed) {
+  const uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  auto target = make_gfx950_kernel_elf({kMovV3V2, endpgm}, /*private_bytes=*/0x1000);
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kMovV2Zero, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  instr.add_point(pt);
+
+  auto result = instr.patch();
+  EXPECT_TRUE(result.elf_bytes.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("scratch"), std::string::npos)
       << "error was: " << result.errors.front();
 }
 

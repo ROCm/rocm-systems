@@ -391,6 +391,7 @@ add_executable(
     patch/probe_callable_test.cpp
     patch/probe_clobber_test.cpp
     patch/error_report_test.cpp
+    dbi/dbi_spill_sim_test.cpp
     code/code_object_target_id_test.cpp
     code/amdgpu_code_object_test.cpp
     code/relocation_function_table_test.cpp

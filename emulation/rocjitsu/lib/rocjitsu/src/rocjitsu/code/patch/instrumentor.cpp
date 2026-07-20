@@ -5,6 +5,7 @@
 
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
@@ -105,6 +106,21 @@ std::string reg_name(RegisterRef ref) {
     break;
   }
   return std::string(prefix) + std::to_string(ref.index);
+}
+
+// Largest positive byte offset encodable in the scratch store/load offset field,
+// per arch. 0 means the arch has no scratch spill emitter (spilling unsupported).
+// The fields are signed, so the cap is the positive half: CDNA4 writes the 12-bit
+// FLAT offset (pad_12 left 0), RDNA4 has a signed 24-bit VSCRATCH ioffset.
+uint32_t max_scratch_offset_bytes(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return 0xFFF; // 12-bit, pad_12 = 0
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return 0x7FFFFF; // positive half of signed 24-bit
+  default:
+    return 0;
+  }
 }
 
 // Special machine state has no save/restore path across a probe call yet.
@@ -292,6 +308,131 @@ bool check_spill_policy(const RegisterSet &spill_set, SpillPolicy policy, std::s
     report(error_out, msg.c_str());
     return false;
   }
+  return true;
+}
+
+bool plan_vgpr_spills(const RegisterSet &spill_set, SpillManager &spills, rj_code_arch_t arch,
+                      std::vector<SpillSlot> &out, std::string *error_out) {
+  out.clear();
+
+  // Plans VGPR spills only; the orchestrator routes SGPRs to plan_sgpr_spills.
+  // Reject any non-VGPR here defensively before reserving anything.
+  std::string non_vgpr;
+  spill_set.for_each([&](RegisterRef ref) {
+    if (ref.cls != RegClass::VGPR) {
+      non_vgpr += non_vgpr.empty() ? " " : ", ";
+      non_vgpr += reg_name(ref);
+    }
+  });
+  if (!non_vgpr.empty()) {
+    report(error_out,
+           ("probe-call spill of non-VGPR registers not yet supported:" + non_vgpr).c_str());
+    return false;
+  }
+
+  const uint32_t max_offset = max_scratch_offset_bytes(arch);
+  if (max_offset == 0) {
+    report(error_out, "probe-call spilling not supported for target architecture");
+    return false;
+  }
+
+  bool ok = true;
+  std::string fail;
+  spill_set.for_each([&](RegisterRef ref) {
+    if (!ok)
+      return;
+    const std::optional<uint32_t> off = spills.allocate_slot(ref);
+    if (!off) {
+      fail = "probe-call spill of " + reg_name(ref) + " exceeds the per-lane scratch limit";
+      ok = false;
+    } else if (*off > max_offset) {
+      fail = "probe-call spill offset for " + reg_name(ref) +
+             " exceeds the scratch instruction offset field";
+      ok = false;
+    } else {
+      out.push_back(SpillSlot{ref.index, *off});
+    }
+  });
+  if (!ok) {
+    out.clear();
+    report(error_out, fail.c_str());
+    return false;
+  }
+  return true;
+}
+
+bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &live_at_anchor,
+                      const std::vector<SpillSlot> &vgpr_spills, uint32_t kernel_vgpr_count,
+                      SpillManager &spills, rj_code_arch_t arch, std::vector<SgprSpillSlot> &out,
+                      uint16_t &out_bridge, std::string *error_out) {
+  out.clear();
+
+  // Only SGPRs bridge through a VGPR here; other classes (AccVGPR) are unhandled.
+  std::string non_sgpr;
+  spill_set.for_each([&](RegisterRef ref) {
+    if (ref.cls != RegClass::SGPR) {
+      non_sgpr += non_sgpr.empty() ? " " : ", ";
+      non_sgpr += reg_name(ref);
+    }
+  });
+  if (!non_sgpr.empty()) {
+    report(error_out,
+           ("probe-call spill of non-SGPR registers not yet supported:" + non_sgpr).c_str());
+    return false;
+  }
+  if (spill_set.none())
+    return true;
+
+  const uint32_t max_offset = max_scratch_offset_bytes(arch);
+  if (max_offset == 0) {
+    report(error_out, "probe-call spilling not supported for target architecture");
+    return false;
+  }
+
+  // Bridge = lowest VGPR neither live at the anchor nor already a spilled VGPR,
+  // within the kernel's allocated VGPR count (never pick an unallocated index).
+  // Dead-at-anchor suffices: written before the call, reloaded after.
+  const uint16_t vgpr_bound =
+      static_cast<uint16_t>(std::min<uint32_t>(kernel_vgpr_count, REGISTER_SET_MAX_VGPRS));
+  std::optional<uint16_t> bridge;
+  for (uint16_t v = 0; v < vgpr_bound; ++v) {
+    if (live_at_anchor.contains(RegisterRef{RegClass::VGPR, v, 1}))
+      continue;
+    if (std::any_of(vgpr_spills.begin(), vgpr_spills.end(),
+                    [v](const SpillSlot &s) { return s.vgpr == v; }))
+      continue;
+    bridge = v;
+    break;
+  }
+  if (!bridge) {
+    report(error_out, "probe-call SGPR spill needs a free bridge VGPR, but none is dead within the "
+                      "kernel's allocated VGPRs");
+    return false;
+  }
+
+  bool ok = true;
+  std::string fail;
+  spill_set.for_each([&](RegisterRef ref) {
+    if (!ok)
+      return;
+    const std::optional<uint32_t> off = spills.allocate_slot(ref);
+    if (!off) {
+      fail = "probe-call spill of " + reg_name(ref) + " exceeds the per-lane scratch limit";
+      ok = false;
+    } else if (*off > max_offset) {
+      fail = "probe-call spill offset for " + reg_name(ref) +
+             " exceeds the scratch instruction offset field";
+      ok = false;
+    } else {
+      out.push_back(SgprSpillSlot{ref.index, *off});
+    }
+  });
+  if (!ok) {
+    out.clear();
+    report(error_out, fail.c_str());
+    return false;
+  }
+  out_bridge = *bridge;
   return true;
 }
 
@@ -549,6 +690,14 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // by the calling convention, so the kernel must allocate up to it.
   const std::optional<uint32_t> kernel_sgpr_count = obj_.min_kernel_sgpr_count(arch_);
 
+  // Register spilling targets a single-kernel code object for now: any site that
+  // must spill grows that one kernel's per-lane scratch. The SpillManager is
+  // created lazily on the first spilling site and shared by the rest; its final
+  // size is written back to the descriptor after all sites succeed.
+  const std::vector<KernelDescriptorInfo> kernels = obj_.kernel_descriptors();
+  std::optional<SpillManager> spills;
+  uint64_t spill_descriptor_file_offset = 0;
+
   std::vector<AppliedSite> applied;
   applied.reserve(sites.size());
   // Allocate offsets for each site. Trampoline size is highly dependent on the
@@ -616,14 +765,51 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         continue;
       }
 
-      // Check that we do not need to spill registers since that is not
-      // implemented yet.
+      // Spill any register that is both live at the anchor and clobbered by the
+      // instrumentation envelope/probe. VGPRs spill to the kernel's per-lane
+      // scratch; SGPRs bridge through a dead VGPR; AccVGPRs and over-cap sites
+      // fail closed inside the planners.
       const RegisterSet clobbers =
           compute_instrumentation_clobbers(*summary, plan.builder_clobbers);
       const RegisterSet spill = compute_spill_set(live, clobbers);
-      if (!check_spill_policy(spill, SpillPolicy::NoSpillsSupported, &err)) {
-        result.errors.push_back(std::move(err));
-        continue;
+      if (!spill.none()) {
+        // Single-kernel assumption: spilling needs exactly one kernel descriptor
+        // with non-zero fixed scratch to grow.
+        if (kernels.size() != 1 || kernels.front().private_segment_fixed_size == 0) {
+          result.errors.push_back(
+              "probe call at anchor_offset " + std::to_string(site.anchor_offset) +
+              " must spill live registers, but the code object does not have a single kernel with "
+              "fixed scratch to spill into");
+          continue;
+        }
+        const KernelDescriptorInfo &kernel = kernels.front();
+        if (!spills) {
+          // Cap total per-lane scratch at the widest slot the scratch offset field
+          // can encode, so the SpillManager limit and the per-instruction offset
+          // guards in the planners agree.
+          const uint32_t scratch_limit = max_scratch_offset_bytes(arch_) + SpillManager::kSlotBytes;
+          spills.emplace(kernel.private_segment_fixed_size, scratch_limit);
+          spill_descriptor_file_offset = kernel.descriptor_file_offset;
+        }
+        // Split by class: VGPRs go straight to scratch; SGPRs need a bridge VGPR.
+        // AccVGPRs are still unsupported and fail closed inside plan_sgpr_spills.
+        RegisterSet vgpr_spill = spill;
+        vgpr_spill.clear_class(RegClass::SGPR);
+        vgpr_spill.clear_class(RegClass::ACC_VGPR);
+        RegisterSet sgpr_spill = spill;
+        sgpr_spill.clear_class(RegClass::VGPR);
+        if (!plan_vgpr_spills(vgpr_spill, *spills, arch_, plan.vgpr_spills, &err)) {
+          result.errors.push_back(std::move(err));
+          continue;
+        }
+        const uint32_t kernel_vgpr_count =
+            (kernel.granulated_workitem_vgpr_count + 1) * vgpr_encoding_granule(arch_);
+        if (!sgpr_spill.none() &&
+            !plan_sgpr_spills(sgpr_spill, live, plan.vgpr_spills, kernel_vgpr_count, *spills, arch_,
+                              plan.sgpr_spills, plan.spill_bridge_vgpr, &err)) {
+          result.errors.push_back(std::move(err));
+          continue;
+        }
       }
 
       // Get trampoline from TrampolineBuilder
@@ -659,6 +845,19 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // All-or-nothing: bail before mutating the patcher if any site failed.
   if (!result.errors.empty())
     return result;
+
+  // Grow the spilled kernel's per-lane scratch to cover its DBI spill zone. Done
+  // before replace_text so the edit lands at the descriptor's original file
+  // offset; replace_text then relocates the descriptor bytes with the rest of the
+  // ELF.
+  if (spills) {
+    if (!patcher.set_private_segment_fixed_size(spill_descriptor_file_offset,
+                                                spills->total_private_bytes())) {
+      result.errors.emplace_back(
+          "failed to grow private_segment_fixed_size for the spilled kernel descriptor");
+      return result;
+    }
+  }
 
   // Every per-site validation, branch-range check, and trampoline-byte
   // construction has succeeded up to this point. Assemble the new .text in one

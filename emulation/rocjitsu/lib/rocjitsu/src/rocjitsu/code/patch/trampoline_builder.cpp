@@ -74,6 +74,47 @@ void append_word(std::vector<uint8_t> &dst, uint32_t w) {
   dst.insert(dst.end(), buf, buf + sizeof(w));
 }
 
+// Spill/fill bracket. prologue saves each register before the call; epilogue
+// restores each after the call and waits for the loads before the original runs.
+// SGPRs bridge through one VGPR (writelane/readlane); since the single bridge is
+// reused, each SGPR restore is a load/wait/readlane of its own.
+struct SpillBracket {
+  std::vector<uint32_t> prologue;
+  std::vector<uint32_t> epilogue;
+};
+
+[[nodiscard]] SpillBracket build_spill_bracket(const std::vector<SpillSlot> &vgpr_spills,
+                                               const std::vector<SgprSpillSlot> &sgpr_spills,
+                                               uint16_t bridge_vgpr, rj_code_arch_t arch) {
+  constexpr uint16_t kUniformLane = 0; // An SGPR is uniform; one lane suffices.
+  SpillBracket bracket;
+
+  // VGPRs: batch stores, then batch loads + a single wait before the readlanes.
+  for (const SpillSlot &slot : vgpr_spills) {
+    const auto store = build_scratch_store_dword(slot.vgpr, slot.byte_offset, arch);
+    bracket.prologue.insert(bracket.prologue.end(), store.begin(), store.end());
+    const auto load = build_scratch_load_dword(slot.vgpr, slot.byte_offset, arch);
+    bracket.epilogue.insert(bracket.epilogue.end(), load.begin(), load.end());
+  }
+  if (!vgpr_spills.empty())
+    bracket.epilogue.push_back(build_wait_loads_complete(arch));
+
+  // SGPRs: writelane into the bridge then store; restore is load/wait/readlane.
+  for (const SgprSpillSlot &slot : sgpr_spills) {
+    const auto wl = build_v_writelane_b32(bridge_vgpr, slot.sgpr, kUniformLane, arch);
+    bracket.prologue.insert(bracket.prologue.end(), wl.begin(), wl.end());
+    const auto store = build_scratch_store_dword(bridge_vgpr, slot.byte_offset, arch);
+    bracket.prologue.insert(bracket.prologue.end(), store.begin(), store.end());
+
+    const auto load = build_scratch_load_dword(bridge_vgpr, slot.byte_offset, arch);
+    bracket.epilogue.insert(bracket.epilogue.end(), load.begin(), load.end());
+    bracket.epilogue.push_back(build_wait_loads_complete(arch));
+    const auto rl = build_v_readlane_b32(slot.sgpr, bridge_vgpr, kUniformLane, arch);
+    bracket.epilogue.insert(bracket.epilogue.end(), rl.begin(), rl.end());
+  }
+  return bracket;
+}
+
 } // namespace
 
 std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &plan,
@@ -215,7 +256,14 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // Literal-constant scalar source code; the 32-bit literal follows the word.
   constexpr uint16_t kLiteralConstant = 0xFF;
 
+  const SpillBracket spill =
+      build_spill_bracket(plan.vgpr_spills, plan.sgpr_spills, plan.spill_bridge_vgpr, plan.arch);
+
   std::vector<uint32_t> env;
+
+  // Spill saves: store each live+clobbered register before the call. Emitted
+  // first so the getpc index below accounts for these words.
+  env.insert(env.end(), spill.prologue.begin(), spill.prologue.end());
 
   // SCC save (prologue): capture SCC into the temp without disturbing it. The
   // matching restore is emitted after the call but still before the relocated
@@ -251,10 +299,15 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   if (plan.preserve_scc)
     env.push_back(build_s_cmp_lg_u32(plan.scc_temp, scalar_positive_inline_u32(0), plan.arch));
 
+  // Spill fills: reload each saved register after the call and wait for the loads
+  // before the relocated original consumes them.
+  env.insert(env.end(), spill.epilogue.begin(), spill.epilogue.end());
+
   // Plan/emit drift guard: the planner committed to this many envelope words and
   // the orchestrator sized the layout around it. A mismatch means the two
-  // disagree about the envelope shape.
-  if (env.size() != plan.before_word_count) {
+  // disagree about the envelope shape. before_word_count is the envelope; the
+  // spill bracket is accounted separately since only the orchestrator knows it.
+  if (env.size() != plan.before_word_count + spill.prologue.size() + spill.epilogue.size()) {
     report(error_out, "emit_probe_call: synthesized envelope word count does not match the planned "
                       "before_word_count");
     return std::nullopt;

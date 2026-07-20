@@ -33,6 +33,21 @@ struct InlineAsmItem {
   std::vector<uint32_t> words;
 };
 
+/// @brief One saved register: a VGPR live at the anchor and clobbered by
+///        instrumentation, with its stable per-lane byte offset in the DBI
+///        spill zone (assigned by SpillManager).
+struct SpillSlot {
+  uint16_t vgpr = 0;        ///< VGPR index to save before / restore after the call.
+  uint32_t byte_offset = 0; ///< Per-lane scratch byte offset for this slot.
+};
+
+/// @brief One saved SGPR, bridged through a VGPR lane (writelane/readlane)
+///        because SGPRs cannot reach scratch directly. Uniform, so lane 0.
+struct SgprSpillSlot {
+  uint16_t sgpr = 0;        ///< SGPR index to save/restore.
+  uint32_t byte_offset = 0; ///< Per-lane scratch byte offset.
+};
+
 /// @brief Builder-facing description of one trampoline.
 ///
 /// Coordinates are .text-relative byte offsets. The orchestrator fills this
@@ -70,6 +85,16 @@ struct TrampolinePlan {
   RegisterSet builder_clobbers;   ///< {link} | {target pair} | {scc_temp}; feeds the spill formula.
   uint32_t before_word_count = 0; ///< Envelope words emitted before the relocated original.
   uint64_t probe_target_offset = 0; ///< .text-relative byte offset of the copied probe body.
+
+  /// VGPRs to save/restore around the call; emit_probe_call brackets each with a
+  /// scratch_store before and a scratch_load after. Empty when nothing spills.
+  std::vector<SpillSlot> vgpr_spills;
+
+  /// SGPRs to save/restore, each bridged through `spill_bridge_vgpr`.
+  std::vector<SgprSpillSlot> sgpr_spills;
+
+  /// Dead-at-anchor VGPR bridging SGPR<->scratch. Valid iff sgpr_spills non-empty.
+  uint16_t spill_bridge_vgpr = 0;
 };
 
 /// @brief Output bytes for one trampoline.

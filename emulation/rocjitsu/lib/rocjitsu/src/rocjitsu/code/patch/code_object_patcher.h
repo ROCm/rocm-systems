@@ -88,6 +88,15 @@ public:
   [[nodiscard]] bool patch_kernel_descriptor(uint64_t file_offset,
                                              std::span<const uint8_t> descriptor);
 
+  /// @brief Overwrite one kernel descriptor's `private_segment_fixed_size`.
+  ///
+  /// @details Used by the DBI spill path to grow a kernel's per-lane scratch to
+  /// cover the appended spill zone. Reads the descriptor at @p
+  /// descriptor_file_offset, sets the scratch-size field to @p bytes, and writes
+  /// it back. Returns false if the descriptor does not fit in the image.
+  [[nodiscard]] bool set_private_segment_fixed_size(uint64_t descriptor_file_offset,
+                                                    uint32_t bytes);
+
   /// @brief Apply a descriptor translation plan to the in-memory ELF image.
   ///
   /// KernelDescriptorTranslator owns the resource/ABI decision. BinaryTranslator
