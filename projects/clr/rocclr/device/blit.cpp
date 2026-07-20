@@ -17,7 +17,7 @@ HostBlitManager::HostBlitManager(VirtualDevice& vDev, Setup setup)
     : BlitManager(setup), vDev_(vDev), dev_(vDev.device()) {}
 
 bool HostBlitManager::readBuffer(device::Memory& srcMemory, void* dstHost,
-                                 const amd::Coord3D& origin, const amd::Coord3D& size, bool entire,
+                                 const amd::Coord3D& origin, const amd::Coord3D& size, [[maybe_unused]] bool entire,
                                  [[maybe_unused]] amd::CopyMetadata copyMetadata) const {
   // Map the device memory to CPU visible
   void* src = srcMemory.cpuMap(vDev_, Memory::CpuReadOnly);
@@ -39,7 +39,7 @@ bool HostBlitManager::readBuffer(device::Memory& srcMemory, void* dstHost,
 bool HostBlitManager::readBufferRect(device::Memory& srcMemory, void* dstHost,
                                      const amd::BufferRect& bufRect,
                                      const amd::BufferRect& hostRect, const amd::Coord3D& size,
-                                     bool entire,
+                                     [[maybe_unused]] bool entire,
                                      [[maybe_unused]] amd::CopyMetadata copyMetadata) const {
   // Map source memory
   void* src = srcMemory.cpuMap(vDev_, Memory::CpuReadOnly);
@@ -70,7 +70,7 @@ bool HostBlitManager::readBufferRect(device::Memory& srcMemory, void* dstHost,
 
 bool HostBlitManager::readImage(device::Memory& srcMemory, void* dstHost,
                                 const amd::Coord3D& origin, const amd::Coord3D& size,
-                                size_t rowPitch, size_t slicePitch, bool entire,
+                                size_t rowPitch, size_t slicePitch, [[maybe_unused]] bool entire,
                                 [[maybe_unused]] amd::CopyMetadata copyMetadata) const {
   size_t startLayer = origin[2];
   size_t numLayers = size[2];
@@ -392,7 +392,7 @@ bool HostBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp>&
 bool HostBlitManager::copyImageToBuffer(device::Memory& srcMemory, device::Memory& dstMemory,
                                         const amd::Coord3D& srcOrigin,
                                         const amd::Coord3D& dstOrigin, const amd::Coord3D& size,
-                                        bool entire, size_t rowPitch, size_t slicePitch,
+                                        bool entire, [[maybe_unused]] size_t rowPitch, [[maybe_unused]] size_t slicePitch,
                                         [[maybe_unused]] amd::CopyMetadata copyMetadata) const {
   size_t startLayer = srcOrigin[2];
   size_t numLayers = size[2];
@@ -458,7 +458,7 @@ bool HostBlitManager::copyImageToBuffer(device::Memory& srcMemory, device::Memor
 bool HostBlitManager::copyBufferToImage(device::Memory& srcMemory, device::Memory& dstMemory,
                                         const amd::Coord3D& srcOrigin,
                                         const amd::Coord3D& dstOrigin, const amd::Coord3D& size,
-                                        bool entire, size_t rowPitch, size_t slicePitch,
+                                        bool entire, [[maybe_unused]] size_t rowPitch, [[maybe_unused]] size_t slicePitch,
                                         [[maybe_unused]] amd::CopyMetadata copyMetadata) const {
   // Map source memory
   void* src = srcMemory.cpuMap(vDev_, Memory::CpuReadOnly);
@@ -608,8 +608,8 @@ bool HostBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dstMe
 }
 
 bool HostBlitManager::fillBuffer(device::Memory& memory, const void* pattern, size_t patternSize,
-                                 const amd::Coord3D& surface, const amd::Coord3D& origin,
-                                 const amd::Coord3D& size, bool entire, bool forceBlit) const {
+                                 [[maybe_unused]] const amd::Coord3D& surface, const amd::Coord3D& origin,
+                                 const amd::Coord3D& size, bool entire, [[maybe_unused]] bool forceBlit) const {
   // Map memory
   void* fillMem = memory.cpuMap(vDev_, (entire) ? Memory::CpuWriteOnly : 0);
   if (fillMem == NULL) {

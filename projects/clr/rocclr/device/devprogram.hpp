@@ -254,8 +254,8 @@ class Program {
   bool getGlobalVarFromCodeObj(std::vector<std::string>* var_names) const;
   bool getUndefinedVarFromCodeObj(std::vector<std::string>* var_names) const;
 
-  virtual bool createGlobalVarObj(amd::Memory** amd_mem_obj, void** dptr, size_t* bytes,
-                                  const char* globalName) const {
+  virtual bool createGlobalVarObj([[maybe_unused]] amd::Memory** amd_mem_obj, [[maybe_unused]] void** dptr, [[maybe_unused]] size_t* bytes,
+                                  [[maybe_unused]] const char* globalName) const {
     ShouldNotReachHere();
     return false;
   }
@@ -303,14 +303,14 @@ class Program {
   //! Release the Binary
   void releaseClBinary();
 
-  virtual bool createKernels(void* binary, size_t binSize, bool useUniformWorkGroupSize,
-                             bool internalKernel) {
+  virtual bool createKernels([[maybe_unused]] void* binary, [[maybe_unused]] size_t binSize, [[maybe_unused]] bool useUniformWorkGroupSize,
+                             [[maybe_unused]] bool internalKernel) {
     return true;
   }
 
-  virtual bool setKernels(void* binary, size_t binSize,
-                          amd::Os::FileDesc fdesc = amd::Os::FDescInit(), size_t foffset = 0,
-                          std::string uri = std::string()) {
+  virtual bool setKernels([[maybe_unused]] void* binary, [[maybe_unused]] size_t binSize,
+                          [[maybe_unused]] amd::Os::FileDesc fdesc = amd::Os::FDescInit(), [[maybe_unused]] size_t foffset = 0,
+                          [[maybe_unused]] std::string uri = std::string()) {
     return true;
   }
 
@@ -344,7 +344,7 @@ class Program {
 
   bool isElf(const char* bin) const { return amd::Elf::isElfMagic(bin); }
 
-  virtual bool defineGlobalVar(const char* name, void* dptr) {
+  virtual bool defineGlobalVar([[maybe_unused]] const char* name, [[maybe_unused]] void* dptr) {
     ShouldNotReachHere();
     return false;
   }

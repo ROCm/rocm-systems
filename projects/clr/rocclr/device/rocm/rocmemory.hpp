@@ -88,7 +88,7 @@ class Memory : public device::Memory {
 
   // Mesa has already decomressed if needed and also does acquire at the start of every command
   // batch.
-  bool processGLResource(GLResourceOP operation) override { return true; }
+  bool processGLResource([[maybe_unused]] GLResourceOP operation) override { return true; }
 
   uint64_t virtualAddress() const override { return reinterpret_cast<uint64_t>(getDeviceMemory()); }
 

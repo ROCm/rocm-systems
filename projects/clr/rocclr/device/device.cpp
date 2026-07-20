@@ -1582,7 +1582,7 @@ void ClBinary::saveBIFBinary(const char* binaryIn, size_t size) {
   return;
 }
 
-bool ClBinary::createElfBinary(bool doencrypt, Program::type_t type) {
+bool ClBinary::createElfBinary([[maybe_unused]] bool doencrypt, Program::type_t type) {
   release();
 
   size_t imageSize;
@@ -1697,8 +1697,8 @@ void ClBinary::setFlags(int encryptCode) {
   }
 }
 
-bool ClBinary::decryptElf(const char* binaryIn, size_t size, char** decryptBin, size_t* decryptSize,
-                          int* encryptCode) {
+bool ClBinary::decryptElf([[maybe_unused]] const char* binaryIn, [[maybe_unused]] size_t size, char** decryptBin, [[maybe_unused]] size_t* decryptSize,
+                          [[maybe_unused]] int* encryptCode) {
   *decryptBin = nullptr;
 #if defined(HAVE_BLOWFISH_H)
   int outBufSize = 0;

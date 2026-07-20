@@ -115,7 +115,7 @@ class FreeAsyncCommand : public amd::Command {
   FreeAsyncCommand(amd::HostQueue& queue, void* ptr, hip::Event* event)
       : amd::Command(queue, 1, amd::Event::nullWaitList), ptr_(ptr), event_(event) {}
 
-  virtual void submit(device::VirtualDevice& device) final {
+  virtual void submit([[maybe_unused]] device::VirtualDevice& device) final {
     size_t offset = 0;
     // Worker-thread submit body: do NOT hoist hip::getCurrentDevice(); use the convenience
     // wrapper that re-fetches TLS each call.

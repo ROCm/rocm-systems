@@ -164,7 +164,7 @@ hipError_t Event::streamWaitCommand(amd::Command*& command, hip::Stream* stream)
   return hipSuccess;
 }
 // ================================================================================================
-hipError_t Event::streamWait(hip::Stream* stream, uint flags) {
+hipError_t Event::streamWait(hip::Stream* stream, [[maybe_unused]] uint flags) {
   std::scoped_lock lock(lock_);
 
   // Early return if event is not recorded, same stream, or already ready
@@ -231,7 +231,7 @@ hipError_t Event::recordCommand(amd::Command*& command, amd::HostQueue* stream, 
 }
 
 // ================================================================================================
-hipError_t Event::enqueueRecordCommand(hip::Stream* stream, amd::Command* command) {
+hipError_t Event::enqueueRecordCommand([[maybe_unused]] hip::Stream* stream, amd::Command* command) {
   // Guard event_ release/replace against concurrent access. Graph event-record
   // nodes call this directly (not via locked addMarker); lock_ is recursive.
   std::scoped_lock lock(lock_);

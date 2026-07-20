@@ -35,11 +35,11 @@ class Signal {
  public:
   virtual ~Signal() {}
 
-  virtual bool Init(const amd::Device& dev, uint64_t init, WaitState ws) { return false; }
+  virtual bool Init([[maybe_unused]] const amd::Device& dev, [[maybe_unused]] uint64_t init, [[maybe_unused]] WaitState ws) { return false; }
 
   // Blocks the current thread untill the condition c is satisfied
   // or amount of time specified by timeout passes
-  virtual uint64_t Wait(uint64_t value, Condition c, uint64_t timeout) { return -1; }
+  virtual uint64_t Wait([[maybe_unused]] uint64_t value, [[maybe_unused]] Condition c, [[maybe_unused]] uint64_t timeout) { return -1; }
 
   // Atomically sets the current value of the signal
   virtual void Reset(uint64_t value) {}
@@ -48,10 +48,10 @@ class Signal {
   virtual uint64_t Load() { return 0; }
 
   // Exports the signal as an IPC handle into the provided buffer
-  virtual bool IpcExport(void* handle, size_t handle_size) { return false; }
+  virtual bool IpcExport([[maybe_unused]] void* handle, [[maybe_unused]] size_t handle_size) { return false; }
 
   // Initializes this signal from an IPC handle (alternative to Init for imported signals)
-  virtual bool IpcImport(const void* handle, size_t handle_size) { return false; }
+  virtual bool IpcImport([[maybe_unused]] const void* handle, [[maybe_unused]] size_t handle_size) { return false; }
 
   // Return the handle to the underlying amd_signal_t object
   virtual void* getHandle() { return nullptr; }

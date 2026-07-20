@@ -120,7 +120,7 @@ struct LaunchParams {
   bool validConfig_;         //!< Flag will be set to false when config is not correct.
 
   LaunchParams(size_t globalX, size_t globalY, size_t globalZ, uint32_t localX,
-               uint32_t localY, uint32_t localZ, uint32_t sharedMemBytes, const Device& device,
+               uint32_t localY, uint32_t localZ, uint32_t sharedMemBytes, [[maybe_unused]] const Device& device,
                uint32_t clusterX = 1, uint32_t clusterY = 1, uint32_t clusterZ = 1,
                uint32_t gridX = 1, uint32_t gridY = 1, uint32_t gridZ = 1,
                bool hipParams = false) : global_(globalX, globalY, globalZ),

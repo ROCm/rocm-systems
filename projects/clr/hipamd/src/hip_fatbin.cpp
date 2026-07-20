@@ -695,7 +695,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
 // TODO: Extract SPIR-V translation from ExtractFatBinaryUsingCOMGR and call
 // it from both of these entry-points once we have enough testing in place
 // to ensure this advanced case is functional.
-hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& devices) {
+hipError_t FatBinaryInfo::ExtractKpackBinary([[maybe_unused]] const std::vector<hip::Device*>& devices) {
 #if !ROCM_KPACK_ENABLED
   LogError("Kpack binary detected but ROCM_KPACK_ENABLED=OFF");
   return hipErrorNotSupported;

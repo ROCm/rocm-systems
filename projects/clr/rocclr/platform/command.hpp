@@ -468,7 +468,7 @@ class Command : public Event {
 
   //! Returns false if the target device cannot execute this command; the
   //! command queue rejects it with an error status instead of dispatching.
-  virtual bool isSupportedOn(const amd::Device& device) const { return true; }
+  virtual bool isSupportedOn([[maybe_unused]] const amd::Device& device) const { return true; }
 
   //! Release the resources associated with this event.
   virtual void releaseResources();

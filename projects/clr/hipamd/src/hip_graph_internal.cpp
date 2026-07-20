@@ -2352,7 +2352,7 @@ hipError_t GraphExecSegmented::UpdatePacketBatchesForNodeEnableDisable(hip::Grap
   return hipSuccess;
 }
 
-void GraphExecBase::OnLaunchComplete(cl_event event, cl_int command_exec_status, void* user_data) {
+void GraphExecBase::OnLaunchComplete([[maybe_unused]] cl_event event, [[maybe_unused]] cl_int command_exec_status, void* user_data) {
   auto* cleanup = reinterpret_cast<GraphLaunchCleanup*>(user_data);
   GraphExecBase* execBase = cleanup->exec;
   // Re-arm and recycle the launch's signals while the GraphExecBase (and thus its

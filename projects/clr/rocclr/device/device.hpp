@@ -258,7 +258,7 @@ static constexpr int AmdVendor = 0x1002;
 template <typename T>
 inline void WriteAqlArgAt(unsigned char* dst,  //!< The write pointer to the buffer
                           T src,               //!< The source pointer
-                          uint size,           //!< The size in bytes to copy
+                          [[maybe_unused]] uint size,           //!< The size in bytes to copy
                           size_t offset  //!< The alignment to follow while writing to the buffer
 ) {
   assert(sizeof(T) <= size && "Argument's size mismatches ABI!");
@@ -851,11 +851,11 @@ class Memory {
   virtual void syncHostFromCache(device::VirtualDevice* vDev, SyncFlags syncFlags = SyncFlags()) {}
 
   //! Allocate memory for API-level maps
-  virtual void* allocMapTarget(const amd::Coord3D& origin,  //!< The map location in memory
-                               const amd::Coord3D& region,  //!< The map region in memory
-                               uint mapFlags,               //!< Map flags
-                               size_t* rowPitch = NULL,     //!< Row pitch for the mapped memory
-                               size_t* slicePitch = NULL    //!< Slice for the mapped memory
+  virtual void* allocMapTarget([[maybe_unused]] const amd::Coord3D& origin,  //!< The map location in memory
+                               [[maybe_unused]] const amd::Coord3D& region,  //!< The map region in memory
+                               [[maybe_unused]] uint mapFlags,               //!< Map flags
+                               [[maybe_unused]] size_t* rowPitch = NULL,     //!< Row pitch for the mapped memory
+                               [[maybe_unused]] size_t* slicePitch = NULL    //!< Slice for the mapped memory
   ) {
     return NULL;
   }
@@ -869,8 +869,8 @@ class Memory {
     }
   }
 
-  virtual bool pinSystemMemory(void* hostPtr,  //!< System memory address
-                               size_t size     //!< Size of allocated system memory
+  virtual bool pinSystemMemory([[maybe_unused]] void* hostPtr,  //!< System memory address
+                               [[maybe_unused]] size_t size     //!< Size of allocated system memory
   ) {
     return true;
   }
@@ -879,14 +879,14 @@ class Memory {
   virtual void releaseIndirectMap() {}
   //! decompress any MSAA/depth-stencil interop surfaces.
   //! notify GL to invalidate any surfaces touched by a CL kernel
-  virtual bool processGLResource(GLResourceOP operation) { return false; }
+  virtual bool processGLResource([[maybe_unused]] GLResourceOP operation) { return false; }
 
   //! Map the device memory to CPU visible
-  virtual void* cpuMap(VirtualDevice& vDev,  //!< Virtual device for map operaiton
-                       uint flags = 0,       //!< flags for the map operation
+  virtual void* cpuMap([[maybe_unused]] VirtualDevice& vDev,  //!< Virtual device for map operaiton
+                       [[maybe_unused]] uint flags = 0,       //!< flags for the map operation
                        // Optimization for multilayer map/unmap
-                       uint startLayer = 0,       //!< Start layer for multilayer map
-                       uint numLayers = 0,        //!< End layer for multilayer map
+                       [[maybe_unused]] uint startLayer = 0,       //!< Start layer for multilayer map
+                       [[maybe_unused]] uint numLayers = 0,        //!< End layer for multilayer map
                        size_t* rowPitch = NULL,   //!< Row pitch for the device memory
                        size_t* slicePitch = NULL  //!< Slice pitch for the device memory
   ) {
@@ -962,7 +962,7 @@ class Memory {
   virtual const address cpuSrd() const { return nullptr; }
 
   //! Returns an export handle for the interprocess communication
-  virtual bool ExportHandle(void* handle) const { return false; }
+  virtual bool ExportHandle([[maybe_unused]] void* handle) const { return false; }
 
   bool getAllowedPeerAccess() const { return (flags_ & AllowedPeerAccess) ? true : false; }
   void setAllowedPeerAccess(bool flag) {
@@ -980,7 +980,7 @@ class Memory {
   MemAccess GetAccess() const { return memAccess_; }
 
   //! Retrieves shareable handle for hipMalloc'ed address range.
-  virtual bool GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle) {
+  virtual bool GetFDHandleForMem([[maybe_unused]] void* dev_ptr, [[maybe_unused]] size_t size, [[maybe_unused]] bool vmm, [[maybe_unused]] void* handle) {
     return false;
   }
 
@@ -1302,7 +1302,7 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   //! Unpin the HW queue, allowing ReleaseHwQueue() to release it again
   virtual void UnpinQueue() {}
   //! Release current HW queue and acquire a new one, avoiding queues with IDs in the excluded set
-  virtual bool ReacquireQueueExcluding(const std::unordered_set<uint64_t>& excluded_ids) {
+  virtual bool ReacquireQueueExcluding([[maybe_unused]] const std::unordered_set<uint64_t>& excluded_ids) {
     return false;
   }
 
@@ -1343,7 +1343,7 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitBatchMemoryOperation(amd::BatchMemoryOperationCommand& cmd);
   virtual void submitVirtualMap(amd::VirtualMapCommand& cmd) = 0;
 
-  virtual address allocKernelArguments(size_t size, size_t alignment) { return nullptr; }
+  virtual address allocKernelArguments([[maybe_unused]] size_t size, [[maybe_unused]] size_t alignment) { return nullptr; }
   virtual void ReleaseSdmaEngines() {}  //!< Release SDMA engine assignments (ROCm specific)
   virtual void ReleaseAllHwQueues() {}
   virtual void ReleaseHwQueue() {}
@@ -1368,14 +1368,14 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void HiddenHeapInit() = 0;
 
   //! Fast-path dispatch using a pre-built contiguous flat packet buffer.
-  virtual bool dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPacketData,
-                                          const std::vector<uint32_t>& validFullHeaders,
-                                          amd::AccumulateCommand* vcmd = nullptr,
-                                          bool attach_signal = false,
-                                          const std::vector<const std::string*>* kernelNames = nullptr,
-                                          bool pre_patched = false,
-                                          bool blocking = false,
-                                          const std::vector<uint8_t>* flatMetadataData = nullptr) {
+  virtual bool dispatchAqlPacketBatchFlat([[maybe_unused]] const std::vector<uint8_t>& flatPacketData,
+                                          [[maybe_unused]] const std::vector<uint32_t>& validFullHeaders,
+                                          [[maybe_unused]] amd::AccumulateCommand* vcmd = nullptr,
+                                          [[maybe_unused]] bool attach_signal = false,
+                                          [[maybe_unused]] const std::vector<const std::string*>* kernelNames = nullptr,
+                                          [[maybe_unused]] bool pre_patched = false,
+                                          [[maybe_unused]] bool blocking = false,
+                                          [[maybe_unused]] const std::vector<uint8_t>* flatMetadataData = nullptr) {
     return false;
   }
 
@@ -1928,9 +1928,9 @@ class Device : public RuntimeObject {
   /**
    * @copydoc amd::Context::hostAlloc
    */
-  virtual void* hostAlloc(size_t size, size_t alignment,
-                          MemorySegment mem_seg = kNoAtomics,
-                          const void* agentInfo = nullptr, bool allowAllAgentsAccess = true) const {
+  virtual void* hostAlloc([[maybe_unused]] size_t size, [[maybe_unused]] size_t alignment,
+                          [[maybe_unused]] MemorySegment mem_seg = kNoAtomics,
+                          [[maybe_unused]] const void* agentInfo = nullptr, [[maybe_unused]] bool allowAllAgentsAccess = true) const {
     ShouldNotCallThis();
     return NULL;
   }
@@ -1949,7 +1949,7 @@ class Device : public RuntimeObject {
   } AllocationFlags;
 
   virtual void* deviceLocalAlloc(
-      size_t size, const AllocationFlags& flags = AllocationFlags{}, bool allowAllAgentsAccess = true) const {
+      [[maybe_unused]] size_t size, [[maybe_unused]] const AllocationFlags& flags = AllocationFlags{}, [[maybe_unused]] bool allowAllAgentsAccess = true) const {
     ShouldNotCallThis();
     return NULL;
   }
@@ -1959,12 +1959,12 @@ class Device : public RuntimeObject {
     return false;
   }
 
-  virtual bool deviceAllowAccess(void* dst) const {
+  virtual bool deviceAllowAccess([[maybe_unused]] void* dst) const {
     ShouldNotCallThis();
     return true;
   }
 
-  virtual bool allowPeerAccess(device::Memory* memory) const {
+  virtual bool allowPeerAccess([[maybe_unused]] device::Memory* memory) const {
     ShouldNotCallThis();
     return true;
   }
@@ -1976,7 +1976,7 @@ class Device : public RuntimeObject {
   /**
    * @copydoc amd::Context::hostFree
    */
-  virtual void hostFree(void* ptr, size_t size = 0) const { ShouldNotCallThis(); }
+  virtual void hostFree([[maybe_unused]] void* ptr, [[maybe_unused]] size_t size = 0) const { ShouldNotCallThis(); }
 
   /**
    * @copydoc amd::Context::svmAlloc
@@ -2149,9 +2149,9 @@ class Device : public RuntimeObject {
    * @param flags any flags to be passed
    * @param shareableHandle exported handle, points to fdesc.
    */
-  virtual VmmExportStatus ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
-                                                   void* shareableHandle,
-                                                   amd::Memory::HandleType handle_type) {
+  virtual VmmExportStatus ExportShareableVMMHandle([[maybe_unused]] amd::Memory& amd_mem_obj, [[maybe_unused]] int flags,
+                                                   [[maybe_unused]] void* shareableHandle,
+                                                   [[maybe_unused]] amd::Memory::HandleType handle_type) {
     ShouldNotCallThis();
     return VmmExportStatus::kError;
   }
@@ -2162,7 +2162,7 @@ class Device : public RuntimeObject {
    * @param osHandle os handle/fdesc/void*
    * @param amd_mem_obj amd_mem_obj with hsa_handle/memory_obj.
    */
-  virtual amd::Memory* ImportShareableVMMHandle(void* osHandle, amd::Memory::HandleType handle_type) {
+  virtual amd::Memory* ImportShareableVMMHandle([[maybe_unused]] void* osHandle, [[maybe_unused]] amd::Memory::HandleType handle_type) {
     ShouldNotCallThis();
     return nullptr;
   }
@@ -2170,8 +2170,8 @@ class Device : public RuntimeObject {
   /**
    * @return True if the device successfully applied the SVM attributes in HMM for device memory
    */
-  virtual bool SetSvmAttributes(const void* dev_ptr, size_t count, amd::MemoryAdvice advice,
-                                bool use_cpu = false, int numa_id = kDefaultNumaNode) const {
+  virtual bool SetSvmAttributes([[maybe_unused]] const void* dev_ptr, [[maybe_unused]] size_t count, [[maybe_unused]] amd::MemoryAdvice advice,
+                                [[maybe_unused]] bool use_cpu = false, [[maybe_unused]] int numa_id = kDefaultNumaNode) const {
     ShouldNotCallThis();
     return false;
   }
@@ -2179,8 +2179,8 @@ class Device : public RuntimeObject {
   /**
    * @return True if the device successfully retrieved the SVM attributes from HMM for device memory
    */
-  virtual bool GetSvmAttributes(void** data, size_t* data_sizes, int* attributes,
-                                size_t num_attributes, const void* dev_ptr, size_t count) const {
+  virtual bool GetSvmAttributes([[maybe_unused]] void** data, [[maybe_unused]] size_t* data_sizes, [[maybe_unused]] int* attributes,
+                                [[maybe_unused]] size_t num_attributes, [[maybe_unused]] const void* dev_ptr, [[maybe_unused]] size_t count) const {
     ShouldNotCallThis();
     return false;
   }
@@ -2189,23 +2189,23 @@ class Device : public RuntimeObject {
   virtual size_t ScratchLimitCurrent() const { return 0; }
 
   //! Sets the current scratch limit of the device. Valid only on rocm device.
-  virtual bool UpdateScratchLimitCurrent(size_t limit) const { return true; }
+  virtual bool UpdateScratchLimitCurrent([[maybe_unused]] size_t limit) const { return true; }
 
   //! Validate kernel
-  virtual bool validateKernel(const amd::Kernel& kernel, const device::VirtualDevice* vdev,
-                              bool coop_groups = false) {
+  virtual bool validateKernel([[maybe_unused]] const amd::Kernel& kernel, [[maybe_unused]] const device::VirtualDevice* vdev,
+                              [[maybe_unused]] bool coop_groups = false) {
     return true;
   };
 
-  virtual bool SetClockMode(const cl_set_device_clock_mode_input_amd setClockModeInput,
-                            cl_set_device_clock_mode_output_amd* pSetClockModeOutput) {
+  virtual bool SetClockMode([[maybe_unused]] const cl_set_device_clock_mode_input_amd setClockModeInput,
+                            [[maybe_unused]] cl_set_device_clock_mode_output_amd* pSetClockModeOutput) {
     return true;
   };
 
   // Returns the status of HW event, associated with amd::Event
-  virtual bool IsHwEventReady(const amd::Event& event,  //!< AMD event for HW status validation
-                              bool wait = false,  //!< If true then forces the event completion
-                              amd::SyncPolicy policy = amd::SyncPolicy::Auto) const {
+  virtual bool IsHwEventReady([[maybe_unused]] const amd::Event& event,  //!< AMD event for HW status validation
+                              [[maybe_unused]] bool wait = false,  //!< If true then forces the event completion
+                              [[maybe_unused]] amd::SyncPolicy policy = amd::SyncPolicy::Auto) const {
     return false;
   };
 
@@ -2222,7 +2222,7 @@ class Device : public RuntimeObject {
   virtual void ReleaseGlobalSignal(void* signal) const {}
   virtual void RetainGlobalSignal(void* signal) const {}
 
-  virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const { return false; }
+  virtual bool CreateHwEvents([[maybe_unused]] int count, [[maybe_unused]] std::vector<void*>& hw_events) const { return false; }
   virtual void DestroyHwEvent(void* hw_event) const {}
 
   //! Re-arm already-allocated HW event signals so they can be reused by a new
@@ -2259,7 +2259,7 @@ class Device : public RuntimeObject {
 
   /// @brief  Creates HW user event for OpenCL implementation
   /// @return The pointer to a HW event structure, known to the HW backend
-  virtual bool CreateUserEvent(amd::UserEvent* event) const { return false; }
+  virtual bool CreateUserEvent([[maybe_unused]] amd::UserEvent* event) const { return false; }
 
   /// @brief  Sets HW user event to the complete status
   virtual void SetUserEvent(amd::UserEvent* event) const {}
@@ -2369,7 +2369,7 @@ class Device : public RuntimeObject {
   uint32_t index() const { return index_; }
 
   //! Returns value for LinkAttribute for lost of vectors
-  virtual bool findLinkInfo(const amd::Device& other_device, std::vector<LinkAttrType>* link_attr) {
+  virtual bool findLinkInfo([[maybe_unused]] const amd::Device& other_device, [[maybe_unused]] std::vector<LinkAttrType>* link_attr) {
     return false;
   }
 
@@ -2396,7 +2396,7 @@ class Device : public RuntimeObject {
 
   void SetActiveWait(bool state) { activeWait_ = state; }
 
-  virtual amd::Memory* GetArenaMemObj(const void* ptr, size_t& offset, size_t size = 0) {
+  virtual amd::Memory* GetArenaMemObj([[maybe_unused]] const void* ptr, [[maybe_unused]] size_t& offset, [[maybe_unused]] size_t size = 0) {
     return nullptr;
   }
 

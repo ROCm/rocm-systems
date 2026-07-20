@@ -125,7 +125,7 @@ hipError_t ihipGraphAddKernelNode(hip::GraphNode** pGraphNode, hip::Graph* graph
 hipError_t ihipGraphAddMemcpyNode(hip::GraphNode** pGraphNode, hip::Graph* graph,
                                   hip::GraphNode* const* pDependencies, size_t numDependencies,
                                   const hipMemcpy3DParms* pCopyParams, bool capture = true,
-                                  int devId = 0) {
+                                  [[maybe_unused]] int devId = 0) {
   if (pGraphNode == nullptr || graph == nullptr ||
       (numDependencies > 0 && pDependencies == nullptr) || pCopyParams == nullptr) {
     return hipErrorInvalidValue;
@@ -141,8 +141,8 @@ hipError_t ihipGraphAddMemcpyNode(hip::GraphNode** pGraphNode, hip::Graph* graph
 
 hipError_t ihipDrvGraphAddMemcpyNode(hip::GraphNode** pGraphNode, hip::Graph* graph,
                                      hip::GraphNode* const* pDependencies, size_t numDependencies,
-                                     const HIP_MEMCPY3D* pCopyParams, hipCtx_t ctx,
-                                     bool capture = true, int devId = 0) {
+                                     const HIP_MEMCPY3D* pCopyParams, [[maybe_unused]] hipCtx_t ctx,
+                                     bool capture = true, [[maybe_unused]] int devId = 0) {
   if (pGraphNode == nullptr || graph == nullptr ||
       (numDependencies > 0 && pDependencies == nullptr) || pCopyParams == nullptr) {
     return hipErrorInvalidValue;
@@ -159,7 +159,7 @@ hipError_t ihipDrvGraphAddMemcpyNode(hip::GraphNode** pGraphNode, hip::Graph* gr
 hipError_t ihipGraphAddMemcpyNode1D(hip::GraphNode** pGraphNode, hip::Graph* graph,
                                     hip::GraphNode* const* pDependencies, size_t numDependencies,
                                     void* dst, const void* src, size_t count, hipMemcpyKind kind,
-                                    bool capture = true, int devId = 0) {
+                                    bool capture = true, [[maybe_unused]] int devId = 0) {
   if (pGraphNode == nullptr || graph == nullptr ||
       (numDependencies > 0 && pDependencies == nullptr) || count == 0) {
     return hipErrorInvalidValue;
@@ -264,7 +264,7 @@ hipError_t ihipExtLaunchKernel(hipStream_t stream, hipFunction_t f, uint32_t glo
                                uint32_t globalWorkSizeZ_remainder, uint32_t localWorkSizeX,
                                uint32_t localWorkSizeY, uint32_t localWorkSizeZ,
                                size_t sharedMemBytes, void** kernelParams, void** extra,
-                               hipEvent_t startEvent, hipEvent_t stopEvent, uint32_t flags,
+                               hipEvent_t startEvent, hipEvent_t stopEvent, [[maybe_unused]] uint32_t flags,
                                bool capture = true) {
   if (!hip::isValid(stream)) {
     return hipErrorContextIsDestroyed;

@@ -14,7 +14,7 @@ namespace amd::roc {
 
 Signal::~Signal() { Hsa::signal_destroy(signal_); }
 
-bool Signal::Init(const amd::Device& dev, uint64_t init, device::Signal::WaitState ws) {
+bool Signal::Init([[maybe_unused]] const amd::Device& dev, uint64_t init, device::Signal::WaitState ws) {
   hsa_status_t status = Hsa::signal_create(init, 0, nullptr, &signal_);
   if (status != HSA_STATUS_SUCCESS) {
     return false;
@@ -42,7 +42,7 @@ IpcSignal::~IpcSignal() {
   }
 }
 
-bool IpcSignal::Init(const amd::Device& dev, uint64_t init, device::Signal::WaitState ws) {
+bool IpcSignal::Init([[maybe_unused]] const amd::Device& dev, uint64_t init, device::Signal::WaitState ws) {
   hsa_status_t status = Hsa::signal_create(init, 0, nullptr, HSA_AMD_SIGNAL_IPC, &signal_);
   if (status != HSA_STATUS_SUCCESS) {
     return false;

@@ -606,7 +606,7 @@ class MemcpyCommandHelper {
 
 // ================================================================================================
 hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, const void* srcMemory,
-                             size_t sizeBytes, hipMemcpyKind kind, hip::Stream& stream,
+                             size_t sizeBytes, [[maybe_unused]] hipMemcpyKind kind, hip::Stream& stream,
                              size_t dstOffset, bool isAsync) {
   MemcpyCommandHelper helper(stream, isAsync);
 
@@ -622,7 +622,7 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, con
 
 // ================================================================================================
 hipError_t ihipMemcpyCommand(amd::Command*& command, void* dstMemory, amd::Memory* srcMemory,
-                             size_t sizeBytes, hipMemcpyKind kind, hip::Stream& stream,
+                             size_t sizeBytes, [[maybe_unused]] hipMemcpyKind kind, hip::Stream& stream,
                              size_t srcOffset, bool isAsync) {
   MemcpyCommandHelper helper(stream, isAsync);
 
@@ -3336,7 +3336,7 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
   HIP_RETURN(status);
 }
 
-hipError_t ihipMemset_validate(amd::Memory* dstMemory, int64_t value, size_t valueSize,
+hipError_t ihipMemset_validate(amd::Memory* dstMemory, [[maybe_unused]] int64_t value, [[maybe_unused]] size_t valueSize,
                                size_t sizeBytes, size_t offset) {
   // Validate Mem Access in case of VMM Memory
   if (!dstMemory->ValidateMemAccess(*hip::getCurrentDevice()->devices()[0], true)) {
@@ -3556,7 +3556,7 @@ hipError_t hipMemsetD32Async(hipDeviceptr_t dst, int value, size_t count, hipStr
 }
 
 hipError_t ihipMemset3D_validate(hipPitchedPtr pitchedDevPtr, amd::Memory* memory, size_t offset,
-                                 int value, hipExtent extent, size_t sizeBytes) {
+                                 [[maybe_unused]] int value, hipExtent extent, size_t sizeBytes) {
   if (memory == nullptr) {
     return hipErrorInvalidValue;
   }
@@ -4790,7 +4790,7 @@ hipError_t ihipMipmappedArrayGetLevel(hipArray_t* level_array_pptr,
 
 hipError_t ihipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements,
                                                   hipMipmappedArray_t mipmap,
-                                                  hipDevice_t device) {
+                                                  [[maybe_unused]] hipDevice_t device) {
   if (memoryRequirements == nullptr) {
     return hipErrorInvalidValue;
   }

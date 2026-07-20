@@ -196,7 +196,7 @@ bool Stream::StreamCaptureOngoing(hipStream_t hStream) {
 }
 
 // ================================================================================================
-void CL_CALLBACK ihipStreamCallback(cl_event event, cl_int command_exec_status, void* user_data) {
+void CL_CALLBACK ihipStreamCallback([[maybe_unused]] cl_event event, [[maybe_unused]] cl_int command_exec_status, void* user_data) {
   auto* cbo = reinterpret_cast<StreamCallback*>(user_data);
   cbo->callback();
   delete cbo;
@@ -593,7 +593,7 @@ hipError_t hipStreamQuery_spt(hipStream_t stream) {
 }
 
 // ================================================================================================
-hipError_t streamCallback_common(hipStream_t stream, StreamCallback* cbo, void* userData) {
+hipError_t streamCallback_common(hipStream_t stream, StreamCallback* cbo, [[maybe_unused]] void* userData) {
   if (cbo == nullptr) {
     return hipErrorInvalidHandle;
   }

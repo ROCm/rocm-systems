@@ -220,7 +220,7 @@ bool Program::createKernels(void* binary, size_t binSize, bool useUniformWorkGro
 }
 
 bool Program::setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc,
-                         size_t foffset, std::string uri) {
+                         size_t foffset, [[maybe_unused]] std::string uri) {
   // Stop compilation if it is an offline device - HSA runtime does not
   // support ISA compiled offline
   if (!device().isOnline()) {

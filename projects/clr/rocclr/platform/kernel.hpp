@@ -220,7 +220,7 @@ class KernelParameters {
 
   //! Deallocate the memory reserved for this instance,
   // matching overloaded operator new.
-  void operator delete(void* ptr, const KernelSignature& signature) {
+  void operator delete(void* ptr, [[maybe_unused]] const KernelSignature& signature) {
     AlignedMemory::deallocate(ptr);
   }
 

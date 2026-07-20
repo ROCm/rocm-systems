@@ -2544,7 +2544,7 @@ hipError_t playback_hipStreamSetAttribute(PlaybackContext& ctx, const uint8_t* p
 // Manual playback: hipMemGetAllocationGranularity
 // ---------------------------------------------------------------------------
 
-hipError_t playback_hipMemGetAllocationGranularity(PlaybackContext& ctx, const uint8_t* pl) {
+hipError_t playback_hipMemGetAllocationGranularity([[maybe_unused]] PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemGetAllocationGranularity*>(pl);
     hipMemAllocationProp prop{};
     std::memcpy(&prop, a->alloc_prop_bytes, sizeof(prop));
