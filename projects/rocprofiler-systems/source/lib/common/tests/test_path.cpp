@@ -62,27 +62,27 @@ protected:
     std::string m_test_dir;
 };
 
-TEST_F(PathTest, Dirname_StandardPath)
+TEST_F(PathTest, ParentPath_StandardPath)
 {
-    EXPECT_EQ(dirname("/usr/local/bin/program"), "/usr/local/bin");
+    EXPECT_EQ(parent_path("/usr/local/bin/program"), "/usr/local/bin");
 }
 
-TEST_F(PathTest, Dirname_SingleLevel) { EXPECT_EQ(dirname("/usr/file"), "/usr"); }
+TEST_F(PathTest, ParentPath_SingleLevel) { EXPECT_EQ(parent_path("/usr/file"), "/usr"); }
 
-TEST_F(PathTest, Dirname_RootFile) { EXPECT_EQ(dirname("/file"), ""); }
+TEST_F(PathTest, ParentPath_RootFile) { EXPECT_EQ(parent_path("/file"), "/"); }
 
-TEST_F(PathTest, Dirname_NoSlash) { EXPECT_EQ(dirname("filename"), ""); }
+TEST_F(PathTest, ParentPath_NoSlash) { EXPECT_EQ(parent_path("filename"), ""); }
 
-TEST_F(PathTest, Dirname_EmptyString) { EXPECT_EQ(dirname(""), ""); }
+TEST_F(PathTest, ParentPath_EmptyString) { EXPECT_EQ(parent_path(""), ""); }
 
-TEST_F(PathTest, Dirname_TrailingSlash)
+TEST_F(PathTest, ParentPath_TrailingSlash)
 {
-    EXPECT_EQ(dirname("/usr/local/"), "/usr/local");
+    EXPECT_EQ(parent_path("/usr/local/"), "/usr/local");
 }
 
-TEST_F(PathTest, Dirname_MultipleSlashes)
+TEST_F(PathTest, ParentPath_MultipleSlashes)
 {
-    EXPECT_EQ(dirname("/a/b/c/d/e"), "/a/b/c/d");
+    EXPECT_EQ(parent_path("/a/b/c/d/e"), "/a/b/c/d");
 }
 
 TEST_F(PathTest, Exists_ExistingFile)
@@ -315,9 +315,9 @@ TEST_F(PathTest, FindPath_InSearchPath)
     EXPECT_EQ(result, file_path);
 }
 
-TEST_F(PathTest, Dirname_ComplexPath)
+TEST_F(PathTest, ParentPath_ComplexPath)
 {
-    EXPECT_EQ(dirname("/opt/rocm/lib/rocprofiler-systems/librocprof-sys.so"),
+    EXPECT_EQ(parent_path("/opt/rocm/lib/rocprofiler-systems/librocprof-sys.so"),
               "/opt/rocm/lib/rocprofiler-systems");
 }
 
@@ -341,10 +341,10 @@ TEST_F(PathTest, Exists_SpecialCharactersInPath)
     EXPECT_TRUE(exists(file_path));
 }
 
-TEST_F(PathTest, Dirname_RocprofsysTypicalPath)
+TEST_F(PathTest, ParentPath_RocprofsysTypicalPath)
 {
     std::string path   = "/opt/rocm-6.0.0/lib/rocprofiler-systems/librocprof-sys-dl.so";
-    std::string result = dirname(path);
+    std::string result = parent_path(path);
     EXPECT_EQ(result, "/opt/rocm-6.0.0/lib/rocprofiler-systems");
 }
 
@@ -360,6 +360,63 @@ TEST_F(PathTest, NestedDirectories)
     EXPECT_TRUE(exists(subdir2));
     EXPECT_TRUE(exists(subdir3));
 
-    EXPECT_EQ(dirname(subdir3), subdir2);
-    EXPECT_EQ(dirname(subdir2), subdir1);
+    EXPECT_EQ(parent_path(subdir3), subdir2);
+    EXPECT_EQ(parent_path(subdir2), subdir1);
+}
+
+TEST_F(PathTest, ParentPath_TwoLevels)
+{
+    EXPECT_EQ(parent_path("/a/b/c", 2), "/a");
+}
+
+TEST_F(PathTest, ParentPath_ThreeLevels)
+{
+    EXPECT_EQ(parent_path("/a/b/c", 3), "/");
+}
+
+TEST_F(PathTest, ParentPath_RootClamp_OneComponent)
+{
+    EXPECT_EQ(parent_path("/a"), "/");
+}
+
+TEST_F(PathTest, ParentPath_RootClamp_Overwalk)
+{
+    EXPECT_EQ(parent_path("/a", 5), "/");
+}
+
+TEST_F(PathTest, ParentPath_RootClamp_Root)
+{
+    EXPECT_EQ(parent_path("/", 1), "/");
+}
+
+TEST_F(PathTest, ParentPath_Relative_OneLevel)
+{
+    EXPECT_EQ(parent_path("a/b", 1), "a");
+}
+
+TEST_F(PathTest, ParentPath_Relative_Overwalk)
+{
+    EXPECT_EQ(parent_path("a/b", 5), "");
+}
+
+TEST_F(PathTest, ParentPath_Identity)
+{
+    EXPECT_EQ(parent_path("/a/b/c", 0), "/a/b/c");
+}
+
+TEST_F(PathTest, ParentPath_TrailingSlash_Redundant)
+{
+    EXPECT_EQ(parent_path("/a/b//"), "/a/b");
+}
+
+TEST_F(PathTest, ParentPath_InteriorRedundantSlash)
+{
+    EXPECT_EQ(parent_path("/a//b"), "/a");
+}
+
+TEST_F(PathTest, ParentPath_RealExe_TwoLevels)
+{
+    std::string result = parent_path(realpath("/proc/self/exe"), 2);
+    EXPECT_FALSE(result.empty());
+    EXPECT_EQ(result.front(), '/');
 }
