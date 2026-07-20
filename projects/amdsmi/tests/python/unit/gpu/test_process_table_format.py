@@ -16,10 +16,12 @@ import sys
 import types
 import unittest
 
-from common.common import amdsmi_path
+from common.common import amdsmi_path, find_cli_dir
 
-_ROCM_ROOT = os.path.dirname(os.path.dirname(amdsmi_path))
-LOGGER_PATH = os.path.join(_ROCM_ROOT, "libexec", "amdsmi_cli", "amdsmi_logger.py")
+# Locate the CLI dir (amdsmi_path first so an AMDSMI_PATH override selects the
+# matching install; see common.find_cli_dir). None -> setUpClass skips.
+_CLI_DIR = find_cli_dir(amdsmi_path, os.path.dirname(os.path.abspath(__file__)))
+LOGGER_PATH = os.path.join(_CLI_DIR, "amdsmi_logger.py") if _CLI_DIR else None
 
 # Fixed inner width of the default-output box (between the two '|' borders).
 _BOX_INNER_WIDTH = 78
@@ -60,10 +62,23 @@ def _process(name="python3", cu=None, sdma="0", gpu="0", pid="12345"):
 class TestProcessTableFormat(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not os.path.isfile(LOGGER_PATH):
-            raise unittest.SkipTest(f"amdsmi_logger not installed at {LOGGER_PATH}")
+        if not LOGGER_PATH or not os.path.isfile(LOGGER_PATH):
+            raise unittest.SkipTest(
+                f"amd-smi CLI not found ({LOGGER_PATH or _CLI_DIR}): amdsmi_logger.py not present"
+            )
+        # Snapshot the real amdsmi_helpers so tearDownClass can undo the stub.
+        # Otherwise the empty stub leaks into later test modules (e.g. the real
+        # AMDSMIHelpers imported by test_cli_exit_codes) and breaks them.
+        cls._saved_amdsmi_helpers = sys.modules.get("amdsmi_helpers")
         _install_fake_helpers()
         cls.logger = _load_logger_module()
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls._saved_amdsmi_helpers is not None:
+            sys.modules["amdsmi_helpers"] = cls._saved_amdsmi_helpers
+        else:
+            sys.modules.pop("amdsmi_helpers", None)
 
     def _assert_boxed(self, line):
         self.assertTrue(line.startswith("|") and line.endswith("|"), line)
@@ -102,7 +117,3 @@ class TestProcessTableFormat(unittest.TestCase):
         self.assertLessEqual(header.index("CU %"), row.index("99.9"))
         self.assertLessEqual(header.index("SDMA"), row.index("765"))
         self._assert_boxed(row)
-
-
-if __name__ == "__main__":
-    unittest.main()
