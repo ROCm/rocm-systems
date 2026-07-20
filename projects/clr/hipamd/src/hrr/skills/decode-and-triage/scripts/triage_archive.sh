@@ -115,7 +115,31 @@ run_replay_preflight() {
   [[ "${HRR_STRICT_VERSION:-}" == "1" ]] && compat_args+=(--strict-version)
   [[ "${HRR_STRICT_ARCH:-}" == "1" ]] && compat_args+=(--strict-arch)
   echo "[triage] replay preflight (manifest metadata from #8680)" >&2
+  set +e
   "${compat_args[@]}"
+  local rc=$?
+  set -e
+  if [[ "$rc" -eq 2 ]]; then
+    if [[ "${HRR_CONTINUE:-}" == "1" ]]; then
+      echo "[triage] continuing despite version mismatch (HRR_CONTINUE=1)" >&2
+      return 0
+    fi
+    if [[ -t 0 ]]; then
+      echo ""
+      read -r -p "Version mismatch detected. Do you want to continue? [y/N] " ans
+      if [[ "$ans" =~ ^[Yy]$ ]]; then
+        echo "[triage] continuing after confirmation" >&2
+        return 0
+      fi
+      echo "[triage] aborted by user at version mismatch prompt" >&2
+      exit 3
+    fi
+    echo "[triage] version mismatch requires confirmation (re-run with HRR_CONTINUE=1)" >&2
+    exit 2
+  fi
+  if [[ "$rc" -ne 0 ]]; then
+    exit "$rc"
+  fi
 }
 
 if [[ "$mode" != "skip" && -x "$ENSURE" ]]; then

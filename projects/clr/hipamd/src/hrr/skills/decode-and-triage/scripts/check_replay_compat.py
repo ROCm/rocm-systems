@@ -40,6 +40,7 @@ class CompatReport:
     ok: bool = True
     blocks: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    prompts: list[str] = field(default_factory=list)
     capture: CaptureMetadata | None = None
     replay: ReplayEnvironment | None = None
 
@@ -121,6 +122,81 @@ def _run(cmd: list[str], timeout: int = 30) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _docker_cmd(*args: str) -> list[str]:
+    """Match replay_docker.sh: use passwordless sudo when available."""
+    if shutil.which("docker") is None:
+        return ["docker", *args]
+    sudo_check = _run(["sudo", "-n", "true"], timeout=5)
+    if sudo_check.returncode == 0:
+        return ["sudo", "-n", "docker", *args]
+    return ["docker", *args]
+
+
+_DOCKER_ROC_LIB = (
+    "/opt/python/lib/python3.13/site-packages/_rocm_sdk_core/lib:"
+    "/opt/python/lib/python3.13/site-packages/_rocm_sdk_devel/lib:"
+    "/opt/rocm/lib"
+)
+
+
+def _parse_hip_version(text: str) -> str | None:
+    for line in text.splitlines():
+        m = re.search(r"HIP version\s*:\s*(\S+)", line, re.I)
+        if m:
+            return m.group(1)
+        stripped = line.strip()
+        if re.fullmatch(r"[0-9]+\.[0-9]+(?:\.[0-9]+)?(?:-[0-9a-f]+)?", stripped):
+            return stripped
+    return None
+
+
+_PROBE_COMGR_PY = r"""
+import ctypes
+import glob
+import os
+import sys
+
+candidates: list[str] = []
+for root in os.environ.get("LD_LIBRARY_PATH", "").split(":"):
+    if root:
+        candidates.extend(glob.glob(os.path.join(root, "libamd_comgr.so*")))
+candidates.extend(
+    [
+        "/opt/python/lib/python3.13/site-packages/_rocm_sdk_core/lib/libamd_comgr.so.3",
+        "/opt/python/lib/python3.13/site-packages/_rocm_sdk_devel/lib/libamd_comgr.so.3",
+        "/opt/rocm/lib/libamd_comgr.so.3",
+        "/opt/rocm/lib/libamd_comgr.so",
+    ]
+)
+seen: set[str] = set()
+for path in candidates:
+    if not path or path in seen:
+        continue
+    seen.add(path)
+    try:
+        lib = ctypes.CDLL(path)
+        major = ctypes.c_size_t()
+        minor = ctypes.c_size_t()
+        lib.amd_comgr_get_version(ctypes.byref(major), ctypes.byref(minor))
+        print(f"{major.value}.{minor.value}")
+        sys.exit(0)
+    except OSError:
+        continue
+sys.exit(1)
+"""
+
+
+def probe_comgr_version() -> str | None:
+    proc = _run(["python3", "-c", _PROBE_COMGR_PY], timeout=15)
+    if proc.returncode != 0:
+        return None
+    line = proc.stdout.strip().splitlines()
+    if not line:
+        return None
+    version = line[-1].strip()
+    return version or None
+
+
 def _parse_rocm_smi(text: str) -> tuple[int, list[str], list[str]]:
     gpu_ids = sorted({int(m.group(1)) for m in re.finditer(r"GPU\[(\d+)\]", text)})
     archs: list[str] = []
@@ -153,11 +229,8 @@ def probe_host_replay_env() -> ReplayEnvironment:
             env.visible_gpus = len(render_nodes)
     if shutil.which("hipconfig"):
         proc = _run(["hipconfig", "--version"])
-        for line in (proc.stdout + proc.stderr).splitlines():
-            m = re.search(r"HIP version\s*:\s*([0-9.]+)", line, re.I)
-            if m:
-                env.hip_runtime_version = m.group(1)
-                break
+        env.hip_runtime_version = _parse_hip_version(proc.stdout + proc.stderr)
+    env.comgr_version = probe_comgr_version()
     return env
 
 
@@ -166,8 +239,12 @@ def probe_docker_replay_env(image: str) -> ReplayEnvironment:
     if not shutil.which("docker"):
         env.source = "docker:unavailable"
         return env
-    cmd = [
-        "docker",
+    probe_shell = (
+        f"export LD_LIBRARY_PATH={_DOCKER_ROC_LIB}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}; "
+        "rocm-smi --showid --showproductname 2>/dev/null || true; "
+        "hipconfig --version 2>/dev/null || true"
+    )
+    cmd = _docker_cmd(
         "run",
         "--rm",
         "--device=/dev/kfd",
@@ -175,21 +252,36 @@ def probe_docker_replay_env(image: str) -> ReplayEnvironment:
         image,
         "bash",
         "-lc",
-        "rocm-smi --showid --showproductname 2>/dev/null || true; "
-        "hipconfig --version 2>/dev/null || true",
-    ]
+        probe_shell,
+    )
     proc = _run(cmd, timeout=120)
     out = proc.stdout + proc.stderr
+    if proc.returncode != 0 and "permission denied" in out.lower():
+        env.source = "docker:permission-denied"
+        return env
     count, archs, names = _parse_rocm_smi(out)
     if count > 0:
         env.visible_gpus = count
         env.gpu_archs = archs
         env.gpu_names = names
-    for line in out.splitlines():
-        m = re.search(r"HIP version\s*:\s*([0-9.]+)", line, re.I)
-        if m:
-            env.hip_runtime_version = m.group(1)
-            break
+    env.hip_runtime_version = _parse_hip_version(out)
+    comgr_proc = _run(
+        _docker_cmd(
+            "run",
+            "--rm",
+            "-e",
+            f"LD_LIBRARY_PATH={_DOCKER_ROC_LIB}",
+            image,
+            "python3",
+            "-c",
+            _PROBE_COMGR_PY,
+        ),
+        timeout=60,
+    )
+    if comgr_proc.returncode == 0:
+        lines = comgr_proc.stdout.strip().splitlines()
+        if lines:
+            env.comgr_version = lines[-1].strip()
     return env
 
 
@@ -247,14 +339,18 @@ def evaluate_compat(
             if strict_version:
                 report.blocks.append(msg)
             else:
-                report.warnings.append(msg)
+                report.prompts.append(msg)
 
     if capture.comgr_version and replay.comgr_version:
         if capture.comgr_version != replay.comgr_version:
-            report.warnings.append(
+            msg = (
                 "comgr version mismatch: capture "
                 f"{capture.comgr_version} vs replay {replay.comgr_version}"
             )
+            if strict_version:
+                report.blocks.append(msg)
+            else:
+                report.prompts.append(msg)
 
     report.ok = not report.blocks
     return report
@@ -285,6 +381,7 @@ def render_report(report: CompatReport) -> str:
                 f"- source: {r.source}",
                 f"- visible_gpus: {r.visible_gpus if r.visible_gpus is not None else 'unknown'}",
                 f"- hip_runtime_version: {r.hip_runtime_version or 'n/a'}",
+                f"- comgr_version: {r.comgr_version or 'n/a'}",
             ]
         )
         if r.gpu_archs:
@@ -292,10 +389,20 @@ def render_report(report: CompatReport) -> str:
     if report.blocks:
         lines.extend(["", "## Blocking issues"])
         lines.extend(f"- {b}" for b in report.blocks)
+    if report.prompts:
+        lines.extend(["", "## Confirmation required"])
+        lines.extend(f"- {p}" for p in report.prompts)
+        lines.extend(
+            [
+                "",
+                "Replay stack versions differ from capture. Do you want to continue?",
+                "Set HRR_CONTINUE=1 to proceed without an interactive prompt.",
+            ]
+        )
     if report.warnings:
         lines.extend(["", "## Warnings"])
         lines.extend(f"- {w}" for w in report.warnings)
-    if report.ok and not report.warnings:
+    if report.ok and not report.warnings and not report.prompts:
         lines.extend(["", "Replay preflight: OK"])
     return "\n".join(lines) + "\n"
 
@@ -343,7 +450,11 @@ def main() -> int:
         strict_arch=args.strict_arch,
     )
     print(render_report(report), end="")
-    return 1 if not report.ok else 0
+    if not report.ok:
+        return 1
+    if report.prompts:
+        return 2
+    return 0
 
 
 if __name__ == "__main__":

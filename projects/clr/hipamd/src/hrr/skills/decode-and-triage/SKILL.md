@@ -26,8 +26,11 @@ rocm/vllm:rocm7.13.0_gfx950-dcgpu_ubuntu24.04_py3.13_pytorch_2.10.0_vllm_0.19.1
 2. **Preflight** (when `pid-*/manifest.json` has `metadata` from #8680): compare capture
    GPU count/arch and HIP/comgr versions vs replay host or Docker image. **Block replay**
    if capture used more GPUs than replay exposes, or requested `GPU` ordinal is missing.
-   Legacy archives without metadata skip preflight. Override: `HRR_SKIP_COMPAT=1`;
-   stricter checks: `HRR_STRICT_VERSION=1`, `HRR_STRICT_ARCH=1`.
+   **HIP or comgr version mismatch** prints a confirmation prompt before replay; in
+   non-interactive runs (agents) exit code 2 — ask the user *"Do you want to continue?"*
+   and re-run with `HRR_CONTINUE=1` if yes. Legacy archives without metadata skip preflight.
+   Override: `HRR_SKIP_COMPAT=1`; hard block (no prompt): `HRR_STRICT_VERSION=1`,
+   `HRR_STRICT_ARCH=1`.
 3. **Native first:** `"$SKILL/scripts/triage_archive.sh" --archive <pid-dir>`
 4. **Docker capture** (user names the image, or native replay fails with library skew):
    ```bash
@@ -48,8 +51,8 @@ Per-process `manifest.json` may embed capture metadata:
 
 | Field | Use in triage |
 |-------|----------------|
-| `runtime.hip_runtime_version` | Warn on replay stack skew; block if `HRR_STRICT_VERSION=1` |
-| `runtime.comgr_version` | Warn when comgr differs |
+| `runtime.hip_runtime_version` | Prompt before replay on mismatch; block if `HRR_STRICT_VERSION=1` |
+| `runtime.comgr_version` | Prompt before replay on mismatch; block if `HRR_STRICT_VERSION=1` |
 | `device_count` / `devices[]` | Block replay when host/container exposes fewer GPUs |
 | `devices[].properties.gcn_arch_name` | Warn/block arch mismatch (`HRR_STRICT_ARCH=1`) |
 | `devices[].properties.name`, `total_global_mem`, `pci`, `uuid` | Surface in finding for context |
@@ -58,6 +61,10 @@ Legacy captures (no `metadata` key) still triage via `--info` + replay logs only
 
 Execute in the same turn. Do not read stale `*.finding.md` / `hrr-replay-*.log` unless
 the user points at them.
+
+If preflight exits **2** (HIP/comgr mismatch), **stop and ask the user**:
+*"Capture and replay HIP/comgr versions differ. Do you want to continue?"*
+Re-run triage with `HRR_CONTINUE=1` only after they confirm.
 
 ## Hard constraints
 

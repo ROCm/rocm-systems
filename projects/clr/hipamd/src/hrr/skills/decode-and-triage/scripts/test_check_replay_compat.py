@@ -75,7 +75,7 @@ class CheckReplayCompatTests(unittest.TestCase):
         self.assertFalse(report.ok)
         self.assertTrue(any("requested replay GPU 1" in b for b in report.blocks))
 
-    def test_warns_on_hip_version_mismatch(self) -> None:
+    def test_prompts_on_hip_version_mismatch(self) -> None:
         capture = crc.CaptureMetadata(
             device_count=1,
             hip_runtime_version="7.13.0",
@@ -89,7 +89,66 @@ class CheckReplayCompatTests(unittest.TestCase):
         report = crc.evaluate_compat(capture, replay, gpu=0)
         self.assertTrue(report.ok)
         self.assertTrue(
-            any("HIP runtime version mismatch" in w for w in report.warnings)
+            any("HIP runtime version mismatch" in p for p in report.prompts)
+        )
+        self.assertFalse(report.warnings)
+
+    def test_prompts_on_comgr_version_mismatch(self) -> None:
+        capture = crc.CaptureMetadata(
+            device_count=1,
+            comgr_version="3.0",
+            devices=[SAMPLE_METADATA["devices"][0]],
+        )
+        replay = crc.ReplayEnvironment(
+            visible_gpus=1,
+            gpu_archs=["gfx942"],
+            comgr_version="2.8",
+        )
+        report = crc.evaluate_compat(capture, replay, gpu=0)
+        self.assertTrue(report.ok)
+        self.assertTrue(any("comgr version mismatch" in p for p in report.prompts))
+
+    def test_strict_version_blocks_without_prompt(self) -> None:
+        capture = crc.CaptureMetadata(
+            device_count=1,
+            hip_runtime_version="7.13.0",
+            comgr_version="3.0",
+            devices=[SAMPLE_METADATA["devices"][0]],
+        )
+        replay = crc.ReplayEnvironment(
+            visible_gpus=1,
+            gpu_archs=["gfx942"],
+            hip_runtime_version="7.15.0",
+            comgr_version="2.8",
+        )
+        report = crc.evaluate_compat(
+            capture, replay, gpu=0, strict_version=True
+        )
+        self.assertFalse(report.ok)
+        self.assertTrue(report.blocks)
+        self.assertFalse(report.prompts)
+
+    @mock.patch("check_replay_compat.probe_comgr_version", return_value="3.0")
+    @mock.patch("check_replay_compat._run")
+    def test_probe_host_reads_comgr(
+        self, run_mock: mock.Mock, _comgr_mock: mock.Mock
+    ) -> None:
+        run_mock.return_value = mock.Mock(
+            stdout="GPU[0]\tGPU[1]\nCard series: Instinct MI300X\nCard series: Instinct MI300X\n",
+            stderr="",
+        )
+        env = crc.probe_host_replay_env()
+        self.assertEqual(env.visible_gpus, 2)
+        self.assertEqual(env.comgr_version, "3.0")
+
+    def test_parse_hip_version_formats(self) -> None:
+        self.assertEqual(
+            crc._parse_hip_version("HIP version : 7.13.0\n"),
+            "7.13.0",
+        )
+        self.assertEqual(
+            crc._parse_hip_version("7.13.99004-3309c6114a\n"),
+            "7.13.99004-3309c6114a",
         )
 
     def test_legacy_manifest_skips_preflight(self) -> None:
@@ -100,15 +159,6 @@ class CheckReplayCompatTests(unittest.TestCase):
                 encoding="utf-8",
             )
             self.assertIsNone(crc.load_capture_metadata(arch))
-
-    @mock.patch("check_replay_compat._run")
-    def test_parse_rocm_smi_gpu_count(self, run_mock: mock.Mock) -> None:
-        run_mock.return_value = mock.Mock(
-            stdout="GPU[0]\tGPU[1]\nCard series: Instinct MI300X\nCard series: Instinct MI300X\n",
-            stderr="",
-        )
-        env = crc.probe_host_replay_env()
-        self.assertEqual(env.visible_gpus, 2)
 
 
 if __name__ == "__main__":
