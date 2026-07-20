@@ -23,8 +23,10 @@
 #define _GNU_SOURCE     1
 #define _DEFAULT_SOURCE 1
 
+#include "att_no_intercept.hpp"
 #include "config.hpp"
 #include "execution_profile.hpp"
+#include "graph_stack.hpp"
 #include "helper.hpp"
 #include "stream_stack.hpp"
 
@@ -106,6 +108,7 @@
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <dlfcn.h>
@@ -210,10 +213,11 @@ struct buffer_ids
     rocprofiler_buffer_id_t rocjpeg_api_trace       = {};
     rocprofiler_buffer_id_t pc_sampling_stochastic  = {};
     rocprofiler_buffer_id_t ompt_trace              = {};
+    rocprofiler_buffer_id_t hip_graph_trace         = {};
 
     auto as_array() const
     {
-        return std::array<rocprofiler_buffer_id_t, 14>{hsa_api_trace,
+        return std::array<rocprofiler_buffer_id_t, 15>{hsa_api_trace,
                                                        hip_api_trace,
                                                        kernel_trace,
                                                        memory_copy_trace,
@@ -226,7 +230,8 @@ struct buffer_ids
                                                        rocdecode_api_trace,
                                                        rocjpeg_api_trace,
                                                        pc_sampling_stochastic,
-                                                       ompt_trace};
+                                                       ompt_trace,
+                                                       hip_graph_trace};
     }
     auto pc_sampling_buffers_as_array() const
     {
@@ -291,11 +296,14 @@ thread_local auto thread_dispatch_rename_dtor = common::scope_destructor{[]() {
 // any context that needs to support pause/resume functionality should add itself to this list
 auto pause_resume_contexts = context_id_set_t{};
 
-// Stores stream ids and kernel region ids for kernel-rename service and hip stream display service
+// Stores stream ids, graph attribution, and kernel region ids for the
+// kernel-rename, hip-stream-display, and hip-graph-display services.
 struct kernel_rename_and_stream_data
 {
-    uint64_t                region_id = 0;  // roctx region correlation id
-    rocprofiler_stream_id_t stream_id = {.handle = 0};
+    uint64_t                    region_id     = 0;  // roctx region correlation id
+    rocprofiler_stream_id_t     stream_id     = {.handle = 0};
+    rocprofiler_graph_exec_id_t graph_exec_id = {.handle = 0};
+    rocprofiler_graph_node_id_t graph_node_id = {.handle = 0};
 };
 
 bool
@@ -501,22 +509,33 @@ record_execution_profile(rocprofiler_thread_id_t                            thr_
     return 0;
 }
 
-template <typename Tp>
-rocprofiler_stream_id_t
-get_stream_id(Tp* _record)
+// Tool-layer external-correlation-id attribution extracted from the per-dispatch
+// payload allocated by set_kernel_rename_and_stream_correlation_id().
+struct ext_attribution_t
 {
-    auto _stream_id = rocprofiler_stream_id_t{.handle = 0};
+    rocprofiler_stream_id_t     stream_id     = {.handle = 0};
+    rocprofiler_graph_exec_id_t graph_exec_id = {.handle = 0};
+    rocprofiler_graph_node_id_t graph_node_id = {.handle = 0};
+};
+
+template <typename Tp>
+ext_attribution_t
+get_ext_attribution(Tp* _record)
+{
+    auto _attr = ext_attribution_t{};
     if(_record->correlation_id.external.ptr != nullptr)
     {
-        // Extract the stream id
+        // Replace external pointer with the roctx region id for downstream consumers.
         auto* _ecid_data =
             static_cast<kernel_rename_and_stream_data*>(_record->correlation_id.external.ptr);
-        _stream_id                             = _ecid_data->stream_id;
+        _attr.stream_id                        = _ecid_data->stream_id;
+        _attr.graph_exec_id                    = _ecid_data->graph_exec_id;
+        _attr.graph_node_id                    = _ecid_data->graph_node_id;
         auto _region_id                        = _ecid_data->region_id;
         _record->correlation_id.external.value = _region_id;
         delete _ecid_data;
     }
-    return _stream_id;
+    return _attr;
 }
 
 int
@@ -534,8 +553,9 @@ set_kernel_rename_and_stream_correlation_id(rocprofiler_thread_id_t  thr_id,
         thread_dispatch_rename != nullptr && !thread_dispatch_rename->empty();
 
     const bool hip_stream_enabled = rocprofiler::tool::stream::stream_stack_not_null();
+    const bool hip_graph_enabled  = rocprofiler::tool::graph::graph_stack_not_null();
 
-    if(!kernel_rename_service_enabled && !hip_stream_enabled) return 1;
+    if(!kernel_rename_service_enabled && !hip_stream_enabled && !hip_graph_enabled) return 1;
 
     auto* _info = new kernel_rename_and_stream_data{};
 
@@ -550,6 +570,20 @@ set_kernel_rename_and_stream_correlation_id(rocprofiler_thread_id_t  thr_id,
     if(hip_stream_enabled)
     {
         _info->stream_id = rocprofiler::tool::stream::get_stream_id();
+    }
+
+    // Only KERNEL_DISPATCH / MEMORY_COPY consume node ordinals.
+    const bool kind_consumes_graph_ordinal =
+        (kind == ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH ||
+         kind == ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY);
+    if(hip_graph_enabled && kind_consumes_graph_ordinal)
+    {
+        if(auto* _g = rocprofiler::tool::graph::current(); _g != nullptr)
+        {
+            _info->graph_exec_id = _g->graph_exec_id;
+            _info->graph_node_id = _g->node_counter;
+            ++_g->node_counter.handle;
+        }
     }
 
     // Set the external correlation id service to point to struct
@@ -795,6 +829,28 @@ hip_stream_display_callback(rocprofiler_callback_tracing_record_t record,
     {
         ROCP_FATAL << "Unsupported operation for ROCPROFILER_HIP_STREAM";
     }
+    common::consume_args(user_data, data);
+}
+
+// Drives the per-thread graph attribution stack on EXEC_LAUNCH callbacks.
+void
+hip_graph_display_callback(rocprofiler_callback_tracing_record_t record,
+                           rocprofiler_user_data_t*              user_data,
+                           void*                                 data)
+{
+    if(record.kind != ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH) return;
+
+    auto* payload = static_cast<rocprofiler_callback_tracing_hip_graph_data_t*>(record.payload);
+    if(payload == nullptr) return;
+
+    if(record.operation == ROCPROFILER_HIP_GRAPH_OPERATION_EXEC_LAUNCH)
+    {
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+            rocprofiler::tool::graph::push(payload->graph_exec_id);
+        else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+            rocprofiler::tool::graph::pop();
+    }
+
     common::consume_args(user_data, data);
 }
 
@@ -1044,6 +1100,9 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                     output_filename,
                     obj_data);
             }
+
+            if(tool::get_config().advanced_thread_trace && tool::get_config().att_no_intercept)
+                tool::att_no_intercept::code_object_load(*obj_data);
         }
         else if(record.phase == ROCPROFILER_CALLBACK_PHASE_UNLOAD)
         {
@@ -1069,7 +1128,6 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
             ROCP_WARNING_IF(!success)
                 << "duplicate kernel symbol data for kernel_id=" << sym_data->kernel_id;
 
-            // add the kernel to the kernel_targets if
             if(success)
             {
                 // if kernel name is provided by user then by default all kernels in the
@@ -1082,14 +1140,15 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
                 std::string_view include_regex(kernel_filter_include);
                 std::string_view exclude_regex(kernel_filter_exclude);
-                if(rocprofiler::common::regex::regex_search(kernel_info->formatted_kernel_name,
-                                                            include_regex))
-                {
-                    if(kernel_filter_exclude.empty() ||
-                       !rocprofiler::common::regex::regex_search(kernel_info->formatted_kernel_name,
-                                                                 exclude_regex))
-                        add_kernel_target(sym_data->kernel_id, kernel_filter_range);
-                }
+                const auto       is_targeted = rocprofiler::common::regex::regex_search(
+                                             kernel_info->formatted_kernel_name, include_regex) &&
+                                         (kernel_filter_exclude.empty() ||
+                                          !rocprofiler::common::regex::regex_search(
+                                              kernel_info->formatted_kernel_name, exclude_regex));
+                if(is_targeted) add_kernel_target(sym_data->kernel_id, kernel_filter_range);
+
+                if(tool::get_config().advanced_thread_trace && tool::get_config().att_no_intercept)
+                    tool::att_no_intercept::kernel_symbol_load(*sym_data, is_targeted);
             }
         }
     }
@@ -1147,9 +1206,10 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                 auto* record = static_cast<rocprofiler_buffer_tracing_kernel_dispatch_record_t*>(
                     header->payload);
 
-                auto stream_id = get_stream_id(record);
+                auto attr = get_ext_attribution(record);
                 tool::write_ring_buffer(
-                    tool::tool_buffer_tracing_kernel_dispatch_ext_record_t{*record, stream_id},
+                    tool::tool_buffer_tracing_kernel_dispatch_ext_record_t{
+                        *record, attr.stream_id, attr.graph_exec_id, attr.graph_node_id},
                     domain_type::KERNEL_DISPATCH);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||
@@ -1167,9 +1227,10 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                 auto* record =
                     static_cast<rocprofiler_buffer_tracing_memory_copy_record_t*>(header->payload);
 
-                auto stream_id = get_stream_id(record);
+                auto attr = get_ext_attribution(record);
                 tool::write_ring_buffer(
-                    tool::tool_buffer_tracing_memory_copy_ext_record_t{*record, stream_id},
+                    tool::tool_buffer_tracing_memory_copy_ext_record_t{
+                        *record, attr.stream_id, attr.graph_exec_id, attr.graph_node_id},
                     domain_type::MEMORY_COPY);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION)
@@ -1177,9 +1238,10 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                 auto* record = static_cast<rocprofiler_buffer_tracing_memory_allocation_record_t*>(
                     header->payload);
 
-                auto stream_id = get_stream_id(record);
+                auto attr = get_ext_attribution(record);
                 tool::write_ring_buffer(
-                    tool::tool_buffer_tracing_memory_allocation_ext_record_t{*record, stream_id},
+                    tool::tool_buffer_tracing_memory_allocation_ext_record_t{*record,
+                                                                             attr.stream_id},
                     domain_type::MEMORY_ALLOCATION);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE ||
@@ -1286,9 +1348,9 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                 auto* record =
                     static_cast<rocprofiler_buffer_tracing_hip_api_ext_record_t*>(header->payload);
 
-                auto stream_id = get_stream_id(record);
+                auto attr = get_ext_attribution(record);
                 tool::write_ring_buffer(
-                    tool::tool_buffer_tracing_hip_api_ext_record_t{*record, stream_id},
+                    tool::tool_buffer_tracing_hip_api_ext_record_t{*record, attr.stream_id},
                     domain_type::HIP);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_RCCL_API)
@@ -1318,6 +1380,13 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                     static_cast<rocprofiler_buffer_tracing_rocjpeg_api_record_t*>(header->payload);
 
                 tool::write_ring_buffer(*record, domain_type::ROCJPEG);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIP_GRAPH)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_hip_graph_record_t*>(header->payload);
+
+                tool::write_ring_buffer(*record, domain_type::HIP_GRAPH);
             }
             else
             {
@@ -1638,13 +1707,13 @@ pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
 }
 
 void
-att_shader_data_callback(rocprofiler_agent_id_t                       agent,
-                         int64_t                                      se_id,
-                         void*                                        se_data,
-                         size_t                                       data_size,
-                         rocprofiler_thread_trace_shader_data_flags_t flags,
-                         rocprofiler_user_data_t                      userdata)
+att_shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
+                         rocprofiler_user_data_t                userdata)
 {
+    auto agent = shader_data.agent;
+    auto se_id = shader_data.shader_engine_id;
+    auto flags = shader_data.flags;
+
     if((flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL) != 0)
         ROCP_CI_LOG(WARNING) << "Thread trace buffer full!";
     std::lock_guard<std::mutex> lock(att_shader_data);
@@ -1658,7 +1727,7 @@ att_shader_data_callback(rocprofiler_agent_id_t                       agent,
     auto        output_stream   = get_output_stream(tool::get_config(), filename.str(), ".att");
     std::string output_filename = get_output_filename(tool::get_config(), filename.str(), ".att");
 
-    output_stream.stream->write(reinterpret_cast<char*>(se_data), data_size);
+    output_stream.stream->write(reinterpret_cast<char*>(shader_data.data), shader_data.data_size);
     auto key = tool::att_dispatch_agent_key_t{dispatch_id, agent.handle};
     tool_metadata->att_filenames[key].emplace_back(output_filename);
 }
@@ -1798,9 +1867,8 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
 
     auto counter_record = tool::tool_counter_record_t{};
 
-    // must call get_stream_id on dispatch_data before copying to counter_record.dispatch_data
-    // so that external correlation id is updated before copy is made
-    counter_record.stream_id     = get_stream_id(&dispatch_data);
+    // Must call get_ext_attribution before copying dispatch_data (rewrites external corr id).
+    counter_record.stream_id     = get_ext_attribution(&dispatch_data).stream_id;
     counter_record.dispatch_data = dispatch_data;
     counter_record.thread_id     = user_data.value;
     auto serialized_records      = std::vector<tool::tool_counter_value_t>{};
@@ -1932,7 +2000,7 @@ spm_data_callback(const rocprofiler_spm_dispatch_counting_service_data_t* dispat
     if((flags & ROCPROFILER_SPM_RECORD_FLAG_DISPATCH_END) != 0)
     {
         auto dispatch_data_copy = *dispatch_data;
-        get_stream_id(&dispatch_data_copy);
+        common::consume_args(get_ext_attribution(&dispatch_data_copy));
         return;
     }
 
@@ -2221,6 +2289,7 @@ struct tracing_callbacks_t
     , cntrl_tracing{cntrl_tracing_callback}
     , kernel_rename{kernel_rename_callback}
     , hip_stream{hip_stream_display_callback}
+    , hip_graph{hip_graph_display_callback}
     , callback_tracing{callback_tracing_callback}
     , buffered_tracing{buffered_tracing_callback}
     , pc_sampling{pc_sampling_callback}
@@ -2236,6 +2305,7 @@ struct tracing_callbacks_t
     , cntrl_tracing{dummy_callback_tracing_callback}
     , kernel_rename{dummy_callback_tracing_callback}
     , hip_stream{dummy_callback_tracing_callback}
+    , hip_graph{dummy_callback_tracing_callback}
     , callback_tracing{dummy_callback_tracing_callback}
     , buffered_tracing{dummy_buffered_tracing_callback}
     , pc_sampling{dummy_buffered_tracing_callback}
@@ -2247,6 +2317,7 @@ struct tracing_callbacks_t
     const rocprofiler_callback_tracing_cb_t               cntrl_tracing                   = nullptr;
     const rocprofiler_callback_tracing_cb_t               kernel_rename                   = nullptr;
     const rocprofiler_callback_tracing_cb_t               hip_stream                      = nullptr;
+    const rocprofiler_callback_tracing_cb_t               hip_graph                       = nullptr;
     const rocprofiler_callback_tracing_cb_t               callback_tracing                = nullptr;
     const rocprofiler_buffer_tracing_cb_t                 buffered_tracing                = nullptr;
     const rocprofiler_buffer_tracing_cb_t                 pc_sampling                     = nullptr;
@@ -2481,6 +2552,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     client_finalizer = fini_func;
 
+    if(tool::get_config().advanced_thread_trace && tool::get_config().att_no_intercept &&
+       !tool::att_no_intercept::is_supported())
+    {
+        ROCP_WARNING << "--att-no-intercept is unavailable: this rocprofv3 build does not include "
+                        "ATT quick-scan support. Falling back to --att.";
+        tool::get_config().att_no_intercept = false;
+    }
+
     const uint64_t buffer_size      = 16 * common::units::get_page_size();
     const uint64_t buffer_watermark = 15 * common::units::get_page_size();
 
@@ -2707,7 +2786,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                       buffer_service_config{tool::get_config().ompt_trace,
                                             ROCPROFILER_BUFFER_TRACING_OMPT,
                                             get_buffers().ompt_trace,
-                                            ompt_ops}})
+                                            ompt_ops},
+                      buffer_service_config{tool::get_config().hip_graph_trace,
+                                            ROCPROFILER_BUFFER_TRACING_HIP_GRAPH,
+                                            get_buffers().hip_graph_trace}})
 
     {
         if(itr.option)
@@ -2826,6 +2908,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         bool     exclude_nontarget = tool::get_config().att_param_target_only;
         auto&    att_perf          = tool::get_config().att_param_perfcounters;
         bool     att_serialize_all = tool::get_config().att_serialize_all;
+        bool     att_no_intercept  = tool::get_config().att_no_intercept;
 
         global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {target_cu}});
         global_parameters.push_back(
@@ -2835,6 +2918,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             {ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {shader_mask}});
         global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SERIALIZE_ALL,
                                      {static_cast<uint64_t>(att_serialize_all)}});
+        if(att_no_intercept)
+            global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_NUM_BUFFERS, {6}});
 
         if(exclude_nontarget)
         {
@@ -2875,10 +2960,20 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         const auto handle_marker_trace        = tool::get_config().selected_regions;
         rocprofiler_user_data_t user{.value = 0};
 
-        ROCP_ERROR_IF(handle_consecutive_kernels && handle_marker_trace)
-            << "selected-regions and att-consecutive-kernels options are mutually exclusive";
+        if(att_no_intercept && handle_marker_trace)
+        {
+            ROCP_WARNING << "--selected-regions does not control --att-no-intercept captures; "
+                            "ATT no-intercept will quick-scan device thread-trace chunks after "
+                            "the first code-object upload for each selected GPU agent";
+        }
 
-        if(handle_marker_trace)
+        if(!att_no_intercept)
+        {
+            ROCP_ERROR_IF(handle_consecutive_kernels && handle_marker_trace)
+                << "selected-regions and att-consecutive-kernels options are mutually exclusive";
+        }
+
+        if(!att_no_intercept && handle_marker_trace)
         {
             // Marker-controlled device thread trace:
             // Context is registered for pause/resume control and starts stopped.
@@ -2889,7 +2984,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             att_device_trace_id.store(0);
             create_pause_resume_ctx(att_device_context, "advanced thread trace (ATT)");
         }
-        else if(handle_consecutive_kernels)
+        else if(!att_no_intercept && handle_consecutive_kernels)
         {
             // TODO: Fix DeviceThreadTracer to handle remaining thread traces before stopping
             // contexts so the following call can function correctly with marker trace:
@@ -2908,6 +3003,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                              "dispatch tracing service configure");
         }
 
+        if(att_no_intercept)
+            tool::att_no_intercept::configure(callbacks.att_shader_data,
+                                              tool::get_config().kernel_filter_range);
+
         for(auto& [id, agent] : tool_metadata->agents_map)
         {
             if(agent.type != ROCPROFILER_AGENT_TYPE_GPU) continue;
@@ -2917,7 +3016,20 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             auto agent_params = global_parameters;
             for(auto& counter : get_att_perfcounter_params(id, att_perf))
                 agent_params.push_back(counter);
-            if(!handle_consecutive_kernels && !handle_marker_trace)
+            if(att_no_intercept)
+            {
+                auto trace_config = tool::att_no_intercept::configure_agent(
+                    id, tool::get_config().att_consecutive_kernels);
+                ROCPROFILER_CALL(rocprofiler_configure_device_thread_trace_service(
+                                     trace_config.context,
+                                     id,
+                                     agent_params.data(),
+                                     agent_params.size(),
+                                     tool::att_no_intercept::shader_data_callback,
+                                     trace_config.userdata),
+                                 "thread trace service configure");
+            }
+            else if(!handle_consecutive_kernels && !handle_marker_trace)
             {
                 ROCPROFILER_CALL(
                     rocprofiler_configure_dispatch_thread_trace_service(get_client_ctx(),
@@ -3009,6 +3121,30 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         "hip stream tracing configure failed");
 
     start_context(hip_stream_display_ctx, "hip stream");
+
+    // Enable HIP graph attribution whenever any consumer can carry graph-attributed records:
+    // kernel-dispatch / memory-copy / hip-graph tracing. The per-thread stack push/pop is
+    // cheap and the alternative leaves graph_exec_id/graph_node_id empty on KERNEL_DISPATCH
+    // and MEMORY_COPY records even though the data is available.
+    if(tool::get_config().hip_graph_trace || tool::get_config().kernel_trace ||
+       tool::get_config().memory_copy_trace)
+    {
+        auto hip_graph_display_ctx = rocprofiler_context_id_t{0};
+
+        ROCPROFILER_CALL(rocprofiler_create_context(&hip_graph_display_ctx),
+                         "failed to create hip graph context");
+
+        ROCPROFILER_CALL(
+            rocprofiler_configure_callback_tracing_service(hip_graph_display_ctx,
+                                                           ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH,
+                                                           nullptr,
+                                                           0,
+                                                           callbacks.hip_graph,
+                                                           nullptr),
+            "hip graph tracing configure failed");
+
+        start_context(hip_graph_display_ctx, "hip graph");
+    }
 
     // Track if HIP runtime has been initialized via runtime_intialization service
     auto runtime_initialization_ctx = rocprofiler_context_id_t{0};
@@ -3359,6 +3495,8 @@ generate_output(cleanup_mode _cleanup_mode)
 
     auto kernel_dispatch_output =
         rocprofiler::tool::kernel_dispatch_buffered_output_ext_t{tool::get_config().kernel_trace};
+    auto hip_graph_output =
+        rocprofiler::tool::hip_graph_buffered_output_t{tool::get_config().hip_graph_trace};
 
     auto hsa_output = tool::hsa_buffered_output_t{tool::get_config().hsa_core_api_trace ||
                                                   tool::get_config().hsa_amd_ext_api_trace ||
@@ -3432,10 +3570,12 @@ generate_output(cleanup_mode _cleanup_mode)
     generate_output(rocjpeg_output, outdata, contributions, cleanups);
     generate_output(pc_sampling_stochastic_output, outdata, contributions, cleanups);
     generate_output(spm_counters_output, outdata, contributions, cleanups);
+    generate_output(hip_graph_output, outdata, contributions, cleanups);
 
     if(tool::get_config().advanced_thread_trace && !tool_metadata->att_filenames.empty())
     {
         outdata.num_output += 1;
+        cleanups.emplace_back([](cleanup_mode /*_mode*/) { tool_metadata->att_filenames.clear(); });
     }
 
     ROCP_INFO << fmt::format("Number of services generating output: {} ({} kB)",
@@ -3479,7 +3619,8 @@ generate_output(cleanup_mode _cleanup_mode)
                          rocjpeg_output.get_generator(),
                          pc_sampling_host_trap_output.get_generator(),
                          pc_sampling_stochastic_output.get_generator(),
-                         spm_counters_output.get_generator());
+                         spm_counters_output.get_generator(),
+                         hip_graph_output.get_generator());
         json_ar.finish_process();
 
         tool::close_json(json_ar);
@@ -3522,7 +3663,8 @@ generate_output(cleanup_mode _cleanup_mode)
                           rocdecode_output.get_generator(),
                           counters_output.get_generator(),
                           spm_counters_output.get_generator(),
-                          ompt_output.get_generator());
+                          ompt_output.get_generator(),
+                          hip_graph_output.get_generator());
     }
 
     if(tool::get_config().otf2_output && outdata.num_output > 0 &&
@@ -3538,7 +3680,6 @@ generate_output(cleanup_mode _cleanup_mode)
         auto memory_allocation_elem_data = memory_allocation_output.load_all();
         auto rocdecode_elem_data         = rocdecode_output.load_all();
         auto rocjpeg_elem_data           = rocjpeg_output.load_all();
-
         tool::write_otf2(tool::get_config(),
                          *tool_metadata,
                          getpid(),
@@ -3606,6 +3747,8 @@ tool_detach(void* /*tool_data*/)
     // Flush all buffers, stop context to ensure in-flight GPU operations complete,
     // then flush again to capture any final events (same pattern as tool_fini).
     flush();
+    if(tool::get_config().advanced_thread_trace && tool::get_config().att_no_intercept)
+        tool::att_no_intercept::finalize();
     rocprofiler_stop_context(get_client_ctx());
     flush();
 
@@ -3661,6 +3804,8 @@ tool_fini(void* /*tool_data*/)
     auto _fini_timer = common::simple_timer{"[rocprofv3] tool finalization"};
 
     flush();
+    if(tool::get_config().advanced_thread_trace && tool::get_config().att_no_intercept)
+        tool::att_no_intercept::finalize();
     rocprofiler_stop_context(get_client_ctx());
     flush();
 

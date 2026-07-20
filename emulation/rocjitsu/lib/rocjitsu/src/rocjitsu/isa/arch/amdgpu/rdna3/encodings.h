@@ -398,6 +398,7 @@ public:
 class Vop1 : public IsaInstruction<Isa> {
 public:
   Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn);
+  void implicit_uses(RegisterSet &uses) const override;
   bool default_encoding();
   bool has_lit();
   using OpEncoding = Vop1MachineInst;
@@ -453,6 +454,7 @@ public:
 class Vop2 : public IsaInstruction<Isa> {
 public:
   Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn);
+  void implicit_uses(RegisterSet &uses) const override;
   bool default_encoding();
   bool has_lit();
   bool hasImpliedLiteral();
@@ -483,6 +485,7 @@ public:
 class Vop3 : public IsaInstruction<Isa> {
 public:
   Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn);
+  void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();
   bool has_lit_1();
   bool has_lit_0_has_lit_1();
@@ -505,6 +508,7 @@ public:
 class Vop3p : public IsaInstruction<Isa> {
 public:
   Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn);
+  void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();
   bool has_lit_1();
   bool has_lit_0_has_lit_1();
@@ -590,6 +594,7 @@ public:
 class Vop3SdstEnc : public IsaInstruction<Isa> {
 public:
   Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn);
+  void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();
   bool has_lit_1();
   bool has_lit_0_has_lit_1();

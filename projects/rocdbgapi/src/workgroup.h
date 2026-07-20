@@ -33,7 +33,7 @@ namespace amd::dbgapi
 class address_space_t;
 class agent_t;
 class architecture_t;
-class compute_queue_t;
+class queue_t;
 class dispatch_t;
 class process_t;
 
@@ -81,7 +81,7 @@ public:
                  void *value) const;
 
   const dispatch_t &dispatch () const { return m_dispatch; }
-  compute_queue_t &queue () const;
+  queue_t &queue () const;
   const agent_t &agent () const;
   process_t &process () const;
   const architecture_t &architecture () const;

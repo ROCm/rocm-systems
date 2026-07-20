@@ -100,25 +100,29 @@ def _make_codegen(profile) -> CodeGenerator:
 
 
 # Regex tolerant to whitespace and identifier choice. We anchor on the
-# stable parts of the contract — the API calls (``write_scalar``/``write_scalar64``,
+# stable parts of the contract — the RegisterAccess scalar write calls
 # ``set_vcc``, ``set_exec``) and the dst identifier — not on the exact
 # variable name of the result-mask local.
 def _re_write_scalar64(dst_ident: str) -> re.Pattern[str]:
     return re.compile(
-        rf'\b{re.escape(dst_ident)}\s*\.\s*write_scalar64\s*\(\s*wf\s*,\s*\w+\s*\)\s*;'
+        rf'amdgpu::RegisterAccess\s*\(\s*wf\s*\)\s*\.\s*write_scalar64\s*\(\s*'
+        rf'{re.escape(dst_ident)}\s*,\s*\w+\s*\)\s*;'
     )
 
 
 def _re_write_scalar32(dst_ident: str) -> re.Pattern[str]:
     return re.compile(
-        rf'\b{re.escape(dst_ident)}\s*\.\s*write_scalar\s*\(\s*wf\s*,\s*'
+        rf'amdgpu::RegisterAccess\s*\(\s*wf\s*\)\s*\.\s*write_scalar\s*\(\s*'
+        rf'{re.escape(dst_ident)}\s*,\s*'
         rf'static_cast\s*<\s*uint32_t\s*>\s*\(\s*\w+\s*\)\s*\)\s*;'
     )
 
 
 _RE_SET_VCC = re.compile(r'\bwf\s*\.\s*set_vcc\s*\(\s*\w+\s*\)\s*;')
 _RE_SET_EXEC = re.compile(r'\bwf\s*\.\s*set_exec\s*\(\s*\w+\s*\)\s*;')
-_RE_ANY_WRITE_SCALAR64 = re.compile(r'\.\s*write_scalar64\s*\(')
+_RE_ANY_WRITE_SCALAR64 = re.compile(
+    r'\bamdgpu::RegisterAccess\s*\(\s*wf\s*\)\s*\.\s*write_scalar64\s*\('
+)
 
 
 # Truth table driving the codegen tests. Each row pins one cell of the
