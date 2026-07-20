@@ -398,8 +398,8 @@ private:
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
-    return add_base(0x47);
   case ROCJITSU_CODE_ARCH_GFX1250:
+    return add_base(0x47);
   case ROCJITSU_CODE_ARCH_RV32I:
   case ROCJITSU_CODE_ARCH_RV64I:
   case ROCJITSU_CODE_ARCH_NUM_ARCHS:
@@ -799,6 +799,45 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   return false;
 }
 
+[[nodiscard]] bool apply_gfx1250_wide_literal_update(const Instruction &inst, uint32_t word,
+                                                     std::span<const uint8_t> text,
+                                                     rj_code_arch_t arch, uint16_t pair_lo,
+                                                     PcValue &value) {
+  // gfx1250 emits compact 64-bit PC-relative call builders:
+  //
+  //   s_get_pc_i64   pair
+  //   s_add_nc_u64   pair, pair, literal64
+  //   s_swap_pc_i64  return_pair, pair
+  //
+  // Recognize only the exact in-place add with one 64-bit literal operand. A
+  // decoded mnemonic check plus the raw SOP2 register fields keeps this narrow:
+  // other 64-bit arithmetic still falls through to generic write invalidation.
+  if (arch != ROCJITSU_CODE_ARCH_GFX1250 || inst.mnemonic() != "s_add_nc_u64" ||
+      inst.size() != 3 * sizeof(uint32_t))
+    return false;
+
+  constexpr uint8_t kLiteral64Operand = 254;
+  const auto ssrc0 = static_cast<uint16_t>(word & 0xffu);
+  const auto ssrc1 = static_cast<uint16_t>((word >> 8) & 0xffu);
+  const auto sdst = static_cast<uint16_t>((word >> 16) & 0x7fu);
+  if (sdst != pair_lo || !((ssrc0 == pair_lo && ssrc1 == kLiteral64Operand) ||
+                           (ssrc1 == pair_lo && ssrc0 == kLiteral64Operand)))
+    return false;
+
+  const uint64_t literal = static_cast<uint64_t>(text_word_at(text, inst.src_loc() + 4)) |
+                           (static_cast<uint64_t>(text_word_at(text, inst.src_loc() + 8)) << 32);
+  // Scalar addition is modulo 2^64. Converting the local text offset to the
+  // same domain naturally handles negative two's-complement deltas; the final
+  // fixup range check rejects wrapped or non-local targets.
+  const uint64_t target = static_cast<uint64_t>(value.offset) + literal;
+  if (target > static_cast<uint64_t>(INT64_MAX))
+    return false;
+
+  value.offset = static_cast<int64_t>(target);
+  value.source_recovery_end_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+  return true;
+}
+
 [[nodiscard]] std::optional<IndirectCallFixup> fixup_for_value(const AnalysisContext &ctx,
                                                                size_t inst_index, uint16_t pair_lo,
                                                                const PcValue &value) {
@@ -1172,7 +1211,8 @@ bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state
         return true;
       }
     }
-    if (!apply_low_literal_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
+    if (!apply_gfx1250_wide_literal_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
+        !apply_low_literal_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
         !apply_high_carry_update(inst, word, ctx.text, ctx.arch, pair_lo, updated))
       continue;
 

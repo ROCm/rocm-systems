@@ -66,6 +66,7 @@ struct FunctionSymbolInfo {
   uint64_t text_file_offset = 0;
   uint64_t text_size = 0;
   uint64_t code_size = 0;
+  bool code_size_inferred_from_zero = false;
 };
 
 [[nodiscard]] std::optional<uint64_t> symbol_file_offset(const Elf64_Sym &sym,
@@ -272,6 +273,7 @@ struct MetadataCursor {
 struct KernelMetadata {
   std::optional<bool> uses_dynamic_stack;
   std::optional<uint16_t> sgpr_count;
+  std::optional<std::array<uint32_t, 3>> required_workgroup_size;
 };
 
 [[nodiscard]] std::unordered_map<std::string, KernelMetadata>
@@ -322,11 +324,28 @@ parse_kernel_metadata(std::span<const uint8_t> payload) {
             return {};
           }
           metadata.sgpr_count = static_cast<uint16_t>(count);
+        } else if (kernel_key == ".reqd_workgroup_size") {
+          uint32_t dimension_count = 0;
+          if (!read_metadata_collection_count(root, /*map=*/false, dimension_count) ||
+              dimension_count != 3u) {
+            return {};
+          }
+          std::array<uint32_t, 3> dimensions{};
+          for (uint32_t dimension = 0; dimension < dimension_count; ++dimension) {
+            uint64_t value = 0;
+            if (!read_metadata_unsigned(root, value) || value == 0u ||
+                value > std::numeric_limits<uint32_t>::max()) {
+              return {};
+            }
+            dimensions[dimension] = static_cast<uint32_t>(value);
+          }
+          metadata.required_workgroup_size = dimensions;
         } else if (!skip_metadata_value(root)) {
           return {};
         }
       }
-      if (name && (metadata.uses_dynamic_stack || metadata.sgpr_count))
+      if (name &&
+          (metadata.uses_dynamic_stack || metadata.sgpr_count || metadata.required_workgroup_size))
         result[*name] = metadata;
     }
     break;
@@ -618,7 +637,7 @@ void AmdGpuCodeObject::load_sections() {
         continue;
       }
 
-      if (elf_symbol_type(sym.st_info) == kElfSymbolTypeFunc && sym.st_size > 0 &&
+      if (elf_symbol_type(sym.st_info) == kElfSymbolTypeFunc &&
           sym.st_shndx < section_hdrs.size() && section_names[sym.st_shndx] == ".text") {
         const auto &text = section_hdrs[sym.st_shndx];
         if (sym.st_value >= text.sh_addr && sym.st_value - text.sh_addr <= text.sh_size) {
@@ -627,10 +646,32 @@ void AmdGpuCodeObject::load_sections() {
           info.text_file_offset = text.sh_offset;
           info.text_size = text.sh_size;
           info.code_size = sym.st_size;
-          function_symbols[sym_name] = info;
+          const auto existing = function_symbols.find(sym_name);
+          if (existing == function_symbols.end() ||
+              (existing->second.code_size == 0 && info.code_size != 0))
+            function_symbols[sym_name] = info;
         }
       }
     }
+  }
+
+  // Assembly-produced code objects may leave STT_FUNC sizes at zero. Infer a
+  // conservative range from the next distinct function entry in the same text
+  // section, or from the section end for the final function. This is the same
+  // bound linkers and disassemblers use when no explicit symbol size exists.
+  for (auto &[name, function] : function_symbols) {
+    (void)name;
+    if (function.code_size != 0 || function.entry_text_offset >= function.text_size)
+      continue;
+    uint64_t end = function.text_size;
+    for (const auto &[other_name, other] : function_symbols) {
+      (void)other_name;
+      if (other.text_file_offset == function.text_file_offset &&
+          other.entry_text_offset > function.entry_text_offset)
+        end = std::min(end, other.entry_text_offset);
+    }
+    function.code_size_inferred_from_zero = true;
+    function.code_size = end - function.entry_text_offset;
   }
 
   Elf64_Ehdr elf_header{};
@@ -654,6 +695,7 @@ void AmdGpuCodeObject::load_sections() {
       kernel.text_file_offset = func->second.text_file_offset;
       kernel.text_size = func->second.text_size;
       kernel.code_size = func->second.code_size;
+      kernel.code_size_inferred_from_zero = func->second.code_size_inferred_from_zero;
       kernel.has_text_range = true;
     } else {
       kernel.code_size = 0;
@@ -662,6 +704,7 @@ void AmdGpuCodeObject::load_sections() {
     if (auto metadata_entry = metadata.find(kernel_name); metadata_entry != metadata.end()) {
       kernel.uses_dynamic_stack = metadata_entry->second.uses_dynamic_stack;
       kernel.sgpr_count = metadata_entry->second.sgpr_count;
+      kernel.required_workgroup_size = metadata_entry->second.required_workgroup_size;
     }
     if (!kernel.uses_dynamic_stack) {
       auto dynamic_stack = dynamic_stack_symbols.find(kernel_name);
@@ -682,6 +725,7 @@ void AmdGpuCodeObject::load_sections() {
     function.text_file_offset = entry.second.text_file_offset;
     function.text_size = entry.second.text_size;
     function.code_size = entry.second.code_size;
+    function.code_size_inferred_from_zero = entry.second.code_size_inferred_from_zero;
     functions_.push_back(std::move(function));
   }
   std::sort(functions_.begin(), functions_.end(), [](const auto &lhs, const auto &rhs) {

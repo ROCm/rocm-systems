@@ -10,6 +10,7 @@
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/rj_code.h"
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -26,9 +27,11 @@ struct AmdGpuKernelInfo {
   uint64_t text_file_offset = 0;
   uint64_t text_size = 0;
   uint64_t code_size = 0;
+  bool code_size_inferred_from_zero = false;
   bool has_text_range = false;
   std::optional<bool> uses_dynamic_stack;
   std::optional<uint16_t> sgpr_count;
+  std::optional<std::array<uint32_t, 3>> required_workgroup_size;
 };
 
 struct AmdGpuFunctionInfo {
@@ -37,6 +40,7 @@ struct AmdGpuFunctionInfo {
   uint64_t text_file_offset = 0;
   uint64_t text_size = 0;
   uint64_t code_size = 0;
+  bool code_size_inferred_from_zero = false;
 };
 
 /// @brief Represents a single AMD GPU HSA ELF code object.

@@ -44,7 +44,8 @@ uint32_t first_word(const Instruction &inst) {
 }
 
 bool s_setpc_from_sreg(const Instruction &inst, uint32_t word, uint16_t ssrc0) {
-  if (inst.size() != sizeof(uint32_t) || inst.mnemonic() != "s_setpc_b64")
+  if (inst.size() != sizeof(uint32_t) ||
+      (inst.mnemonic() != "s_setpc_b64" && inst.mnemonic() != "s_set_pc_i64"))
     return false;
   return static_cast<uint16_t>(word & 0xffu) == ssrc0;
 }
