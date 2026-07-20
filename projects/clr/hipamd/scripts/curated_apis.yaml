@@ -1081,3 +1081,174 @@
 
 - api: hipUserObjectRetain
   args: [object, count]
+
+- api: hipDeviceSynchronize
+  args: []
+
+- api: hipChooseDeviceR0000
+  args: [device, properties]
+
+- api: hipChooseDeviceR0600
+  args: [device, prop]
+
+- api: hipDevResourceGenerateDesc
+  args: [phDesc, resources, nbResources]
+
+- api: hipDevSmResourceSplit
+  args: [result, nbGroups, input, remainder, flags, groupParams]
+
+- api: hipDevSmResourceSplitByCount
+  args: [result, nbGroups, input, remainder, flags, minCount]
+
+- api: hipDeviceCanAccessPeer
+  args: [canAccessPeer, deviceId, peerDeviceId]
+
+- api: hipDeviceComputeCapability
+  args: [major, minor, device]
+
+- api: hipDeviceDisablePeerAccess
+  args: [peerDeviceId]
+
+- api: hipDeviceEnablePeerAccess
+  args: [peerDeviceId, flags]
+
+- api: hipDeviceGet
+  args: [device, ordinal]
+
+- api: hipDeviceGetAttribute
+  args: [pi, attr, deviceId]
+
+- api: hipDeviceGetByPCIBusId
+  args: [device, pciBusId]
+  strings: [pciBusId]
+
+- api: hipDeviceGetCacheConfig
+  args: [cacheConfig]
+
+- api: hipDeviceGetDefaultMemPool
+  args: [mem_pool, device]
+
+- api: hipDeviceGetDevResource
+  args: [device, resource, type]
+
+- api: hipDeviceGetExecutionCtx
+  args: [ctx, device]
+
+- api: hipDeviceGetGraphMemAttribute
+  args: [device, attr, value]
+
+- api: hipDeviceGetLimit
+  args: [pValue, limit]
+
+- api: hipDeviceGetMemPool
+  args: [mem_pool, device]
+
+- api: hipDeviceGetName
+  args: [name, len, device]
+  strings: [name]
+
+- api: hipDeviceGetP2PAttribute
+  args: [value, attr, srcDevice, dstDevice]
+
+- api: hipDeviceGetPCIBusId
+  args: [pciBusId, len, device]
+  strings: [pciBusId]
+
+- api: hipDeviceGetSharedMemConfig
+  args: [pConfig]
+
+- api: hipDeviceGetStreamPriorityRange
+  args: [leastPriority, greatestPriority]
+
+- api: hipDeviceGetTexture1DLinearMaxWidth
+  args: [maxWidthInElements, fmtDesc, device]
+
+- api: hipDeviceGetUuid
+  args: [uuid, device]
+
+- api: hipDeviceGraphMemTrim
+  args: [device]
+
+- api: hipDevicePrimaryCtxGetState
+  args: [dev, flags, active]
+
+- api: hipDevicePrimaryCtxRelease
+  args: [dev]
+
+- api: hipDevicePrimaryCtxReset
+  args: [dev]
+
+- api: hipDevicePrimaryCtxRetain
+  args: [pctx, dev]
+
+- api: hipDevicePrimaryCtxSetFlags
+  args: [dev, flags]
+
+- api: hipDeviceReset
+  args: []
+
+- api: hipDeviceSetCacheConfig
+  args: [cacheConfig]
+
+- api: hipDeviceSetGraphMemAttribute
+  args: [device, attr, value]
+
+- api: hipDeviceSetLimit
+  args: [limit, value]
+
+- api: hipDeviceSetMemPool
+  args: [device, mem_pool]
+
+- api: hipDeviceSetSharedMemConfig
+  args: [config]
+
+- api: hipDeviceTotalMem
+  args: [bytes, device]
+
+- api: hipExecutionCtxDestroy
+  args: [ctx]
+
+- api: hipExecutionCtxGetDevResource
+  args: [ctx, resource, type]
+
+- api: hipExecutionCtxGetDevice
+  args: [device, ctx]
+
+- api: hipExecutionCtxGetId
+  args: [ctx, ctxId]
+
+- api: hipExecutionCtxRecordEvent
+  args: [ctx, event]
+
+- api: hipExecutionCtxStreamCreate
+  args: [stream, greenctx, flags, priority]
+
+- api: hipExecutionCtxSynchronize
+  args: [ctx]
+
+- api: hipExecutionCtxWaitEvent
+  args: [ctx, event]
+
+- api: hipGetDevice
+  args: [deviceId]
+
+- api: hipGetDeviceCount
+  args: [count]
+
+- api: hipGetDeviceFlags
+  args: [flags]
+
+- api: hipGetDevicePropertiesR0000
+  args: [prop, device]
+
+- api: hipGetDevicePropertiesR0600
+  args: [prop, deviceId]
+
+- api: hipSetDevice
+  args: [deviceId]
+
+- api: hipSetDeviceFlags
+  args: [flags]
+
+- api: hipSetValidDevices
+  args: [device_arr, len]

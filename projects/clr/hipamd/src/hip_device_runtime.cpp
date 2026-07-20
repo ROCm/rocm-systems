@@ -135,8 +135,15 @@ hipError_t ihipChooseDevice(int* device, const DeviceProp* properties) {
 }
 
 hipError_t hipChooseDeviceR0600(int* device, const hipDeviceProp_tR0600* properties) {
+  auto const __rocm_in_device = device;
+  auto const __rocm_in_prop = properties;
+  rocm_trace_emit_hipChooseDeviceR0600_enter(
+      (const void*)(uintptr_t)(__rocm_in_device),
+      (const void*)(uintptr_t)(__rocm_in_prop)); /* __ROCM_CURATED__: hipChooseDeviceR0600 */
   HIP_INIT_API(hipChooseDeviceR0600, device, properties);
-  HIP_RETURN(ihipChooseDevice(device, properties));
+  const hipError_t __rocm_status = ihipChooseDevice(device, properties);
+  rocm_trace_emit_hipChooseDeviceR0600_exit(__rocm_status);
+  HIP_RETURN(__rocm_status);
 }
 
 hipError_t hipChooseDeviceR0000(int* device, const hipDeviceProp_tR0000* properties) {

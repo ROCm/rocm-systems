@@ -2,7 +2,7 @@
  * Do not edit by hand — regenerate instead (see command below).
  *
  * SHA256(curated_apis.yaml) at generation:
- * f0a4b94c6de44532820e4ef54369c1cfb66f5233e07d9b99e4d9a0ceb7b7d46c
+ * 56bab68515ebcbe64e15fd69c58305e12b0f94cc334cf5701433d0a138850e12
  *
  * Per-API typed emit helpers for curated parameter capture. Every
  * helper takes (<captured-args...>, <status_type> status); status is
@@ -6403,6 +6403,906 @@ static inline void rocm_trace_emit_hipUserObjectRetain_exit(hipError_t status) {
   }
 }
 
+static inline void rocm_trace_emit_hipDeviceSynchronize_enter(void) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceSynchronize)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceSynchronize, (int32_t)0, 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceSynchronize_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceSynchronize)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceSynchronize, (int32_t)1, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipChooseDeviceR0000_enter(const void* device,
+                                                              const void* properties) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipChooseDeviceR0000)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipChooseDeviceR0000, (int32_t)0,
+                            (uint64_t)(uintptr_t)(device), (uint64_t)(uintptr_t)(properties), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipChooseDeviceR0000_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipChooseDeviceR0000)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipChooseDeviceR0000, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipChooseDeviceR0600_enter(const void* device,
+                                                              const void* prop) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipChooseDeviceR0600)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipChooseDeviceR0600, (int32_t)0,
+                            (uint64_t)(uintptr_t)(device), (uint64_t)(uintptr_t)(prop), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipChooseDeviceR0600_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipChooseDeviceR0600)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipChooseDeviceR0600, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDevResourceGenerateDesc_enter(const void* phDesc,
+                                                                    const void* resources,
+                                                                    uint32_t nbResources) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDevResourceGenerateDesc)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDevResourceGenerateDesc, (int32_t)0,
+                            (uint64_t)(uintptr_t)(phDesc), (uint64_t)(uintptr_t)(resources),
+                            (uint32_t)(nbResources), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDevResourceGenerateDesc_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDevResourceGenerateDesc)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDevResourceGenerateDesc, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDevSmResourceSplit_enter(const void* result,
+                                                               uint32_t nbGroups, const void* input,
+                                                               const void* remainder,
+                                                               uint32_t flags,
+                                                               const void* groupParams) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDevSmResourceSplit)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDevSmResourceSplit, (int32_t)0,
+                            (uint64_t)(uintptr_t)(result), (uint32_t)(nbGroups),
+                            (uint64_t)(uintptr_t)(input), (uint64_t)(uintptr_t)(remainder),
+                            (uint32_t)(flags), (uint64_t)(uintptr_t)(groupParams), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDevSmResourceSplit_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDevSmResourceSplit)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDevSmResourceSplit, (int32_t)1, 0, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDevSmResourceSplitByCount_enter(
+    const void* result, const void* nbGroups, const void* input, const void* remainder,
+    uint32_t flags, uint32_t minCount) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDevSmResourceSplitByCount)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDevSmResourceSplitByCount, (int32_t)0,
+                            (uint64_t)(uintptr_t)(result), (uint64_t)(uintptr_t)(nbGroups),
+                            (uint64_t)(uintptr_t)(input), (uint64_t)(uintptr_t)(remainder),
+                            (uint32_t)(flags), (uint32_t)(minCount), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDevSmResourceSplitByCount_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDevSmResourceSplitByCount)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDevSmResourceSplitByCount, (int32_t)1, 0, 0, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceCanAccessPeer_enter(const void* canAccessPeer,
+                                                                int32_t deviceId,
+                                                                int32_t peerDeviceId) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceCanAccessPeer)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceCanAccessPeer, (int32_t)0,
+                            (uint64_t)(uintptr_t)(canAccessPeer), (int32_t)(deviceId),
+                            (int32_t)(peerDeviceId), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceCanAccessPeer_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceCanAccessPeer)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceCanAccessPeer, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceComputeCapability_enter(const void* major,
+                                                                    const void* minor,
+                                                                    int32_t device) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceComputeCapability)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceComputeCapability, (int32_t)0,
+                            (uint64_t)(uintptr_t)(major), (uint64_t)(uintptr_t)(minor),
+                            (int32_t)(device), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceComputeCapability_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceComputeCapability)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceComputeCapability, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceDisablePeerAccess_enter(int32_t peerDeviceId) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceDisablePeerAccess)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceDisablePeerAccess, (int32_t)0,
+                            (int32_t)(peerDeviceId), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceDisablePeerAccess_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceDisablePeerAccess)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceDisablePeerAccess, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceEnablePeerAccess_enter(int32_t peerDeviceId,
+                                                                   uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceEnablePeerAccess)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceEnablePeerAccess, (int32_t)0,
+                            (int32_t)(peerDeviceId), (uint32_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceEnablePeerAccess_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceEnablePeerAccess)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceEnablePeerAccess, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGet_enter(const void* device, int32_t ordinal) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGet)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGet, (int32_t)0, (uint64_t)(uintptr_t)(device),
+                            (int32_t)(ordinal), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGet_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGet)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGet, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetAttribute_enter(const void* pi, int32_t attr,
+                                                               int32_t deviceId) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetAttribute)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetAttribute, (int32_t)0, (uint64_t)(uintptr_t)(pi),
+                            (int32_t)(attr), (int32_t)(deviceId), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetAttribute_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetAttribute)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetAttribute, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetByPCIBusId_enter(const void* device,
+                                                                const char* pciBusId) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetByPCIBusId)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetByPCIBusId, (int32_t)0,
+                            (uint64_t)(uintptr_t)(device), (pciBusId ? pciBusId : ""), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetByPCIBusId_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetByPCIBusId)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetByPCIBusId, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetCacheConfig_enter(const void* cacheConfig) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetCacheConfig)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetCacheConfig, (int32_t)0,
+                            (uint64_t)(uintptr_t)(cacheConfig), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetCacheConfig_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetCacheConfig)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetCacheConfig, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetDefaultMemPool_enter(const void* mem_pool,
+                                                                    int32_t device) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetDefaultMemPool)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetDefaultMemPool, (int32_t)0,
+                            (uint64_t)(uintptr_t)(mem_pool), (int32_t)(device), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetDefaultMemPool_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetDefaultMemPool)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetDefaultMemPool, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetDevResource_enter(int32_t device,
+                                                                 const void* resource,
+                                                                 int32_t type) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetDevResource)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetDevResource, (int32_t)0, (int32_t)(device),
+                            (uint64_t)(uintptr_t)(resource), (int32_t)(type), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetDevResource_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetDevResource)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetDevResource, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetExecutionCtx_enter(const void* ctx, int32_t device) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetExecutionCtx)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetExecutionCtx, (int32_t)0,
+                            (uint64_t)(uintptr_t)(ctx), (int32_t)(device), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetExecutionCtx_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetExecutionCtx)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetExecutionCtx, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetGraphMemAttribute_enter(int32_t device, int32_t attr,
+                                                                       const void* value) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetGraphMemAttribute)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetGraphMemAttribute, (int32_t)0, (int32_t)(device),
+                            (int32_t)(attr), (uint64_t)(uintptr_t)(value), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetGraphMemAttribute_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetGraphMemAttribute)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetGraphMemAttribute, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetLimit_enter(const void* pValue, int32_t limit) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetLimit)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetLimit, (int32_t)0, (uint64_t)(uintptr_t)(pValue),
+                            (int32_t)(limit), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetLimit_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetLimit)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetLimit, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetMemPool_enter(const void* mem_pool, int32_t device) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetMemPool)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetMemPool, (int32_t)0,
+                            (uint64_t)(uintptr_t)(mem_pool), (int32_t)(device), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetMemPool_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetMemPool)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetMemPool, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetName_enter(const char* name, int32_t len,
+                                                          int32_t device) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetName)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetName, (int32_t)0, (name ? name : ""),
+                            (int32_t)(len), (int32_t)(device), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetName_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetName)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetName, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetP2PAttribute_enter(const void* value, int32_t attr,
+                                                                  int32_t srcDevice,
+                                                                  int32_t dstDevice) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetP2PAttribute)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetP2PAttribute, (int32_t)0,
+                            (uint64_t)(uintptr_t)(value), (int32_t)(attr), (int32_t)(srcDevice),
+                            (int32_t)(dstDevice), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetP2PAttribute_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetP2PAttribute)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetP2PAttribute, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetPCIBusId_enter(const char* pciBusId, int32_t len,
+                                                              int32_t device) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetPCIBusId)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetPCIBusId, (int32_t)0, (pciBusId ? pciBusId : ""),
+                            (int32_t)(len), (int32_t)(device), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetPCIBusId_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetPCIBusId)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetPCIBusId, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetSharedMemConfig_enter(const void* pConfig) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetSharedMemConfig)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetSharedMemConfig, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pConfig), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetSharedMemConfig_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetSharedMemConfig)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetSharedMemConfig, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetStreamPriorityRange_enter(
+    const void* leastPriority, const void* greatestPriority) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetStreamPriorityRange)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetStreamPriorityRange, (int32_t)0,
+                            (uint64_t)(uintptr_t)(leastPriority),
+                            (uint64_t)(uintptr_t)(greatestPriority), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetStreamPriorityRange_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetStreamPriorityRange)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetStreamPriorityRange, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetTexture1DLinearMaxWidth_enter(
+    const void* maxWidthInElements, const void* fmtDesc, int32_t device) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetTexture1DLinearMaxWidth)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetTexture1DLinearMaxWidth, (int32_t)0,
+                            (uint64_t)(uintptr_t)(maxWidthInElements),
+                            (uint64_t)(uintptr_t)(fmtDesc), (int32_t)(device), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetTexture1DLinearMaxWidth_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetTexture1DLinearMaxWidth)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetTexture1DLinearMaxWidth, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetUuid_enter(const void* uuid, int32_t device) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetUuid)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetUuid, (int32_t)0, (uint64_t)(uintptr_t)(uuid),
+                            (int32_t)(device), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetUuid_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetUuid)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetUuid, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGraphMemTrim_enter(int32_t device) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGraphMemTrim)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGraphMemTrim, (int32_t)0, (int32_t)(device), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGraphMemTrim_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGraphMemTrim)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGraphMemTrim, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDevicePrimaryCtxGetState_enter(int32_t dev, const void* flags,
+                                                                     const void* active) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDevicePrimaryCtxGetState)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDevicePrimaryCtxGetState, (int32_t)0, (int32_t)(dev),
+                            (uint64_t)(uintptr_t)(flags), (uint64_t)(uintptr_t)(active), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDevicePrimaryCtxGetState_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDevicePrimaryCtxGetState)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDevicePrimaryCtxGetState, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDevicePrimaryCtxRelease_enter(int32_t dev) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDevicePrimaryCtxRelease)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDevicePrimaryCtxRelease, (int32_t)0, (int32_t)(dev), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDevicePrimaryCtxRelease_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDevicePrimaryCtxRelease)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDevicePrimaryCtxRelease, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDevicePrimaryCtxReset_enter(int32_t dev) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDevicePrimaryCtxReset)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDevicePrimaryCtxReset, (int32_t)0, (int32_t)(dev), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDevicePrimaryCtxReset_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDevicePrimaryCtxReset)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDevicePrimaryCtxReset, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDevicePrimaryCtxRetain_enter(const void* pctx, int32_t dev) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDevicePrimaryCtxRetain)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDevicePrimaryCtxRetain, (int32_t)0,
+                            (uint64_t)(uintptr_t)(pctx), (int32_t)(dev), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDevicePrimaryCtxRetain_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDevicePrimaryCtxRetain)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDevicePrimaryCtxRetain, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDevicePrimaryCtxSetFlags_enter(int32_t dev, uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDevicePrimaryCtxSetFlags)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDevicePrimaryCtxSetFlags, (int32_t)0, (int32_t)(dev),
+                            (uint32_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDevicePrimaryCtxSetFlags_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDevicePrimaryCtxSetFlags)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDevicePrimaryCtxSetFlags, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceReset_enter(void) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceReset)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceReset, (int32_t)0, 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceReset_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceReset)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceReset, (int32_t)1, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceSetCacheConfig_enter(int32_t cacheConfig) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceSetCacheConfig)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceSetCacheConfig, (int32_t)0, (int32_t)(cacheConfig),
+                            0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceSetCacheConfig_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceSetCacheConfig)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceSetCacheConfig, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceSetGraphMemAttribute_enter(int32_t device, int32_t attr,
+                                                                       const void* value) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceSetGraphMemAttribute)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceSetGraphMemAttribute, (int32_t)0, (int32_t)(device),
+                            (int32_t)(attr), (uint64_t)(uintptr_t)(value), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceSetGraphMemAttribute_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceSetGraphMemAttribute)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceSetGraphMemAttribute, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceSetLimit_enter(int32_t limit, size_t value) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceSetLimit)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceSetLimit, (int32_t)0, (int32_t)(limit),
+                            (uint64_t)(value), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceSetLimit_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceSetLimit)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceSetLimit, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceSetMemPool_enter(int32_t device, const void* mem_pool) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceSetMemPool)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceSetMemPool, (int32_t)0, (int32_t)(device),
+                            (uint64_t)(uintptr_t)(mem_pool), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceSetMemPool_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceSetMemPool)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceSetMemPool, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceSetSharedMemConfig_enter(int32_t config) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceSetSharedMemConfig)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceSetSharedMemConfig, (int32_t)0, (int32_t)(config),
+                            0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceSetSharedMemConfig_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceSetSharedMemConfig)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceSetSharedMemConfig, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceTotalMem_enter(const void* bytes, int32_t device) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceTotalMem)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceTotalMem, (int32_t)0, (uint64_t)(uintptr_t)(bytes),
+                            (int32_t)(device), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceTotalMem_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceTotalMem)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceTotalMem, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipExecutionCtxDestroy_enter(const void* ctx) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExecutionCtxDestroy)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExecutionCtxDestroy, (int32_t)0,
+                            (uint64_t)(uintptr_t)(ctx), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipExecutionCtxDestroy_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExecutionCtxDestroy)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExecutionCtxDestroy, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipExecutionCtxGetDevResource_enter(const void* ctx,
+                                                                       const void* resource,
+                                                                       int32_t type) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExecutionCtxGetDevResource)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExecutionCtxGetDevResource, (int32_t)0,
+                            (uint64_t)(uintptr_t)(ctx), (uint64_t)(uintptr_t)(resource),
+                            (int32_t)(type), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipExecutionCtxGetDevResource_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExecutionCtxGetDevResource)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExecutionCtxGetDevResource, (int32_t)1, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipExecutionCtxGetDevice_enter(const void* device,
+                                                                  const void* ctx) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExecutionCtxGetDevice)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExecutionCtxGetDevice, (int32_t)0,
+                            (uint64_t)(uintptr_t)(device), (uint64_t)(uintptr_t)(ctx), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipExecutionCtxGetDevice_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExecutionCtxGetDevice)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExecutionCtxGetDevice, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipExecutionCtxGetId_enter(const void* ctx, const void* ctxId) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExecutionCtxGetId)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExecutionCtxGetId, (int32_t)0, (uint64_t)(uintptr_t)(ctx),
+                            (uint64_t)(uintptr_t)(ctxId), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipExecutionCtxGetId_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExecutionCtxGetId)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExecutionCtxGetId, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipExecutionCtxRecordEvent_enter(const void* ctx,
+                                                                    uint64_t event) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExecutionCtxRecordEvent)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExecutionCtxRecordEvent, (int32_t)0,
+                            (uint64_t)(uintptr_t)(ctx), (uint64_t)(uintptr_t)(event), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipExecutionCtxRecordEvent_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExecutionCtxRecordEvent)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExecutionCtxRecordEvent, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipExecutionCtxStreamCreate_enter(const void* stream,
+                                                                     const void* greenctx,
+                                                                     uint32_t flags,
+                                                                     int32_t priority) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExecutionCtxStreamCreate)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExecutionCtxStreamCreate, (int32_t)0,
+                            (uint64_t)(uintptr_t)(stream), (uint64_t)(uintptr_t)(greenctx),
+                            (uint32_t)(flags), (int32_t)(priority), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipExecutionCtxStreamCreate_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExecutionCtxStreamCreate)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExecutionCtxStreamCreate, (int32_t)1, 0, 0, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipExecutionCtxSynchronize_enter(const void* ctx) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExecutionCtxSynchronize)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExecutionCtxSynchronize, (int32_t)0,
+                            (uint64_t)(uintptr_t)(ctx), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipExecutionCtxSynchronize_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExecutionCtxSynchronize)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExecutionCtxSynchronize, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipExecutionCtxWaitEvent_enter(const void* ctx, uint64_t event) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExecutionCtxWaitEvent)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExecutionCtxWaitEvent, (int32_t)0,
+                            (uint64_t)(uintptr_t)(ctx), (uint64_t)(uintptr_t)(event), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipExecutionCtxWaitEvent_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipExecutionCtxWaitEvent)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipExecutionCtxWaitEvent, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetDevice_enter(const void* deviceId) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetDevice)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetDevice, (int32_t)0, (uint64_t)(uintptr_t)(deviceId), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetDevice_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetDevice)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetDevice, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetDeviceCount_enter(const void* count) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetDeviceCount)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetDeviceCount, (int32_t)0, (uint64_t)(uintptr_t)(count),
+                            0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetDeviceCount_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetDeviceCount)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetDeviceCount, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetDeviceFlags_enter(const void* flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetDeviceFlags)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetDeviceFlags, (int32_t)0, (uint64_t)(uintptr_t)(flags),
+                            0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetDeviceFlags_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetDeviceFlags)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetDeviceFlags, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetDevicePropertiesR0000_enter(const void* prop,
+                                                                     int32_t device) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetDevicePropertiesR0000)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetDevicePropertiesR0000, (int32_t)0,
+                            (uint64_t)(uintptr_t)(prop), (int32_t)(device), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetDevicePropertiesR0000_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetDevicePropertiesR0000)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetDevicePropertiesR0000, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetDevicePropertiesR0600_enter(const void* prop,
+                                                                     int32_t deviceId) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetDevicePropertiesR0600)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetDevicePropertiesR0600, (int32_t)0,
+                            (uint64_t)(uintptr_t)(prop), (int32_t)(deviceId), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipGetDevicePropertiesR0600_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipGetDevicePropertiesR0600)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipGetDevicePropertiesR0600, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipSetDevice_enter(int32_t deviceId) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipSetDevice)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipSetDevice, (int32_t)0, (int32_t)(deviceId), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipSetDevice_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipSetDevice)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipSetDevice, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipSetDeviceFlags_enter(uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipSetDeviceFlags)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipSetDeviceFlags, (int32_t)0, (uint32_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipSetDeviceFlags_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipSetDeviceFlags)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipSetDeviceFlags, (int32_t)1, 0, (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipSetValidDevices_enter(const void* device_arr, int32_t len) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipSetValidDevices)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipSetValidDevices, (int32_t)0,
+                            (uint64_t)(uintptr_t)(device_arr), (int32_t)(len), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipSetValidDevices_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipSetValidDevices)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipSetValidDevices, (int32_t)1, 0, 0, (int32_t)status);
+  }
+}
+
 
 #else /* HIP_ENABLE_LTTNG_UST not defined — all helpers are no-ops */
 
@@ -7340,6 +8240,133 @@ static inline void rocm_trace_emit_hipUserObjectRelease_enter(const void*, uint3
 static inline void rocm_trace_emit_hipUserObjectRelease_exit(hipError_t) {}
 static inline void rocm_trace_emit_hipUserObjectRetain_enter(const void*, uint32_t) {}
 static inline void rocm_trace_emit_hipUserObjectRetain_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceSynchronize_enter() {}
+static inline void rocm_trace_emit_hipDeviceSynchronize_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipChooseDeviceR0000_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipChooseDeviceR0000_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipChooseDeviceR0600_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipChooseDeviceR0600_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDevResourceGenerateDesc_enter(const void*, const void*,
+                                                                    uint32_t) {}
+static inline void rocm_trace_emit_hipDevResourceGenerateDesc_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDevSmResourceSplit_enter(const void*, uint32_t, const void*,
+                                                               const void*, uint32_t, const void*) {
+}
+static inline void rocm_trace_emit_hipDevSmResourceSplit_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDevSmResourceSplitByCount_enter(const void*, const void*,
+                                                                      const void*, const void*,
+                                                                      uint32_t, uint32_t) {}
+static inline void rocm_trace_emit_hipDevSmResourceSplitByCount_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceCanAccessPeer_enter(const void*, int32_t, int32_t) {}
+static inline void rocm_trace_emit_hipDeviceCanAccessPeer_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceComputeCapability_enter(const void*, const void*,
+                                                                    int32_t) {}
+static inline void rocm_trace_emit_hipDeviceComputeCapability_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceDisablePeerAccess_enter(int32_t) {}
+static inline void rocm_trace_emit_hipDeviceDisablePeerAccess_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceEnablePeerAccess_enter(int32_t, uint32_t) {}
+static inline void rocm_trace_emit_hipDeviceEnablePeerAccess_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceGet_enter(const void*, int32_t) {}
+static inline void rocm_trace_emit_hipDeviceGet_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceGetAttribute_enter(const void*, int32_t, int32_t) {}
+static inline void rocm_trace_emit_hipDeviceGetAttribute_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceGetByPCIBusId_enter(const void*, const char*) {}
+static inline void rocm_trace_emit_hipDeviceGetByPCIBusId_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceGetCacheConfig_enter(const void*) {}
+static inline void rocm_trace_emit_hipDeviceGetCacheConfig_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceGetDefaultMemPool_enter(const void*, int32_t) {}
+static inline void rocm_trace_emit_hipDeviceGetDefaultMemPool_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceGetDevResource_enter(int32_t, const void*, int32_t) {}
+static inline void rocm_trace_emit_hipDeviceGetDevResource_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceGetExecutionCtx_enter(const void*, int32_t) {}
+static inline void rocm_trace_emit_hipDeviceGetExecutionCtx_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceGetGraphMemAttribute_enter(int32_t, int32_t,
+                                                                       const void*) {}
+static inline void rocm_trace_emit_hipDeviceGetGraphMemAttribute_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceGetLimit_enter(const void*, int32_t) {}
+static inline void rocm_trace_emit_hipDeviceGetLimit_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceGetMemPool_enter(const void*, int32_t) {}
+static inline void rocm_trace_emit_hipDeviceGetMemPool_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceGetName_enter(const char*, int32_t, int32_t) {}
+static inline void rocm_trace_emit_hipDeviceGetName_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceGetP2PAttribute_enter(const void*, int32_t, int32_t,
+                                                                  int32_t) {}
+static inline void rocm_trace_emit_hipDeviceGetP2PAttribute_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceGetPCIBusId_enter(const char*, int32_t, int32_t) {}
+static inline void rocm_trace_emit_hipDeviceGetPCIBusId_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceGetSharedMemConfig_enter(const void*) {}
+static inline void rocm_trace_emit_hipDeviceGetSharedMemConfig_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceGetStreamPriorityRange_enter(const void*, const void*) {
+}
+static inline void rocm_trace_emit_hipDeviceGetStreamPriorityRange_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceGetTexture1DLinearMaxWidth_enter(const void*,
+                                                                             const void*, int32_t) {
+}
+static inline void rocm_trace_emit_hipDeviceGetTexture1DLinearMaxWidth_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceGetUuid_enter(const void*, int32_t) {}
+static inline void rocm_trace_emit_hipDeviceGetUuid_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceGraphMemTrim_enter(int32_t) {}
+static inline void rocm_trace_emit_hipDeviceGraphMemTrim_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDevicePrimaryCtxGetState_enter(int32_t, const void*,
+                                                                     const void*) {}
+static inline void rocm_trace_emit_hipDevicePrimaryCtxGetState_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDevicePrimaryCtxRelease_enter(int32_t) {}
+static inline void rocm_trace_emit_hipDevicePrimaryCtxRelease_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDevicePrimaryCtxReset_enter(int32_t) {}
+static inline void rocm_trace_emit_hipDevicePrimaryCtxReset_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDevicePrimaryCtxRetain_enter(const void*, int32_t) {}
+static inline void rocm_trace_emit_hipDevicePrimaryCtxRetain_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDevicePrimaryCtxSetFlags_enter(int32_t, uint32_t) {}
+static inline void rocm_trace_emit_hipDevicePrimaryCtxSetFlags_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceReset_enter() {}
+static inline void rocm_trace_emit_hipDeviceReset_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceSetCacheConfig_enter(int32_t) {}
+static inline void rocm_trace_emit_hipDeviceSetCacheConfig_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceSetGraphMemAttribute_enter(int32_t, int32_t,
+                                                                       const void*) {}
+static inline void rocm_trace_emit_hipDeviceSetGraphMemAttribute_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceSetLimit_enter(int32_t, size_t) {}
+static inline void rocm_trace_emit_hipDeviceSetLimit_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceSetMemPool_enter(int32_t, const void*) {}
+static inline void rocm_trace_emit_hipDeviceSetMemPool_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceSetSharedMemConfig_enter(int32_t) {}
+static inline void rocm_trace_emit_hipDeviceSetSharedMemConfig_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceTotalMem_enter(const void*, int32_t) {}
+static inline void rocm_trace_emit_hipDeviceTotalMem_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipExecutionCtxDestroy_enter(const void*) {}
+static inline void rocm_trace_emit_hipExecutionCtxDestroy_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipExecutionCtxGetDevResource_enter(const void*, const void*,
+                                                                       int32_t) {}
+static inline void rocm_trace_emit_hipExecutionCtxGetDevResource_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipExecutionCtxGetDevice_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipExecutionCtxGetDevice_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipExecutionCtxGetId_enter(const void*, const void*) {}
+static inline void rocm_trace_emit_hipExecutionCtxGetId_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipExecutionCtxRecordEvent_enter(const void*, uint64_t) {}
+static inline void rocm_trace_emit_hipExecutionCtxRecordEvent_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipExecutionCtxStreamCreate_enter(const void*, const void*,
+                                                                     uint32_t, int32_t) {}
+static inline void rocm_trace_emit_hipExecutionCtxStreamCreate_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipExecutionCtxSynchronize_enter(const void*) {}
+static inline void rocm_trace_emit_hipExecutionCtxSynchronize_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipExecutionCtxWaitEvent_enter(const void*, uint64_t) {}
+static inline void rocm_trace_emit_hipExecutionCtxWaitEvent_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGetDevice_enter(const void*) {}
+static inline void rocm_trace_emit_hipGetDevice_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGetDeviceCount_enter(const void*) {}
+static inline void rocm_trace_emit_hipGetDeviceCount_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGetDeviceFlags_enter(const void*) {}
+static inline void rocm_trace_emit_hipGetDeviceFlags_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGetDevicePropertiesR0000_enter(const void*, int32_t) {}
+static inline void rocm_trace_emit_hipGetDevicePropertiesR0000_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipGetDevicePropertiesR0600_enter(const void*, int32_t) {}
+static inline void rocm_trace_emit_hipGetDevicePropertiesR0600_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipSetDevice_enter(int32_t) {}
+static inline void rocm_trace_emit_hipSetDevice_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipSetDeviceFlags_enter(uint32_t) {}
+static inline void rocm_trace_emit_hipSetDeviceFlags_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipSetValidDevices_enter(const void*, int32_t) {}
+static inline void rocm_trace_emit_hipSetValidDevices_exit(hipError_t) {}
 
 #endif /* HIP_ENABLE_LTTNG_UST */
 
