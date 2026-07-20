@@ -502,26 +502,17 @@ void TestHotSwapQueueTypeSupport() {
 }
 
 void TestHotSwapEnvFlagParsing() {
-  constexpr const char* kName = "HSA_HOTSWAP_UNIT_TEST_FLAG";
-  unsetenv(kName);
-  EXPECT_FALSE(rocr::hotswap::IsEnvFlagEnabled(kName));
+  EXPECT_FALSE(rocr::hotswap::IsEnvFlagValueEnabled(""));
+  EXPECT_FALSE(rocr::hotswap::IsEnvFlagValueEnabled("0"));
+  EXPECT_FALSE(rocr::hotswap::IsEnvFlagValueEnabled("off"));
+  EXPECT_FALSE(rocr::hotswap::IsEnvFlagValueEnabled("FALSE"));
+  EXPECT_FALSE(rocr::hotswap::IsEnvFlagValueEnabled("no"));
+  EXPECT_FALSE(rocr::hotswap::IsEnvFlagValueEnabled("n"));
+  EXPECT_FALSE(rocr::hotswap::IsEnvFlagValueEnabled("f"));
 
-  setenv(kName, "", 1);
-  EXPECT_FALSE(rocr::hotswap::IsEnvFlagEnabled(kName));
-  setenv(kName, "0", 1);
-  EXPECT_FALSE(rocr::hotswap::IsEnvFlagEnabled(kName));
-  setenv(kName, "off", 1);
-  EXPECT_FALSE(rocr::hotswap::IsEnvFlagEnabled(kName));
-  setenv(kName, "FALSE", 1);
-  EXPECT_FALSE(rocr::hotswap::IsEnvFlagEnabled(kName));
-  setenv(kName, "no", 1);
-  EXPECT_FALSE(rocr::hotswap::IsEnvFlagEnabled(kName));
-
-  setenv(kName, "1", 1);
-  EXPECT_TRUE(rocr::hotswap::IsEnvFlagEnabled(kName));
-  setenv(kName, "gfx1250", 1);
-  EXPECT_TRUE(rocr::hotswap::IsEnvFlagEnabled(kName));
-  unsetenv(kName);
+  EXPECT_TRUE(rocr::hotswap::IsEnvFlagValueEnabled("1"));
+  EXPECT_TRUE(rocr::hotswap::IsEnvFlagValueEnabled("true"));
+  EXPECT_TRUE(rocr::hotswap::IsEnvFlagValueEnabled("gfx1250"));
 }
 
 }  // namespace
