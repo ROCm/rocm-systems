@@ -18,7 +18,7 @@ mod types;
 
 pub use communicator::{AsyncStatus, Communicator, CommunicatorState};
 pub use config::{Config, CtaPolicy, GraphUsageMode};
-pub use device::{DeviceCommRequirements, DeviceCommunicator, GinConnectionType};
+pub use device::{DeviceCommRequirements, DeviceCommunicator, GinConnectionType, GinType};
 pub use error::{Error, Result, Status};
 pub use group::Group;
 pub use memory::{NcclMemory, Window, WindowFlags};

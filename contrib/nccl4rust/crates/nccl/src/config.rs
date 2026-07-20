@@ -65,6 +65,8 @@ impl Default for Config {
                 maxP2pPeers: undefined,
                 graphStreamOrdering: undefined,
                 launchOrderImplicit: undefined,
+                numRmaSig: undefined,
+                rmaEagerInit: undefined,
             },
             net_name: None,
             comm_name: None,
@@ -107,6 +109,8 @@ impl std::fmt::Debug for Config {
             .field("max_p2p_peers", &self.raw.maxP2pPeers)
             .field("graph_stream_ordering", &self.raw.graphStreamOrdering)
             .field("launch_order_implicit", &self.raw.launchOrderImplicit)
+            .field("rma_signals", &self.raw.numRmaSig)
+            .field("rma_eager_init", &self.raw.rmaEagerInit)
             .finish()
     }
 }
@@ -235,6 +239,16 @@ impl Config {
         self.raw.launchOrderImplicit = i32::from(enabled);
         self
     }
+
+    pub fn rma_signals(mut self, count: i32) -> Self {
+        self.raw.numRmaSig = count;
+        self
+    }
+
+    pub fn rma_eager_init(mut self, enabled: bool) -> Self {
+        self.raw.rmaEagerInit = i32::from(enabled);
+        self
+    }
 }
 
 #[cfg(test)]
@@ -269,6 +283,8 @@ mod tests {
         assert_eq!(raw.maxP2pPeers, undefined);
         assert_eq!(raw.graphStreamOrdering, undefined);
         assert_eq!(raw.launchOrderImplicit, undefined);
+        assert_eq!(raw.numRmaSig, undefined);
+        assert_eq!(raw.rmaEagerInit, undefined);
     }
 
     #[test]
@@ -277,6 +293,8 @@ mod tests {
             .blocking(false)
             .min_ctas(2)
             .max_ctas(8)
+            .rma_signals(3)
+            .rma_eager_init(true)
             .try_net_name("IB")
             .unwrap()
             .try_comm_name("pipeline")
@@ -286,6 +304,8 @@ mod tests {
         assert_eq!(config.raw.blocking, 0);
         assert_eq!(config.raw.minCTAs, 2);
         assert_eq!(config.raw.maxCTAs, 8);
+        assert_eq!(config.raw.numRmaSig, 3);
+        assert_eq!(config.raw.rmaEagerInit, 1);
         assert!(!config.raw.netName.is_null());
         assert!(!clone.raw.netName.is_null());
         assert_ne!(config.raw.netName, clone.raw.netName);

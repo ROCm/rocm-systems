@@ -71,7 +71,7 @@ coverage are follow-on work.
 ## Requirements
 
 - Matching NCCL 2.31 headers and runtime. This prototype is developed against
-  NCCL 2.31.0a7 and directly initializes fields that differ in earlier NCCL
+  NCCL 2.31.0 and directly initializes fields that differ in earlier NCCL
   device-API versions.
 - CUDA Toolkit 12.2 or newer for the Hopper flow. The optional `sm_100+`
   Blackwell flow requires CUDA 12.8 or newer; current checks use CUDA 13.2.
@@ -217,6 +217,10 @@ Kernels construct `nccl_device::DevComm` from a pointer to that device copy.
 Using a pointer rather than a by-value Rust mirror keeps the versioned C struct
 layout out of the kernel argument ABI.
 
+The NCCL runtime-version device-communicator mode is intentionally not exposed
+yet. It requires querying and allocating a runtime-selected image size, while
+the current wrapper owns the compile-time `ncclDevComm_t` representation.
+
 Likewise, nccl4rust does not select devices, create CUDA contexts, create
 streams, copy memory, or load modules. Those remain responsibilities of the
 application's CUDA host library. Unlike NVSHMEM's module API, NCCL device
@@ -253,7 +257,7 @@ device-communicator requirements. They pass against matching freshly built
 NCCL 2.31 headers and `libnccl.so`, including a loaded-library version check.
 
 The runtime smoke passes repeatedly on two directly connected H100 GPUs with
-NCCL 2.31.0a7 and CUDA 13.2. Both host and device reductions return `3.0` on
+NCCL 2.31.0 and CUDA 13.2. Both host and device reductions return `3.0` on
 both ranks; the kernels also validate scalar queries, world/LSA/rail teams and
 rank translation, local/LSA/world/team self-pointer mappings at two offsets,
 two reused LSA barrier epochs, a 17-element non-16-byte-aligned reduction tail,

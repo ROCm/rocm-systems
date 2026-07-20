@@ -207,19 +207,19 @@ fn rank_to_world_device(
 
 /// Translate a rank in `team` to its LSA rank.
 ///
-/// Returns `None` when `rank` is outside the team.
+/// Returns `None` when `rank` is outside the team or the translated rank does
+/// not belong to this communicator rank's local LSA team.
 #[inline(always)]
 pub fn rank_to_lsa(comm: DevComm<'_>, team: Team, rank: i32) -> Option<i32> {
     if rank < 0 || rank >= team.size() {
         None
     } else {
-        Some(rank_to_lsa_device(
-            comm,
-            team.size(),
-            team.rank(),
-            team.stride(),
-            rank,
-        ))
+        let translated = rank_to_lsa_device(comm, team.size(), team.rank(), team.stride(), rank);
+        if translated < 0 || translated >= lsa_size(comm) {
+            None
+        } else {
+            Some(translated)
+        }
     }
 }
 
@@ -398,7 +398,8 @@ pub unsafe fn lsa_multimem_ptr<T>(
 /// # Safety
 ///
 /// Every rank in the LSA team must execute the same barrier index, and the
-/// communicator must have reserved that index in `lsaBarrierCount`. When
+/// communicator must have reserved that index in `lsaBarrierCount`. A barrier
+/// index must not be shared by concurrently active cooperative groups. When
 /// `multimem` is true, the device communicator must have been created with
 /// `DeviceCommRequirements::lsa_multimem(true)`, and the target must support
 /// LSA multimem.
@@ -417,8 +418,9 @@ fn lsa_barrier_thread_device(comm: DevComm<'_>, index: u32, multimem: bool) {
 /// # Safety
 ///
 /// All lanes in each participating warp and every LSA rank must execute this
-/// call convergently with the same reserved barrier index. When `multimem` is
-/// true, the device communicator must have been created with
+/// call convergently with the same reserved barrier index. A barrier index must
+/// not be shared by concurrently active cooperative groups. When `multimem`
+/// is true, the device communicator must have been created with
 /// `DeviceCommRequirements::lsa_multimem(true)`, and the target must support
 /// LSA multimem.
 #[inline(always)]
@@ -436,8 +438,9 @@ fn lsa_barrier_warp_device(comm: DevComm<'_>, index: u32, multimem: bool) {
 /// # Safety
 ///
 /// All threads in each CTA and every LSA rank must execute this call
-/// convergently with the same reserved barrier index. When `multimem` is true,
-/// the device communicator must have been created with
+/// convergently with the same reserved barrier index. A barrier index must not
+/// be shared by concurrently active cooperative groups. When `multimem` is
+/// true, the device communicator must have been created with
 /// `DeviceCommRequirements::lsa_multimem(true)`, and the target must support
 /// LSA multimem.
 #[inline(always)]
@@ -723,7 +726,8 @@ mod tests {
         let team = team(6, 2, 3);
 
         assert_eq!(rank_to_world(comm, team, 4), Some(104));
-        assert_eq!(rank_to_lsa(comm, team, 5), Some(205));
+        assert_eq!(rank_to_lsa(comm, team, 3), Some(6));
+        assert_eq!(rank_to_lsa(comm, team, 5), None);
         assert_eq!(rank_to_world(comm, team, -1), None);
         assert_eq!(rank_to_world(comm, team, 6), None);
         assert_eq!(rank_to_lsa(comm, team, -1), None);
@@ -744,8 +748,17 @@ mod tests {
                     n_ranks: 6,
                     team_rank: 2,
                     stride: 3,
+                    rank: 3,
+                },
+                Call::LsaSize(0x1200),
+                Call::RankToLsa {
+                    comm: 0x1200,
+                    n_ranks: 6,
+                    team_rank: 2,
+                    stride: 3,
                     rank: 5,
                 },
+                Call::LsaSize(0x1200),
             ]
         );
     }
@@ -913,7 +926,7 @@ mod tests {
             stride,
             rank,
         });
-        200 + rank
+        3 + (rank - team_rank) * stride
     }
 
     #[unsafe(no_mangle)]

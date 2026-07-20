@@ -15,6 +15,8 @@ pub enum GinConnectionType {
     None,
     Full,
     Rail,
+    /// Connect ranks using the supplied positive world-rank stride.
+    CustomStride(i32),
 }
 
 impl GinConnectionType {
@@ -23,6 +25,30 @@ impl GinConnectionType {
             Self::None => sys::NCCL_GIN_CONNECTION_NONE,
             Self::Full => sys::NCCL_GIN_CONNECTION_FULL,
             Self::Rail => sys::NCCL_GIN_CONNECTION_RAIL,
+            Self::CustomStride(_) => sys::NCCL_GIN_CONNECTION_CUSTOM_STRIDE,
+        }
+    }
+}
+
+/// GIN backend requested for a device communicator.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum GinType {
+    /// Accept any backend supported by every communicator rank.
+    Any,
+    Proxy,
+    Gdaki,
+    Gpi,
+    EfaGda,
+}
+
+impl GinType {
+    const fn as_raw(self) -> sys::ncclGinType_t {
+        match self {
+            Self::Any => sys::NCCL_GIN_TYPE_NONE,
+            Self::Proxy => sys::NCCL_GIN_TYPE_PROXY,
+            Self::Gdaki => sys::NCCL_GIN_TYPE_GDAKI,
+            Self::Gpi => sys::NCCL_GIN_TYPE_GPI,
+            Self::EfaGda => sys::NCCL_GIN_TYPE_EFA_GDA,
         }
     }
 }
@@ -32,7 +58,9 @@ impl GinConnectionType {
 /// `Default` exactly mirrors `NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER` from the
 /// selected NCCL headers. Resource/team linked-list builders are intentionally
 /// not exposed yet because their output-handle pointers need a separate pinned
-/// ownership API.
+/// ownership API. Runtime-version device communicators are also left disabled:
+/// supporting them requires querying and allocating the runtime-selected image
+/// size instead of this wrapper's compile-time `ncclDevComm_t` layout.
 #[derive(Clone)]
 pub struct DeviceCommRequirements {
     raw: sys::ncclDevCommRequirements_t,
@@ -64,6 +92,11 @@ impl Default for DeviceCommRequirements {
                 worldGinBarrierCount: 0,
                 ginStrongSignalsRequired: true,
                 ginVaSignalsRequired: true,
+                ginCustomStride: 1,
+                ginType: sys::NCCL_GIN_TYPE_NONE,
+                useRuntimeVersion: false,
+                cftCaps: sys::NCCL_CFT_NONE as i32,
+                cftBarrierCount: 0,
             },
         }
     }
@@ -93,6 +126,11 @@ impl std::fmt::Debug for DeviceCommRequirements {
                 &self.raw.ginStrongSignalsRequired,
             )
             .field("gin_va_signals_required", &self.raw.ginVaSignalsRequired)
+            .field("gin_custom_stride", &self.raw.ginCustomStride)
+            .field("gin_type", &self.raw.ginType)
+            .field("use_runtime_version", &self.raw.useRuntimeVersion)
+            .field("cft_caps", &self.raw.cftCaps)
+            .field("cft_barrier_count", &self.raw.cftBarrierCount)
             .finish()
     }
 }
@@ -146,6 +184,15 @@ impl DeviceCommRequirements {
 
     pub fn gin_connection_type(mut self, connection_type: GinConnectionType) -> Self {
         self.raw.ginConnectionType = connection_type.as_raw();
+        self.raw.ginCustomStride = match connection_type {
+            GinConnectionType::CustomStride(stride) => stride,
+            _ => 1,
+        };
+        self
+    }
+
+    pub fn gin_type(mut self, gin_type: GinType) -> Self {
+        self.raw.ginType = gin_type.as_raw();
         self
     }
 
@@ -213,8 +260,26 @@ impl DeviceCommRequirements {
             ("GIN counter count", self.raw.ginCounterCount),
             ("GIN queue depth", self.raw.ginQueueDepth),
             ("world GIN barrier count", self.raw.worldGinBarrierCount),
+            ("CFT barrier count", self.raw.cftBarrierCount),
         ] {
             require_nonnegative(name, value)?;
+        }
+
+        if self.raw.ginConnectionType == sys::NCCL_GIN_CONNECTION_CUSTOM_STRIDE
+            && self.raw.ginCustomStride <= 0
+        {
+            return Err(Error::local(format!(
+                "GIN custom stride must be positive, got {}",
+                self.raw.ginCustomStride
+            )));
+        }
+        if self.raw.ginConnectionType == sys::NCCL_GIN_CONNECTION_CUSTOM_STRIDE
+            && self.raw.ginCustomStride > lsa_size
+        {
+            return Err(Error::local(format!(
+                "GIN custom stride {} exceeds the LSA size {lsa_size}",
+                self.raw.ginCustomStride
+            )));
         }
 
         // ncclLsaBarrierCreateRequirement computes
@@ -261,34 +326,29 @@ impl DeviceCommRequirements {
             &[self.raw.ginContextCount, signal_total],
         )?;
 
-        if self.raw.ginForceEnable || self.raw.ginConnectionType != sys::NCCL_GIN_CONNECTION_NONE {
-            // A backend may expose up to four GIN connections. ROUNDUP first
-            // adds connection_count-1 in signed arithmetic, then the GDAKI
-            // backend sizes QPs and signal/counter tables with signed products.
-            let rounded_context_bound =
-                checked_add("GIN context count", self.raw.ginContextCount, 3)?;
-            let world_with_local = checked_add("world team size", world_size, 1)?;
-            checked_nonnegative_product(
-                "GIN communication QPs",
-                &[rounded_context_bound, world_size],
-            )?;
-            checked_nonnegative_product(
-                "GIN companion QPs",
-                &[rounded_context_bound, world_size, 2],
-            )?;
-            checked_nonnegative_product(
-                "GIN local and communication QPs",
-                &[rounded_context_bound, world_with_local],
-            )?;
-            checked_nonnegative_product(
-                "GIN signal table",
-                &[rounded_context_bound, signal_total],
-            )?;
-            checked_nonnegative_product(
-                "GIN counter table",
-                &[rounded_context_bound, self.raw.ginCounterCount],
-            )?;
-        }
+        // GIN enablement is sticky on a communicator: a previous device
+        // communicator may have activated it even when this request selects
+        // `None`. A backend may expose up to four GIN connections. ROUNDUP
+        // first adds connection_count-1 in signed arithmetic, then the GDAKI
+        // backend sizes QPs and signal/counter tables with signed products.
+        // Validate those expressions for every request because the public host
+        // API does not expose the communicator's current sticky state.
+        let rounded_context_bound = checked_add("GIN context count", self.raw.ginContextCount, 3)?;
+        let world_with_local = checked_add("world team size", world_size, 1)?;
+        checked_nonnegative_product(
+            "GIN communication QPs",
+            &[rounded_context_bound, world_size],
+        )?;
+        checked_nonnegative_product("GIN companion QPs", &[rounded_context_bound, world_size, 2])?;
+        checked_nonnegative_product(
+            "GIN local and communication QPs",
+            &[rounded_context_bound, world_with_local],
+        )?;
+        checked_nonnegative_product("GIN signal table", &[rounded_context_bound, signal_total])?;
+        checked_nonnegative_product(
+            "GIN counter table",
+            &[rounded_context_bound, self.raw.ginCounterCount],
+        )?;
 
         // ncclLLA2ACreateRequirement uses nBlocks*(1 + 2*nSlots)*16 in
         // signed arithmetic. This release does not consume these fields yet,
@@ -501,6 +561,11 @@ mod tests {
         assert_eq!(raw.worldGinBarrierCount, 0);
         assert!(raw.ginStrongSignalsRequired);
         assert!(raw.ginVaSignalsRequired);
+        assert_eq!(raw.ginCustomStride, 1);
+        assert_eq!(raw.ginType, sys::NCCL_GIN_TYPE_NONE);
+        assert!(!raw.useRuntimeVersion);
+        assert_eq!(raw.cftCaps, sys::NCCL_CFT_NONE as i32);
+        assert_eq!(raw.cftBarrierCount, 0);
     }
 
     #[test]
@@ -525,17 +590,21 @@ mod tests {
             .lsa_multimem(true)
             .barrier_count(3)
             .gin_context_count(8)
-            .gin_connection_type(GinConnectionType::Rail)
+            .gin_connection_type(GinConnectionType::CustomStride(2))
+            .gin_type(GinType::Gdaki)
             .gin_strong_signals_required(false);
         assert!(requirements.raw.lsaMultimem);
         assert_eq!(requirements.raw.barrierCount, 3);
         assert_eq!(requirements.raw.ginContextCount, 8);
         assert_eq!(
             requirements.raw.ginConnectionType,
-            sys::NCCL_GIN_CONNECTION_RAIL
+            sys::NCCL_GIN_CONNECTION_CUSTOM_STRIDE
         );
+        assert_eq!(requirements.raw.ginCustomStride, 2);
+        assert_eq!(requirements.raw.ginType, sys::NCCL_GIN_TYPE_GDAKI);
         assert!(!requirements.raw.ginStrongSignalsRequired);
         assert!(requirements.raw.ginVaSignalsRequired);
+        assert!(!requirements.raw.useRuntimeVersion);
     }
 
     #[test]
@@ -563,6 +632,7 @@ mod tests {
         assert_rejected!(ginCounterCount);
         assert_rejected!(ginQueueDepth);
         assert_rejected!(worldGinBarrierCount);
+        assert_rejected!(cftBarrierCount);
     }
 
     #[test]
@@ -595,9 +665,9 @@ mod tests {
                 .contains("signed resource limit")
         );
 
-        let contexts = DeviceCommRequirements::default()
-            .gin_connection_type(GinConnectionType::Full)
-            .gin_context_count(i32::MAX);
+        // GIN can already be active because of an earlier device communicator,
+        // so this must be checked even when this request selects `None`.
+        let contexts = DeviceCommRequirements::default().gin_context_count(i32::MAX);
         assert!(
             contexts
                 .validate_team_sizes(8, 4, 2)
@@ -617,6 +687,30 @@ mod tests {
                 .message()
                 .contains("signed resource limit")
         );
+    }
+
+    #[test]
+    fn custom_gin_stride_must_be_positive() {
+        for stride in [i32::MIN, -1, 0] {
+            let requirements = DeviceCommRequirements::default()
+                .gin_connection_type(GinConnectionType::CustomStride(stride));
+            let error = requirements.validate_team_sizes(8, 4, 2).unwrap_err();
+            assert!(
+                error.message().contains("custom stride must be positive"),
+                "stride {stride} produced unexpected error: {error}"
+            );
+        }
+
+        DeviceCommRequirements::default()
+            .gin_connection_type(GinConnectionType::CustomStride(2))
+            .validate_team_sizes(8, 4, 2)
+            .unwrap();
+
+        let too_large = DeviceCommRequirements::default()
+            .gin_connection_type(GinConnectionType::CustomStride(5))
+            .validate_team_sizes(8, 4, 2)
+            .unwrap_err();
+        assert!(too_large.message().contains("exceeds the LSA size"));
     }
 
     #[test]
