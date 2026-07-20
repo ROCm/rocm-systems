@@ -19,6 +19,7 @@ on:
         type: string
         default: ''
       test_scope:
+        description: 'Test scope: smoke (22 curated tests) or all'
         type: string
         default: 'smoke'
       notify_email:
@@ -31,6 +32,8 @@ permissions:
 jobs:
   therock-build-linux:
     name: Build Linux Packages
+    # Skipped when artifact_run_id is provided (reuse mode). Downstream jobs
+    # use `!cancelled()` in their `if:` so they still run when this is skipped.
     if: ${{ inputs.artifact_run_id == '' }}
     runs-on: azure-linux-scale-rocm
     permissions:
