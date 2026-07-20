@@ -456,13 +456,6 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipMemset3DAsync",
     "hipMemset3D_spt",
     "hipMemset3DAsync_spt",
-    # hipMemsetD2D8/16/32 and Async — hipDeviceptr_t output correctly typed; but not in alloc_map — noop
-    "hipMemsetD2D8",
-    "hipMemsetD2D8Async",
-    "hipMemsetD2D16",
-    "hipMemsetD2D16Async",
-    "hipMemsetD2D32",
-    "hipMemsetD2D32Async",
     # hipMallocPitch — already in MANUAL_PLAYBACK_APIS for the DrvMemcpy test; these are the _spt wrappers
     # hipLaunchCooperativeKernel — variable args (void**); handled via regular kernel launch fallback — noop
     "hipLaunchCooperativeKernel",
