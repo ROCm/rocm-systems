@@ -80,9 +80,9 @@ class RocDecodeConformanceTest(unittest.TestCase):
                 env=env,
                 capture_output=True,
                 text=True,
+                timeout=30,
                 check=False,
             )
-
             self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertFalse((tempPath / 'PWNED').exists())
             self.assertFalse((tempPath / 'RESULTS_PWNED').exists())
