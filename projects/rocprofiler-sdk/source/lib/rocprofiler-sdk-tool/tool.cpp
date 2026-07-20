@@ -3575,6 +3575,7 @@ generate_output(cleanup_mode _cleanup_mode)
     if(tool::get_config().advanced_thread_trace && !tool_metadata->att_filenames.empty())
     {
         outdata.num_output += 1;
+        cleanups.emplace_back([](cleanup_mode /*_mode*/) { tool_metadata->att_filenames.clear(); });
     }
 
     ROCP_INFO << fmt::format("Number of services generating output: {} ({} kB)",
