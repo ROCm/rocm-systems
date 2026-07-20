@@ -1350,8 +1350,8 @@ def _seed_capability_cache() -> None:
             probe(rocprof_config.rocm_path)
         except SerializationError:
             raise
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Warning: seeding {probe.__name__} failed: {e}")
 
     # Every persistent_cached_property that is not target-dependent
     _seed_object_cached_properties(rocprof_config)
@@ -1702,7 +1702,10 @@ def get_gpu_info() -> GPUInfo:
         rocprof_config = get_rocprof_config()
     except Exception as e:
         pytest.exit(f"{e}")
-    return detect_gpu(rocprof_config.rocm_path)
+    try:
+        return detect_gpu(rocprof_config.rocm_path)
+    except Exception as e:
+        pytest.exit(f"Failed to detect GPU: {e}")
 
 
 def _run_cleanup() -> None:
