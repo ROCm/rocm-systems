@@ -190,6 +190,8 @@ RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(32768));       // 32 KiB
 RCCL_PARAM(DdaLL128, "DDA_LL128", 0);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(33554432)); // 32 MiB
 
+RCCL_PARAM(OobBalanced, "OOB_BALANCED", 0);
+
 // Returns true when the DDA fast path should be attempted for a collective
 // with the given total byte count.  gfx942Default is the per-collective
 // threshold for gfx942 (MI300).  gfx950Default optionally caps MI350; when 0,
@@ -211,7 +213,7 @@ static bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx94
   } else {
     return false;
   }
-  return threshold > 0 && totalBytes <= threshold;
+  return rcclParamOobBalanced() ? true :threshold > 0 && totalBytes <= threshold;
 }
 
 // Check if symmteric kernels is requested for this collective
