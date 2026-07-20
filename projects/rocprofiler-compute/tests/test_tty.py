@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from utils.tty import convert_time_columns, format_table_output, has_time_data
+from utils.utils_common import is_gfx115x
 
 TIME_UNITS = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
 
@@ -276,3 +277,65 @@ def test_edge_cases_and_error_handling() -> None:
     result = convert_time_columns(mixed_case_df, "ms")
     assert result.loc[0, "Unit"] == "ms"
     assert result.loc[1, "Unit"] == "ms"
+
+
+@pytest.mark.parametrize(
+    "gpu_arch",
+    [
+        pytest.param("gfx1151", id="rdna35"),
+        pytest.param("gfx942", id="cdna"),
+    ],
+)
+def test_format_table_output_dispatches_memory_chart_renderer(
+    monkeypatch: pytest.MonkeyPatch,
+    gpu_arch: str,
+) -> None:
+    """Memory Chart output uses the architecture renderer and shared heading."""
+    calls: dict[str, dict] = {}
+
+    def record(name: str, return_value: str):
+        def stub(mem_data: dict, *, chart_title: str) -> str:
+            calls[name] = {
+                "mem_data": mem_data,
+                "chart_title": chart_title,
+            }
+            return return_value
+
+        return stub
+
+    monkeypatch.setattr(
+        "utils.tty.mem_chart_gfx11.plot_mem_chart",
+        record("gfx11", "rendered RDNA3.5 memory chart"),
+    )
+    monkeypatch.setattr(
+        "utils.tty.mem_chart_gfx9.plot_mem_chart",
+        record("gfx9", "rendered CDNA memory chart"),
+    )
+    df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
+
+    content = format_table_output(
+        make_args(),
+        {
+            "id": 701,
+            "title": "Memory Chart",
+            "cli_style": "mem_chart",
+        },
+        df,
+        "metric_table",
+        runs={"only": object()},
+        gpu_arch=gpu_arch,
+    )
+
+    expected = "gfx11" if is_gfx115x(gpu_arch) else "gfx9"
+    unexpected = "gfx9" if is_gfx115x(gpu_arch) else "gfx11"
+    assert calls[expected] == {
+        "mem_data": {"Metric A": 1},
+        "chart_title": "7. Memory Chart (Normalization: per_wave)",
+    }
+    assert unexpected not in calls
+    return_value = (
+        "rendered RDNA3.5 memory chart"
+        if is_gfx115x(gpu_arch)
+        else "rendered CDNA memory chart"
+    )
+    assert content == f"{return_value}\n"
