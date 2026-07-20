@@ -247,104 +247,210 @@ hsa_status_t HSA_API hsa_agent_major_extension_supported(uint16_t extension, hsa
                                                               version_minor, result);
 }
 
-hsa_status_t HSA_API
-    hsa_queue_create(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
-                     void (*callback)(hsa_status_t status, hsa_queue_t* source,
-                                      void* data),
-                     void* data, uint32_t private_segment_size,
-                     uint32_t group_segment_size, hsa_queue_t** queue) {
-  return coreApiTable->hsa_queue_create_fn(agent, size, type, callback, data,
-                                          private_segment_size,
-                                          group_segment_size, queue);
+hsa_status_t HSA_API hsa_queue_create(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
+                                      void (*callback)(hsa_status_t status, hsa_queue_t* source,
+                                                       void* data),
+                                      void* data, uint32_t private_segment_size,
+                                      uint32_t group_segment_size, hsa_queue_t** queue) {
+  auto const __rocm_in_agent = agent;
+  auto const __rocm_in_size = size;
+  auto const __rocm_in_type = type;
+  auto const __rocm_in_callback = callback;
+  auto const __rocm_in_data = data;
+  auto const __rocm_in_private_segment_size = private_segment_size;
+  auto const __rocm_in_group_segment_size = group_segment_size;
+  rocm_trace_emit_hsa_queue_create_enter(
+      (uint64_t)((__rocm_in_agent).handle),
+      (__rocm_in_size),
+      (__rocm_in_type),
+      (const void*)(uintptr_t)(__rocm_in_callback),
+      (const void*)(uintptr_t)(__rocm_in_data),
+      (__rocm_in_private_segment_size),
+      (__rocm_in_group_segment_size)); /* __ROCM_CURATED__: hsa_queue_create */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA(hsa_queue_create, coreApiTable->hsa_queue_create_fn(agent, size, type, callback, data, private_segment_size,
+                                        group_segment_size, queue), queue);
 }
 
-hsa_status_t HSA_API
-    hsa_soft_queue_create(hsa_region_t region, uint32_t size,
-                          hsa_queue_type32_t type, uint32_t features,
-                          hsa_signal_t completion_signal, hsa_queue_t** queue) {
-  return coreApiTable->hsa_soft_queue_create_fn(region, size, type, features,
-                                               completion_signal, queue);
+hsa_status_t HSA_API hsa_soft_queue_create(hsa_region_t region, uint32_t size,
+                                           hsa_queue_type32_t type, uint32_t features,
+                                           hsa_signal_t completion_signal, hsa_queue_t** queue) {
+  auto const __rocm_in_region = region;
+  auto const __rocm_in_size = size;
+  auto const __rocm_in_type = type;
+  auto const __rocm_in_features = features;
+  auto const __rocm_in_doorbell_signal = completion_signal;
+  auto const __rocm_in_queue = queue;
+  rocm_trace_emit_hsa_soft_queue_create_enter(
+      (uint64_t)((__rocm_in_region).handle),
+      (__rocm_in_size),
+      (__rocm_in_type),
+      (__rocm_in_features),
+      (uint64_t)((__rocm_in_doorbell_signal).handle),
+      (const void*)(uintptr_t)(__rocm_in_queue)); /* __ROCM_CURATED__: hsa_soft_queue_create */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_soft_queue_create, coreApiTable->hsa_soft_queue_create_fn(
+                                            region, size, type, features, completion_signal, queue));
 }
 
 hsa_status_t HSA_API hsa_queue_destroy(hsa_queue_t* queue) {
-  return coreApiTable->hsa_queue_destroy_fn(queue);
+  auto const __rocm_in_queue = queue;
+  rocm_trace_emit_hsa_queue_destroy_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue)); /* __ROCM_CURATED__: hsa_queue_destroy */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_queue_destroy, coreApiTable->hsa_queue_destroy_fn(queue));
 }
 
 hsa_status_t HSA_API hsa_queue_inactivate(hsa_queue_t* queue) {
-  return coreApiTable->hsa_queue_inactivate_fn(queue);
+  auto const __rocm_in_queue = queue;
+  rocm_trace_emit_hsa_queue_inactivate_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue)); /* __ROCM_CURATED__: hsa_queue_inactivate */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_queue_inactivate, coreApiTable->hsa_queue_inactivate_fn(queue));
 }
 
 uint64_t HSA_API hsa_queue_load_read_index_scacquire(const hsa_queue_t* queue) {
-  return coreApiTable->hsa_queue_load_read_index_scacquire_fn(queue);
+  auto const __rocm_in_queue = queue;
+  rocm_trace_emit_hsa_queue_load_read_index_scacquire_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue)); /* __ROCM_CURATED__: hsa_queue_load_read_index_scacquire */
+  ROCR_TRACE_API_RET_U64_CURATED_HSA_NOARGS(hsa_queue_load_read_index_scacquire, coreApiTable->hsa_queue_load_read_index_scacquire_fn(queue));
 }
 
 uint64_t HSA_API hsa_queue_load_read_index_relaxed(const hsa_queue_t* queue) {
-  return coreApiTable->hsa_queue_load_read_index_relaxed_fn(queue);
+  auto const __rocm_in_queue = queue;
+  rocm_trace_emit_hsa_queue_load_read_index_relaxed_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue)); /* __ROCM_CURATED__: hsa_queue_load_read_index_relaxed */
+  ROCR_TRACE_API_RET_U64_CURATED_HSA_NOARGS(hsa_queue_load_read_index_relaxed, coreApiTable->hsa_queue_load_read_index_relaxed_fn(queue));
 }
 
 uint64_t HSA_API hsa_queue_load_write_index_scacquire(const hsa_queue_t* queue) {
-  return coreApiTable->hsa_queue_load_write_index_scacquire_fn(queue);
+  auto const __rocm_in_queue = queue;
+  rocm_trace_emit_hsa_queue_load_write_index_scacquire_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue)); /* __ROCM_CURATED__: hsa_queue_load_write_index_scacquire */
+  ROCR_TRACE_API_RET_U64_CURATED_HSA_NOARGS(hsa_queue_load_write_index_scacquire, coreApiTable->hsa_queue_load_write_index_scacquire_fn(queue));
 }
 
 uint64_t HSA_API hsa_queue_load_write_index_relaxed(const hsa_queue_t* queue) {
-  return coreApiTable->hsa_queue_load_write_index_relaxed_fn(queue);
+  auto const __rocm_in_queue = queue;
+  rocm_trace_emit_hsa_queue_load_write_index_relaxed_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue)); /* __ROCM_CURATED__: hsa_queue_load_write_index_relaxed */
+  ROCR_TRACE_API_RET_U64_CURATED_HSA_NOARGS(hsa_queue_load_write_index_relaxed, coreApiTable->hsa_queue_load_write_index_relaxed_fn(queue));
 }
 
-void HSA_API hsa_queue_store_write_index_relaxed(const hsa_queue_t* queue,
-                                                 uint64_t value) {
-  return coreApiTable->hsa_queue_store_write_index_relaxed_fn(queue, value);
+void HSA_API hsa_queue_store_write_index_relaxed(const hsa_queue_t* queue, uint64_t value) {
+  auto const __rocm_in_queue = queue;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hsa_queue_store_write_index_relaxed_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue),
+      (__rocm_in_value)); /* __ROCM_CURATED__: hsa_queue_store_write_index_relaxed */
+  ROCR_TRACE_API_RET_VOID_CURATED_HSA_NOARGS(hsa_queue_store_write_index_relaxed, coreApiTable->hsa_queue_store_write_index_relaxed_fn(queue, value));
 }
 
 void HSA_API hsa_queue_store_write_index_screlease(const hsa_queue_t* queue, uint64_t value) {
-  return coreApiTable->hsa_queue_store_write_index_screlease_fn(queue, value);
+  auto const __rocm_in_queue = queue;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hsa_queue_store_write_index_screlease_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue),
+      (__rocm_in_value)); /* __ROCM_CURATED__: hsa_queue_store_write_index_screlease */
+  ROCR_TRACE_API_RET_VOID_CURATED_HSA_NOARGS(hsa_queue_store_write_index_screlease, coreApiTable->hsa_queue_store_write_index_screlease_fn(queue, value));
 }
 
 uint64_t HSA_API hsa_queue_cas_write_index_scacq_screl(const hsa_queue_t* queue, uint64_t expected,
                                                        uint64_t value) {
-  return coreApiTable->hsa_queue_cas_write_index_scacq_screl_fn(queue, expected, value);
+  auto const __rocm_in_queue = queue;
+  auto const __rocm_in_expected = expected;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hsa_queue_cas_write_index_scacq_screl_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue),
+      (__rocm_in_expected),
+      (__rocm_in_value)); /* __ROCM_CURATED__: hsa_queue_cas_write_index_scacq_screl */
+  ROCR_TRACE_API_RET_U64_CURATED_HSA_NOARGS(hsa_queue_cas_write_index_scacq_screl, coreApiTable->hsa_queue_cas_write_index_scacq_screl_fn(queue, expected, value));
 }
 
 uint64_t HSA_API hsa_queue_cas_write_index_scacquire(const hsa_queue_t* queue, uint64_t expected,
                                                      uint64_t value) {
-  return coreApiTable->hsa_queue_cas_write_index_scacquire_fn(queue, expected, value);
+  auto const __rocm_in_queue = queue;
+  auto const __rocm_in_expected = expected;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hsa_queue_cas_write_index_scacquire_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue),
+      (__rocm_in_expected),
+      (__rocm_in_value)); /* __ROCM_CURATED__: hsa_queue_cas_write_index_scacquire */
+  ROCR_TRACE_API_RET_U64_CURATED_HSA_NOARGS(hsa_queue_cas_write_index_scacquire, coreApiTable->hsa_queue_cas_write_index_scacquire_fn(queue, expected, value));
 }
 
-uint64_t HSA_API hsa_queue_cas_write_index_relaxed(const hsa_queue_t* queue,
-                                                   uint64_t expected,
+uint64_t HSA_API hsa_queue_cas_write_index_relaxed(const hsa_queue_t* queue, uint64_t expected,
                                                    uint64_t value) {
-  return coreApiTable->hsa_queue_cas_write_index_relaxed_fn(queue, expected,
-                                                           value);
+  auto const __rocm_in_queue = queue;
+  auto const __rocm_in_expected = expected;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hsa_queue_cas_write_index_relaxed_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue),
+      (__rocm_in_expected),
+      (__rocm_in_value)); /* __ROCM_CURATED__: hsa_queue_cas_write_index_relaxed */
+  ROCR_TRACE_API_RET_U64_CURATED_HSA_NOARGS(hsa_queue_cas_write_index_relaxed, coreApiTable->hsa_queue_cas_write_index_relaxed_fn(queue, expected, value));
 }
 
 uint64_t HSA_API hsa_queue_cas_write_index_screlease(const hsa_queue_t* queue, uint64_t expected,
                                                      uint64_t value) {
-  return coreApiTable->hsa_queue_cas_write_index_screlease_fn(queue, expected, value);
+  auto const __rocm_in_queue = queue;
+  auto const __rocm_in_expected = expected;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hsa_queue_cas_write_index_screlease_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue),
+      (__rocm_in_expected),
+      (__rocm_in_value)); /* __ROCM_CURATED__: hsa_queue_cas_write_index_screlease */
+  ROCR_TRACE_API_RET_U64_CURATED_HSA_NOARGS(hsa_queue_cas_write_index_screlease, coreApiTable->hsa_queue_cas_write_index_screlease_fn(queue, expected, value));
 }
 
 uint64_t HSA_API hsa_queue_add_write_index_scacq_screl(const hsa_queue_t* queue, uint64_t value) {
-  return coreApiTable->hsa_queue_add_write_index_scacq_screl_fn(queue, value);
+  auto const __rocm_in_queue = queue;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hsa_queue_add_write_index_scacq_screl_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue),
+      (__rocm_in_value)); /* __ROCM_CURATED__: hsa_queue_add_write_index_scacq_screl */
+  ROCR_TRACE_API_RET_U64_CURATED_HSA_NOARGS(hsa_queue_add_write_index_scacq_screl, coreApiTable->hsa_queue_add_write_index_scacq_screl_fn(queue, value));
 }
 
 uint64_t HSA_API hsa_queue_add_write_index_scacquire(const hsa_queue_t* queue, uint64_t value) {
-  return coreApiTable->hsa_queue_add_write_index_scacquire_fn(queue, value);
+  auto const __rocm_in_queue = queue;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hsa_queue_add_write_index_scacquire_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue),
+      (__rocm_in_value)); /* __ROCM_CURATED__: hsa_queue_add_write_index_scacquire */
+  ROCR_TRACE_API_RET_U64_CURATED_HSA_NOARGS(hsa_queue_add_write_index_scacquire, coreApiTable->hsa_queue_add_write_index_scacquire_fn(queue, value));
 }
 
-uint64_t HSA_API hsa_queue_add_write_index_relaxed(const hsa_queue_t* queue,
-                                                   uint64_t value) {
-  return coreApiTable->hsa_queue_add_write_index_relaxed_fn(queue, value);
+uint64_t HSA_API hsa_queue_add_write_index_relaxed(const hsa_queue_t* queue, uint64_t value) {
+  auto const __rocm_in_queue = queue;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hsa_queue_add_write_index_relaxed_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue),
+      (__rocm_in_value)); /* __ROCM_CURATED__: hsa_queue_add_write_index_relaxed */
+  ROCR_TRACE_API_RET_U64_CURATED_HSA_NOARGS(hsa_queue_add_write_index_relaxed, coreApiTable->hsa_queue_add_write_index_relaxed_fn(queue, value));
 }
 
 uint64_t HSA_API hsa_queue_add_write_index_screlease(const hsa_queue_t* queue, uint64_t value) {
-  return coreApiTable->hsa_queue_add_write_index_screlease_fn(queue, value);
+  auto const __rocm_in_queue = queue;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hsa_queue_add_write_index_screlease_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue),
+      (__rocm_in_value)); /* __ROCM_CURATED__: hsa_queue_add_write_index_screlease */
+  ROCR_TRACE_API_RET_U64_CURATED_HSA_NOARGS(hsa_queue_add_write_index_screlease, coreApiTable->hsa_queue_add_write_index_screlease_fn(queue, value));
 }
 
-void HSA_API hsa_queue_store_read_index_relaxed(const hsa_queue_t* queue,
-                                                uint64_t value) {
-  return coreApiTable->hsa_queue_store_read_index_relaxed_fn(queue, value);
+void HSA_API hsa_queue_store_read_index_relaxed(const hsa_queue_t* queue, uint64_t value) {
+  auto const __rocm_in_queue = queue;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hsa_queue_store_read_index_relaxed_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue),
+      (__rocm_in_value)); /* __ROCM_CURATED__: hsa_queue_store_read_index_relaxed */
+  ROCR_TRACE_API_RET_VOID_CURATED_HSA_NOARGS(hsa_queue_store_read_index_relaxed, coreApiTable->hsa_queue_store_read_index_relaxed_fn(queue, value));
 }
 
 void HSA_API hsa_queue_store_read_index_screlease(const hsa_queue_t* queue, uint64_t value) {
-  return coreApiTable->hsa_queue_store_read_index_screlease_fn(queue, value);
+  auto const __rocm_in_queue = queue;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hsa_queue_store_read_index_screlease_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue),
+      (__rocm_in_value)); /* __ROCM_CURATED__: hsa_queue_store_read_index_screlease */
+  ROCR_TRACE_API_RET_VOID_CURATED_HSA_NOARGS(hsa_queue_store_read_index_screlease, coreApiTable->hsa_queue_store_read_index_screlease_fn(queue, value));
 }
 
 hsa_status_t HSA_API hsa_agent_iterate_regions(
@@ -1033,17 +1139,29 @@ uint32_t HSA_API
 }
 
 // Mirrors Amd Extension Apis
-hsa_status_t HSA_API hsa_amd_queue_cu_set_mask(const hsa_queue_t* queue,
-                                               uint32_t num_cu_mask_count,
+hsa_status_t HSA_API hsa_amd_queue_cu_set_mask(const hsa_queue_t* queue, uint32_t num_cu_mask_count,
                                                const uint32_t* cu_mask) {
-  return amdExtTable->hsa_amd_queue_cu_set_mask_fn(
-                                     queue, num_cu_mask_count, cu_mask);
+  auto const __rocm_in_queue = queue;
+  auto const __rocm_in_num_cu_mask_count = num_cu_mask_count;
+  auto const __rocm_in_cu_mask = cu_mask;
+  rocm_trace_emit_hsa_amd_queue_cu_set_mask_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue),
+      (__rocm_in_num_cu_mask_count),
+      (const void*)(uintptr_t)(__rocm_in_cu_mask)); /* __ROCM_CURATED__: hsa_amd_queue_cu_set_mask */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_queue_cu_set_mask, amdExtTable->hsa_amd_queue_cu_set_mask_fn(queue, num_cu_mask_count, cu_mask));
 }
 
 // Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_queue_cu_get_mask(const hsa_queue_t* queue, uint32_t num_cu_mask_count,
                                                uint32_t* cu_mask) {
-  return amdExtTable->hsa_amd_queue_cu_get_mask_fn(queue, num_cu_mask_count, cu_mask);
+  auto const __rocm_in_queue = queue;
+  auto const __rocm_in_num_cu_mask_count = num_cu_mask_count;
+  auto const __rocm_in_cu_mask = cu_mask;
+  rocm_trace_emit_hsa_amd_queue_cu_get_mask_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue),
+      (__rocm_in_num_cu_mask_count),
+      (const void*)(uintptr_t)(__rocm_in_cu_mask)); /* __ROCM_CURATED__: hsa_amd_queue_cu_get_mask */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_queue_cu_get_mask, amdExtTable->hsa_amd_queue_cu_get_mask_fn(queue, num_cu_mask_count, cu_mask));
 }
 
 // Mirrors Amd Extension Apis
@@ -1305,14 +1423,25 @@ hsa_status_t HSA_API hsa_amd_register_system_event_handler(
 // Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_queue_set_priority(hsa_queue_t* queue,
                                                 hsa_amd_queue_priority_t priority) {
-  return amdExtTable->hsa_amd_queue_set_priority_fn(queue, priority);
+  auto const __rocm_in_queue = queue;
+  auto const __rocm_in_priority = priority;
+  rocm_trace_emit_hsa_amd_queue_set_priority_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue),
+      (int32_t)(__rocm_in_priority)); /* __ROCM_CURATED__: hsa_amd_queue_set_priority */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_queue_set_priority, amdExtTable->hsa_amd_queue_set_priority_fn(queue, priority));
 }
 
 // Mirrors Amd Extension Apis
-hsa_status_t HSA_API hsa_amd_queue_create(hsa_agent_t agent,
-                                          hsa_amd_queue_create_desc_t* descs,
+hsa_status_t HSA_API hsa_amd_queue_create(hsa_agent_t agent, hsa_amd_queue_create_desc_t* descs,
                                           uint32_t num_descs) {
-  return amdExtTable->hsa_amd_queue_create_fn(agent, descs, num_descs);
+  auto const __rocm_in_agent = agent;
+  auto const __rocm_in_descs = descs;
+  auto const __rocm_in_num_descs = num_descs;
+  rocm_trace_emit_hsa_amd_queue_create_enter(
+      (uint64_t)((__rocm_in_agent).handle),
+      (const void*)(uintptr_t)(__rocm_in_descs),
+      (__rocm_in_num_descs)); /* __ROCM_CURATED__: hsa_amd_queue_create */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_queue_create, amdExtTable->hsa_amd_queue_create_fn(agent, descs, num_descs));
 }
 
 // Mirrors Amd Extension Apis
@@ -1473,7 +1602,14 @@ hsa_status_t HSA_API hsa_amd_agent_set_async_scratch_limit(hsa_agent_t agent, si
 
 hsa_status_t HSA_API hsa_amd_queue_get_info(hsa_queue_t* queue,
                                             hsa_queue_info_attribute_t attribute, void* value) {
-  return amdExtTable->hsa_amd_queue_get_info_fn(queue, attribute, value);
+  auto const __rocm_in_queue = queue;
+  auto const __rocm_in_attribute = attribute;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hsa_amd_queue_get_info_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue),
+      (int32_t)(__rocm_in_attribute),
+      (const void*)(uintptr_t)(__rocm_in_value)); /* __ROCM_CURATED__: hsa_amd_queue_get_info */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_queue_get_info, amdExtTable->hsa_amd_queue_get_info_fn(queue, attribute, value));
 }
 
 hsa_status_t HSA_API hsa_amd_enable_logging(uint8_t* flags, void* file) {
@@ -1498,12 +1634,30 @@ hsa_status_t HSA_API hsa_amd_counted_queue_acquire(
     hsa_agent_t agent, hsa_queue_type_t type, hsa_amd_queue_priority_t priority,
     void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data), void* data,
     uint64_t flags, hsa_queue_t** queue) {
-  return amdExtTable->hsa_amd_counted_queue_acquire_fn(agent, type, priority, callback, data, flags,
-                                                    queue);
+  auto const __rocm_in_agent = agent;
+  auto const __rocm_in_type = type;
+  auto const __rocm_in_priority = priority;
+  auto const __rocm_in_callback = callback;
+  auto const __rocm_in_data = data;
+  auto const __rocm_in_flags = flags;
+  auto const __rocm_in_queue = queue;
+  rocm_trace_emit_hsa_amd_counted_queue_acquire_enter(
+      (uint64_t)((__rocm_in_agent).handle),
+      (int32_t)(__rocm_in_type),
+      (int32_t)(__rocm_in_priority),
+      (const void*)(uintptr_t)(__rocm_in_callback),
+      (const void*)(uintptr_t)(__rocm_in_data),
+      (__rocm_in_flags),
+      (const void*)(uintptr_t)(__rocm_in_queue)); /* __ROCM_CURATED__: hsa_amd_counted_queue_acquire */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_counted_queue_acquire, amdExtTable->hsa_amd_counted_queue_acquire_fn(
+                                            agent, type, priority, callback, data, flags, queue));
 }
 
 hsa_status_t HSA_API hsa_amd_counted_queue_release(hsa_queue_t* queue) {
-  return amdExtTable->hsa_amd_counted_queue_release_fn(queue);
+  auto const __rocm_in_queue = queue;
+  rocm_trace_emit_hsa_amd_counted_queue_release_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue)); /* __ROCM_CURATED__: hsa_amd_counted_queue_release */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_counted_queue_release, amdExtTable->hsa_amd_counted_queue_release_fn(queue));
 }
 
 hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes, uint32_t count, uint32_t num_dep_signals,
@@ -1531,19 +1685,31 @@ hsa_status_t HSA_API hsa_amd_external_semaphore_handle_close(
 }
 
 // Mirrors Amd Extension Apis
-hsa_status_t HSA_API hsa_amd_queue_signal_external_semaphore(
-    hsa_queue_t *queue,
-    hsa_amd_external_semaphore_t sem,
-    uint64_t value) {
-  return amdExtTable->hsa_amd_queue_signal_external_semaphore_fn(queue, sem, value);
+hsa_status_t HSA_API hsa_amd_queue_signal_external_semaphore(hsa_queue_t* queue,
+                                                             hsa_amd_external_semaphore_t sem,
+                                                             uint64_t value) {
+  auto const __rocm_in_queue = queue;
+  auto const __rocm_in_sem = sem;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hsa_amd_queue_signal_external_semaphore_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue),
+      (uint64_t)((__rocm_in_sem).handle),
+      (__rocm_in_value)); /* __ROCM_CURATED__: hsa_amd_queue_signal_external_semaphore */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_queue_signal_external_semaphore, amdExtTable->hsa_amd_queue_signal_external_semaphore_fn(queue, sem, value));
 }
 
 // Mirrors Amd Extension Apis
-hsa_status_t HSA_API hsa_amd_queue_wait_external_semaphore(
-    hsa_queue_t *queue,
-    hsa_amd_external_semaphore_t sem,
-    uint64_t value) {
-  return amdExtTable->hsa_amd_queue_wait_external_semaphore_fn(queue, sem, value);
+hsa_status_t HSA_API hsa_amd_queue_wait_external_semaphore(hsa_queue_t* queue,
+                                                           hsa_amd_external_semaphore_t sem,
+                                                           uint64_t value) {
+  auto const __rocm_in_queue = queue;
+  auto const __rocm_in_sem = sem;
+  auto const __rocm_in_value = value;
+  rocm_trace_emit_hsa_amd_queue_wait_external_semaphore_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue),
+      (uint64_t)((__rocm_in_sem).handle),
+      (__rocm_in_value)); /* __ROCM_CURATED__: hsa_amd_queue_wait_external_semaphore */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_queue_wait_external_semaphore, amdExtTable->hsa_amd_queue_wait_external_semaphore_fn(queue, sem, value));
 }
 
 hsa_status_t HSA_API hsa_amd_svm_discard_and_prefetch_batch_async(
@@ -1564,15 +1730,38 @@ hsa_status_t hsa_amd_queue_intercept_create(
     hsa_agent_t agent_handle, uint32_t size, hsa_queue_type32_t type,
     void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data), void* data,
     uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t** queue) {
-  return amdExtTable->hsa_amd_queue_intercept_create_fn(
-      agent_handle, size, type, callback, data, private_segment_size, group_segment_size, queue);
+  auto const __rocm_in_agent_handle = agent_handle;
+  auto const __rocm_in_size = size;
+  auto const __rocm_in_type = type;
+  auto const __rocm_in_callback = callback;
+  auto const __rocm_in_data = data;
+  auto const __rocm_in_private_segment_size = private_segment_size;
+  auto const __rocm_in_group_segment_size = group_segment_size;
+  rocm_trace_emit_hsa_amd_queue_intercept_create_enter(
+      (uint64_t)((__rocm_in_agent_handle).handle),
+      (__rocm_in_size),
+      (__rocm_in_type),
+      (const void*)(uintptr_t)(__rocm_in_callback),
+      (const void*)(uintptr_t)(__rocm_in_data),
+      (__rocm_in_private_segment_size),
+      (__rocm_in_group_segment_size)); /* __ROCM_CURATED__: hsa_amd_queue_intercept_create */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA(hsa_amd_queue_intercept_create, amdExtTable->hsa_amd_queue_intercept_create_fn(agent_handle, size, type, callback, data,
+                                                     private_segment_size, group_segment_size,
+                                                     queue), queue);
 }
 
 // Mirrors Amd Extension Apis
 hsa_status_t hsa_amd_queue_intercept_register(hsa_queue_t* queue,
                                               hsa_amd_queue_intercept_handler callback,
                                               void* user_data) {
-  return amdExtTable->hsa_amd_queue_intercept_register_fn(queue, callback, user_data);
+  auto const __rocm_in_queue = queue;
+  auto const __rocm_in_callback = callback;
+  auto const __rocm_in_user_data = user_data;
+  rocm_trace_emit_hsa_amd_queue_intercept_register_enter(
+      (uint64_t)(uintptr_t)(__rocm_in_queue),
+      (const void*)(uintptr_t)(__rocm_in_callback),
+      (const void*)(uintptr_t)(__rocm_in_user_data)); /* __ROCM_CURATED__: hsa_amd_queue_intercept_register */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_queue_intercept_register, amdExtTable->hsa_amd_queue_intercept_register_fn(queue, callback, user_data));
 }
 
 }  // namespace rocr

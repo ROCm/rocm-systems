@@ -2,3 +2,101 @@
 # Schema is the same as the HIP equivalent (projects/clr/hipamd/scripts/curated_apis.yaml).
 
 # --- hsa_queues ---
+
+- api: hsa_queue_create
+  args: [agent, size, type, callback, data, private_segment_size, group_segment_size, queue]
+  out: [queue]
+
+- api: hsa_queue_destroy
+  args: [queue]
+
+- api: hsa_amd_queue_intercept_create
+  args: [agent_handle, size, type, callback, data, private_segment_size, group_segment_size, queue]
+  out: [queue]
+  notes: |
+    Verified against /opt/rocm/include/hsa/hsa_api_trace.h.
+    Same shape as hsa_queue_create with first param renamed agent_handle.
+
+- api: hsa_soft_queue_create
+  args: [region, size, type, features, doorbell_signal, queue]
+
+- api: hsa_queue_inactivate
+  args: [queue]
+
+- api: hsa_queue_load_read_index_scacquire
+  args: [queue]
+
+- api: hsa_queue_load_read_index_relaxed
+  args: [queue]
+
+- api: hsa_queue_load_write_index_scacquire
+  args: [queue]
+
+- api: hsa_queue_load_write_index_relaxed
+  args: [queue]
+
+- api: hsa_queue_store_write_index_relaxed
+  args: [queue, value]
+
+- api: hsa_queue_store_write_index_screlease
+  args: [queue, value]
+
+- api: hsa_queue_cas_write_index_scacq_screl
+  args: [queue, expected, value]
+
+- api: hsa_queue_cas_write_index_scacquire
+  args: [queue, expected, value]
+
+- api: hsa_queue_cas_write_index_relaxed
+  args: [queue, expected, value]
+
+- api: hsa_queue_cas_write_index_screlease
+  args: [queue, expected, value]
+
+- api: hsa_queue_add_write_index_scacq_screl
+  args: [queue, value]
+
+- api: hsa_queue_add_write_index_scacquire
+  args: [queue, value]
+
+- api: hsa_queue_add_write_index_relaxed
+  args: [queue, value]
+
+- api: hsa_queue_add_write_index_screlease
+  args: [queue, value]
+
+- api: hsa_queue_store_read_index_relaxed
+  args: [queue, value]
+
+- api: hsa_queue_store_read_index_screlease
+  args: [queue, value]
+
+- api: hsa_amd_queue_cu_set_mask
+  args: [queue, num_cu_mask_count, cu_mask]
+
+- api: hsa_amd_queue_cu_get_mask
+  args: [queue, num_cu_mask_count, cu_mask]
+
+- api: hsa_amd_queue_set_priority
+  args: [queue, priority]
+
+- api: hsa_amd_queue_get_info
+  args: [queue, attribute, value]
+
+- api: hsa_amd_counted_queue_acquire
+  args: [agent, type, priority, callback, data, flags, queue]
+
+- api: hsa_amd_counted_queue_release
+  args: [queue]
+
+- api: hsa_amd_queue_intercept_register
+  args: [queue, callback, user_data]
+
+- api: hsa_amd_queue_create
+  args: [agent, descs, num_descs]
+
+- api: hsa_amd_queue_signal_external_semaphore
+  args: [queue, sem, value]
+
+- api: hsa_amd_queue_wait_external_semaphore
+  args: [queue, sem, value]
