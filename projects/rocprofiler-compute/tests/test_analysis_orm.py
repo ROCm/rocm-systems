@@ -59,6 +59,7 @@ def add_kernel_with_durations(
         session.add(
             Dispatch(
                 dispatch_id=dispatch_id,
+                pid=1,
                 gpu_id=0,
                 start_timestamp=0,
                 end_timestamp=duration,
@@ -129,15 +130,44 @@ def test_duplicate_kernel_rejected(db_session):
 
 
 def test_duplicate_dispatch_rejected(db_session):
-    """A second dispatch with the same (kernel_uuid, dispatch_id) is rejected."""
+    """A duplicate (kernel_uuid, pid, dispatch_id) is rejected."""
     workload = Workload(name="w", sub_name="s")
     db_session.add(workload)
     kernel = Kernel(kernel_name="k", workload=workload)
     db_session.add(kernel)
-    db_session.add(Dispatch(dispatch_id=0, kernel=kernel))
-    db_session.add(Dispatch(dispatch_id=0, kernel=kernel))
+    db_session.add(Dispatch(dispatch_id=0, pid=101, kernel=kernel))
+    db_session.add(Dispatch(dispatch_id=0, pid=101, kernel=kernel))
     with pytest.raises(IntegrityError):
         db_session.commit()
+
+
+def test_dispatch_id_can_repeat_across_processes(db_session):
+    """Process-local dispatch IDs remain distinct and aggregate together."""
+    workload = Workload(name="w", sub_name="s")
+    kernel = Kernel(kernel_name="k", workload=workload)
+    db_session.add_all([
+        Dispatch(
+            dispatch_id=0,
+            pid=101,
+            start_timestamp=10,
+            end_timestamp=20,
+            kernel=kernel,
+        ),
+        Dispatch(
+            dispatch_id=0,
+            pid=202,
+            start_timestamp=30,
+            end_timestamp=50,
+            kernel=kernel,
+        ),
+    ])
+    Database.create_views()
+    db_session.commit()
+
+    row = db_session.execute(
+        text("SELECT dispatch_count, duration_ns_sum FROM compute_kernel_view")
+    ).one()
+    assert row == (2, 30)
 
 
 def test_duplicate_stall_reason_lookup_rejected(db_session):

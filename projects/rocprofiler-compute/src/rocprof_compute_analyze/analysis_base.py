@@ -116,24 +116,10 @@ class OmniAnalyze_Base:
         tool_data: list[dict[str, Any]],
     ) -> None:
         """Build dispatch scaffolding and tables for a run without counters."""
-        trace_frames = (
-            [
-                file_io.process_pc_sampling_kernel_trace(tool_record)
-                for tool_record in tool_data
-            ]
-            if tool_data
-            else [file_io.process_pc_sampling_kernel_trace(None)]
-        )
-        workload.raw_pmc = pd.concat(
-            trace_frames,
-            ignore_index=True,
-        )
+        workload.raw_pmc = file_io.process_pc_sampling_kernel_traces(tool_data)
         workload.raw_pmc = workload.raw_pmc.rename(
             columns={"Dispatch_Id": "Dispatch_ID"}
         )
-        # A legacy one-file workload retains its original dispatch statistics.
-        if len(tool_data) > 1:
-            workload.raw_pmc = workload.raw_pmc.drop_duplicates("Kernel_Name")
         kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
             df_in=workload.raw_pmc,
             raw_data_dir=str(dir_path),
