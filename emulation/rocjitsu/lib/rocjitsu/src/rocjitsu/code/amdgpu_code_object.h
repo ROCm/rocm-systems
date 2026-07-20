@@ -19,6 +19,16 @@
 
 namespace rocjitsu {
 
+/// @brief One kernel descriptor discovered in a code object, with the coordinates
+///        DBI needs to read and (later) rewrite its scratch reservation.
+struct KernelDescriptorInfo {
+  std::string name;                        ///< Kernel name (the .kd symbol minus the suffix).
+  uint64_t descriptor_file_offset = 0;     ///< File offset of the descriptor bytes.
+  uint64_t entry_text_offset = 0;          ///< .text-relative offset of the kernel entry.
+  uint32_t private_segment_fixed_size = 0;     ///< Per-lane scratch bytes from the descriptor.
+  uint32_t granulated_workitem_vgpr_count = 0; ///< Raw compute_pgm_rsrc1 VGPR granule field.
+};
+
 /// @brief Represents a single AMD GPU HSA ELF code object.
 ///
 /// A code object is a device ELF containing GPU machine code (.text sections),
@@ -73,6 +83,13 @@ public:
   /// otherwise the granulated field is an RDNA-style sentinel and the wave owns
   /// the fixed per-wave SGPR pool. @p arch selects that interpretation.
   [[nodiscard]] std::optional<uint32_t> min_kernel_sgpr_count(rj_code_arch_t arch) const;
+
+  /// @brief Enumerate every kernel descriptor with the coordinates a
+  ///        scratch-growing pass needs: descriptor file offset (for writeback),
+  ///        `.text`-relative entry offset (to map an anchor to its kernel), and
+  ///        the current `private_segment_fixed_size`. Skips descriptors that
+  ///        cannot be located or whose entry falls outside `.text`.
+  [[nodiscard]] std::vector<KernelDescriptorInfo> kernel_descriptors() const;
 
 private:
   void load_sections();

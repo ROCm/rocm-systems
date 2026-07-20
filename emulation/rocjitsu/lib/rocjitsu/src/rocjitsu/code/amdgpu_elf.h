@@ -131,6 +131,26 @@ inline constexpr rj_code_arch_t arch_for_elf_mach(uint32_t mach) {
   }
 }
 
+/// @brief VGPR-count encoding granule for @p arch. Descriptor VGPR count =
+///        (granulated_workitem_vgpr_count + 1) * granule. Matches LLVM's
+///        AMDGPUBaseInfo::getVGPREncodingGranule().
+inline constexpr uint32_t vgpr_encoding_granule(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return 16;
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return 8;
+  default:
+    return 4;
+  }
+}
+
 /// @brief Return the canonical gfx name for an AMDGPU ELF MACH value.
 inline constexpr const char *elf_mach_name(uint32_t mach) {
   switch (mach & EF_AMDGPU_MACH) {
