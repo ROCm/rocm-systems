@@ -28,6 +28,7 @@ from utils.file_io import (
     process_pc_sampling_kernel_trace,
 )
 from utils.parser import (
+    PMC_DISPATCH_INFO_TABLE_ID,
     PMC_KERNEL_TOP_TABLE_ID,
     _merge_stall_reason_rows,
     load_non_mertrics_table,
@@ -874,6 +875,52 @@ def test_load_pc_sampling_data_no_tool_data() -> None:
     assert df.empty
 
 
+def test_canonical_record_collection_preserves_legacy_analysis_table() -> None:
+    """A one-record collection produces the unchanged legacy display table."""
+    tool_data = make_tool_data(
+        stochastic=[
+            make_record(5, 0x10, 0, dispatch_id=0),
+            make_record(6, 0x10, 1, dispatch_id=1),
+        ],
+        instructions=["v_mov", "v_add"],
+        comments=["/s/a.cpp:1", "/s/b.cpp:1"],
+        kernel_symbols=[
+            make_kernel_symbol(100, 5, "sharedKernel"),
+            make_kernel_symbol(101, 6, "sharedKernel"),
+        ],
+        kernel_dispatch=[make_dispatch(0, 100), make_dispatch(1, 101)],
+    )
+    expected = load_pc_sampling_data_per_kernel(
+        "stochastic",
+        tool_data,
+        "offset",
+    )
+
+    actual = load_pc_sampling_data(
+        schema.Workload(),
+        "ps_file",
+        "offset",
+        [tool_data],
+    )
+
+    assert len(actual) == 2
+    assert list(actual.columns) == [
+        "source_line",
+        "instruction",
+        "code_object_id",
+        "offset",
+        "count",
+        "count_issued",
+        "count_stalled",
+        "stall_reason",
+        "Kernel_Name",
+    ]
+    pd.testing.assert_frame_equal(
+        actual.reset_index(drop=True),
+        expected.reset_index(drop=True),
+    )
+
+
 @pytest.mark.parametrize("method", ["stochastic", "host_trap"])
 def test_load_pc_sampling_data_no_filter_schema_parity(method: str) -> None:
     """No-filter has the same columns as the single-kernel view, with more rows."""
@@ -1215,12 +1262,16 @@ def test_load_pc_sampling_results_returns_empty_for_missing_folder(
 # ═══════════════════════════════════════════════════════════════
 
 
-def test_load_pc_sampling_results_missing_returns_empty_list(tmp_path: Path) -> None:
+def test_canonical_record_collection_preserves_legacy_analysis_empty_loader(
+    tmp_path: Path,
+) -> None:
     """Return an empty list when the results json is absent."""
     assert load_pc_sampling_results(str(tmp_path)) == []
 
 
-def test_load_pc_sampling_results_parses_tool_record(tmp_path: Path) -> None:
+def test_canonical_record_collection_preserves_legacy_analysis_loader(
+    tmp_path: Path,
+) -> None:
     """Return a list containing the rocprofiler-sdk-tool[0] dict."""
     write_results_json(
         tmp_path / "ps_file_results.json",
@@ -1379,6 +1430,33 @@ def test_load_pc_sampling_tool_data_gate(tmp_path: Path) -> None:
     instance._profiling_config = {"filter_blocks": ["2"]}  # counters only
     assert instance.pc_sampling_collected() is False
     assert instance.load_pc_sampling_tool_data(str(tmp_path)) == []
+
+
+def test_canonical_record_collection_preserves_legacy_analysis_scaffolding(
+    tmp_path: Path,
+) -> None:
+    """Repeated legacy dispatches retain their top-kernel and dispatch rows."""
+    tool_data = make_tool_data(
+        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
+        kernel_dispatch=[
+            make_dispatch(1, 100, start=10, end=20),
+            make_dispatch(2, 100, start=30, end=50),
+        ],
+    )
+    workload = schema.Workload()
+    args = argparse.Namespace(time_unit="ns", kernel_verbose=5)
+    instance = make_db_analysis(str(tmp_path))
+
+    instance.build_pc_sampling_only_workload(
+        workload,
+        str(tmp_path),
+        args,
+        [tool_data],
+    )
+
+    assert workload.raw_pmc["Dispatch_ID"].tolist() == [1, 2]
+    assert workload.dfs[PMC_KERNEL_TOP_TABLE_ID].iloc[0]["Count"] == 2
+    assert workload.dfs[PMC_DISPATCH_INFO_TABLE_ID]["Dispatch_ID"].tolist() == [1, 2]
 
 
 def test_load_table_data_forwards_pc_sampling_tool_data() -> None:
@@ -1616,6 +1694,41 @@ def test_calc_dispatch_data_uses_provided_tool_data(tmp_path: Path) -> None:
     assert df.iloc[0]["gpu_id"] == 0
 
 
+def test_canonical_record_collection_preserves_legacy_analysis_db_dispatches(
+    tmp_path: Path,
+) -> None:
+    """Database preprocessing retains every dispatch from one legacy record."""
+    tool_data = make_tool_data(
+        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
+        kernel_dispatch=[
+            make_dispatch(1, 100, start=10, end=20),
+            make_dispatch(2, 100, start=30, end=50),
+        ],
+    )
+    instance = make_db_analysis(str(tmp_path))
+    instance._profiling_config = {"filter_blocks": ["21"]}
+
+    result = instance.calc_dispatch_data({str(tmp_path): [tool_data]})
+
+    assert result[str(tmp_path)]["dispatch_id"].tolist() == [1, 2]
+
+
+def test_canonical_record_collection_preserves_legacy_analysis_empty_db(
+    tmp_path: Path,
+) -> None:
+    """An empty collection retains the legacy missing-results warning."""
+    instance = make_db_analysis(str(tmp_path))
+    instance._profiling_config = {"filter_blocks": ["21"]}
+
+    with patch("utils.file_io.console_warning") as warning:
+        result = instance.calc_dispatch_data({str(tmp_path): []})
+
+    assert result[str(tmp_path)].empty
+    warning.assert_called_once_with(
+        "PC sampling results not found. Cannot build dispatch data."
+    )
+
+
 def test_calc_dispatch_data_stitches_pc_sampling_tool_records(
     tmp_path: Path,
 ) -> None:
@@ -1720,11 +1833,11 @@ def test_pc_sampling_analyze_sorting_type(
     common.clean_output_dir(True, workload_dir)
 
 
-def test_pc_sampling_analyze_db_output(
+def test_canonical_record_collection_preserves_legacy_analysis_database_and_csv(
     binary_handler_analyze_rocprof_compute,
     monkeypatch,
 ) -> None:
-    """Analyze in db mode records sampled rows and the dispatched kernels' ISA."""
+    """Legacy database and CSV outputs retain samples and dispatch counts."""
     workload_dir = Path(common.setup_workload_dir(PC_SAMPLING_WORKLOAD)).resolve()
     db_name = "pc_sampling_db_test"
     db_path = workload_dir / f"{db_name}.db"
@@ -1781,12 +1894,22 @@ def test_pc_sampling_analyze_db_output(
                 "GROUP BY code_object_uuid, code_object_offset "
                 "HAVING COUNT(*) > 1)"
             ).fetchone()[0]
+            db_pc_sampling = pd.read_sql_query(
+                "SELECT kernel_name, offset, instruction, source, count, "
+                "count_issue, count_stall, stall_reason "
+                "FROM compute_pc_sampling_view "
+                "ORDER BY kernel_name, offset",
+                conn,
+            )
+            db_dispatch_count = conn.execute(
+                "SELECT dispatch_count FROM compute_kernel_view"
+            ).fetchone()[0]
         finally:
             conn.close()
         assert counts["compute_code_object_store"] > 0
         # Only sampled offsets carry a sample state; the dispatched kernels' full
         # disassembly is added as extra lines, so lines outnumber states.
-        assert state_count > 0
+        assert state_count == 14
         assert line_count > state_count
         # Un-dispatched ISA is never stored, so no line is left un-attributed.
         assert attributed == line_count
@@ -1794,7 +1917,50 @@ def test_pc_sampling_analyze_db_output(
         # No duplicate ISA: sampled offsets are not re-inserted.
         assert duplicate_offsets == 0
         # inst_type is a per-sample class, so its counts sum to the sample total.
+        assert state_total == 390
         assert inst_sample_total == state_total
+        assert len(db_pc_sampling) == 14
+        assert db_pc_sampling["count"].sum() == 390
+        assert db_dispatch_count == 3
+
+        csv_name = "pc_sampling_csv_test"
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            str(workload_dir),
+            "--block",
+            "21",
+            "--output-format",
+            "csv",
+            "--output-name",
+            csv_name,
+        ])
+        assert code == 0
+        csv_dir = workload_dir / csv_name
+        csv_pc_sampling = pd.read_csv(csv_dir / "pc_sampling.csv").sort_values([
+            "kernel_name",
+            "offset",
+        ])
+        csv_kernel = pd.read_csv(csv_dir / "kernel.csv")
+        pd.testing.assert_frame_equal(
+            csv_pc_sampling[
+                [
+                    "kernel_name",
+                    "offset",
+                    "instruction",
+                    "source",
+                    "count",
+                    "count_issue",
+                    "count_stall",
+                    "stall_reason",
+                ]
+            ].reset_index(drop=True),
+            db_pc_sampling.reset_index(drop=True),
+            check_dtype=False,
+        )
+        assert len(csv_pc_sampling) == 14
+        assert csv_pc_sampling["count"].sum() == 390
+        assert csv_kernel.iloc[0]["dispatch_count"] == 3
     finally:
         common.clean_output_dir(True, str(workload_dir))
 
