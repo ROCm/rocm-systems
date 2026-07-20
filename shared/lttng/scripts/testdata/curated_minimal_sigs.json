@@ -1,0 +1,35 @@
+{
+  "hipDeviceSynchronize": [],
+  "hipMalloc": [
+    {
+      "c_type": "void **",
+      "name": "ptr"
+    },
+    {
+      "c_type": "size_t",
+      "name": "size"
+    }
+  ],
+  "hipMemcpyAsync": [
+    {
+      "c_type": "void *",
+      "name": "dst"
+    },
+    {
+      "c_type": "const void *",
+      "name": "src"
+    },
+    {
+      "c_type": "size_t",
+      "name": "sizeBytes"
+    },
+    {
+      "c_type": "hipMemcpyKind",
+      "name": "kind"
+    },
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    }
+  ]
+}
