@@ -937,9 +937,9 @@ configure(bool _setup, std::int64_t _tid)
                     get_setting_value<std::string>(
                         std::string{ env_vars::SAMPLING_OVERFLOW_EVENT })
                         .value_or("perf::PERF_COUNT_HW_CACHE_REFERENCES");
-                LOG_INFO("[SIG{}] Sampler for thread {} will be triggered every {:.1f} "
-                         "{} events...",
-                         itr, _tid, _freq, _overflow_event);
+                LOG_TRACE("[SIG{}] Sampler for thread {} will be triggered every {:.1f} "
+                          "{} events...",
+                          itr, _tid, _freq, _overflow_event);
             }
             else
             {
@@ -949,7 +949,7 @@ configure(bool _setup, std::int64_t _tid)
                     dynamic_cast<const timer*>(_sampler->get_trigger(itr));
                 if(_timer)
                 {
-                    LOG_INFO(
+                    LOG_TRACE(
                         "[SIG{}] Sampler for thread {} will be triggered {:.1f}x per "
                         "second of {}-time (every {:.3e} milliseconds)...",
                         itr, _tid, _timer->get_frequency(units::sec), _type,

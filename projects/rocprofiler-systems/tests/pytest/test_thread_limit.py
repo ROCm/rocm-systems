@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest, get_rocprof_config
 
-pytestmark = [pytest.mark.thread_limit]
+pytestmark = [pytest.mark.thread_limit, pytest.mark.gpu]
 
 # rocprof-sys may initialize internal/offset threads (sampling, ROCm, etc.)
 # that consume thread slots without appearing as workload thread rows. Expect the

@@ -1131,7 +1131,7 @@ rocprofsys_finalize_hidden(void)
                 if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
                 if(_thr_verbose >= 0)
                 {
-                    LOG_INFO("{}", _msg);
+                    LOG_TRACE("{}", _msg);
                 }
             }
         }

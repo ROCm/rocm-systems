@@ -54,6 +54,7 @@ def ompt_sampling_env(ompt_base_env: dict[str, str]) -> dict[str, str]:
             "ROCPROFSYS_SAMPLING_CPUTIME_FREQ": "1000",
             "ROCPROFSYS_SAMPLING_REALTIME_FREQ": "500",
             "ROCPROFSYS_MONOCHROME": "ON",
+            "ROCPROFSYS_LOG_LEVEL": "trace",
         }
     )
     return env
