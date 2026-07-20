@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 import unittest
 from unittest import mock
 
@@ -16,6 +17,32 @@ from consan_validation_test_support import temporary_root
 
 
 class ConSanValidationTest(unittest.TestCase):
+    def test_run_process_timeout_contains_descendants(self) -> None:
+        parent = (
+            "import subprocess,sys,time; "
+            "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); "
+            "print(child.pid, flush=True); time.sleep(60)"
+        )
+        with temporary_root() as root:
+            returncode, _, output = validation._run_process(
+                [sys.executable, "-c", parent], os.environ.copy(), root / "run.log", 1
+            )
+        self.assertEqual(returncode, 124)
+        self.assertIn("validation timeout after 1s", output)
+        child_pid = int(output.splitlines()[0])
+        for _ in range(20):
+            try:
+                state = Path(f"/proc/{child_pid}/stat").read_text(
+                    encoding="utf-8"
+                ).split()[2]
+            except FileNotFoundError:
+                break
+            if state == "Z":
+                break
+            time.sleep(0.05)
+        else:
+            self.fail(f"timed-out descendant {child_pid} remained runnable")
+
     def test_coverage_summary_rejects_static_analysis_incompleteness(self) -> None:
         counts = {name: 0 for name in _COVERAGE_COUNT_FIELDS}
         counts["access_discovered"] = 1

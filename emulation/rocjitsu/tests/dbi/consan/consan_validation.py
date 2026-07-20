@@ -1557,22 +1557,26 @@ def _run_process(
     timeout: int,
 ) -> tuple[int, float, str]:
     start = time.monotonic()
+    process = subprocess.Popen(
+        command,
+        env=environment,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
     try:
-        result = subprocess.run(
-            command,
-            env=environment,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=timeout,
-            check=False,
-        )
-        returncode = result.returncode
-        output = result.stdout
-    except subprocess.TimeoutExpired as error:
+        output, _ = process.communicate(timeout=timeout)
+        returncode = process.returncode
+    except subprocess.TimeoutExpired:
         returncode = 124
-        stdout = error.stdout.decode() if isinstance(error.stdout, bytes) else error.stdout
-        output = (stdout or "") + f"\nvalidation timeout after {timeout}s\n"
+        _stop_process_group(process, signal.SIGTERM)
+        try:
+            output, _ = process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            _stop_process_group(process, signal.SIGKILL)
+            output, _ = process.communicate()
+        output = (output or "") + f"\nvalidation timeout after {timeout}s\n"
     elapsed = time.monotonic() - start
     log_path.write_text(output, encoding="utf-8")
     return returncode, elapsed, output
