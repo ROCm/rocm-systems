@@ -258,6 +258,52 @@ class TestFullPipelineAlignment:
         min_offset = surgery.get_min_content_offset()
         assert min_offset > 0, "get_min_content_offset should not return 0"
 
+    def test_relocated_phdr_vaddr_equals_offset(
+        self, test_assets_dir: Path, tmp_path: Path
+    ):
+        """Relocated PHDR PT_LOAD must use p_vaddr == p_offset.
+
+        EL8's 4.18 kernel computes AT_PHDR = load_bias + e_phoff without
+        translating e_phoff through the covering segment, so a merely
+        page-congruent mapping (p_vaddr != p_offset) makes direct exec
+        SIGSEGV in ld.so before main. Regression test for ROCm/TheRock#5430.
+        """
+        input_binary = (
+            test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_single.exe"
+        )
+        output_binary = tmp_path / "phdr_vaddr_output.exe"
+
+        kpack_offload_binary(
+            input_path=input_binary,
+            output_path=output_binary,
+            kpack_search_paths=["test.kpack"],
+            kernel_name="test_kernel",
+        )
+
+        surgery = ElfSurgery.load(output_binary)
+        e_phoff = surgery.ehdr.e_phoff
+        covering = [
+            phdr
+            for _, phdr in surgery.iter_program_headers()
+            if phdr.p_type == PT_LOAD
+            and phdr.p_offset <= e_phoff < phdr.p_offset + phdr.p_filesz
+        ]
+        assert covering, "no PT_LOAD covers the program header table"
+        # The pipeline must have relocated the PHDR table into a dedicated
+        # trailing PT_LOAD that begins at e_phoff (otherwise this test would
+        # pass trivially on a non-relocated PIE whose first PT_LOAD already has
+        # p_vaddr == p_offset == 0, exercising nothing).
+        assert any(phdr.p_offset == e_phoff for phdr in covering), (
+            f"expected a dedicated PHDR PT_LOAD starting at e_phoff=0x{e_phoff:x}; "
+            "the table was not relocated as expected"
+        )
+        for phdr in covering:
+            assert phdr.p_vaddr == phdr.p_offset, (
+                "PHDR-covering PT_LOAD must have p_vaddr == p_offset for "
+                f"old-kernel exec; got p_vaddr=0x{phdr.p_vaddr:x}, "
+                f"p_offset=0x{phdr.p_offset:x}"
+            )
+
 
 class TestNobitsCollision:
     """Tests for NOBITS offset collision when section ends on page boundary."""

@@ -2,12 +2,15 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "halt_snapshot_plugin.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/config/dbt_guest_config.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
+#include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/soc.h"
 #include "rocjitsu/vm/virtual_machine.h"
@@ -25,16 +28,28 @@ RJ_DIAGNOSTIC_POP
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace {
 
 const std::string CONFIG_DIR_PATH = CONFIG_DIR;
 
+// \NPI new GPU: add a config-load test for its configs/<gpu>.json here.
 using namespace rocjitsu;
 
+std::filesystem::path write_temp_config(std::string_view name, std::string_view json) {
+  std::filesystem::path path = std::filesystem::temp_directory_path() / std::string(name);
+  std::ofstream out(path);
+  out << json;
+  return path;
+}
+
 TEST(ConfigLoaderTest, LoadCdna4Config) {
-  std::string json = CONFIG_DIR_PATH + "/amdgpu_cdna4.json";
+  std::string json = CONFIG_DIR_PATH + "/gfx950_cdna4.json";
   auto loaded = config::load_config(json, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
 
@@ -44,6 +59,121 @@ TEST(ConfigLoaderTest, LoadCdna4Config) {
   auto *xcd = soc->xcd(0);
   EXPECT_EQ(xcd->num_shader_engines(), 4u);
   EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 8u);
+}
+
+TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
+  auto rdna4 =
+      config::load_config(CONFIG_DIR_PATH + "/gfx1201_r9700.json", rocjitsu::kEmbeddedSchema);
+  EXPECT_EQ(rdna4.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_EQ(rdna4.device.gpu_id, 8716u);
+  EXPECT_EQ(rdna4.device.device_id, 0x7551u);
+  EXPECT_EQ(rdna4.device.family_id, 0x98u);
+  EXPECT_EQ(rdna4.device.gfx_target_version, 120001u);
+  EXPECT_EQ(rdna4.device.revision_id, 1u);
+  EXPECT_EQ(rdna4.device.pci_revision_id, 192u);
+  EXPECT_EQ(rdna4.device.simd_count, 128u);
+  EXPECT_EQ(rdna4.device.num_shader_engines, 8u);
+  EXPECT_EQ(rdna4.device.num_shader_arrays_per_engine, 2u);
+  EXPECT_EQ(rdna4.device.num_cu_per_sh, 8u);
+  EXPECT_EQ(rdna4.device.simd_per_cu, 2u);
+  EXPECT_EQ(rdna4.device.vram_type, kmd::kAmdgpuVramTypeGddr6);
+  EXPECT_EQ(rdna4.device.simd_count, rdna4.device.num_shader_engines * rdna4.device.num_cu_per_sh *
+                                         rdna4.device.simd_per_cu);
+  EXPECT_EQ(kmd::drm_shader_engine_count(rdna4.device.num_shader_engines,
+                                         rdna4.device.num_shader_arrays_per_engine),
+            4u);
+  EXPECT_EQ(kmd::drm_cu_active_number(rdna4.device.num_shader_engines, rdna4.device.num_cu_per_sh),
+            64u);
+  EXPECT_EQ(kmd::external_rev_id_for_gfx_target_version(rdna4.device.gfx_target_version,
+                                                        rdna4.device.revision_id),
+            0x51u);
+  EXPECT_EQ(kmd::gfx_target_name(rdna4.device.gfx_target_version), "gfx1201");
+  EXPECT_EQ(kmd::gfx_target_version_from_name("gfx1201"), rdna4.device.gfx_target_version);
+  EXPECT_EQ(kmd::gfx_target_name(90010), "gfx90a");
+  EXPECT_EQ(kmd::gfx_target_version_from_name("gfx90a"), 90010u);
+  EXPECT_FALSE(kmd::gfx_target_version_from_name("cdna4"));
+  EXPECT_EQ(kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA3_5), 0u);
+  EXPECT_EQ(kmd::gb_addr_config_for_gfx_target_version(110500), 0u);
+  EXPECT_EQ(kmd::gb_addr_config_for_gfx_target_version(120500), 0u);
+  EXPECT_EQ(kmd::drm_shader_engine_count(0, 2), 0u);
+  EXPECT_EQ(kmd::drm_shader_engine_count(1, 2), 1u);
+  EXPECT_EQ(kmd::drm_shader_engine_count(3, 2), 2u);
+  EXPECT_EQ(kmd::drm_shader_engine_count(3, 0), 3u);
+  EXPECT_EQ(kmd::num_hw_gfx_contexts_for_gfx_target_version(rdna4.device.gfx_target_version), 8u);
+  EXPECT_EQ(rdna4.soc()->num_xcds(), 1u);
+  EXPECT_EQ(rdna4.soc()->xcd(0)->num_shader_engines(), 4u);
+  EXPECT_EQ(rdna4.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
+  EXPECT_TRUE(rdna4.soc()->xcd(0)->command_processor()->packed_tid());
+  EXPECT_EQ(rdna4.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
+            amdgpu::SdmaPacketDialect::Gfx11Plus);
+
+  auto rdna3 =
+      config::load_config(CONFIG_DIR_PATH + "/gfx1100_w7900.json", rocjitsu::kEmbeddedSchema);
+  EXPECT_EQ(rdna3.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA3);
+  EXPECT_EQ(rdna3.device.gpu_id, 7019u);
+  EXPECT_EQ(rdna3.device.device_id, 0x7448u);
+  EXPECT_EQ(rdna3.device.family_id, 0x91u);
+  EXPECT_EQ(rdna3.device.gfx_target_version, 110000u);
+  EXPECT_EQ(rdna3.device.revision_id, 0u);
+  EXPECT_EQ(rdna3.device.pci_revision_id, 0u);
+  EXPECT_EQ(rdna3.device.simd_count, 192u);
+  EXPECT_EQ(rdna3.device.num_shader_engines, 12u);
+  EXPECT_EQ(rdna3.device.num_shader_arrays_per_engine, 2u);
+  EXPECT_EQ(rdna3.device.num_cu_per_sh, 8u);
+  EXPECT_EQ(rdna3.device.simd_per_cu, 2u);
+  EXPECT_EQ(rdna3.device.vram_type, kmd::kAmdgpuVramTypeGddr6);
+  EXPECT_EQ(rdna3.device.simd_count, rdna3.device.num_shader_engines * rdna3.device.num_cu_per_sh *
+                                         rdna3.device.simd_per_cu);
+  EXPECT_EQ(kmd::drm_shader_engine_count(rdna3.device.num_shader_engines,
+                                         rdna3.device.num_shader_arrays_per_engine),
+            6u);
+  EXPECT_EQ(kmd::drm_cu_active_number(rdna3.device.num_shader_engines, rdna3.device.num_cu_per_sh),
+            96u);
+  EXPECT_EQ(kmd::external_rev_id_for_gfx_target_version(rdna3.device.gfx_target_version,
+                                                        rdna3.device.revision_id),
+            0x1u);
+  EXPECT_EQ(kmd::gfx_target_name(rdna3.device.gfx_target_version), "gfx1100");
+  EXPECT_EQ(kmd::num_hw_gfx_contexts_for_gfx_target_version(rdna3.device.gfx_target_version), 8u);
+  EXPECT_EQ(rdna3.soc()->num_xcds(), 1u);
+  EXPECT_EQ(rdna3.soc()->xcd(0)->num_shader_engines(), 6u);
+  EXPECT_EQ(rdna3.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
+  EXPECT_TRUE(rdna3.soc()->xcd(0)->command_processor()->packed_tid());
+  EXPECT_EQ(rdna3.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
+            amdgpu::SdmaPacketDialect::Gfx11Plus);
+
+  auto rdna35 = config::load_config(CONFIG_DIR_PATH + "/gfx1151.json", rocjitsu::kEmbeddedSchema);
+  EXPECT_EQ(rdna35.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA3_5);
+  EXPECT_EQ(rdna35.device.gpu_id, 5510u);
+  EXPECT_EQ(rdna35.device.device_id, 0x1586u);
+  EXPECT_EQ(rdna35.device.family_id, 0x91u);
+  EXPECT_EQ(rdna35.device.gfx_target_version, 110501u);
+  EXPECT_EQ(rdna35.device.revision_id, 0u);
+  EXPECT_EQ(rdna35.device.pci_revision_id, 0u);
+  EXPECT_EQ(rdna35.device.simd_count, 64u);
+  EXPECT_EQ(rdna35.device.num_shader_engines, 4u);
+  EXPECT_EQ(rdna35.device.num_shader_arrays_per_engine, 2u);
+  EXPECT_EQ(rdna35.device.num_cu_per_sh, 8u);
+  EXPECT_EQ(rdna35.device.simd_per_cu, 2u);
+  EXPECT_EQ(rdna35.device.vram_type, kmd::kAmdgpuVramTypeGddr6);
+  EXPECT_EQ(rdna35.device.simd_count, rdna35.device.num_shader_engines *
+                                          rdna35.device.num_cu_per_sh * rdna35.device.simd_per_cu);
+  EXPECT_EQ(kmd::drm_shader_engine_count(rdna35.device.num_shader_engines,
+                                         rdna35.device.num_shader_arrays_per_engine),
+            2u);
+  EXPECT_EQ(
+      kmd::drm_cu_active_number(rdna35.device.num_shader_engines, rdna35.device.num_cu_per_sh),
+      32u);
+  EXPECT_EQ(kmd::external_rev_id_for_gfx_target_version(rdna35.device.gfx_target_version,
+                                                        rdna35.device.revision_id),
+            0xc1u);
+  EXPECT_EQ(kmd::gfx_target_name(rdna35.device.gfx_target_version), "gfx1151");
+  EXPECT_EQ(kmd::num_hw_gfx_contexts_for_gfx_target_version(rdna35.device.gfx_target_version), 8u);
+  EXPECT_EQ(rdna35.soc()->num_xcds(), 1u);
+  EXPECT_EQ(rdna35.soc()->xcd(0)->num_shader_engines(), 2u);
+  EXPECT_EQ(rdna35.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
+  EXPECT_TRUE(rdna35.soc()->xcd(0)->command_processor()->packed_tid());
+  EXPECT_EQ(rdna35.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
+            amdgpu::SdmaPacketDialect::Gfx11Plus);
 }
 
 TEST(ConfigLoaderTest, BuildFromJsonString) {
@@ -116,6 +246,406 @@ TEST(ConfigLoaderTest, BuildFromJsonString) {
   EXPECT_EQ(xcd->shader_engine(1)->num_compute_units(), 3u);
 }
 
+TEST(ConfigLoaderTest, DeviceCapabilityFieldsDefaultToAutoCompute) {
+  const char *json = R"({
+    "max_ticks": 5000,
+    "num_threads": 1,
+    "vm": {
+      "arch": "cdna3",
+      "gpu": { "device": { "gfx_target_version": 90500 } }
+    },
+    "topology": {
+      "root": {
+        "name": "soc", "type": "soc",
+        "children": [
+          { "name": "vram", "type": "gpu_memory" },
+          {
+            "name": "xcd0", "type": "xcd",
+            "children": [
+              { "name": "l2", "type": "l2_cache" },
+              { "name": "cp", "type": "command_processor" },
+              { "name": "se0", "type": "shader_engine",
+                "children": [{ "name": "cu0", "type": "compute_unit" }] }
+            ]
+          }
+        ]
+      },
+      "links": []
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+
+  // Not specified in JSON: 0 means "auto-compute" (see
+  // rocjitsu::default_non_debug_capability()/debug_topology_for()).
+  EXPECT_EQ(loaded.device.capability, 0u);
+  EXPECT_EQ(loaded.device.capability2, 0u);
+  EXPECT_EQ(loaded.device.debug_prop, 0u);
+}
+
+TEST(ConfigLoaderTest, DeviceCapabilityFieldsRoundTripFromJson) {
+  const char *json = R"({
+    "max_ticks": 5000,
+    "num_threads": 1,
+    "vm": {
+      "arch": "cdna3",
+      "gpu": { "device": {
+        "gfx_target_version": 90500,
+        "capability": 268468354,
+        "capability2": 3,
+        "debug_prop": 3119
+      } }
+    },
+    "topology": {
+      "root": {
+        "name": "soc", "type": "soc",
+        "children": [
+          { "name": "vram", "type": "gpu_memory" },
+          {
+            "name": "xcd0", "type": "xcd",
+            "children": [
+              { "name": "l2", "type": "l2_cache" },
+              { "name": "cp", "type": "command_processor" },
+              { "name": "se0", "type": "shader_engine",
+                "children": [{ "name": "cu0", "type": "compute_unit" }] }
+            ]
+          }
+        ]
+      },
+      "links": []
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+
+  EXPECT_EQ(loaded.device.capability, 268468354u);
+  EXPECT_EQ(loaded.device.capability2, 3u);
+  EXPECT_EQ(loaded.device.debug_prop, 3119u);
+}
+
+TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
+  const std::filesystem::path path = write_temp_config("rocjitsu_dbt_only_config_test.json", R"({
+      "dbt_guest": {
+        "enabled": true,
+        "guest_isa": "gfx950",
+        "host_isa": "gfx1201",
+        "host_gpu_id": 8716,
+        "log_level": 2,
+        "signal_backtrace": true,
+        "guest_device": {
+          "gpu_id": 38144,
+          "gfx_target_version": 90500,
+          "vendor_id": 4098,
+          "device_id": 30112,
+          "family_id": 160,
+          "unique_id": 5929628898254127105,
+          "marketing_name": "AMD Instinct MI350X",
+          "drm_render_minor": 191,
+          "simd_count": 64,
+          "num_shader_engines": 4,
+          "num_shader_arrays_per_engine": 2,
+          "num_cu_per_sh": 4,
+          "local_mem_size": 309237645312
+        }
+      }
+    })");
+
+  auto dbt = config::load_dbt_guest_config_from_file(path.string());
+  std::filesystem::remove(path);
+
+  EXPECT_TRUE(dbt.enabled);
+  EXPECT_EQ(dbt.guest_isa, "gfx950");
+  EXPECT_EQ(dbt.host.isa, "gfx1201");
+  EXPECT_EQ(dbt.host.gpu_id, 8716u);
+  EXPECT_EQ(dbt.host.backend, config::DbtExecutionBackend::Hardware);
+  EXPECT_EQ(dbt.log_level, 2);
+  EXPECT_TRUE(dbt.signal_backtrace);
+  ASSERT_TRUE(dbt.guest_device.present);
+  EXPECT_EQ(dbt.guest_device.gpu_id, 38144u);
+  EXPECT_EQ(dbt.guest_device.gfx_target_version, 90500u);
+  EXPECT_EQ(dbt.guest_device.marketing_name, "AMD Instinct MI350X");
+  EXPECT_EQ(dbt.guest_device.drm_render_minor, 191u);
+  EXPECT_EQ(dbt.guest_device.simd_count, dbt.guest_device.num_shader_engines *
+                                             dbt.guest_device.num_cu_per_sh *
+                                             dbt.guest_device.simd_per_cu);
+  EXPECT_EQ(dbt.guest_device.num_shader_arrays_per_engine, 2u);
+  EXPECT_EQ(dbt.guest_device.local_mem_size, 309237645312ULL);
+}
+
+TEST(ConfigLoaderTest, RejectsDbtGuestDeviceWithInconsistentSimdCount) {
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_bad_dbt_guest_geometry_config_test.json", R"({
+      "dbt_guest": {
+        "enabled": true,
+        "guest_isa": "gfx950",
+        "host_isa": "gfx1201",
+        "guest_device": {
+          "gpu_id": 38144,
+          "gfx_target_version": 90500,
+          "simd_count": 1024,
+          "num_shader_engines": 4,
+          "num_cu_per_sh": 4,
+          "simd_per_cu": 4
+        }
+      }
+    })");
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(path.string()), std::runtime_error);
+  std::filesystem::remove(path);
+}
+
+TEST(ConfigLoaderTest, LoadsDbtGuestThroughFullConfigLoader) {
+  std::ifstream base(CONFIG_DIR_PATH + "/gfx1201_r9700.json");
+  ASSERT_TRUE(base.is_open());
+  std::string json((std::istreambuf_iterator<char>(base)), std::istreambuf_iterator<char>());
+  const size_t insert_pos = json.find('{');
+  ASSERT_NE(insert_pos, std::string::npos);
+  json.insert(insert_pos + 1, R"(
+    "dbt_guest": {
+      "enabled": true,
+      "guest_isa": "gfx950",
+      "host_isa": "gfx1201",
+      "host_gpu_id": 8716,
+      "log_level": 2,
+      "signal_backtrace": true,
+      "guest_device": {
+        "gpu_id": 38144,
+        "gfx_target_version": 90500,
+        "vendor_id": 4098,
+        "device_id": 30112,
+        "family_id": 160,
+        "unique_id": 5929628898254127105,
+        "marketing_name": "AMD Instinct MI350X",
+        "drm_render_minor": 191,
+        "simd_count": 64,
+        "num_shader_engines": 4,
+        "num_shader_arrays_per_engine": 2,
+        "num_cu_per_sh": 4,
+        "local_mem_size": 309237645312
+      }
+    },
+  )");
+
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_full_dbt_guest_config_test.json", json);
+  auto loaded = config::load_config(path.string(), rocjitsu::kEmbeddedSchema);
+  std::filesystem::remove(path);
+
+  EXPECT_TRUE(loaded.dbt_guest.enabled);
+  EXPECT_EQ(loaded.dbt_guest.guest_isa, "gfx950");
+  EXPECT_EQ(loaded.dbt_guest.host.isa, "gfx1201");
+  EXPECT_EQ(loaded.dbt_guest.host.gpu_id, 8716u);
+  EXPECT_EQ(loaded.dbt_guest.host.backend, config::DbtExecutionBackend::Hardware);
+  EXPECT_EQ(loaded.dbt_guest.log_level, 2);
+  EXPECT_TRUE(loaded.dbt_guest.signal_backtrace);
+  ASSERT_TRUE(loaded.dbt_guest.guest_device.present);
+  EXPECT_EQ(loaded.dbt_guest.guest_device.gpu_id, 38144u);
+  EXPECT_EQ(loaded.dbt_guest.guest_device.gfx_target_version, 90500u);
+  EXPECT_EQ(loaded.dbt_guest.guest_device.marketing_name, "AMD Instinct MI350X");
+}
+
+TEST(ConfigLoaderTest, MissingDbtGuestConfigReturnsDefaults) {
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_missing_dbt_guest_config_test.json", "{}");
+
+  auto dbt = config::load_dbt_guest_config_from_file(path.string());
+  std::filesystem::remove(path);
+
+  EXPECT_FALSE(dbt.enabled);
+  EXPECT_TRUE(dbt.guest_isa.empty());
+  EXPECT_TRUE(dbt.host.isa.empty());
+  EXPECT_EQ(dbt.host.gpu_id, 0u);
+  EXPECT_EQ(dbt.host.backend, config::DbtExecutionBackend::Hardware);
+  EXPECT_EQ(dbt.log_level, 0);
+  EXPECT_FALSE(dbt.signal_backtrace);
+  EXPECT_FALSE(dbt.guest_device.present);
+}
+
+TEST(ConfigLoaderTest, MissingDbtGuestDeviceLeavesDeviceAbsent) {
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_missing_dbt_guest_device_config_test.json", R"({
+        "dbt_guest": {
+          "enabled": true,
+          "guest_isa": "gfx950",
+          "host_isa": "gfx1201"
+        }
+      })");
+
+  auto dbt = config::load_dbt_guest_config_from_file(path.string());
+  std::filesystem::remove(path);
+
+  EXPECT_TRUE(dbt.enabled);
+  EXPECT_EQ(dbt.guest_isa, "gfx950");
+  EXPECT_EQ(dbt.host.isa, "gfx1201");
+  EXPECT_FALSE(dbt.guest_device.present);
+}
+
+TEST(ConfigLoaderTest, MalformedDbtGuestConfigThrows) {
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_malformed_dbt_guest_config_test.json", R"({ "dbt_guest": )");
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(path.string()), std::runtime_error);
+  std::filesystem::remove(path);
+}
+
+TEST(ConfigLoaderTest, LoadsSimulatorDbtBackendConfig) {
+  const std::filesystem::path external_path =
+      write_temp_config("rocjitsu_simulator_dbt_guest_config_test.json", R"({
+        "dbt_guest": {
+          "enabled": true,
+          "guest_isa": "gfx950",
+          "host_isa": "gfx942",
+          "execution_backend": "simulator",
+          "simulator_config": "gfx942_cdna3_kmd.json"
+        }
+      })");
+  const std::filesystem::path self_contained_path =
+      write_temp_config("rocjitsu_self_contained_dbt_guest_config_test.json", R"({
+        "dbt_guest": {
+          "enabled": true,
+          "guest_isa": "gfx950",
+          "host_isa": "gfx942",
+          "execution_backend": "simulator"
+        }
+      })");
+
+  auto external = config::load_dbt_guest_config_from_file(external_path.string());
+  auto self_contained = config::load_dbt_guest_config_from_file(self_contained_path.string());
+  std::filesystem::remove(external_path);
+  std::filesystem::remove(self_contained_path);
+
+  EXPECT_EQ(external.host.isa, "gfx942");
+  EXPECT_EQ(external.host.backend, config::DbtExecutionBackend::Simulator);
+  EXPECT_EQ(external.host.simulator_config_path, "gfx942_cdna3_kmd.json");
+  EXPECT_EQ(self_contained.host.backend, config::DbtExecutionBackend::Simulator);
+  EXPECT_TRUE(self_contained.host.simulator_config_path.empty());
+}
+
+TEST(ConfigLoaderTest, LoadsExplicitHardwareDbtBackendConfig) {
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_hardware_dbt_guest_config_test.json", R"({
+        "dbt_guest": {
+          "enabled": true,
+          "execution_backend": "hardware"
+        }
+      })");
+
+  auto dbt = config::load_dbt_guest_config_from_file(path.string());
+  std::filesystem::remove(path);
+
+  EXPECT_EQ(dbt.host.backend, config::DbtExecutionBackend::Hardware);
+}
+
+TEST(ConfigLoaderTest, RejectsEmptyDbtExecutionBackend) {
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_empty_dbt_backend_config_test.json", R"({
+        "dbt_guest": {
+          "enabled": true,
+          "execution_backend": ""
+        }
+      })");
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(path.string()), std::runtime_error);
+  std::filesystem::remove(path);
+}
+
+TEST(ConfigLoaderTest, RejectsMisspelledDbtExecutionBackend) {
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_misspelled_dbt_backend_config_test.json", R"({
+        "dbt_guest": {
+          "enabled": true,
+          "execution_backed": "simulator"
+        }
+      })");
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(path.string()), std::runtime_error);
+  std::filesystem::remove(path);
+}
+
+TEST(ConfigLoaderTest, ValidatesSimulatorDbtGuestDeviceLimits) {
+  config::DbtGuestConfig guest;
+  guest.enabled = true;
+  guest.host.backend = config::DbtExecutionBackend::Simulator;
+  guest.guest_device.present = true;
+  guest.guest_device.lds_size_kb = 64;
+  guest.guest_device.max_slots_scratch_cu = 32;
+  guest.guest_device.max_waves_per_simd = 8;
+  guest.guest_device.wave_front_size = 64;
+
+  config::KfdDeviceConfig simulator;
+  simulator.present = true;
+  simulator.lds_size_kb = 64;
+  simulator.max_slots_scratch_cu = 32;
+  simulator.max_waves_per_simd = 8;
+  simulator.wave_front_size = 64;
+
+  EXPECT_NO_THROW(config::validate_dbt_simulator_device_limits(guest, simulator));
+  guest.guest_device.lds_size_kb = 65;
+  EXPECT_THROW(config::validate_dbt_simulator_device_limits(guest, simulator), std::runtime_error);
+  guest.guest_device.lds_size_kb = 64;
+  guest.guest_device.max_slots_scratch_cu = 33;
+  EXPECT_THROW(config::validate_dbt_simulator_device_limits(guest, simulator), std::runtime_error);
+}
+
+TEST(ConfigLoaderTest, DisabledDbtBackendSkipsBackendSpecificValidation) {
+  const std::filesystem::path simulator_path =
+      write_temp_config("rocjitsu_disabled_simulator_dbt_config_test.json", R"({
+        "dbt_guest": {
+          "enabled": false,
+          "execution_backend": "simulator"
+        }
+      })");
+  const std::filesystem::path hardware_path =
+      write_temp_config("rocjitsu_disabled_hardware_dbt_config_test.json", R"({
+        "dbt_guest": {
+          "enabled": false,
+          "execution_backend": "hardware",
+          "simulator_config": "ignored.json"
+        }
+      })");
+
+  EXPECT_NO_THROW(config::load_dbt_guest_config_from_file(simulator_path.string()));
+  EXPECT_NO_THROW(config::load_dbt_guest_config_from_file(hardware_path.string()));
+  std::filesystem::remove(simulator_path);
+  std::filesystem::remove(hardware_path);
+}
+
+TEST(ConfigLoaderTest, ResolvesDbtHostConfigPath) {
+  EXPECT_EQ(config::resolve_dbt_host_config_path("/a/b/dbt.json", ""), "/a/b/dbt.json");
+  EXPECT_EQ(config::resolve_dbt_host_config_path("/a/b/dbt.json", "sim.json"), "/a/b/sim.json");
+  EXPECT_EQ(config::resolve_dbt_host_config_path("/a/b/dbt.json", "/abs/sim.json"),
+            "/abs/sim.json");
+  EXPECT_EQ(config::resolve_dbt_host_config_path("/a/b/dbt.json", "../c/./sim.json"),
+            "/a/c/sim.json");
+}
+
+TEST(ConfigLoaderTest, RejectsUnknownDbtExecutionBackend) {
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_unknown_dbt_backend_config_test.json", R"({
+        "dbt_guest": {
+          "enabled": true,
+          "execution_backend": "magic"
+        }
+      })");
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(path.string()), std::runtime_error);
+  std::filesystem::remove(path);
+}
+
+TEST(ConfigLoaderTest, RejectsSimulatorConfigForHardwareDbtBackend) {
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_hardware_with_simulator_config_test.json", R"({
+        "dbt_guest": {
+          "enabled": true,
+          "execution_backend": "hardware",
+          "simulator_config": "gfx942_cdna3_kmd.json"
+        }
+      })");
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(path.string()), std::runtime_error);
+  std::filesystem::remove(path);
+}
+
 TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
   const char *json = R"({"max_ticks":1000,"num_threads":1,
     "vm":{"arch":"gfx1250"},
@@ -180,7 +710,11 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
   simdojo::SimulationEngine engine(loaded.engine_config);
   engine.topology().set_root(loaded.take_root());
   loaded.wire_links(engine.topology());
-  engine.build();
+  engine.create();
+
+  rocjitsu::test::DispatchCountPlugin *dispatch_count = nullptr;
+  auto plugin_group = rocjitsu::test::make_dispatch_count_group(&dispatch_count);
+  soc->set_plugin_group(plugin_group);
 
   // Write a kernel descriptor + invalid instruction so wavefronts halt immediately.
   using namespace rocr::llvm::amdhsa;
@@ -203,12 +737,13 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
 
   engine.step();
 
-  // After one step, the doorbell event dispatched wavefronts to CUs
-  // (allocated but not yet executed). Verify round-robin distribution.
+  // After one step, the doorbell event dispatched wavefronts to CUs. Count them
+  // via the dispatch hook (fired at placement) so the check is independent of when
+  // waves execute and free themselves. Verify round-robin distribution.
   EXPECT_EQ(xcd->command_processor()->dispatched_count(), 1u);
   auto *se = soc->xcd(0)->shader_engine(0);
-  EXPECT_EQ(se->compute_unit(0)->num_wfs(), 1u);
-  EXPECT_EQ(se->compute_unit(1)->num_wfs(), 1u);
+  EXPECT_EQ(dispatch_count->for_cu(se->compute_unit(0)), 1u);
+  EXPECT_EQ(dispatch_count->for_cu(se->compute_unit(1)), 1u);
 }
 
 TEST(CheckpointTest, SaveAndRestoreMemory) {
@@ -314,6 +849,59 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
                                        cdna3::Isa::MAX_ACC_VGPRS_PER_WF - 1,
                                    0),
             0xDEADBEEFu);
+
+  std::filesystem::remove(path);
+}
+
+TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
+  const char *json = R"({"max_ticks":10000,"num_threads":1,
+    "vm":{"arch":"rdna4"},
+    "topology":{
+      "root":{
+        "name":"soc","type":"soc",
+        "children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"xcd0","type":"xcd","children":[
+            {"name":"l2","type":"l2_cache"},
+            {"name":"cp","type":"command_processor"},
+            {"name":"se0","type":"shader_engine","children":[
+              {"name":"cu[0:1]","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"1"},
+                {"key":"sgprs_per_wf","value":"128"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]}
+          ]}
+        ]
+      },
+      "links":[
+        {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}
+      ]
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  wf->set_exec_raw(0xDEADBEEF0000000FULL);
+
+  const char *path = "/tmp/rocjitsu_test_checkpoint_wave32_exec.bin";
+  config::save_checkpoint(path, *loaded.soc(), 42, loaded.engine_config);
+  ASSERT_TRUE(std::filesystem::exists(path));
+
+  auto restored = config::restore_checkpoint(path);
+  auto *restored_vm = dynamic_cast<VirtualMachine *>(restored.build_result.root.get());
+  ASSERT_NE(restored_vm, nullptr);
+  auto *restored_wf = restored_vm->soc()->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
+  ASSERT_NE(restored_wf, nullptr);
+  EXPECT_EQ(restored_wf->exec(), 0xFULL);
+  EXPECT_EQ(restored_wf->exec_raw(), 0xDEADBEEF0000000FULL);
 
   std::filesystem::remove(path);
 }

@@ -51,7 +51,7 @@ void getDeviceCount(int* pdevCnt) {
     write(fd[1], &devCnt, sizeof(devCnt));
     // close the write descriptor:
     close(fd[1]);
-    exit(0);
+    _exit(0);
   } else {  // failure
     *pdevCnt = 1;
     return;
@@ -84,7 +84,7 @@ bool testMaskedDevice(int actualNumGPUs) {
     close(fd[0]);
     write(fd[1], &testResult, sizeof(testResult));
     close(fd[1]);
-    exit(0);
+    _exit(0);
 
   } else if (cPid > 0) {  // parent
     close(fd[1]);

@@ -50,7 +50,7 @@ _DEFAULT_INSTALL_PREFIX = (
 )
 _DEFAULT_GPU_TARGETS = os.environ.get(
     "GPU_TARGETS",
-    "gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102",
+    "gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1250",
 ).split()
 
 
@@ -573,7 +573,10 @@ def parse_args(args=None):
             ctest_args += ["-L", "tests"]
 
     if cdash_args.linter == "clang-tidy":
-        cmake_args += ["-DROCPROFILER_ENABLE_CLANG_TIDY=ON"]
+        cmake_args += [
+            "-DROCPROFILER_ENABLE_CLANG_TIDY=ON",
+            "-DROCPROFILER_DISABLE_ATT_QUICK_SCAN=ON",
+        ]
 
     if (
         cdash_args.mode == "Nightly"

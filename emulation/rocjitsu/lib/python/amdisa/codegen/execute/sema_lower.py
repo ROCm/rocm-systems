@@ -9,9 +9,10 @@ C++ code implementing the instruction's behavior in the simulator.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 
+from amdisa.codegen.execute.fp8_formats import fp8_helper_name
 from amdisa.sema_ast import (
     ExecModel,
     SemaBlock,
@@ -19,6 +20,7 @@ from amdisa.sema_ast import (
     SemaNodeKind,
     SemaType,
 )
+from amdisa.sema_effects import InlineOperationEffects, inline_binary_op_effects
 from amdisa.sema_helpers import (
     HELPER_REGISTRY,
     HelperTreatment,
@@ -111,15 +113,17 @@ class LoweringContext:
     operand_map: OperandMap | None = None
     indent: int = 1
     declared: set[str] = field(default_factory=set)
+    vector_preamble: list[str] = field(default_factory=list)
     is_lhs: bool = False
     vcc_var: str = 'vcc'
     vcc_read: str | None = None
     vcc_dst: str | None = None
     true16_dst_select: str | None = None
-    true16_src_select: str | None = None
     true16_src_selects: dict[int, str] = field(default_factory=dict)
-    true16_dst_reg: str | None = None
-    true16_src_raw: str | None = None
+    true16_vop3_opsel: str | None = None
+    fp8_byte_select: str | None = None
+    fp8_decode_e5m3_select: str | None = None
+    arch_name: str = ''
     vector_sgpr_once: bool = False
     clear_false_lane_mask_writes: bool = True
 
@@ -149,6 +153,7 @@ _CONTEXT_READS: dict[str, str] = {
     'SCC': 'wf.read_scc()',
     'VCC': 'wf.vcc()',
     'EXEC': 'wf.exec()',
+    'EXEC_RAW': 'wf.exec_raw()',
     'EXEC_LO': 'static_cast<uint32_t>(wf.exec())',
     'M0': 'wf.m0()',
     'laneId': 'lane',
@@ -158,6 +163,7 @@ _CONTEXT_WRITES: dict[str, str] = {
     'SCC': 'wf.write_scc',
     'VCC': 'wf.write_vcc',
     'EXEC': 'wf.set_exec',
+    'EXEC_RAW': 'wf.set_exec_raw',
 }
 
 _STD_MATH: dict[SemaNodeKind, str] = {
@@ -197,6 +203,7 @@ def lower_sema_block(block: SemaBlock, ctx: LoweringContext | None = None) -> st
         writes_vcc = _writes_vcc(block.body)
         wrapped = []
         wrapped.append('  uint64_t exec = wf.exec();')
+        wrapped.extend(ctx.vector_preamble)
         if writes_vcc:
             vcc_init = _vcc_init_expr(ctx)
             wrapped.append(f'  uint64_t vcc = {vcc_init};')
@@ -260,9 +267,9 @@ def _write_vcc_mask_to_explicit_dst(dst: str) -> str:
     # vector_cmp.py.
     return (
         f'if (wf.wf_size() <= 32)\n'
-        f'    {dst}.write_scalar(wf, static_cast<uint32_t>(vcc));\n'
+        f'    amdgpu::RegisterAccess(wf).write_scalar({dst}, static_cast<uint32_t>(vcc));\n'
         f'  else\n'
-        f'    {dst}.write_scalar64(wf, vcc);'
+        f'    amdgpu::RegisterAccess(wf).write_scalar64({dst}, vcc);'
     )
 
 
@@ -281,6 +288,10 @@ def _vcc_write_stmt(ctx: LoweringContext) -> str:
 
 def _indent(ctx: LoweringContext) -> str:
     return '  ' * ctx.indent
+
+
+def _nested_context(ctx: LoweringContext) -> LoweringContext:
+    return replace(ctx, indent=ctx.indent + 1)
 
 
 def _lower_stmt(node: SemaNode, ctx: LoweringContext) -> list[str]:
@@ -311,19 +322,7 @@ def _lower_stmt(node: SemaNode, ctx: LoweringContext) -> list[str]:
     if kind == SemaNodeKind.WHILE:
         cond = _lower_expr(node.children[0], ctx)
         lines = [f'{_indent(ctx)}while ({cond}) {{']
-        inner_ctx = LoweringContext(
-            exec_model=ctx.exec_model,
-            operand_map=ctx.operand_map,
-            indent=ctx.indent + 1,
-            declared=ctx.declared,
-            true16_dst_select=ctx.true16_dst_select,
-            true16_src_select=ctx.true16_src_select,
-            true16_src_selects=ctx.true16_src_selects,
-            true16_dst_reg=ctx.true16_dst_reg,
-            true16_src_raw=ctx.true16_src_raw,
-            vector_sgpr_once=ctx.vector_sgpr_once,
-            clear_false_lane_mask_writes=ctx.clear_false_lane_mask_writes,
-        )
+        inner_ctx = _nested_context(ctx)
         lines.extend(_lower_stmt(node.children[1], inner_ctx))
         lines.append(f'{_indent(ctx)}}}')
         return lines
@@ -443,19 +442,7 @@ def _lower_if(node: SemaNode, ctx: LoweringContext) -> list[str]:
     """Lower an IF node (supports 2, 3, or multi-branch elif chains)."""
     children = node.children
     lines: list[str] = []
-    inner_ctx = LoweringContext(
-        exec_model=ctx.exec_model,
-        operand_map=ctx.operand_map,
-        indent=ctx.indent + 1,
-        declared=ctx.declared,
-        true16_dst_select=ctx.true16_dst_select,
-        true16_src_select=ctx.true16_src_select,
-        true16_src_selects=ctx.true16_src_selects,
-        true16_dst_reg=ctx.true16_dst_reg,
-        true16_src_raw=ctx.true16_src_raw,
-        vector_sgpr_once=ctx.vector_sgpr_once,
-        clear_false_lane_mask_writes=ctx.clear_false_lane_mask_writes,
-    )
+    inner_ctx = _nested_context(ctx)
 
     if len(children) == 2:
         cond = _lower_expr(children[0], ctx)
@@ -494,19 +481,7 @@ def _lower_for(node: SemaNode, ctx: LoweringContext) -> list[str]:
     init_lines = _lower_stmt(node.children[0], ctx)
     cond = _lower_expr(node.children[1], ctx)
     step_lines = _lower_stmt(node.children[2], ctx)
-    inner_ctx = LoweringContext(
-        exec_model=ctx.exec_model,
-        operand_map=ctx.operand_map,
-        indent=ctx.indent + 1,
-        declared=ctx.declared,
-        true16_dst_select=ctx.true16_dst_select,
-        true16_src_select=ctx.true16_src_select,
-        true16_src_selects=ctx.true16_src_selects,
-        true16_dst_reg=ctx.true16_dst_reg,
-        true16_src_raw=ctx.true16_src_raw,
-        vector_sgpr_once=ctx.vector_sgpr_once,
-        clear_false_lane_mask_writes=ctx.clear_false_lane_mask_writes,
-    )
+    inner_ctx = _nested_context(ctx)
 
     init_str = (
         '; '.join(l.strip().rstrip(';') for l in init_lines) if init_lines else ''
@@ -852,9 +827,15 @@ def _lower_src_write(
     if binding:
         name = binding.name
         if binding.bit_width == 64:
-            return [f'{_indent(ctx)}{name}.write_lane64(wf, lane, {rhs});']
-        return [f'{_indent(ctx)}{name}.write_lane(wf, lane, {rhs});']
-    return [f'{_indent(ctx)}inst.src{idx}.write_lane(wf, lane, {rhs});']
+            return [
+                f'{_indent(ctx)}amdgpu::RegisterAccess(wf).write_lane64({name}, lane, {rhs});'
+            ]
+        return [
+            f'{_indent(ctx)}amdgpu::RegisterAccess(wf).write_lane({name}, lane, {rhs});'
+        ]
+    return [
+        f'{_indent(ctx)}amdgpu::RegisterAccess(wf).write_lane(inst.src{idx}, lane, {rhs});'
+    ]
 
 
 def _get_operand_index(node: SemaNode) -> int:
@@ -890,39 +871,47 @@ def _lower_instoperand_read(node: SemaNode, ctx: LoweringContext) -> str:
         name = binding.name
         if binding.reg_class == RegClass.SGPR or ctx.exec_model == ExecModel.SCALAR:
             if binding.bit_width == 64:
-                return f'{name}.read_scalar64(wf)'
-            value = f'{name}.read_scalar(wf)'
+                return f'amdgpu::RegisterAccess(wf).read_scalar64({name})'
+            value = f'amdgpu::RegisterAccess(wf).read_scalar({name})'
             if tag != 'D' and idx in ctx.true16_src_selects:
                 select = ctx.true16_src_selects[idx]
                 return f'(({select}) != 0 ? ({value} >> 16) : {value})'
             return value
         if binding.bit_width == 64:
-            return f'{name}.read_lane64(wf, lane)'
-        value = f'{name}.read_lane(wf, lane)'
+            return f'amdgpu::RegisterAccess(wf).read_lane64({name}, lane)'
+        value = f'amdgpu::RegisterAccess(wf).read_lane({name}, lane)'
         if (
             tag == 'D'
             and ctx.true16_dst_select is not None
             and ((node.ty and node.ty.size == 16) or binding.bit_width == 16)
         ):
-            if ctx.true16_dst_reg is not None:
-                value = (
-                    'wf.cu().read_vgpr(wf.vgpr_alloc().base + '
-                    f'({ctx.true16_dst_reg}), lane)'
-                )
             return f'(({ctx.true16_dst_select}) != 0 ? ({value} >> 16) : {value})'
         if tag != 'D' and idx in ctx.true16_src_selects:
+            if ctx.true16_vop3_opsel is not None:
+                return (
+                    f'::rocjitsu::amdgpu::read_vop3_true16_src('
+                    f'{name}, wf, lane, {ctx.true16_vop3_opsel}, {idx})'
+                )
             select = ctx.true16_src_selects[idx]
             return f'(({select}) != 0 ? ({value} >> 16) : {value})'
         return value
 
+    # A D-tagged instoperand is a read of the destination operand's old value
+    # (for accumulator/update forms), not a source-operand alias.
+    operand = f'inst.dst{idx}' if tag == 'D' else f'inst.src{idx}'
     if ctx.exec_model == ExecModel.SCALAR:
-        value = f'inst.src{idx}.read_scalar(wf)'
+        value = f'amdgpu::RegisterAccess(wf).read_scalar({operand})'
         if tag != 'D' and idx in ctx.true16_src_selects:
             select = ctx.true16_src_selects[idx]
             return f'(({select}) != 0 ? ({value} >> 16) : {value})'
         return value
-    value = f'inst.src{idx}.read_lane(wf, lane)'
+    value = f'amdgpu::RegisterAccess(wf).read_lane({operand}, lane)'
     if tag != 'D' and idx in ctx.true16_src_selects:
+        if ctx.true16_vop3_opsel is not None:
+            return (
+                f'::rocjitsu::amdgpu::read_vop3_true16_src('
+                f'inst.src{idx}, wf, lane, {ctx.true16_vop3_opsel}, {idx})'
+            )
         select = ctx.true16_src_selects[idx]
         return f'(({select}) != 0 ? ({value} >> 16) : {value})'
     return value
@@ -1027,33 +1016,31 @@ def _lower_dst_write(
         name = binding.name
         if binding.reg_class == RegClass.SGPR or ctx.exec_model == ExecModel.SCALAR:
             if binding.bit_width == 64:
-                return [f'{_indent(ctx)}{name}.write_scalar64(wf, {rhs});']
-            return [f'{_indent(ctx)}{name}.write_scalar(wf, {rhs});']
+                return [
+                    f'{_indent(ctx)}amdgpu::RegisterAccess(wf).write_scalar64({name}, {rhs});'
+                ]
+            return [
+                f'{_indent(ctx)}amdgpu::RegisterAccess(wf).write_scalar({name}, {rhs});'
+            ]
         if ctx.true16_dst_select is not None and (
             (lhs_ty and lhs_ty.size == 16) or binding.bit_width == 16
         ):
             selected_rhs = rhs
-            if ctx.true16_src_raw is not None or ctx.true16_src_select is not None:
-                true16_rhs = ctx.true16_src_raw or raw_rhs
-                if (
-                    ctx.true16_src_raw is None
-                    and rhs_node.kind == SemaNodeKind.CAST
-                    and rhs_node.children
-                    and rhs_node.cast_target
-                    and rhs_node.cast_target.size == 16
-                ):
-                    true16_rhs = _lower_expr(rhs_node.children[0], ctx)
-                selected_rhs = true16_rhs
-                if ctx.true16_src_select is not None:
-                    selected_rhs = f'(({ctx.true16_src_select}) != 0 ? ({true16_rhs} >> 16) : {true16_rhs})'
             ind = _indent(ctx)
-            if ctx.true16_dst_reg is not None:
-                dst_ref = f'wf.vgpr_alloc().base + ({ctx.true16_dst_reg})'
-                read_dst = f'wf.cu().read_vgpr({dst_ref}, lane)'
-                write_dst = f'wf.cu().write_vgpr({dst_ref}, lane, merged);'
-            else:
-                read_dst = f'{name}.read_lane(wf, lane)'
-                write_dst = f'{name}.write_lane(wf, lane, merged);'
+            if ctx.true16_vop3_opsel is not None or ctx.true16_dst_select in {
+                'inst_.opsel & 0x8u',
+                'amdgpu::vop3_opsel(inst_) & 0x8u',
+            }:
+                opsel_expr = ctx.true16_vop3_opsel or ctx.true16_dst_select
+                return [
+                    f'{ind}{{',
+                    f'{ind}  uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>({selected_rhs}));',
+                    f'{ind}  ::rocjitsu::amdgpu::write_vop3_true16_dst('
+                    f'{name}, wf, lane, {opsel_expr}, src_half, true);',
+                    f'{ind}}}',
+                ]
+            read_dst = f'amdgpu::RegisterAccess(wf).read_lane({name}, lane)'
+            write_dst = f'amdgpu::RegisterAccess(wf).write_lane({name}, lane, merged);'
             return [
                 f'{ind}{{',
                 f'{ind}  uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>({selected_rhs}));',
@@ -1065,12 +1052,20 @@ def _lower_dst_write(
                 f'{ind}}}',
             ]
         if binding.bit_width == 64:
-            return [f'{_indent(ctx)}{name}.write_lane64(wf, lane, {rhs});']
-        return [f'{_indent(ctx)}{name}.write_lane(wf, lane, {rhs});']
+            return [
+                f'{_indent(ctx)}amdgpu::RegisterAccess(wf).write_lane64({name}, lane, {rhs});'
+            ]
+        return [
+            f'{_indent(ctx)}amdgpu::RegisterAccess(wf).write_lane({name}, lane, {rhs});'
+        ]
 
     if ctx.exec_model == ExecModel.SCALAR:
-        return [f'{_indent(ctx)}inst.dst{idx}.write_scalar(wf, {rhs});']
-    return [f'{_indent(ctx)}inst.dst{idx}.write_lane(wf, lane, {rhs});']
+        return [
+            f'{_indent(ctx)}amdgpu::RegisterAccess(wf).write_scalar(inst.dst{idx}, {rhs});'
+        ]
+    return [
+        f'{_indent(ctx)}amdgpu::RegisterAccess(wf).write_lane(inst.dst{idx}, lane, {rhs});'
+    ]
 
 
 def _lower_arrayderef(node: SemaNode, ctx: LoweringContext) -> str:
@@ -1171,9 +1166,9 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' if (s & (0xFu << (i * 4))) r |= (0xFu << (i * 4));'
     ' return r; }}()',
     'clz': '[&]() {{ auto s = static_cast<uint32_t>({0});'
-    ' return s == 0 ? 32u : static_cast<uint32_t>(std::countl_zero(s)); }}()',
+    ' return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(s)); }}()',
     'clz64': '[&]() {{ auto s = static_cast<uint64_t>({0});'
-    ' return s == 0 ? 64u : static_cast<uint32_t>(std::countl_zero(s)); }}()',
+    ' return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(s)); }}()',
     'cvt_hi_f32_f16': 'std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>(({0}) >> 16)))',
     'brev64': '[&]() {{ uint64_t s = {0}; uint64_t r = 0;'
     ' for (int i = 0; i < 64; ++i) r |= ((s >> i) & 1ULL) << (63 - i);'
@@ -1301,7 +1296,20 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'cvt': '{0}',
 }
 
-_INLINE_BINARY_OPS: dict[str, str] = {
+
+@dataclass(frozen=True)
+class InlineBinaryOp:
+    template: str
+    effects: InlineOperationEffects
+
+
+def _effectful_inline_binary_op(name: str, template: str) -> InlineBinaryOp:
+    effects = inline_binary_op_effects(name)
+    assert effects != InlineOperationEffects(), f'{name} has no declared effects'
+    return InlineBinaryOp(template, effects)
+
+
+_INLINE_BINARY_OPS: dict[str, str | InlineBinaryOp] = {
     'mul_hi': '[&]() {{ auto a = static_cast<uint64_t>({0});'
     ' auto b = static_cast<uint64_t>({1});'
     ' return static_cast<uint32_t>((a * b) >> 32); }}()',
@@ -1315,7 +1323,7 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' return static_cast<uint32_t>(v >> ({1} & 31u)); }}()',
     'util::arithmetic_shr_i16': '[&]() {{ auto v = static_cast<int16_t>({0});'
     ' return static_cast<uint32_t>(static_cast<uint16_t>(v >> ({1} & 15u))); }}()',
-    'bfm': '(((1u << ({0} & 31u)) - 1u) << ({1} & 31u))',
+    'bfm': '::rocjitsu::amdgpu::bfm_b32({0}, {1})',
     'bfm64': '[&]() {{ uint64_t cnt = {0} & 63u; uint64_t off = {1} & 63u;'
     ' return cnt == 0 ? 0ULL : ((1ULL << cnt) - 1ULL) << off; }}()',
     'ashr': '[&]() {{ auto v = static_cast<int32_t>({0});'
@@ -1331,11 +1339,10 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' auto b = static_cast<int64_t>(static_cast<int32_t>({1} << 8) >> 8);'
     ' return static_cast<uint32_t>(static_cast<uint64_t>((a * b) >> 32)); }}()',
     'mul_u24': '(({0} & 0x00FFFFFFu) * ({1} & 0x00FFFFFFu))',
-    'mul_i24': '[&]() {{ auto a = static_cast<int32_t>({0} << 8) >> 8;'
-    ' auto b = static_cast<int32_t>({1} << 8) >> 8;'
-    ' return static_cast<uint32_t>(a * b); }}()',
+    'mul_i24': '::rocjitsu::amdgpu::mul_i24_u32({0}, {1})',
     'mul_lo_u16': 'static_cast<uint32_t>(static_cast<uint16_t>('
-    'static_cast<uint16_t>({0}) * static_cast<uint16_t>({1})))',
+    'static_cast<uint32_t>(static_cast<uint16_t>({0})) * '
+    'static_cast<uint32_t>(static_cast<uint16_t>({1}))))',
     'std::min': 'std::min({0}, {1})',
     'std::max': 'std::max({0}, {1})',
     'std::fmin': 'std::fmin({0}, {1})',
@@ -1399,27 +1406,45 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' if (a < b) vcc |= (1ULL << lane);'
     ' else vcc &= ~(1ULL << lane);'
     ' return a - b; }}()',
-    'addc': '[&]() {{ uint64_t w = static_cast<uint64_t>({0})'
-    ' + static_cast<uint64_t>({1})'
-    ' + static_cast<uint64_t>(wf.read_scc());'
-    ' wf.write_scc(w > 0xFFFFFFFFULL);'
-    ' return static_cast<uint32_t>(w); }}()',
-    'subb': '[&]() {{ uint32_t a = {0}, b = {1};'
-    ' uint32_t cin = wf.read_scc() ? 1u : 0u;'
-    ' wf.write_scc(static_cast<uint64_t>(a) < static_cast<uint64_t>(b) + cin);'
-    ' return a - b - cin; }}()',
-    'lshl1_add': '[&]() {{ uint64_t w = (static_cast<uint64_t>({0}) << 1u) + static_cast<uint64_t>({1});'
-    ' wf.write_scc(w > 0xFFFFFFFFULL);'
-    ' return static_cast<uint32_t>(w); }}()',
-    'lshl2_add': '[&]() {{ uint64_t w = (static_cast<uint64_t>({0}) << 2u) + static_cast<uint64_t>({1});'
-    ' wf.write_scc(w > 0xFFFFFFFFULL);'
-    ' return static_cast<uint32_t>(w); }}()',
-    'lshl3_add': '[&]() {{ uint64_t w = (static_cast<uint64_t>({0}) << 3u) + static_cast<uint64_t>({1});'
-    ' wf.write_scc(w > 0xFFFFFFFFULL);'
-    ' return static_cast<uint32_t>(w); }}()',
-    'lshl4_add': '[&]() {{ uint64_t w = (static_cast<uint64_t>({0}) << 4u) + static_cast<uint64_t>({1});'
-    ' wf.write_scc(w > 0xFFFFFFFFULL);'
-    ' return static_cast<uint32_t>(w); }}()',
+    'addc': _effectful_inline_binary_op(
+        'addc',
+        '[&]() {{ uint64_t w = static_cast<uint64_t>({0})'
+        ' + static_cast<uint64_t>({1})'
+        ' + static_cast<uint64_t>(wf.read_scc());'
+        ' wf.write_scc(w > 0xFFFFFFFFULL);'
+        ' return static_cast<uint32_t>(w); }}()',
+    ),
+    'subb': _effectful_inline_binary_op(
+        'subb',
+        '[&]() {{ uint32_t a = {0}, b = {1};'
+        ' uint32_t cin = wf.read_scc() ? 1u : 0u;'
+        ' wf.write_scc(static_cast<uint64_t>(a) < static_cast<uint64_t>(b) + cin);'
+        ' return a - b - cin; }}()',
+    ),
+    'lshl1_add': _effectful_inline_binary_op(
+        'lshl1_add',
+        '[&]() {{ uint64_t w = (static_cast<uint64_t>({0}) << 1u) + static_cast<uint64_t>({1});'
+        ' wf.write_scc(w > 0xFFFFFFFFULL);'
+        ' return static_cast<uint32_t>(w); }}()',
+    ),
+    'lshl2_add': _effectful_inline_binary_op(
+        'lshl2_add',
+        '[&]() {{ uint64_t w = (static_cast<uint64_t>({0}) << 2u) + static_cast<uint64_t>({1});'
+        ' wf.write_scc(w > 0xFFFFFFFFULL);'
+        ' return static_cast<uint32_t>(w); }}()',
+    ),
+    'lshl3_add': _effectful_inline_binary_op(
+        'lshl3_add',
+        '[&]() {{ uint64_t w = (static_cast<uint64_t>({0}) << 3u) + static_cast<uint64_t>({1});'
+        ' wf.write_scc(w > 0xFFFFFFFFULL);'
+        ' return static_cast<uint32_t>(w); }}()',
+    ),
+    'lshl4_add': _effectful_inline_binary_op(
+        'lshl4_add',
+        '[&]() {{ uint64_t w = (static_cast<uint64_t>({0}) << 4u) + static_cast<uint64_t>({1});'
+        ' wf.write_scc(w > 0xFFFFFFFFULL);'
+        ' return static_cast<uint32_t>(w); }}()',
+    ),
     'pack_ll': '(({0} & 0xFFFFu) | (({1} & 0xFFFFu) << 16))',
     'pack_lh': '(({0} & 0xFFFFu) | ({1} & 0xFFFF0000u))',
     'pack_hh': '((({0} >> 16) & 0xFFFFu) | ({1} & 0xFFFF0000u))',
@@ -1468,7 +1493,6 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     'pack_b32_f16': '(({0} & 0xFFFFu) | (({1} & 0xFFFFu) << 16))',
     'v_readlane': '{0}',
 }
-
 _INLINE_TERNARY_OPS: dict[str, str] = {
     'min3_f': 'std::fmin(std::fmin({0}, {1}), {2})',
     'max3_f': 'std::fmax(std::fmax({0}, {1}), {2})',
@@ -1490,9 +1514,9 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     'or3': '({0} | {1} | {2})',
     'xor3': '({0} ^ {1} ^ {2})',
     'xad': '(({0} ^ {1}) + {2})',
-    'lshl_add': '(({0} << {1}) + {2})',
-    'lshl_or': '(({0} << {1}) | {2})',
-    'add_lshl': '(({0} + {1}) << {2})',
+    'lshl_add': '(::rocjitsu::amdgpu::lshl_masked({0}, {1}) + {2})',
+    'lshl_or': '(::rocjitsu::amdgpu::lshl_masked({0}, {1}) | {2})',
+    'add_lshl': '::rocjitsu::amdgpu::lshl_masked(({0} + {1}), {2})',
     'ashr_pk_i8_i32': '[&]() -> uint32_t {{'
     ' uint32_t shift = static_cast<uint32_t>({2}) & 31u;'
     ' auto pack = [&](uint32_t src) -> uint32_t {{'
@@ -1514,7 +1538,7 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     'and_or': '(({0} & {1}) | {2})',
     'bfi': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
     ' return (a & b) | (~a & c); }}()',
-    'bfm': '(((1u << ({0} & 31u)) - 1u) << ({1} & 31u))',
+    'bfm': '::rocjitsu::amdgpu::bfm_b32({0}, {1})',
     'alignbit': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
     ' uint64_t val = (static_cast<uint64_t>(a) << 32) | b;'
     ' return static_cast<uint32_t>(val >> (c & 31u)); }}()',
@@ -1601,25 +1625,25 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' float hi = util::f16_to_f32(static_cast<uint16_t>(a >> 16))'
     ' * util::f16_to_f32(static_cast<uint16_t>(b >> 16));'
     ' return std::bit_cast<uint32_t>(lo + hi + c); }}()',
-    'dot4c': '[&]() {{ uint32_t a = {0}, b = {1}; int32_t c = static_cast<int32_t>({2});'
-    ' int32_t sum = c;'
+    'dot4c': '[&]() {{ uint32_t a = {0}, b = {1}; uint32_t sum = static_cast<uint32_t>({2});'
     ' for (int i = 0; i < 4; ++i)'
-    '   sum += static_cast<int32_t>(static_cast<int8_t>((a >> (i*8)) & 0xFF))'
-    '        * static_cast<int32_t>(static_cast<int8_t>((b >> (i*8)) & 0xFF));'
-    ' return static_cast<uint32_t>(sum); }}()',
-    'dot8c': '[&]() {{ uint32_t a = {0}, b = {1}; int32_t c = static_cast<int32_t>({2});'
-    ' int32_t sum = c;'
+    '   sum += static_cast<uint32_t>('
+    'static_cast<int32_t>(static_cast<int8_t>((a >> (i*8)) & 0xFF))'
+    '        * static_cast<int32_t>(static_cast<int8_t>((b >> (i*8)) & 0xFF)));'
+    ' return sum; }}()',
+    'dot8c': '[&]() {{ uint32_t a = {0}, b = {1}; uint32_t sum = static_cast<uint32_t>({2});'
     ' for (int i = 0; i < 8; ++i) {{'
     '   int32_t av = static_cast<int32_t>((a >> (i*4)) & 0xF);'
     '   if (av & 8) av |= ~0xF;'
     '   int32_t bv = static_cast<int32_t>((b >> (i*4)) & 0xF);'
     '   if (bv & 8) bv |= ~0xF;'
-    '   sum += av * bv; }}'
-    ' return static_cast<uint32_t>(sum); }}()',
+    '   sum += static_cast<uint32_t>(av * bv); }}'
+    ' return sum; }}()',
     'mad_32_16': '[&]() {{ int32_t a = static_cast<int32_t>(static_cast<int16_t>({0}));'
     ' int32_t b = static_cast<int32_t>(static_cast<int16_t>({1}));'
-    ' int32_t c = static_cast<int32_t>({2});'
-    ' return static_cast<uint32_t>(a * b + c); }}()',
+    ' uint32_t c = static_cast<uint32_t>({2});'
+    ' int64_t dot = static_cast<int64_t>(a) * b;'
+    ' return c + static_cast<uint32_t>(dot); }}()',
     'v_writelane': '(lane == {2}) ? {1} : {0}',
     'util::bfe': '[&]() {{ uint32_t base = {0};'
     ' uint32_t offset = {1};'
@@ -1634,18 +1658,17 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' else vcc &= ~(1ULL << lane);'
     ' return static_cast<uint32_t>(a - b - c); }}()',
     'mad_u24': '(({0} & 0x00FFFFFFu) * ({1} & 0x00FFFFFFu) + {2})',
-    'mad_i24': '[&]() {{ auto a = static_cast<int32_t>({0} << 8) >> 8;'
-    ' auto b = static_cast<int32_t>({1} << 8) >> 8;'
-    ' return static_cast<uint32_t>(a * b + static_cast<int32_t>({2})); }}()',
+    'mad_i24': '::rocjitsu::amdgpu::mad_i24_u32({0}, {1}, {2})',
+    'mad_lo_u16': '::rocjitsu::amdgpu::mad_lo_u16({0}, {1}, {2})',
     'bfe_u': '[&]() {{ uint32_t src={0}; uint32_t off={1} & 31u; uint32_t w={2} & 31u;'
     ' if (w == 0) return 0u;'
     ' uint32_t mask = (w >= 32) ? ~0u : ((1u << w) - 1u);'
     ' return (src >> off) & mask; }}()',
-    'bfe_i': '[&]() -> uint32_t {{ int32_t src=static_cast<int32_t>({0});'
-    ' uint32_t off={1} & 31u; uint32_t w={2} & 31u;'
-    ' if (w == 0) return 0u; int32_t val = (src >> off) & ((1 << w) - 1);'
-    ' if (val & (1 << (w-1))) val |= -(1 << w);'
-    ' return static_cast<uint32_t>(val); }}()',
+    'bfe_i': '[&]() -> uint32_t {{ uint32_t src=static_cast<uint32_t>({0});'
+    ' uint32_t off=static_cast<uint32_t>({1}) & 31u; uint32_t w=static_cast<uint32_t>({2}) & 31u;'
+    ' if (w == 0) return 0u; uint32_t mask = (uint32_t{{1}} << w) - 1u;'
+    ' uint32_t extracted = static_cast<uint32_t>(static_cast<int32_t>(src) >> off) & mask;'
+    ' uint32_t signbit = uint32_t{{1}} << (w - 1u); return (extracted ^ signbit) - signbit; }}()',
     'cubeid': '[&]() {{ auto x={0}; auto y={1}; auto z={2};'
     ' float ax=std::fabs(x), ay=std::fabs(y), az=std::fabs(z);'
     ' if (ax >= ay && ax >= az) return x >= 0 ? 0.0f : 1.0f;'
@@ -1681,10 +1704,49 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
     args = [_lower_expr(c, ctx) for c in node.children[1:]]
     args_str = ', '.join(args)
 
+    if len(args) == 1 and callee in (
+        'cvt_f32_fp8',
+        'cvt_f32_bf8',
+        'cvt_f16_fp8',
+        'cvt_f16_bf8',
+    ):
+        arg = args[0]
+        if ctx.fp8_byte_select is not None:
+            arg = f'(({arg} >> (({ctx.fp8_byte_select}) * 8u)) & 0xFFu)'
+        fp8_decode_fn = fp8_helper_name(ctx.arch_name, 'util::fp8_e4m3_to_f32')
+        bf8_decode_fn = fp8_helper_name(ctx.arch_name, 'util::bf8_e5m2_to_f32')
+        if ctx.fp8_decode_e5m3_select is not None and callee == 'cvt_f32_fp8':
+            return (
+                f'std::bit_cast<uint32_t>(({ctx.fp8_decode_e5m3_select}) ? '
+                f'util::fp8_e5m3_to_f32(static_cast<uint8_t>({arg})) : '
+                f'{fp8_decode_fn}(static_cast<uint8_t>({arg})))'
+            )
+        if ctx.fp8_decode_e5m3_select is not None and callee == 'cvt_f16_fp8':
+            return (
+                f'static_cast<uint32_t>(util::f32_to_f16(({ctx.fp8_decode_e5m3_select}) ? '
+                f'util::fp8_e5m3_to_f32(static_cast<uint8_t>({arg})) : '
+                f'{fp8_decode_fn}(static_cast<uint8_t>({arg}))))'
+            )
+        if callee == 'cvt_f32_fp8':
+            return (
+                f'std::bit_cast<uint32_t>({fp8_decode_fn}(static_cast<uint8_t>({arg})))'
+            )
+        if callee == 'cvt_f32_bf8':
+            return (
+                f'std::bit_cast<uint32_t>({bf8_decode_fn}(static_cast<uint8_t>({arg})))'
+            )
+        if callee == 'cvt_f16_fp8':
+            return f'static_cast<uint32_t>(util::f32_to_f16({fp8_decode_fn}(static_cast<uint8_t>({arg}))))'
+        return f'static_cast<uint32_t>(util::f32_to_f16({bf8_decode_fn}(static_cast<uint8_t>({arg}))))'
+
     if len(args) == 1 and callee in _INLINE_UNARY_OPS:
         return _INLINE_UNARY_OPS[callee].format(args[0])
     if len(args) == 2 and callee in _INLINE_BINARY_OPS:
-        return _INLINE_BINARY_OPS[callee].format(args[0], args[1])
+        inline_op = _INLINE_BINARY_OPS[callee]
+        template = (
+            inline_op.template if isinstance(inline_op, InlineBinaryOp) else inline_op
+        )
+        return template.format(args[0], args[1])
     if callee in ('min3', 'max3', 'med3'):
         suffix = '_f' if node.ty and node.ty.base == 'F' else '_i'
         return _INLINE_TERNARY_OPS[callee + suffix].format(args[0], args[1], args[2])

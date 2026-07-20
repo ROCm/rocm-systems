@@ -46,6 +46,7 @@ AvcVideoParser::AvcVideoParser() {
     second_field_ = 0;
     first_field_pic_idx_ = 0;
     first_field_dec_buf_idx_ = 0;
+    pic_data_start_offset_ = 0;
 
     InitDpb();
 }
@@ -76,62 +77,9 @@ rocDecStatus AvcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
             FunctionExitLog(g_rocdec_logger);
             return ROCDEC_RUNTIME_ERROR;
         }
-
-        // Init Roc decoder for the first time or reconfigure the existing decoder
-        if (new_seq_activated_) {
-            if (FlushDpb() != PARSER_OK) {
-                FunctionExitLog(g_rocdec_logger);
-                return ROCDEC_RUNTIME_ERROR;
-            }
-            if (NotifyNewSps(&sps_list_[active_sps_id_]) != PARSER_OK) {
-                FunctionExitLog(g_rocdec_logger);
-                return ROCDEC_RUNTIME_ERROR;
-            }
-            new_seq_activated_ = false;
-        }
-
-        // Whenever new sei message found
-        if (pfn_get_sei_message_cb_ && sei_message_count_ > 0) {
-            SendSeiMsgPayload();
-        }
-
-        // Error handling: if there is no slice data, return gracefully.
-        if (num_slices_ == 0) {
-            FunctionExitLog(g_rocdec_logger);
-            return ROCDEC_SUCCESS;
-        }
-
-        // Output decoded pictures from DPB if any are ready in case of frame_num gaps.
-        if (pfn_display_picture_cb_ && num_output_pics_ > 0) {
-            if (OutputDecodedPictures(false) != PARSER_OK) {
-                FunctionExitLog(g_rocdec_logger);
-                return ROCDEC_RUNTIME_ERROR;
-            }
-        }
-
-        // Decode the picture
-        if (SendPicForDecode() != PARSER_OK) {
-            ErrorLog(g_rocdec_logger, ROCDEC_STR("Failed to decode!"));
-            FunctionExitLog(g_rocdec_logger);
-            return ROCDEC_RUNTIME_ERROR;
-        }
-
-        // Decoded reference picture marking (8.2.5) for later pictures
-        if (MarkDecodedRefPics() != PARSER_OK) {
-            FunctionExitLog(g_rocdec_logger);
-            return ROCDEC_RUNTIME_ERROR;
-        }
-
-        if (InsertCurrPicIntoDpb() != PARSER_OK) {
-            FunctionExitLog(g_rocdec_logger);
-            return ROCDEC_RUNTIME_ERROR;
-        }
-        if (CheckDpbAndOutput() != PARSER_OK) {
-            FunctionExitLog(g_rocdec_logger);
-            return ROCDEC_RUNTIME_ERROR;
-        }
-
-        pic_count_++;
+        // Note: a single packet may contain more than one coded picture (e.g. a complementary
+        // field pair). Each contained picture is decoded from within ParsePictureData() as its
+        // boundary is detected; see DecodeCurrentPicture().
     } else if (!(p_data->flags & ROCDEC_PKT_ENDOFSTREAM)) {
         // If no payload and EOS is not set, treated as invalid.
         FunctionExitLog(g_rocdec_logger);
@@ -203,38 +151,57 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                 case kAvcNalTypeSlice_Data_Partition_A:
                 case kAvcNalTypeSlice_Data_Partition_B:
                 case kAvcNalTypeSlice_Data_Partition_C: {
-                    // Save slice NAL unit header
-                    slice_nal_unit_header_ = nal_unit_header_;
-
-                    // Resize slice info list if needed
-                    if ((num_slices_ + 1) > slice_info_list_.size()) {
-                        slice_info_list_.resize(num_slices_ + 1, {{0}});
-                    }
-
+                    // Parse the slice header into a temporary first, so we can decide whether this
+                    // slice begins a new primary coded picture before committing it.
                     memcpy(rbsp_buf_, (pic_data_buffer_ptr_ + curr_start_code_offset_ + 4), ebsp_size);
                     rbsp_size_ = EbspToRbsp(rbsp_buf_, 0, ebsp_size);
-                    AvcSliceHeader *p_slice_header = &slice_info_list_[num_slices_].slice_header;
-                    if ((ret2 = ParseSliceHeader(rbsp_buf_, rbsp_size_, p_slice_header)) != PARSER_OK) {
+                    AvcSliceHeader curr_slice_header;
+                    if ((ret2 = ParseSliceHeader(rbsp_buf_, rbsp_size_, &curr_slice_header)) != PARSER_OK) {
                         ErrorLog(g_rocdec_logger, "Error occurred in slice header parsing. This slice NAL unit is skipped.");
                         break;      // ignore and continue to next nal_unit
                     }
-                    slice_info_list_[num_slices_].slice_data_offset = curr_start_code_offset_;
-                    slice_info_list_[num_slices_].slice_data_size = nal_unit_size_;
+
+                    // A single packet may carry more than one coded picture (e.g. a complementary
+                    // field pair). If this slice starts a new primary coded picture (7.4.1.2.4),
+                    // finalize the picture accumulated so far before starting the new one.
+                    if (num_slices_ > 0 &&
+                        IsNewPicture(&slice_info_list_[0].slice_header, &slice_nal_unit_header_,
+                                     &curr_slice_header, &nal_unit_header_)) {
+                        pic_stream_data_size_ = curr_start_code_offset_ - pic_data_start_offset_;
+                        if ((ret2 = DecodeCurrentPicture()) != PARSER_OK) {
+                            return ret2;
+                        }
+                        num_slices_ = 0;
+                    }
+
+                    // Save slice NAL unit header of the picture currently being accumulated (first VCL NAL)
+                    if (num_slices_ == 0) {
+                        slice_nal_unit_header_ = nal_unit_header_;
+                    }
+
+                    // Resize slice info list if needed and commit the parsed slice header
+                    if ((num_slices_ + 1) > slice_info_list_.size()) {
+                        slice_info_list_.resize(num_slices_ + 1, {{0}});
+                    }
+                    slice_info_list_[num_slices_].slice_header = curr_slice_header;
+                    AvcSliceHeader *p_slice_header = &slice_info_list_[num_slices_].slice_header;
 
                     // Start decode process
                     if (num_slices_ == 0) {
+                        curr_pic_ = {0};
+                        pic_data_start_offset_ = curr_start_code_offset_;
+                        // Use the data directly from demuxer without copying. The span defaults to
+                        // the remainder of the packet and is shortened if a following coded picture
+                        // boundary is detected within the same packet.
+                        pic_stream_data_ptr_ = pic_data_buffer_ptr_ + curr_start_code_offset_;
+                        pic_stream_data_size_ = pic_data_size - curr_start_code_offset_;
+
                         if (p_slice_header->field_pic_flag) {
                             second_field_ = field_pic_count_ & 1;
                             field_pic_count_++;
                         } else {
                             second_field_ = 0;
                         }
-
-                        // Use the data directly from demuxer without copying
-                        pic_stream_data_ptr_ = pic_data_buffer_ptr_ + curr_start_code_offset_;
-                        // Picture stream data size is calculated as the diff between the frame end and the first slice offset.
-                        // This is to consider the possibility of non-slice NAL units between slices.
-                        pic_stream_data_size_ = pic_data_size - curr_start_code_offset_;
 
                         // Decode gaps in frame_num if needed (8.2.5.2)
                         if (DecodeFrameNumGaps() == PARSER_NOT_SUPPORTED) {
@@ -260,6 +227,10 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                             curr_pic_.pic_output_flag = 1; // Annex C. OutputFlag is set to 1 for Annex A streams
                         }
                     }
+
+                    // Slice data offset is relative to the current picture's bitstream data start.
+                    slice_info_list_[num_slices_].slice_data_offset = curr_start_code_offset_ - pic_data_start_offset_;
+                    slice_info_list_[num_slices_].slice_data_size = nal_unit_size_;
 
                     // Reference picture lists construction (8.2.4)
                     if (SetupReflist(&slice_info_list_[num_slices_]) != PARSER_OK) {
@@ -319,8 +290,121 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
         }
     } while (1);
 
+    // Finalize the last (or only) coded picture accumulated from this packet.
+    if (num_slices_ > 0) {
+        pic_stream_data_size_ = pic_data_size_ - pic_data_start_offset_;
+        if ((ret = DecodeCurrentPicture()) != PARSER_OK) {
+            FunctionExitLog(g_rocdec_logger);
+            return ret;
+        }
+    }
+
     FunctionExitLog(g_rocdec_logger);
     return PARSER_OK;
+}
+
+ParserResult AvcVideoParser::DecodeCurrentPicture() {
+    FunctionEntryLog(g_rocdec_logger);
+    // Init Roc decoder for the first time or reconfigure the existing decoder
+    if (new_seq_activated_) {
+        if (FlushDpb() != PARSER_OK) {
+            FunctionExitLog(g_rocdec_logger);
+            return PARSER_FAIL;
+        }
+        if (NotifyNewSps(&sps_list_[active_sps_id_]) != PARSER_OK) {
+            FunctionExitLog(g_rocdec_logger);
+            return PARSER_FAIL;
+        }
+        new_seq_activated_ = false;
+    }
+
+    // Whenever new sei message found
+    if (pfn_get_sei_message_cb_ && sei_message_count_ > 0) {
+        SendSeiMsgPayload();
+        sei_message_count_ = 0;
+        sei_payload_size_ = 0;
+    }
+
+    // Output decoded pictures from DPB if any are ready in case of frame_num gaps.
+    if (pfn_display_picture_cb_ && num_output_pics_ > 0) {
+        if (OutputDecodedPictures(false) != PARSER_OK) {
+            FunctionExitLog(g_rocdec_logger);
+            return PARSER_FAIL;
+        }
+    }
+
+    // Decode the picture
+    if (SendPicForDecode() != PARSER_OK) {
+        ErrorLog(g_rocdec_logger, ROCDEC_STR("Failed to decode!"));
+        FunctionExitLog(g_rocdec_logger);
+        return PARSER_FAIL;
+    }
+
+    // Decoded reference picture marking (8.2.5) for later pictures
+    if (MarkDecodedRefPics() != PARSER_OK) {
+        FunctionExitLog(g_rocdec_logger);
+        return PARSER_FAIL;
+    }
+
+    if (InsertCurrPicIntoDpb() != PARSER_OK) {
+        FunctionExitLog(g_rocdec_logger);
+        return PARSER_FAIL;
+    }
+
+    if (CheckDpbAndOutput() != PARSER_OK) {
+        FunctionExitLog(g_rocdec_logger);
+        return PARSER_FAIL;
+    }
+
+    pic_count_++;
+    FunctionExitLog(g_rocdec_logger);
+    return PARSER_OK;
+}
+
+bool AvcVideoParser::IsNewPicture(const AvcSliceHeader *prev_slice_header, const AvcNalUnitHeader *prev_nal_header,
+                                  const AvcSliceHeader *curr_slice_header, const AvcNalUnitHeader *curr_nal_header) {
+    // H.264 clause 7.4.1.2.4 - Detection of the first VCL NAL unit of a primary coded picture.
+    if (curr_slice_header->frame_num != prev_slice_header->frame_num) {
+        return true;
+    }
+    if (curr_slice_header->pic_parameter_set_id != prev_slice_header->pic_parameter_set_id) {
+        return true;
+    }
+    if (curr_slice_header->field_pic_flag != prev_slice_header->field_pic_flag) {
+        return true;
+    }
+    if (curr_slice_header->field_pic_flag && (curr_slice_header->bottom_field_flag != prev_slice_header->bottom_field_flag)) {
+        return true;
+    }
+    if ((curr_nal_header->nal_ref_idc == 0) != (prev_nal_header->nal_ref_idc == 0)) {
+        return true;
+    }
+    bool curr_idr = curr_nal_header->nal_unit_type == kAvcNalTypeSlice_IDR;
+    bool prev_idr = prev_nal_header->nal_unit_type == kAvcNalTypeSlice_IDR;
+    if (curr_idr != prev_idr) {
+        return true;
+    }
+    if (curr_idr && prev_idr && (curr_slice_header->idr_pic_id != prev_slice_header->idr_pic_id)) {
+        return true;
+    }
+    // POC-related fields depend on the active SPS pic_order_cnt_type.
+    AvcSeqParameterSet *p_sps = &sps_list_[active_sps_id_];
+    if (p_sps->pic_order_cnt_type == 0) {
+        if (curr_slice_header->pic_order_cnt_lsb != prev_slice_header->pic_order_cnt_lsb) {
+            return true;
+        }
+        if (curr_slice_header->delta_pic_order_cnt_bottom != prev_slice_header->delta_pic_order_cnt_bottom) {
+            return true;
+        }
+    } else if (p_sps->pic_order_cnt_type == 1) {
+        if (curr_slice_header->delta_pic_order_cnt[0] != prev_slice_header->delta_pic_order_cnt[0]) {
+            return true;
+        }
+        if (curr_slice_header->delta_pic_order_cnt[1] != prev_slice_header->delta_pic_order_cnt[1]) {
+            return true;
+        }
+    }
+    return false;
 }
 
 ParserResult AvcVideoParser::NotifyNewSps(AvcSeqParameterSet *p_sps) {
@@ -990,8 +1074,17 @@ ParserResult AvcVideoParser::ParseSps(uint8_t *p_stream, size_t size) {
     CHECK_ALLOWED_RANGE("max_num_ref_frames", p_sps->max_num_ref_frames, 0, AVC_MAX_DPB_FRAMES - 1);
     p_sps->gaps_in_frame_num_value_allowed_flag = Parser::GetBit(p_stream, offset);
     p_sps->pic_width_in_mbs_minus1 = Parser::ExpGolomb::ReadUe(p_stream, offset);
+    uint64_t pic_width_in_mbs = static_cast<uint64_t>(p_sps->pic_width_in_mbs_minus1) + 1;
+    // Maximum picture width in MBs is 1056 for AVC Level 6.2 (Annex A.3 Sqrt(MaxFS * 8))
+    CHECK_ALLOWED_MAX("PicWidthInMbs", pic_width_in_mbs, 1056);
     p_sps->pic_height_in_map_units_minus1 = Parser::ExpGolomb::ReadUe(p_stream, offset);
     p_sps->frame_mbs_only_flag = Parser::GetBit(p_stream, offset);
+    uint64_t frame_height_in_mbs = static_cast<uint64_t>(2 - p_sps->frame_mbs_only_flag) * (static_cast<uint64_t>(p_sps->pic_height_in_map_units_minus1) + 1);
+    // Maximum picture height in MBs is 1056 for AVC Level 6.2 (Annex A.3 Sqrt(MaxFS * 8))
+    CHECK_ALLOWED_MAX("PicHeightInMbs", frame_height_in_mbs, 1056);
+    // Maximum picture size in MBs is 139264 for AVC Level 6.2 (Annex A.3 MaxFS)
+    CHECK_ALLOWED_MAX("PicWidthInMbs * PicHeightInMbs", pic_width_in_mbs * frame_height_in_mbs, 139264);
+
     if (!p_sps->frame_mbs_only_flag) {
         p_sps->mb_adaptive_frame_field_flag = Parser::GetBit(p_stream, offset);
     }
@@ -1031,10 +1124,10 @@ ParserResult AvcVideoParser::ParseSps(uint8_t *p_stream, size_t size) {
         uint32_t frame_height_in_samples_l = (2 - p_sps->frame_mbs_only_flag) * (p_sps->pic_height_in_map_units_minus1 + 1) * AVC_MACRO_BLOCK_SIZE;
         p_sps->frame_crop_left_offset = Parser::ExpGolomb::ReadUe(p_stream, offset);
         p_sps->frame_crop_right_offset = Parser::ExpGolomb::ReadUe(p_stream, offset);
-        CHECK_ALLOWED_MAX("frame_crop_left_offset + frame_crop_right_offset", p_sps->frame_crop_left_offset + p_sps->frame_crop_right_offset + 1, pic_width_in_samples_l / crop_unit_x);
+        CHECK_ALLOWED_MAX("frame_crop_left_offset + frame_crop_right_offset", static_cast<uint64_t>(p_sps->frame_crop_left_offset) + p_sps->frame_crop_right_offset + 1, pic_width_in_samples_l / crop_unit_x);
         p_sps->frame_crop_top_offset = Parser::ExpGolomb::ReadUe(p_stream, offset);
         p_sps->frame_crop_bottom_offset = Parser::ExpGolomb::ReadUe(p_stream, offset);
-        CHECK_ALLOWED_MAX("frame_crop_top_offset + frame_crop_bottom_offset", p_sps->frame_crop_top_offset + p_sps->frame_crop_bottom_offset + 1, frame_height_in_samples_l / crop_unit_y);
+        CHECK_ALLOWED_MAX("frame_crop_top_offset + frame_crop_bottom_offset", static_cast<uint64_t>(p_sps->frame_crop_top_offset) + p_sps->frame_crop_bottom_offset + 1, frame_height_in_samples_l / crop_unit_y);
     }
 
     p_sps->vui_parameters_present_flag = Parser::GetBit(p_stream, offset);
@@ -3272,10 +3365,20 @@ ParserResult AvcVideoParser::InsertCurrPicIntoDpb() {
                     dpb_buffer_.num_pics_needed_for_output++;
                 }
                 dpb_buffer_.dpb_fullness++;
-                if (curr_pic_.is_reference == kUsedForShortTerm) {
-                    dpb_buffer_.num_short_term++;
-                } else if (curr_pic_.is_reference == kUsedForLongTerm) {
+                // 8.2.5.1: a complementary field pair is "used for reference" if either
+                // of its fields is used for reference. Derive the combined status from both fields so
+                // the frame-level flag and the counters stay in sync; otherwise a pair
+                // whose first field is non-reference and second field is a reference would
+                // bump the counter without ever marking a frame buffer, and the sliding
+                // window process (8.2.5.3, which scans frame-level flags) could later fail
+                // to find a picture to remove.
+                uint32_t first_field_ref = dpb_buffer_.field_pic_list[i * 2].is_reference;
+                if (first_field_ref == kUsedForLongTerm || curr_pic_.is_reference == kUsedForLongTerm) {
+                    dpb_buffer_.frame_buffer_list[i].is_reference = kUsedForLongTerm;
                     dpb_buffer_.num_long_term++;
+                } else if (first_field_ref == kUsedForShortTerm || curr_pic_.is_reference == kUsedForShortTerm) {
+                    dpb_buffer_.frame_buffer_list[i].is_reference = kUsedForShortTerm;
+                    dpb_buffer_.num_short_term++;
                 }
             }
         }

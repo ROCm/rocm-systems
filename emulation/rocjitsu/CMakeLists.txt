@@ -3,10 +3,25 @@
 
 cmake_minimum_required(VERSION 3.22)
 
+set(_RJ_ROCM_PATH_EXPLICIT OFF)
+if(DEFINED ROCM_PATH AND NOT "${ROCM_PATH}" STREQUAL "")
+    set(_RJ_ROCM_PATH_EXPLICIT ON)
+elseif(DEFINED ENV{ROCM_PATH} AND NOT "$ENV{ROCM_PATH}" STREQUAL "")
+    set(_RJ_ROCM_PATH_EXPLICIT ON)
+    set(ROCM_PATH "$ENV{ROCM_PATH}" CACHE PATH "Path to the ROCm installation")
+elseif(IS_DIRECTORY "/opt/rocm")
+    set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to the ROCm installation")
+endif()
+
+if(_RJ_ROCM_PATH_EXPLICIT AND NOT IS_DIRECTORY "${ROCM_PATH}")
+    message(FATAL_ERROR "ROCM_PATH must be set to a valid directory")
+endif()
+unset(_RJ_ROCM_PATH_EXPLICIT)
+
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(rj_default_compiler)
 
-project(rocm_jit_suite VERSION 0.1.0)
+project(rocm_jit_suite VERSION 0.2.0)
 
 include(rj_version)
 
@@ -15,18 +30,20 @@ include(rj_version)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Default install prefix to /opt/rocm, matching other ROCm projects.
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-    if(DEFINED ENV{ROCM_PATH})
-        set(CMAKE_INSTALL_PREFIX "$ENV{ROCM_PATH}" CACHE PATH "" FORCE)
-    else()
-        set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "" FORCE)
-    endif()
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT AND ROCM_PATH)
+    set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "" FORCE)
 endif()
 
 include(CTest)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+# Hide symbols by default so the shared library (librocjitsu.so) exports only its
+# intended ABI.
+set(CMAKE_C_VISIBILITY_PRESET hidden)
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
 find_package(Threads REQUIRED)
 
@@ -46,28 +63,54 @@ set(HSA_INCLUDE_DIR
     "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers"
 )
 
+# DRM/amdgpu UAPI headers (vendored kernel ABI, MIT-licensed). Lets the
+# interposer service the amdgpu DRM ioctl surface using the real kernel structs
+# instead of hand-mirrored copies, without depending on libdrm library types.
+set(DRM_INCLUDE_DIR
+    "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/drm_headers/linux/uapi/drm"
+)
+
 include(rj_log)
 
+# Install directory variables are used by subdirectories that add install rules.
+include(GNUInstallDirs)
+
 # Sanitizer and static analysis options.
-option(RJ_SANITIZER "Enable sanitizer (asan, ubsan, tsan, or msan)" "")
+option(RJ_ENABLE_ASAN "Enable AddressSanitizer" OFF)
+option(RJ_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
+option(RJ_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
+option(RJ_ENABLE_MSAN "Enable MemorySanitizer" OFF)
 option(RJ_CLANG_TIDY "Enable clang-tidy static analysis" OFF)
 option(
     RJ_ENABLE_EXPENSIVE_CHECKS
     "Enable expensive exhaustive test suites (MFMA/WMMA SIMD bit-exactness)"
     OFF
 )
+option(RJ_INSTALL_TESTS "Install rocjitsu test binaries" OFF)
 option(
     LTO
     "Enable link-time optimization (IPO) for Release / RelWithDebInfo"
     OFF
 )
 
+set(_rj_sanitizer_kinds)
+if(RJ_ENABLE_ASAN)
+    list(APPEND _rj_sanitizer_kinds address)
+endif()
+if(RJ_ENABLE_UBSAN)
+    list(APPEND _rj_sanitizer_kinds undefined)
+endif()
+if(RJ_ENABLE_TSAN)
+    list(APPEND _rj_sanitizer_kinds thread)
+endif()
+if(RJ_ENABLE_MSAN)
+    list(APPEND _rj_sanitizer_kinds memory)
+endif()
+list(LENGTH _rj_sanitizer_kinds _rj_sanitizer_count)
+
 if(LTO)
-    if(RJ_SANITIZER)
-        message(
-            FATAL_ERROR
-            "LTO is incompatible with RJ_SANITIZER=${RJ_SANITIZER}. Disable one."
-        )
+    if(_rj_sanitizer_count GREATER 0)
+        message(FATAL_ERROR "LTO is incompatible with sanitizers. Disable one.")
     endif()
     include(CheckIPOSupported)
     check_ipo_supported(RESULT _rj_ipo_ok OUTPUT _rj_ipo_err)
@@ -105,51 +148,66 @@ if(LTO)
     endif()
 endif()
 
-if(RJ_SANITIZER)
-    message(STATUS "Sanitizer enabled: ${RJ_SANITIZER}")
+if(_rj_sanitizer_count GREATER 0)
+    if(thread IN_LIST _rj_sanitizer_kinds AND _rj_sanitizer_count GREATER 1)
+        message(
+            FATAL_ERROR
+            "ThreadSanitizer cannot be combined with other sanitizers"
+        )
+    endif()
+    if(memory IN_LIST _rj_sanitizer_kinds AND _rj_sanitizer_count GREATER 1)
+        message(
+            FATAL_ERROR
+            "MemorySanitizer cannot be combined with other sanitizers"
+        )
+    endif()
+    list(JOIN _rj_sanitizer_kinds "," _rj_sanitizer_arg)
+    set(RJ_SANITIZER_COMPILE_OPTIONS)
+    set(RJ_SANITIZER_LINK_OPTIONS)
+    message(STATUS "Sanitizer enabled: ${_rj_sanitizer_arg}")
     if(MSVC)
         # MSVC only supports AddressSanitizer; ubsan/tsan/msan are GCC/Clang-only.
-        if(RJ_SANITIZER STREQUAL "asan")
-            add_compile_options(/fsanitize=address)
+        if(_rj_sanitizer_arg STREQUAL "address")
+            list(APPEND RJ_SANITIZER_COMPILE_OPTIONS /fsanitize=address)
+            add_compile_options(${RJ_SANITIZER_COMPILE_OPTIONS})
             # /INCREMENTAL:NO is required when using MSVC ASAN.
             add_link_options(/INCREMENTAL:NO)
         else()
-            message(
-                FATAL_ERROR
-                "RJ_SANITIZER=${RJ_SANITIZER} is not supported by MSVC. Only 'asan' is available."
-            )
+            message(FATAL_ERROR "Only RJ_ENABLE_ASAN is supported by MSVC.")
         endif()
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
-        if(RJ_SANITIZER STREQUAL "asan")
-            add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
-            add_link_options(-fsanitize=address)
+        list(APPEND RJ_SANITIZER_COMPILE_OPTIONS "-fno-sanitize-recover=all")
+        list(
+            APPEND RJ_SANITIZER_COMPILE_OPTIONS
+            -fsanitize=${_rj_sanitizer_arg}
+        )
+        list(APPEND RJ_SANITIZER_LINK_OPTIONS -fsanitize=${_rj_sanitizer_arg})
+        if(
+            address IN_LIST _rj_sanitizer_kinds
+            OR undefined IN_LIST _rj_sanitizer_kinds
+            OR memory IN_LIST _rj_sanitizer_kinds
+        )
+            list(APPEND RJ_SANITIZER_COMPILE_OPTIONS -fno-omit-frame-pointer)
+        endif()
+        add_compile_options(${RJ_SANITIZER_COMPILE_OPTIONS})
+        add_link_options(${RJ_SANITIZER_LINK_OPTIONS})
+        if(address IN_LIST _rj_sanitizer_kinds)
             # GCC 13+ emits false-positive -Wmaybe-uninitialized in std_function.h
             # when ASAN is enabled. Suppress to avoid -Werror failures.
             if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
                 add_compile_options(-Wno-maybe-uninitialized)
             endif()
-        elseif(RJ_SANITIZER STREQUAL "ubsan")
-            add_compile_options(-fsanitize=undefined -fno-omit-frame-pointer)
-            add_link_options(-fsanitize=undefined)
-        elseif(RJ_SANITIZER STREQUAL "tsan")
-            add_compile_options(-fsanitize=thread)
-            add_link_options(-fsanitize=thread)
-        elseif(RJ_SANITIZER STREQUAL "msan")
-            add_compile_options(-fsanitize=memory -fno-omit-frame-pointer)
-            add_link_options(-fsanitize=memory)
-        else()
-            message(
-                FATAL_ERROR
-                "Unknown sanitizer: ${RJ_SANITIZER}. Use asan, ubsan, tsan, or msan."
-            )
         endif()
     else()
         message(
             FATAL_ERROR
-            "RJ_SANITIZER is not supported for compiler '${CMAKE_CXX_COMPILER_ID}'."
+            "Sanitizers are not supported for compiler '${CMAKE_CXX_COMPILER_ID}'."
         )
     endif()
+    unset(_rj_sanitizer_arg)
 endif()
+unset(_rj_sanitizer_count)
+unset(_rj_sanitizer_kinds)
 
 if(RJ_CLANG_TIDY)
     find_program(CLANG_TIDY_EXE NAMES clang-tidy)
@@ -222,6 +280,7 @@ target_link_libraries(
         rocjitsu_isa_rdna3_5
         rocjitsu_isa_rdna4
         rocjitsu_isa_gfx1250
+        # \NPI new ISA family: link its rocjitsu_isa_<isa> object library here.
         rocjitsu_isa_risc_v
         simdojo
         rocjitsu_kmd
@@ -231,11 +290,32 @@ target_link_libraries(
         rocjitsu_plugin_race_detector
         rocjitsu_vm_risc_v
         rocjitsu_config
+        rocjitsu_dbt_config
         util
         flatbuffers
         Threads::Threads
 )
-target_include_directories(rocjitsu_shared PRIVATE ${GENERATED_DIR})
+target_include_directories(
+    rocjitsu_shared
+    PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR} ${GENERATED_DIR}
+)
+target_include_directories(rocjitsu_shared SYSTEM PRIVATE ${HSA_INCLUDE_DIR})
+
+# Linux-only: KMD interposer (LD_PRELOAD shim) and its dependencies.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_sources(
+        rocjitsu_shared
+        PRIVATE ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/interposer.cpp
+    )
+    target_include_directories(rocjitsu_shared PRIVATE ${DRM_INCLUDE_DIR})
+    target_compile_definitions(rocjitsu_shared PRIVATE _GNU_SOURCE)
+    target_link_libraries(rocjitsu_shared PRIVATE dl)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(rocjitsu_shared PRIVATE "LINKER:--exclude-libs,ALL")
+endif()
+
 add_dependencies(rocjitsu_shared flatbuffers_schemas)
 
 # Developer and test workflow tools.
@@ -253,8 +333,6 @@ endif()
 # Install rules.
 # ---------------------------------------------------------------------------
 
-include(GNUInstallDirs)
-
 # Public headers: include/rocjitsu/
 install(
     DIRECTORY lib/rocjitsu/include/rocjitsu
@@ -270,10 +348,6 @@ install(
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    install(
-        TARGETS rocjitsu_kmd_shim
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    )
     install(TARGETS rocjitsu_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 

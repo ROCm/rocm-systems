@@ -22,7 +22,7 @@
 use std::process::{Command, Stdio};
 
 use mirage_core::container::{ContainerState, NodeContainer};
-use mirage_core::profile::{ContainerizedDef, FileMount};
+use mirage_core::profile::{ContainerizedDef, FileMount, PortMapping};
 
 /// Errors raised while driving a container provider.
 #[derive(Debug, thiserror::Error)]
@@ -101,6 +101,11 @@ fn host_gpu_groups() -> Vec<String> {
 /// keeping the full set of bring-up conditions described in one place.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BringUpPhase {
+    /// The derived image already exists locally, so the build is skipped.
+    ImageBuilt { image: String },
+    /// Building a derived image (applying profile hacks); can take a
+    /// while as it runs package-manager commands inside the build.
+    BuildingImage { base: String, image: String },
     /// The image is already present locally, so the pull is skipped.
     ImagePresent { image: String },
     /// Pulling the image from its registry (can take a while).
@@ -123,6 +128,7 @@ impl BringUpPhase {
     /// off while [`message`](Self::message) carries the human detail.
     pub fn state(&self) -> &'static str {
         match self {
+            BringUpPhase::ImageBuilt { .. } | BringUpPhase::BuildingImage { .. } => "building",
             BringUpPhase::ImagePresent { .. }
             | BringUpPhase::Pulling { .. }
             | BringUpPhase::Pulled { .. } => "pulling",
@@ -137,6 +143,12 @@ impl BringUpPhase {
     /// surfacing directly to the user as the session's status message.
     pub fn message(&self) -> String {
         match self {
+            BringUpPhase::ImageBuilt { image } => {
+                format!("derived image {image} already built; skipping build")
+            }
+            BringUpPhase::BuildingImage { base, image } => {
+                format!("building derived image {image} from {base} (this can take a while)…")
+            }
             BringUpPhase::ImagePresent { image } => {
                 format!("image {image} already present locally; skipping pull")
             }
@@ -208,6 +220,14 @@ impl Engine {
     /// so the container hosts its node directly; an empty `command`
     /// leaves the image's default entrypoint in place.
     ///
+    /// The first element of `command` is passed as `--entrypoint` so it
+    /// *replaces* the image's default `ENTRYPOINT` rather than being
+    /// appended to it (the remaining elements become the entrypoint's
+    /// arguments after the image). Without this, images that ship their
+    /// own entrypoint (e.g. `vllm/vllm-openai`) would run that entrypoint
+    /// with `mirage host …` tacked on as arguments instead of running
+    /// mirage.
+    ///
     /// When `host_gpus` is set, the container is launched with the
     /// supplementary groups needed to open the passed-through GPU device
     /// nodes. The mechanism depends on `provider`: podman inherits the
@@ -226,6 +246,7 @@ impl Engine {
         network: Option<&str>,
         host_gpus: bool,
         mounts: &[FileMount],
+        ports: &[PortMapping],
         devices: &[String],
         groups: &[String],
         env: &[(String, String)],
@@ -273,14 +294,28 @@ impl Engine {
             argv.push("-v".to_string());
             argv.push(m.to_volume_arg());
         }
+        for p in ports {
+            argv.push("-p".to_string());
+            argv.push(p.to_publish_arg());
+        }
         for d in devices {
             argv.push("--device".to_string());
             argv.push(d.clone());
         }
-        argv.push(image.to_string());
         // The container's foreground process. Mirage hosts the node from
         // inside the container, so this is normally `mirage host ...`.
-        argv.extend(command.iter().cloned());
+        // The first element overrides the image ENTRYPOINT (so it runs
+        // mirage rather than the image's own entrypoint); the rest become
+        // its arguments after the image. An empty `command` leaves the
+        // image's default entrypoint in place.
+        if let Some((entrypoint, args)) = command.split_first() {
+            argv.push("--entrypoint".to_string());
+            argv.push(entrypoint.clone());
+            argv.push(image.to_string());
+            argv.extend(args.iter().cloned());
+        } else {
+            argv.push(image.to_string());
+        }
         argv
     }
 
@@ -335,6 +370,105 @@ impl Engine {
         self.checked(&["pull".to_string(), image.to_string()])
     }
 
+    /// Build an image tagged `tag` from the given `dockerfile` contents,
+    /// streamed to the provider's `build` over stdin (`build -t <tag> -`,
+    /// which both podman and docker accept for a context-less build).
+    ///
+    /// Used to realise profile [hacks](mirage_core::profile::Hack): a
+    /// derivative image is built once from the base image and then run in
+    /// place of it. The provider's build output (which can take a while —
+    /// apt updates, package installs, …) is streamed line by line to the
+    /// log at INFO so progress is visible live; the captured lines are
+    /// also retained and, on failure, surfaced in the error so a broken
+    /// `RUN` step is actionable.
+    pub fn build_image(&self, tag: &str, dockerfile: &str) -> Result<()> {
+        let args = vec![
+            "build".to_string(),
+            "-t".to_string(),
+            tag.to_string(),
+            "-".to_string(),
+        ];
+        let mut child = spawn_retrying_etxtbsy(|| {
+            Command::new(&self.provider)
+                .args(&args)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+        })
+        .map_err(|source| ContainerError::Spawn {
+            provider: self.provider.clone(),
+            args: args.clone(),
+            source,
+        })?;
+        // Stream the Dockerfile to the build's stdin, then close it so the
+        // provider proceeds.
+        use std::io::{BufRead, BufReader, Write};
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(dockerfile.as_bytes())
+                .map_err(|source| ContainerError::Spawn {
+                    provider: self.provider.clone(),
+                    args: args.clone(),
+                    source,
+                })?;
+        }
+
+        // Drain stdout and stderr concurrently, logging each line at INFO
+        // as it arrives and retaining it so a failing build's output can
+        // be surfaced in the error. Build providers write most progress
+        // to stderr, so both streams are followed.
+        fn log_stream<R: std::io::Read + Send + 'static>(
+            reader: Option<R>,
+            tag: String,
+        ) -> (
+            std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+            Option<std::thread::JoinHandle<()>>,
+        ) {
+            let lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+            let lines_for_thread = lines.clone();
+            let handle = reader.map(|r| {
+                std::thread::spawn(move || {
+                    for line in BufReader::new(r).lines().map_while(std::result::Result::ok) {
+                        tracing::info!(image = %tag, "{line}");
+                        lines_for_thread.lock().unwrap().push(line);
+                    }
+                })
+            });
+            (lines, handle)
+        }
+        let (out_lines, out_handle) = log_stream(child.stdout.take(), tag.to_string());
+        let (err_lines, err_handle) = log_stream(child.stderr.take(), tag.to_string());
+
+        let status = child.wait().map_err(|source| ContainerError::Spawn {
+            provider: self.provider.clone(),
+            args: args.clone(),
+            source,
+        })?;
+        if let Some(h) = out_handle {
+            let _ = h.join();
+        }
+        if let Some(h) = err_handle {
+            let _ = h.join();
+        }
+
+        if status.success() {
+            Ok(())
+        } else {
+            // Prefer stderr (where build errors land); fall back to stdout.
+            let mut captured = err_lines.lock().unwrap().join("\n");
+            if captured.trim().is_empty() {
+                captured = out_lines.lock().unwrap().join("\n");
+            }
+            Err(ContainerError::Command {
+                provider: self.provider.clone(),
+                args,
+                code: status.code().unwrap_or(-1),
+                stderr: captured.trim().to_string(),
+            })
+        }
+    }
+
     /// Whether `image` is already present locally.
     pub fn image_present(&self, image: &str) -> bool {
         self.status(&[
@@ -381,6 +515,7 @@ impl Engine {
         network: Option<&str>,
         host_gpus: bool,
         mounts: &[FileMount],
+        ports: &[PortMapping],
         devices: &[String],
         groups: &[String],
         env: &[(String, String)],
@@ -393,6 +528,7 @@ impl Engine {
             network,
             host_gpus,
             mounts,
+            ports,
             devices,
             groups,
             env,
@@ -536,6 +672,7 @@ impl Engine {
                 Some(&network),
                 host_gpus,
                 &def.mounts,
+                &def.ports,
                 &devices,
                 &groups,
                 &env,
@@ -564,15 +701,17 @@ impl Engine {
 
     /// Run the provider with `args`, succeeding only on a zero exit.
     fn checked(&self, args: &[String]) -> Result<()> {
-        let output = Command::new(&self.provider)
-            .args(args)
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|source| ContainerError::Spawn {
-                provider: self.provider.clone(),
-                args: args.to_vec(),
-                source,
-            })?;
+        let output = spawn_retrying_etxtbsy(|| {
+            Command::new(&self.provider)
+                .args(args)
+                .stdin(Stdio::null())
+                .output()
+        })
+        .map_err(|source| ContainerError::Spawn {
+            provider: self.provider.clone(),
+            args: args.to_vec(),
+            source,
+        })?;
         if output.status.success() {
             Ok(())
         } else {
@@ -587,32 +726,36 @@ impl Engine {
 
     /// Run the provider with `args` and return whether it exited zero.
     fn status(&self, args: &[String]) -> Result<bool> {
-        let status = Command::new(&self.provider)
-            .args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map_err(|source| ContainerError::Spawn {
-                provider: self.provider.clone(),
-                args: args.to_vec(),
-                source,
-            })?;
+        let status = spawn_retrying_etxtbsy(|| {
+            Command::new(&self.provider)
+                .args(args)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+        })
+        .map_err(|source| ContainerError::Spawn {
+            provider: self.provider.clone(),
+            args: args.to_vec(),
+            source,
+        })?;
         Ok(status.success())
     }
 
     /// Run the provider with `args`, returning captured stdout on a zero
     /// exit.
     fn output(&self, args: &[String]) -> Result<Vec<u8>> {
-        let output = Command::new(&self.provider)
-            .args(args)
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|source| ContainerError::Spawn {
-                provider: self.provider.clone(),
-                args: args.to_vec(),
-                source,
-            })?;
+        let output = spawn_retrying_etxtbsy(|| {
+            Command::new(&self.provider)
+                .args(args)
+                .stdin(Stdio::null())
+                .output()
+        })
+        .map_err(|source| ContainerError::Spawn {
+            provider: self.provider.clone(),
+            args: args.to_vec(),
+            source,
+        })?;
         if output.status.success() {
             Ok(output.stdout)
         } else {
@@ -626,6 +769,31 @@ impl Engine {
     }
 }
 
+/// Spawn a command, transparently retrying on `ETXTBSY`.
+///
+/// In a multithreaded process a concurrent `fork` momentarily
+/// duplicates every open file descriptor — including a writable handle
+/// to a just-written executable — into the forked child. Until that
+/// child `exec`s (closing the descriptor via `O_CLOEXEC`), attempting to
+/// execute the file fails with `ETXTBSY` ("Text file busy"). The
+/// condition is transient, so retry a bounded number of times with a
+/// short backoff before surfacing the error. Real container providers
+/// (podman/docker) are stable binaries that never hit this, but the
+/// guard makes provider spawning robust regardless of how the binary
+/// came to exist.
+fn spawn_retrying_etxtbsy<T>(mut run: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    let mut attempts = 0;
+    loop {
+        match run() {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && attempts < 50 => {
+                attempts += 1;
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            other => return other,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -634,6 +802,10 @@ mod tests {
 
     fn mount(spec: &str) -> FileMount {
         FileMount::parse(spec).unwrap()
+    }
+
+    fn port(spec: &str) -> PortMapping {
+        PortMapping::parse(spec).unwrap()
     }
 
     /// Mock provider: logs every invocation to `log`, exits non-zero for
@@ -661,6 +833,7 @@ mod tests {
             ("MIRAGE_HEAD_PORT".to_string(), "5000".to_string()),
         ];
         let mounts = vec![mount("/data:/data:ro"), mount("/h:/c")];
+        let ports = vec![port("8080:8000"), port("53:53/udp")];
         let devices = vec!["/dev/kfd".to_string(), "/dev/dri".to_string()];
         let groups = vec!["video".to_string(), "render".to_string()];
         let command = vec![
@@ -678,6 +851,7 @@ mod tests {
             Some("mirage-s"),
             true,
             &mounts,
+            &ports,
             &devices,
             &groups,
             &env,
@@ -693,6 +867,8 @@ mod tests {
         assert!(joined.contains("-e MIRAGE_HEAD_PORT=5000"));
         assert!(joined.contains("-v /data:/data:ro"));
         assert!(joined.contains("-v /h:/c"));
+        assert!(joined.contains("-p 8080:8000"));
+        assert!(joined.contains("-p 53:53/udp"));
         assert!(joined.contains("--device /dev/kfd"));
         assert!(joined.contains("--device /dev/dri"));
         // On podman the named groups are dropped: `--group-add
@@ -700,7 +876,10 @@ mod tests {
         // options, and already inherits them from the host.
         assert!(!joined.contains("--group-add video"));
         assert!(!joined.contains("--group-add render"));
-        assert!(joined.ends_with("img:latest /mnt/mirage/bin/mirage host --session s --rank 0"));
+        // The first command element overrides the image ENTRYPOINT; the
+        // rest are its arguments after the image.
+        assert!(joined.contains("--entrypoint /mnt/mirage/bin/mirage"));
+        assert!(joined.ends_with("img:latest host --session s --rank 0"));
     }
 
     #[test]
@@ -714,6 +893,7 @@ mod tests {
             "img",
             None,
             true,
+            &[],
             &[],
             &[],
             &groups,
@@ -733,7 +913,17 @@ mod tests {
         // docker — which rejects `keep-groups` — keeps working.
         let groups = vec!["video".to_string()];
         let argv = Engine::run_argv(
-            "docker", "n", "img", None, false, &[], &[], &groups, &[], &[],
+            "docker",
+            "n",
+            "img",
+            None,
+            false,
+            &[],
+            &[],
+            &[],
+            &groups,
+            &[],
+            &[],
         );
         let joined = argv.join(" ");
         assert!(!joined.contains("--group-add"));
@@ -745,10 +935,24 @@ mod tests {
     fn run_argv_omits_network_when_none() {
         let command = vec!["sleep".to_string(), "infinity".to_string()];
         let argv = Engine::run_argv(
-            "podman", "n", "img", None, false, &[], &[], &[], &[], &command,
+            "podman",
+            "n",
+            "img",
+            None,
+            false,
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &command,
         );
         assert!(!argv.iter().any(|a| a == "--network"));
         assert_eq!(argv.last().map(String::as_str), Some("infinity"));
+        // `sleep` overrides the entrypoint; `infinity` is its argument.
+        assert!(argv.iter().any(|a| a == "--entrypoint"));
+        let ep = argv.iter().position(|a| a == "--entrypoint").unwrap();
+        assert_eq!(argv[ep + 1], "sleep");
     }
 
     #[test]
@@ -791,8 +995,10 @@ mod tests {
             provider: Some("docker".to_string()),
             image: "img".to_string(),
             mounts: vec![],
+            ports: vec![],
             devices: vec![],
             groups: vec![],
+            hacks: vec![],
         };
         let engine = Engine::resolve(&def).unwrap();
         assert_eq!(engine.provider(), "docker");
@@ -852,6 +1058,7 @@ mod tests {
                 &[],
                 &[],
                 &[],
+                &[],
                 &["sleep".to_string(), "infinity".to_string()],
             )
             .unwrap();
@@ -875,8 +1082,10 @@ mod tests {
             provider: Some(provider.to_string_lossy().to_string()),
             image: "img:latest".to_string(),
             mounts: vec![],
+            ports: vec![],
             devices: vec![],
             groups: vec![],
+            hacks: vec![],
         };
 
         let mut phases: Vec<BringUpPhase> = Vec::new();

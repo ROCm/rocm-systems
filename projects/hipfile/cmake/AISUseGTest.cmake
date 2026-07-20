@@ -2,8 +2,19 @@
 #
 # SPDX-License-Identifier: MIT
 
+# This module sets up GoogleTest and applies settings to its targets, so it must
+# run exactly once.
+include_guard(GLOBAL)
+
 include(AISSanitizers)
 include(FetchContent)
+
+# GoogleTest's ThreadLocal<T> implementation uses POSIX thread-key APIs
+# (pthread_key_create, pthread_setspecific, etc.). These must be linked
+# explicitly: lld (used by the sanitizer toolchain) errors on the undefined
+# symbols in libgtest.a / libgmock.a, whereas GNU ld resolves them
+# transitively and masks the missing dependency.
+find_package(Threads REQUIRED)
 
 # Decide whether to check for a system GoogleTest install first. When building
 # with the sanitizers, we HAVE to build GoogleTest from source.
@@ -29,6 +40,7 @@ if(NOT GTest_FOUND)
     FetchContent_Declare(
       googletest
       URL https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
+      URL_HASH SHA256=65fab701d9829d38cb77c14acdc431d2108bfdbf8979e40eb8ae567edf10b27c
       DOWNLOAD_EXTRACT_TIMESTAMP true
       SYSTEM
     )
@@ -47,10 +59,70 @@ if(AIS_USE_SANITIZERS OR AIS_USE_THREAD_SANITIZER)
     ais_add_sanitizers(GTest::gmock)
 endif()
 
+# Propagate pthread linkage to anything that links a GTest target, so the
+# individual test CMakeLists files don't each have to add Threads::Threads.
+# Fetched GoogleTest exposes GTest::gtest/GTest::gmock as ALIAS targets, which
+# cannot be modified directly, so resolve to the underlying target first. We
+# use set_property(... APPEND ...) rather than target_link_libraries() so this
+# works uniformly for the IMPORTED targets that a system find_package(GTest)
+# produces as well as the normal targets from a fetched build. A system GTest
+# install may provide gtest without gmock, so only touch targets that exist.
+#
+# A from-source GoogleTest already links Threads::Threads on its targets, so
+# check before appending to avoid a duplicate entry in the link interface.
+foreach(gtest_target GTest::gtest GTest::gmock)
+    if(NOT TARGET ${gtest_target})
+        continue()
+    endif()
+    get_target_property(aliased ${gtest_target} ALIASED_TARGET)
+    if(aliased)
+        set(gtest_target ${aliased})
+    endif()
+    get_target_property(existing_libs ${gtest_target} INTERFACE_LINK_LIBRARIES)
+    if(NOT existing_libs MATCHES "Threads::Threads")
+        set_property(TARGET ${gtest_target} APPEND PROPERTY
+            INTERFACE_LINK_LIBRARIES Threads::Threads)
+    endif()
+
+    # Mark GoogleTest's headers as system includes so consumers pull them in
+    # via -isystem. clang-tidy suppresses diagnostics from system headers by
+    # default, which keeps GoogleTest's macros and templates from polluting our
+    # test builds with warnings we can't fix. The SYSTEM keyword passed to
+    # FetchContent_Declare only takes effect on CMake >= 3.25, and a system
+    # find_package(GTest) is not guaranteed to mark them either, so set the
+    # property here directly to cover every path.
+    set_target_properties(${gtest_target} PROPERTIES
+        INTERFACE_SYSTEM_INCLUDE_DIRECTORIES
+            "$<TARGET_PROPERTY:${gtest_target},INTERFACE_INCLUDE_DIRECTORIES>")
+endforeach()
+
 include(GoogleTest)
 
+# Absolute path to the LeakSanitizer suppression file. Only applied when
+# building with the (non-TSAN) sanitizers.
+set(AIS_LSAN_SUPPRESSIONS_FILE "${HIPFILE_ROOT_PATH}/cmake/lsan-suppressions.supp")
+
 function(ais_gtest_discover_tests target)
-    cmake_language(CALL gtest_discover_tests ${ARGV})
+    set(forwarded_args ${ARGV})
+
+    # When the address sanitizer is on, force every discovered test to load the
+    # LSan suppression file via LSAN_OPTIONS. We splice an ENVIRONMENT entry into
+    # the PROPERTIES list that gtest_discover_tests applies to each test case, so
+    # the suppression travels with the test regardless of how ctest is invoked.
+    if(AIS_USE_SANITIZERS)
+        set(lsan_env "LSAN_OPTIONS=suppressions=${AIS_LSAN_SUPPRESSIONS_FILE}")
+        list(FIND forwarded_args "PROPERTIES" props_idx)
+        if(props_idx EQUAL -1)
+            list(APPEND forwarded_args PROPERTIES ENVIRONMENT "${lsan_env}")
+        else()
+            # Insert ENVIRONMENT right after the PROPERTIES keyword so it joins
+            # the existing property name/value pairs the caller passed.
+            math(EXPR insert_idx "${props_idx} + 1")
+            list(INSERT forwarded_args ${insert_idx} ENVIRONMENT "${lsan_env}")
+        endif()
+    endif()
+
+    cmake_language(CALL gtest_discover_tests ${forwarded_args})
 
     if(AIS_USE_CODE_COVERAGE)
         set(options)

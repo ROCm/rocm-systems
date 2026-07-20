@@ -28,6 +28,7 @@
 target_sources(
   ${PROJECT_NAME}
   PRIVATE
+    api_trace.cc
     backend_bc.cpp
     backend_bc_device.cpp
     build_info.cpp
@@ -45,6 +46,7 @@ target_sources(
     wf_coal_policy.cpp
     ipc_policy.cpp
     sdma_policy.cpp
+    sdma/gin_anvil_sdma_factory.cpp
 )
 
 set(

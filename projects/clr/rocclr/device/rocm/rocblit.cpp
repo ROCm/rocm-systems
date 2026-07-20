@@ -207,9 +207,14 @@ bool DmaBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& dstMe
                                 const amd::Coord3D& srcOrigin, const amd::Coord3D& dstOrigin,
                                 const amd::Coord3D& size, bool entire,
                                 amd::CopyMetadata copyMetadata) const {
-  if (setup_.disableCopyBuffer_ ||
+  // When FFM/DTIF fast-copy is enabled, plain device allocations are marked
+  // HostMemoryDirectAccess so HtoD/DtoH can short-circuit to a host memcpy. DtoD
+  // must not take that path: the host memcpy CPU-stalls on prior queue work
+  // (releaseGpuMemoryFence) and breaks CUDA-style host-async DtoD semantics.
+  if (!HSA_ENABLE_DTIF_FAST_COPY &&
+      (setup_.disableCopyBuffer_ ||
       (srcMemory.isHostMemDirectAccess() && !srcMemory.isCpuUncached() &&
-       (dev().agent_profile() != HSA_PROFILE_FULL) && dstMemory.isHostMemDirectAccess())) {
+       (dev().agent_profile() != HSA_PROFILE_FULL) && dstMemory.isHostMemDirectAccess()))) {
     // Stall GPU before CPU access
     gpu().releaseGpuMemoryFence();
     return HostBlitManager::copyBuffer(srcMemory, dstMemory, srcOrigin, dstOrigin, size, false,
@@ -226,9 +231,12 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
                                     const amd::BufferRect& srcRect, const amd::BufferRect& dstRect,
                                     const amd::Coord3D& size, bool entire,
                                     amd::CopyMetadata copyMetadata) const {
-  if (setup_.disableCopyBufferRect_ ||
+  // See note in copyBuffer: skip the host short-circuit when FFM/DTIF fast-copy
+  // is enabled so DtoD stays on the GPU blit path.
+  if (!HSA_ENABLE_DTIF_FAST_COPY &&
+      (setup_.disableCopyBufferRect_ ||
       (srcMemory.isHostMemDirectAccess() && !srcMemory.isCpuUncached() &&
-       dstMemory.isHostMemDirectAccess())) {
+       dstMemory.isHostMemDirectAccess()))) {
     // Stall GPU before CPU access
     gpu().releaseGpuMemoryFence();
     return HostBlitManager::copyBufferRect(srcMemory, dstMemory, srcRect, dstRect, size, entire,
@@ -775,10 +783,9 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
   // Submit each non-empty engine group as a separate batch with its own signal.
   // Within each group, ops are grouped by type (SWAP and each INDIRECT mode
   // each become one multi-entry op; see the bucket declarations below).
-  // LINEAR ops are further grouped by src_agent:
-  //  - Same (src, size) with multiple dsts (SdmaD2D) → BROADCAST
-  //  - Multiple remaining ops from same src_agent    → MULTI
-  //  - Single remaining op                           → LINEAR
+  // LINEAR ops share one src_agent per engine group.
+  // SdmaD2D only: same (src, size) with multiple dsts → BROADCAST.
+  // Remaining LINEAR ops → one MULTI or LINEAR.
   hsa_status_t status = HSA_STATUS_SUCCESS;
   std::vector<ProfilingSignal*> groupSignals;
 
@@ -788,7 +795,6 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 
     HwQueueEngine engine = static_cast<HwQueueEngine>(e);
 
-    // Two-level grouping: first by src_agent, then by (src, size) for broadcast.
     struct BcastKey {
       const void* src;
       size_t size;
@@ -802,11 +808,7 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
       std::vector<void*> dsts;
       std::vector<hsa_agent_t> dst_agents;
     };
-    struct AgentGroup {
-      hsa_agent_t src_agent;
-      std::map<BcastKey, BcastEntry> sub_groups;
-    };
-    std::map<uint64_t, AgentGroup> agent_groups;
+    std::map<BcastKey, BcastEntry> broadcast_groups;
 
     struct MultiArrays {
       std::vector<void*> srcs;
@@ -817,6 +819,8 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 
     MultiArrays swapPending;
     hsa_agent_t swapSrcAgent = {};
+    MultiArrays linear_pending;
+    hsa_agent_t linear_src_agent = {};
 
     // Indirect ops are bucketed by their indirect mode (SRC / DST / SRCDST)
     // into multi-entry HSA ops, one bucket per mode.  All entries in one
@@ -859,24 +863,30 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
         bucket.pending.sizes.push_back(op.size);
         continue;
       }
-      auto& ag = agent_groups[op.src_agent.handle];
-      ag.src_agent = op.src_agent;
-      BcastKey bkey{op.src, op.size};
-      auto& be = ag.sub_groups[bkey];
-      if (be.dsts.empty()) {
-        be.tmpl = op;
+      if (linear_pending.srcs.empty() && broadcast_groups.empty()) {
+        linear_src_agent = op.src_agent;
       }
-      be.dsts.push_back(op.dst);
-      be.dst_agents.push_back(op.dst_agent);
+      if (engine == HwQueueEngine::SdmaD2D) {
+        auto& broadcast_entry = broadcast_groups[BcastKey{op.src, op.size}];
+        if (broadcast_entry.dsts.empty()) {
+          broadcast_entry.tmpl = op;
+        }
+        broadcast_entry.dsts.push_back(op.dst);
+        broadcast_entry.dst_agents.push_back(op.dst_agent);
+      } else {
+        linear_pending.srcs.push_back(const_cast<void*>(op.src));
+        linear_pending.dsts.push_back(op.dst);
+        linear_pending.dst_agents.push_back(op.dst_agent);
+        linear_pending.sizes.push_back(op.size);
+      }
     }
 
     gpu().Barriers().SetActiveEngine(engine);
 
     std::vector<MultiArrays> multiStore;
     // Upper-bound entries that land in multiStore: one swap bucket + one
-    // multi bucket per src_agent group + one per populated indirect-mode
-    // bucket.
-    multiStore.reserve(1 + agent_groups.size() + indirectPending.size());
+    // multi bucket + one per populated indirect-mode bucket.
+    multiStore.reserve(1 + 1 + indirectPending.size());
 
     std::vector<hsa_amd_memory_copy_op_t> finalOps;
 
@@ -897,57 +907,53 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
       finalOps.push_back(swap);
     }
 
-    // --- Emit LINEAR / BROADCAST batches (one group per src_agent) ---
-    for (auto& [agent_handle, ag] : agent_groups) {
-      MultiArrays pending;
-
-      for (auto& [bkey, be] : ag.sub_groups) {
-        if (be.dsts.size() > 1 && engine == HwQueueEngine::SdmaD2D) {
-          hsa_amd_memory_copy_op_t bcast = {};
-          bcast.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
-          bcast.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST;
-          bcast.src = be.tmpl.src;
-          bcast.src_agent = ag.src_agent;
-          bcast.dst_list = be.dsts.data();
-          bcast.dst_agent_list = be.dst_agents.data();
-          bcast.num_entries = static_cast<uint16_t>(be.dsts.size());
-          bcast.size = be.tmpl.size;
-          finalOps.push_back(bcast);
-        } else {
-          for (size_t i = 0; i < be.dsts.size(); ++i) {
-            pending.srcs.push_back(const_cast<void*>(be.tmpl.src));
-            pending.dsts.push_back(be.dsts[i]);
-            pending.dst_agents.push_back(be.dst_agents[i]);
-            pending.sizes.push_back(be.tmpl.size);
-          }
+    // --- Emit LINEAR / BROADCAST batches ---
+    for (auto& [bcast_key, broadcast_entry] : broadcast_groups) {
+      if (broadcast_entry.dsts.size() > 1) {
+        hsa_amd_memory_copy_op_t bcast = {};
+        bcast.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+        bcast.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST;
+        bcast.src = broadcast_entry.tmpl.src;
+        bcast.src_agent = linear_src_agent;
+        bcast.dst_list = broadcast_entry.dsts.data();
+        bcast.dst_agent_list = broadcast_entry.dst_agents.data();
+        bcast.num_entries = static_cast<uint16_t>(broadcast_entry.dsts.size());
+        bcast.size = broadcast_entry.tmpl.size;
+        finalOps.push_back(bcast);
+      } else {
+        for (size_t i = 0; i < broadcast_entry.dsts.size(); ++i) {
+          linear_pending.srcs.push_back(const_cast<void*>(broadcast_entry.tmpl.src));
+          linear_pending.dsts.push_back(broadcast_entry.dsts[i]);
+          linear_pending.dst_agents.push_back(broadcast_entry.dst_agents[i]);
+          linear_pending.sizes.push_back(broadcast_entry.tmpl.size);
         }
       }
+    }
 
-      if (pending.srcs.size() > 1) {
-        multiStore.push_back(std::move(pending));
-        auto& stored = multiStore.back();
+    if (linear_pending.srcs.size() > 1) {
+      multiStore.push_back(std::move(linear_pending));
+      auto& stored = multiStore.back();
 
-        hsa_amd_memory_copy_op_t multi = {};
-        multi.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
-        multi.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
-        multi.src_list = stored.srcs.data();
-        multi.src_agent = ag.src_agent;
-        multi.dst_list = stored.dsts.data();
-        multi.dst_agent_list = stored.dst_agents.data();
-        multi.size_list = stored.sizes.data();
-        multi.num_entries = static_cast<uint16_t>(stored.srcs.size());
-        finalOps.push_back(multi);
-      } else if (pending.srcs.size() == 1) {
-        hsa_amd_memory_copy_op_t linear = {};
-        linear.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
-        linear.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
-        linear.src = pending.srcs[0];
-        linear.src_agent = ag.src_agent;
-        linear.dst = pending.dsts[0];
-        linear.dst_agent = pending.dst_agents[0];
-        linear.size = pending.sizes[0];
-        finalOps.push_back(linear);
-      }
+      hsa_amd_memory_copy_op_t multi = {};
+      multi.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+      multi.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
+      multi.src_list = stored.srcs.data();
+      multi.src_agent = linear_src_agent;
+      multi.dst_list = stored.dsts.data();
+      multi.dst_agent_list = stored.dst_agents.data();
+      multi.size_list = stored.sizes.data();
+      multi.num_entries = static_cast<uint16_t>(stored.srcs.size());
+      finalOps.push_back(multi);
+    } else if (linear_pending.srcs.size() == 1) {
+      hsa_amd_memory_copy_op_t linear = {};
+      linear.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+      linear.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
+      linear.src = linear_pending.srcs[0];
+      linear.src_agent = linear_src_agent;
+      linear.dst = linear_pending.dsts[0];
+      linear.dst_agent = linear_pending.dst_agents[0];
+      linear.size = linear_pending.sizes[0];
+      finalOps.push_back(linear);
     }
 
     // --- Emit INDIRECT batches ---
@@ -2003,8 +2009,25 @@ bool KernelBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory
   bool result = false;
   bool rejected = false;
 
+  // hsa_amd_memory_async_copy_rect requires dword-aligned row/slice pitches.
+  // When they are not aligned, DmaBlitManager::copyBufferRect falls back to one
+  // hsa_amd_memory_async_copy per row. For tall, narrow host<->device rects
+  // (e.g. hipMemcpy2D with width=1 and a very large height) this issues one
+  // single-byte SDMA submission per row - up to millions of descriptors - which
+  // is orders of magnitude slower than the shader rect kernel below
+  // (BlitCopyBufferRect handles 1-byte alignment in a single dispatch). Skip the
+  // SDMA rect path in that pathological case and let the shader kernel handle it.
+  constexpr size_t kSdmaRectRowSerializeLimit = 256;
+  const bool dwordAlignedRect =
+      ((srcRectIn.rowPitch_ % 4) == 0) && ((srcRectIn.slicePitch_ % 4) == 0) &&
+      ((dstRectIn.rowPitch_ % 4) == 0) && ((dstRectIn.slicePitch_ % 4) == 0);
+  const bool hostDeviceRect =
+      srcMemory.isHostMemDirectAccess() != dstMemory.isHostMemDirectAccess();
+  const bool sdmaRectWouldSerialize =
+      !dwordAlignedRect && hostDeviceRect && ((sizeIn[1] * sizeIn[2]) > kSdmaRectRowSerializeLimit);
+
   // Fall into the ROC path for rejected transfers
-  if (dev().info().pcie_atomics_ &&
+  if (dev().info().pcie_atomics_ && !sdmaRectWouldSerialize &&
       (setup_.disableCopyBufferRect_ || srcMemory.isHostMemDirectAccess() ||
        dstMemory.isHostMemDirectAccess())) {
     result = DmaBlitManager::copyBufferRect(srcMemory, dstMemory, srcRectIn, dstRectIn, sizeIn,
@@ -2422,6 +2445,31 @@ bool KernelBlitManager::fillBuffer(device::Memory& memory, const void* pattern, 
   }
 }
 
+struct alignas(16) FillPatternPayload {
+  uint64_t lo;
+  uint64_t hi;
+};
+
+// startByte rotates the pattern so the payload is byte-correct for a region whose
+// byte-offset-from-fill-start is startByte % patternSize.  This works for all supported
+// patternSizes (1/2/4/8/16) since patternSize is always a power of two, making the
+// bitwise AND a valid modulo.
+static inline void tilePatternBytes(unsigned char* dst, size_t dstSize, const void* pattern,
+                                    size_t patternSize, size_t startByte) {
+  const auto* src = static_cast<const unsigned char*>(pattern);
+  for (size_t i = 0; i < dstSize; ++i) {
+    dst[i] = src[(startByte + i) & (patternSize - 1)];
+  }
+}
+
+static inline FillPatternPayload buildTilePattern(const void* pattern, size_t patternSize,
+                                                  size_t startByte) {
+  FillPatternPayload payload = {};
+  tilePatternBytes(reinterpret_cast<unsigned char*>(&payload), sizeof(payload), pattern,
+                   patternSize, startByte);
+  return payload;
+}
+
 // ================================================================================================
 bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern,
                                      size_t patternSize, const amd::Coord3D& surface,
@@ -2437,72 +2485,135 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
     result = HostBlitManager::fillBuffer(memory, pattern, patternSize, size, origin, size, entire);
     synchronize();
     return result;
-  } else {
-    // Pack the fill buffer info, that handles unaligned memories.
-    std::vector<FillBufferInfo> packed_vector{};
-    FillBufferInfo::PackInfo(memory, size[0], origin[0], pattern, patternSize, packed_vector);
-
-    size_t overall_offset = origin[0];
-    for (auto& packed_obj : packed_vector) {
-      constexpr uint32_t kFillType = FillBufferAligned;
-      uint32_t kpattern_size = (packed_obj.pattern_expanded_)
-                                   ? HostBlitManager::FillBufferInfo::kExtendedSize
-                                   : patternSize;
-      size_t kfill_size = packed_obj.fill_size_ / kpattern_size;
-      size_t koffset = overall_offset;
-      overall_offset += packed_obj.fill_size_;
-
-      size_t globalWorkOffset[3] = {0, 0, 0};
-      uint32_t alignment = (kpattern_size & 0xf) == 0   ? 2 * sizeof(uint64_t)
-                           : (kpattern_size & 0x7) == 0 ? sizeof(uint64_t)
-                           : (kpattern_size & 0x3) == 0 ? sizeof(uint32_t)
-                           : (kpattern_size & 0x1) == 0 ? sizeof(uint16_t)
-                                                        : sizeof(uint8_t);
-      // Program kernels arguments for the fill operation
-      cl_mem mem = as_cl<amd::Memory>(memory.owner());
-      setArgument(kernels_[kFillType], 0, sizeof(cl_mem), &mem, koffset);
-      const size_t localWorkSize = 256;
-      size_t globalWorkSize = std::min(dev().settings().limit_blit_wg_ * localWorkSize, kfill_size);
-      globalWorkSize = amd::alignUp(globalWorkSize, localWorkSize);
-
-      bool isGraphPktCapturing =
-          gpu().command() != nullptr && gpu().command()->getPktCapturingState();
-      auto constBuf = isGraphPktCapturing
-                          ? gpu().command()->getGraphKernArg(kCBSize, kCBAlignment, dev().index())
-                          : gpu().allocKernArg(kCBSize, kCBAlignment);
-
-      // If pattern has been expanded, use the expanded pattern, otherwise use the default pattern.
-      if (packed_obj.pattern_expanded_) {
-        memcpy(constBuf, &packed_obj.expanded_pattern_, kpattern_size);
-      } else {
-        memcpy(constBuf, pattern, kpattern_size);
-      }
-      constexpr bool kDirectVa = true;
-      setArgument(kernels_[kFillType], 1, sizeof(cl_mem), constBuf, 0, nullptr, kDirectVa);
-
-      // Adjust the pattern size in the copy type size
-      kpattern_size /= alignment;
-      setArgument(kernels_[kFillType], 2, sizeof(uint32_t), &kpattern_size);
-      setArgument(kernels_[kFillType], 3, sizeof(alignment), &alignment);
-
-      // Calculate max id
-      kfill_size = memory.virtualAddress() + koffset + kfill_size * kpattern_size * alignment;
-      setArgument(kernels_[kFillType], 4, sizeof(kfill_size), &kfill_size);
-      uint32_t next_chunk = globalWorkSize * kpattern_size;
-      setArgument(kernels_[kFillType], 5, sizeof(uint32_t), &next_chunk);
-      uint32_t lws = localWorkSize;
-      setArgument(kernels_[kFillType], 6, sizeof(lws), &lws);
-
-      // Create ND range object for the kernel's execution
-      amd::NDRangeContainer ndrange(1, globalWorkOffset, &globalWorkSize, &localWorkSize);
-
-      // Execute the blit
-      address parameters = captureArguments(kernels_[kFillType]);
-      result = gpu().submitKernelInternal(ndrange, *kernels_[kFillType], parameters, nullptr);
-      releaseArguments(parameters);
-    }
   }
 
+  const uintptr_t fill_buf_addr = memory.virtualAddress() + origin[0];
+
+  constexpr uint32_t kFillType = FillBufferUnAligned;
+
+  cl_mem mem = as_cl<amd::Memory>(memory.owner());
+  bool isGraphPktCapturing = gpu().command() != nullptr && gpu().command()->getPktCapturingState();
+  unsigned char* kernArgBase =
+      isGraphPktCapturing
+          ? (unsigned char*)gpu().command()->getGraphKernArg(kCBSize, kCBAlignment, dev().index())
+          : (unsigned char*)gpu().allocKernArg(kCBSize, kCBAlignment);
+
+  assert((patternSize == 1 || patternSize == 2 || patternSize == 4 || patternSize == 8 ||
+          patternSize == 16) &&
+         "fillBuffer1D supports pattern sizes of 1/2/4/8/16 bytes");
+
+  // Body region uses uint64 stores unconditionally. Tile region uses ulong2 stores.
+  // Payloads are built after region offsets are computed so they can be rotated
+  // by regionByteOffset % patternSize, making every region byte-correct even when
+  // the destination address is not aligned to patternSize.
+  constexpr size_t bodyElemSize = sizeof(uint64_t);
+
+  // Calculate head, body, body-tail, tail, and tiled body counts
+  // Head/tail are byte counts. Body/body-tail are element counts.
+  constexpr size_t tile_size = 2 * sizeof(uint64_t);
+  uintptr_t end_addr = fill_buf_addr + size[0];
+
+  uintptr_t body_aligned_start = alignUp(fill_buf_addr, bodyElemSize);
+  uintptr_t body_aligned_end = alignDown(end_addr, bodyElemSize);
+
+  size_t head_count = 0;
+  size_t body_count = 0;
+  size_t body_tile_count = 0;
+  size_t body_tail_count = 0;
+  size_t tail_count = 0;
+  uintptr_t tile_start = fill_buf_addr;  // unused when body_tile_count == 0
+
+  if (body_aligned_end <= body_aligned_start) {
+    // Tiny or sufficiently misaligned buffer: no room for a body uint64 element.
+    // Route every byte through the head cleanup region. Head count is
+    // bounded by 2*bodyElemSize - 2 = 14 (e.g. patternSize=1, addr=1,
+    // size=14); still fits within the 16-lane cleanup region.
+    head_count = size[0];
+  } else {
+    tile_start = alignUp(body_aligned_start, tile_size);
+    uintptr_t tile_end = alignDown(body_aligned_end, tile_size);
+    head_count = body_aligned_start - fill_buf_addr;
+    body_tile_count =
+        (tile_end > tile_start) ? (tile_end - tile_start) / tile_size : 0;
+    body_count =
+        (tile_start > body_aligned_start)
+            ? static_cast<size_t>((tile_start - body_aligned_start) / bodyElemSize)
+            : static_cast<size_t>(0);
+    body_tail_count =
+        (body_aligned_end > tile_end)
+            ? static_cast<size_t>((body_aligned_end - tile_end) / bodyElemSize)
+            : static_cast<size_t>(0);
+    tail_count = static_cast<size_t>(end_addr - body_aligned_end);
+  }
+
+  assert(head_count <= (2 * bodyElemSize - 2) &&
+         "head_count must fit cleanup region (small-buffer case may be up to 2*bodyElemSize-2)");
+  // body_aligned_start is 8-aligned, tile_start = alignUp(body_aligned_start, 16),
+  // so (tile_start - body_aligned_start) / bodyElemSize is structurally 0 or 1.
+  assert(body_count <= 1 && "body_count is structurally 0 or 1");
+  assert(body_tail_count <= 1 && "body_tail_count is structurally 0 or 1");
+  assert(tail_count < bodyElemSize && "tail_count should be less than body element size");
+  const size_t cleanup_total = head_count + body_count + body_tail_count + tail_count;
+  assert(cleanup_total <= 16 && "cleanup region must fit in the kernel's 16-lane cleanup gate");
+  if (cleanup_total > 16) {
+    LogPrintfError(
+        "fillBuffer1D: cleanup region size %zu exceeds 16-lane kernel gate "
+        "(head=%zu body=%zu body_tail=%zu tail=%zu, fill_buf_addr=0x%lx, size=%zu, patternSize=%zu)",
+        cleanup_total, head_count, body_count, body_tail_count, tail_count,
+        fill_buf_addr, size[0], patternSize);
+    return false;
+  }
+
+  const size_t tail_offset =
+      head_count + body_count * bodyElemSize + body_tile_count * tile_size + body_tail_count * bodyElemSize;
+  const size_t body_offset = head_count;
+  const size_t body_tail_offset = head_count + body_count * bodyElemSize + body_tile_count * tile_size;
+  const size_t tile_offset = static_cast<size_t>(tile_start - fill_buf_addr);
+
+  // Build rotated payloads: each region's payload is rotated by its byte-offset-from-fill-start
+  // modulo patternSize so that the stored bytes are correct regardless of destination alignment.
+  // When all offsets are 0 (aligned case), all three payloads agree with the unrotated pattern.
+  const FillPatternPayload tiled_pattern =
+      buildTilePattern(pattern, patternSize, tile_offset % patternSize);
+  const uint64_t body_pattern =
+      buildTilePattern(pattern, patternSize, body_offset % patternSize).lo;
+  const uint64_t body_tail_pattern =
+      buildTilePattern(pattern, patternSize, body_tail_offset % patternSize).lo;
+
+  constexpr size_t localWorkSize = 256;
+  const size_t work_items = std::max(alignUp(body_tile_count, localWorkSize), localWorkSize);
+  size_t globalWorkSize = std::min(dev().settings().limit_blit_wg_ * localWorkSize, work_items);
+  const size_t body_tile_passes = (body_tile_count + globalWorkSize - 1) / globalWorkSize;
+
+  memcpy(kernArgBase, pattern, patternSize);
+  constexpr bool kDirectVa = true;
+  struct Ushort4 {
+    uint16_t s0, s1, s2, s3;
+  } counts = {static_cast<uint16_t>(head_count), static_cast<uint16_t>(body_count),
+              static_cast<uint16_t>(body_tail_count), static_cast<uint16_t>(tail_count)};
+  static_assert(sizeof(size_t) == sizeof(uint64_t),
+                "Kernel arg passing assumes 64-bit size_t");
+  setArgument(kernels_[kFillType], 0, sizeof(cl_mem), &mem, origin[0]);
+  setArgument(kernels_[kFillType], 1, sizeof(cl_mem), kernArgBase, 0, nullptr, kDirectVa);
+  setArgument(kernels_[kFillType], 2, sizeof(tiled_pattern), &tiled_pattern);
+  setArgument(kernels_[kFillType], 3, sizeof(body_pattern), &body_pattern);
+  setArgument(kernels_[kFillType], 4, sizeof(body_tail_pattern), &body_tail_pattern);
+  setArgument(kernels_[kFillType], 5, sizeof(body_tile_count), &body_tile_count);
+  setArgument(kernels_[kFillType], 6, sizeof(body_tile_passes), &body_tile_passes);
+  setArgument(kernels_[kFillType], 7, sizeof(globalWorkSize), &globalWorkSize /* stride */);
+  setArgument(kernels_[kFillType], 8, sizeof(patternSize), &patternSize);
+  setArgument(kernels_[kFillType], 9, sizeof(tail_offset), &tail_offset);
+  setArgument(kernels_[kFillType], 10, sizeof(cl_mem), &mem, origin[0] + body_offset);
+  setArgument(kernels_[kFillType], 11, sizeof(cl_mem), &mem, origin[0] + body_tail_offset);
+  setArgument(kernels_[kFillType], 12, sizeof(cl_mem), &mem, origin[0] + tail_offset);
+  setArgument(kernels_[kFillType], 13, sizeof(cl_mem), &mem, origin[0] + tile_offset);
+  setArgument(kernels_[kFillType], 14, sizeof(counts), &counts);
+
+  size_t globalWorkOffset[3] = {0, 0, 0};
+  amd::NDRangeContainer ndrange(1, globalWorkOffset, &globalWorkSize, &localWorkSize);
+  address parameters = captureArguments(kernels_[kFillType]);
+  result = gpu().submitKernelInternal(ndrange, *kernels_[kFillType], parameters, nullptr);
+  releaseArguments(parameters);
   synchronize();
 
   return result;
@@ -2712,6 +2823,38 @@ bool KernelBlitManager::useShaderCopyBufferPath(const Memory& srcMemory, const M
 // ================================================================================================
 bool KernelBlitManager::ShaderCopyBufferBatch(
     const std::vector<amd::BatchCopyOp> &copy_operations) const {
+  std::vector<BatchRawCopyOp> raw_copy_operations;
+  raw_copy_operations.reserve(copy_operations.size());
+
+  for (const auto& copy_operation : copy_operations) {
+    device::Memory* source_device_memory = copy_operation.srcMemory->getDeviceMemory(
+        *copy_operation.srcMemory->getContext().devices()[0]);
+    device::Memory* destination_device_memory = copy_operation.dstMemory->getDeviceMemory(
+        *copy_operation.dstMemory->getContext().devices()[0]);
+
+    const address source_address = reinterpret_cast<address>(
+        source_device_memory->virtualAddress() + copy_operation.srcOffset);
+    const address destination_address = reinterpret_cast<address>(
+        destination_device_memory->virtualAddress() + copy_operation.dstOffset);
+    const bool source_svm_atomics =
+        (source_device_memory->owner()->getMemFlags() & CL_MEM_SVM_ATOMICS) != 0;
+    const bool needs_system_scope =
+        !source_svm_atomics && source_device_memory->isHostMemDirectAccess();
+
+    raw_copy_operations.push_back({source_address, destination_address, copy_operation.size,
+                                   copy_operation.metadata, needs_system_scope, false});
+  }
+
+  return ShaderCopyBufferBatchRaw(raw_copy_operations);
+}
+
+// ================================================================================================
+bool KernelBlitManager::ShaderCopyBufferBatchRaw(
+    const std::vector<BatchRawCopyOp>& copy_operations) const {
+  if (copy_operations.empty()) {
+    return true;
+  }
+
   std::scoped_lock transfer_operations_lock(lockXferOps_);
 
   constexpr uint32_t kMaxAlignment = 2 * sizeof(uint64_t);
@@ -2729,23 +2872,10 @@ bool KernelBlitManager::ShaderCopyBufferBatch(
   bool attach_signal = false;
 
   for (const auto &copy_operation : copy_operations) {
-    device::Memory *source_device_memory =
-        copy_operation.srcMemory->getDeviceMemory(
-            *copy_operation.srcMemory->getContext().devices()[0]);
-    device::Memory *destination_device_memory =
-        copy_operation.dstMemory->getDeviceMemory(
-            *copy_operation.dstMemory->getContext().devices()[0]);
-
-    const uint64_t source_address =
-        source_device_memory->virtualAddress() + copy_operation.srcOffset;
-    const uint64_t destination_address =
-        destination_device_memory->virtualAddress() + copy_operation.dstOffset;
-    const bool source_svm_atomics =
-        (source_device_memory->owner()->getMemFlags() & CL_MEM_SVM_ATOMICS) != 0;
-    needs_system_scope |=
-        (!source_svm_atomics && source_device_memory->isHostMemDirectAccess()) ||
-        !copy_operation.metadata.isAsync_;
-    attach_signal |= !copy_operation.metadata.isAsync_;
+    const uint64_t source_address = reinterpret_cast<uint64_t>(copy_operation.src);
+    const uint64_t destination_address = reinterpret_cast<uint64_t>(copy_operation.dst);
+    needs_system_scope |= copy_operation.needs_system_scope || !copy_operation.metadata.isAsync_;
+    attach_signal |= copy_operation.attach_signal || !copy_operation.metadata.isAsync_;
     const bool addresses_aligned = ((source_address % kMaxAlignment) == 0) &&
                                    ((destination_address % kMaxAlignment) == 0);
     const uint32_t aligned_element_size =
@@ -2792,6 +2922,199 @@ bool KernelBlitManager::ShaderCopyBufferBatch(
   releaseArguments(parameters);
 
   return submit_result;
+}
+
+// ================================================================================================
+bool KernelBlitManager::WriteBufferBatch(
+    const std::vector<amd::BatchWriteMemoryOp>& write_ops) const {
+  for (const amd::BatchWriteMemoryOp& op : write_ops) {
+    if (op.metadata.srcAccessOrder_ == amd::CopyMetadata::kSrcAccessOrderStream) {
+      gpu().releaseGpuMemoryFence();
+      break;
+    }
+  }
+
+  std::vector<amd::BatchCopyOp> pinned_copy_ops;
+  std::vector<BatchRawCopyOp> staging_copy_ops;
+  size_t staging_batch_size = 0;
+
+  for (const amd::BatchWriteMemoryOp& op : write_ops) {
+    Memory* dst_memory = dev().getRocMemory(op.dst_memory);
+
+    const_address src_addr = reinterpret_cast<const_address>(op.src_host);
+    size_t copy_offset = 0;
+    size_t remaining_size = op.size;
+    bool first_transfer = true;
+    // Staging captures source bytes before return; pinned host DMA may read later.
+    const bool enable_pin =
+        op.metadata.srcAccessOrder_ != amd::CopyMetadata::kSrcAccessOrderDuringApiCall;
+
+    while (remaining_size > 0) {
+      const size_t max_staging_size = std::min(remaining_size, StagingXferSize);
+      // Flush before getBuffer can rotate the staging pool past queued copies that still use it.
+      if ((staging_batch_size + max_staging_size) > StagingXferSize) {
+        const bool result = ShaderCopyBufferBatchRaw(staging_copy_ops);
+        staging_copy_ops.clear();
+        staging_batch_size = 0;
+        if (!result) {
+          gpu().releaseGpuMemoryFence();
+          gpu().command()->ReleasePinnedMemory();
+          return false;
+        }
+      }
+
+      BufferState buffer_state = {0};
+      getBuffer(static_cast<const_address>(src_addr + copy_offset), remaining_size, enable_pin,
+                first_transfer, buffer_state);
+      const size_t copy_size = buffer_state.copySize_;
+      if (buffer_state.buffer_ == 0 || copy_size == 0) {
+        LogWarning("KernelBlitManager::WriteBufferBatch: Buffer creation failed!");
+        gpu().releaseGpuMemoryFence();
+        gpu().command()->ReleasePinnedMemory();
+        return false;
+      }
+
+      if (buffer_state.pinnedMem_ != nullptr) {
+        Memory* pinned_memory = dev().getRocMemory(buffer_state.pinnedMem_);
+        const size_t pinned_offset = buffer_state.buffer_ - pinned_memory->getDeviceMemory();
+        pinned_copy_ops.emplace_back(buffer_state.pinnedMem_, op.dst_memory, pinned_offset,
+                                     op.dst_offset + copy_offset, copy_size, op.metadata);
+        releaseBuffer(buffer_state);
+      } else {
+        memcpy(buffer_state.buffer_, src_addr + copy_offset, copy_size);
+        staging_copy_ops.push_back({buffer_state.buffer_,
+                                    dst_memory->getDeviceMemory() + op.dst_offset + copy_offset,
+                                    copy_size, op.metadata, false, false});
+        staging_batch_size += copy_size;
+      }
+
+      copy_offset += copy_size;
+      remaining_size -= copy_size;
+      first_transfer = false;
+    }
+  }
+
+  if (!pinned_copy_ops.empty()) {
+    constexpr bool kSkipCpuWait = true;
+    gpu().releaseGpuMemoryFence(kSkipCpuWait);
+    if (!hsaCopyBatch(pinned_copy_ops)) {
+      gpu().releaseGpuMemoryFence();
+      gpu().command()->ReleasePinnedMemory();
+      return false;
+    }
+    pinned_copy_ops.clear();
+  }
+
+  if (!staging_copy_ops.empty()) {
+    if (!ShaderCopyBufferBatchRaw(staging_copy_ops)) {
+      gpu().releaseGpuMemoryFence();
+      gpu().command()->ReleasePinnedMemory();
+      return false;
+    }
+  }
+
+  return true;
+}
+
+// ================================================================================================
+bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp>& read_ops) const {
+  struct StagingReadBack {
+    address staging;
+    address dst;
+    size_t size;
+  };
+
+  std::vector<amd::BatchCopyOp> pinned_copy_ops;
+  std::vector<BatchRawCopyOp> staging_copy_ops;
+  std::vector<StagingReadBack> staging_read_backs;
+  size_t staging_batch_size = 0;
+
+  for (const amd::BatchReadMemoryOp& op : read_ops) {
+    Memory* src_memory = dev().getRocMemory(op.src_memory);
+    if (src_memory == nullptr) {
+      LogError("KernelBlitManager::ReadBufferBatch: Invalid source memory!");
+      gpu().releaseGpuMemoryFence();
+      gpu().command()->ReleasePinnedMemory();
+      return false;
+    }
+
+    address dst_addr = reinterpret_cast<address>(op.dst_host);
+    size_t copy_offset = 0;
+    size_t remaining_size = op.size;
+    bool first_transfer = true;
+
+    while (remaining_size > 0) {
+      const size_t max_staging_size = std::min(remaining_size, StagingXferSize);
+      if ((staging_batch_size + max_staging_size) > StagingXferSize) {
+        if (!ShaderCopyBufferBatchRaw(staging_copy_ops)) {
+          gpu().releaseGpuMemoryFence();
+          gpu().command()->ReleasePinnedMemory();
+          return false;
+        }
+        gpu().Barriers().WaitCurrent();
+        for (const StagingReadBack& read_back : staging_read_backs) {
+          memcpy(read_back.dst, read_back.staging, read_back.size);
+        }
+        staging_copy_ops.clear();
+        staging_read_backs.clear();
+        staging_batch_size = 0;
+      }
+
+      BufferState buffer_state = {0};
+      getBuffer(static_cast<const_address>(dst_addr + copy_offset), remaining_size, true,
+                first_transfer, buffer_state);
+      const size_t copy_size = buffer_state.copySize_;
+      if (buffer_state.buffer_ == 0 || copy_size == 0) {
+        LogWarning("KernelBlitManager::ReadBufferBatch: Buffer creation failed!");
+        gpu().releaseGpuMemoryFence();
+        gpu().command()->ReleasePinnedMemory();
+        return false;
+      }
+
+      if (buffer_state.pinnedMem_ != nullptr) {
+        Memory* pinned_memory = dev().getRocMemory(buffer_state.pinnedMem_);
+        const size_t pinned_offset = buffer_state.buffer_ - pinned_memory->getDeviceMemory();
+        pinned_copy_ops.emplace_back(op.src_memory, buffer_state.pinnedMem_,
+                                     op.src_offset + copy_offset, pinned_offset, copy_size,
+                                     op.metadata);
+        releaseBuffer(buffer_state);
+      } else {
+        staging_copy_ops.push_back({src_memory->getDeviceMemory() + op.src_offset + copy_offset,
+                                    buffer_state.buffer_, copy_size, op.metadata, true, true});
+        staging_read_backs.push_back({buffer_state.buffer_, dst_addr + copy_offset, copy_size});
+        staging_batch_size += copy_size;
+      }
+
+      copy_offset += copy_size;
+      remaining_size -= copy_size;
+      first_transfer = false;
+    }
+  }
+
+  if (!pinned_copy_ops.empty()) {
+    constexpr bool kSkipCpuWait = true;
+    gpu().releaseGpuMemoryFence(kSkipCpuWait);
+    if (!hsaCopyBatch(pinned_copy_ops)) {
+      gpu().releaseGpuMemoryFence();
+      gpu().command()->ReleasePinnedMemory();
+      return false;
+    }
+    pinned_copy_ops.clear();
+  }
+
+  if (!staging_copy_ops.empty()) {
+    if (!ShaderCopyBufferBatchRaw(staging_copy_ops)) {
+      gpu().releaseGpuMemoryFence();
+      gpu().command()->ReleasePinnedMemory();
+      return false;
+    }
+    gpu().Barriers().WaitCurrent();
+    for (const StagingReadBack& read_back : staging_read_backs) {
+      memcpy(read_back.dst, read_back.staging, read_back.size);
+    }
+  }
+
+  return true;
 }
 
 // ================================================================================================
@@ -2845,6 +3168,20 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
   if (!p2pCopyOps.empty()) {
     // Always pass prior wait events to maintain stream ordering for the batch.
     if (!hsaCopyBatch(p2pCopyOps, &priorWaitEvents, &batchSignals)) {
+      // Swap ops cannot fall back to shader copy (it only does one-directional
+      // copy, not a bidirectional swap). Fail the entire batch if any swap op
+      // was in the SDMA batch that failed.
+      bool hasSwap = false;
+      for (const auto& op : p2pCopyOps) {
+        if (op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpSwap) {
+          hasSwap = true;
+          break;
+        }
+      }
+      if (hasSwap) {
+        LogError("KernelBlitManager::copyBufferBatch: SDMA batch with swap ops failed");
+        return false;
+      }
       LogWarning(
           "KernelBlitManager::copyBufferBatch: Batch copy failed, falling back to copyBuffer");
       d2dCopyOps.insert(d2dCopyOps.end(), p2pCopyOps.begin(), p2pCopyOps.end());

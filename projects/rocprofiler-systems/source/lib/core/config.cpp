@@ -4,8 +4,10 @@
 #include "config.hpp"
 #include "amd_smi.hpp"
 #include "common/defines.h"
+#include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
+#include "common/path.hpp"
 #include "common/static_object.hpp"
 #include "constraint.hpp"
 #include "gpu.hpp"
@@ -30,7 +32,6 @@
 #include <timemory/settings/types.hpp>
 #include <timemory/utility/argparse.hpp>
 #include <timemory/utility/declaration.hpp>
-#include <timemory/utility/delimit.hpp>
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/signals.hpp>
 #include <timemory/utility/types.hpp>
@@ -43,7 +44,10 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
+#include <cerrno>
 #include <charconv>
+#include <cmath>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -56,9 +60,11 @@
 #include <ostream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <unistd.h>
 #include <utility>
+#include <vector>
 
 namespace rocprofsys
 {
@@ -99,11 +105,10 @@ get_config()
 std::string
 get_setting_name(std::string _v)
 {
-    constexpr auto _prefix = tim::string_view_t{ "rocprofsys_" };
+    constexpr auto _prefix = std::string_view{ "rocprofsys_" };
     for(auto& itr : _v)
         itr = tolower(itr);
-    auto _pos = _v.find(_prefix);
-    if(_pos == 0) return _v.substr(_prefix.length());
+    if(_v.starts_with(_prefix)) return _v.substr(_prefix.length());
     return _v;
 }
 
@@ -119,8 +124,275 @@ get_available_categories()
 
 using utility::parse_numeric_range;
 
+enum class config_value_rule
+{
+    boolean,
+    floating_point,
+    positive_floating_point,
+    choice,
+};
+
+struct config_value_validation
+{
+    std::string_view  name;
+    config_value_rule rule;
+    std::string_view  expectation;
+};
+
+// Keep all three paths: tsettings parses env vars in its constructor before
+// callbacks are installed, and callbacks only fire when parsed values change.
+// Config files need a raw pre-scan for parse-to-default cases such as
+// ROCPROFSYS_TRACE_DURATION=abc -> 0.0. If timemory callbacks become
+// unconditional and available before constructor parsing, the explicit env and
+// config-file validation paths can be removed.
+const auto strict_config_value_validations = std::array<config_value_validation, 5>{ {
+    { env_vars::MODE, config_value_rule::choice, "one of the registered choices" },
+    { env_vars::PERFETTO_BACKEND, config_value_rule::choice,
+      "one of the registered choices" },
+    { env_vars::TRACE, config_value_rule::boolean,
+      "a boolean value (0, non-zero integer, true, false, on, off, yes, no, "
+      "y, n, t, f)" },
+    { env_vars::TRACE_DURATION, config_value_rule::floating_point,
+      "a finite floating-point value" },
+    // Only validate positive ranges for settings without sentinel values.
+    // CPUTIME/REALTIME sampling frequencies intentionally default to -1.0.
+    { env_vars::SAMPLING_FREQ, config_value_rule::positive_floating_point,
+      "a positive finite floating-point value" },
+} };
+
+[[nodiscard]] std::string
+trim_config_value(std::string_view value)
+{
+    auto str = std::string{ value };
+    utility::trim_str(str);
+    return str;
+}
+
+[[nodiscard]] std::string
+lower_config_value(std::string value)
+{
+    for(auto& itr : value)
+        itr = static_cast<char>(std::tolower(static_cast<unsigned char>(itr)));
+    return value;
+}
+
+[[nodiscard]] bool
+has_config_value_reference(std::string_view raw_value)
+{
+    auto value = trim_config_value(raw_value);
+    return !value.empty() && value.front() == '$';
+}
+
+[[nodiscard]] bool
+is_integer_config_value(std::string_view value)
+{
+    if(value.empty()) return false;
+    if(value.front() == '+' || value.front() == '-') value.remove_prefix(1);
+    return !value.empty() && value.find_first_not_of("0123456789") == std::string::npos;
+}
+
+[[nodiscard]] bool
+is_recognized_boolean_text_value(std::string_view value)
+{
+    constexpr auto accepted_values =
+        std::array<std::string_view, 10>{ "on", "off", "true", "false", "yes",
+                                          "no", "y",   "n",    "t",     "f" };
+    return std::any_of(accepted_values.begin(), accepted_values.end(),
+                       [value](auto accepted_value) { return value == accepted_value; });
+}
+
+[[nodiscard]] bool
+is_valid_boolean_config_value(std::string_view raw_value)
+{
+    auto value = lower_config_value(trim_config_value(raw_value));
+    if(value.empty()) return false;
+
+    if(is_integer_config_value(value)) return true;
+
+    return is_recognized_boolean_text_value(value);
+}
+
+[[nodiscard]] bool
+parse_floating_point_config_value(std::string_view raw_value, double& parsed_value)
+{
+    auto value = trim_config_value(raw_value);
+    if(value.empty()) return false;
+
+    char* end    = nullptr;
+    errno        = 0;
+    parsed_value = std::strtod(value.c_str(), &end);
+
+    if(end == value.c_str()) return false;
+
+    while(end && std::isspace(static_cast<unsigned char>(*end)) != 0)
+        ++end;
+
+    return end && *end == '\0' && errno != ERANGE && std::isfinite(parsed_value);
+}
+
+[[nodiscard]] std::string
+format_config_choices(const std::vector<std::string>& choices)
+{
+    return choices.empty() ? "one of the registered choices"
+                           : fmt::format("one of: {}", fmt::join(choices, ", "));
+}
+
+[[nodiscard]] const std::vector<std::string>*
+get_setting_choices(const std::shared_ptr<settings>& _config, std::string_view name)
+{
+    if(!_config) return nullptr;
+
+    auto itr = _config->find(std::string{ name });
+    if(itr == _config->end() || !itr->second) return nullptr;
+
+    return &itr->second->get_choices();
+}
+
+[[nodiscard]] const config_value_validation*
+find_config_value_validation(std::string_view name)
+{
+    auto itr = std::find_if(
+        strict_config_value_validations.begin(), strict_config_value_validations.end(),
+        [name](const auto& validation) { return validation.name == name; });
+    return (itr != strict_config_value_validations.end()) ? &*itr : nullptr;
+}
+
+void
+validate_config_setting_value(std::string_view name, std::string_view raw_value,
+                              const std::vector<std::string>* choices = nullptr)
+{
+    auto* validation = find_config_value_validation(name);
+    if(!validation) return;
+
+    auto valid       = false;
+    auto expectation = std::string{ validation->expectation };
+    switch(validation->rule)
+    {
+        case config_value_rule::boolean:
+            valid = is_valid_boolean_config_value(raw_value);
+            break;
+        case config_value_rule::floating_point:
+        {
+            auto parsed = 0.0;
+            valid       = parse_floating_point_config_value(raw_value, parsed);
+            break;
+        }
+        case config_value_rule::positive_floating_point:
+        {
+            auto parsed = 0.0;
+            valid = parse_floating_point_config_value(raw_value, parsed) && parsed > 0.0;
+            break;
+        }
+        case config_value_rule::choice:
+        {
+            auto value = trim_config_value(raw_value);
+            if(choices)
+            {
+                valid =
+                    std::any_of(choices->begin(), choices->end(),
+                                [&value](const auto& choice) { return value == choice; });
+                expectation = format_config_choices(*choices);
+            }
+            break;
+        }
+    }
+
+    if(!valid)
+    {
+        throw std::runtime_error(
+            fmt::format("Error! Invalid value \"{}\" for {}. Expected {}", raw_value,
+                        name, expectation));
+    }
+}
+
+void
+validate_environment_config_values(const std::shared_ptr<settings>& _config)
+{
+    for(const auto& validation : strict_config_value_validations)
+    {
+        if(auto* raw_value = std::getenv(std::string{ validation.name }.c_str()))
+            validate_config_setting_value(validation.name, raw_value,
+                                          get_setting_choices(_config, validation.name));
+    }
+}
+
+void
+validate_config_file_values(const std::string& config_file, const std::string& tag,
+                            const std::shared_ptr<settings>& _config)
+{
+    auto filepath = settings::format(config_file, tag);
+    if(filepath.empty()) return;
+
+    auto input = std::ifstream{ filepath };
+    if(!input) return;
+
+    auto line_number = 0;
+    for(std::string line; std::getline(input, line);)
+    {
+        ++line_number;
+
+        auto trimmed_line = trim_config_value(line);
+        if(trimmed_line.empty() || trimmed_line.front() == '#') continue;
+
+        auto key       = std::string{};
+        auto raw_value = std::string{};
+
+        if(auto equal_pos = trimmed_line.find('='); equal_pos != std::string::npos)
+        {
+            key =
+                trim_config_value(std::string_view{ trimmed_line }.substr(0, equal_pos));
+            raw_value =
+                trim_config_value(std::string_view{ trimmed_line }.substr(equal_pos + 1));
+        }
+        else
+        {
+            auto split_pos = trimmed_line.find_first_of(" \t");
+            if(split_pos == std::string::npos) continue;
+
+            key =
+                trim_config_value(std::string_view{ trimmed_line }.substr(0, split_pos));
+            raw_value =
+                trim_config_value(std::string_view{ trimmed_line }.substr(split_pos + 1));
+        }
+
+        if(auto comment_pos = raw_value.find('#'); comment_pos != std::string::npos)
+            raw_value =
+                trim_config_value(std::string_view{ raw_value }.substr(0, comment_pos));
+
+        if(!raw_value.empty() && has_config_value_reference(raw_value)) continue;
+
+        try
+        {
+            validate_config_setting_value(key, raw_value,
+                                          get_setting_choices(_config, key));
+        } catch(const std::runtime_error& exc)
+        {
+            throw std::runtime_error(
+                fmt::format("{} in {}:{}", exc.what(), filepath, line_number));
+        }
+    }
+}
+
+void
+install_strict_config_value_callbacks(const std::shared_ptr<settings>& _config)
+{
+    for(const auto& validation : strict_config_value_validations)
+    {
+        auto itr = _config->find(std::string{ validation.name });
+        if(itr == _config->end() || !itr->second) continue;
+
+        itr->second->set_parse_callback([](tim::vsettings*  setting,
+                                           std::string_view raw_value,
+                                           settings::update_type) {
+            if(!setting) return;
+            const auto& choices = setting->get_choices();
+            validate_config_setting_value(setting->get_env_name(), raw_value, &choices);
+        });
+    }
+}
+
 // Accepts either a `const char*` literal or `std::string_view` (e.g. env_vars::FOO)
-// for ENV_NAME — std::string{} can be constructed from either.
+// for ENV_NAME -- std::string{} can be constructed from either.
 #define ROCPROFSYS_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)           \
     [&]() {                                                                                  \
         auto _env_name = std::string{ ENV_NAME };                                            \
@@ -349,6 +621,13 @@ configure_settings(bool _init)
         "enabled automatically)",
         false, "backend", "unified_memory", "kfd");
 
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, env_vars::UNIFIED_MEMORY_OUTPUT_PATH,
+        "Explicitly specify the output folder for unified memory profiling reports. "
+        "When empty, unified memory reports are written next to the active trace "
+        "backend output.",
+        std::string{}, "output", "unified_memory", "backend", "kfd");
+
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_AMD_SMI,
                               "Enable sampling GPU power, temp, utilization, "
                               "vcn_activity, jpeg_activity and memory usage",
@@ -514,9 +793,11 @@ configure_settings(bool _init)
                               "user time, and kernel time",
                               false, "process_sampling");
 
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_AINIC,
                               "Enable tracking for AI NIC metrics", false,
                               "process_sampling");
+#endif
 
     ROCPROFSYS_CONFIG_SETTING(
         double, env_vars::PROCESS_SAMPLING_FREQ,
@@ -545,12 +826,14 @@ configure_settings(bool _init)
         "user_time, kernel_time. Special: all, none",
         std::string{ "all" }, "process_sampling");
 
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::SAMPLING_AINICS,
                               "AI NICs to query when ROCPROFSYS_USE_AMD_SMI=ON. NIC "
                               "names should be separated by "
                               "commas, e.g. eno8303,enp7s0.",
                               std::string{ "none" }, "amd_smi", "rocm", "sampling",
                               "process_sampling");
+#endif
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, env_vars::SAMPLING_GPUS,
@@ -922,7 +1205,7 @@ configure_settings(bool _init)
         std::string, env_vars::RANK_FILTER_LOGS,
         "Ranks for which console output is generated. Values should be separated by "
         "commas and can be explicit or ranges, e.g. 0,1,5-8. An empty value enables "
-        "output for all ranks",
+        "console output for all ranks",
         std::string{}, "data", "io", "advanced");
 
     // set the defaults
@@ -1082,12 +1365,15 @@ configure_settings(bool _init)
     _config->get_papi_quiet() = true;
 #endif
 
+    install_strict_config_value_callbacks(_config);
+    validate_environment_config_values(_config);
+
     // always initialize timemory because gotcha wrappers are always used
     auto _cmd     = tim::read_command_line(process::get_id());
     auto _cmd_env = rocprofsys::get_env<std::string>(env_vars::COMMAND_LINE, "");
-    if(!_cmd_env.empty()) _cmd = tim::delimit(_cmd_env, " ");
+    if(!_cmd_env.empty()) _cmd = rocprofsys::delimit(_cmd_env, " ");
     auto _exe          = (_cmd.empty()) ? "exe" : _cmd.front();
-    get_exe_realpath() = filepath::realpath(_exe, nullptr, false);
+    get_exe_realpath() = path::realpath(_exe);
     auto _pos          = _exe.find_last_of('/');
     if(_pos < _exe.length() - 1) _exe = _exe.substr(_pos + 1);
     get_exe_name() = _exe;
@@ -1105,7 +1391,7 @@ configure_settings(bool _init)
     auto _proc      = mproc::get_concurrent_processes(_ppid);
     bool _main_proc = (_proc.size() < 2 || *_proc.begin() == _pid);
 
-    for(auto&& filename : tim::delimit(
+    for(auto&& filename : rocprofsys::delimit(
             _config->get<std::string>(std::string{ env_vars::CONFIG_FILE }), ";:"))
     {
         if(_config->get_suppress_config()) continue;
@@ -1126,6 +1412,7 @@ configure_settings(bool _init)
         }
 
         LOG_DEBUG("Reading config file {}", filename);
+        validate_config_file_values(filename, _config->get_tag(), _config);
         if(_config->read(filename) && _main_proc &&
            ((_config->get<bool>(std::string{ env_vars::CI }) &&
              settings::verbose() >= 0) ||
@@ -1845,8 +2132,7 @@ get_exe_realpath()
 {
     static std::string _v = []() {
         auto _cmd_line = tim::read_command_line(process::get_id());
-        if(!_cmd_line.empty())
-            return filepath::realpath(_cmd_line.front(), nullptr, false);
+        if(!_cmd_line.empty()) return path::realpath(_cmd_line.front());
         return std::string{};
     }();
     return _v;
@@ -1894,13 +2180,6 @@ get_mode()
             fmt::format("[{}] invalid mode {}. Choices: {}", __FUNCTION__, _mode, _msg));
     }
     return Mode::Trace;
-}
-
-bool&
-is_attached()
-{
-    static bool _v = false;
-    return _v;
 }
 
 bool&
@@ -2024,8 +2303,22 @@ get_cpu_freq_enabled()
 std::string
 get_sampling_ainics()
 {
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     static auto _v = get_config()->find(std::string{ env_vars::SAMPLING_AINICS });
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+#else
+    return std::string{};
+#endif
+}
+
+bool
+get_ainic_supported()
+{
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+    return true;
+#else
+    return false;
+#endif
 }
 
 bool&
@@ -2080,7 +2373,7 @@ get_use_vaapi_tracing()
         return false;  // Setting not found
     }
     std::string domains = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-    auto        domain_list = tim::delimit(domains, " ,;:\t\n");
+    auto        domain_list = rocprofsys::delimit(domains, " ,;:\t\n");
     return std::find(domain_list.begin(), domain_list.end(), "rocdecode_api") !=
                domain_list.end() ||
            std::find(domain_list.begin(), domain_list.end(), "rocjpeg_api") !=
@@ -2201,7 +2494,7 @@ get_category_config()
         auto _avail = get_available_categories<strset_t>();
         auto _parse = [&_avail](const auto& _setting) {
             auto _ret = strset_t{};
-            for(auto itr : tim::delimit(
+            for(auto itr : rocprofsys::delimit(
                     static_cast<tim::tsettings<std::string>&>(*_setting->second).get(),
                     " ,;:\n\t"))
             {
@@ -2474,16 +2767,13 @@ get_sampling_allocator_size()
 double
 get_process_sampling_freq()
 {
-    static auto _v   = get_config()->find(std::string{ env_vars::PROCESS_SAMPLING_FREQ });
-    const auto  _val = static_cast<tim::tsettings<double>&>(*_v->second).get();
+    static auto _v = get_config()->find(std::string{ env_vars::PROCESS_SAMPLING_FREQ });
+    auto        _val =
+        std::min<double>(static_cast<tim::tsettings<double>&>(*_v->second).get(), 1000.0);
 
     constexpr auto effective_zero = 1.0e-9;
-    if(_val < effective_zero)
-    {
-        return std::min<double>(get_sampling_freq(), 100.0);
-    }
-
-    return std::min<double>(_val, 1000.0);
+    if(_val < effective_zero) return std::min<double>(get_sampling_freq(), 100.0);
+    return _val;
 }
 
 double
@@ -2730,7 +3020,54 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
 std::string
 get_ump_absolute_path()
 {
-    if(!settings_are_configured()) return settings::output_path();
+    auto ensure_dir = [](std::string path) {
+        if(!path.empty() && !tim::filepath::direxists(path))
+        {
+            tim::filepath::makedir(path);
+        }
+        return path;
+    };
+
+    auto current_working_directory = [] {
+        const auto* pwd = getenv("PWD");
+        if(pwd != nullptr && pwd[0] != '\0') return std::string{ pwd };
+
+        char* current_dir = getcwd(nullptr, 0);
+        if(current_dir == nullptr) return std::string{ "." };
+
+        auto result = std::string{ current_dir };
+        free(current_dir);
+        return result;
+    };
+
+    auto make_absolute = [&](std::string path) {
+        if(path.empty()) return path;
+
+        if(path.at(0) != '/')
+        {
+            path = fmt::format("{}/{}", current_working_directory(), path);
+        }
+
+        return (settings_are_configured())
+                   ? settings::format(std::move(path), get_config()->get_tag())
+                   : path;
+    };
+
+    if(settings_are_configured())
+    {
+        auto explicit_path = get_setting_value<std::string>(
+            std::string{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH });
+        if(explicit_path && !explicit_path->empty())
+            return ensure_dir(make_absolute(*explicit_path));
+    }
+
+    if(!settings_are_configured())
+    {
+        auto env_path =
+            rocprofsys::get_env<std::string>(env_vars::UNIFIED_MEMORY_OUTPUT_PATH, "");
+        if(!env_path.empty()) return ensure_dir(make_absolute(env_path));
+        return settings::output_path();
+    }
 
     // Co-locate UMP output with the active backend: rocpd's .db dir when
     // rocpd is on and trace-cache Perfetto is not; otherwise the Perfetto
@@ -2790,24 +3127,17 @@ get_rank_filter_output()
     return static_cast<tim::tsettings<std::string>&>(*_v).get();
 }
 
-std::string
+[[nodiscard]] std::string
 get_rank_filter_logs()
 {
     static auto _v = get_config()->at(std::string{ env_vars::RANK_FILTER_LOGS });
     return static_cast<tim::tsettings<std::string>&>(*_v).get();
 }
 
-#if(defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0) ||            \
-    (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
-#    define ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED 1
-#else
-#    define ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED 0
-#endif
-
 #if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
 // Return the first env var in `env_var_options` that holds an unsigned integer.
 // `label` is used only for logging (e.g. "MPI rank", "MPI world size").
-std::optional<std::uint64_t>
+[[nodiscard]] std::optional<std::uint64_t>
 get_first_mpi_env_uint(const std::vector<std::string>& env_var_options,
                        const std::string&              label)
 {
@@ -2837,7 +3167,7 @@ get_first_mpi_env_uint(const std::vector<std::string>& env_var_options,
     return std::nullopt;
 }
 
-std::optional<std::uint64_t>
+[[nodiscard]] std::optional<std::uint64_t>
 get_mpi_rank_from_env()
 {
     // global rank env-vars: user-provided, then runtime-specific
@@ -2847,7 +3177,7 @@ get_mpi_rank_from_env()
                                   "MPI rank");
 }
 
-std::optional<std::uint64_t>
+[[nodiscard]] std::optional<std::uint64_t>
 get_mpi_world_size_from_env()
 {
     return get_first_mpi_env_uint({ "OMPI_COMM_WORLD_SIZE", "MV2_COMM_WORLD_SIZE",
@@ -2860,10 +3190,34 @@ get_mpi_world_size_from_env()
 namespace output_filtering
 {
 #if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
-namespace
-{
+/**
+ * Decide whether the current MPI rank should produce output, given a filter.
+ *
+ * Pure decision core for rank-based output filtering: performs no environment
+ * access so it can be unit tested with explicit inputs. The public entry point
+ * is_rank_in_filter() wraps this, supplying the rank and world size from the
+ * environment.
+ *
+ * Policy is fail-open: every error or ambiguous condition disables filtering
+ * (returns true) so that a misconfiguration never silently suppresses all
+ * output. Specifically, true is returned when the filter is empty or "all",
+ * when the current rank is unknown, when the world size is reported as 0, when
+ * the current rank is outside [0, world_size-1], and when no valid filter
+ * entries remain after validation. "none" returns false; otherwise the result
+ * is whether the current rank is a member of the filter set.
+ *
+ * @param current_rank      Current MPI rank, or std::nullopt if undeterminable.
+ * @param world_size        Total MPI ranks, or std::nullopt if undeterminable.
+ *                          When present, filter entries and the current rank are
+ *                          validated against [0, world_size-1]; when absent, no
+ *                          range validation is performed.
+ * @param enabled_ranks_str Filter spec: "all"/empty, "none", or a numeric range
+ *                          (e.g. "0-3,8,10-15"), case-insensitive.
+ * @return true if the current rank should produce output.
+ */
 bool
-is_rank_in_filter(std::string enabled_ranks_str)
+rank_passes_filter(std::optional<std::uint64_t> current_rank,
+                   std::optional<std::uint64_t> world_size, std::string enabled_ranks_str)
 {
     rocprofsys::utility::trim_str(enabled_ranks_str);
     for(auto& ch : enabled_ranks_str)
@@ -2872,7 +3226,6 @@ is_rank_in_filter(std::string enabled_ranks_str)
     if(enabled_ranks_str.empty() || enabled_ranks_str == "all") return true;
     if(enabled_ranks_str == "none") return false;
 
-    const auto current_rank = get_mpi_rank_from_env();
     if(!current_rank)
     {
         LOG_WARNING("MPI output filtering DISABLED: failed to get MPI rank");
@@ -2883,36 +3236,34 @@ is_rank_in_filter(std::string enabled_ranks_str)
         std::int64_t, std::unordered_set<std::int64_t>>(enabled_ranks_str, "ranks", 1L);
 
     // Check current_rank and enabled_ranks against total number of existing MPI ranks
-    const auto world_size = get_mpi_world_size_from_env();
     if(world_size.has_value())
     {
-        if(world_size.value() == 0)
+        if(*world_size == 0)
         {
             LOG_WARNING("MPI output filtering DISABLED: total number of MPI ranks (world "
                         "size) is 0");
             return true;
         }
 
-        for(auto it = enabled_ranks.begin(); it != enabled_ranks.end();)
-        {
-            if(*it < 0 || static_cast<std::uint64_t>(*it) >= world_size.value())
-            {
-                LOG_WARNING("MPI output filtering: requested MPI rank {} not in range of "
-                            "existing ranks [0-{}]. Ignoring",
-                            *it, world_size.value() - 1);
-                it = enabled_ranks.erase(it);
-            }
-            else
-            {
-                ++it;
-            }
-        }
+        const auto ws       = *world_size;
+        const auto max_rank = ws - 1;
+        const auto in_world = [ws](std::int64_t rank) {
+            return rank >= 0 && static_cast<std::uint64_t>(rank) < ws;
+        };
 
-        if(current_rank.value() >= world_size.value())
+        std::erase_if(enabled_ranks, [&](const std::int64_t rank) {
+            if(in_world(rank)) return false;
+            LOG_WARNING("MPI output filtering: requested MPI rank {} not in range of "
+                        "existing ranks [0-{}]. Ignoring",
+                        rank, max_rank);
+            return true;
+        });
+
+        if(*current_rank > max_rank)
         {
             LOG_WARNING("MPI output filtering DISABLED: MPI rank {} not in range of "
                         "existing ranks [0-{}]",
-                        current_rank.value(), world_size.value() - 1);
+                        *current_rank, max_rank);
             return true;
         }
     }
@@ -2923,15 +3274,25 @@ is_rank_in_filter(std::string enabled_ranks_str)
         return true;
     }
 
-    const auto is_enabled = enabled_ranks.count(current_rank.value()) != 0;
-    LOG_DEBUG("Output for MPI rank {} is {}", current_rank.value(),
+    const auto is_enabled =
+        enabled_ranks.count(static_cast<std::int64_t>(*current_rank)) != 0;
+    LOG_DEBUG("Output for MPI rank {} is {}", *current_rank,
               is_enabled ? "enabled" : "disabled");
     return is_enabled;
+}
+
+namespace
+{
+[[nodiscard]] bool
+is_rank_in_filter(std::string enabled_ranks_str)
+{
+    return rank_passes_filter(get_mpi_rank_from_env(), get_mpi_world_size_from_env(),
+                              std::move(enabled_ranks_str));
 }
 }  // namespace
 #endif
 
-bool
+[[nodiscard]] bool
 is_file_output_enabled_for_current_mpi_rank()
 {
 #if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
@@ -2942,7 +3303,7 @@ is_file_output_enabled_for_current_mpi_rank()
 #endif
 }
 
-bool
+[[nodiscard]] bool
 is_log_output_enabled_for_current_mpi_rank()
 {
 #if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
@@ -3284,8 +3645,8 @@ get_causal_binary_scope()
     auto&&      _config = get_config();
     static auto _v      = _config->find(std::string{ env_vars::CAUSAL_BINARY_SCOPE });
     return format_causal_scopes(
-        tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
-                     "\t\"';"),
+        rocprofsys::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
+                            "\t\"';"),
         _config->get_tag());
 }
 
@@ -3293,16 +3654,16 @@ std::vector<std::string>
 get_causal_source_scope()
 {
     static auto _v = get_config()->find(std::string{ env_vars::CAUSAL_SOURCE_SCOPE });
-    return tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
-                        "\t\"';");
+    return rocprofsys::delimit(
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "\t\"';");
 }
 
 std::vector<std::string>
 get_causal_function_scope()
 {
     static auto _v = get_config()->find(std::string{ env_vars::CAUSAL_FUNCTION_SCOPE });
-    return tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
-                        "\t\"';");
+    return rocprofsys::delimit(
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "\t\"';");
 }
 
 std::vector<std::string>
@@ -3311,8 +3672,8 @@ get_causal_binary_exclude()
     auto&&      _config = get_config();
     static auto _v      = _config->find(std::string{ env_vars::CAUSAL_BINARY_EXCLUDE });
     return format_causal_scopes(
-        tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
-                     "\t\"';"),
+        rocprofsys::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
+                            "\t\"';"),
         _config->get_tag());
 }
 
@@ -3320,16 +3681,16 @@ std::vector<std::string>
 get_causal_source_exclude()
 {
     static auto _v = get_config()->find(std::string{ env_vars::CAUSAL_SOURCE_EXCLUDE });
-    return tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
-                        "\t\"';");
+    return rocprofsys::delimit(
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "\t\"';");
 }
 
 std::vector<std::string>
 get_causal_function_exclude()
 {
     static auto _v = get_config()->find(std::string{ env_vars::CAUSAL_FUNCTION_EXCLUDE });
-    return tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
-                        "\t\"';");
+    return rocprofsys::delimit(
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "\t\"';");
 }
 }  // namespace config
 }  // namespace rocprofsys

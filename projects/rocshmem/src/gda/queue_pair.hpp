@@ -47,6 +47,7 @@
 
 #include "containers/free_list.hpp"
 #include "memory/hip_allocator.hpp"
+#include "gda/gda_symm_table.hpp"
 
 #include <map>
 
@@ -161,33 +162,63 @@ class QueuePair {
   virtual ~QueuePair();
 
   /**
-   * @brief Create and enqueue a non-blocking put work queue entry (wqe).
+   * @brief Create and enqueue a non-blocking put to a symmetric destination.
    *
-   * @param[in] dest Destination address for data transmission.
-   * @param[in] source Source address for data transmission.
-   * @param[in] nelems Size in bytes of data transmission.
-   * @param[in] pe Destination processing element of data transmission.
+   * The target PE is this QP's connected peer. Resolves the
+   * remote address and remote key for @p dest and the local key for @p source
+   * internally (heap or registered buffer), so callers pass symmetric addresses
+   * only. Small transfers are inlined (no source key).
+   *
+   * @param[in] dest    Symmetric destination address (local address space).
+   * @param[in] source  Local source address.
+   * @param[in] length  Size in bytes of data transmission.
    * @param[in] wf_info Wavefront information.
    */
-  __device__ void put_nbi(void *dest, const void *source, size_t nelems,
-      int pe, ActiveWFInfo &wf_info);
+  __device__ void put_nbi(void *dest, const void *source, size_t length,
+      ActiveWFInfo &wf_info);
 
-  __device__ void put_nbi_single(void *dest, const void *source, size_t nelems,
+  __device__ void put_nbi_single(void *dest, const void *source, size_t length,
       bool ring_db);
 
+  __device__ void put_nbi_single(void *raddr, uint32_t rkey,
+      const void *laddr, uint32_t lkey,
+      size_t length, bool ring_db = true);
+
   /**
-   * @brief Create and enqueue a non-blocking get work queue entry (wqe).
+   * @brief Create and enqueue a non-blocking put with explicit rkey/lkey.
    *
-   * @param[in] dest Destination address for data transmission.
-   * @param[in] source Source address for data transmission.
-   * @param[in] nelems Size in bytes of data transmission.
-   * @param[in] pe Destination processing element of data transmission.
+   * Used when each buffer registration has its own keys, distinct from
+   * the QP's default heap keys.
+   *
+   * @param[in] length Size in bytes of data transmission.
+   * @param[in] raddr Remote destination address.
+   * @param[in] rkey Remote key for the destination buffer.
+   * @param[in] laddr Local source address.
+   * @param[in] lkey Local key for the source buffer.
+   * @param[in] wf_info Wavefront information.
+   * @param[in] ring_db Ring doorbell after posting (default true).
+   */
+  __device__ void put_nbi(void *raddr, uint32_t rkey,
+      const void *laddr, uint32_t lkey,
+      size_t length, ActiveWFInfo &wf_info, bool ring_db = true);
+
+  /**
+   * @brief Create and enqueue a non-blocking get from a symmetric source.
+   *
+   * The target PE is this QP's connected peer. Resolves the
+   * remote address and remote key for @p source and the local key for @p dest
+   * internally (heap or registered buffer), so callers pass symmetric addresses
+   * only.
+   *
+   * @param[in] dest    Local destination address.
+   * @param[in] source  Symmetric source address (local address space).
+   * @param[in] length  Size in bytes of data transmission.
    * @param[in] wf_info Wavefront information.
    */
-  __device__ void get_nbi(void *dest, const void *source, size_t nelems,
-      int pe, ActiveWFInfo &wf_info);
+  __device__ void get_nbi(void *dest, const void *source, size_t length,
+      ActiveWFInfo &wf_info);
 
-  __device__ void get_nbi_single(void *dest, const void *source, size_t nelems,
+  __device__ void get_nbi_single(void *dest, const void *source, size_t length,
       bool ring_db);
 
   /**
@@ -254,93 +285,239 @@ class QueuePair {
   __device__ int64_t atomic_cas_nofetch(void *dest, int64_t atomic_data,
       int64_t atomic_cmp, ActiveWFInfo &wf_info);
 
+  /**
+   * @brief Explicit remote-key atomic variants.
+   *
+   * Used when the destination is a symmetrically-registered user buffer whose
+   * remote key differs from the QP's default heap key. Mirror the default-key
+   * versions above but forward the caller-supplied @p rkey.
+   */
+  __device__ int64_t atomic_fetch(void *dest, uint32_t rkey, int64_t value,
+      int64_t cond, ActiveWFInfo &wf_info);
+
+  __device__ void atomic_nofetch(void *dest, uint32_t rkey, int64_t value,
+      int64_t cond, ActiveWFInfo &wf_info);
+
+  __device__ int64_t atomic_cas(void *dest, uint32_t rkey, int64_t atomic_data,
+      int64_t atomic_cmp, ActiveWFInfo &wf_info);
+
+  __device__ int64_t atomic_cas_nofetch(void *dest, uint32_t rkey,
+      int64_t atomic_data, int64_t atomic_cmp, ActiveWFInfo &wf_info);
+
+  /**
+   * @brief Explicit-key non-blocking put/get.
+   *
+   * get_nbi's default-key form derives the remote key from the QP heap key and
+   * the local key via get_lkey; this form takes both explicitly for symmetric
+   * user-buffer transfers. (put_nbi already provides an explicit-key overload.)
+   */
+  __device__ void get_nbi(void *dest, uint32_t lkey, const void *source,
+      uint32_t rkey, size_t length, ActiveWFInfo &wf_info);
+
   uintptr_t base_heap = 0;
   size_t base_heap_size = 0;
+
+  /**
+   * @brief Cached remote heap base for this QP's connected peer.
+   *
+   * Equals heap_bases[dest_pe], captured once at setup. Lets the (common) heap
+   * translation run as pure register arithmetic with no memory load.
+   */
+  uintptr_t remote_heap_base{0};
+
+  /**
+   * @brief Contiguous slice of registration entries for this QP's fixed
+   * (dest_pe, nic_idx), indexed by registration slot [0, *symm_count).
+   *
+   * Points into the backend's flat entry table; every entry is already
+   * specialized to this QP, so a match yields the remote address and keys with
+   * no further dereference. Null when symmetric registration is unavailable.
+   */
+  QpSymmEntry *symm_entries{nullptr};
+
+  /**
+   * @brief Shared registration count (number of live entries per slice).
+   *
+   * Single device int shared by all QPs; register/unregister publish updates
+   * here. One load per non-heap lookup (null when registration unavailable).
+   */
+  const int *symm_count{nullptr};
+
+  /**
+   * @brief Resolved remote address and remote key for a symmetric target.
+   */
+  struct raddr_info {
+    uintptr_t raddr;  //!< Remote address in the connected peer's address space.
+    uint32_t rkey;    //!< Remote key to use for the transfer.
+  };
+
+  /**
+   * @brief Resolve the remote address and remote key for a symmetric target.
+   *
+   * The target PE is this QP's connected peer. Common case is a
+   * symmetric-heap address, translated from the cached remote heap base using
+   * this QP's default heap key. Otherwise the address is matched against this
+   * QP's registration slice, which supplies the peer base and per-NIC key
+   * directly.
+   *
+   * @param[in] sym_addr Symmetric address (valid in the local address space)
+   * @return Remote address and remote key. Returns {0, 0} for a non-symmetric
+   *         pointer (undefined in SHMEM) so the NIC rejects the transfer,
+   *         rather than fabricating a heap offset that could silently corrupt
+   *         peer memory.
+   */
+  __device__ __forceinline__ raddr_info get_raddr_info(const void *sym_addr) {
+    uintptr_t addr = reinterpret_cast<uintptr_t>(sym_addr);
+    if (is_ptr_in_range(base_heap, base_heap_size, addr)) {
+      return {remote_heap_base + (addr - base_heap), rkey};
+    }
+    int n = symm_count ? *symm_count : 0;
+    for (int i = 0; i < n; ++i) {
+      uintptr_t local_base = symm_entries[i].local_base;
+      if (is_ptr_in_range(local_base, symm_entries[i].length, addr)) {
+        return {symm_entries[i].remote_base + (addr - local_base),
+                symm_entries[i].rkey};
+      }
+    }
+    return {0, 0};
+  }
+
+  /**
+   * @brief Resolve the local key for a locally-sourced buffer.
+   *
+   * Heap buffers use this QP's default heap key; per-QP registered user buffers
+   * and registered symmetric buffers use their own per-NIC local key. Aborts if
+   * the address belongs to none of them.
+   */
+  __device__ __forceinline__ uint32_t get_lkey(uintptr_t addr) {
+    /* Check if in heap */
+    if (is_ptr_in_range(base_heap, base_heap_size, addr)) {
+      return lkey;
+    }
+
+    /* Get the correct lkey for the user buffer */
+    for (size_t i = 0; i < num_user_buffers; i++) {
+      if (is_ptr_in_range(user_buf_info[i].addr, user_buf_info[i].length,
+                          addr)) {
+        return user_buf_info[i].lkey;
+      }
+    }
+
+    /* Get the correct lkey for a registered symmetric buffer */
+    int n = symm_count ? *symm_count : 0;
+    for (int i = 0; i < n; ++i) {
+      if (is_ptr_in_range(symm_entries[i].local_base, symm_entries[i].length,
+                          addr)) {
+        return symm_entries[i].lkey;
+      }
+    }
+
+    LOGD_ERROR_ABORT("Valid lkey buffer not found");
+    return 0;
+  }
 
  private:
   /**
    * @brief Helper method to build work requests for the send queue.
    *
-   * @param[in] size Size in bytes of data transmission.
    * @param[in] raddr Remote address.
+   * @param[in] rkey Remote key.
    * @param[in] opcode Operation to be performed.
    * @param[in] atomic_data An atomic data value to be used.
-   * @param[in] atomic_cmp An atomic comparison operation to be performed.
-   * @param[in] fetch True if the operation returns a value.
+   * @param[in] atomic_cmp An atomic comparison value.
    * @param[in] wf_info Wavefront information.
+   * @param[in] fetching True if the operation returns a value.
+   * @param[in] fence True to set fence flag on the WQE.
    */
   __device__ __attribute__((noinline)) uint64_t
-  post_wqe_amo(int32_t size, uintptr_t raddr, uint8_t opcode,
-      int64_t atomic_data, int64_t atomic_cmp, bool fetch,
-      ActiveWFInfo &wf_info);
+  post_wqe_amo(uintptr_t raddr, uint32_t rkey, uint8_t opcode,
+      int64_t atomic_data, int64_t atomic_cmp,
+      ActiveWFInfo &wf_info, bool fetching = false, bool fence = false);
+
+#if defined(GDA_IONIC)
+  __device__ uint64_t ionic_post_wqe_amo(uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+      ActiveWFInfo &wf_info, bool fetching = false, bool fence = false);
+#endif
+#if defined(GDA_BNXT)
+  __device__ uint64_t bnxt_post_wqe_amo(uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+      ActiveWFInfo &wf_info, bool fetching = false, bool fence = false);
+#endif
+#if defined(GDA_MLX5)
+  __device__ uint64_t mlx5_post_wqe_amo(uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+      ActiveWFInfo &wf_info, bool fetching = false, bool fence = false);
+#endif
 
   __device__ __attribute__((noinline)) uint64_t post_wqe_amo_single(uintptr_t raddr,
-      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching);
+      uint32_t rkey, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+      bool fetching = false, bool fence = false);
 
   /**
-   * @brief Helper method to build work requests for the send queue.
+   * @brief Build and post an RMA work queue entry with explicit keys.
    *
-   * @param[in] pe Destination processing element of data transmission.
    * @param[in] size Size in bytes of data transmission.
-   * @param[in] laddr Local address.
    * @param[in] raddr Remote address.
+   * @param[in] rkey Remote key.
+   * @param[in] laddr Local address.
+   * @param[in] lkey Local key.
    * @param[in] opcode Operation to be performed.
    * @param[in] wf_info Wavefront information.
+   * @param[in] ring_db Ring doorbell after posting.
    */
   __device__ __attribute__((noinline)) void
-  post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr,
-      uint8_t opcode, ActiveWFInfo &wf_info);
+  post_wqe_rma(int32_t length, uintptr_t raddr, uint32_t rkey,
+      uintptr_t laddr, uint32_t lkey,
+      uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
 
   __device__ __attribute__((noinline)) void
-  post_wqe_rma_single(int32_t size, uintptr_t laddr, uintptr_t raddr,
-      uint8_t opcode, bool ring_db);
+  post_wqe_rma_single(int32_t length, uintptr_t laddr, uint32_t lkey,
+      uintptr_t raddr, uint32_t rkey, uint8_t opcode, bool ring_db);
 
 #if defined(GDA_MLX5)
-  __device__ uint64_t mlx5_post_wqe_amo(int32_t size, uintptr_t raddr,
-      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch,
-      ActiveWFInfo &wf_info);
-  __device__ uint64_t mlx5_post_wqe_amo_single(int32_t size, uintptr_t raddr,
+  __device__ uint64_t mlx5_post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
       uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
-      bool fetch);
-  __device__ void mlx5_post_wqe_rma(int32_t size, uintptr_t laddr,
-      uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info);
-  __device__ void mlx5_post_wqe_rma_single(int32_t size, uintptr_t laddr,
-      uintptr_t raddr, uint8_t opcode, bool ring_db);
+      bool fetch = false, bool fence = false);
+  __device__ void mlx5_post_wqe_rma_single(int32_t length, uintptr_t laddr,
+      uint32_t lkey, uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode, bool ring_db);
+  __device__ void mlx5_post_wqe_rma(int32_t length, uintptr_t raddr,
+      uint32_t rkey, uintptr_t laddr, uint32_t lkey,
+      uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
   __device__ void mlx5_quiet();
   __device__ void mlx5_quiet_single();
 #endif
 #if defined(GDA_BNXT)
 
-  __device__ void bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr,
-      int32_t length, uint8_t opcode);
-  __device__ uint32_t bnxt_write_amo_wqe(uintptr_t raddr, uint8_t opcode,
-      int64_t atomic_data, int64_t atomic_cmp, bool fetching);
+  __device__ void bnxt_write_rma_wqe(int32_t length, uintptr_t raddr,
+      uint32_t rkey, uintptr_t laddr, uint32_t lkey, uint8_t opcode);
+  __device__ uint32_t bnxt_write_amo_wqe(uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+      bool fetching, bool fence);
 
-  __device__ uint64_t bnxt_post_wqe_amo_single(uintptr_t raddr, uint8_t opcode,
-      int64_t atomic_data, int64_t atomic_cmp, bool fetching);
-  __device__ uint64_t bnxt_post_wqe_amo(uintptr_t raddr, uint8_t opcode,
-      int64_t atomic_data, int64_t atomic_cmp, bool fetching,
-      ActiveWFInfo &wf_info);
-
-  __device__ void bnxt_post_wqe_rma(int32_t size, uintptr_t laddr,
-      uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info);
-
-  __device__ void bnxt_post_wqe_rma_single(int32_t size, uintptr_t laddr,
-      uintptr_t raddr, uint8_t opcode, bool ring_db);
+  __device__ uint64_t bnxt_post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+      bool fetching = false, bool fence = false);
+  __device__ void bnxt_post_wqe_rma_single(int32_t length, uintptr_t laddr,
+      uint32_t lkey, uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode, bool ring_db);
+  __device__ void bnxt_post_wqe_rma(int32_t length, uintptr_t raddr,
+      uint32_t rkey, uintptr_t laddr, uint32_t lkey,
+      uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
   __device__ void bnxt_quiet();
   __device__ void bnxt_quiet_single();
 #endif
 #if defined(GDA_IONIC)
-  __device__ uint64_t ionic_post_wqe_amo(int32_t size, uintptr_t raddr,
-      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch,
-      ActiveWFInfo &wf_info);
-  __device__ uint64_t ionic_post_wqe_amo_single(int32_t size,
-      uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
-      bool fetch);
-  __device__ void ionic_post_wqe_rma(int32_t size, uintptr_t laddr,
-      uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info);
-  __device__ void ionic_post_wqe_rma_single(int32_t size,
-      uintptr_t laddr, uintptr_t raddr, uint8_t opcode);
+  __device__ uint64_t ionic_post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+      bool fetch = false, bool fence = false);
+  __device__ void ionic_post_wqe_rma_single(int32_t length,
+      uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
+      uint32_t rkey, uint8_t opcode, bool ring_db);
+  __device__ void ionic_post_wqe_rma(int32_t length, uintptr_t raddr,
+      uint32_t rkey, uintptr_t laddr, uint32_t lkey,
+      uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
   __device__ void ionic_quiet(ActiveWFInfo &wf_info);
   __device__ void ionic_quiet_single();
 #endif
@@ -361,6 +538,8 @@ class QueuePair {
   __device__ void ionic_ring_doorbell_single(uint32_t pos);
 #endif
 
+  // TODO: make private once gin_rocshmem_gda_factory uses a proper init API
+ public:
   /* GDAProvider::BNXT START */
   uint64_t *bnxt_dbr;
   struct bnxt_device_cq bnxt_cq;
@@ -488,8 +667,6 @@ class QueuePair {
   int buffer_register(uintptr_t addr, size_t length);
   int buffer_unregister(uintptr_t addr);
   void buffer_unregister_all();
-
-  __device__ uint32_t get_lkey(uintptr_t addr);
 };
 
 }  // namespace rocshmem

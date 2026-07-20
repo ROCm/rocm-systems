@@ -36,8 +36,15 @@ jobs:
         cat /etc/os-release
         apt update -y
         # provides add-apt-repository and support for caching actions
-        apt install -y software-properties-common jq curl
-        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+        apt install -y software-properties-common jq curl ca-certificates gnupg
+        # Install Node.js from the NodeSource APT repository with a signed-by
+        # keyring instead of piping a remote installer script into bash
+        install -d -m 0755 /etc/apt/keyrings
+        curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor | tee /etc/apt/keyrings/nodesource.gpg > /dev/null
+        # ensure the keyring is world-readable so the _apt user (gpgv) can verify signatures
+        chmod a+r /etc/apt/keyrings/nodesource.gpg
+        echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
+        apt update -y
         apt install -y nodejs
         add-apt-repository -y ppa:apt-fast/stable
         apt update -y
@@ -150,8 +157,15 @@ jobs:
         cat /etc/os-release
         apt update -y
         # provides add-apt-repository and support for caching actions
-        apt install -y software-properties-common jq curl
-        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+        apt install -y software-properties-common jq curl ca-certificates gnupg
+        # Install Node.js from the NodeSource APT repository with a signed-by
+        # keyring instead of piping a remote installer script into bash
+        install -d -m 0755 /etc/apt/keyrings
+        curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor | tee /etc/apt/keyrings/nodesource.gpg > /dev/null
+        # ensure the keyring is world-readable so the _apt user (gpgv) can verify signatures
+        chmod a+r /etc/apt/keyrings/nodesource.gpg
+        echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
+        apt update -y
         apt install -y nodejs
 
     - name: Package RDC

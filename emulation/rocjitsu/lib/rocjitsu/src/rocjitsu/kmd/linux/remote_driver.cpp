@@ -34,12 +34,17 @@ namespace rocjitsu {
 namespace {
 
 constexpr bool has_embedded_pointers(unsigned long request) {
-  switch (request) {
+  switch (canonical_ioctl_request(request)) {
   case AMDKFD_IOC_WAIT_EVENTS:
   case AMDKFD_IOC_MAP_MEMORY_TO_GPU:
   case AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU:
   case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW:
+  case AMDKFD_IOC_DBG_TRAP:
     return true;
+  case AMDKFD_IOC_SVM:
+    // SVM's variable-length attribute array is part of the ioctl payload, not a
+    // client pointer that the daemon has to rewrite.
+    return false;
   default:
     return false;
   }
@@ -54,22 +59,95 @@ void *safe_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
   return reinterpret_cast<void *>(static_cast<uintptr_t>(rc));
 }
 
+Sysfs::GpuInfo gpu_info_from_rpc(const RpcGpuInfo &src) {
+  Sysfs::GpuInfo gpu{};
+  gpu.gpu_id = src.gpu_id;
+  gpu.gfx_target_version = src.gfx_target_version;
+  gpu.vendor_id = src.vendor_id;
+  gpu.device_id = src.device_id;
+  gpu.family_id = src.family_id;
+  gpu.unique_id = src.unique_id;
+  gpu.location_id = src.location_id;
+  gpu.domain = src.domain;
+  gpu.hive_id = src.hive_id;
+  gpu.drm_render_minor = src.drm_render_minor;
+  gpu.revision_id = src.revision_id;
+  gpu.pci_revision_id = src.pci_revision_id;
+  gpu.simd_count = src.simd_count;
+  gpu.max_waves_per_simd = src.max_waves_per_simd;
+  gpu.num_shader_engines = src.num_shader_engines;
+  gpu.num_shader_arrays_per_engine = src.num_shader_arrays_per_engine;
+  gpu.num_cu_per_sh = src.num_cu_per_sh;
+  gpu.simd_per_cu = src.simd_per_cu;
+  gpu.wave_front_size = src.wave_front_size;
+  gpu.num_xcc = src.num_xcc;
+  gpu.max_slots_scratch_cu = src.max_slots_scratch_cu;
+  gpu.local_mem_size = src.local_mem_size;
+  gpu.vram_type = src.vram_type;
+  gpu.lds_size_kb = src.lds_size_kb;
+  gpu.mem_width = src.mem_width;
+  gpu.mem_clk_max = src.mem_clk_max;
+  gpu.l1_size_kb = src.l1_size_kb;
+  gpu.l1_line_size = src.l1_line_size;
+  gpu.l1_assoc = src.l1_assoc;
+  gpu.l2_size_kb = src.l2_size_kb;
+  gpu.l2_line_size = src.l2_line_size;
+  gpu.l2_assoc = src.l2_assoc;
+  gpu.num_sdma_engines = src.num_sdma_engines;
+  gpu.num_sdma_xgmi_engines = src.num_sdma_xgmi_engines;
+  gpu.num_cp_queues = src.num_cp_queues;
+  gpu.max_engine_clk_fcompute = src.max_engine_clk_fcompute;
+  gpu.capability = src.capability;
+  gpu.capability2 = src.capability2;
+  gpu.debug_prop = src.debug_prop;
+  gpu.fw_version = src.fw_version;
+  gpu.sdma_fw_version = src.sdma_fw_version;
+
+  auto *name_end =
+      static_cast<const char *>(std::memchr(src.marketing_name, '\0', sizeof(src.marketing_name)));
+  auto name_len =
+      name_end ? static_cast<size_t>(name_end - src.marketing_name) : sizeof(src.marketing_name);
+  gpu.marketing_name.assign(src.marketing_name, name_len);
+  return gpu;
+}
+
 } // namespace
 
-bool RemoteDriver::find_memfd_for_addr(void *addr, size_t length, int *memfd_out,
-                                       off_t *offset_out) {
+RemoteDriver::MemfdLookup RemoteDriver::find_memfd_for_addr(void *addr, size_t length,
+                                                            int *memfd_out, off_t *offset_out) {
   *memfd_out = -1;
   *offset_out = 0;
   auto target = reinterpret_cast<uint64_t>(addr);
   std::lock_guard<std::mutex> lock(rpc_mutex_);
   for (const auto &r : alloc_ranges_) {
-    if (target >= r.va && target + length <= r.va + r.size) {
-      *memfd_out = r.memfd;
+    // Overflow-safe containment test for [target, target+length) within
+    // [r.va, r.va+r.size). Rearranged to subtraction so neither target+length
+    // nor r.va+r.size can wrap uint64_t and admit an out-of-range address.
+    if (target >= r.va && length <= r.size && target - r.va <= r.size - length) {
+      // Return a DUP of the memfd, not the stored fd, so the caller owns a
+      // descriptor whose lifetime is independent of this RemoteDriver. Without
+      // this, a concurrent last-close -> RemoteDriver::close() (which closes the
+      // stored handle_memfds_ fds) could close the fd between this return and the
+      // caller's ftruncate/fallocate/mmap, operating on a closed/reused fd. The
+      // dup is taken under rpc_mutex_, the same lock close() holds, so the stored
+      // fd is guaranteed still open here. The caller MUST close the returned fd.
+      int dup_fd = static_cast<int>(syscall(SYS_fcntl, r.memfd, F_DUPFD_CLOEXEC, 0));
+      if (dup_fd < 0) {
+        // The range matched but we could not hand out a descriptor. Report this
+        // distinctly so the caller fails the mmap rather than silently falling
+        // back to an anonymous mapping and breaking the shared-memory invariant.
+        // The dup's errno (EMFILE/ENFILE/...) reaches the caller: the only code
+        // that runs before this returns is the rpc_mutex_ lock_guard unlock, and
+        // pthread_mutex_unlock does not touch errno on success. Do not add any
+        // errno-setting call after this point without saving/restoring it.
+        return MemfdLookup::kDupFailed;
+      }
+      *memfd_out = dup_fd;
       *offset_out = static_cast<off_t>(target - r.va);
-      return true;
+      return MemfdLookup::kFound;
     }
   }
-  return false;
+  return MemfdLookup::kNotFound;
 }
 
 RemoteDriver::RemoteDriver(int sock_fd) : sock_(sock_fd) {
@@ -90,6 +168,10 @@ RemoteDriver::~RemoteDriver() {
 int RemoteDriver::open() {
   assert(sock_ >= 0 && "open called on disconnected RemoteDriver");
   closing_.store(false, std::memory_order_release);
+  has_gpu_info_ = false;
+  gpu_info_ = {};
+  topology_path_.clear();
+  drm_path_.clear();
   // Drain the shutdown eventfd so it doesn't immediately wake pollers.
   if (shutdown_efd_ >= 0) {
     uint64_t val = 0;
@@ -119,6 +201,10 @@ int RemoteDriver::open() {
   if (hs.version != kRpcProtocolVersion)
     return -1;
 
+  has_gpu_info_ = hs.gpu_info.present != 0;
+  if (has_gpu_info_)
+    gpu_info_ = gpu_info_from_rpc(hs.gpu_info);
+
   constexpr uint32_t kMaxPathLen = 4096;
   if (hs.topology_path_len > kMaxPathLen)
     return -1;
@@ -136,9 +222,13 @@ int RemoteDriver::open() {
       return -1;
   }
 
+  return reissue_synthetic_kfd_fd();
+}
+
+int RemoteDriver::reissue_synthetic_kfd_fd() {
   // Create a high-numbered synthetic KFD fd to avoid collisions with ROCR's
   // internal fd lifecycle. Use the top of the current rlimit range (same
-  // approach as SimulatedDriver::init_reserved_fd_range).
+  // approach as SimulatedKfd::init_reserved_fd_range).
   struct rlimit rl {};
   getrlimit(RLIMIT_NOFILE, &rl);
   int fd_min = static_cast<int>(rl.rlim_cur) - 64;
@@ -147,7 +237,10 @@ int RemoteDriver::open() {
   auto raw_fd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_remote_kfd", MFD_CLOEXEC));
   if (raw_fd < 0)
     return -1;
-  int fd = fcntl(raw_fd, F_DUPFD_CLOEXEC, fd_min);
+  // Use the raw syscall, not fcntl(): this shared object exports an interposed
+  // fcntl with default visibility, so an unqualified call would re-enter the
+  // shim (reserve_dup_backend/untrack_dup, fd_mutex_) for a plain memfd dup.
+  int fd = static_cast<int>(syscall(SYS_fcntl, raw_fd, F_DUPFD_CLOEXEC, fd_min));
   syscall(SYS_close, raw_fd);
   return fd;
 }
@@ -179,14 +272,29 @@ int RemoteDriver::close() {
     }
     handle_memfds_.clear();
     alloc_ranges_.clear();
+    // Deliberately do NOT clear the handshake metadata (topology_path_,
+    // drm_path_, gpu_info_, has_gpu_info_). It is written once during open() and
+    // is immutable for the rest of the object's life. The interposer publishes
+    // this RemoteDriver via an atomic shared_ptr and lets lock-free readers take
+    // snapshots that call the accessors (topology_path(), drm_path(),
+    // gpu_info()); a racing teardown clears the atomic and calls close() while
+    // such a snapshot may still be live. Clearing these strings/structs here
+    // would be a data race against those readers. Keeping the metadata
+    // immutable-after-open makes the reads safe without a lock; the storage is
+    // reclaimed when the last shared_ptr drops.
   }
 
   return 0;
 }
 
 int RemoteDriver::ioctl(unsigned long request, void *arg) {
-  assert(sock_ >= 0 && "ioctl called on disconnected RemoteDriver");
   assert(arg && "ioctl called with null arg");
+  // Do NOT assert(sock_ >= 0) here: sock_ is guarded by rpc_mutex_ and a
+  // concurrent teardown_remote() -> close() can set it to -1 while another
+  // thread holds a live shared_ptr snapshot and is entering this call. Reading
+  // sock_ unlocked would be a data race (and would abort in Debug on exactly the
+  // teardown-vs-in-flight-ioctl race this design tolerates). The locked send
+  // path (send_ioctl) handles a closed socket gracefully by returning -1.
 
   // WAIT_EVENTS is handled client-side to avoid rpc_mutex_ contention.
   // Multiple ROCR threads poll WAIT_EVENTS concurrently during init. If each
@@ -256,18 +364,9 @@ int RemoteDriver::ioctl(unsigned long request, void *arg) {
 int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   std::lock_guard<std::mutex> lock(rpc_mutex_);
 
-  size_t arg_size = ioctl_arg_size(request);
-  if (is_svm_ioctl(request)) {
-    // SVM has a flexible attrs[] tail, so ROCR encodes the actual byte size in
-    // the ioctl request. The attributes are inline payload, not embedded client
-    // pointers, so RPC only needs the larger buffer size validated here.
-    if (arg_size < sizeof(kfd_ioctl_svm_args))
-      return -EINVAL;
-    auto *svm_args = static_cast<const kfd_ioctl_svm_args *>(arg);
-    size_t required_size = 0;
-    if (!svm_ioctl_required_size(svm_args->nattr, required_size) || arg_size < required_size)
-      return -EINVAL;
-  }
+  size_t arg_size = 0;
+  if (!validate_ioctl_arg_size(request, arg, arg_size))
+    return -EINVAL;
 
   // Save original embedded pointers before serialization. The daemon rewrites
   // these to point at its own buffer; we must restore the client-side originals
@@ -275,6 +374,10 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   uint64_t saved_events_ptr = 0;
   uint64_t saved_apertures_ptr = 0;
   uint64_t saved_device_ids_ptr = 0;
+  uint64_t saved_dbg_rinfo_ptr = 0;
+  uint32_t saved_dbg_rinfo_size = 0;
+  uint64_t saved_dbg_snapshot_ptr = 0;
+  size_t saved_dbg_snapshot_cap = 0;
   if (has_embedded_pointers(request)) {
     switch (request) {
     case AMDKFD_IOC_WAIT_EVENTS:
@@ -289,6 +392,23 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       saved_device_ids_ptr =
           static_cast<kfd_ioctl_map_memory_to_gpu_args *>(arg)->device_ids_array_ptr;
       break;
+    case AMDKFD_IOC_DBG_TRAP: {
+      auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
+      switch (dbg->op) {
+      case KFD_IOC_DBG_TRAP_ENABLE:
+        saved_dbg_rinfo_ptr = dbg->enable.rinfo_ptr;
+        saved_dbg_rinfo_size = dbg->enable.rinfo_size;
+        break;
+      case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+        saved_dbg_snapshot_ptr = dbg->device_snapshot.snapshot_buf_ptr;
+        saved_dbg_snapshot_cap =
+            static_cast<size_t>(dbg->device_snapshot.num_devices) * dbg->device_snapshot.entry_size;
+        break;
+      default:
+        break;
+      }
+      break;
+    }
     default:
       break;
     }
@@ -326,6 +446,25 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       buf.resize(buf.size() + aperture_args->num_of_nodes * sizeof(kfd_process_device_apertures));
       break;
     }
+    case AMDKFD_IOC_DBG_TRAP: {
+      auto *dbg = reinterpret_cast<kfd_ioctl_dbg_trap_args *>(args_base);
+      size_t inline_size = 0;
+      switch (dbg->op) {
+      case KFD_IOC_DBG_TRAP_ENABLE:
+        inline_size =
+            std::min(static_cast<size_t>(dbg->enable.rinfo_size), sizeof(kfd_runtime_info));
+        break;
+      case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+        inline_size =
+            static_cast<size_t>(dbg->device_snapshot.num_devices) * dbg->device_snapshot.entry_size;
+        break;
+      default:
+        break;
+      }
+      if (inline_size > 0)
+        buf.resize(buf.size() + inline_size);
+      break;
+    }
     default:
       break;
     }
@@ -341,8 +480,29 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   ireq->ioctl_cmd = static_cast<uint32_t>(request);
   ireq->args_bytes = static_cast<uint32_t>(buf.size() - prefix);
 
-  if (!rpc_send_exact(sock_, buf.data(), buf.size()))
-    return -1;
+  // For DBG_TRAP ENABLE, hand the debugger's notifier pipe write-end to the
+  // daemon as an SCM_RIGHTS fd. The daemon substitutes it into the ioctl's
+  // dbg_fd so the driver can wake the debugger when a wave stops — the same fd
+  // the real kernel would receive through the ioctl. KFD_INVALID_FD (0xffffffff)
+  // casts to -1 and is not sent.
+  int send_fd = -1;
+  if (request == AMDKFD_IOC_DBG_TRAP) {
+    auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
+    if (dbg->op == KFD_IOC_DBG_TRAP_ENABLE && static_cast<int>(dbg->enable.dbg_fd) >= 0)
+      send_fd = static_cast<int>(dbg->enable.dbg_fd);
+  }
+  if (send_fd >= 0) {
+    if (rpc_send_msg(sock_, buf.data(), buf.size(), &send_fd, 1) <= 0) {
+      // Preserve the transport errno — e.g. EBADF when the client handed us a
+      // closed notifier fd for SCM_RIGHTS — instead of a bare -1, which the
+      // interposer would surface as EPERM (-EPERM == -1).
+      int err = errno;
+      return err > 0 ? -err : -1;
+    }
+  } else if (!rpc_send_exact(sock_, buf.data(), buf.size())) {
+    int err = errno;
+    return err > 0 ? -err : -1;
+  }
 
   // Receive response — may include a memfd via SCM_RIGHTS for ALLOC_MEMORY.
   uint8_t resp_header_buf[sizeof(RpcHeader)];
@@ -379,6 +539,20 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         static_cast<kfd_ioctl_map_memory_to_gpu_args *>(arg)->device_ids_array_ptr =
             saved_device_ids_ptr;
         break;
+      case AMDKFD_IOC_DBG_TRAP: {
+        auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
+        switch (dbg->op) {
+        case KFD_IOC_DBG_TRAP_ENABLE:
+          dbg->enable.rinfo_ptr = saved_dbg_rinfo_ptr;
+          break;
+        case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+          dbg->device_snapshot.snapshot_buf_ptr = saved_dbg_snapshot_ptr;
+          break;
+        default:
+          break;
+        }
+        break;
+      }
       default:
         break;
       }
@@ -399,6 +573,37 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
             reinterpret_cast<void *>(aperture_args->kfd_process_device_apertures_ptr),
             payload.data() + arg_size,
             std::min(aperture_args->num_of_nodes * sizeof(kfd_process_device_apertures), extra));
+        break;
+      }
+      case AMDKFD_IOC_DBG_TRAP: {
+        auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
+        void *dst = nullptr;
+        size_t copy_len = 0;
+        switch (dbg->op) {
+        case KFD_IOC_DBG_TRAP_ENABLE:
+          // Only propagate runtime-info bytes on success; a failed op (e.g.
+          // -EBADF from a rejected notifier fd) must not mutate caller memory
+          // or dereference the saved output pointer, matching local mode.
+          if (resp->result == 0) {
+            dst = reinterpret_cast<void *>(saved_dbg_rinfo_ptr);
+            copy_len = std::min(static_cast<size_t>(saved_dbg_rinfo_size),
+                                std::min(static_cast<size_t>(dbg->enable.rinfo_size), extra));
+          }
+          break;
+        case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+          // Only propagate snapshot bytes on success; a failed op (e.g. -ENOSYS)
+          // must not mutate caller memory or dereference the saved output
+          // pointer. Clamp any successful copy to the original buffer capacity.
+          if (resp->result == 0) {
+            dst = reinterpret_cast<void *>(saved_dbg_snapshot_ptr);
+            copy_len = std::min(saved_dbg_snapshot_cap, extra);
+          }
+          break;
+        default:
+          break;
+        }
+        if (dst != nullptr && copy_len > 0)
+          std::memcpy(dst, payload.data() + arg_size, copy_len);
         break;
       }
       default:
@@ -468,6 +673,12 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         size = static_cast<uint64_t>(st.st_size);
       register_allocation(import_args->handle, import_args->va_addr, size, received_fds[0]);
     }
+  }
+
+  if (request == AMDKFD_IOC_EXPORT_DMABUF && resp->result == 0) {
+    auto *export_args = static_cast<kfd_ioctl_export_dmabuf_args *>(arg);
+    if (num_fds > 0 && received_fds[0] >= 0)
+      export_args->dmabuf_fd = received_fds[0];
   }
 
   if (request == AMDKFD_IOC_FREE_MEMORY_OF_GPU && resp->result == 0) {

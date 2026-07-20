@@ -33,9 +33,22 @@ extern "C" {
 #include "ras-decode/aca_decode.h"
 }
 #include "amd_smi/impl/amd_smi_cper.h"
+#include "amd_smi/impl/amd_smi_cper_testing.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
 namespace {
+// Upper bound on the CPER ring file we will allocate for. debugfs reports the
+// ring capacity (a few MiB) in st_size; this cap guards against a nonsensical
+// size exhausting memory or throwing across the C API boundary.
+constexpr off_t kMaxCperBufferSize = 64 * 1024 * 1024;  // 64 MiB
+
+// read() indirection so unit tests can reproduce the debugfs short-read shape
+// (st_size advertises ring capacity, read() returns fewer/zero bytes) that a
+// regular file cannot. Defaults to POSIX read(); the production path is unchanged.
+// Not thread-safe: only the single-threaded tests mutate it (via
+// cper_set_read_fn_for_testing); production never writes it.
+ssize_t (*g_cper_read_fn)(int, void*, size_t) = ::read;
+
 static std::vector<const amdsmi_cper_hdr_t*> amdsmi_get_gpu_cper_headers(const char* buffer,
                                                                          size_t buffer_sz) {
   std::ostringstream ss;
@@ -48,10 +61,13 @@ static std::vector<const amdsmi_cper_hdr_t*> amdsmi_get_gpu_cper_headers(const c
     LOG_ERROR(ss);
     return headers;
   }
-  static constexpr char cper_signature[] = "CPER";
-  static constexpr size_t cper_signature_size = sizeof(cper_signature) - 1;
-  for (size_t data_idx = 0;
-       buffer_sz >= cper_signature_size && data_idx < buffer_sz - cper_signature_size; ++data_idx) {
+  // A valid record begins with a full header. Only scan offsets where an entire
+  // amdsmi_cper_hdr_t fits, so reading the header fields below never reads past
+  // the end of the buffer.
+  if (buffer_sz < sizeof(amdsmi_cper_hdr_t)) {
+    return headers;
+  }
+  for (size_t data_idx = 0; data_idx <= buffer_sz - sizeof(amdsmi_cper_hdr_t); ++data_idx) {
     const amdsmi_cper_hdr_t* hdr = reinterpret_cast<const amdsmi_cper_hdr_t*>(&buffer[data_idx]);
     if (hdr->signature[0] != 'C' || hdr->signature[1] != 'P' || hdr->signature[2] != 'E' ||
         hdr->signature[3] != 'R') {
@@ -60,7 +76,9 @@ static std::vector<const amdsmi_cper_hdr_t*> amdsmi_get_gpu_cper_headers(const c
     if (hdr->signature_end != 0xFFFFFFFF) {
       continue;
     }
-    if (hdr->record_length > buffer_sz) {
+    // The record must fit from its start offset, not merely within buffer_sz
+    // overall, or the later memcpy of record_length bytes would read past the end.
+    if (hdr->record_length > buffer_sz - data_idx) {
       continue;
     }
     ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] add header at data_idx: " << data_idx
@@ -75,7 +93,7 @@ static std::vector<const amdsmi_cper_hdr_t*> amdsmi_get_gpu_cper_headers(const c
 struct CperFileCtx {
   amdsmi_status_t status = AMDSMI_STATUS_FILE_ERROR;
   std::unique_ptr<char[]> buffer;
-  long file_size = 0;
+  off_t file_size = 0;
 };
 
 static auto amdsmi_read_cper_file(const std::string& filepath) -> CperFileCtx {
@@ -86,34 +104,37 @@ static auto amdsmi_read_cper_file(const std::string& filepath) -> CperFileCtx {
   ctx.file_size = 0;
 
   struct stat file_stats;
-  if (stat(filepath.c_str(), &file_stats) == 0) {
-    if (!S_ISREG(file_stats.st_mode)) {
-      ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__
-         << "[CPER] file is not a regular file: " << filepath << ", errno: " << errno
-         << "): " << strerror(errno);
-      return ctx;
-    }
-  } else {
+  if (stat(filepath.c_str(), &file_stats) != 0) {
+    int stat_errno = errno;
     ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] file does not exist: " << filepath
-       << ", errno: " << errno << "): " << strerror(errno);
+       << ", errno: " << stat_errno << "): " << strerror(stat_errno);
     ctx.status = AMDSMI_STATUS_NOT_SUPPORTED;
     return ctx;
   }
+  if (!S_ISREG(file_stats.st_mode)) {
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__
+       << "[CPER] file is not a regular file: " << filepath;
+    return ctx;
+  }
 
+  // st_size carries the ring capacity from debugfs; reject a negative or absurd
+  // value before allocating rather than risk std::bad_alloc or OOM.
+  if (file_stats.st_size < 0 || file_stats.st_size > kMaxCperBufferSize) {
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__
+       << "[CPER] implausible file size: " << file_stats.st_size << " for " << filepath;
+    LOG_ERROR(ss);
+    return ctx;
+  }
+
+  // st_size can be 0 here (e.g. an empty regular file). We do not special-case
+  // it: the uniform open/read/close path below reads 0 bytes and reports an
+  // empty ring, keeping the empty / short / full read handling in one place.
   ctx.file_size = file_stats.st_size;
   ctx.buffer = std::make_unique<char[]>(ctx.file_size);
 
-  // Read with POSIX open/read/close rather than std::ifstream. The hazard is
-  // not open() vs ifstream itself, but where the memory is allocated and freed:
-  // std::ifstream owns a std::basic_filebuf whose internal buffer is allocated
-  // and later torn down (in its destructor) by the libstdc++ bound to this
-  // library. When libamd_smi.so is LD_PRELOAD-ed alongside a different host
-  // libstdc++, that destructor can free a pointer the host allocator never
-  // owned, producing "free(): invalid pointer". debugfs CPER nodes
-  // (e.g. /sys/kernel/debug/dri/<N>/amdgpu_ring_cper) report st_size == 0
-  // because their content is generated on read, which is the case that
-  // triggered the abort. POSIX I/O performs no STL allocation across the
-  // library boundary, avoiding the issue entirely (ROCM-25398).
+  // Use POSIX open/read/close, not std::ifstream: its basic_filebuf is freed by
+  // this library's libstdc++, an invalid free when libamd_smi.so is LD_PRELOAD-ed
+  // under a different host libstdc++.
   int fd = open(filepath.c_str(), O_RDONLY);
   if (fd == -1) {
     ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] failed to open file: " << filepath
@@ -121,16 +142,29 @@ static auto amdsmi_read_cper_file(const std::string& filepath) -> CperFileCtx {
     LOG_ERROR(ss);
     return ctx;
   }
-  auto bytes_read = read(fd, ctx.buffer.get(), ctx.file_size);
-  if (bytes_read <= 0) {
-    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__
-       << "[CPER] failed to read complete file, read only  " << bytes_read << " of "
-       << ctx.file_size << " bytes";
+  auto bytes_read = g_cper_read_fn(fd, ctx.buffer.get(), ctx.file_size);
+  if (bytes_read < 0) {
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] failed to read file: " << filepath
+       << ", errno:(" << errno << "): " << strerror(errno);
     LOG_ERROR(ss);
     close(fd);
     return ctx;
   }
   close(fd);
+
+  // Empty ring: st_size advertises capacity but read() returns 0 bytes. Not an
+  // error, so report success ("no CPER records") rather than FILE_ERROR.
+  if (bytes_read == 0) {
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] ring is empty (no records)";
+    LOG_DEBUG(ss);
+  } else if (bytes_read < file_stats.st_size) {
+    // Short read is normal: the ring advertises its full capacity in st_size but
+    // read() returns only the bytes currently populated. Parse whatever was
+    // returned (the parser bounds-checks each record); log at debug only.
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] short read: " << bytes_read << " of "
+       << file_stats.st_size << " bytes; parsing available records";
+    LOG_DEBUG(ss);
+  }
 
   ctx.status = AMDSMI_STATUS_SUCCESS;
   ctx.file_size = bytes_read;
@@ -364,6 +398,11 @@ static void inject_product_serial_number(amdsmi_cper_hdr_t* cper, uint64_t produ
 
 }  // namespace
 
+// See amd_smi/impl/amd_smi_cper_testing.h for the contract.
+void cper_set_read_fn_for_testing(ssize_t (*read_fn)(int, void*, size_t)) {
+  g_cper_read_fn = read_fn ? read_fn : ::read;
+}
+
 amdsmi_status_t amdsmi_get_gpu_cper_entries_by_path(const char* amdgpu_ring_cper_file,
                                                     uint32_t severity_mask, char* cper_data,
                                                     uint64_t* buf_size,
@@ -371,6 +410,15 @@ amdsmi_status_t amdsmi_get_gpu_cper_entries_by_path(const char* amdgpu_ring_cper
                                                     uint64_t* entry_count, uint64_t* cursor,
                                                     uint64_t product_serial) {
   std::ostringstream ss;
+  if (!amdgpu_ring_cper_file) {
+    if (entry_count) {
+      *entry_count = 0;
+    }
+    if (buf_size) {
+      *buf_size = 0;
+    }
+    return AMDSMI_STATUS_OUT_OF_RESOURCES;
+  }
   ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] begin\n"
      << ", amdgpu_ring_cper_file: " << amdgpu_ring_cper_file
      << ", severity_mask: " << severity_mask;

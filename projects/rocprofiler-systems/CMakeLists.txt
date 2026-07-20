@@ -51,31 +51,47 @@ set(BINARY_NAME_PREFIX "rocprof-sys")
 
 find_package(Git)
 
-if(Git_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
+# ROCPROFSYS_GIT_DESCRIBE / ROCPROFSYS_GIT_REVISION may be provided on the command
+# line (e.g. tarball/CI builds with no git checkout); honor those if set.
+if(
+    NOT DEFINED ROCPROFSYS_GIT_DESCRIBE
+    AND NOT DEFINED ROCPROFSYS_GIT_REVISION
+    AND Git_FOUND
+)
+    # detect a git checkout via git itself rather than a literal .git directory so
+    # this works when the source is a subdirectory/submodule of a larger repo (the
+    # rocm-systems monorepo) where .git is not under PROJECT_SOURCE_DIR
     execute_process(
-        COMMAND ${GIT_EXECUTABLE} describe --tags
-        OUTPUT_VARIABLE ROCPROFSYS_GIT_DESCRIBE
+        COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
+        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+        OUTPUT_VARIABLE ROCPROFSYS_GIT_REVISION
         OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE _GIT_DESCRIBE_RESULT
+        RESULT_VARIABLE _GIT_REVISION_RESULT
         ERROR_QUIET
     )
-    if(NOT _GIT_DESCRIBE_RESULT EQUAL 0)
+    if(_GIT_REVISION_RESULT EQUAL 0)
+        # Only record a tag when HEAD is *exactly* a tagged commit; otherwise leave
+        # it empty so the banner falls back to the full commit SHA instead of
+        # reporting a stale/nearest tag name that does not identify the source
         execute_process(
-            COMMAND ${GIT_EXECUTABLE} describe
+            COMMAND ${GIT_EXECUTABLE} describe --tags --exact-match
+            WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
             OUTPUT_VARIABLE ROCPROFSYS_GIT_DESCRIBE
             OUTPUT_STRIP_TRAILING_WHITESPACE
             RESULT_VARIABLE _GIT_DESCRIBE_RESULT
             ERROR_QUIET
         )
+        if(NOT _GIT_DESCRIBE_RESULT EQUAL 0)
+            set(ROCPROFSYS_GIT_DESCRIBE "")
+        endif()
+    else()
+        set(ROCPROFSYS_GIT_REVISION "")
     endif()
-    execute_process(
-        COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
-        OUTPUT_VARIABLE ROCPROFSYS_GIT_REVISION
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET
-    )
-else()
-    set(ROCPROFSYS_GIT_DESCRIBE "v${ROCPROFSYS_VERSION}")
+endif()
+if(NOT DEFINED ROCPROFSYS_GIT_DESCRIBE)
+    set(ROCPROFSYS_GIT_DESCRIBE "")
+endif()
+if(NOT DEFINED ROCPROFSYS_GIT_REVISION)
     set(ROCPROFSYS_GIT_REVISION "")
 endif()
 
@@ -140,6 +156,9 @@ if(CI_BUILD)
     rocprofiler_systems_add_option(ROCPROFSYS_BUILD_CI "Enable internal asserts, etc." ON
         ADVANCED NO_FEATURE
     )
+    rocprofiler_systems_add_option(ROCPROFSYS_BUILD_EXAMPLES
+        "Enable building the examples" ON ADVANCED
+    )
     rocprofiler_systems_add_option(ROCPROFSYS_BUILD_TESTING
         "Enable building the testing suite" ON ADVANCED
     )
@@ -183,36 +202,9 @@ else()
     )
 endif()
 
-rocprofiler_systems_add_option(ROCPROFSYS_BUILD_FOR_THEROCK "Build rocprofiler-systems for use with TheRock" OFF
-    ADVANCED NO_FEATURE
-)
-
 # TheRock injects these variables, which takes precedence over our
 # own python discovery, even when versions differ. Unset them to prevent this.
 unset(Python3_EXECUTABLE CACHE)
-
-# TODO: Deprecate once TheRock switches to CTests
-if(ROCPROFSYS_BUILD_FOR_THEROCK AND NOT DEFINED ROCPROFSYS_USE_PYTESTS)
-    set(ROCPROFSYS_BUILD_EXAMPLES ON CACHE BOOL "Enable building the examples" FORCE)
-    set(ROCPROFSYS_INSTALL_EXAMPLES ON CACHE BOOL "Enable installing examples" FORCE)
-    set(ROCPROFSYS_USE_PYTESTS ON CACHE BOOL "Enable pytest suite" FORCE)
-
-    # Lulesh does not build with TheRock
-    if(NOT DEFINED ROCPROFSYS_DISABLE_EXAMPLES)
-        set(ROCPROFSYS_DISABLE_EXAMPLES
-            "lulesh"
-            CACHE STRING
-            "Disable building examples"
-            FORCE
-        )
-    else()
-        if(NOT "lulesh" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
-            list(APPEND ROCPROFSYS_DISABLE_EXAMPLES "lulesh")
-        endif()
-    endif()
-else()
-    set(ROCPROFSYS_USE_PYTESTS OFF CACHE BOOL "Enable pytest suite" FORCE)
-endif()
 
 include(Compilers) # compiler identification
 include(BuildSettings) # compiler flags
@@ -311,28 +303,17 @@ endif()
 
 if(ROCPROFSYS_INSTALL_TESTING)
     set(ROCPROFSYS_BUILD_TESTING ON CACHE BOOL "Enable building the testing suite" FORCE)
-    set(ROCPROFSYS_INSTALL_EXAMPLES ON CACHE BOOL "Enable installing examples" FORCE)
 endif()
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)
     set(ROCPROFSYS_BUILD_EXAMPLES ON CACHE BOOL "Enable building the examples" FORCE)
 endif()
 
-if(ROCPROFSYS_BUILD_TESTING)
-    set(ROCPROFSYS_BUILD_EXAMPLES ON CACHE BOOL "Enable building the examples" FORCE)
-endif()
-
-# Examples are built independently on TheRock
-if(ROCPROFSYS_BUILD_FOR_THEROCK AND NOT ROCPROFSYS_USE_PYTESTS)
-    set(ROCPROFSYS_BUILD_EXAMPLES OFF CACHE BOOL "Enable building the examples" FORCE)
-    set(ROCPROFSYS_INSTALL_EXAMPLES OFF CACHE BOOL "Enable installing examples" FORCE)
-endif()
-
 include(ProcessorCount)
 ProcessorCount(ROCPROFSYS_PROCESSOR_COUNT)
 
-if(ROCPROFSYS_PROCESSOR_COUNT LESS 8)
-    set(ROCPROFSYS_THREAD_COUNT 128)
+if(ROCPROFSYS_PROCESSOR_COUNT LESS 128)
+    set(ROCPROFSYS_THREAD_COUNT 2048)
 else()
     math(EXPR ROCPROFSYS_THREAD_COUNT "16 * ${ROCPROFSYS_PROCESSOR_COUNT}")
     compute_pow2_ceil(ROCPROFSYS_THREAD_COUNT "16 * ${ROCPROFSYS_PROCESSOR_COUNT}")
@@ -354,7 +335,7 @@ set(ROCPROFSYS_MAX_THREADS
 )
 rocprofiler_systems_add_feature(
     ROCPROFSYS_MAX_THREADS
-    "Maximum number of total threads supported in the host application (default: max of 128 or 16 * nproc)"
+    "Maximum number of total threads supported in the host application (default: max of 2048 or 16 * nproc)"
 )
 
 compute_pow2_ceil(_MAX_THREADS "${ROCPROFSYS_MAX_THREADS}")

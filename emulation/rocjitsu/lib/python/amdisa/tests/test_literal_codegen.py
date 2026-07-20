@@ -7,6 +7,8 @@ from types import SimpleNamespace
 
 from amdisa.codegen._generator import CodeGenerator
 from amdisa.gpuisa import InstEncoding, Instruction, Operand
+from amdisa.isa_profile import Rdna4Profile
+from amdisa.semantics import InstructionSemantics
 
 
 def _enc(name: str) -> InstEncoding:
@@ -21,7 +23,9 @@ def _enc(name: str) -> InstEncoding:
     )
 
 
-def _literal_operand(size: int, operand_type: str) -> Operand:
+def _literal_operand(
+    size: int, operand_type: str, data_format_name: str = ''
+) -> Operand:
     return Operand(
         'literal',
         size,
@@ -31,6 +35,30 @@ def _literal_operand(size: int, operand_type: str) -> Operand:
         is_implicit=False,
         is_binary_ucode_required=True,
         order=2,
+        data_format_name=data_format_name,
+    )
+
+
+def _operand(
+    name: str,
+    operand_type: str,
+    *,
+    size: int = 32,
+    is_input: bool = True,
+    is_output: bool = False,
+    order: int = 0,
+    data_format_name: str = '',
+) -> Operand:
+    return Operand(
+        name,
+        size,
+        operand_type,
+        is_input=is_input,
+        is_output=is_output,
+        is_implicit=False,
+        is_binary_ucode_required=False,
+        order=order,
+        data_format_name=data_format_name,
     )
 
 
@@ -48,6 +76,22 @@ def test_implied_literal_uses_parent_encoding_literal_struct():
     )
 
     assert info == ('Sop2InstLiteralMachineInst', ('ssrc0', 'ssrc1'))
+
+
+def test_implied_literal64_uses_its_three_dword_machine_inst():
+    inst = Instruction(
+        'V_FMAMK_F64',
+        'VOP2_INST_LITERAL64',
+        opcode=35,
+        operands=[],
+        is_implied_literal_enc=True,
+    )
+
+    info = CodeGenerator._literal_encoding_info(
+        _enc('ENC_VOP2'), _enc('VOP2_INST_LITERAL64'), inst
+    )
+
+    assert info == ('Vop2InstLiteral64MachineInst', ('src0',))
 
 
 def test_literal_fixups_require_generated_machine_inst_struct():
@@ -76,6 +120,102 @@ def test_simm32_literal_operand_is_initialized_from_extension_word():
     ) == stmt
 
 
+def test_f64_simm32_literal_operand_uses_extension_word_as_double_high_bits():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand(
+            'src0',
+            'OPR_SRC_VGPR',
+            size=64,
+            data_format_name='FMT_NUM_F64',
+        ),
+        'Vop2InstLiteralMachineInst',
+        literal_operand_type='OPR_SIMM32',
+    )
+
+    assert (
+        'src0 = Operand(64, OperandType::OPR_SIMM32, '
+        '(static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32) '
+        '<< 32), true);'
+    ) == stmt
+
+
+def test_f64_simm32_literal_operand_falls_back_to_semantics():
+    sem = InstructionSemantics(
+        'V_FMAC_F64',
+        'vector_binop',
+        operation='fmac',
+        data_type='f64',
+    )
+
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand('src0', 'OPR_SRC_VGPR', size=64),
+        'Vop2InstLiteralMachineInst',
+        inst_sem=sem,
+        literal_operand_type='OPR_SIMM32',
+    )
+
+    assert (
+        'src0 = Operand(64, OperandType::OPR_SIMM32, '
+        '(static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32) '
+        '<< 32), true);'
+    ) == stmt
+
+
+def test_mixed_width_literal_operands_classify_per_operand_signature():
+    src0_stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand(
+            'src0',
+            'OPR_SRC_NOLIT',
+            size=64,
+            data_format_name='FMT_NUM_F64',
+        ),
+        'Vop3InstLiteralMachineInst',
+        literal_operand_type='OPR_SIMM32',
+    )
+    src1_stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand(
+            'src1',
+            'OPR_SRC_SIMPLE',
+            size=32,
+            data_format_name='FMT_NUM_B32',
+        ),
+        'Vop3InstLiteralMachineInst',
+        literal_operand_type='OPR_SIMM32',
+    )
+
+    assert (
+        'src0 = Operand(64, OperandType::OPR_SIMM32, '
+        '(static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32) '
+        '<< 32), true);'
+    ) == src0_stmt
+    assert (
+        'src1 = Operand(32, OperandType::OPR_SIMM32, '
+        'static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));'
+    ) == src1_stmt
+
+
+def test_u64_simm32_literal_operand_keeps_low_32_bit_value():
+    sem = InstructionSemantics(
+        'S_MUL_U64',
+        'scalar_binop',
+        operation='mul',
+        data_type='u64',
+        sets_scc='none',
+    )
+
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand('ssrc0', 'OPR_SSRC', size=64, data_format_name='FMT_NUM_U64'),
+        'Sop2InstLiteralMachineInst',
+        inst_sem=sem,
+        literal_operand_type='OPR_SIMM32',
+    )
+
+    assert (
+        'ssrc0 = Operand(64, OperandType::OPR_SIMM32, '
+        'static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));'
+    ) == stmt
+
+
 def test_simm16_literal_operand_uses_low_half_of_extension_word():
     stmt = CodeGenerator._literal_operand_fixup_stmt(
         _literal_operand(16, 'OPR_SIMM16'), 'Vop2InstLiteralMachineInst'
@@ -86,6 +226,71 @@ def test_simm16_literal_operand_uses_low_half_of_extension_word():
         'static_cast<int>((reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 '
         '& 0xFFFFu)));'
     ) == stmt
+
+
+def test_simm64_literal_operand_reads_both_unaligned_extension_words():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _literal_operand(64, 'OPR_SIMM64'), 'Vop2InstLiteral64MachineInst'
+    )
+
+    assert (
+        'literal = Operand(64, OperandType::OPR_SIMM64, '
+        '(static_cast<uint64_t>(reinterpret_cast<const uint32_t *>(inst)[2]) << 32) | '
+        'reinterpret_cast<const uint32_t *>(inst)[1], true);'
+    ) == stmt
+
+
+def test_declared_16bit_simm32_literal_uses_low_half_of_extension_word():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _literal_operand(16, 'OPR_SIMM32'), 'Vop2InstLiteralMachineInst'
+    )
+
+    assert (
+        'literal = Operand(16, OperandType::OPR_SIMM32, '
+        'static_cast<int>((reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 '
+        '& 0xFFFFu)));'
+    ) == stmt
+
+
+def test_non_opsel_16bit_retyped_simm32_literal_uses_low_half():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand('src0', 'OPR_SRC', size=16),
+        'Vop2InstLiteralMachineInst',
+        literal_operand_type='OPR_SIMM32',
+    )
+
+    assert (
+        'src0 = Operand(16, OperandType::OPR_SIMM32, '
+        'static_cast<int>((reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 '
+        '& 0xFFFFu)));'
+    ) == stmt
+
+
+def test_dynamic_true16_simm32_literal_keeps_raw_and_selected_display_values():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand('src0', 'OPR_SRC', size=16),
+        'Vop3InstLiteralMachineInst',
+        literal_operand_type='OPR_SIMM32',
+        dynamic_true16_opsel_bit=0,
+    )
+
+    assert (
+        'src0 = Operand(16, OperandType::OPR_SIMM32, '
+        'static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32), '
+        'static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 '
+        '>> (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) & 0xFFFFu), true);'
+    ) == stmt
+
+
+def test_dynamic_true16_display_uses_each_sources_opsel_bit():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand('src2', 'OPR_SRC', size=16),
+        'Vop3InstLiteralMachineInst',
+        literal_operand_type='OPR_SIMM32',
+        dynamic_true16_opsel_bit=2,
+    )
+
+    assert '((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u' in stmt
 
 
 def test_existing_literal_operand_does_not_need_simm32_fallback_member():
@@ -115,6 +320,105 @@ def test_scalar_literal_fma_synthesizes_third_source_operand():
     assert fixed.operands[-1].name == 'src2'
     assert fixed.operands[-1].operand_type == 'OPR_SIMM32'
     assert fixed.operands[-1].is_input
+
+
+def test_scalar_fmamk_semantic_sources_use_synthesized_literal_as_multiplier():
+    operands = [
+        _operand('sdst', 'OPR_SDST', is_input=False, is_output=True, order=0),
+        _operand('ssrc0', 'OPR_SSRC', order=1),
+        _operand('ssrc1', 'OPR_SSRC', order=2),
+        _operand('src2', 'OPR_SIMM32', order=3),
+    ]
+    inst = Instruction('S_FMAMK_F32', 'ENC_SOP2', opcode=70, operands=operands)
+
+    ordered = CodeGenerator._semantic_source_operands(inst, operands[1:])
+
+    assert [op.name for op in ordered] == ['ssrc0', 'src2', 'ssrc1']
+
+
+def test_scalar_fmamk_semantic_sources_keep_explicit_literal_as_multiplier():
+    operands = [
+        _operand('ssrc0', 'OPR_SSRC', order=0),
+        _operand('literal', 'OPR_SIMM32', order=1),
+        _operand('ssrc1', 'OPR_SSRC', order=2),
+        _operand('src2', 'OPR_SIMM32', order=3),
+    ]
+    inst = Instruction('S_FMAMK_F32', 'ENC_SOP2', opcode=70, operands=operands)
+
+    ordered = CodeGenerator._semantic_source_operands(inst, operands)
+
+    assert [op.name for op in ordered] == ['ssrc0', 'literal', 'ssrc1', 'src2']
+
+
+def test_scalar_fmamk_generated_execute_uses_literal_multiplier():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='rdna4',
+        profile=Rdna4Profile(),
+        inst_encodings=[],
+        encoding_map={},
+    )
+    operands = [
+        _operand('sdst', 'OPR_SDST', is_input=False, is_output=True, order=0),
+        _operand('ssrc0', 'OPR_SSRC', order=1),
+        _operand('ssrc1', 'OPR_SSRC', order=2),
+        _operand('src2', 'OPR_SIMM32', order=3),
+    ]
+    inst = Instruction('S_FMAMK_F32', 'ENC_SOP2', opcode=70, operands=operands)
+    sem = InstructionSemantics(
+        'S_FMAMK_F32',
+        'scalar_binop',
+        operation='fma',
+        data_type='f32',
+        sets_scc='none',
+    )
+
+    body = codegen._gen_execute_body(inst, sem, 'ENC_SOP2')
+
+    assert 'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))' in body
+    assert 'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(src2))' in body
+    assert 'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))' in body
+    assert body.index('amdgpu::RegisterAccess(wf).read_scalar(src2)') < body.index(
+        'amdgpu::RegisterAccess(wf).read_scalar(ssrc1)'
+    )
+
+
+def test_scalar_mul_u64_generated_execute_reads_full_source_pairs():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='rdna4',
+        profile=Rdna4Profile(),
+        inst_encodings=[],
+        encoding_map={},
+    )
+    operands = [
+        _operand(
+            'sdst',
+            'OPR_SDST',
+            size=64,
+            is_input=False,
+            is_output=True,
+            order=0,
+        ),
+        _operand('ssrc0', 'OPR_SSRC', size=64, order=1),
+        _operand('ssrc1', 'OPR_SSRC', size=64, order=2),
+    ]
+    inst = Instruction('S_MUL_U64', 'ENC_SOP2', opcode=68, operands=operands)
+    sem = InstructionSemantics(
+        'S_MUL_U64',
+        'scalar_binop',
+        operation='mul',
+        data_type='u64',
+        sets_scc='none',
+    )
+
+    body = codegen._gen_execute_body(inst, sem, 'ENC_SOP2')
+
+    assert 'amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)' in body
+    assert 'amdgpu::RegisterAccess(wf).read_scalar64(ssrc1)' in body
+    assert 'amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);' in body
+    assert 'amdgpu::RegisterAccess(wf).read_scalar(ssrc0)' not in body
+    assert 'amdgpu::RegisterAccess(wf).read_scalar(ssrc1)' not in body
 
 
 def test_literal_fma_mnemonics_are_not_shared_across_isa_layouts():

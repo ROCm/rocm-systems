@@ -34,6 +34,8 @@
 #include "ipc_team.hpp"
 #include "mpi_instance.hpp"
 #include "log.hpp"
+#include "memory/default_allocator.hpp"
+#include "memory/hip_allocator_vmm_common.hpp"
 
 namespace rocshmem {
 
@@ -112,13 +114,20 @@ IPCBackend::IPCBackend(TcpBootstrap *bootstrap):  Backend(bootstrap) {
 void IPCBackend::init() {
   ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque = default_host_ctx.get();
 
+  setup_symm_registration();
+
   setup_wrk_sync_buffers();
 
   rocshmem_collective_init();
 
-  setup_fence_buffer();
-
   teams_init();
+
+  /*
+   * Carve the fence region last. Its size (sizeof(int) * num_pes) is not a
+   * multiple of wrk_sync_pool_alignment for odd num_pes, so allocating it after
+   * every 64-bit-atomic region keeps those regions aligned.
+   */
+  setup_fence_buffer();
 
   setup_team_world();
 
@@ -137,6 +146,7 @@ IPCBackend::~IPCBackend() {
    * and team world
    */
   teams_destroy();
+  cleanup_symm_registration();
   cleanup_wrk_sync_buffer();
 
   // Close IPC handles for remote heap bases
@@ -345,19 +355,33 @@ void IPCBackend::ctx_destroy(Context *ctx) {
   delete ro_net_host_ctx;
 }
 
-void IPCBackend::reset_backend_stats() {
-  assert(false);
+void IPCBackend::accumulate_ctx_device_stats() {
+  ROCStats tmp;
+  for (size_t i = 0; i < envvar::max_num_contexts; i++) {
+    CHECK_HIP(hipMemcpy(&tmp, &ctx_array[i].ctxStats, sizeof(ROCStats),
+                        hipMemcpyDeviceToHost));
+    globalStats.hostAccumulateStats(tmp);
+  }
 }
 
-void IPCBackend::dump_backend_stats() {
-  assert(false);
+void IPCBackend::accumulate_default_host_ctx_stats() {
+  globalHostStats.accumulateStats(default_host_ctx->ctxHostStats);
 }
+
+void IPCBackend::reset_backend_stats() {
+  for (size_t i = 0; i < envvar::max_num_contexts; i++) {
+    CHECK_HIP(hipMemset(&ctx_array[i].ctxStats, 0, sizeof(ROCStats)));
+  }
+  default_host_ctx->ctxHostStats.resetStats();
+}
+
 
 void IPCBackend::initIPC() {
   const auto &heap_bases{heap.get_heap_bases()};
 
   ipcImpl.ipcHostInit(my_pe, heap_bases,
                       backend_comm);
+  ipcImpl.heap_size = heap.get_size();
 }
 
 void IPCBackend::initIPC(TcpBootstrap *bootstr) {
@@ -365,6 +389,7 @@ void IPCBackend::initIPC(TcpBootstrap *bootstr) {
 
   ipcImpl.ipcHostInit(my_pe, heap_bases,
                       bootstr);
+  ipcImpl.heap_size = heap.get_size();
 }
 
 void IPCBackend::global_exit(int status) {
@@ -392,7 +417,7 @@ void IPCBackend::setup_wrk_sync_buffers() {
 
   /**
    * Size of sync arrays for the teams
-  */
+   */
   wrk_sync_pool_size_ += sizeof(long) * max_num_teams *
                            (ROCSHMEM_BARRIER_SYNC_SIZE +
                             ROCSHMEM_REDUCE_SYNC_SIZE +
@@ -402,19 +427,23 @@ void IPCBackend::setup_wrk_sync_buffers() {
   /**
    * Size of work arrays for the teams
    * Accommodate largest possible data type for pWrk
-  */
+   */
   wrk_sync_pool_size_ += sizeof(double) * max_num_teams *
                            ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
 
   /**
    * Size of fence array
-  */
+   */
   wrk_sync_pool_size_ += sizeof(int) * num_pes;
+
+  /* Round up so the alignment guards in the carve functions cannot overflow it. */
+  wrk_sync_pool_size_ =
+      __builtin_align_up(wrk_sync_pool_size_, wrk_sync_pool_alignment);
 
   /**
    * Allocate a buffer of size wrk_sync_pool_size_, using fine-grained
    * memory allocator
-  */
+   */
   psync_allocator_->allocate((void**)&wrk_sync_pool_,
                                     wrk_sync_pool_size_);
   assert(wrk_sync_pool_);
@@ -478,11 +507,114 @@ void IPCBackend::cleanup_wrk_sync_buffer() {
 }
 
 void IPCBackend::setup_fence_buffer() {
-  /*
-  * Allocate memory for fence
-  */
+  /* Must be carved last (see init()); do not add pool regions after this. */
   fence_pool = reinterpret_cast<int *>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sizeof(int) * num_pes;
+}
+
+void IPCBackend::setup_symm_registration() {
+#if HIP_VERSION >= 70000000
+  /* The table alloc is shared with other backends (see Backend). */
+  alloc_ipc_symm_table();
+#else
+  ipcImpl.symm_table = nullptr;
+#endif
+}
+
+void IPCBackend::cleanup_symm_registration() {
+#if HIP_VERSION >= 70000000
+  /*
+   * Unregister anything the user left registered. buffer_unregister_symmetric
+   * mutates ipc_symm_records_, so iterate over a snapshot of the keys.
+   */
+  std::vector<uintptr_t> addrs;
+  addrs.reserve(ipc_symm_records_.size());
+  for (auto &kv : ipc_symm_records_) {
+    addrs.push_back(kv.first);
+  }
+  for (auto a : addrs) {
+    buffer_unregister_symmetric(reinterpret_cast<void *>(a));
+  }
+
+  free_ipc_symm_table();
+#endif
+}
+
+int IPCBackend::buffer_register_symmetric([[maybe_unused]] void *addr,
+                                          [[maybe_unused]] size_t length,
+                                          [[maybe_unused]] void **registered_addr) {
+#if HIP_VERSION >= 70000000
+  if (registered_addr == nullptr) {
+    return ROCSHMEM_ERROR;
+  }
+
+  if (ipcImpl.symm_table == nullptr) {
+    return ROCSHMEM_ERROR;
+  }
+
+  /*
+   * Symmetric size check first: registration is collective, so every PE must
+   * call with the same length. Doing this before any host-side setup lets a
+   * mismatch fail out uniformly with nothing to unwind.
+   */
+  if (!symm_lengths_match(length)) {
+    return ROCSHMEM_ERROR;
+  }
+
+  /*
+   * Stage 1: per-PE host-side setup. Validates the user buffer (VMM/per-buffer
+   * checks), maps it to a rocSHMEM-owned alias, runs capacity/overlap
+   * checks, and records it keyed by the alias. The alias is the address the
+   * caller uses for RMA and unregistration, and the local base published into
+   * the device translation table.
+   */
+  void *alias = nullptr;
+  int register_ok = (Backend::buffer_register_symmetric(addr, length, &alias) ==
+                     ROCSHMEM_SUCCESS) ? 1 : 0;
+  if (!all_pes_succeeded(register_ok)) {
+    if (register_ok) {
+      Backend::buffer_unregister_symmetric(alias);
+    }
+    return ROCSHMEM_ERROR;
+  }
+
+  /*
+   * Stage 2/3: export/exchange/open IPC handles and publish the region into
+   * ipcImpl.symm_table. All peers are node-local for the IPC backend, so the
+   * peer index is the global PE id (identity mapping) and self is my_pe. This
+   * common machinery is shared with the GDA backend (see Backend).
+   */
+  std::vector<int> peer_global(num_pes);
+  for (int i = 0; i < num_pes; i++) {
+    peer_global[i] = i;
+  }
+  if (register_ipc_symm_region(alias, addr, length, peer_global, my_pe) !=
+      ROCSHMEM_SUCCESS) {
+    Backend::buffer_unregister_symmetric(alias);
+    return ROCSHMEM_ERROR;
+  }
+
+  *registered_addr = alias;
+  return ROCSHMEM_SUCCESS;
+#else
+  return ROCSHMEM_ERROR;
+#endif
+}
+
+int IPCBackend::buffer_unregister_symmetric([[maybe_unused]] void *addr) {
+#if HIP_VERSION >= 70000000
+  if (addr == nullptr) {
+    return ROCSHMEM_ERROR;
+  }
+
+  /* Tear down the IPC region (shared machinery), then common bookkeeping. */
+  if (unregister_ipc_symm_region(addr) != ROCSHMEM_SUCCESS) {
+    return ROCSHMEM_ERROR;
+  }
+  return Backend::buffer_unregister_symmetric(addr);
+#else
+  return ROCSHMEM_ERROR;
+#endif
 }
 
 void IPCBackend::rocshmem_collective_init() {
@@ -492,6 +624,9 @@ void IPCBackend::rocshmem_collective_init() {
   size_t one_sync_size_bytes {sizeof(*barrier_sync)};
   size_t sync_size_bytes {one_sync_size_bytes * ROCSHMEM_BARRIER_SYNC_SIZE};
 
+  /* Guard: barrier_sync is accessed with 64-bit atomics; keep it 8-byte aligned. */
+  wrk_sync_pool_top_ =
+      __builtin_align_up(wrk_sync_pool_top_, wrk_sync_pool_alignment);
   barrier_sync = reinterpret_cast<int64_t*>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sync_size_bytes;
 
@@ -519,6 +654,9 @@ void IPCBackend::teams_init() {
    */
   auto max_num_teams{team_tracker.get_max_num_teams()};
 
+  /* Guard: the pSync pools are accessed with 64-bit atomics; keep them 8-byte aligned. */
+  wrk_sync_pool_top_ =
+      __builtin_align_up(wrk_sync_pool_top_, wrk_sync_pool_alignment);
   barrier_pSync_pool = reinterpret_cast<long *>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sizeof(long) * ROCSHMEM_BARRIER_SYNC_SIZE
                             * max_num_teams;

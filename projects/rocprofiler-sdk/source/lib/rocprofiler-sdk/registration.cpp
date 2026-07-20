@@ -35,6 +35,7 @@
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
+#include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hip/stream.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
@@ -392,6 +393,18 @@ find_clients()
     }
 
     auto get_env_libs = []() {
+        // Never honor ROCP_TOOL_LIBRARIES in a secure-execution context (setuid/
+        // setgid binaries, file capabilities, etc.). Otherwise an unprivileged
+        // local user could inject an arbitrary shared library (via dlopen) into a
+        // privileged process by setting this environment variable.
+        if(common::is_at_secure())
+        {
+            ROCP_CI_LOG(WARNING) << "[ROCP_TOOL_LIBRARIES] ignoring environment variable because "
+                                    "the process is running in a secure-execution context "
+                                    "(AT_SECURE)";
+            return std::vector<std::string>{};
+        }
+
         auto       val       = common::get_env("ROCP_TOOL_LIBRARIES", std::string{});
         auto       val_arr   = std::vector<std::string>{};
         size_t     pos       = 0;
@@ -1169,6 +1182,8 @@ rocprofiler_set_api_table(const char* name,
         // any internal modifications to the HipDispatchTable need to be done before we make the
         // copy or else those modifications will be lost when HIP API tracing is enabled
         // because the HIP API tracing invokes the function pointers from the copy below
+        rocprofiler::hip::graph::update_table(hip_runtime_api_table);
+
         rocprofiler::hip::copy_table(hip_runtime_api_table, lib_instance);
 
         // install rocprofiler API wrappers
@@ -1281,11 +1296,19 @@ rocprofiler_set_api_table(const char* name,
             auto non_queue_interposition_contexts = rocprofiler::context::get_registered_contexts(
                 [](const rocprofiler::context::context* ctx) {
                     return (ctx->dispatch_counter_collection != nullptr ||
-                            ctx->dispatch_thread_trace != nullptr || ctx->pc_sampler != nullptr);
+                            ctx->dispatch_thread_trace != nullptr || ctx->pc_sampler != nullptr ||
+                            ctx->dispatch_spm != nullptr ||
+                            ctx->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_GRAPH) ||
+                            (ctx->device_thread_trace != nullptr &&
+                             ctx->device_thread_trace->requires_queue_intercept()));
+                });
+            auto device_thread_trace_contexts = rocprofiler::context::get_registered_contexts(
+                [](const rocprofiler::context::context* ctx) {
+                    return ctx->device_thread_trace != nullptr;
                 });
 
             ROCP_INFO << fmt::format(
-                "[queue-interposition] counter/ATT/PC-sampling contexts found: {}. The presence of "
+                "[queue-interposition] non-inline contexts found: {}. The presence of "
                 "any of these contexts will prevent inline intercept (for the time being).",
                 non_queue_interposition_contexts.size());
 
@@ -1293,6 +1316,10 @@ rocprofiler_set_api_table(const char* name,
             // if non_queue_interposition_contexts is not empty, default to non-inline intercept.
             auto enable_queue_interposition = rocprofiler::common::get_env(
                 "ROCPROFILER_QUEUE_INTERPOSITION", non_queue_interposition_contexts.empty());
+
+            if(enable_queue_interposition && !device_thread_trace_contexts.empty() &&
+               !rocprofiler::hsa::enable_queue_intercept())
+                enable_queue_interposition = false;
 
             // if ROCPROFILER_QUEUE_INTERPOSITION is explicitly set to true, but there are contexts
             // that require non-inline intercept, print a warning and fall back to non-inline

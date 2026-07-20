@@ -6,8 +6,8 @@ This directory contains NAS Parallel Benchmarks (NPB) implemented with OpenMP th
 
 ## Source Files
 
-- `CG/cg.cpp` - NAS CG benchmark with sparse matrix operations, configurable problem size parameters, and unrolled sparse matrix-vector multiply variants.
-- `LU/lu.cpp` - NAS LU benchmark with 3D grid PDE solver, block-tridiagonal operations, and padded arrays for cache optimization.
+- `cg/cg.cpp` - NAS CG benchmark with sparse matrix operations, configurable problem size parameters, and unrolled sparse matrix-vector multiply variants.
+- `lu/lu.cpp` - NAS LU benchmark with 3D grid PDE solver, block-tridiagonal operations, and padded arrays for cache optimization.
 - `common/` - Shared utilities: `c_print_results.cpp` (result reporting), `c_randdp.cpp` (random number generation), `c_timers.cpp` (timer infrastructure), `npb-CPP.hpp` (common definitions), `wtime.cpp`/`wtime.hpp` (wall-clock timing).
 
 ### OpenMP Target Offloading

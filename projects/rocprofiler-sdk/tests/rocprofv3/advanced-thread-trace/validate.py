@@ -31,6 +31,175 @@ import glob
 import json
 from pathlib import Path
 
+OCCUPANCY_FIELDS = (
+    "time",
+    "cu",
+    "simd",
+    "wave_id",
+    "start",
+    "kernel_id",
+    "me_id",
+    "pipe_id",
+    "is_ext",
+    "workgroup_id",
+    "cluster_id",
+)
+
+OCCUPANCY_VERSION = "3.1.0"
+
+EVENT_FIELDS = (
+    "kind",
+    "time",
+    "type",
+    "me_id",
+    "pipe_id",
+    "flags",
+    "payload",
+    "byte_offset",
+)
+
+DISPATCH_FIELDS = (
+    "kind",
+    "time",
+    "me_id",
+    "pipe_id",
+    "kernel_id",
+    "kernel_name",
+    "entry_point",
+    "user_sgprs",
+    "vgprs",
+    "sgprs",
+    "lds_size",
+    "thread_dim_x",
+    "thread_dim_y",
+    "thread_dim_z",
+    "dispatch_pkt_addr",
+    "byte_offset",
+    "flags",
+)
+
+
+def assert_json_int(value, field):
+    assert isinstance(value, int) and not isinstance(
+        value, bool
+    ), f"{field} must be an integer"
+
+
+def find_occupancy_files(output_path):
+    pattern = os.path.join(output_path, "ui_output_*", "occupancy.json")
+    return sorted(Path(path) for path in glob.glob(pattern))
+
+
+def validate_occupancy_rows(occupancy_data, occupancy_file):
+    assert (
+        occupancy_data.get("version") == OCCUPANCY_VERSION
+    ), f"occupancy version mismatch in {occupancy_file}"
+    assert (
+        "occupancy_fields" in occupancy_data
+    ), f"occupancy_fields missing from {occupancy_file}"
+    fields = occupancy_data["occupancy_fields"]
+    assert isinstance(
+        fields, list
+    ), f"occupancy_fields must be a list in {occupancy_file}"
+    for field in OCCUPANCY_FIELDS:
+        assert (
+            field in fields
+        ), f"{field} missing from occupancy_fields in {occupancy_file}"
+
+    found_rows = False
+    for se, rows in occupancy_data.items():
+        if not str(se).isdigit():
+            continue
+
+        assert isinstance(rows, list), f"occupancy SE {se} must be a list"
+        for row in rows:
+            found_rows = True
+            assert isinstance(row, list), f"occupancy row for SE {se} must be a list"
+            assert len(row) >= len(
+                fields
+            ), f"occupancy row for SE {se} has {len(row)} fields, expected {len(fields)}"
+
+    assert found_rows, f"No occupancy rows found in {occupancy_file}"
+
+
+def validate_trace_event(event, occupancy_file):
+    for field in EVENT_FIELDS:
+        assert field in event, f"{field} missing from event record in {occupancy_file}"
+
+    assert event["kind"] == "event"
+    assert_json_int(event["time"], "event.time")
+    assert_json_int(event["type"], "event.type")
+    assert_json_int(event["me_id"], "event.me_id")
+    assert_json_int(event["pipe_id"], "event.pipe_id")
+    assert_json_int(event["flags"], "event.flags")
+    assert_json_int(event["payload"], "event.payload")
+    assert_json_int(event["byte_offset"], "event.byte_offset")
+    assert "name" not in event
+    assert "type_name" not in event
+
+
+def validate_dispatch_event(dispatch, dispatches, occupancy_file):
+    for field in DISPATCH_FIELDS:
+        assert (
+            field in dispatch
+        ), f"{field} missing from dispatch record in {occupancy_file}"
+
+    assert dispatch["kind"] == "dispatch"
+    for field in (
+        "time",
+        "me_id",
+        "pipe_id",
+        "kernel_id",
+        "user_sgprs",
+        "vgprs",
+        "sgprs",
+        "lds_size",
+        "thread_dim_x",
+        "thread_dim_y",
+        "thread_dim_z",
+        "dispatch_pkt_addr",
+        "byte_offset",
+        "flags",
+    ):
+        assert_json_int(dispatch[field], f"dispatch.{field}")
+
+    assert dispatch["vgprs"] > 0
+    assert dispatch["sgprs"] > 0
+    assert dispatch["thread_dim_x"] > 0
+    assert dispatch["thread_dim_y"] > 0
+    assert dispatch["thread_dim_z"] > 0
+    assert isinstance(dispatch["kernel_name"], str)
+    assert len(dispatch["kernel_name"]) > 0
+
+    entry_point = dispatch["entry_point"]
+    assert isinstance(entry_point, dict)
+    assert_json_int(entry_point["address"], "dispatch.entry_point.address")
+    assert_json_int(entry_point["code_object_id"], "dispatch.entry_point.code_object_id")
+
+    dispatch_id = str(dispatch["kernel_id"])
+    assert dispatch_id in dispatches
+    assert dispatches[dispatch_id] == dispatch["kernel_name"]
+
+
+def read_att_stats_kernel_names(output_path):
+    traced_kernel_names = set()
+    stats_files = list(Path(output_path).glob("stats_*.csv"))
+    assert len(stats_files) > 0, f"No stats_*.csv files found in {output_path}"
+
+    for stats_file in stats_files:
+        with open(stats_file, "r") as f:
+            reader = csv.reader(f)
+            header = next(reader, None)
+            assert header is not None, f"Empty stats CSV: {stats_file}"
+            for row in reader:
+                if len(row) >= 3 and row[2].startswith("; "):
+                    traced_kernel_names.add(row[2][2:].strip())
+                if len(row) >= 8 and row[7].strip():
+                    traced_kernel_names.add(row[7].strip())
+
+    assert len(traced_kernel_names) > 0, "No kernel names found in stats CSV files"
+    return traced_kernel_names
+
 
 def test_json_data(json_data):
     data = json_data["rocprofiler-sdk-tool"]
@@ -102,6 +271,50 @@ def test_perfcounter_target_cu(output_path, request):
                 f"Found perfcounter event for CU {event_cu}, "
                 f"but target CU is {target_cu} in file {pc_file}"
             )
+
+
+def test_occupancy_event_tracing_fields(att_occupancy_event_trace_out_dir_path):
+    occupancy_files = find_occupancy_files(att_occupancy_event_trace_out_dir_path)
+    assert (
+        occupancy_files
+    ), f"No occupancy.json files found under {att_occupancy_event_trace_out_dir_path}"
+
+    found_event = False
+    found_dispatch = False
+    for occupancy_file in occupancy_files:
+        with open(occupancy_file, "r", encoding="utf-8") as f:
+            occupancy_data = json.load(f)
+
+        validate_occupancy_rows(occupancy_data, occupancy_file)
+
+        dispatches = occupancy_data.get("dispatches", {})
+        assert isinstance(
+            dispatches, dict
+        ), f"dispatches must be an object in {occupancy_file}"
+        assert dispatches, f"dispatches is empty in {occupancy_file}"
+
+        events = occupancy_data.get("events", {})
+        assert isinstance(events, dict), f"events must be an object in {occupancy_file}"
+        assert events, f"events is empty in {occupancy_file}"
+
+        for se, records in events.items():
+            assert isinstance(records, list), f"events[{se}] must be a list"
+            assert records, f"events[{se}] is empty in {occupancy_file}"
+
+            for record in records:
+                assert isinstance(record, dict), f"event record must be an object"
+                kind = record.get("kind")
+                if kind == "event":
+                    validate_trace_event(record, occupancy_file)
+                    found_event = True
+                elif kind == "dispatch":
+                    validate_dispatch_event(record, dispatches, occupancy_file)
+                    found_dispatch = True
+                else:
+                    assert False, f"Unexpected event kind {kind} in {occupancy_file}"
+
+    assert found_event, "No event records found in occupancy.json"
+    assert found_dispatch, "No dispatch records found in occupancy.json"
 
 
 def test_realtime_clock(output_path):
@@ -493,29 +706,7 @@ def test_att_marker_trace(json_data, att_marker_trace_out_dir_path):
     ]
     assert len(att_ui_dirs) > 0, "No ui_output_agent_* directories found"
 
-    # Parse stats_*.csv files for kernel names.
-    # stats_*.csv are written to the PARENT of ui_output_* dirs (see code.cpp).
-    # The CSV has rows where the Instruction column is "; <mangled_name>" for
-    # kernel entry points and the Source column holds the demangled name.
-    traced_kernel_names = set()
-    stats_files = list(Path(att_marker_trace_out_dir_path).glob("stats_*.csv"))
-    assert (
-        len(stats_files) > 0
-    ), f"No stats_*.csv files found in {att_marker_trace_out_dir_path}"
-    for stats_file in stats_files:
-        with open(stats_file, "r") as f:
-            reader = csv.reader(f)
-            header = next(reader, None)
-            assert header is not None, f"Empty stats CSV: {stats_file}"
-            for row in reader:
-                # Instruction column (index 2) starts with "; " for kernel names
-                if len(row) >= 3 and row[2].startswith("; "):
-                    traced_kernel_names.add(row[2][2:].strip())
-                # Also check demangled name in Source column (index 7)
-                if len(row) >= 8 and row[7].strip():
-                    traced_kernel_names.add(row[7].strip())
-
-    assert len(traced_kernel_names) > 0, "No kernel names found in stats CSV files"
+    traced_kernel_names = read_att_stats_kernel_names(att_marker_trace_out_dir_path)
 
     # Verify traced_kernel_first and traced_kernel_second were traced
     for expected in ("traced_kernel_first", "traced_kernel_second"):
@@ -532,6 +723,19 @@ def test_att_marker_trace(json_data, att_marker_trace_out_dir_path):
             f"Expected '{not_expected}' to NOT be in ATT trace but it was. "
             f"Traced kernels: {traced_kernel_names}"
         )
+
+
+def test_att_no_intercept_target_kernel(att_no_intercept_out_dir_path):
+    out_dir = Path(att_no_intercept_out_dir_path)
+    att_ui_dirs = [p for p in out_dir.glob("ui_output_agent_*") if p.is_dir()]
+    assert len(att_ui_dirs) > 0, "No ui_output_agent_* directories found"
+
+    traced_kernel_names = read_att_stats_kernel_names(out_dir)
+    expected = "looping_lds_kernel"
+    assert any(expected in name for name in traced_kernel_names), (
+        f"Expected '{expected}' to be in ATT no-intercept trace. "
+        f"Traced kernels: {traced_kernel_names}"
+    )
 
 
 if __name__ == "__main__":

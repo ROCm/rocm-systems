@@ -157,7 +157,10 @@ platforms:
       - rocrtstFunc.VirtMemory_Access_Test
       - rocrtstFunc.VirtMemory_Accounting_Test
       - rocrtstFunc.VirtMemory_Aliasing_Test
-      - rocrtstFunc.VirtMemory_Interprocess_Test
+      - rocrtstFunc.VirtMemory_NonContiguousChunks_Test
+      - rocrtstFunc.VirtMemory_GPUtoHostAccess_Test
+      - rocrtstFunc.VirtMemory_Interprocess_DevicePool_Test
+      - rocrtstFunc.VirtMemory_Interprocess_HostPool_Test
       - rocrtstFunc.Filter_Devices_Test
       - rocrtstFunc.GpuCoreDump_DefaultPattern
       - rocrtstFunc.GpuCoreDump_CustomPattern
@@ -182,4 +185,11 @@ platforms:
   # FFM Simulator - only Core and Extended groups allowed
   FFM_SIMULATOR:
     allowed_groups: [Core, Extended]
-    blocked_tests: []
+    blocked_tests:
+      - rocrtstFunc.Memory_Max_Mem
+      - rocrtstFunc.Memory_Available  # Uses max & available mem; not accurate
+      - rocrtstPerf.Memory_Async_Copy # Requires hwloc support
+      # These negative tests require device exceptions to call
+      # error callback. It doesn't currently do this.
+      - rocrtstNeg.*
+

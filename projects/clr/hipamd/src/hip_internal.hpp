@@ -13,6 +13,7 @@
 #include "rocclr/utils/debug.hpp"
 #include "hip_graph_capture.hpp"
 
+#include <atomic>
 #include <unordered_map>
 #include <unordered_set>
 #include <thread>
@@ -35,6 +36,10 @@
 #define KMAG "\x1B[35m"
 #define KCYN "\x1B[36m"
 #define KWHT "\x1B[37m"
+
+namespace amd::device {
+class Signal;
+}
 
 template <typename T> T ReturnPtrValue(T* ptr) { return (ptr != nullptr) ? *ptr : nullptr; }
 
@@ -70,7 +75,8 @@ enum MemcpyType {
 
 struct Graph;
 struct GraphNode;
-struct GraphExec;
+class GraphExecBase;
+class GraphExecSegmented;
 struct UserObject;
 class Stream;
 
@@ -96,6 +102,12 @@ static_assert(sizeof(ihipIpcEventHandle_t) <= sizeof(hipIpcEventHandle_t),
 const char* ihipGetErrorName(hipError_t hip_error);
 
 } // namespace hip
+
+#if defined(__GNUC__) || defined(__clang__)
+extern "C" __attribute__((visibility("default"))) void __hipOnError(const void *err_info);
+#else
+extern "C" void __hipOnError(const void *err_info);
+#endif
 
 // Helper: set up TLS device pointer on first use.
 #define HIP_INIT_TLS_DEVICE()                                                                      \
@@ -172,6 +184,28 @@ const char* ihipGetErrorName(hipError_t hip_error);
   } else if (hip::tls.last_command_error_ != hipSuccess &&                                         \
              hip::tls.last_command_error_ != hipErrorNotReady) {                                   \
     hip::tls.last_error_ = hip::tls.last_command_error_;                                           \
+  }                                                                                                \
+  if (hip::tls.last_command_error_ != hipSuccess &&                                                \
+      hip::tls.last_command_error_ != hipErrorNotReady) {                                          \
+    /*                                                                                             \
+     * The "version" is bumped when more fields are added to the structure.                        \
+     * Newer versions must keep backward compatibility with the previous ones,                     \
+     * by only tacking new fields at the end of the structure, so that older                       \
+     * clients can still extract the parameters they know.                                         \
+     */                                                                                            \
+    struct {                                                                                       \
+      uint32_t version;                                                                            \
+      uint32_t err_no;                                                                             \
+      const char *err_name;                                                                        \
+      const char *err_string;                                                                      \
+    } err_info = {                                                                                 \
+      1,                                                                                           \
+      hip::tls.last_command_error_,                                                                \
+      hipGetErrorName(hip::tls.last_command_error_),                                               \
+      hipGetErrorString(hip::tls.last_command_error_)                                              \
+    };                                                                                             \
+    /* The debugger may place a breakpoint at __hipOnError to catch failed API calls. */           \
+    __hipOnError((void *) &err_info);                                                              \
   }
 
 #define HIP_RETURN_DURATION(ret, ...)                                                              \
@@ -266,6 +300,28 @@ const char* ihipGetErrorName(hipError_t hip_error);
 #define PER_THREAD_DEFAULT_STREAM(stream)                                                         \
   if (stream == nullptr || stream == hipStreamLegacy) {                                           \
     stream = getPerThreadDefaultStream();                                                         \
+  }
+
+// Detach guard. If the owning hipExecutionCtx_t has been destroyed, the
+// stream is flagged detached_; work-submit / sync / capture / graph-launch
+// APIs must early-return hipErrorStreamDetached. Default / legacy /
+// per-thread streams are never owned by an ExecutionCtx and therefore
+// never detach.
+//
+// Use CHECK_STREAM_DETACHED_API at top-level API entry points (those that ran
+// HIP_INIT_API) so the return goes through HIP_RETURN and updates the
+// per-thread last-error state / API-return trace; use CHECK_STREAM_DETACHED in
+// internal helpers whose caller already wraps the result in HIP_RETURN.
+#define CHECK_STREAM_DETACHED(stream)                                                              \
+  if ((stream) != nullptr && (stream) != hipStreamLegacy && (stream) != hipStreamPerThread &&      \
+      reinterpret_cast<hip::Stream*>(stream)->IsDetached()) {                                      \
+    return hipErrorStreamDetached;                                                                 \
+  }
+
+#define CHECK_STREAM_DETACHED_API(stream)                                                          \
+  if ((stream) != nullptr && (stream) != hipStreamLegacy && (stream) != hipStreamPerThread &&      \
+      reinterpret_cast<hip::Stream*>(stream)->IsDetached()) {                                      \
+    HIP_RETURN(hipErrorStreamDetached);                                                            \
   }
 
 /// Stores the kernel launch configuration set by hipConfigureCall /
@@ -413,6 +469,21 @@ namespace hip {
     /// Remove a parallel capture stream
     void EraseParallelCaptureStream(hipStream_t s) { parallelCaptureStreams_.erase(s); }
 
+    // --- Execution context (green context) lifecycle ---
+    /// Marks the stream as detached: its owning ExecutionCtx has been
+    /// destroyed. Behavior:
+    ///   - Subsequent work-submit / sync APIs on this stream must return
+    ///     hipErrorStreamDetached (enforced by CHECK_STREAM_DETACHED).
+    ///   - If a stream capture is active on this stream, the capture is
+    ///     invalidated (status -> hipStreamCaptureStatusInvalidated) and every
+    ///     forked parallel branch is marked invalidated as well.
+    ///   - hipStreamDestroy continues to succeed on a detached stream.
+    void Detach();
+    /// Returns true once Detach() has been called.
+    bool IsDetached() const {
+      return detached_.load(std::memory_order_acquire);
+    }
+
   private:
     ~Stream() = default;
 
@@ -435,6 +506,9 @@ namespace hip {
     std::unordered_set<hipStream_t> parallelCaptureStreams_; //!< Forked parallel capture branches
     std::unordered_set<hipEvent_t> captureEvents_;        //!< Events tied to this capture
     uint64_t captureID_ = 0;                              //!< Unique ID for this capture sequence
+
+    // ----- Execution context (green context) state -----
+    std::atomic<bool> detached_{false};  //!< True once the owning ExecutionCtx has been destroyed
 
     static CommandQueue::Priority convertToQueuePriority(Priority p) {
       return p == Priority::High  ? amd::CommandQueue::Priority::High
@@ -529,6 +603,16 @@ namespace hip {
     /// doesn't stall the current thread.
     void WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stream = false);
 
+    // Destroying a recorded IPC event must wait for the GPU barrier that decrements the
+    // event's IPC signal before the signal can be freed (otherwise the GPU could write to
+    // freed memory).
+
+    /// Transfer an IPC signal (and its record marker's event, may be null) to this device's
+    /// deferred-cleanup queue. Frees inline if the queue grows past its bound.
+    void EnqueueDeferredIpcSignal(amd::device::Signal* signal, amd::Event* event);
+    /// Wait for the pending barriers of all deferred IPC signals on this device and free them.
+    void DrainDeferredIpcSignals();
+
     // --- Device activity ---
 
     void SetActiveStatus() { isActive_.store(true, std::memory_order_release); }
@@ -603,6 +687,18 @@ namespace hip {
     std::unordered_map<uint32_t, ResourceMeta> resourceFamilyMap_;
     std::mutex resourceFamilyMapLock_;
 
+    struct DeferredIpcSignal {
+      amd::device::Signal* signal;  //!< IPC signal to free once its barrier completes
+      amd::Event* event;            //!< record marker's event (non-null => signal was armed)
+    };
+    /// Wait for an armed signal's in-flight barrier, then free the signal and release its event.
+    static void CleanupDeferredIpcSignal(const DeferredIpcSignal& item);
+
+    std::mutex deferredIpcLock_;                        //!< Guards deferredIpcSignals_
+    std::vector<DeferredIpcSignal> deferredIpcSignals_; //!< Signals awaiting deferred cleanup
+    /// Drain inline once the queue reaches this many entries, bounding memory if an app
+    /// destroys many IPC events without an intervening device sync.
+    static constexpr size_t kDeferredIpcDrainThreshold = 256;
   };
 
   /// Per-thread state aggregator for HIP runtime (one instance per thread via thread_local).
@@ -655,6 +751,7 @@ namespace hip {
   extern hipError_t ihipMemGetInfo(size_t* free, size_t* total);
   extern amd::Memory* getMemoryObject(hip::Device* device, const void* ptr, size_t& offset,
                                        size_t size = 0);
+  extern bool IsManagedMemory(cl_mem_flags flags);
   extern std::vector<amd::Memory*> getMemoryObjectBatch(hip::Device* device, void* const* ptrs,
                                                          size_t count,
                                                          std::vector<size_t>& offsets);

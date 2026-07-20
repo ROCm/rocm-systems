@@ -1,4 +1,3 @@
-
 #include "api_trace.h"
 #include "core.h"
 #include "nccl.h"
@@ -12,180 +11,127 @@
 #include <vector>
 
 #if defined(RCCL_ROCPROFILER_REGISTER) && RCCL_ROCPROFILER_REGISTER > 0
-#    include <rocprofiler-register/rocprofiler-register.h>
+#include <rocprofiler-register/rocprofiler-register.h>
 
-#    define ROCP_REG_VERSION                                                             \
-        ROCPROFILER_REGISTER_COMPUTE_VERSION_3(NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH)
+#define ROCP_REG_VERSION ROCPROFILER_REGISTER_COMPUTE_VERSION_3(NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH)
 
 ROCPROFILER_REGISTER_DEFINE_IMPORT(rccl, ROCP_REG_VERSION)
 #endif
 
-ncclResult_t
-ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sendcount,
-                   ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
+                                ncclComm_t comm, cudaStream_t stream);
 
-ncclResult_t
-ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t count,
-                   ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
-                   cudaStream_t stream);
+ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
-ncclResult_t
-ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t count,
-                  ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
+ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                               ncclComm_t comm, hipStream_t stream);
 
-ncclResult_t
-ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
-                   const size_t sdispls[], void* recvbuff, const size_t recvcounts[],
-                   const size_t rdispls[], ncclDataType_t datatype, ncclComm_t comm,
-                   hipStream_t stream);
+ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[], const size_t sdispls[], void* recvbuff,
+                                const size_t recvcounts[], const size_t rdispls[], ncclDataType_t datatype,
+                                ncclComm_t comm, hipStream_t stream);
 
-ncclResult_t
-ncclBroadcast_impl(const void* sendbuff, void* recvbuff, size_t count,
-                   ncclDataType_t datatype, int root, ncclComm_t comm,
-                   cudaStream_t stream);
+ncclResult_t ncclBroadcast_impl(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, int root,
+                                ncclComm_t comm, cudaStream_t stream);
 
-ncclResult_t
-ncclGather_impl(const void* sendbuff, void* recvbuff, size_t sendcount,
-                ncclDataType_t datatype, int root, ncclComm_t comm, hipStream_t stream);
+ncclResult_t ncclGather_impl(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype, int root,
+                             ncclComm_t comm, hipStream_t stream);
 
-ncclResult_t
-ncclReduce_impl(const void* sendbuff, void* recvbuff, size_t count,
-                ncclDataType_t datatype, ncclRedOp_t op, int root, ncclComm_t comm,
-                cudaStream_t stream);
+ncclResult_t ncclReduce_impl(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                             ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream);
 
-ncclResult_t
-ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t recvcount,
-                       ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
-                       cudaStream_t stream);
+ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
+                                    ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
-ncclResult_t
-ncclScatter_impl(const void* sendbuff, void* recvbuff, size_t recvcount,
-                 ncclDataType_t datatype, int root, ncclComm_t comm, hipStream_t stream);
+ncclResult_t ncclScatter_impl(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype, int root,
+                              ncclComm_t comm, hipStream_t stream);
 
-ncclResult_t
-ncclSend_impl(const void* sendbuff, size_t count, ncclDataType_t datatype, int peer,
-              ncclComm_t comm, cudaStream_t stream);
+ncclResult_t ncclSend_impl(const void* sendbuff, size_t count, ncclDataType_t datatype, int peer, ncclComm_t comm,
+                           cudaStream_t stream);
 
-ncclResult_t
-ncclRecv_impl(void* recvbuff, size_t count, ncclDataType_t datatype, int peer,
-              ncclComm_t comm, cudaStream_t stream);
+ncclResult_t ncclRecv_impl(void* recvbuff, size_t count, ncclDataType_t datatype, int peer, ncclComm_t comm,
+                           cudaStream_t stream);
 
-ncclResult_t
-ncclPutSignal_impl(const void* localbuff, size_t count, ncclDataType_t datatype,
-                   int peer, ncclWindow_t peerWin, size_t peerWinOffset,
-                   int sigIdx, int ctx, unsigned int flags,
-                   ncclComm_t comm, cudaStream_t stream);
+ncclResult_t ncclPutSignal_impl(const void* localbuff, size_t count, ncclDataType_t datatype, int peer,
+                                ncclWindow_t peerWin, size_t peerWinOffset, int sigIdx, int ctx, unsigned int flags,
+                                ncclComm_t comm, cudaStream_t stream);
 
-ncclResult_t
-ncclSignal_impl(int peer, int sigIdx, int ctx, unsigned int flags,
-                ncclComm_t comm, cudaStream_t stream);
+ncclResult_t ncclSignal_impl(int peer, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream);
 
-ncclResult_t
-ncclWaitSignal_impl(int nDesc, ncclWaitSignalDesc_t* signalDescs,
-                    ncclComm_t comm, cudaStream_t stream);
+ncclResult_t ncclWaitSignal_impl(int nDesc, ncclWaitSignalDesc_t* signalDescs, ncclComm_t comm, cudaStream_t stream);
 
-ncclResult_t
-ncclRedOpCreatePreMulSum_impl(ncclRedOp_t* op, void* scalar, ncclDataType_t datatype,
-                              ncclScalarResidence_t residence, ncclComm_t comm);
+ncclResult_t ncclRedOpCreatePreMulSum_impl(ncclRedOp_t* op, void* scalar, ncclDataType_t datatype,
+                                           ncclScalarResidence_t residence, ncclComm_t comm);
 
-ncclResult_t
-ncclRedOpDestroy_impl(ncclRedOp_t op, ncclComm_t comm);
+ncclResult_t ncclRedOpDestroy_impl(ncclRedOp_t op, ncclComm_t comm);
 
-ncclResult_t
-ncclGroupStart_impl();
+ncclResult_t ncclGroupStart_impl();
 
-ncclResult_t
-ncclGroupEnd_impl();
+ncclResult_t ncclGroupEnd_impl();
 
-ncclResult_t
-ncclGetVersion_impl(int* version);
+ncclResult_t ncclGetVersion_impl(int* version);
 
-ncclResult_t
-ncclGetUniqueId_impl(ncclUniqueId* out);
+ncclResult_t ncclGetUniqueId_impl(ncclUniqueId* out);
 
-ncclResult_t
-ncclCommInitRank_impl(ncclComm_t* newcomm, int nranks, ncclUniqueId commId, int myrank);
+ncclResult_t ncclCommInitRank_impl(ncclComm_t* newcomm, int nranks, ncclUniqueId commId, int myrank);
 
-ncclResult_t
-ncclCommInitAll_impl(ncclComm_t* comms, int ndev, const int* devlist);
+ncclResult_t ncclCommInitAll_impl(ncclComm_t* comms, int ndev, const int* devlist);
 
-ncclResult_t
-ncclCommInitRankConfig_impl(ncclComm_t* comm, int nranks, ncclUniqueId commId, int myrank,
-                            ncclConfig_t* config);
+ncclResult_t ncclCommInitRankConfig_impl(ncclComm_t* comm, int nranks, ncclUniqueId commId, int myrank,
+                                         ncclConfig_t* config);
 
-ncclResult_t
-ncclCommFinalize_impl(ncclComm_t comm);
+ncclResult_t ncclCommFinalize_impl(ncclComm_t comm);
 
-ncclResult_t
-ncclCommDestroy_impl(ncclComm_t comm);
+ncclResult_t ncclCommDestroy_impl(ncclComm_t comm);
 
-ncclResult_t
-ncclCommAbort_impl(ncclComm_t comm);
+ncclResult_t ncclCommAbort_impl(ncclComm_t comm);
 
-ncclResult_t
-ncclCommRevoke_impl(ncclComm_t comm, int revokeFlags);
+ncclResult_t ncclCommRevoke_impl(ncclComm_t comm, int revokeFlags);
 
-ncclResult_t
-ncclCommShrink_impl(ncclComm_t comm, int* excludeRanksList, int excludeRanksCount, ncclComm_t *newcomm,
-                    ncclConfig_t* config, int shrinkFlags);
+ncclResult_t ncclCommShrink_impl(ncclComm_t comm, int* excludeRanksList, int excludeRanksCount, ncclComm_t* newcomm,
+                                 ncclConfig_t* config, int shrinkFlags);
 
-ncclResult_t
-ncclCommSplit_impl(ncclComm_t comm, int color, int key, ncclComm_t* newcomm,
-                   ncclConfig_t* config);
+ncclResult_t ncclCommSplit_impl(ncclComm_t comm, int color, int key, ncclComm_t* newcomm, ncclConfig_t* config);
 
-const char*
-ncclGetErrorString_impl(ncclResult_t code);
+const char* ncclGetErrorString_impl(ncclResult_t code);
 
-const char*
-ncclGetLastError_impl(const ncclComm_t comm);
+const char* ncclGetLastError_impl(const ncclComm_t comm);
 
-ncclResult_t
-ncclCommGetAsyncError_impl(ncclComm_t comm, ncclResult_t* asyncError);
+ncclResult_t ncclCommGetAsyncError_impl(ncclComm_t comm, ncclResult_t* asyncError);
 
-ncclResult_t
-ncclCommCount_impl(const ncclComm_t comm, int* count);
+ncclResult_t ncclCommCount_impl(const ncclComm_t comm, int* count);
 
-ncclResult_t
-ncclCommCuDevice_impl(const ncclComm_t comm, int* devid);
+ncclResult_t ncclCommCuDevice_impl(const ncclComm_t comm, int* devid);
 
-ncclResult_t
-ncclCommUserRank_impl(const ncclComm_t comm, int* rank);
+ncclResult_t ncclCommUserRank_impl(const ncclComm_t comm, int* rank);
 
-ncclResult_t
-ncclMemAlloc_impl(void** ptr, size_t size);
+ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size);
 
-ncclResult_t
-ncclMemFree_impl(void* ptr);
+ncclResult_t ncclMemFree_impl(void* ptr);
 
-ncclResult_t
-ncclCommRegister_impl(const ncclComm_t comm, void* buff, size_t size, void** handle);
+ncclResult_t ncclCommRegister_impl(const ncclComm_t comm, void* buff, size_t size, void** handle);
 
-ncclResult_t
-ncclCommDeregister_impl(const ncclComm_t comm, void* handle);
+ncclResult_t ncclCommDeregister_impl(const ncclComm_t comm, void* handle);
 
-ncclResult_t
-ncclCommWindowRegister_impl(ncclComm_t comm, void* buff, size_t size, ncclWindow_t* win, int winFlags);
+ncclResult_t ncclCommWindowRegister_impl(ncclComm_t comm, void* buff, size_t size, ncclWindow_t* win, int winFlags);
 
-ncclResult_t
-ncclCommWindowDeregister_impl(ncclComm_t comm, ncclWindow_t win);
+ncclResult_t ncclCommWindowDeregister_impl(ncclComm_t comm, ncclWindow_t win);
 
-ncclResult_t
-ncclCommSuspend_impl(ncclComm_t comm, int flags);
+ncclResult_t ncclCommSuspend_impl(ncclComm_t comm, int flags);
 
-ncclResult_t
-ncclCommResume_impl(ncclComm_t comm);
+ncclResult_t ncclCommResume_impl(ncclComm_t comm);
 
-ncclResult_t
-ncclCommMemStats_impl(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value);
+ncclResult_t ncclCommMemStats_impl(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value);
 
-ncclResult_t
-ncclAllReduceWithBias_impl(const void* sendbuff, void* recvbuff, size_t count,
-                   ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
-                   cudaStream_t stream, const void* acc);
+ncclResult_t ncclCommGetUniqueId_impl(ncclComm_t comm, ncclUniqueId* uniqueId);
 
-ncclResult_t
-mscclLoadAlgo_impl(const char* mscclAlgoFilePath, mscclAlgoHandle_t* mscclAlgoHandle, int rank)
-{
+ncclResult_t ncclCommGrow_impl(ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId, int rank, ncclComm_t* newcomm,
+                               ncclConfig_t* config);
+
+ncclResult_t ncclAllReduceWithBias_impl(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                        ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, const void* acc);
+
+ncclResult_t mscclLoadAlgo_impl(const char* mscclAlgoFilePath, mscclAlgoHandle_t* mscclAlgoHandle, int rank) {
   (void)mscclAlgoFilePath;
   (void)mscclAlgoHandle;
   (void)rank;
@@ -194,12 +140,10 @@ mscclLoadAlgo_impl(const char* mscclAlgoFilePath, mscclAlgoHandle_t* mscclAlgoHa
   return ncclSuccess;
 }
 
-ncclResult_t
-mscclRunAlgo_impl(const void* sendBuff, const size_t sendCounts[], const size_t sDisPls[],
-                  void* recvBuff, const size_t recvCounts[], const size_t rDisPls[],
-                  size_t count, ncclDataType_t dataType, int root, int peer, ncclRedOp_t op,
-                  mscclAlgoHandle_t mscclAlgoHandle, ncclComm_t comm, hipStream_t stream)
-{
+ncclResult_t mscclRunAlgo_impl(const void* sendBuff, const size_t sendCounts[], const size_t sDisPls[], void* recvBuff,
+                               const size_t recvCounts[], const size_t rDisPls[], size_t count, ncclDataType_t dataType,
+                               int root, int peer, ncclRedOp_t op, mscclAlgoHandle_t mscclAlgoHandle, ncclComm_t comm,
+                               hipStream_t stream) {
   (void)sendBuff;
   (void)sendCounts;
   (void)sDisPls;
@@ -215,41 +159,31 @@ mscclRunAlgo_impl(const void* sendBuff, const size_t sendCounts[], const size_t 
   (void)comm;
   (void)stream;
   rccl::Recorder::instance().record("mscclRunAlgo");
-  NVTX3_FUNC_WITH_PARAMS(MSCCL, NcclNvtxParamsMSCCL,
-    NVTX3_PAYLOAD(0, count * ncclTypeSize(dataType), op, dataType));
+  NVTX3_FUNC_WITH_PARAMS(MSCCL, NcclNvtxParamsMSCCL, NVTX3_PAYLOAD(0, count * ncclTypeSize(dataType), op, dataType));
   WARN("MSCCL support has been removed from RCCL; mscclRunAlgo has no effect.");
   return ncclSuccess;
 }
 
-ncclResult_t
-mscclUnloadAlgo_impl(mscclAlgoHandle_t mscclAlgoHandle)
-{
+ncclResult_t mscclUnloadAlgo_impl(mscclAlgoHandle_t mscclAlgoHandle) {
   (void)mscclAlgoHandle;
   rccl::Recorder::instance().record("mscclUnloadAlgo");
   WARN("MSCCL support has been removed from RCCL; mscclUnloadAlgo has no effect.");
   return ncclSuccess;
 }
 
-namespace rccl
-{
-namespace
-{
+namespace rccl {
+namespace {
 
-constexpr size_t
-compute_table_offset(size_t n)
-{
-    return (sizeof(uint64_t) + (n * sizeof(void*)));
+constexpr size_t compute_table_offset(size_t n) {
+  return (sizeof(uint64_t) + (n * sizeof(void*)));
 }
 
-constexpr size_t
-compute_table_size(size_t nmembers)
-{
-    return (sizeof(uint64_t) + (nmembers * sizeof(void*)));
+constexpr size_t compute_table_size(size_t nmembers) {
+  return (sizeof(uint64_t) + (nmembers * sizeof(void*)));
 }
 
-#define RCCL_ASSERT_OFFSET(TABLE, MEMBER, IDX)                                           \
-    static_assert(offsetof(TABLE, MEMBER) == compute_table_offset(IDX),                  \
-                  "Do not re-arrange the table members")
+#define RCCL_ASSERT_OFFSET(TABLE, MEMBER, IDX) \
+  static_assert(offsetof(TABLE, MEMBER) == compute_table_offset(IDX), "Do not re-arrange the table members")
 
 // DO NOT REORDER, ADD NEW ITEMS TO BOTTOM
 RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclAllGather_fn, 0);
@@ -302,167 +236,157 @@ RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclCommMemStats_fn, 46);
 RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclPutSignal_fn, 47);
 RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclSignal_fn, 48);
 RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclWaitSignal_fn, 49);
+RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclCommGetUniqueId_fn, 50);
+RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclCommGrow_fn, 51);
 // DO NOT REORDER, ADD NEW ITEMS HERE
 
 #undef RCCL_ASSERT_OFFSET
 
-static_assert(sizeof(rcclApiFuncTable) == compute_table_size(50),
+static_assert(sizeof(rcclApiFuncTable) == compute_table_size(52),
               "Update table major/step version and add a new offset assertion if this "
               "fails to compile");
 
 std::array<unsigned char, sizeof(rcclApiFuncTable)> m_buffer = {};
 
-rcclApiFuncTable*
-RcclGetFunctionTable_impl()
-{
-    static auto* tbl =
-        new(m_buffer.data()) rcclApiFuncTable{ sizeof(rcclApiFuncTable),
-                                               &ncclAllGather_impl,
-                                               &ncclAllReduce_impl,
-                                               nullptr,
-                                               nullptr,
-                                               &ncclBroadcast_impl,
-                                               &ncclGather_impl,
-                                               &ncclReduce_impl,
-                                               &ncclReduceScatter_impl,
-                                               &ncclScatter_impl,
-                                               &ncclSend_impl,
-                                               &ncclRecv_impl,
-                                               &ncclRedOpCreatePreMulSum_impl,
-                                               &ncclRedOpDestroy_impl,
-                                               &ncclGroupStart_impl,
-                                               &ncclGroupEnd_impl,
-                                               &ncclGetVersion_impl,
-                                               &ncclGetUniqueId_impl,
-                                               &ncclCommInitRank_impl,
-                                               &ncclCommInitAll_impl,
-                                               &ncclCommInitRankConfig_impl,
-                                               &ncclCommFinalize_impl,
-                                               &ncclCommDestroy_impl,
-                                               &ncclCommAbort_impl,
-                                               &ncclCommSplit_impl,
-                                               &ncclGetErrorString_impl,
-                                               &ncclGetLastError_impl,
-                                               &ncclCommGetAsyncError_impl,
-                                               &ncclCommCount_impl,
-                                               &ncclCommCuDevice_impl,
-                                               &ncclCommUserRank_impl,
-                                               &ncclMemAlloc_impl,
-                                               &ncclMemFree_impl,
-                                               &mscclLoadAlgo_impl,
-                                               &mscclRunAlgo_impl,
-                                               &mscclUnloadAlgo_impl,
-                                               &ncclCommRegister_impl,
-                                               &ncclCommDeregister_impl,
-                                               &ncclAllReduceWithBias_impl,
-                                               &ncclCommShrink_impl,
-                                               &ncclCommWindowRegister_impl,
-                                               &ncclCommWindowDeregister_impl,
-                                               &ncclAlltoAll_impl,
-                                               &ncclAlltoAllv_impl,
-                                               &ncclCommRevoke_impl,
-                                               &ncclCommSuspend_impl,
-                                               &ncclCommResume_impl,
-                                               &ncclCommMemStats_impl,
-                                               &ncclPutSignal_impl,
-                                               &ncclSignal_impl,
-                                               &ncclWaitSignal_impl
+rcclApiFuncTable* RcclGetFunctionTable_impl() {
+  static auto* tbl = new (m_buffer.data()) rcclApiFuncTable{
+    sizeof(rcclApiFuncTable),
+    &ncclAllGather_impl,
+    &ncclAllReduce_impl,
+    nullptr,
+    nullptr,
+    &ncclBroadcast_impl,
+    &ncclGather_impl,
+    &ncclReduce_impl,
+    &ncclReduceScatter_impl,
+    &ncclScatter_impl,
+    &ncclSend_impl,
+    &ncclRecv_impl,
+    &ncclRedOpCreatePreMulSum_impl,
+    &ncclRedOpDestroy_impl,
+    &ncclGroupStart_impl,
+    &ncclGroupEnd_impl,
+    &ncclGetVersion_impl,
+    &ncclGetUniqueId_impl,
+    &ncclCommInitRank_impl,
+    &ncclCommInitAll_impl,
+    &ncclCommInitRankConfig_impl,
+    &ncclCommFinalize_impl,
+    &ncclCommDestroy_impl,
+    &ncclCommAbort_impl,
+    &ncclCommSplit_impl,
+    &ncclGetErrorString_impl,
+    &ncclGetLastError_impl,
+    &ncclCommGetAsyncError_impl,
+    &ncclCommCount_impl,
+    &ncclCommCuDevice_impl,
+    &ncclCommUserRank_impl,
+    &ncclMemAlloc_impl,
+    &ncclMemFree_impl,
+    &mscclLoadAlgo_impl,
+    &mscclRunAlgo_impl,
+    &mscclUnloadAlgo_impl,
+    &ncclCommRegister_impl,
+    &ncclCommDeregister_impl,
+    &ncclAllReduceWithBias_impl,
+    &ncclCommShrink_impl,
+    &ncclCommWindowRegister_impl,
+    &ncclCommWindowDeregister_impl,
+    &ncclAlltoAll_impl,
+    &ncclAlltoAllv_impl,
+    &ncclCommRevoke_impl,
+    &ncclCommSuspend_impl,
+    &ncclCommResume_impl,
+    &ncclCommMemStats_impl,
+    &ncclPutSignal_impl,
+    &ncclSignal_impl,
+    &ncclWaitSignal_impl,
+    &ncclCommGetUniqueId_impl,
+    &ncclCommGrow_impl
                                                // DO NOT REORDER, ADD NEW ITEMS HERE
-                                             };
+  };
 
 #if defined(RCCL_ROCPROFILER_REGISTER) && RCCL_ROCPROFILER_REGISTER > 0
-    std::array<void*, 1>                       table_array{ tbl };
-    rocprofiler_register_library_indentifier_t lib_id =
-        rocprofiler_register_library_indentifier_t{};
-    rocprofiler_register_error_code_t rocp_reg_status =
-        rocprofiler_register_library_api_table(
-            "rccl", &ROCPROFILER_REGISTER_IMPORT_FUNC(rccl), ROCP_REG_VERSION,
-            table_array.data(), table_array.size(), &lib_id);
+  std::array<void*, 1> table_array{tbl};
+  rocprofiler_register_library_indentifier_t lib_id = rocprofiler_register_library_indentifier_t{};
+  rocprofiler_register_error_code_t rocp_reg_status = rocprofiler_register_library_api_table(
+    "rccl", &ROCPROFILER_REGISTER_IMPORT_FUNC(rccl), ROCP_REG_VERSION, table_array.data(), table_array.size(), &lib_id);
 
-    INFO(NCCL_COLL,
-         "[rocprofiler-sdk-rccl][ = %d ] rocprofiler-register returned code = %d : %s",
+  INFO(NCCL_COLL, "[rocprofiler-sdk-rccl][ = %d ] rocprofiler-register returned code = %d : %s", getpid(),
+       rocp_reg_status, rocprofiler_register_error_string(rocp_reg_status));
+
+  if (rocp_reg_status != ROCP_REG_SUCCESS && rocp_reg_status != ROCP_REG_NO_TOOLS)
+    WARN("[rocprofiler-sdk-rccl][%d] rocprofiler-register failed with error code %d "
+         ": %s",
          getpid(), rocp_reg_status, rocprofiler_register_error_string(rocp_reg_status));
-
-    if(rocp_reg_status != ROCP_REG_SUCCESS && rocp_reg_status != ROCP_REG_NO_TOOLS)
-        WARN("[rocprofiler-sdk-rccl][%d] rocprofiler-register failed with error code %d "
-             ": %s",
-             getpid(), rocp_reg_status,
-             rocprofiler_register_error_string(rocp_reg_status));
 #endif
 
-    return tbl;
+  return tbl;
 }
 }  // end of namespace
 
-const rcclApiFuncTable*
-RcclGetFunctionTable()
-{
-    static const auto* tbl = RcclGetFunctionTable_impl();
-    return tbl;
+const rcclApiFuncTable* RcclGetFunctionTable() {
+  static const auto* tbl = RcclGetFunctionTable_impl();
+  return tbl;
 }
 }  // end of namespace rccl
 
-NCCL_API(ncclResult_t, ncclAllGather, const void* sendbuff, void* recvbuff,
-         size_t sendcount, ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
+NCCL_API(ncclResult_t, ncclAllGather, const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
+         ncclComm_t comm, cudaStream_t stream);
 
-NCCL_API(ncclResult_t, ncclAllReduce, const void* sendbuff, void* recvbuff, size_t count,
-         ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, hipStream_t stream);
+NCCL_API(ncclResult_t, ncclAllReduce, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+         ncclRedOp_t op, ncclComm* comm, hipStream_t stream);
 
 NCCL_API(ncclResult_t, ncclAllReduceWithBias, const void* sendbuff, void* recvbuff, size_t count,
          ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, hipStream_t stream, const void* acc);
 
-NCCL_API(ncclResult_t, ncclAlltoAll, const void* sendbuff, void* recvbuff, size_t count,
-         ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
-
-NCCL_API(ncclResult_t, ncclAllToAll, const void* sendbuff, void* recvbuff, size_t count,
-        ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
-
-NCCL_API(ncclResult_t, ncclAlltoAllv, const void* sendbuff, const size_t sendcounts[],
-         const size_t sdispls[], void* recvbuff, const size_t recvcounts[],
-         const size_t rdispls[], ncclDataType_t datatype, ncclComm_t comm,
-         hipStream_t stream);
-
-NCCL_API(ncclResult_t, ncclAllToAllv, const void* sendbuff, const size_t sendcounts[],
-        const size_t sdispls[], void* recvbuff, const size_t recvcounts[],
-        const size_t rdispls[], ncclDataType_t datatype, ncclComm_t comm,
-        hipStream_t stream);
-
-NCCL_API(ncclResult_t, ncclBroadcast, const void* sendbuff, void* recvbuff, size_t count,
-         ncclDataType_t datatype, int root, ncclComm_t comm, hipStream_t stream);
-
-NCCL_API(ncclResult_t, ncclGather, const void* sendbuff, void* recvbuff, size_t sendcount,
-         ncclDataType_t datatype, int root, ncclComm_t comm, hipStream_t stream);
-
-NCCL_API(ncclResult_t, ncclReduce, const void* sendbuff, void* recvbuff, size_t count,
-         ncclDataType_t datatype, ncclRedOp_t op, int root, ncclComm_t comm,
-         hipStream_t stream);
-
-NCCL_API(ncclResult_t, ncclReduceScatter, const void* sendbuff, void* recvbuff,
-         size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
-         hipStream_t stream);
-
-NCCL_API(ncclResult_t, ncclScatter, const void* sendbuff, void* recvbuff,
-         size_t recvcount, ncclDataType_t datatype, int root, ncclComm_t comm,
-         hipStream_t stream);
-
-NCCL_API(ncclResult_t, ncclSend, const void* sendbuff, size_t count,
-         ncclDataType_t datatype, int peer, ncclComm_t comm, hipStream_t stream);
-
-NCCL_API(ncclResult_t, ncclRecv, void* recvbuff, size_t count, ncclDataType_t datatype,
-         int peer, ncclComm_t comm, hipStream_t stream);
-
-NCCL_API(ncclResult_t, ncclPutSignal, const void* localbuff, size_t count,
-         ncclDataType_t datatype, int peer, ncclWindow_t peerWin, size_t peerWinOffset,
-         int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, hipStream_t stream);
-
-NCCL_API(ncclResult_t, ncclSignal, int peer, int sigIdx, int ctx, unsigned int flags,
+NCCL_API(ncclResult_t, ncclAlltoAll, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
          ncclComm_t comm, hipStream_t stream);
 
-NCCL_API(ncclResult_t, ncclWaitSignal, int nDesc, ncclWaitSignalDesc_t* signalDescs,
+NCCL_API(ncclResult_t, ncclAllToAll, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
          ncclComm_t comm, hipStream_t stream);
 
-NCCL_API(ncclResult_t, ncclRedOpCreatePreMulSum, ncclRedOp_t* op, void* scalar,
-         ncclDataType_t datatype, ncclScalarResidence_t residence, ncclComm_t comm);
+NCCL_API(ncclResult_t, ncclAlltoAllv, const void* sendbuff, const size_t sendcounts[], const size_t sdispls[],
+         void* recvbuff, const size_t recvcounts[], const size_t rdispls[], ncclDataType_t datatype, ncclComm_t comm,
+         hipStream_t stream);
+
+NCCL_API(ncclResult_t, ncclAllToAllv, const void* sendbuff, const size_t sendcounts[], const size_t sdispls[],
+         void* recvbuff, const size_t recvcounts[], const size_t rdispls[], ncclDataType_t datatype, ncclComm_t comm,
+         hipStream_t stream);
+
+NCCL_API(ncclResult_t, ncclBroadcast, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+         int root, ncclComm_t comm, hipStream_t stream);
+
+NCCL_API(ncclResult_t, ncclGather, const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
+         int root, ncclComm_t comm, hipStream_t stream);
+
+NCCL_API(ncclResult_t, ncclReduce, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+         ncclRedOp_t op, int root, ncclComm_t comm, hipStream_t stream);
+
+NCCL_API(ncclResult_t, ncclReduceScatter, const void* sendbuff, void* recvbuff, size_t recvcount,
+         ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, hipStream_t stream);
+
+NCCL_API(ncclResult_t, ncclScatter, const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
+         int root, ncclComm_t comm, hipStream_t stream);
+
+NCCL_API(ncclResult_t, ncclSend, const void* sendbuff, size_t count, ncclDataType_t datatype, int peer, ncclComm_t comm,
+         hipStream_t stream);
+
+NCCL_API(ncclResult_t, ncclRecv, void* recvbuff, size_t count, ncclDataType_t datatype, int peer, ncclComm_t comm,
+         hipStream_t stream);
+
+NCCL_API(ncclResult_t, ncclPutSignal, const void* localbuff, size_t count, ncclDataType_t datatype, int peer,
+         ncclWindow_t peerWin, size_t peerWinOffset, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm,
+         hipStream_t stream);
+
+NCCL_API(ncclResult_t, ncclSignal, int peer, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm,
+         hipStream_t stream);
+
+NCCL_API(ncclResult_t, ncclWaitSignal, int nDesc, ncclWaitSignalDesc_t* signalDescs, ncclComm_t comm,
+         hipStream_t stream);
+
+NCCL_API(ncclResult_t, ncclRedOpCreatePreMulSum, ncclRedOp_t* op, void* scalar, ncclDataType_t datatype,
+         ncclScalarResidence_t residence, ncclComm_t comm);
 
 NCCL_API(ncclResult_t, ncclRedOpDestroy, ncclRedOp_t op, ncclComm_t comm);
 
@@ -474,13 +398,12 @@ NCCL_API(ncclResult_t, ncclGetVersion, int* version);
 
 NCCL_API(ncclResult_t, ncclGetUniqueId, ncclUniqueId* out);
 
-NCCL_API(ncclResult_t, ncclCommInitRank, ncclComm_t* newcomm, int nranks,
-         ncclUniqueId commId, int myrank);
+NCCL_API(ncclResult_t, ncclCommInitRank, ncclComm_t* newcomm, int nranks, ncclUniqueId commId, int myrank);
 
 NCCL_API(ncclResult_t, ncclCommInitAll, ncclComm_t* comms, int ndev, const int* devlist);
 
-NCCL_API(ncclResult_t, ncclCommInitRankConfig, ncclComm_t* comm, int nranks,
-         ncclUniqueId commId, int myrank, ncclConfig_t* config);
+NCCL_API(ncclResult_t, ncclCommInitRankConfig, ncclComm_t* comm, int nranks, ncclUniqueId commId, int myrank,
+         ncclConfig_t* config);
 
 NCCL_API(ncclResult_t, ncclCommFinalize, ncclComm_t comm);
 
@@ -493,8 +416,7 @@ NCCL_API(ncclResult_t, ncclCommRevoke, ncclComm_t comm, int revokeFlags);
 NCCL_API(ncclResult_t, ncclCommShrink, ncclComm_t comm, int* excludeRanksList, int excludeRanksCount,
          ncclComm_t* newcomm, ncclConfig_t* config, int shrinkFlags);
 
-NCCL_API(ncclResult_t, ncclCommSplit, ncclComm_t comm, int color, int key,
-         ncclComm_t* newcomm, ncclConfig_t* config);
+NCCL_API(ncclResult_t, ncclCommSplit, ncclComm_t comm, int color, int key, ncclComm_t* newcomm, ncclConfig_t* config);
 
 NCCL_API(const char*, ncclGetErrorString, ncclResult_t code);
 
@@ -512,24 +434,20 @@ NCCL_API(ncclResult_t, ncclMemAlloc, void** ptr, size_t size);
 
 NCCL_API(ncclResult_t, ncclMemFree, void* ptr);
 
-NCCL_API(ncclResult_t, mscclLoadAlgo, const char* mscclAlgoFilePath,
-         mscclAlgoHandle_t* mscclAlgoHandle, int rank);
+NCCL_API(ncclResult_t, mscclLoadAlgo, const char* mscclAlgoFilePath, mscclAlgoHandle_t* mscclAlgoHandle, int rank);
 
-NCCL_API(ncclResult_t, mscclRunAlgo, const void* sendBuff, const size_t sendCounts[],
-         const size_t sDisPls[], void* recvBuff, const size_t recvCounts[],
-         const size_t rDisPls[], size_t count, ncclDataType_t dataType, int root,
-         int peer, ncclRedOp_t op, mscclAlgoHandle_t mscclAlgoHandle, ncclComm_t comm,
-         hipStream_t stream);
+NCCL_API(ncclResult_t, mscclRunAlgo, const void* sendBuff, const size_t sendCounts[], const size_t sDisPls[],
+         void* recvBuff, const size_t recvCounts[], const size_t rDisPls[], size_t count, ncclDataType_t dataType,
+         int root, int peer, ncclRedOp_t op, mscclAlgoHandle_t mscclAlgoHandle, ncclComm_t comm, hipStream_t stream);
 
 NCCL_API(ncclResult_t, mscclUnloadAlgo, mscclAlgoHandle_t mscclAlgoHandle);
 
-NCCL_API(ncclResult_t, ncclCommRegister, const ncclComm_t comm, void* buff, size_t size,
-         void** handle);
+NCCL_API(ncclResult_t, ncclCommRegister, const ncclComm_t comm, void* buff, size_t size, void** handle);
 
 NCCL_API(ncclResult_t, ncclCommDeregister, const ncclComm_t comm, void* handle);
 
-NCCL_API(ncclResult_t, ncclCommWindowRegister, ncclComm_t comm, void* buff, size_t size, 
-         ncclWindow_t* win, int winFlags);
+NCCL_API(ncclResult_t, ncclCommWindowRegister, ncclComm_t comm, void* buff, size_t size, ncclWindow_t* win,
+         int winFlags);
 
 NCCL_API(ncclResult_t, ncclCommWindowDeregister, ncclComm_t comm, ncclWindow_t win);
 
@@ -537,362 +455,252 @@ NCCL_API(ncclResult_t, ncclCommSuspend, ncclComm_t comm, int flags);
 
 NCCL_API(ncclResult_t, ncclCommResume, ncclComm_t comm);
 
-NCCL_API(ncclResult_t, ncclCommMemStats, ncclComm_t comm, ncclCommMemStat_t stat,
-         uint64_t* value);
+NCCL_API(ncclResult_t, ncclCommMemStats, ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value);
 
-ncclResult_t
-ncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcount,
-              ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclAllGather_fn(sendbuff, recvbuff, sendcount,
-                                                            datatype, comm, stream);
+NCCL_API(ncclResult_t, ncclCommGetUniqueId, ncclComm_t comm, ncclUniqueId* uniqueId);
+
+NCCL_API(ncclResult_t, ncclCommGrow, ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId, int rank,
+         ncclComm_t* newcomm, ncclConfig_t* config);
+
+ncclResult_t ncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
+                           ncclComm_t comm, cudaStream_t stream) {
+  return ::rccl::RcclGetFunctionTable()->ncclAllGather_fn(sendbuff, recvbuff, sendcount, datatype, comm, stream);
 }
 
-ncclResult_t
-ncclAllReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-              ncclRedOp_t op, ncclComm* comm, cudaStream_t stream)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclAllReduce_fn(sendbuff, recvbuff, count,
-                                                            datatype, op, comm, stream);
+ncclResult_t ncclAllReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
+                           ncclComm* comm, cudaStream_t stream) {
+  return ::rccl::RcclGetFunctionTable()->ncclAllReduce_fn(sendbuff, recvbuff, count, datatype, op, comm, stream);
 }
 
-ncclResult_t
-ncclAllReduceWithBias(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-              ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, const void* acc)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclAllReduceWithBias_fn(sendbuff, recvbuff, count,
-                                                            datatype, op, comm, stream, acc);
+ncclResult_t ncclAllReduceWithBias(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                   ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, const void* acc) {
+  return ::rccl::RcclGetFunctionTable()->ncclAllReduceWithBias_fn(sendbuff, recvbuff, count, datatype, op, comm, stream,
+                                                                  acc);
 }
 
-ncclResult_t
-ncclAlltoAll(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-             ncclComm_t comm, hipStream_t stream)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclAlltoAll_fn(sendbuff, recvbuff, count,
-                                                           datatype, comm, stream);
+ncclResult_t ncclAlltoAll(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, ncclComm_t comm,
+                          hipStream_t stream) {
+  return ::rccl::RcclGetFunctionTable()->ncclAlltoAll_fn(sendbuff, recvbuff, count, datatype, comm, stream);
 }
 
-ncclResult_t
-ncclAllToAll(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-             ncclComm_t comm, hipStream_t stream)
-{
-    WARN("Please note that ncclAllToAll is deprecated, please use ncclAlltoAll instead");
-    return ::rccl::RcclGetFunctionTable()->ncclAlltoAll_fn(sendbuff, recvbuff, count,
-                                                           datatype, comm, stream);
+ncclResult_t ncclAllToAll(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, ncclComm_t comm,
+                          hipStream_t stream) {
+  WARN("Please note that ncclAllToAll is deprecated, please use ncclAlltoAll instead");
+  return ::rccl::RcclGetFunctionTable()->ncclAlltoAll_fn(sendbuff, recvbuff, count, datatype, comm, stream);
 }
 
-ncclResult_t
-ncclAlltoAllv(const void* sendbuff, const size_t sendcounts[], const size_t sdispls[],
-              void* recvbuff, const size_t recvcounts[], const size_t rdispls[],
-              ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclAlltoAllv_fn(sendbuff, sendcounts, sdispls,
-                                                            recvbuff, recvcounts, rdispls,
-                                                            datatype, comm, stream);
+ncclResult_t ncclAlltoAllv(const void* sendbuff, const size_t sendcounts[], const size_t sdispls[], void* recvbuff,
+                           const size_t recvcounts[], const size_t rdispls[], ncclDataType_t datatype, ncclComm_t comm,
+                           hipStream_t stream) {
+  return ::rccl::RcclGetFunctionTable()->ncclAlltoAllv_fn(sendbuff, sendcounts, sdispls, recvbuff, recvcounts, rdispls,
+                                                          datatype, comm, stream);
 }
 
-ncclResult_t
-ncclAllToAllv(const void* sendbuff, const size_t sendcounts[], const size_t sdispls[],
-              void* recvbuff, const size_t recvcounts[], const size_t rdispls[],
-              ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream)
-{
-    WARN("Please note that ncclAllToAllv is deprecated, please use ncclAlltoAllv instead");
-    return ::rccl::RcclGetFunctionTable()->ncclAlltoAllv_fn(sendbuff, sendcounts, sdispls,
-                                                            recvbuff, recvcounts, rdispls,
-                                                            datatype, comm, stream);
+ncclResult_t ncclAllToAllv(const void* sendbuff, const size_t sendcounts[], const size_t sdispls[], void* recvbuff,
+                           const size_t recvcounts[], const size_t rdispls[], ncclDataType_t datatype, ncclComm_t comm,
+                           hipStream_t stream) {
+  WARN("Please note that ncclAllToAllv is deprecated, please use ncclAlltoAllv instead");
+  return ::rccl::RcclGetFunctionTable()->ncclAlltoAllv_fn(sendbuff, sendcounts, sdispls, recvbuff, recvcounts, rdispls,
+                                                          datatype, comm, stream);
 }
 
-ncclResult_t
-ncclBroadcast(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-              int root, ncclComm_t comm, cudaStream_t stream)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclBroadcast_fn(sendbuff, recvbuff, count,
-                                                            datatype, root, comm, stream);
+ncclResult_t ncclBroadcast(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, int root,
+                           ncclComm_t comm, cudaStream_t stream) {
+  return ::rccl::RcclGetFunctionTable()->ncclBroadcast_fn(sendbuff, recvbuff, count, datatype, root, comm, stream);
 }
 
-ncclResult_t
-ncclGather(const void* sendbuff, void* recvbuff, size_t sendcount,
-           ncclDataType_t datatype, int root, ncclComm_t comm, hipStream_t stream)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclGather_fn(sendbuff, recvbuff, sendcount,
-                                                         datatype, root, comm, stream);
+ncclResult_t ncclGather(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype, int root,
+                        ncclComm_t comm, hipStream_t stream) {
+  return ::rccl::RcclGetFunctionTable()->ncclGather_fn(sendbuff, recvbuff, sendcount, datatype, root, comm, stream);
 }
 
-ncclResult_t
-ncclReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-           ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclReduce_fn(
-        sendbuff, recvbuff, count, datatype, op, root, comm, stream);
+ncclResult_t ncclReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
+                        int root, ncclComm_t comm, cudaStream_t stream) {
+  return ::rccl::RcclGetFunctionTable()->ncclReduce_fn(sendbuff, recvbuff, count, datatype, op, root, comm, stream);
 }
 
-ncclResult_t
-ncclReduceScatter(const void* sendbuff, void* recvbuff, size_t recvcount,
-                  ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
-                  cudaStream_t stream)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclReduceScatter_fn(
-        sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
+ncclResult_t ncclReduceScatter(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
+                               ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
+  return ::rccl::RcclGetFunctionTable()->ncclReduceScatter_fn(sendbuff, recvbuff, recvcount, datatype, op, comm,
+                                                              stream);
 }
 
-ncclResult_t
-ncclScatter(const void* sendbuff, void* recvbuff, size_t recvcount,
-            ncclDataType_t datatype, int root, ncclComm_t comm, hipStream_t stream)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclScatter_fn(sendbuff, recvbuff, recvcount,
-                                                          datatype, root, comm, stream);
+ncclResult_t ncclScatter(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype, int root,
+                         ncclComm_t comm, hipStream_t stream) {
+  return ::rccl::RcclGetFunctionTable()->ncclScatter_fn(sendbuff, recvbuff, recvcount, datatype, root, comm, stream);
 }
 
-ncclResult_t
-ncclSend(const void* sendbuff, size_t count, ncclDataType_t datatype, int peer,
-         ncclComm_t comm, cudaStream_t stream)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclSend_fn(sendbuff, count, datatype, peer,
-                                                       comm, stream);
+ncclResult_t ncclSend(const void* sendbuff, size_t count, ncclDataType_t datatype, int peer, ncclComm_t comm,
+                      cudaStream_t stream) {
+  return ::rccl::RcclGetFunctionTable()->ncclSend_fn(sendbuff, count, datatype, peer, comm, stream);
 }
 
-ncclResult_t
-ncclRecv(void* recvbuff, size_t count, ncclDataType_t datatype, int peer, ncclComm_t comm,
-         cudaStream_t stream)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclRecv_fn(recvbuff, count, datatype, peer,
-                                                       comm, stream);
+ncclResult_t ncclRecv(void* recvbuff, size_t count, ncclDataType_t datatype, int peer, ncclComm_t comm,
+                      cudaStream_t stream) {
+  return ::rccl::RcclGetFunctionTable()->ncclRecv_fn(recvbuff, count, datatype, peer, comm, stream);
 }
 
-ncclResult_t
-ncclRedOpCreatePreMulSum(ncclRedOp_t* op, void* scalar, ncclDataType_t datatype,
-                         ncclScalarResidence_t residence, ncclComm_t comm)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclRedOpCreatePreMulSum_fn(
-        op, scalar, datatype, residence, comm);
+ncclResult_t ncclRedOpCreatePreMulSum(ncclRedOp_t* op, void* scalar, ncclDataType_t datatype,
+                                      ncclScalarResidence_t residence, ncclComm_t comm) {
+  return ::rccl::RcclGetFunctionTable()->ncclRedOpCreatePreMulSum_fn(op, scalar, datatype, residence, comm);
 }
 
-ncclResult_t
-ncclRedOpDestroy(ncclRedOp_t op, ncclComm_t comm)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclRedOpDestroy_fn(op, comm);
+ncclResult_t ncclRedOpDestroy(ncclRedOp_t op, ncclComm_t comm) {
+  return ::rccl::RcclGetFunctionTable()->ncclRedOpDestroy_fn(op, comm);
 }
 
-ncclResult_t
-ncclGroupStart()
-{
-    return ::rccl::RcclGetFunctionTable()->ncclGroupStart_fn();
+ncclResult_t ncclGroupStart() {
+  return ::rccl::RcclGetFunctionTable()->ncclGroupStart_fn();
 }
 
-ncclResult_t
-ncclGroupEnd()
-{
-    return ::rccl::RcclGetFunctionTable()->ncclGroupEnd_fn();
+ncclResult_t ncclGroupEnd() {
+  return ::rccl::RcclGetFunctionTable()->ncclGroupEnd_fn();
 }
 
-ncclResult_t
-ncclGetVersion(int* version)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclGetVersion_fn(version);
+ncclResult_t ncclGetVersion(int* version) {
+  return ::rccl::RcclGetFunctionTable()->ncclGetVersion_fn(version);
 }
 
-ncclResult_t
-ncclGetUniqueId(ncclUniqueId* out)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclGetUniqueId_fn(out);
+ncclResult_t ncclGetUniqueId(ncclUniqueId* out) {
+  return ::rccl::RcclGetFunctionTable()->ncclGetUniqueId_fn(out);
 }
 
-ncclResult_t
-ncclCommInitRank(ncclComm_t* newcomm, int nranks, ncclUniqueId commId, int myrank)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclCommInitRank_fn(newcomm, nranks, commId,
-                                                               myrank);
+ncclResult_t ncclCommInitRank(ncclComm_t* newcomm, int nranks, ncclUniqueId commId, int myrank) {
+  return ::rccl::RcclGetFunctionTable()->ncclCommInitRank_fn(newcomm, nranks, commId, myrank);
 }
 
-ncclResult_t
-ncclCommInitAll(ncclComm_t* comms, int ndev, const int* devlist)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclCommInitAll_fn(comms, ndev, devlist);
+ncclResult_t ncclCommInitAll(ncclComm_t* comms, int ndev, const int* devlist) {
+  return ::rccl::RcclGetFunctionTable()->ncclCommInitAll_fn(comms, ndev, devlist);
 }
 
-ncclResult_t
-ncclCommInitRankConfig(ncclComm_t* comm, int nranks, ncclUniqueId commId, int myrank,
-                       ncclConfig_t* config)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclCommInitRankConfig_fn(comm, nranks, commId,
-                                                                     myrank, config);
+ncclResult_t ncclCommInitRankConfig(ncclComm_t* comm, int nranks, ncclUniqueId commId, int myrank,
+                                    ncclConfig_t* config) {
+  return ::rccl::RcclGetFunctionTable()->ncclCommInitRankConfig_fn(comm, nranks, commId, myrank, config);
 }
 
-ncclResult_t
-ncclCommFinalize(ncclComm_t comm)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclCommFinalize_fn(comm);
+ncclResult_t ncclCommFinalize(ncclComm_t comm) {
+  return ::rccl::RcclGetFunctionTable()->ncclCommFinalize_fn(comm);
 }
 
-ncclResult_t
-ncclCommDestroy(ncclComm_t comm)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclCommDestroy_fn(comm);
+ncclResult_t ncclCommDestroy(ncclComm_t comm) {
+  return ::rccl::RcclGetFunctionTable()->ncclCommDestroy_fn(comm);
 }
 
-ncclResult_t
-ncclCommAbort(ncclComm_t comm)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclCommAbort_fn(comm);
+ncclResult_t ncclCommAbort(ncclComm_t comm) {
+  return ::rccl::RcclGetFunctionTable()->ncclCommAbort_fn(comm);
 }
 
-ncclResult_t
-ncclCommRevoke(ncclComm_t comm, int revokeFlags)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclCommRevoke_fn(comm, revokeFlags);
+ncclResult_t ncclCommRevoke(ncclComm_t comm, int revokeFlags) {
+  return ::rccl::RcclGetFunctionTable()->ncclCommRevoke_fn(comm, revokeFlags);
 }
 
-ncclResult_t
-ncclCommShrink(ncclComm_t comm, int* excludeRanksList, int excludeRanksCount, ncclComm_t* newcomm,
-               ncclConfig_t* config, int shrinkFlags)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclCommShrink_fn(comm, excludeRanksList, excludeRanksCount, 
-                                                             newcomm, config, shrinkFlags);
+ncclResult_t ncclCommShrink(ncclComm_t comm, int* excludeRanksList, int excludeRanksCount, ncclComm_t* newcomm,
+                            ncclConfig_t* config, int shrinkFlags) {
+  return ::rccl::RcclGetFunctionTable()->ncclCommShrink_fn(comm, excludeRanksList, excludeRanksCount, newcomm, config,
+                                                           shrinkFlags);
 }
 
-ncclResult_t
-ncclCommSplit(ncclComm_t comm, int color, int key, ncclComm_t* newcomm,
-              ncclConfig_t* config)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclCommSplit_fn(comm, color, key, newcomm,
-                                                            config);
+ncclResult_t ncclCommSplit(ncclComm_t comm, int color, int key, ncclComm_t* newcomm, ncclConfig_t* config) {
+  return ::rccl::RcclGetFunctionTable()->ncclCommSplit_fn(comm, color, key, newcomm, config);
 }
 
-const char*
-ncclGetErrorString(ncclResult_t code)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclGetErrorString_fn(code);
+const char* ncclGetErrorString(ncclResult_t code) {
+  return ::rccl::RcclGetFunctionTable()->ncclGetErrorString_fn(code);
 }
 
-const char*
-ncclGetLastError(const ncclComm_t comm)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclGetLastError_fn(comm);
+const char* ncclGetLastError(const ncclComm_t comm) {
+  return ::rccl::RcclGetFunctionTable()->ncclGetLastError_fn(comm);
 }
 
-ncclResult_t
-ncclCommGetAsyncError(ncclComm_t comm, ncclResult_t* asyncError)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclCommGetAsyncError_fn(comm, asyncError);
+ncclResult_t ncclCommGetAsyncError(ncclComm_t comm, ncclResult_t* asyncError) {
+  return ::rccl::RcclGetFunctionTable()->ncclCommGetAsyncError_fn(comm, asyncError);
 }
 
-ncclResult_t
-ncclCommCount(const ncclComm_t comm, int* count)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclCommCount_fn(comm, count);
+ncclResult_t ncclCommCount(const ncclComm_t comm, int* count) {
+  return ::rccl::RcclGetFunctionTable()->ncclCommCount_fn(comm, count);
 }
 
-ncclResult_t
-ncclCommCuDevice(const ncclComm_t comm, int* devid)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclCommCuDevice_fn(comm, devid);
+ncclResult_t ncclCommCuDevice(const ncclComm_t comm, int* devid) {
+  return ::rccl::RcclGetFunctionTable()->ncclCommCuDevice_fn(comm, devid);
 }
 
-ncclResult_t
-ncclCommUserRank(const ncclComm_t comm, int* rank)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclCommUserRank_fn(comm, rank);
+ncclResult_t ncclCommUserRank(const ncclComm_t comm, int* rank) {
+  return ::rccl::RcclGetFunctionTable()->ncclCommUserRank_fn(comm, rank);
 }
 
-ncclResult_t
-ncclMemAlloc(void** ptr, size_t size)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclMemAlloc_fn(ptr, size);
+ncclResult_t ncclMemAlloc(void** ptr, size_t size) {
+  return ::rccl::RcclGetFunctionTable()->ncclMemAlloc_fn(ptr, size);
 }
 
-ncclResult_t
-ncclMemFree(void* ptr)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclMemFree_fn(ptr);
+ncclResult_t ncclMemFree(void* ptr) {
+  return ::rccl::RcclGetFunctionTable()->ncclMemFree_fn(ptr);
 }
 
-ncclResult_t
-mscclLoadAlgo(const char* mscclAlgoFilePath, mscclAlgoHandle_t* mscclAlgoHandle, int rank)
-{
-    return ::rccl::RcclGetFunctionTable()->mscclLoadAlgo_fn(mscclAlgoFilePath,
-                                                            mscclAlgoHandle, rank);
+ncclResult_t mscclLoadAlgo(const char* mscclAlgoFilePath, mscclAlgoHandle_t* mscclAlgoHandle, int rank) {
+  return ::rccl::RcclGetFunctionTable()->mscclLoadAlgo_fn(mscclAlgoFilePath, mscclAlgoHandle, rank);
 }
 
-ncclResult_t
-mscclRunAlgo(const void* sendBuff, const size_t sendCounts[], const size_t sDisPls[],
-             void* recvBuff, const size_t recvCounts[], const size_t rDisPls[],
-             size_t count, ncclDataType_t dataType, int root, int peer, ncclRedOp_t op,
-             mscclAlgoHandle_t mscclAlgoHandle, ncclComm_t comm, hipStream_t stream)
-{
-    return ::rccl::RcclGetFunctionTable()->mscclRunAlgo_fn(
-        sendBuff, sendCounts, sDisPls, recvBuff, recvCounts, rDisPls, count, dataType,
-        root, peer, op, mscclAlgoHandle, comm, stream);
+ncclResult_t mscclRunAlgo(const void* sendBuff, const size_t sendCounts[], const size_t sDisPls[], void* recvBuff,
+                          const size_t recvCounts[], const size_t rDisPls[], size_t count, ncclDataType_t dataType,
+                          int root, int peer, ncclRedOp_t op, mscclAlgoHandle_t mscclAlgoHandle, ncclComm_t comm,
+                          hipStream_t stream) {
+  return ::rccl::RcclGetFunctionTable()->mscclRunAlgo_fn(sendBuff, sendCounts, sDisPls, recvBuff, recvCounts, rDisPls,
+                                                         count, dataType, root, peer, op, mscclAlgoHandle, comm,
+                                                         stream);
 }
 
-ncclResult_t
-mscclUnloadAlgo(mscclAlgoHandle_t mscclAlgoHandle)
-{
-    return ::rccl::RcclGetFunctionTable()->mscclUnloadAlgo_fn(mscclAlgoHandle);
+ncclResult_t mscclUnloadAlgo(mscclAlgoHandle_t mscclAlgoHandle) {
+  return ::rccl::RcclGetFunctionTable()->mscclUnloadAlgo_fn(mscclAlgoHandle);
 }
 
-ncclResult_t
-ncclCommRegister(const ncclComm_t comm, void* buff, size_t size, void** handle)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclCommRegister_fn(comm, buff, size, handle);
+ncclResult_t ncclCommRegister(const ncclComm_t comm, void* buff, size_t size, void** handle) {
+  return ::rccl::RcclGetFunctionTable()->ncclCommRegister_fn(comm, buff, size, handle);
 }
 
-ncclResult_t
-ncclCommDeregister(const ncclComm_t comm, void* handle)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclCommDeregister_fn(comm, handle);
+ncclResult_t ncclCommDeregister(const ncclComm_t comm, void* handle) {
+  return ::rccl::RcclGetFunctionTable()->ncclCommDeregister_fn(comm, handle);
 }
 
-ncclResult_t
-ncclCommWindowRegister(ncclComm_t comm, void* buff, size_t size, ncclWindow_t* win, int winFlags)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclCommWindowRegister_fn(comm, buff, size, win, winFlags);
+ncclResult_t ncclCommWindowRegister(ncclComm_t comm, void* buff, size_t size, ncclWindow_t* win, int winFlags) {
+  return ::rccl::RcclGetFunctionTable()->ncclCommWindowRegister_fn(comm, buff, size, win, winFlags);
 }
 
-ncclResult_t
-ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclCommWindowDeregister_fn(comm, win);
+ncclResult_t ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win) {
+  return ::rccl::RcclGetFunctionTable()->ncclCommWindowDeregister_fn(comm, win);
 }
 
-ncclResult_t
-ncclCommSuspend(ncclComm_t comm, int flags)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclCommSuspend_fn(comm, flags);
+ncclResult_t ncclCommSuspend(ncclComm_t comm, int flags) {
+  return ::rccl::RcclGetFunctionTable()->ncclCommSuspend_fn(comm, flags);
 }
 
-ncclResult_t
-ncclCommResume(ncclComm_t comm)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclCommResume_fn(comm);
+ncclResult_t ncclCommResume(ncclComm_t comm) {
+  return ::rccl::RcclGetFunctionTable()->ncclCommResume_fn(comm);
 }
 
-ncclResult_t
-ncclCommMemStats(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclCommMemStats_fn(comm, stat, value);
+ncclResult_t ncclCommMemStats(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value) {
+  return ::rccl::RcclGetFunctionTable()->ncclCommMemStats_fn(comm, stat, value);
 }
 
-ncclResult_t
-ncclPutSignal(const void* localbuff, size_t count, ncclDataType_t datatype,
-              int peer, ncclWindow_t peerWin, size_t peerWinOffset,
-              int sigIdx, int ctx, unsigned int flags,
-              ncclComm_t comm, cudaStream_t stream)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclPutSignal_fn(localbuff, count, datatype,
-                                                            peer, peerWin, peerWinOffset,
-                                                            sigIdx, ctx, flags, comm, stream);
+ncclResult_t ncclPutSignal(const void* localbuff, size_t count, ncclDataType_t datatype, int peer, ncclWindow_t peerWin,
+                           size_t peerWinOffset, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm,
+                           cudaStream_t stream) {
+  return ::rccl::RcclGetFunctionTable()->ncclPutSignal_fn(localbuff, count, datatype, peer, peerWin, peerWinOffset,
+                                                          sigIdx, ctx, flags, comm, stream);
 }
 
-ncclResult_t
-ncclSignal(int peer, int sigIdx, int ctx, unsigned int flags,
-           ncclComm_t comm, cudaStream_t stream)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclSignal_fn(peer, sigIdx, ctx, flags, comm, stream);
+ncclResult_t ncclSignal(int peer, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream) {
+  return ::rccl::RcclGetFunctionTable()->ncclSignal_fn(peer, sigIdx, ctx, flags, comm, stream);
 }
 
-ncclResult_t
-ncclWaitSignal(int nDesc, ncclWaitSignalDesc_t* signalDescs,
-               ncclComm_t comm, cudaStream_t stream)
-{
-    return ::rccl::RcclGetFunctionTable()->ncclWaitSignal_fn(nDesc, signalDescs, comm, stream);
+ncclResult_t ncclWaitSignal(int nDesc, ncclWaitSignalDesc_t* signalDescs, ncclComm_t comm, cudaStream_t stream) {
+  return ::rccl::RcclGetFunctionTable()->ncclWaitSignal_fn(nDesc, signalDescs, comm, stream);
+}
+
+ncclResult_t ncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId) {
+  return ::rccl::RcclGetFunctionTable()->ncclCommGetUniqueId_fn(comm, uniqueId);
+}
+
+ncclResult_t ncclCommGrow(ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId, int rank, ncclComm_t* newcomm,
+                          ncclConfig_t* config) {
+  return ::rccl::RcclGetFunctionTable()->ncclCommGrow_fn(comm, nRanks, uniqueId, rank, newcomm, config);
 }

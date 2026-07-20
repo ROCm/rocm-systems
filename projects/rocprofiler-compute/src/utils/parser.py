@@ -282,16 +282,6 @@ def apply_filters(
     # TODO: error out properly if filters out of bound
     filtered_df = workload.raw_pmc
 
-    # Apply node filter
-    if workload.filter_nodes:
-        filtered_df = filtered_df.loc[
-            filtered_df["Node"]
-            .astype(str)
-            .isin(normalize_filter_to_str_list(workload.filter_nodes))
-        ]
-        if filtered_df.empty:
-            console_error("analysis", f"{workload.filter_nodes} is invalid")
-
     # Apply GPU ID filter
     if workload.filter_gpu_ids:
         filtered_df = filtered_df.loc[
@@ -404,6 +394,7 @@ def load_pc_sampling_data_per_kernel(
     tool_data: dict[str, Any],
     sorting_type: str,
     kernel_name: Optional[str] = None,
+    num_rows: Optional[int] = None,
 ) -> pd.DataFrame:
     """Build the detailed per-instruction PC sampling table from *tool_data*.
 
@@ -413,17 +404,25 @@ def load_pc_sampling_data_per_kernel(
     :param tool_data: The parsed ``rocprofiler-sdk-tool[0]`` dict.
     :param sorting_type: "offset" or "count".
     :param kernel_name: Kernel to filter to, or None for all kernels.
+    :param num_rows: Keep only the first *num_rows* rows after sorting; None or
+        0 keeps every row.
     """
+    kernel_context = f"kernel '{kernel_name}'" if kernel_name else "all kernels"
     pc_samples = tool_data["buffer_records"][
         "pc_sample_host_trap" if method == "host_trap" else "pc_sample_stochastic"
     ]
     if not pc_samples:
-        console_error("PC sampling: can not find pc sample.")
+        console_warning(f"PC sampling: no pc samples found for {kernel_context}.")
+        return pd.DataFrame()
 
     instructions = tool_data["strings"]["pc_sample_instructions"]
     comments = tool_data["strings"]["pc_sample_comments"]
     if not instructions or not comments:
-        console_error("PC sampling: instruction or comment string table is empty.")
+        console_warning(
+            "PC sampling: instruction or comment string table is empty for "
+            f"{kernel_context}."
+        )
+        return pd.DataFrame()
 
     records_df = load_pc_sample_records(tool_data)
     aggregated_df = aggregate_pc_sample_records(
@@ -465,6 +464,10 @@ def load_pc_sampling_data_per_kernel(
         )
         return pd.DataFrame()
 
+    # num_rows of 0 or None (or a negative passed programmatically) shows all.
+    if num_rows and num_rows > 0:
+        df_sorted = df_sorted.head(num_rows)
+
     df_sorted["offset"] = df_sorted["offset"].apply(hex)
 
     # Stochastic adds issue/stall detail on top of the host_trap columns.
@@ -483,6 +486,7 @@ def load_pc_sampling_data(
     file_prefix: str,
     sorting_type: str,
     tool_data: Optional[dict[str, Any]],
+    num_rows: Optional[int] = None,
 ) -> pd.DataFrame:
     """Return the detailed per-instruction table for a single kernel or all.
 
@@ -507,6 +511,7 @@ def load_pc_sampling_data(
             pc_sampling_method,
             tool_data,
             sorting_type,
+            num_rows=num_rows,
         )
 
     if len(workload.filter_kernel_ids) > 1:
@@ -533,6 +538,7 @@ def load_pc_sampling_data(
         tool_data,
         sorting_type,
         kernel_name,
+        num_rows=num_rows,
     )
 
 
@@ -624,6 +630,7 @@ def load_non_mertrics_table(
                 df.loc[0, "from_pc_sampling"],
                 args.pc_sampling_sorting_type,
                 pc_sampling_tool_data,
+                num_rows=args.pc_sampling_rows,
             )
 
     workload.dfs.update(tmp)
@@ -642,6 +649,7 @@ def load_table_data(
     args: argparse.Namespace,
     dfs_expressions: dict[int, list[str]],
     skip_kernel_top: bool = False,
+    pc_sampling_tool_data: Optional[dict[str, Any]] = None,
 ) -> None:
     """
     - Load data for all "raw_csv_table"
@@ -649,7 +657,7 @@ def load_table_data(
     - Calculate mertric value for all "metric_table"
     """
     if not skip_kernel_top:
-        load_non_mertrics_table(workload, dir_path, args)
+        load_non_mertrics_table(workload, dir_path, args, pc_sampling_tool_data)
 
     eval_metric(
         workload.dfs,

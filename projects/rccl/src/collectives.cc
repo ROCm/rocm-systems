@@ -13,10 +13,12 @@
 #include "api_trace.h"
 #include "nvtx_payload_schemas.h"
 #include "device/hierarchical_ag_shuffle.h"
-#include "dda_all_reduce_ipc.h"
-#include "dda_reduce_scatter_ipc.h"
-#include "dda_all_gather_ipc.h"
-#include "dda_alltoall_ipc.h"
+#include "dda_all_reduce.h"
+#include "dda_reduce_scatter.h"
+#include "dda_all_gather.h"
+#include "dda_alltoall.h"
+#include "sym_kernels.h"
+#include "dev_runtime.h"
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
@@ -26,76 +28,121 @@ using namespace rccl;
 
 const char* ncclFuncToString(ncclFunc_t fn) {
   switch (fn) {
-  case ncclFuncAllGather: return "AllGather";
-  case ncclFuncAllReduce: return "AllReduce";
-  case ncclFuncAlltoAll: return "AlltoAll";
-  case ncclFuncBroadcast: return "Broadcast";
-  case ncclFuncGather: return "Gather";
-  case ncclFuncRecv: return "Recv";
-  case ncclFuncReduce: return "Reduce";
-  case ncclFuncReduceScatter: return "ReduceScatter";
-  case ncclFuncScatter: return "Scatter";
-  case ncclFuncSendRecv: return "SendRecv";
-  case ncclFuncSend: return "Send";
-  case ncclFuncPutSignal: return "PutSignal";
-  case ncclFuncSignal: return "Signal";
-  case ncclFuncWaitSignal: return "WaitSignal";
-  default: return "Invalid";
+  case ncclFuncAllGather:
+    return "AllGather";
+  case ncclFuncAllReduce:
+    return "AllReduce";
+  case ncclFuncAlltoAll:
+    return "AlltoAll";
+  case ncclFuncBroadcast:
+    return "Broadcast";
+  case ncclFuncGather:
+    return "Gather";
+  case ncclFuncRecv:
+    return "Recv";
+  case ncclFuncReduce:
+    return "Reduce";
+  case ncclFuncReduceScatter:
+    return "ReduceScatter";
+  case ncclFuncScatter:
+    return "Scatter";
+  case ncclFuncSendRecv:
+    return "SendRecv";
+  case ncclFuncSend:
+    return "Send";
+  case ncclFuncPutSignal:
+    return "PutSignal";
+  case ncclFuncSignal:
+    return "Signal";
+  case ncclFuncWaitSignal:
+    return "WaitSignal";
+  default:
+    return "Invalid";
   }
 }
 
 const char* ncclDevRedOpToString(ncclDevRedOp_t op) {
   switch (op) {
-  case ncclDevSum: return "Sum";
-  case ncclDevProd: return "Prod";
-  case ncclDevMinMax: return "MinMax";
-  case ncclDevPreMulSum: return "PreMulSum";
-  case ncclDevSumPostDiv: return "SumPostDiv";
-  default: return "Unknown";
+  case ncclDevSum:
+    return "Sum";
+  case ncclDevProd:
+    return "Prod";
+  case ncclDevMinMax:
+    return "MinMax";
+  case ncclDevPreMulSum:
+    return "PreMulSum";
+  case ncclDevSumPostDiv:
+    return "SumPostDiv";
+  default:
+    return "Unknown";
   }
 }
 
 const char* ncclDatatypeToString(ncclDataType_t type) {
   switch (type) {
-  case ncclInt8: return "ncclInt8";
-  case ncclInt32: return "ncclInt32";
-  case ncclUint32: return "ncclUint32";
-  case ncclInt64: return "ncclInt64";
-  case ncclUint64: return "ncclUint64";
-  case ncclFloat16: return "ncclFloat16";
-  case ncclFloat32: return "ncclFloat32";
-  case ncclFloat64: return "ncclFloat64";
-  case ncclBfloat16: return "ncclBfloat16";
-  case ncclFloat8e4m3: return "ncclFloat8e4m3";
-  case ncclFloat8e5m2: return "ncclFloat8e5m2";
-  default: return "Unknown";
+  case ncclInt8:
+    return "ncclInt8";
+  case ncclInt32:
+    return "ncclInt32";
+  case ncclUint32:
+    return "ncclUint32";
+  case ncclInt64:
+    return "ncclInt64";
+  case ncclUint64:
+    return "ncclUint64";
+  case ncclFloat16:
+    return "ncclFloat16";
+  case ncclFloat32:
+    return "ncclFloat32";
+  case ncclFloat64:
+    return "ncclFloat64";
+  case ncclBfloat16:
+    return "ncclBfloat16";
+  case ncclFloat8e4m3:
+    return "ncclFloat8e4m3";
+  case ncclFloat8e5m2:
+    return "ncclFloat8e5m2";
+  default:
+    return "Unknown";
   }
 }
 
 const char* ncclAlgoToString(int algo) {
   switch (algo) {
-  case NCCL_ALGO_TREE: return "TREE";
-  case NCCL_ALGO_RING: return "RING";
-  case NCCL_ALGO_COLLNET_DIRECT: return "COLLNET_DIRECT";
-  case NCCL_ALGO_COLLNET_CHAIN: return "COLLNET_CHAIN";
-  case NCCL_ALGO_NVLS: return "NVLS";
-  case NCCL_ALGO_NVLS_TREE: return "NVLS_TREE";
-  case NCCL_ALGO_PAT: return "PAT";
-  default: return "Unknown";
+  case NCCL_ALGO_TREE:
+    return "TREE";
+  case NCCL_ALGO_RING:
+    return "RING";
+  case NCCL_ALGO_COLLNET_DIRECT:
+    return "COLLNET_DIRECT";
+  case NCCL_ALGO_COLLNET_CHAIN:
+    return "COLLNET_CHAIN";
+  case NCCL_ALGO_NVLS:
+    return "NVLS";
+  case NCCL_ALGO_NVLS_TREE:
+    return "NVLS_TREE";
+  case NCCL_ALGO_PAT:
+    return "PAT";
+  default:
+    return "Unknown";
   }
 }
 
 const char* ncclProtoToString(int proto) {
   switch (proto) {
-  case NCCL_PROTO_LL: return "LL";
-  case NCCL_PROTO_LL128: return "LL128";
-  case NCCL_PROTO_SIMPLE: return "SIMPLE";
-  default: return "Unknown";
+  case NCCL_PROTO_LL:
+    return "LL";
+  case NCCL_PROTO_LL128:
+    return "LL128";
+  case NCCL_PROTO_SIMPLE:
+    return "SIMPLE";
+  default:
+    return "Unknown";
   }
 }
 
-NCCL_API(ncclResult_t, ncclAllGather, const void* sendbuff, void* recvbuff, size_t sendcount,
-    ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
+NCCL_API(ncclResult_t, ncclAllGather, const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
+         ncclComm_t comm, cudaStream_t stream);
 
 // Direct AllGather: posts Send/Recv to every peer (including self) for every
 // rank using the same iteration order on all ranks. Mirrors the AlltoAll
@@ -114,11 +161,12 @@ NCCL_API(ncclResult_t, ncclAllGather, const void* sendbuff, void* recvbuff, size
 //     overhead (ArgsCheck, Recorder, profiler events, group start/end
 //     internal) that previously made cross-rank batch composition fragile at
 //     scale.
-static ncclResult_t rcclDirectAllGather(const void* sendbuff, void* recvbuff, size_t sendcount,
-    ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream) {
-  struct ncclInfo info = { ncclFuncAllGather, "AllGather",
-    sendbuff, recvbuff, sendcount, datatype, ncclSum, 0, comm, stream,
-    ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS, nullptr };
+static ncclResult_t rcclDirectAllGather(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
+                                        ncclComm_t comm, cudaStream_t stream) {
+  struct ncclInfo info = {
+    ncclFuncAllGather,    "AllGather",          sendbuff, recvbuff, sendcount, datatype, ncclSum, 0, comm, stream,
+    ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS, nullptr
+  };
   info.useDirect = true;
   return ncclEnqueueCheck(&info);
 }
@@ -128,19 +176,41 @@ RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(67108864));
 
 // Returns true when the DDA fast path should be attempted for a collective
 // with the given total byte count.  gfx942Default is the per-collective
-// threshold for gfx942; gfx950 uses the user-configurable rcclParamDdaThreshold();
-// all other architectures return false (threshold 0).
-static bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default) {
-  if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0 || comm->nRanks < 8 || comm->symmetricSupport) return false;
+// threshold for gfx942 (MI300).  gfx950Default optionally caps MI350; when 0,
+// gfx950 uses the user-configurable rcclParamDdaThreshold().
+// gfx1250 uses the user-configurable rcclParamDdaThreshold().
+// All other architectures return false (threshold 0).
+static bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default, size_t gfx950Default = 0) {
+  if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) return false;
   size_t threshold;
-  if (IsArchMatch(comm->archName, "gfx942")) {
-    threshold = gfx942Default;
-  } else if (IsArchMatch(comm->archName, "gfx950")) {
+  if (IsArchMatch(comm->archName, "gfx1250")) {
     threshold = (size_t)rcclParamDdaThreshold();
+  } else if (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950")) {
+    if (comm->nRanks < 8 || comm->symmetricSupport) return false;
+    if (IsArchMatch(comm->archName, "gfx942")) {
+      threshold = gfx942Default;
+    } else {
+      threshold = gfx950Default ? gfx950Default : (size_t)rcclParamDdaThreshold();
+    }
   } else {
     return false;
   }
   return threshold > 0 && totalBytes <= threshold;
+}
+
+// Check if symmteric kernels is requested for this collective
+static bool isSymmetricKernelRequested(ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype,
+                                       size_t nElts, const void* sendbuff, void* recvbuff) {
+  if (comm == nullptr || !comm->symmetricSupport) return false;
+  if (ncclSymkInitOnce(comm) != ncclSuccess) return false;
+  if (!ncclSymkAvailable(comm, coll, symkOp, datatype, nElts)) return false;
+
+  struct ncclDevrWindow* sendWin = nullptr;
+  struct ncclDevrWindow* recvWin = nullptr;
+  ncclDevrFindWindow(comm, sendbuff, &sendWin);
+  ncclDevrFindWindow(comm, recvbuff, &recvWin);
+  return sendWin != nullptr && recvWin != nullptr && (sendWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
+         (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC);
 }
 
 enum rcclAllGatherAlgo {
@@ -160,15 +230,13 @@ static rcclAllGatherAlgo rcclSelectAllGatherAlgo(struct ncclComm* comm, size_t m
 }
 
 static inline int hierarchicalShuffleNumBlocks(size_t totalBytes) {
-  if (totalBytes <= (size_t)64 * 1024)
-    return 8;
-  if (totalBytes <= (size_t)16 * 1024 * 1024)
-    return 16;
+  if (totalBytes <= (size_t)64 * 1024) return 8;
+  if (totalBytes <= (size_t)16 * 1024 * 1024) return 16;
   return 32;
 }
 
 static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* recvbuff, size_t sendcount,
-    ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream) {
+                                                   ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream) {
   if (sendcount == 0) return ncclSuccess;
   ncclComm* intraComm = comm->hierarchicalIntraComm;
   ncclComm* interComm = comm->hierarchicalInterComm;
@@ -189,9 +257,19 @@ static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* r
   if (nNodes <= 16 && rcclUseAllGatherDirect(interComm, interMsgSize)) {
     NCCLCHECK(rcclDirectAllGather(interSendBuff, recvbuff, sendcount, datatype, interComm, stream));
   } else {
-    struct ncclInfo infoInterAG = { ncclFuncAllGather, "HierarchicalAllGather-Inter",
-      interSendBuff, recvbuff, sendcount, datatype, ncclSum, 0, interComm, stream,
-      ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS, nullptr };
+    struct ncclInfo infoInterAG = {ncclFuncAllGather,
+                                   "HierarchicalAllGather-Inter",
+                                   interSendBuff,
+                                   recvbuff,
+                                   sendcount,
+                                   datatype,
+                                   ncclSum,
+                                   0,
+                                   interComm,
+                                   stream,
+                                   ALLGATHER_CHUNKSTEPS,
+                                   ALLGATHER_SLICESTEPS,
+                                   nullptr};
     NCCLCHECK(ncclEnqueueCheck(&infoInterAG));
   }
 
@@ -202,11 +280,19 @@ static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* r
     // Use direct allgather
     NCCLCHECK(rcclDirectAllGather(recvbuff, tempBuffer, intraSendCount, datatype, intraComm, stream));
   } else {
-    struct ncclInfo infoIntraAG = { ncclFuncAllGather, "HierarchicalAllGather-Intra",
-      recvbuff, tempBuffer, intraSendCount, datatype, ncclSum, 0, intraComm, stream,
-      ALLGATHER_CHUNKSTEPS,
-      intraComm->rcclUseOneSlice ? ALLGATHER_SLICESTEPS_SINGLE_NODE : ALLGATHER_SLICESTEPS, nullptr
-    };
+    struct ncclInfo infoIntraAG = {ncclFuncAllGather,
+                                   "HierarchicalAllGather-Intra",
+                                   recvbuff,
+                                   tempBuffer,
+                                   intraSendCount,
+                                   datatype,
+                                   ncclSum,
+                                   0,
+                                   intraComm,
+                                   stream,
+                                   ALLGATHER_CHUNKSTEPS,
+                                   intraComm->rcclUseOneSlice ? ALLGATHER_SLICESTEPS_SINGLE_NODE : ALLGATHER_SLICESTEPS,
+                                   nullptr};
     NCCLCHECK(ncclEnqueueCheck(&infoIntraAG));
   }
 
@@ -214,27 +300,25 @@ static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* r
   size_t totalAGBytes = (size_t)nNodes * localRanks * rankOffset;
   int numBlocks = hierarchicalShuffleNumBlocks(totalAGBytes);
   int threadsPerBlock = 1024;
-  hierarchicalAGShuffle<<<numBlocks, threadsPerBlock, 0, stream>>>(
-    (const char*)tempBuffer, (char*)recvbuff, rankOffset, nNodes, localRanks);
+  hierarchicalAGShuffle<<<numBlocks, threadsPerBlock, 0, stream>>>((const char*)tempBuffer, (char*)recvbuff, rankOffset,
+                                                                   nNodes, localRanks);
   CUDACHECK(hipGetLastError());
 
   return ncclSuccess;
 }
 
-ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sendcount,
-    ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream) {
+ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
+                                ncclComm_t comm, cudaStream_t stream) {
   NVTX3_FUNC_WITH_PARAMS(AllGather, NcclNvtxParamsAllGather,
-    NVTX3_PAYLOAD(comm ? comm->commHash : 0, sendcount * ncclTypeSize(datatype), datatype));
+                         NVTX3_PAYLOAD(comm ? comm->commHash : 0, sendcount * ncclTypeSize(datatype), datatype));
     // RCCL update slice steps for AllGather if single node
-    const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
+  const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
 
-    int chunkSteps = (isGfx950 && comm->rcclUseOneSlice)? 1 : ALLGATHER_CHUNKSTEPS;
-    int sliceSteps = comm->rcclUseOneSlice
-      ? (isGfx950 ? 1 : ALLGATHER_SLICESTEPS_SINGLE_NODE)
-      : ALLGATHER_SLICESTEPS;
-  struct ncclInfo info = { ncclFuncAllGather, "AllGather",
-    sendbuff, recvbuff, sendcount, datatype, ncclSum, 0, comm, stream, /* Args */
-    chunkSteps, sliceSteps, nullptr };
+  int chunkSteps = (isGfx950 && comm->rcclUseOneSlice) ? 1 : ALLGATHER_CHUNKSTEPS;
+  int sliceSteps = comm->rcclUseOneSlice ? (isGfx950 ? 1 : ALLGATHER_SLICESTEPS_SINGLE_NODE) : ALLGATHER_SLICESTEPS;
+  struct ncclInfo info = {ncclFuncAllGather, "AllGather", sendbuff, recvbuff, sendcount,
+                          datatype,          ncclSum,     0,        comm,     stream, /* Args */
+                          chunkSteps,        sliceSteps,  nullptr};
   int nRanks, rank;
   NCCLCHECK(ncclCommCount(comm, &nRanks));
   NCCLCHECK(ncclCommUserRank(comm, &rank));
@@ -242,24 +326,34 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
 
   NCCLCHECK(Recorder::instance().record(rrAllGather, info));
 
-  if (rcclDdaEnabled(comm, nRanks * sendcount * ncclTypeSize(datatype), 8388608) &&
-      ncclAllGatherDdaIpcEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
-    NCCLCHECK(ncclAllGatherDdaIpc(
-        sendbuff,
-        recvbuff,
-        sendcount,
-        datatype,
-        comm,
-        stream));
-    return ncclSuccess;
+  // Let the symmetric kernel take priority when the user registered these
+  // buffers as symmetric windows; otherwise fall through to DDA.
+  bool symEligible =
+    isSymmetricKernelRequested(comm, ncclFuncAllGather, (int)ncclDevSum, datatype, sendcount, sendbuff, recvbuff);
+
+  if (!symEligible && rcclDdaEnabled(comm, nRanks * sendcount * ncclTypeSize(datatype), 8388608)) {
+    if (IsArchMatch(comm->archName, "gfx1250")) {
+      if (ncclAllGatherDdaFabricEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+        INFO(NCCL_COLL,
+             "AllGather: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d sendcount=%zu datatype=%d bytes=%zu",
+             comm->nRanks, comm->nNodes, sendcount, (int)datatype, sendcount * ncclTypeSize(datatype));
+        NCCLCHECK(ncclAllGatherDdaFabric(sendbuff, recvbuff, sendcount, datatype, comm, stream));
+        return ncclSuccess;
+      }
+    } else if (ncclAllGatherDdaIpcEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+      NCCLCHECK(ncclAllGatherDdaIpc(sendbuff, recvbuff, sendcount, datatype, comm, stream));
+      return ncclSuccess;
+    }
   }
   rcclAllGatherAlgo algo = rcclSelectAllGatherAlgo(comm, msgSize);
   switch (algo) {
-    case RCCL_AG_HIERARCHICAL:
+  case RCCL_AG_HIERARCHICAL:
     return ncclHierarchicalAllGather_Impl(sendbuff, recvbuff, sendcount, datatype, comm, stream);
-    case RCCL_AG_DIRECT:
-    INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER count = %zu, msgSize = %zu, comm = %p, stream = %p, rank = %d, sendbuff = %p, recvbuff = %p",
-      sendcount, msgSize, comm, stream, rank, sendbuff, recvbuff);
+  case RCCL_AG_DIRECT:
+    INFO(NCCL_TUNING,
+         "RCCL DIRECT ALLGATHER count = %zu, msgSize = %zu, comm = %p, stream = %p, rank = %d, sendbuff = %p, recvbuff "
+         "= %p",
+         sendcount, msgSize, comm, stream, rank, sendbuff, recvbuff);
     // Use direct allgather (only when not in a group; in-group use Ring so
     // ncclGroupSimulateEnd gets estimatedTime).
     if (sendcount == 0) return ncclSuccess;
@@ -267,21 +361,21 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
     // P2P tasks (no peer rotation, no in-place self skip).
     info.useDirect = true;
     return ncclEnqueueCheck(&info);
-    case RCCL_AG_RING:
-    default:
-      return ncclEnqueueCheck(&info);
+  case RCCL_AG_RING:
+  default:
+    return ncclEnqueueCheck(&info);
   }
 }
 
 RCCL_PARAM(AlltoAllPivotEnable, "ALL_TO_ALL_PIVOT_ENABLE", 0);
 
-NCCL_API(ncclResult_t, ncclAlltoAll, const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, ncclComm* comm, cudaStream_t stream);
-ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, ncclComm* comm, cudaStream_t stream) {
+NCCL_API(ncclResult_t, ncclAlltoAll, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+         ncclComm* comm, cudaStream_t stream);
+ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                               ncclComm* comm, cudaStream_t stream) {
   NVTX3_FUNC_WITH_PARAMS(AlltoAll, NcclNvtxParamsAlltoAll,
-    NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), datatype));
-  
+                         NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), datatype));
+
   NCCLCHECK(Recorder::instance().record(rrAllToAll, sendbuff, recvbuff, count, datatype, comm, stream));
 
   size_t rankOffset = count * ncclTypeSize(datatype);
@@ -290,51 +384,75 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
   struct ncclInfo info;
   if (comm->topo->pivotA2AEnabled && comm->nChannels >= comm->topo->pivotA2ANumBiRings * 2 &&
       rankOffset >= 744 * 1024 && rankAlign != 4 && rcclParamAlltoAllPivotEnable()) {
-      info = { ncclFuncAlltoAllPivot, "AlltoAllPivot",
-        sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream, /* Args */
-        ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr };
+    info = {ncclFuncAlltoAllPivot,
+            "AlltoAllPivot",
+            sendbuff,
+            recvbuff,
+            count,
+            datatype,
+            ncclSum,
+            0,
+            comm,
+            stream, /* Args */
+            ALLTOALL_PIVOT_CHUNKSTEPS,
+            ALLTOALL_PIVOT_SLICESTEPS,
+            nullptr};
   } else {
-      #ifdef ENABLE_ROCSHMEM
-      size_t msgSize = count * ncclTypeSize(datatype) * comm->nRanks;
-      if (rcclUseAlltoAllGda(comm) && msgSize <= comm->rocshmemThreshold) {	
-        struct ncclInfo info = { ncclFuncAlltoAllGda, "AlltoAllGda",
-              sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
-              ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr };
-            
-        return ncclEnqueueCheck(&info);
-      }
-      #endif // ENABLE_ROCSHMEM
+#ifdef ENABLE_ROCSHMEM
+    size_t msgSize = count * ncclTypeSize(datatype) * comm->nRanks;
+    if (rcclUseAlltoAllGda(comm) && msgSize <= comm->rocshmemThreshold) {
+      struct ncclInfo info = {ncclFuncAlltoAllGda,
+                              "AlltoAllGda",
+                              sendbuff,
+                              recvbuff,
+                              count,
+                              datatype,
+                              ncclSum,
+                              0,
+                              comm,
+                              stream,
+                              ALLTOALL_PIVOT_CHUNKSTEPS,
+                              ALLTOALL_PIVOT_SLICESTEPS,
+                              nullptr};
 
-    if (rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype), 4194304) &&
-        ncclAllToAllDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype)) {
-      NCCLCHECK(ncclAllToAllDdaIpc(
-        sendbuff,
-        recvbuff,
-        count,
-        datatype,
-        comm,
-        stream));
-      return ncclSuccess;
+      return ncclEnqueueCheck(&info);
+    }
+#endif // ENABLE_ROCSHMEM
+
+    if (rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype), 4194304, 4194304)) {
+      if (IsArchMatch(comm->archName, "gfx1250")) {
+        if (ncclAllToAllDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype)) {
+          INFO(NCCL_COLL, "AllToAll: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+               comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
+          NCCLCHECK(ncclAllToAllDdaFabric(sendbuff, recvbuff, count, datatype, comm, stream));
+          return ncclSuccess;
+        }
+      } else if (ncclAllToAllDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype)) {
+        NCCLCHECK(ncclAllToAllDdaIpc(sendbuff, recvbuff, count, datatype, comm, stream));
+        return ncclSuccess;
+      }
     }
 
-    info = { ncclFuncAlltoAll, "AlltoAll",
-      sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream, /* Args */
-      ALLTOALL_CHUNKSTEPS, ALLTOALL_SLICESTEPS };
+    info = {
+      ncclFuncAlltoAll,    "AlltoAll",         sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream, /* Args */
+      ALLTOALL_CHUNKSTEPS, ALLTOALL_SLICESTEPS
+    };
   }
   return ncclEnqueueCheck(&info);
 }
 
-NCCL_API(ncclResult_t, ncclAlltoAllv, const void *sendbuff, const size_t sendcounts[], const size_t sdispls[],
-    void *recvbuff, const size_t recvcounts[], const size_t rdispls[],
-    ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
-ncclResult_t ncclAlltoAllv_impl(const void *sendbuff, const size_t sendcounts[], const size_t sdispls[],
-    void *recvbuff, const size_t recvcounts[], const size_t rdispls[],
-    ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream) {
+NCCL_API(ncclResult_t, ncclAlltoAllv, const void* sendbuff, const size_t sendcounts[], const size_t sdispls[],
+         void* recvbuff, const size_t recvcounts[], const size_t rdispls[], ncclDataType_t datatype, ncclComm_t comm,
+         hipStream_t stream);
+ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[], const size_t sdispls[], void* recvbuff,
+                                const size_t recvcounts[], const size_t rdispls[], ncclDataType_t datatype,
+                                ncclComm_t comm, hipStream_t stream) {
   NVTX3_FUNC_WITH_PARAMS(AlltoAllv, NcclNvtxParamsAlltoAllv,
-    NVTX3_PAYLOAD(comm ? comm->commHash : 0, sendcounts[comm->rank] * ncclTypeSize(datatype),
-      recvcounts[comm->rank] * ncclTypeSize(datatype), datatype));
+                         NVTX3_PAYLOAD(comm ? comm->commHash : 0, sendcounts[comm->rank] * ncclTypeSize(datatype),
+                                       recvcounts[comm->rank] * ncclTypeSize(datatype), datatype));
 
-  NCCLCHECK(Recorder::instance().record(rrAllToAllv, sendbuff, recvbuff, 0, datatype, comm, stream, -1, sendcounts, sdispls, recvcounts, rdispls));
+  NCCLCHECK(Recorder::instance().record(rrAllToAllv, sendbuff, recvbuff, 0, datatype, comm, stream, -1, sendcounts,
+                                        sdispls, recvcounts, rdispls));
 
   int nRanks, rank;
   NCCLCHECK(ncclCommCount(comm, &nRanks));
@@ -345,117 +463,122 @@ ncclResult_t ncclAlltoAllv_impl(const void *sendbuff, const size_t sendcounts[],
   std::vector<size_t> sendcounts1(nRanks);
   std::vector<size_t> recvcounts1(nRanks);
 
-  std::vector<size_t> sizes(4*nRanks);	//4 for sdispl, rdispl, scount, rcount
+  std::vector<size_t> sizes(4 * nRanks); // 4 for sdispl, rdispl, scount, rcount
 #ifdef ENABLE_ROCSHMEM
+  for (int i = 0; i < nRanks; i++) {
+    sdispls1[i] = sdispls[i] * ncclTypeSize(datatype);
+    rdispls1[i] = rdispls[i] * ncclTypeSize(datatype);
+    sendcounts1[i] = sendcounts[i] * ncclTypeSize(datatype);
+    recvcounts1[i] = recvcounts[i] * ncclTypeSize(datatype);
+  }
+
+  size_t count = sdispls1[nRanks - 1] + sendcounts1[nRanks - 1];
+
+  if (comm->enableRocshmem && comm->nNodes > 1 && (comm->nRanks / comm->nNodes == 8)) {
+    INFO(
+      NCCL_INIT,
+      "GDA alltoallv is supported for up to 128MB message size; Use ROCSHMEM_HEAP_SIZE=3GB for GDA support till 512MB");
+
     for (int i = 0; i < nRanks; i++) {
-       sdispls1[i] = sdispls[i] * ncclTypeSize(datatype);
-       rdispls1[i] = rdispls[i] * ncclTypeSize(datatype);
-       sendcounts1[i] = sendcounts[i] * ncclTypeSize(datatype);
-       recvcounts1[i] = recvcounts[i] * ncclTypeSize(datatype);
+      sizes[i] = sendcounts1[i];
+      sizes[nRanks + i] = sdispls1[i];
+      sizes[2 * nRanks + i] = recvcounts1[i];
+      sizes[3 * nRanks + i] = rdispls1[i];
     }
+    count = count / ncclTypeSize(datatype);
 
-    size_t count = sdispls1[nRanks - 1] + sendcounts1[nRanks - 1];
-
-    if (comm->enableRocshmem && comm->nNodes > 1 && (comm->nRanks/comm->nNodes == 8)) {
-        INFO(NCCL_INIT, "GDA alltoallv is supported for up to 128MB message size; Use ROCSHMEM_HEAP_SIZE=3GB for GDA support till 512MB");  
-
-        for (int i = 0; i < nRanks; i++) {
-            sizes[i] = sendcounts1[i];
-            sizes[nRanks + i] = sdispls1[i];
-            sizes[2*nRanks + i] = recvcounts1[i];
-            sizes[3*nRanks + i] = rdispls1[i];
-        }
-        count = count / ncclTypeSize(datatype);
-
-	//use CU for copy-in/copy-out for small <= 128KB sizes
-	//TODO: the threshold could be different for different number of nodes
-	if ((count * ncclTypeSize(datatype)) > 131072) {
-	    void *dest = (char*)comm->sourceRshmem + comm->symId * comm->bufThreshold;
-            CUDACHECK(hipMemcpyAsync(dest, sendbuff, count * ncclTypeSize(datatype),
-               hipMemcpyDeviceToDevice, stream));
-        }
-        struct ncclInfo info = { ncclFuncAlltoAllvGda, "AlltoAllvGda",
-        sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
-        ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr };
+    // use CU for copy-in/copy-out for small <= 128KB sizes
+    // TODO: the threshold could be different for different number of nodes
+    if ((count * ncclTypeSize(datatype)) > 131072) {
+      void* dest = (char*)comm->sourceRshmem + comm->symId * comm->bufThreshold;
+      CUDACHECK(hipMemcpyAsync(dest, sendbuff, count * ncclTypeSize(datatype), hipMemcpyDeviceToDevice, stream));
+    }
+    struct ncclInfo info = {ncclFuncAlltoAllvGda,
+                            "AlltoAllvGda",
+                            sendbuff,
+                            recvbuff,
+                            count,
+                            datatype,
+                            ncclSum,
+                            0,
+                            comm,
+                            stream,
+                            ALLTOALL_PIVOT_CHUNKSTEPS,
+                            ALLTOALL_PIVOT_SLICESTEPS,
+                            nullptr};
 #ifdef ENABLE_ROCSHMEM
-        info.sizes = sizes.data();
+    info.sizes = sizes.data();
 #endif
 
-        ncclResult_t ret = ncclEnqueueCheck(&info);
+    ncclResult_t ret = ncclEnqueueCheck(&info);
 
-        if (ret == ncclSuccess && ((count * ncclTypeSize(datatype)) > 131072)) {
-	    void *src = (char*)comm->destRshmem + comm->symId * comm->bufThreshold;
-            CUDACHECK(hipMemcpyAsync(recvbuff, src, count * ncclTypeSize(datatype),
-                    hipMemcpyDeviceToDevice, stream));
-            comm->symId = (comm->symId + 1) % comm->numSymBuf;
-        }
-        return ret;
+    if (ret == ncclSuccess && ((count * ncclTypeSize(datatype)) > 131072)) {
+      void* src = (char*)comm->destRshmem + comm->symId * comm->bufThreshold;
+      CUDACHECK(hipMemcpyAsync(recvbuff, src, count * ncclTypeSize(datatype), hipMemcpyDeviceToDevice, stream));
+      comm->symId = (comm->symId + 1) % comm->numSymBuf;
     }
+    return ret;
+  }
 #endif
 
   Recorder::instance().skip(true);
   NCCLCHECK(ncclGroupStart());
-  for (int r=0; r<nRanks; r++) {
-    NCCLCHECK(ncclSend(
-        ((char*)sendbuff) + sdispls[r]*ncclTypeSize(datatype),
-        sendcounts[r],
-        datatype,
-        r,
-        comm,
-        stream));
-    NCCLCHECK(ncclRecv(
-        ((char*)recvbuff) + rdispls[r]*ncclTypeSize(datatype),
-        recvcounts[r],
-        datatype,
-        r,
-        comm,
-        stream));
+  for (int r = 0; r < nRanks; r++) {
+    NCCLCHECK(ncclSend(((char*)sendbuff) + sdispls[r] * ncclTypeSize(datatype), sendcounts[r], datatype, r, comm,
+                       stream));
+    NCCLCHECK(ncclRecv(((char*)recvbuff) + rdispls[r] * ncclTypeSize(datatype), recvcounts[r], datatype, r, comm,
+                       stream));
   }
   NCCLCHECK(ncclGroupEnd());
   Recorder::instance().skip(false);
   return ncclSuccess;
 }
 
-NCCL_API(ncclResult_t, ncclAllReduce, const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
-ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
+NCCL_API(ncclResult_t, ncclAllReduce, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+         ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
+ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
   NVTX3_FUNC_WITH_PARAMS(AllReduce, NcclNvtxParamsAllReduce,
-    NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), op, datatype));
+                         NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), op, datatype));
 
   // RCCL update slice steps for AllReduce if single node
   const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
-  int chunkSteps = (isGfx950 && comm->rcclUseOneSlice)? 1 : ALLREDUCE_CHUNKSTEPS;
-  int sliceSteps = comm->rcclUseOneSlice
-      ? (isGfx950 ? 1 : ALLREDUCE_SLICESTEPS_SINGLE_NODE)
-      : ALLREDUCE_SLICESTEPS;
+  int chunkSteps = (isGfx950 && comm->rcclUseOneSlice) ? 1 : ALLREDUCE_CHUNKSTEPS;
+  int sliceSteps = comm->rcclUseOneSlice ? (isGfx950 ? 1 : ALLREDUCE_SLICESTEPS_SINGLE_NODE) : ALLREDUCE_SLICESTEPS;
 
-  struct ncclInfo info = { ncclFuncAllReduce, "AllReduce",
-    sendbuff, recvbuff, count, datatype, op, 0, comm, stream, /* Args */
-    chunkSteps, sliceSteps, nullptr };
+  struct ncclInfo info = {ncclFuncAllReduce, "AllReduce", sendbuff, recvbuff, count,
+                          datatype,          op,          0,        comm,     stream, /* Args */
+                          chunkSteps,        sliceSteps,  nullptr};
 
   NCCLCHECK(Recorder::instance().record(rrAllReduce, info));
 
-  if (rcclDdaEnabled(comm, count * ncclTypeSize(datatype), 8388608) &&
-      ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
-    NCCLCHECK(ncclAllReduceDdaIpc(
-        sendbuff,
-        recvbuff,
-        count,
-        datatype,
-        op,
-        comm,
-        stream));
-    return ncclSuccess;
-  }
+  // Let the symmetric kernel take priority when the user registered these
+  // buffers as symmetric windows; otherwise fall through to DDA.
+  bool symEligible = (op == ncclSum) && isSymmetricKernelRequested(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype,
+                                                                   count, sendbuff, recvbuff);
 
+  if (!symEligible && rcclDdaEnabled(comm, count * ncclTypeSize(datatype), 8388608)) {
+    if (IsArchMatch(comm->archName, "gfx1250")) {
+      if (ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+        INFO(NCCL_COLL, "AllReduce: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+             comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
+        NCCLCHECK(ncclAllReduceDdaFabric(sendbuff, recvbuff, count, datatype, op, comm, stream));
+        return ncclSuccess;
+      }
+    } else {
+      if (ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+        NCCLCHECK(ncclAllReduceDdaIpc(sendbuff, recvbuff, count, datatype, op, comm, stream));
+        return ncclSuccess;
+      }
+    }
+  }
   return ncclEnqueueCheck(&info);
 }
 
-ncclResult_t ncclAllReduceWithBias_impl(const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, const void* acc) {
+ncclResult_t ncclAllReduceWithBias_impl(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                        ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, const void* acc) {
   NVTX3_FUNC_WITH_PARAMS(AllReduce, NcclNvtxParamsAllReduce,
-    NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), op, datatype));
+                         NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), op, datatype));
 
   if (acc == nullptr) {
     WARN("ncclAllReduceWithBias : acc cannot be nullptr");
@@ -466,92 +589,109 @@ ncclResult_t ncclAllReduceWithBias_impl(const void* sendbuff, void* recvbuff, si
   // similar to changes made to AllReduce earlier
   const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
   int chunkSteps = (isGfx950 && comm->rcclUseOneSlice) ? 1 : ALLREDUCE_CHUNKSTEPS;
-  int sliceSteps = comm->rcclUseOneSlice
-      ? (isGfx950 ? 1 : ALLREDUCE_SLICESTEPS_SINGLE_NODE)
-      : ALLREDUCE_SLICESTEPS;
+  int sliceSteps = comm->rcclUseOneSlice ? (isGfx950 ? 1 : ALLREDUCE_SLICESTEPS_SINGLE_NODE) : ALLREDUCE_SLICESTEPS;
 
-  struct ncclInfo info = { ncclFuncAllReduce, "AllReduce",
-    sendbuff, recvbuff, count, datatype, op, 0, comm, stream, /* Args */
-    chunkSteps, sliceSteps, acc };
+  struct ncclInfo info = {ncclFuncAllReduce, "AllReduce", sendbuff, recvbuff, count,
+                          datatype,          op,          0,        comm,     stream, /* Args */
+                          chunkSteps,        sliceSteps,  acc};
 
   NCCLCHECK(Recorder::instance().record(rrAllReduceWithBias, info));
 
   return ncclEnqueueCheck(&info);
 }
 
-NCCL_API(ncclResult_t, ncclBroadcast, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, int root,
-    ncclComm_t comm, cudaStream_t stream);
+NCCL_API(ncclResult_t, ncclBroadcast, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+         int root, ncclComm_t comm, cudaStream_t stream);
 ncclResult_t ncclBroadcast_impl(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, int root,
-    ncclComm_t comm, cudaStream_t stream) {
+                                ncclComm_t comm, cudaStream_t stream) {
   NVTX3_FUNC_WITH_PARAMS(Broadcast, NcclNvtxParamsBroadcast,
-    NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), root, datatype));
+                         NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), root, datatype));
 
-  struct ncclInfo info = { ncclFuncBroadcast, "Broadcast",
-    sendbuff, recvbuff, count, datatype, ncclSum, root, comm, stream, /* Args */
-    BROADCAST_CHUNKSTEPS, BROADCAST_SLICESTEPS, nullptr };
+  struct ncclInfo info = {ncclFuncBroadcast,
+                          "Broadcast",
+                          sendbuff,
+                          recvbuff,
+                          count,
+                          datatype,
+                          ncclSum,
+                          root,
+                          comm,
+                          stream, /* Args */
+                          BROADCAST_CHUNKSTEPS,
+                          BROADCAST_SLICESTEPS,
+                          nullptr};
 
   NCCLCHECK(Recorder::instance().record(rrBroadcast, info));
 
   return ncclEnqueueCheck(&info);
 }
 /* Deprecated original "in place" function, similar to MPI */
-NCCL_API(ncclResult_t, ncclBcast, void* buff, size_t count, ncclDataType_t datatype, int root,
-    ncclComm_t comm, cudaStream_t stream);
-ncclResult_t ncclBcast(void* buff, size_t count, ncclDataType_t datatype, int root,
-    ncclComm_t comm, cudaStream_t stream) {
+NCCL_API(ncclResult_t, ncclBcast, void* buff, size_t count, ncclDataType_t datatype, int root, ncclComm_t comm,
+         cudaStream_t stream);
+ncclResult_t ncclBcast(void* buff, size_t count, ncclDataType_t datatype, int root, ncclComm_t comm,
+                       cudaStream_t stream) {
   NCCLCHECK(Recorder::instance().record(rrBcast, buff, buff, count, datatype, comm, stream, root));
   return ncclBroadcast(buff, buff, count, datatype, root, comm, stream);
 }
 
-NCCL_API(ncclResult_t, ncclGather, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, int root,
-    ncclComm* comm, cudaStream_t stream);
+NCCL_API(ncclResult_t, ncclGather, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+         int root, ncclComm* comm, cudaStream_t stream);
 ncclResult_t ncclGather_impl(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, int root,
-    ncclComm* comm, cudaStream_t stream) {
+                             ncclComm* comm, cudaStream_t stream) {
   NVTX3_FUNC_WITH_PARAMS(Gather, NcclNvtxParamsGather,
-    NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), root));
+                         NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), root));
 
   NCCLCHECK(Recorder::instance().record(rrGather, sendbuff, recvbuff, count, datatype, comm, stream, root));
 
-  struct ncclInfo info = { ncclFuncGather, "Gather",
-    sendbuff, recvbuff, count, datatype, ncclSum, root, comm, stream, /* Args */
-    GATHER_CHUNKSTEPS, GATHER_SLICESTEPS };
+  struct ncclInfo info = {ncclFuncGather,    "Gather",         sendbuff, recvbuff, count,
+                          datatype,          ncclSum,          root,     comm,     stream, /* Args */
+                          GATHER_CHUNKSTEPS, GATHER_SLICESTEPS};
   return ncclEnqueueCheck(&info);
 }
 
-NCCL_API(ncclResult_t, ncclReduce, const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream);
-ncclResult_t ncclReduce_impl(const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
+NCCL_API(ncclResult_t, ncclReduce, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+         ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t ncclReduce_impl(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                             ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
   NVTX3_FUNC_WITH_PARAMS(Reduce, NcclNvtxParamsReduce,
-    NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), root, op, datatype));
+                         NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), root, op, datatype));
 
-  struct ncclInfo info = { ncclFuncReduce, "Reduce",
-    sendbuff, recvbuff, count, datatype, op, root, comm, stream, /* Args */
-    REDUCE_CHUNKSTEPS, REDUCE_SLICESTEPS, nullptr };
+  struct ncclInfo info = {
+    ncclFuncReduce,    "Reduce",          sendbuff, recvbuff, count, datatype, op, root, comm, stream, /* Args */
+    REDUCE_CHUNKSTEPS, REDUCE_SLICESTEPS, nullptr
+  };
 
   NCCLCHECK(Recorder::instance().record(rrReduce, info));
 
   return ncclEnqueueCheck(&info);
 }
 
-
 NCCL_API(ncclResult_t, ncclReduceScatter, const void* sendbuff, void* recvbuff, size_t recvcount,
-    ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
-ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t recvcount,
-    ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
+         ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
+ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
+                                    ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
   NVTX3_FUNC_WITH_PARAMS(ReduceScatter, NcclNvtxParamsReduceScatter,
-    NVTX3_PAYLOAD(comm ? comm->commHash : 0, recvcount * ncclTypeSize(datatype), op, datatype));
-    // RCCL update slice steps for ReduceScatter if single node
-    const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
+                         NVTX3_PAYLOAD(comm ? comm->commHash : 0, recvcount * ncclTypeSize(datatype), op, datatype));
+  // RCCL update slice steps for ReduceScatter if single node
+  const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
 
-    int chunkSteps = (isGfx950 && comm->rcclUseOneSlice)? 1 : REDUCESCATTER_CHUNKSTEPS;
-    int sliceSteps = comm->rcclUseOneSlice
-      ? (isGfx950 ? 1 : REDUCESCATTER_SLICESTEPS_SINGLE_NODE)
-      : REDUCESCATTER_SLICESTEPS;
+  int chunkSteps = (isGfx950 && comm->rcclUseOneSlice) ? 1 : REDUCESCATTER_CHUNKSTEPS;
+  int sliceSteps =
+    comm->rcclUseOneSlice ? (isGfx950 ? 1 : REDUCESCATTER_SLICESTEPS_SINGLE_NODE) : REDUCESCATTER_SLICESTEPS;
 
-  struct ncclInfo info = { ncclFuncReduceScatter, "ReduceScatter",
-    sendbuff, recvbuff, recvcount, datatype, op, 0, comm, stream, /* Args */
-    chunkSteps, sliceSteps, nullptr };
+  struct ncclInfo info = {ncclFuncReduceScatter,
+                          "ReduceScatter",
+                          sendbuff,
+                          recvbuff,
+                          recvcount,
+                          datatype,
+                          op,
+                          0,
+                          comm,
+                          stream, /* Args */
+                          chunkSteps,
+                          sliceSteps,
+                          nullptr};
 
   int nRanks;
   NCCLCHECK(ncclCommCount(comm, &nRanks));
@@ -559,36 +699,48 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
 
   NCCLCHECK(Recorder::instance().record(rrReduceScatter, info));
 
-  // Reset value forcing direct reduce scatter algorithm 
+  // Reset value forcing direct reduce scatter algorithm
   comm->enableDirectReduceScatter = 0;
-  if (rcclDdaEnabled(comm, nRanks * recvcount * ncclTypeSize(datatype), 8388608) &&
-      ncclReduceScatterDdaIpcEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
-    NCCLCHECK(ncclReduceScatterDdaIpc(
-        sendbuff,
-        recvbuff,
-        recvcount,
-        datatype,
-        op,
-        comm,
-        stream));
-    return ncclSuccess;
+
+  // Skip DDA IPC and Direct RS if the symmetric path will handle this op, so they don't collide and deadlock.
+  // Symmetric reduce-scatter implements sum and avg (ncclDevSumPostDiv), refer ncclSymkImplemented
+  bool symEligible =
+    (op == ncclSum || op == ncclAvg) &&
+    isSymmetricKernelRequested(comm, ncclFuncReduceScatter, (op == ncclAvg) ? (int)ncclDevSumPostDiv : (int)ncclDevSum,
+                               datatype, recvcount, sendbuff, recvbuff);
+
+  if (!symEligible && rcclDdaEnabled(comm, nRanks * recvcount * ncclTypeSize(datatype), 8388608)) {
+    if (IsArchMatch(comm->archName, "gfx1250")) {
+      if (ncclReduceScatterDdaFabricEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
+        INFO(NCCL_COLL,
+             "ReduceScatter: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
+             comm->nRanks, comm->nNodes, recvcount, (int)datatype, recvcount * ncclTypeSize(datatype));
+        NCCLCHECK(ncclReduceScatterDdaFabric(sendbuff, recvbuff, recvcount, datatype, op, comm, stream));
+        return ncclSuccess;
+      }
+    } else if (ncclReduceScatterDdaIpcEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
+      NCCLCHECK(ncclReduceScatterDdaIpc(sendbuff, recvbuff, recvcount, datatype, op, comm, stream));
+      return ncclSuccess;
+    }
   }
 
-  if (rcclUseReduceScatterDirect(comm, msgSize)) {
-    INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER recvcount=%zu msgSize=%zu rank=%d nRanks=%d nNodes=%d comm=%p stream=%p sendbuff=%p recvbuff=%p",
-      recvcount, msgSize, comm->rank, nRanks, comm->nNodes, comm, stream, sendbuff, recvbuff);
+  if (!symEligible && rcclUseReduceScatterDirect(comm, msgSize)) {
+    INFO(NCCL_TUNING,
+         "RCCL DIRECT REDUCE-SCATTER recvcount=%zu msgSize=%zu rank=%d nRanks=%d nNodes=%d comm=%p stream=%p "
+         "sendbuff=%p recvbuff=%p",
+         recvcount, msgSize, comm->rank, nRanks, comm->nNodes, comm, stream, sendbuff, recvbuff);
 
     // Temporary Buffer to store data from each rank
     void* tempbuff = comm->tempBuff;
 
     // Use Direct Reduce Scatter Algorithm
     comm->enableDirectReduceScatter = 1;
-    
+
     if (recvcount == 0) return ncclSuccess;
-    
+
     // Calculate offset into buffers
     size_t offset = recvcount * ncclTypeSize(datatype);
-    
+
     NCCLCHECK(ncclGroupStart());
     for (int i = 0; i < nRanks; i++) {
       int peer = (comm->rank + i) % nRanks;
@@ -597,103 +749,164 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
     }
     NCCLCHECK(ncclGroupEnd());
   }
-  
+
   return ncclEnqueueCheck(&info);
 }
 
-NCCL_API(ncclResult_t, ncclScatter, const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, int root, ncclComm* comm, cudaStream_t stream);
-ncclResult_t ncclScatter_impl(const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, int root, ncclComm* comm, cudaStream_t stream) {
+NCCL_API(ncclResult_t, ncclScatter, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+         int root, ncclComm* comm, cudaStream_t stream);
+ncclResult_t ncclScatter_impl(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, int root,
+                              ncclComm* comm, cudaStream_t stream) {
   NVTX3_FUNC_WITH_PARAMS(Scatter, NcclNvtxParamsScatter,
-    NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), root, datatype));
+                         NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), root, datatype));
 
   NCCLCHECK(Recorder::instance().record(rrScatter, sendbuff, recvbuff, count, datatype, comm, stream, root));
 
-  struct ncclInfo info = { ncclFuncScatter, "Scatter",
-    sendbuff, recvbuff, count, datatype, ncclSum, root, comm, stream, /* Args */
-    SCATTER_CHUNKSTEPS, SCATTER_SLICESTEPS };
+  struct ncclInfo info = {ncclFuncScatter,    "Scatter",         sendbuff, recvbuff, count,
+                          datatype,           ncclSum,           root,     comm,     stream, /* Args */
+                          SCATTER_CHUNKSTEPS, SCATTER_SLICESTEPS};
   return ncclEnqueueCheck(&info);
 }
 
-NCCL_API(ncclResult_t, ncclSend, const void* sendbuff, size_t count, ncclDataType_t datatype, int peer,
-    ncclComm_t comm, cudaStream_t stream);
-ncclResult_t ncclSend_impl(const void* sendbuff, size_t count, ncclDataType_t datatype, int peer,
-    ncclComm_t comm, cudaStream_t stream) {
+NCCL_API(ncclResult_t, ncclSend, const void* sendbuff, size_t count, ncclDataType_t datatype, int peer, ncclComm_t comm,
+         cudaStream_t stream);
+ncclResult_t ncclSend_impl(const void* sendbuff, size_t count, ncclDataType_t datatype, int peer, ncclComm_t comm,
+                           cudaStream_t stream) {
   NVTX3_FUNC_WITH_PARAMS(Send, NcclNvtxParamsSendRecv,
-    NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), peer, datatype));
+                         NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), peer, datatype));
 
-  struct ncclInfo info = { ncclFuncSend, "Send",
-    NULL, (void*)sendbuff, count, datatype, ncclSum, peer, comm, stream, /* Args */
-    1, 1, nullptr };
+  struct ncclInfo info = {ncclFuncSend,
+                          "Send",
+                          NULL,
+                          (void*)sendbuff,
+                          count,
+                          datatype,
+                          ncclSum,
+                          peer,
+                          comm,
+                          stream, /* Args */
+                          1,
+                          1,
+                          nullptr};
 
   NCCLCHECK(Recorder::instance().record(rrSend, info));
 
   return ncclEnqueueCheck(&info);
 }
 
-NCCL_API(ncclResult_t, ncclRecv, void* recvbuff, size_t count, ncclDataType_t datatype, int peer,
-    ncclComm_t comm, cudaStream_t stream);
-ncclResult_t ncclRecv_impl(void* recvbuff, size_t count, ncclDataType_t datatype, int peer,
-    ncclComm_t comm, cudaStream_t stream) {
+NCCL_API(ncclResult_t, ncclRecv, void* recvbuff, size_t count, ncclDataType_t datatype, int peer, ncclComm_t comm,
+         cudaStream_t stream);
+ncclResult_t ncclRecv_impl(void* recvbuff, size_t count, ncclDataType_t datatype, int peer, ncclComm_t comm,
+                           cudaStream_t stream) {
   NVTX3_FUNC_WITH_PARAMS(Recv, NcclNvtxParamsSendRecv,
-    NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), peer, datatype));
+                         NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), peer, datatype));
 
-  struct ncclInfo info = { ncclFuncRecv, "Recv",
-    NULL, recvbuff, count, datatype, ncclSum, peer, comm, stream, /* Args */
-    1, 1, nullptr };
+  struct ncclInfo info = {ncclFuncRecv,
+                          "Recv",
+                          NULL,
+                          recvbuff,
+                          count,
+                          datatype,
+                          ncclSum,
+                          peer,
+                          comm,
+                          stream, /* Args */
+                          1,
+                          1,
+                          nullptr};
 
   NCCLCHECK(Recorder::instance().record(rrRecv, info));
 
   return ncclEnqueueCheck(&info);
 }
 
-NCCL_API(ncclResult_t, ncclPutSignal, const void* localbuff, size_t count, ncclDataType_t datatype,
-    int peer, ncclWindow_t peerWin, size_t peerWinOffset, int sigIdx, int ctx, unsigned int flags,
-    ncclComm_t comm, cudaStream_t stream);
-ncclResult_t ncclPutSignal_impl(const void* localbuff, size_t count, ncclDataType_t datatype,
-    int peer, ncclWindow_t peerWin, size_t peerWinOffset, int sigIdx, int ctx, unsigned int flags,
-    ncclComm_t comm, cudaStream_t stream) {
+NCCL_API(ncclResult_t, ncclPutSignal, const void* localbuff, size_t count, ncclDataType_t datatype, int peer,
+         ncclWindow_t peerWin, size_t peerWinOffset, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm,
+         cudaStream_t stream);
+ncclResult_t ncclPutSignal_impl(const void* localbuff, size_t count, ncclDataType_t datatype, int peer,
+                                ncclWindow_t peerWin, size_t peerWinOffset, int sigIdx, int ctx, unsigned int flags,
+                                ncclComm_t comm, cudaStream_t stream) {
   NVTX3_FUNC_WITH_PARAMS(PutSignal, NcclNvtxParamsPut,
-    NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), peer, ctx));
+                         NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), peer, ctx));
 
-  struct ncclInfo info = { ncclFuncPutSignal, "PutSignal",
-    localbuff, NULL, count, datatype, ncclSum, peer, comm, stream, /* Args */
-    1, 1, nullptr, /* chunkSteps, sliceSteps, acc */
-    false, /* useDirect */
-    peerWinOffset, peerWin, sigIdx, ctx, flags, /* peerWinOffset, peerWin, sigIdx, ctx, flags */
-    0, NULL }; /* nDesc, signalDescs */
+  struct ncclInfo info = {ncclFuncPutSignal,
+                          "PutSignal",
+                          localbuff,
+                          NULL,
+                          count,
+                          datatype,
+                          ncclSum,
+                          peer,
+                          comm,
+                          stream, /* Args */
+                          1,
+                          1,
+                          nullptr, /* chunkSteps, sliceSteps, acc */
+                          false, /* useDirect */
+                          peerWinOffset,
+                          peerWin,
+                          sigIdx,
+                          ctx,
+                          flags, /* peerWinOffset, peerWin, sigIdx, ctx, flags */
+                          0,
+                          NULL}; /* nDesc, signalDescs */
   return ncclEnqueueCheck(&info);
 }
 
-NCCL_API(ncclResult_t, ncclSignal, int peer, int sigIdx, int ctx, unsigned int flags,
-    ncclComm_t comm, cudaStream_t stream);
-ncclResult_t ncclSignal_impl(int peer, int sigIdx, int ctx, unsigned int flags,
-    ncclComm_t comm, cudaStream_t stream) {
-  NVTX3_FUNC_WITH_PARAMS(Signal, NcclNvtxParamsSignal,
-    NVTX3_PAYLOAD(comm ? comm->commHash : 0, peer, ctx));
+NCCL_API(ncclResult_t, ncclSignal, int peer, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm,
+         cudaStream_t stream);
+ncclResult_t ncclSignal_impl(int peer, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream) {
+  NVTX3_FUNC_WITH_PARAMS(Signal, NcclNvtxParamsSignal, NVTX3_PAYLOAD(comm ? comm->commHash : 0, peer, ctx));
 
-  struct ncclInfo info = { ncclFuncSignal, "Signal",
-    NULL, NULL, 0, ncclInt8, ncclSum, peer, comm, stream, /* Args */
-    1, 1, nullptr, /* chunkSteps, sliceSteps, acc */
-    false, /* useDirect */
-    0, NULL, sigIdx, ctx, flags, /* peerWinOffset, peerWin, sigIdx, ctx, flags */
-    0, NULL }; /* nDesc, signalDescs */
+  struct ncclInfo info = {ncclFuncSignal,
+                          "Signal",
+                          NULL,
+                          NULL,
+                          0,
+                          ncclInt8,
+                          ncclSum,
+                          peer,
+                          comm,
+                          stream, /* Args */
+                          1,
+                          1,
+                          nullptr, /* chunkSteps, sliceSteps, acc */
+                          false, /* useDirect */
+                          0,
+                          NULL,
+                          sigIdx,
+                          ctx,
+                          flags, /* peerWinOffset, peerWin, sigIdx, ctx, flags */
+                          0,
+                          NULL}; /* nDesc, signalDescs */
   return ncclEnqueueCheck(&info);
 }
 
-NCCL_API(ncclResult_t, ncclWaitSignal, int nDesc, ncclWaitSignalDesc_t* signalDescs,
-    ncclComm_t comm, cudaStream_t stream);
-ncclResult_t ncclWaitSignal_impl(int nDesc, ncclWaitSignalDesc_t* signalDescs,
-    ncclComm_t comm, cudaStream_t stream) {
-  NVTX3_FUNC_WITH_PARAMS(WaitSignal, NcclNvtxParamsWaitSignal,
-    NVTX3_PAYLOAD(comm ? comm->commHash : 0, nDesc, 0));
+NCCL_API(ncclResult_t, ncclWaitSignal, int nDesc, ncclWaitSignalDesc_t* signalDescs, ncclComm_t comm,
+         cudaStream_t stream);
+ncclResult_t ncclWaitSignal_impl(int nDesc, ncclWaitSignalDesc_t* signalDescs, ncclComm_t comm, cudaStream_t stream) {
+  NVTX3_FUNC_WITH_PARAMS(WaitSignal, NcclNvtxParamsWaitSignal, NVTX3_PAYLOAD(comm ? comm->commHash : 0, nDesc, 0));
 
-  struct ncclInfo info = { ncclFuncWaitSignal, "WaitSignal",
-    NULL, NULL, 0, ncclInt32, ncclSum, 0, comm, stream, /* Args */
-    1, 1, nullptr, /* chunkSteps, sliceSteps, acc */
-    false, /* useDirect */
-    0, NULL, 0, 0, 0, /* peerWinOffset, peerWin, sigIdx, ctx, flags */
-    nDesc, signalDescs }; /* nDesc, signalDescs */
+  struct ncclInfo info = {ncclFuncWaitSignal,
+                          "WaitSignal",
+                          NULL,
+                          NULL,
+                          0,
+                          ncclInt32,
+                          ncclSum,
+                          0,
+                          comm,
+                          stream, /* Args */
+                          1,
+                          1,
+                          nullptr, /* chunkSteps, sliceSteps, acc */
+                          false, /* useDirect */
+                          0,
+                          NULL,
+                          0,
+                          0,
+                          0, /* peerWinOffset, peerWin, sigIdx, ctx, flags */
+                          nDesc,
+                          signalDescs}; /* nDesc, signalDescs */
   return ncclEnqueueCheck(&info);
 }

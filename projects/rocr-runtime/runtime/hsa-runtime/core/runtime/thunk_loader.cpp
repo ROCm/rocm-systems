@@ -54,7 +54,7 @@ namespace rocr {
 namespace core {
 
   std::string ThunkLoader::whoami() {
-    is_dtif_ = is_dxg_ = false;
+    is_dtif_ = is_win_dxg_ = is_wsl_dxg_ = false;
     if (core::Runtime::runtime_singleton_->flag().enable_dtif()) {
       is_dtif_ = true;
 #if defined(_WIN32)
@@ -69,12 +69,12 @@ namespace core {
       int fd = open("/dev/dxg", O_RDWR);
       if (fd >= 0) {
         close(fd);
-        is_dxg_ = true;
+        is_wsl_dxg_ = true;
         return "librocdxg.so";
       }
     }
 #else
-    is_dxg_ = true;
+    is_win_dxg_ = true;
 #endif
 
     return "";
@@ -309,6 +309,9 @@ namespace core {
       HSAKMT_PFN(hsaKmtGetQueueInfo) = (HSAKMT_DEF(hsaKmtGetQueueInfo)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtGetQueueInfo");
       if (HSAKMT_PFN(hsaKmtGetQueueInfo) == nullptr) goto LOAD_ERROR;
 
+      HSAKMT_PFN(hsaKmtGetKernelQueueId) = (HSAKMT_DEF(hsaKmtGetKernelQueueId)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtGetKernelQueueId");
+      if (HSAKMT_PFN(hsaKmtGetKernelQueueId) == nullptr) goto LOAD_ERROR;
+
       HSAKMT_PFN(hsaKmtAllocQueueGWS) = (HSAKMT_DEF(hsaKmtAllocQueueGWS)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtAllocQueueGWS");
       if (HSAKMT_PFN(hsaKmtAllocQueueGWS) == nullptr) goto LOAD_ERROR;
 
@@ -323,6 +326,10 @@ namespace core {
 
       HSAKMT_PFN(hsaKmtGetRuntimeCapabilities) = (HSAKMT_DEF(hsaKmtGetRuntimeCapabilities)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtGetRuntimeCapabilities");
       if (HSAKMT_PFN(hsaKmtGetRuntimeCapabilities) == nullptr) goto LOAD_ERROR;
+      HSAKMT_PFN(hsaKmtGetCoreRuntimeInfo) = (HSAKMT_DEF(hsaKmtGetCoreRuntimeInfo)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtGetCoreRuntimeInfo");
+      if (HSAKMT_PFN(hsaKmtGetCoreRuntimeInfo) == nullptr) goto LOAD_ERROR;
+      HSAKMT_PFN(hsaKmtGetCoreDeviceInfo) = (HSAKMT_DEF(hsaKmtGetCoreDeviceInfo)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtGetCoreDeviceInfo");
+      if (HSAKMT_PFN(hsaKmtGetCoreDeviceInfo) == nullptr) goto LOAD_ERROR;
 
       HSAKMT_PFN(hsaKmtDebugTrapIoctl) = (HSAKMT_DEF(hsaKmtDebugTrapIoctl)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtDebugTrapIoctl");
       if (HSAKMT_PFN(hsaKmtDebugTrapIoctl) == nullptr) goto LOAD_ERROR;
@@ -407,11 +414,13 @@ namespace core {
       HSAKMT_PFN(hsaKmtHandleImport) = (HSAKMT_DEF(hsaKmtHandleImport)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtHandleImport");
       if (HSAKMT_PFN(hsaKmtHandleImport) == nullptr) goto LOAD_ERROR;
 
+      // Optional: a missing export leaves the pfn null (KfdDriver guards
+      // each call) instead of failing the whole table load.
       HSAKMT_PFN(hsaKmtImportExternalSemaphore) = (HSAKMT_DEF(hsaKmtImportExternalSemaphore)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtImportExternalSemaphore");
-      if (HSAKMT_PFN(hsaKmtImportExternalSemaphore) == nullptr) goto LOAD_ERROR;
-
       HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) = (HSAKMT_DEF(hsaKmtDestroyExternalSemaphore)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtDestroyExternalSemaphore");
-      if (HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) == nullptr) goto LOAD_ERROR;
+      HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore) = (HSAKMT_DEF(hsaKmtQueueSignalExternalSemaphore)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtQueueSignalExternalSemaphore");
+      HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore) = (HSAKMT_DEF(hsaKmtQueueWaitExternalSemaphore)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtQueueWaitExternalSemaphore");
+
       HSAKMT_PFN(hsaKmtHandleExport) = (HSAKMT_DEF(hsaKmtHandleExport)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtHandleExport");
       if (HSAKMT_PFN(hsaKmtHandleExport) == nullptr) goto LOAD_ERROR;
 
@@ -423,6 +432,9 @@ namespace core {
 
       HSAKMT_PFN(hsaKmtMemHandleFree) = (HSAKMT_DEF(hsaKmtMemHandleFree)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtMemHandleFree");
       if (HSAKMT_PFN(hsaKmtMemHandleFree) == nullptr) goto LOAD_ERROR;
+
+      HSAKMT_PFN(hsaKmtMemHandleFreePreserveMetadata) = (HSAKMT_DEF(hsaKmtMemHandleFreePreserveMetadata)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtMemHandleFreePreserveMetadata");
+      if (HSAKMT_PFN(hsaKmtMemHandleFreePreserveMetadata) == nullptr) goto LOAD_ERROR;
 
       HSAKMT_PFN(hsaKmtMemoryGetCpuAddr) = (HSAKMT_DEF(hsaKmtMemoryGetCpuAddr)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtMemoryGetCpuAddr");
       if (HSAKMT_PFN(hsaKmtMemoryGetCpuAddr) == nullptr) goto LOAD_ERROR;
@@ -537,11 +549,14 @@ LOAD_ERROR:
       HSAKMT_PFN(hsaKmtQueryPointerInfo) = (HSAKMT_DEF(hsaKmtQueryPointerInfo)*)(&hsaKmtQueryPointerInfo);
       HSAKMT_PFN(hsaKmtSetMemoryUserData) = (HSAKMT_DEF(hsaKmtSetMemoryUserData)*)(&hsaKmtSetMemoryUserData);
       HSAKMT_PFN(hsaKmtGetQueueInfo) = (HSAKMT_DEF(hsaKmtGetQueueInfo)*)(&hsaKmtGetQueueInfo);
+      HSAKMT_PFN(hsaKmtGetKernelQueueId) = (HSAKMT_DEF(hsaKmtGetKernelQueueId)*)(&hsaKmtGetKernelQueueId);
       HSAKMT_PFN(hsaKmtAllocQueueGWS) = (HSAKMT_DEF(hsaKmtAllocQueueGWS)*)(&hsaKmtAllocQueueGWS);
       HSAKMT_PFN(hsaKmtRuntimeEnable) = (HSAKMT_DEF(hsaKmtRuntimeEnable)*)(&hsaKmtRuntimeEnable);
       HSAKMT_PFN(hsaKmtRuntimeDisable) = (HSAKMT_DEF(hsaKmtRuntimeDisable)*)(&hsaKmtRuntimeDisable);
       HSAKMT_PFN(hsaKmtCheckRuntimeDebugSupport) = (HSAKMT_DEF(hsaKmtCheckRuntimeDebugSupport)*)(&hsaKmtCheckRuntimeDebugSupport);
       HSAKMT_PFN(hsaKmtGetRuntimeCapabilities) = (HSAKMT_DEF(hsaKmtGetRuntimeCapabilities)*)(&hsaKmtGetRuntimeCapabilities);
+      HSAKMT_PFN(hsaKmtGetCoreRuntimeInfo) = (HSAKMT_DEF(hsaKmtGetCoreRuntimeInfo)*)(&hsaKmtGetCoreRuntimeInfo);
+      HSAKMT_PFN(hsaKmtGetCoreDeviceInfo) = (HSAKMT_DEF(hsaKmtGetCoreDeviceInfo)*)(&hsaKmtGetCoreDeviceInfo);
       HSAKMT_PFN(hsaKmtDebugTrapIoctl) = (HSAKMT_DEF(hsaKmtDebugTrapIoctl)*)(&hsaKmtDebugTrapIoctl);
       HSAKMT_PFN(hsaKmtSPMAcquire) = (HSAKMT_DEF(hsaKmtSPMAcquire)*)(&hsaKmtSPMAcquire);
       HSAKMT_PFN(hsaKmtSPMRelease) = (HSAKMT_DEF(hsaKmtSPMRelease)*)(&hsaKmtSPMRelease);
@@ -574,10 +589,13 @@ LOAD_ERROR:
       HSAKMT_PFN(hsaKmtHandleImport) = (HSAKMT_DEF(hsaKmtHandleImport)*)(&hsaKmtHandleImport);
       HSAKMT_PFN(hsaKmtImportExternalSemaphore) = (HSAKMT_DEF(hsaKmtImportExternalSemaphore)*)(&hsaKmtImportExternalSemaphore);
       HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) = (HSAKMT_DEF(hsaKmtDestroyExternalSemaphore)*)(&hsaKmtDestroyExternalSemaphore);
+      HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore) = (HSAKMT_DEF(hsaKmtQueueSignalExternalSemaphore)*)(&hsaKmtQueueSignalExternalSemaphore);
+      HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore) = (HSAKMT_DEF(hsaKmtQueueWaitExternalSemaphore)*)(&hsaKmtQueueWaitExternalSemaphore);
       HSAKMT_PFN(hsaKmtHandleExport) = (HSAKMT_DEF(hsaKmtHandleExport)*)(&hsaKmtHandleExport);
       HSAKMT_PFN(hsaKmtMemoryVaMap) = (HSAKMT_DEF(hsaKmtMemoryVaMap)*)(&hsaKmtMemoryVaMap);
       HSAKMT_PFN(hsaKmtMemoryVaUnmap) = (HSAKMT_DEF(hsaKmtMemoryVaUnmap)*)(&hsaKmtMemoryVaUnmap);
       HSAKMT_PFN(hsaKmtMemHandleFree) = (HSAKMT_DEF(hsaKmtMemHandleFree)*)(&hsaKmtMemHandleFree);
+      HSAKMT_PFN(hsaKmtMemHandleFreePreserveMetadata) = (HSAKMT_DEF(hsaKmtMemHandleFreePreserveMetadata)*)(&hsaKmtMemHandleFreePreserveMetadata);
       HSAKMT_PFN(hsaKmtMemoryGetCpuAddr) = (HSAKMT_DEF(hsaKmtMemoryGetCpuAddr)*)(&hsaKmtMemoryGetCpuAddr);
       HSAKMT_PFN(hsaKmtGetAmdGPUDeviceFd) = (HSAKMT_DEF(hsaKmtGetAmdGPUDeviceFd)*)(&hsaKmtGetAmdGPUDeviceFd);
       HSAKMT_PFN(hsaKmtMemoryCpuMap) = (HSAKMT_DEF(hsaKmtMemoryCpuMap)*)(&hsaKmtMemoryCpuMap);

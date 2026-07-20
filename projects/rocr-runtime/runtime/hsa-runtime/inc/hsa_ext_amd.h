@@ -77,9 +77,13 @@
  * - 1.23 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS
  * - 1.24 - hsa_amd_external_semaphore_handle_open/hsa_amd_external_semaphore_handle_close
  * - 1.25 - hsa_amd_vmem_export_fabric_handle, hsa_amd_vmem_import_fabric_handle
+ * - 1.26 - hsa_amd_queue_create: batch queue creation with descriptor
+ * - 1.27 - hsa_amd_queue_signal_external_semaphore, hsa_amd_queue_wait_external_semaphore
+ * - 1.28 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED
+ * - 1.29 - hsa_amd_image_create_v2, hsa_amd_interop_map_buffer_with_size
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 25
+#define HSA_AMD_INTERFACE_VERSION_MINOR 29
 
 #ifdef __cplusplus
 extern "C" {
@@ -658,6 +662,11 @@ enum {
    * constraints enforced by the command processor).
    */
   HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS = 49,
+
+  /**
+   * Underlying resource is a valid resource, but it is not ready to be used.
+   */
+  HSA_STATUS_ERROR_RESOURCE_NOT_READY = 50,
 };
 
 /** @} */
@@ -968,6 +977,14 @@ typedef enum hsa_amd_agent_info_s {
    * Returns uint32_t. Zero if the device does not support dynamic data prefetch.
    */
   HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS = 0xA123,
+  /**
+   * Queries whether the agent supports virtual memory API operations on
+   * host memory that can be exported as a DMA-BUF file descriptor.
+   * For CPU agents: indicates host memory can be allocated and exported.
+   * For GPU agents: indicates the GPU can access such host-allocated memory.
+   * The type of this attribute is bool.
+   */
+  HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED = 0xA124,
 } hsa_amd_agent_info_t;
 
 /**
@@ -1586,7 +1603,7 @@ typedef struct hsa_amd_image_descriptor_s {
  *
  * @param agent[in] Agent on which to create the image
  *
- * @param[in] image_descriptor[in] Vendor specific image format
+ * @param[in] image_descriptor Vendor specific image format
  *
  * @param[in] image_data Pointer to image backing store
  *
@@ -1612,6 +1629,42 @@ hsa_status_t HSA_API hsa_amd_image_create(
     hsa_access_permission_t access_permission,
     hsa_ext_image_t *image
 );
+
+/**
+ * @brief Creates an image from an opaque vendor specific image format.
+ * Does not modify data at image_data.  Intended initially for
+ * accessing interop images.
+ *
+ * @param agent[in] Agent on which to create the image
+ *
+ * @param[in] image_descriptor Vendor specific image format
+ *
+ * @param[in] image_layout Opaque vendor-specific image layout descriptor (may be NULL
+ *                         when image metadata is not available from an interop source)
+ *
+ * @param[in] image_data Pointer to image backing store
+ *
+ * @param[in] access_permission Access permissions for the image object
+ *
+ * @param[out] image Created image object.
+ *
+ * @retval HSA_STATUS_SUCCESS Image created successfully
+ *
+ * @retval HSA_STATUS_ERROR_NOT_INITIALIZED if HSA is not initialized
+ *
+ * @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES if there is a failure in allocating
+ * necessary resources
+ *
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT Bad or mismatched descriptor,
+ * null image_data, or mismatched access_permission.
+ */
+hsa_status_t HSA_API hsa_amd_image_create_v2(
+    hsa_agent_t agent,
+    const hsa_ext_image_descriptor_v2_t* image_descriptor,
+    const hsa_amd_image_descriptor_t* image_layout,
+    const void* image_data,
+    hsa_access_permission_t access_permission,
+    hsa_ext_image_t* image);
 
 /**
  * @brief Query image limits.
@@ -2888,6 +2941,55 @@ hsa_status_t HSA_API hsa_amd_interop_map_buffer(uint32_t num_agents, hsa_agent_t
                                                 const void** metadata);
 
 /**
+ * @brief Maps an interop object into the HSA flat address space with a
+ * caller-supplied size hint and establishes memory residency.
+ * The metadata pointer is valid during the lifetime of the
+ * map (until hsa_amd_interop_unmap_buffer is called).
+ * Multiple calls to hsa_amd_interop_map_buffer with the same interop_handle
+ * result in multiple mappings with potentially different addresses and
+ * different metadata pointers.  Concurrent operations on these addresses are
+ * not coherent.  Memory must be fenced to system scope to ensure consistency,
+ * between mappings and with any views of this buffer in the originating
+ * software stack.
+ * It is identical to hsa_amd_interop_map_buffer except that @p size_hint provides
+ * the known byte size of the resource to the runtime.  Use this variant when
+ * the resource was created by a foreign API (e.g. D3D11 USAGE_DYNAMIC constant
+ * buffer) whose KMD private data does not encode the allocation size in a
+ * format the runtime can parse.  Pass 0 when the size is unknown and will be deduced.
+ *
+ * @param[in] num_agents Number of agents which require access to the memory
+ *
+ * @param[in] agents List of accessing agents.
+ *
+ * @param[in] interop_handle interop buffer handle (FD on Linux and HANDLE on
+ * Windows)
+ *
+ * @param [in] flags Reserved, must be 0
+ *
+ * @param [in] size_hint the hinted size of the buffer.
+ *
+ * @param[out] size Size in bytes of the mapped object
+ *
+ * @param[out] ptr Base address of the mapped object
+ *
+ * @param[out] metadata_size Size of metadata in bytes, may be NULL
+ *
+ * @param[out] metadata Pointer to metadata, may be NULL
+ *
+ * @retval HSA_STATUS_SUCCESS if successfully mapped
+ *
+ * @retval HSA_STATUS_ERROR_NOT_INITIALIZED if HSA is not initialized
+ *
+ * @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES if there is a failure in allocating
+ * necessary resources
+ *
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT all other errors
+ */
+hsa_status_t HSA_API hsa_amd_interop_map_buffer_with_size(
+    uint32_t num_agents, hsa_agent_t* agents, hsa_handle_t interop_handle, uint32_t flags,
+    size_t size_hint, size_t* size, void** ptr, size_t* metadata_size, const void** metadata);
+
+/**
  * @brief Removes a previously mapped interop object from HSA's flat address space.
  * Ends lifetime for the mapping's associated metadata pointer.
  */
@@ -3119,6 +3221,14 @@ typedef struct hsa_amd_ipc_memory_s {
  * unique handles. The allocation needs to be on memory on an agent of type
  * HSA_DEVICE_TYPE_GPU.
  *
+ * @warning The exporter process MUST keep the allocation alive until all
+ * importers have successfully called ::hsa_amd_ipc_memory_attach. If the
+ * exporter frees the memory (via ::hsa_amd_memory_free or ::hsa_memory_free)
+ * before importers attach, subsequent attach calls will fail with
+ * HSA_STATUS_ERROR_INVALID_ARGUMENT. This follows standard IPC semantics
+ * where the exporter owns memory lifetime. A debug warning is emitted if
+ * exported memory is freed while the IPC handle is still active.
+ *
  * @param[in] ptr Pointer to device memory allocated via ROCr APIs to prepare for
  * sharing.
  *
@@ -3210,12 +3320,8 @@ typedef enum {
  * @brief Imported external semaphore. Opaque; created by
  * hsa_amd_external_semaphore_handle_open and released by
  * hsa_amd_external_semaphore_handle_close. Internally encodes the
- * libhsakmt HSA_EXTERNAL_SEMAPHORE_HANDLE.
- *
- * @note This release adds the import / close half only. The HSA queue
- * signal/wait APIs that consume hsa_amd_external_semaphore_t will land
- * in a separate change; until then the imported handle is only useful
- * as a lifecycle owner.
+ * libhsakmt HSA_EXTERNAL_SEMAPHORE_HANDLE. Consumed by
+ * hsa_amd_queue_signal_external_semaphore / _wait_external_semaphore.
  */
 typedef struct hsa_amd_external_semaphore_s {
   uint64_t handle;
@@ -3237,11 +3343,6 @@ typedef struct {
  * agent's KMD node. The returned semaphore must be released with
  * hsa_amd_external_semaphore_handle_close.
  *
- * @note This release adds the import / close path only. There is no
- * HSA queue signal/wait API in this header that consumes
- * hsa_amd_external_semaphore_t yet; the submission half will land in
- * a separate change.
- *
  * @param[in] agent A GPU agent whose node owns the imported syncobj.
  * @param[in] desc Descriptor naming the OS handle and its type.
  * @param[out] out_sem On success, the imported semaphore.
@@ -3249,8 +3350,10 @@ typedef struct {
  * @retval HSA_STATUS_SUCCESS Imported.
  * @retval HSA_STATUS_ERROR_INVALID_AGENT Agent is not a GPU, or its
  *   KMD node has no associated WDDM device.
- * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT desc/out_sem null,
- *   the OS handle is null, or the handle type is unsupported.
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT desc/out_sem null, or the
+ *   OS handle is null.
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED The handle type is unsupported,
+ *   or libhsakmt lacks the import/destroy thunks (incl. Linux/KFD stub).
  * @retval HSA_STATUS_ERROR Underlying KMD import failed.
  */
 hsa_status_t HSA_API hsa_amd_external_semaphore_handle_open(
@@ -3259,13 +3362,80 @@ hsa_status_t HSA_API hsa_amd_external_semaphore_handle_open(
     hsa_amd_external_semaphore_t *out_sem);
 
 /**
- * @brief Releases an imported external semaphore. Until the HSA queue
- * signal/wait API for hsa_amd_external_semaphore_t is added, callers
- * are expected to keep the handle alive only for as long as the
- * higher-level (HIP / rocclr) wrapper that owns the same syncobj.
+ * @brief Releases an imported external semaphore. Keep the handle alive
+ * as long as any queued signal/wait that references it may still be
+ * in flight, and as long as the higher-level (HIP / rocclr) wrapper that
+ * owns the same syncobj.
  */
 hsa_status_t HSA_API hsa_amd_external_semaphore_handle_close(
     hsa_amd_external_semaphore_t sem);
+
+/**
+ * @brief Submits a GPU-side signal of an imported external semaphore
+ * onto @p queue, queued behind prior packets on the AQL ring. Windows
+ * routes to D3DKMTSignalSynchronizationObjectFromGpu via libhsakmt;
+ * Linux / KFD is currently a stub (HSA_STATUS_ERROR_NOT_SUPPORTED).
+ *
+ * @param queue Must be an AMD GPU AQL queue. A null, non-GPU, or
+ *   non-AQL queue returns HSA_STATUS_ERROR_INVALID_QUEUE; a valid AQL
+ *   queue whose node differs from the one that imported @p sem returns
+ *   HSA_STATUS_ERROR_INVALID_AGENT.
+ * @param sem   Handle from hsa_amd_external_semaphore_handle_open.
+ * @param value Fence value written to the syncobj (passed verbatim).
+ *
+ * @retval HSA_STATUS_SUCCESS                Signal queued.
+ * @retval HSA_STATUS_ERROR_INVALID_QUEUE    Null/invalid/non-GPU queue.
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT sem.handle is malformed.
+ * @retval HSA_STATUS_ERROR_INVALID_AGENT    Queue's node has no WDDM
+ *   device, or its node differs from the one that imported @p sem.
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED    libhsakmt lacks the thunk
+ *   (incl. Linux/KFD stub).
+ * @retval HSA_STATUS_ERROR                  KMD signal ioctl failed.
+ */
+hsa_status_t HSA_API hsa_amd_queue_signal_external_semaphore(
+    hsa_queue_t                  *queue,
+    hsa_amd_external_semaphore_t  sem,
+    uint64_t                      value);
+
+/**
+ * @brief Submits a GPU-side wait on an imported external semaphore
+ * onto @p queue. The wait blocks any subsequent packets on the AQL
+ * ring until the imported syncobj reaches @p value. Ordering against
+ * prior submissions is the caller's responsibility (rocclr's
+ * host-queue worker submits commands sequentially, so the wait is
+ * appended in program order ahead of subsequent submitKernel /
+ * submitCopyMemory calls).
+ *
+ * Wired to KMD via libhsakmt's hsaKmtQueueWaitExternalSemaphore,
+ * which on Windows resolves to D3DKMTWaitForSynchronizationObjectFromGpu
+ * against the queue's WDDM context. Linux / KFD route is currently a
+ * stub returning HSA_STATUS_ERROR_NOT_SUPPORTED.
+ *
+ * @param queue Must be an AMD GPU AQL queue. Null, HostQueue, and AIE
+ *   queues return HSA_STATUS_ERROR_INVALID_QUEUE; a valid AQL queue
+ *   whose node differs from the one that imported @p sem returns
+ *   HSA_STATUS_ERROR_INVALID_AGENT.
+ * @param sem   Handle returned by hsa_amd_external_semaphore_handle_open.
+ * @param value Fence value to wait for. Vulkan binary semaphores
+ *   conventionally use 0 / 1 but the value is passed through verbatim
+ *   so timeline-style callers can pick their own.
+ *
+ * @retval HSA_STATUS_SUCCESS                Wait queued successfully.
+ * @retval HSA_STATUS_ERROR_INVALID_QUEUE    queue is null, invalid, or
+ *   not an AMD GPU AQL queue.
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT sem.handle is malformed.
+ * @retval HSA_STATUS_ERROR_INVALID_AGENT    The queue's KMD node has
+ *   no associated WDDM device, or it differs from the one that
+ *   imported @p sem.
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED    libhsakmt lacks the thunk
+ *   (incl. Linux/KFD stub).
+ * @retval HSA_STATUS_ERROR                  Underlying KMD wait
+ *   ioctl failed.
+ */
+hsa_status_t HSA_API hsa_amd_queue_wait_external_semaphore(
+    hsa_queue_t                  *queue,
+    hsa_amd_external_semaphore_t  sem,
+    uint64_t                      value);
 
 /** @} */
 
@@ -3548,7 +3718,7 @@ typedef enum {
   HSA_AMD_QUEUE_CREATE_SYSTEM_MEM = 0,
   /**
    * The queue's packet buffer should be allocated in the agent's
-   * fine-grain device memory region.
+   * local device memory region.
    */
   HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF = (1 << 0),
   /**
@@ -3560,6 +3730,268 @@ typedef enum {
    */
   HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR = (1 << 1),
 } hsa_amd_queue_create_flag_t;
+
+/**
+ * @brief Hardware engine type a queue targets.
+ *
+ * Selects which hardware engine the queue feeds. The default value (0)
+ * is ::HSA_AMD_QUEUE_ENGINE_COMPUTE so that descriptors that leave the
+ * @c engine_type field zero behave exactly like a classic compute (AQL)
+ * queue. This keeps the descriptor ABI backward compatible: callers that
+ * predate the @c engine_type field simply request a compute queue.
+ *
+ * The engine type also determines which other descriptor fields are
+ * meaningful (see ::hsa_amd_queue_create_desc_t). For example, AQL queue
+ * type, CU mask, and scratch (private segment) size apply only to the
+ * compute engine, while @c sdma_engine_id applies only to the SDMA engine.
+ *
+ * @note ::HSA_AMD_QUEUE_ENGINE_COMPUTE and ::HSA_AMD_QUEUE_ENGINE_SDMA are
+ * implemented today. The AIE engine type is reserved by the API so that tools
+ * and applications can be written against the final interface, but the runtime
+ * does not yet create AIE queues and will fail such requests with
+ * ::HSA_STATUS_ERROR_INVALID_QUEUE_CREATION.
+ */
+typedef enum {
+  /**
+   * Compute (AQL) queue. This is the default engine type.
+   */
+  HSA_AMD_QUEUE_ENGINE_COMPUTE = 0,
+  /**
+   * SDMA (system DMA / copy) queue.
+   */
+  HSA_AMD_QUEUE_ENGINE_SDMA = 1,
+  /**
+   * AI Engine (AIE) queue. Reserved for future use; queue creation for
+   * this engine type is not yet implemented.
+   */
+  HSA_AMD_QUEUE_ENGINE_AIE = 2,
+} hsa_amd_queue_engine_t;
+
+/**
+ * @brief Sentinel for @c sdma_engine_id requesting runtime engine selection.
+ *
+ * When @c engine_type is ::HSA_AMD_QUEUE_ENGINE_SDMA and @c sdma_engine_id is
+ * set to this value, the runtime selects an SDMA engine automatically,
+ * rotating round-robin across the agent's SDMA engines so that concurrently
+ * created queues are spread across the available hardware. Otherwise
+ * @c sdma_engine_id selects a specific SDMA engine by index in
+ * [0, agent's number of SDMA engines). The XGMI-optimized engines occupy the
+ * upper portion of this engine-id space.
+ *
+ * In all cases the runtime creates the queue using the driver's
+ * @c HSA_QUEUE_SDMA_BY_ENG_ID queue type, which requires sufficient KFD
+ * support; requests are rejected with
+ * ::HSA_STATUS_ERROR_INVALID_QUEUE_CREATION when the kernel driver cannot
+ * target a specific SDMA engine.
+ */
+#define HSA_AMD_SDMA_ENGINE_ID_ANY UINT32_MAX
+
+/**
+ * @brief Version of the hsa_amd_queue_create_desc_t structure.
+ *
+ * Callers must set the @c version field to this value. The runtime rejects
+ * descriptors whose version it does not recognise.
+ */
+#define HSA_AMD_QUEUE_CREATE_DESC_VERSION 1
+
+/**
+ * @brief Default value for @c private_segment_size in
+ * ::hsa_amd_queue_create_desc_t.
+ *
+ * Requests the runtime's profile-dependent default scratch allocation.
+ * Equivalent to passing @c UINT32_MAX to ::hsa_queue_create.
+ */
+#define HSA_AMD_PRIVATE_SEGMENT_SIZE_DEFAULT UINT32_MAX
+
+/**
+ * @brief Compute (AQL) queue parameters.
+ *
+ * Engine-specific parameters used when @c engine_type is
+ * ::HSA_AMD_QUEUE_ENGINE_COMPUTE. Stored in the @c engine union of
+ * ::hsa_amd_queue_create_desc_t.
+ */
+typedef struct hsa_amd_compute_queue_params_s {
+  /** CU mask array. NULL when @c cu_mask_count is 0. Each bit corresponds to
+   *  one CU; the array length is ceil(cu_mask_count / 32) uint32_t elements. */
+  const uint32_t *cu_mask;
+  /** Queue type: HSA_QUEUE_TYPE_MULTI, HSA_QUEUE_TYPE_SINGLE, or
+   *  HSA_QUEUE_TYPE_COOPERATIVE. */
+  hsa_queue_type32_t type;
+  /** Initial scratch (private segment) size in bytes per work-item.
+   *  0 = no scratch.  HSA_AMD_PRIVATE_SEGMENT_SIZE_DEFAULT = runtime default
+   *  (profile-dependent).  Scratch may still grow dynamically beyond this
+   *  initial allocation. */
+  uint32_t private_segment_size;
+  /** Number of bits in the CU mask. Must be a multiple of 32.
+   *  0 = no CU mask (all CUs enabled). */
+  uint32_t cu_mask_count;
+  /** Reserved for future compute parameters. Must be 0. */
+  uint32_t reserved[3];
+} hsa_amd_compute_queue_params_t;
+
+/**
+ * @brief SDMA (system DMA / copy) queue parameters.
+ *
+ * Engine-specific parameters used when @c engine_type is
+ * ::HSA_AMD_QUEUE_ENGINE_SDMA.
+ *
+ * SDMA queues created by this API are single-producer/external-synchronization
+ * queues. The runtime exposes the ring through @c hsa_queue_t, but callers are
+ * responsible for serializing packet production and for handling ring space,
+ * wrap/no-op padding, packet writes, and ordered write-pointer/doorbell
+ * publication before submitting work.
+ */
+typedef struct hsa_amd_sdma_queue_params_s {
+  /** SDMA engine selector. HSA_AMD_SDMA_ENGINE_ID_ANY lets the runtime pick
+   *  an engine; any other value selects a specific SDMA engine by index in
+   *  [0, agent's number of SDMA engines). Maps to the kernel driver
+   *  HSA_QUEUE_SDMA / HSA_QUEUE_SDMA_BY_ENG_ID queue types and the targeted
+   *  engine id. */
+  uint32_t sdma_engine_id;
+  /** Reserved for future SDMA parameters. Must be 0. */
+  uint32_t reserved[7];
+} hsa_amd_sdma_queue_params_t;
+
+/**
+ * @brief AI Engine (AIE) queue parameters.
+ *
+ * Engine-specific parameters used when @c engine_type is
+ * ::HSA_AMD_QUEUE_ENGINE_AIE. (AIE queue creation is not yet implemented.)
+ */
+typedef struct hsa_amd_aie_queue_params_s {
+  /** Reserved for future AIE parameters. Must be 0. */
+  uint32_t reserved[8];
+} hsa_amd_aie_queue_params_t;
+
+/**
+ * @brief Describes a single queue to create within a batch.
+ *
+ * The descriptor is split into a common header (fields that apply to every
+ * engine type) followed by an @c engine union that carries the parameters
+ * specific to the selected @c engine_type. Callers fill in the common header
+ * plus exactly one arm of the union. This makes the set of fields that apply
+ * to each engine explicit rather than relying on "must be zero" rules for
+ * inapplicable fields.
+ *
+ * A zero-initialised descriptor (with @c version set) requests a compute
+ * (AQL) queue, because ::HSA_AMD_QUEUE_ENGINE_COMPUTE is 0 and the compute
+ * arm is the zero state of the union. This keeps the descriptor backward
+ * compatible with callers that only know about compute queues.
+ *
+ * On success the runtime writes the created queue into the @c queue field.
+ * An array of descriptors can be passed to ::hsa_amd_queue_create to create
+ * multiple queues in a single call.
+ *
+ * The @c version field must be set to @c HSA_AMD_QUEUE_CREATE_DESC_VERSION.
+ * All @c reserved fields — including the reserved arm/bytes of the @c engine
+ * union, the per-engine @c reserved members, and the trailing @c reserved
+ * block — must be zero.
+ *
+ * Descriptor version 1 does not expose @c group_segment_size. The runtime
+ * uses its default group-segment sizing, equivalent to passing @c UINT32_MAX
+ * to ::hsa_queue_create.
+ *
+ * @note ::HSA_AMD_QUEUE_ENGINE_COMPUTE and ::HSA_AMD_QUEUE_ENGINE_SDMA are
+ * implemented today. AIE requests are rejected with
+ * ::HSA_STATUS_ERROR_INVALID_QUEUE_CREATION.
+ */
+typedef struct hsa_amd_queue_create_desc_s {
+  /* ---- Common header: applies to every engine type ---- */
+  /** Struct version. Must be HSA_AMD_QUEUE_CREATE_DESC_VERSION. */
+  uint16_t version;
+  /** Memory placement flags (hsa_amd_queue_create_flag_t). 0 = system memory. */
+  uint16_t flags;
+  /** Engine type the queue targets (hsa_amd_queue_engine_t).
+   *  HSA_AMD_QUEUE_ENGINE_COMPUTE (0) selects a compute (AQL) queue and is
+   *  the default. Selects which arm of the @c engine union is read. Only a
+   *  small set of engine types exists, so this is a single byte. */
+  uint8_t engine_type;
+  /** Reserved header bytes for future common fields. Must be 0. */
+  uint8_t reserved_header[3];
+  /** Queue ring-buffer size in bytes. Must be a power of 2. For fixed-size
+   *  packet queues, this must also be a multiple of the engine's packet size.
+   *  For SDMA queues, the returned hsa_queue_t::size is also expressed in
+   *  bytes because SDMA read/write pointers are byte offsets. */
+  uint32_t queue_size_bytes;
+  /** Dispatch and wavefront scheduling priority. HSA_AMD_QUEUE_PRIORITY_NORMAL = default. */
+  hsa_amd_queue_priority_t priority;
+  /** Callback invoked by the runtime for asynchronous queue errors. May be NULL. */
+  void (*callback)(hsa_status_t status, hsa_queue_t *source, void *data);
+  /** Application data passed to @c callback. May be NULL. */
+  void *callback_data;
+  /** [out] On success the runtime writes the created queue pointer here.
+   *  On failure this is set to NULL. */
+  hsa_queue_t *queue;
+  union {
+    /** Valid when @c engine_type == HSA_AMD_QUEUE_ENGINE_COMPUTE. */
+    hsa_amd_compute_queue_params_t compute;
+    /** Valid when @c engine_type == HSA_AMD_QUEUE_ENGINE_SDMA. */
+    hsa_amd_sdma_queue_params_t sdma;
+    /** Valid when @c engine_type == HSA_AMD_QUEUE_ENGINE_AIE. */
+    hsa_amd_aie_queue_params_t aie;
+    /** Fixes the union size to the v1 per-engine parameter budget. Must be 0
+     *  for engine types whose arm does not cover it. */
+    uint8_t reserved[32];
+  } engine;
+  /** Traffic class hint for the queue's memory/fabric traffic (QoS).
+   *  Reserved for future use and not yet implemented: it must be 0, which
+   *  selects the runtime default traffic class. */
+  uint32_t traffic_class;
+  /** Reserved for future use. Must be 0. */
+  uint8_t reserved[20];
+} hsa_amd_queue_create_desc_t;
+
+/**
+ * @brief Create one or more queues from an array of descriptors.
+ *
+ * @details Each element of @p descs fully describes a queue to create on
+ * @p agent. The runtime creates the queue, applies the requested priority
+ * and CU mask atomically, and writes the result to the descriptor's
+ * @c queue output pointer.
+ *
+ * For single-queue creation pass @p num_descs = 1.
+ *
+ * On partial failure (batch mode), queues that were successfully created
+ * remain valid. The caller should inspect each @c descs[i].queue pointer
+ * (NULL indicates that particular queue failed). The return value reflects
+ * the first error encountered.
+ *
+ * @param[in] agent Agent on which to create all queues.
+ *
+ * @param[in,out] descs Array of queue descriptors. Each descriptor's
+ * @c queue field is an output parameter written by the runtime.
+ *
+ * @param[in] num_descs Number of elements in @p descs. Must be >= 1.
+ *
+ * @retval ::HSA_STATUS_SUCCESS All queues were created successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT @p agent is invalid.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p descs is NULL,
+ * @p num_descs is 0, a descriptor's @c version is unrecognised,
+ * @c queue_size_bytes is 0 or not a power of two, @c priority is invalid,
+ * @c engine_type is not a valid ::hsa_amd_queue_engine_t value, the selected
+ * engine's parameters are invalid (for compute: @c type is invalid,
+ * @c queue_size_bytes is not a multiple of the AQL packet size, or
+ * @c cu_mask_count is not a multiple of 32), @c traffic_class is non-zero
+ * (it is reserved and not yet implemented), or any @c reserved field is
+ * non-zero.
+ *
+ * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES The runtime could not allocate
+ * the required resources for one or more queues.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_QUEUE_CREATION @p agent does not support
+ * queues of the requested type, or a descriptor requested an @c engine_type
+ * that is recognised by the API but not yet implemented by the runtime (for
+ * example ::HSA_AMD_QUEUE_ENGINE_SDMA or ::HSA_AMD_QUEUE_ENGINE_AIE).
+ */
+hsa_status_t HSA_API hsa_amd_queue_create(
+    hsa_agent_t agent,
+    hsa_amd_queue_create_desc_t *descs,
+    uint32_t num_descs);
 
 /** @} */
 
@@ -4118,7 +4550,7 @@ typedef enum {
  * To minimize internal memory fragmentation, align the size to the recommended allocation granule
  * size, see HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE
  *
- * @param[in] pool memory to use. Only GPU agent pools are supported.
+ * @param[in] pool memory to use.
  * @param[in] size of the memory allocation
  * @param[in] type of memory
  * @param[in] flags - currently unsupported

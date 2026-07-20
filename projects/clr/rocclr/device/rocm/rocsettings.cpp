@@ -44,7 +44,7 @@ Settings::Settings() {
 
   pinnedXferSize_ = GPU_PINNED_XFER_SIZE * Mi;
   pinnedMinXferSize_ =
-      flagIsDefault(GPU_PINNED_MIN_XFER_SIZE) ? 1 * Mi : GPU_PINNED_MIN_XFER_SIZE * Mi;
+      flagIsDefault(GPU_PINNED_MIN_XFER_SIZE) ? 64 * Ki : GPU_PINNED_MIN_XFER_SIZE * Mi;
 
   sdmaCopyThreshold_ = GPU_FORCE_BLIT_COPY_SIZE * Ki;
 
@@ -145,7 +145,8 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     queue_pipe_dist_ = dynamic_queues_ >= 1;
   }
 
-  if (gfxipMajor == 9 && gfxipMinor >= 4) {
+  if ((gfxipMajor == 9 && gfxipMinor >= 4) ||
+      (gfxipMajor == 12 && gfxipMinor >= 5)) {
     sdma_swap_supported_ = true;
   }
 
@@ -192,6 +193,17 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
   if (gfxipMajor == 12 && gfxipMinor == 5) {
     sdma_indirect_supported_ = true;
   }
+
+#if defined(_WIN32)
+  if (gfxipMajor >= 11) {
+    // Due to driver limitation,
+    // D3D10/11 sharing extensions are only supported on GFX11 or later,
+    // and D3D9 sharing extension is not supported on any hardware as it is deprecated.
+    enableExtension(ClKhrD3d10Sharing);
+    enableExtension(ClKhrD3d11Sharing);
+    enableExtension(ClAmdPlanarYuv);
+  }
+#endif
 
   // Override current device settings
   override();

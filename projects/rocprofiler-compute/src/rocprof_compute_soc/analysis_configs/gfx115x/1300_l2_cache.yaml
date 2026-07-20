@@ -23,9 +23,9 @@ Panel Config:
         unit: Unit
       metric:
         GL2 Cache Hit Rate:
-          avg: SUM(100 * GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
-          min: MIN(100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum))
-          max: MAX(100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum))
+          avg: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
+          min: 100 * MIN(GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum))
+          max: 100 * MAX(GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum))
           unit: Percent
         GL2 Cache Hits:
           avg: SUM(GL2C_HIT_sum) / SUM($denom)
@@ -97,15 +97,15 @@ Panel Config:
       metric:
         GL2 Cache Read BW:
           # 32/64/128 B read bins plus 96 B compressed reads; GL2C_EA_RDREQ_96B covers EA-side 96 B reads.
-          avg: SUM(GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+          avg: SUM(GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           min: MIN((GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / ((End_Timestamp - Start_Timestamp) / 1e9))
           max: MAX((GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / ((End_Timestamp - Start_Timestamp) / 1e9))
           unit: Bytes/s
         GL2 Cache Write BW:
           # Note: GL2C write requests use 64B as the average transaction size.
-          avg: SUM(GL2C_WRITE_sum * 64) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
-          min: MIN((GL2C_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
-          max: MAX((GL2C_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          avg: 64 * SUM(GL2C_WRITE_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          min: 64 * MIN(GL2C_WRITE_sum / ((End_Timestamp - Start_Timestamp) / 1e9))
+          max: 64 * MAX(GL2C_WRITE_sum / ((End_Timestamp - Start_Timestamp) / 1e9))
           unit: Bytes/s
 
   metrics_description:

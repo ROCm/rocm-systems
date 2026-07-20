@@ -5,6 +5,13 @@
 #==================================================================================================
 cmake_minimum_required(VERSION 3.16)
 
+# Locate the shared rocm-systems tree so standalone RCCL builds can pick up
+# shared/ctest/TestCategories.cmake (the test-categories block in test/CMakeLists.txt
+# is gated on ROCM_SYSTEMS_ROOT and is otherwise silently skipped).
+if(NOT DEFINED ROCM_SYSTEMS_ROOT)
+  set(ROCM_SYSTEMS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 # Determine version from makefiles/version.mk (NCCL-style version variables)
 #==================================================================================================
 file(READ makefiles/version.mk version_mk_text)
@@ -83,6 +90,12 @@ option(ENABLE_CODE_COVERAGE                    "Enable code coverage"           
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
 option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
+# Move .hip_fatbin to the end of librccl.so so that small-code-model host
+# relocations (PC32/PLT32/GOTPCRELX/32S) between .text and the read-only /
+# writable data clusters stay in range even when the bundled device fat
+# binary exceeds ~2 GiB.  Default ON; disable only to reproduce the prior
+# layout for diagnostics.  See cmake/linker_scripts/hip_fatbin_tail.ld.
+option(RCCL_HIP_FATBIN_AT_TAIL                 "Place .hip_fatbin at the end of librccl.so"    ON)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             ON)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
@@ -93,7 +106,9 @@ option(QP_TRACKING                             "Enable per-device QP tracking"  
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
-option(ENABLE_ROCSHMEM                         "Enable rocSHMEM support in RCCL"               OFF)
+option(ENABLE_ROCSHMEM                         "Link librocshmem.a into librccl.so (full rocSHMEM device+host integration)" OFF)
+option(ENABLE_ROCSHMEM_GIN                     "Compile GIN rocshmem plugins; symbols resolved at runtime by the executable" OFF)
+option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device unit tests with ENABLE_ROCSHMEM on test targets only (no full librocshmem in librccl)" OFF)
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
 
 # Default GPU architectures to build
@@ -124,7 +139,7 @@ include(GNUInstallDirs)
 include(cmake/Dependencies.cmake) # GTest, rocm-cmake, rocm_local_targets
 include(cmake/CheckSymbolExistsNoWarn.cmake)
 # Include rocSHMEM build module only if enabled
-if(ENABLE_ROCSHMEM)
+if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   include(cmake/ROCSHMEM.cmake)
 endif()
 
@@ -341,6 +356,19 @@ check_cxx_source_compiles("
 ### Check for hipMemcpyBatchAsync support (Copy Engine batch API)
 check_symbol_exists("hipMemcpyBatchAsync" "hip/hip_runtime_api.h" HIP_MEMCPY_BATCH_ASYNC)
 
+### Check for cuMem VMM DMA-BUF export support (driver-level dmabuf export).
+check_symbol_exists("hipMemGetHandleForAddressRange" "hip/hip_runtime_api.h" HIP_MEM_GET_HANDLE_FOR_ADDR_RANGE)
+
+### Check for uncached VMM allocation type (hipMemAllocationTypeUncached).
+check_cxx_source_compiles("
+  #include <hip/hip_runtime_api.h>
+  int main() {
+    hipMemAllocationType t = hipMemAllocationTypeUncached;
+    (void)t;
+    return 0;
+  }
+" HIP_VMM_UNCACHED_MEMORY_AVAILABLE)
+
 unset(CMAKE_REQUIRED_LIBRARIES)
 
 ### Check for indirect function call support
@@ -373,6 +401,15 @@ if(HIP_MEMCPY_BATCH_ASYNC)
 else()
   set(CE_ENABLED OFF)
   message(STATUS "Copy Engine (CE) batch API disabled - hipMemcpyBatchAsync not found in hip/hip_runtime_api.h")
+endif()
+
+## Check for cuMem VMM DMA-BUF export support
+if(HIP_MEM_GET_HANDLE_FOR_ADDR_RANGE)
+  set(CUMEM_DMABUF_EXPORT_ENABLED ON)
+  message(STATUS "cuMem DMA-BUF export enabled - hipMemGetHandleForAddressRange found")
+else()
+  set(CUMEM_DMABUF_EXPORT_ENABLED OFF)
+  message(STATUS "cuMem DMA-BUF export disabled - hipMemGetHandleForAddressRange not found in hip/hip_runtime_api.h")
 endif()
 
 ## Check for hsa-runtime64
@@ -710,12 +747,14 @@ endif()
 rocm_install(TARGETS rcclras)
 
 if(BUILD_TESTS)
+  enable_testing()
   rocm_package_setup_component(clients)
   rocm_package_setup_client_component(tests PACKAGE_NAME unittests)
   if(BUILD_EXT_EXAMPLES)
     add_subdirectory(plugins/net/example)
     add_subdirectory(plugins/tuner/example)
     add_subdirectory(plugins/profiler/example)
+    add_subdirectory(plugins/profiler/proxytrace)
   endif()
   add_subdirectory(test)
 

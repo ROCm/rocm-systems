@@ -231,15 +231,14 @@ hipError_t IPCEvent::createIpcSignalIfNeeded() {
 
 IPCEvent::~IPCEvent() {
   if (ipc_signal_ != nullptr) {
-    // If the event was recorded (signal armed), wait for any in-flight barrier
-    // to finish before destroying the signal; otherwise the GPU could write to
-    // freed memory.  Skip the wait when the signal was never recorded (still at
-    // its initial value) — waiting would hang forever.
-    if (event_ != nullptr) {
-      ipc_signal_->Wait(1, amd::device::Signal::Condition::Lt, UINT64_MAX);
-    }
-    delete ipc_signal_;
+    // Transfer the signal (and the record marker's event) to the owning device's
+    // deferred-cleanup queue, which waits for the barrier and frees them at the next device
+    // sync/reset (or on overflow).
+    g_devices[deviceId()]->EnqueueDeferredIpcSignal(ipc_signal_, event_);
     ipc_signal_ = nullptr;
+    // Ownership of event_ is transferred to the deferred queue; clear it so the base ~Event()
+    // does not release it (the deferred cleanup will).
+    event_ = nullptr;
   }
 }
 
