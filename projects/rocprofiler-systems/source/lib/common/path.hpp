@@ -294,6 +294,15 @@ readlink(const std::string& _path)
     return _path;
 }
 
+/**
+ * Resolve @p path to its canonical absolute form.
+ * Filesystem operation: follows symlinks and collapses '.'/'..'; the path
+ * must exist. On any error (missing path, permission denied) @p path is
+ * returned unchanged.
+ * @code realpath("/a/./b/../c") @endcode returns "/a/c" (when it exists).
+ * @param path the path to canonicalize
+ * @return the canonical absolute path, or @p path unchanged on error
+ */
 [[nodiscard]] std::string
 realpath(const std::string& path)
 {
