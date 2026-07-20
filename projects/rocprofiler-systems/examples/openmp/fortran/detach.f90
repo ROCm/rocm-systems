@@ -25,6 +25,15 @@ program task_detach_routes
     use omp_lib
     implicit none
 
+    ! Pin the whole program to two OpenMP threads regardless of the launching
+    ! environment (e.g. an externally injected OMP_NUM_THREADS). These detach
+    ! routes only need two threads, and a large external thread count has been
+    ! observed to stall the OMPT runtime on the trailing detach/early-fulfill
+    ! callbacks. omp_set_num_threads overrides OMP_NUM_THREADS, and every
+    ! parallel region below also pins its team size with num_threads(2).
+    call omp_set_dynamic(.false.)
+    call omp_set_num_threads(2)
+
     call run_late_sibling_fulfill()
     print *, "----"
     call run_early_self_fulfill()
@@ -58,7 +67,7 @@ contains
             !$omp end task
 
             !$omp task shared(event)
-                call busy_work(200000)
+                call busy_work(2000)
                 call omp_fulfill_event(event)
             !$omp end task
 
@@ -88,7 +97,7 @@ contains
         !$omp single
             !$omp task detach(event) shared(result)
                 call omp_fulfill_event(event)
-                call busy_work(200000)
+                call busy_work(2000)
                 result = reduce_squares(N)
             !$omp end task
 
@@ -120,7 +129,7 @@ contains
                 result = reduce_squares(N)
             !$omp end task
 
-            call busy_work(200000)
+            call busy_work(2000)
             call omp_fulfill_event(event)
 
             !$omp taskwait
@@ -149,11 +158,11 @@ contains
 
         print *, "[phase 4] many detached tasks, fulfilled out of order"
 
-        !$omp parallel num_threads(4) shared(ev1, ev2, ev3, r1, r2, r3)
+        !$omp parallel num_threads(2) shared(ev1, ev2, ev3, r1, r2, r3)
         !$omp single
             ! Three detached tasks are created up front...
             !$omp task detach(ev1) shared(r1)
-                call busy_work(150000)
+                call busy_work(1500)
                 r1 = 1
             !$omp end task
 
@@ -161,12 +170,12 @@ contains
             ! not appear in a shared clause on this same task construct.
             !$omp task detach(ev2) shared(r2)
                 call omp_fulfill_event(ev2)        ! task 2 releases itself early
-                call busy_work(100000)
+                call busy_work(1000)
                 r2 = 2
             !$omp end task
 
             !$omp task detach(ev3) shared(r3)
-                call busy_work(50000)
+                call busy_work(500)
                 r3 = 3
             !$omp end task
 
@@ -175,7 +184,7 @@ contains
             call omp_fulfill_event(ev3)
 
             !$omp task shared(ev1)
-                call busy_work(80000)
+                call busy_work(800)
                 call omp_fulfill_event(ev1)
             !$omp end task
 

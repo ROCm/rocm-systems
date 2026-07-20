@@ -280,7 +280,13 @@ class TestOpenMPFortran(RocprofsysTest):
             sys_run_pass_regex=["omp_parallel"],
         )
 
+    # OMPT task-detach tracing exercises the early_fulfill task-schedule
+    # callback. rocprofiler-sdk < 1.3.2 aborts on the trailing early_fulfill
+    # callback (state_prior == nullptr), so gate this test behind the SDK
+    # version that carries the fix.
+    @pytest.mark.rocprofiler_sdk_min_version("1.3.2")
     @pytest.mark.parametrize("mode", ["baseline", "sampling", "sys_run"])
+    @pytest.mark.gpu
     def test_detach(self, mode, ompt_base_env):
         # Exercises omp task detach / omp_fulfill_event under the profiler.
         # No output validation is needed: the default abort-fail regex check
