@@ -77,6 +77,8 @@ struct ConSanMoiWorkgroupSource {
   std::optional<uint16_t> scalar_src;
   bool shift_right_16 = false;
   bool mask_low_16 = false;
+
+  auto operator<=>(const ConSanMoiWorkgroupSource &) const = default;
 };
 
 struct ConSanMoiWorkgroupSources {
@@ -84,6 +86,8 @@ struct ConSanMoiWorkgroupSources {
   ConSanMoiWorkgroupSource y;
   ConSanMoiWorkgroupSource z;
   ConSanMoiWorkgroupSource cluster_workgroup_id;
+
+  auto operator<=>(const ConSanMoiWorkgroupSources &) const = default;
 };
 
 struct ConSanMoiAccessRange {

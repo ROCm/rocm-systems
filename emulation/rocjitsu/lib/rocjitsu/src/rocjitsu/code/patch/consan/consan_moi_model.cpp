@@ -287,6 +287,8 @@ bool consan_moi_sampled_qualifies_barrier_sequence(const ConSanSyncSequence &seq
   const bool static_id =
       sequence.barrier_operand_source == ConSanBarrierSite::OperandSource::Immediate ||
       sequence.barrier_operand_source == ConSanBarrierSite::OperandSource::Literal32;
+  const bool owner_proven = sequence.in_kernel ? sequence.execution_owners.size() == 1u
+                                               : !sequence.execution_owners.empty();
   return sequence.kind == ConSanSyncSequenceKind::Barrier &&
          sequence.operation == ConSanSyncOperation::BarrierFull &&
          sequence.memory_role == ConSanSyncMemoryRole::AcquireRelease &&
@@ -294,8 +296,8 @@ bool consan_moi_sampled_qualifies_barrier_sequence(const ConSanSyncSequence &seq
                                       ConSanSemanticConfidence::Conservative) &&
          consan_sync_confidence_meets(sequence.memory_role_confidence,
                                       ConSanSemanticConfidence::Conservative) &&
-         sequence.in_kernel && sequence.basic_block_index && !sequence.inside_scalar_clause &&
-         sequence.execution_owners.size() == 1u && static_id && sequence.barrier_id &&
+         sequence.basic_block_index && !sequence.inside_scalar_clause && owner_proven &&
+         static_id && sequence.barrier_id &&
          sequence.barrier_scope == ConSanBarrierSite::Scope::Workgroup &&
          (sequence.member_event_identities.size() == 1u ||
           sequence.member_event_identities.size() == 2u) &&

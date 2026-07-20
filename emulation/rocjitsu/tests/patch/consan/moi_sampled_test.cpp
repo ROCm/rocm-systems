@@ -1920,7 +1920,7 @@ TEST(ConSanMoi, SampledSyncMetadataPublicationIsBoundedAndCollisionSafe) {
   EXPECT_EQ(slots[1].descriptor, consan_moi_sampled_sync_abi::reserved_mask);
 }
 
-TEST(ConSanMoi, SampledBarrierQualificationAcceptsOnlyCompleteStaticSingleOwnerSequence) {
+TEST(ConSanMoi, SampledBarrierQualificationAcceptsCompleteStaticOwnedSequence) {
   ConSanSyncSequence sequence;
   sequence.kind = ConSanSyncSequenceKind::Barrier;
   sequence.operation = ConSanSyncOperation::BarrierFull;
@@ -1956,7 +1956,10 @@ TEST(ConSanMoi, SampledBarrierQualificationAcceptsOnlyCompleteStaticSingleOwnerS
   sequence.in_cyclic_cfg_component = false;
   rejects([](auto &item) { item.inside_scalar_clause = true; });
   rejects([](auto &item) { item.execution_owners.clear(); });
-  rejects([](auto &item) { item.execution_owners.push_back({.descriptor_file_offset = 0x90}); });
+  ConSanSyncSequence callable = sequence;
+  callable.in_kernel = false;
+  callable.execution_owners.push_back({.descriptor_file_offset = 0x90});
+  EXPECT_TRUE(consan_moi_sampled_qualifies_barrier_sequence(callable));
   rejects([](auto &item) { item.member_event_identities.push_back("ambiguous-third-member"); });
 }
 
