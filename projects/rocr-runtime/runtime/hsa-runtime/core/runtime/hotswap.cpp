@@ -359,7 +359,9 @@ std::optional<RewriteDecision> DecideHotswapRewrite(
         WithGfx1250SteppingFeature(source_isa, Gfx1250Stepping::kB0);
     decision.target_isa =
         WithGfx1250SteppingFeature(target_isa, Gfx1250Stepping::kA0);
-    decision.rewrite_required = true;
+    // Preserve the legacy A0 fallback when COMGR cannot rewrite a code object.
+    // Required behavior remains opt-in through strict mode for non-A0 targets.
+    decision.rewrite_required = false;
     return decision;
   }
 
