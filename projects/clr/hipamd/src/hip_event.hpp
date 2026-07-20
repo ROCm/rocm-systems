@@ -248,6 +248,11 @@ struct CallbackData {
   const int previous_read_index;               //!< Snapshot of read index for synchronization
   hip::ihipIpcEventShmem_t* const shmem;       //!< IPC shared memory for event signaling
 };
+/// Internal event creation that picks the correct concrete subclass
+/// (hip::EventDD in AMD_DIRECT_DISPATCH mode, hip::Event otherwise).
+/// Safe to call from within HIP runtime code without going through HIP_INIT_API.
+hipError_t ihipEventCreateWithFlags(hipEvent_t* event, uint32_t flags);
+
 
 /// True IPC event backed by a device::Signal with IPC capability.
 /// On ROCm, this uses ROCr IPC signals

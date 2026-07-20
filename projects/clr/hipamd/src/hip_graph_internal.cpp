@@ -289,6 +289,165 @@ hipError_t Graph::ScheduleNodes() {
 }
 
 // ================================================================================================
+// Critical-path list scheduler for the classic (non-segmented) path.
+//
+// Mirrors xla_scheduler ListScheduler: priority = upward rank
+// (rank(n) = dur(n) + max(rank(successor))), and each picked ready node is
+// assigned to the queue that minimizes its earliest finish time.
+//
+// Runs once, lazily, after a warm-up launch (idx 2) has populated per-node
+// gpu_time_us_. It writes back node->stream_id_ (queue assignment) and records
+// the greedy pick order into sched_order_, which then replaces topoOrder_ as
+// the run order in RunNodes.
+void Graph::PathDecomposition() {
+  if (!DEBUG_HIP_GRAPH_LIST_SCHED || list_sched_done_ || current_launch_idx_ < 3) {
+    return;
+  }
+  const std::vector<Node>& order = topoOrder_;
+  if (order.empty()) {
+    list_sched_done_ = true;
+    return;
+  }
+
+  // Durations come from the warm-up launch. If any node lacks a measured time,
+  // the collection launch has not completed yet; retry on a later launch.
+  for (auto n : order) {
+    if (n->gpu_time_us_ <= 0.0f) {
+      return;
+    }
+  }
+
+  // Queues are capped by the streams actually provisioned for this launch,
+  // since RunOneNode indexes streams_[stream_id_].
+  const int num_queues =
+      std::max(1, std::min(static_cast<int>(DEBUG_HIP_FORCE_GRAPH_QUEUES),
+                           static_cast<int>(streams_.size())));
+
+  auto dur = [](Node n) -> double { return static_cast<double>(n->gpu_time_us_); };
+
+  // Deterministic tie-break: earlier topo index wins on equal rank.
+  std::unordered_map<Node, size_t> topo_index;
+  topo_index.reserve(order.size());
+  for (size_t i = 0; i < order.size(); ++i) {
+    topo_index[order[i]] = i;
+  }
+
+  // Upward ranks via reverse topological pass (successors already computed).
+  std::unordered_map<Node, double> ranks;
+  ranks.reserve(order.size());
+  for (auto it = order.rbegin(); it != order.rend(); ++it) {
+    Node n = *it;
+    double best_succ = 0.0;
+    for (auto s : n->GetEdges()) {
+      auto f = ranks.find(s);
+      if (f != ranks.end()) {
+        best_succ = std::max(best_succ, f->second);
+      }
+    }
+    ranks[n] = dur(n) + best_succ;
+  }
+
+  // ASAP list schedule.
+  std::unordered_map<Node, int> remaining_deps;
+  remaining_deps.reserve(order.size());
+  for (auto n : order) {
+    remaining_deps[n] = static_cast<int>(n->GetDependencies().size());
+  }
+
+  std::unordered_map<Node, double> done_at;
+  done_at.reserve(order.size());
+  std::vector<double> queue_free_at(num_queues, 0.0);
+
+  std::vector<Node> ready;
+  for (auto n : order) {
+    if (remaining_deps[n] == 0) {
+      ready.push_back(n);
+    }
+  }
+
+  sched_order_.clear();
+  sched_order_.reserve(order.size());
+
+  while (!ready.empty()) {
+    // Highest upward rank first; tie-break by smallest topo index.
+    size_t best_i = 0;
+    for (size_t i = 1; i < ready.size(); ++i) {
+      double ri = ranks[ready[i]];
+      double rb = ranks[ready[best_i]];
+      if (ri > rb || (ri == rb && topo_index[ready[i]] < topo_index[ready[best_i]])) {
+        best_i = i;
+      }
+    }
+    Node node = ready[best_i];
+    ready[best_i] = ready.back();
+    ready.pop_back();
+
+    double pred_done = 0.0;
+    for (auto p : node->GetDependencies()) {
+      auto f = done_at.find(p);
+      if (f != done_at.end()) {
+        pred_done = std::max(pred_done, f->second);
+      }
+    }
+
+    // Queue that yields the earliest finish time (ties -> smallest queue index).
+    int best_q = 0;
+    double best_eft = std::max(queue_free_at[0], pred_done) + dur(node);
+    for (int q = 1; q < num_queues; ++q) {
+      double eft = std::max(queue_free_at[q], pred_done) + dur(node);
+      if (eft < best_eft) {
+        best_eft = eft;
+        best_q = q;
+      }
+    }
+
+    node->stream_id_ = best_q;
+    queue_free_at[best_q] = best_eft;
+    done_at[node] = best_eft;
+    sched_order_.push_back(node);
+
+    for (auto s : node->GetEdges()) {
+      auto f = remaining_deps.find(s);
+      if (f != remaining_deps.end() && --(f->second) == 0) {
+        ready.push_back(s);
+      }
+    }
+  }
+
+  // Guard against a malformed graph (cycle) where not every node was scheduled:
+  // fall back to leaving the previous (topo) assignment untouched.
+  if (sched_order_.size() != order.size()) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+            "[hipGraph] list scheduler covered %zu of %zu nodes; keeping classic schedule",
+            sched_order_.size(), order.size());
+    sched_order_.clear();
+    list_sched_done_ = true;
+    return;
+  }
+
+  // Rebuild the launch-startup state that RunNodes derives from stream_id_.
+  std::fill(roots_.begin(), roots_.end(), nullptr);
+  streams_dev_ids_.clear();
+  max_streams_ = 0;
+  for (auto n : sched_order_) {
+    int sid = n->stream_id_;
+    max_streams_ = std::max(max_streams_, sid + 1);
+    streams_dev_ids_[sid].insert(n->dev_id_);
+    // First dependency-free node on a non-default stream becomes that stream's
+    // root, so RunNodes enqueues a start marker syncing it with the app stream.
+    if (n->GetDependencies().empty() && sid != 0 && roots_[sid] == nullptr) {
+      roots_[sid] = n;
+    }
+  }
+
+  ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+          "[hipGraph] list scheduler applied: %zu nodes across %d queues (max_streams=%d)",
+          sched_order_.size(), num_queues, max_streams_);
+
+  list_sched_done_ = true;
+}
+
+// ================================================================================================
 hipError_t Graph::ScheduleNodesIntoBatches() {
   // Handle empty graph case - valid, nothing to schedule
   if (GetNodeCount() == 0) {
@@ -1622,6 +1781,11 @@ hipError_t GraphExecClassic::Run(hip::Stream* launch_stream) {
   ClPrint(amd::LOG_DEBUG, amd::LOG_CODE, "GraphExecClassic::Run max_streams: %d, on device: %d",
           max_streams_, launch_stream->DeviceId());
 
+  // List-scheduler warm-up bookkeeping. Launch idx 2 collects per-node GPU times;
+  // idx 3 runs PathDecomposition() (from RunNodes) and caches the schedule.
+  current_launch_idx_ = static_cast<int32_t>(list_sched_launch_count_++);
+  collect_node_timing_ = (DEBUG_HIP_GRAPH_LIST_SCHED && current_launch_idx_ == 2);
+
   launch_stream->vdev()->SetPreferredQueue();
   launch_stream->vdev()->AcquireQueueWithPreference();
   UpdateStreams(launch_stream);
@@ -1640,7 +1804,26 @@ hipError_t GraphExecClassic::Run(hip::Stream* launch_stream) {
     }
   }
 
-  if (DEBUG_HIP_GRAPH_DOT_PRINT == 2 && !graph_dumped_) {
+  if (unlikely(DEBUG_HIP_GRAPH_DOT_PRINT >= 3 || collect_node_timing_)) {
+    // Block until all GPU work is done so timing events are queryable.
+    // Makes hipGraphLaunch synchronous at level 3 — acceptable for debug profiling.
+    // For list scheduling, this only happens on the single collection launch (idx 2).
+    // Must run after RunNodes() (which enqueues the per-node timing markers in
+    // Graph::RunOneNode) and before the DOT dump, so gpu_time_us_ is populated by
+    // the time ihipGraphLaunch generates the DOT after Run() returns.
+    launch_stream->finish();
+    for (auto node : GetTopoOrder()) {
+      if (node->timing_start_hip_ && node->timing_stop_hip_) {
+        float ms = 0.0f;
+        auto* e_start = reinterpret_cast<hip::Event*>(node->timing_start_hip_);
+        auto* e_stop  = reinterpret_cast<hip::Event*>(node->timing_stop_hip_);
+        (void)e_start->elapsedTime(*e_stop, ms);
+        node->gpu_time_us_ = ms * 1000.0f;
+      }
+    }
+  }
+
+  if (unlikely(DEBUG_HIP_GRAPH_DOT_PRINT == 2 && !graph_dumped_)) {
     graph_dumped_ = true;
     std::string filename =
         "graph_" + std::to_string(amd::Os::getProcessId()) + "_dot_print_launch_1";
@@ -2742,7 +2925,7 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
       // Node was successfully captured - dispatch its batch
       if (segBatch && batchIndex < segBatch->packet_batches.size()) {
         auto& packetBatch = segBatch->packet_batches[batchIndex];
-        if (DEBUG_HIP_GRAPH_DOT_PRINT) {
+        if (unlikely(DEBUG_HIP_GRAPH_DOT_PRINT)) {
           for (size_t j = i; j < i + packetBatch.nodeRanges.size(); j++) {
             segment.nodes[j]->stream_id_ = stream->GetStreamId();
             segment.nodes[j]->hw_queue_id_ = stream->getQueueID();
@@ -2775,7 +2958,7 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
       // Node doesn't support capture - execute individually. Upstream flat batches
       // hand off via attach_signal (SDMA memcpy) or BuildSyncPlan dep barriers;
       // no pre/post Markers needed around the uncaptured node.
-      if (DEBUG_HIP_GRAPH_DOT_PRINT) {
+      if (unlikely(DEBUG_HIP_GRAPH_DOT_PRINT)) {
         node->stream_id_ = stream->GetStreamId();
         node->hw_queue_id_ = stream->getQueueID();
       }
@@ -2899,7 +3082,7 @@ bool Graph::RunOneNode(Node node) {
   } else {
     // Assign a stream to the current node
     node->SetStream(streams_);
-    if (DEBUG_HIP_GRAPH_DOT_PRINT) {
+    if (unlikely(DEBUG_HIP_GRAPH_DOT_PRINT)) {
       node->hw_queue_id_ = node->GetQueue()->getQueueID();
     }
     // Create the execution commands on the assigned stream
@@ -2912,8 +3095,25 @@ bool Graph::RunOneNode(Node node) {
     if (node->GetWait() && !waitList.empty()) {
       node->UpdateEventWaitLists(waitList);
     }
+    if (unlikely(DEBUG_HIP_GRAPH_DOT_PRINT >= 3 || collect_node_timing_)) {
+      if (node->timing_start_hip_ == nullptr) {
+        // Use ihipEventCreateWithFlags so that AMD_DIRECT_DISPATCH mode gets hip::EventDD
+        // (the correct subclass).  Plain `new hip::Event` causes heap corruption via
+        // submitMarker→ActiveSignal when running with direct dispatch enabled.
+        (void)ihipEventCreateWithFlags(&node->timing_start_hip_, hipEventDefault);
+        (void)ihipEventCreateWithFlags(&node->timing_stop_hip_, hipEventDefault);
+      }
+      // batch_flush=false: do not prematurely flush the CPU command ring inside a graph launch.
+      auto* e_start = reinterpret_cast<hip::Event*>(node->timing_start_hip_);
+      (void)e_start->addMarker(node->GetQueue(), nullptr, false);
+    }
     // Start the execution
     node->EnqueueCommands(node->GetQueue());
+    if (unlikely((DEBUG_HIP_GRAPH_DOT_PRINT >= 3 || collect_node_timing_) &&
+                 node->timing_stop_hip_)) {
+      auto* e_stop = reinterpret_cast<hip::Event*>(node->timing_stop_hip_);
+      (void)e_stop->addMarker(node->GetQueue(), nullptr, false);
+    }
   }
   // Release commands of dependency nodes that were included in the wait list after enqueue
   for (auto dep : wait_order_) {
@@ -3003,17 +3203,24 @@ bool Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* paral
     last_command->release();
   }
 
-  //PathDecomposition();
+  // Lazily reschedule (once) using measured per-node GPU times. No-op unless
+  // DEBUG_HIP_GRAPH_LIST_SCHED is set and the warm-up launch (idx 2) has run.
+  PathDecomposition();
 
   Xwait_count = 0;
-  // Run all commands in the graph
-  for (auto node : GetTopoOrder()) {
+  // Run all commands in the graph. When the list scheduler is active, its pick
+  // order (sched_order_) drives execution instead of the default topo order.
+  const std::vector<Node>& run_order =
+      (DEBUG_HIP_GRAPH_LIST_SCHED && list_sched_done_ && !sched_order_.empty())
+          ? sched_order_
+          : GetTopoOrder();
+  for (auto node : run_order) {
     node->launch_id_ = -1;
     if (!RunOneNode(node)) {
       return false;
     }
   }
-  fprintf(stderr, "Xwait_count: %d\n", Xwait_count);
+  // XPUT("Xwait_count: %d", Xwait_count);
   wait_list.clear();
   // Check if the graph has multiple leaf nodes
   for (uint32_t i = 0; i < DEBUG_HIP_FORCE_GRAPH_QUEUES; ++i) {
@@ -3141,7 +3348,7 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
       launch_stream->DeviceId(), captureDeviceId_);
     status = hipErrorInvalidValue;
   }
-  if (DEBUG_HIP_GRAPH_DOT_PRINT == 2 && !graph_dumped_) {
+  if (unlikely(DEBUG_HIP_GRAPH_DOT_PRINT == 2 && !graph_dumped_)) {
     graph_dumped_ = true;
     std::string filename =
         "graph_" + std::to_string(amd::Os::getProcessId()) + "_dot_print_launch_1";

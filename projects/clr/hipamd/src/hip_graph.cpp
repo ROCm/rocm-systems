@@ -1624,7 +1624,7 @@ hipError_t ihipGraphInstantiate(hip::GraphExecBase** pGraphExec, hip::Graph* gra
   if (DEBUG_HIP_GRAPH_DOT_PRINT == 1) {
     static int i = 1;
     std::string filename =
-        "graph_" + std::to_string(amd::Os::getProcessId()) + "_dot_print_" + std::to_string(i++);
+        "graph_" + std::to_string(amd::Os::getProcessId()) + "_dot_print_" + std::to_string(i++) + ".dot";
     hipError_t status = ihipGraphDebugDotPrint(*pGraphExec, filename.c_str(), 0);
     if (status == hipSuccess) {
       LogPrintfInfo("[hipGraph] graph dump:%s", filename.c_str());
@@ -1724,10 +1724,10 @@ hipError_t ihipGraphLaunch(hip::GraphExecBase* graphExec, hipStream_t stream) {
   auto res = graphExec->Run(launch_stream);
   if (unlikely(DEBUG_HIP_GRAPH_DOT_PRINT >= 2)) {
     static int i = 1;
-    if (i < 10) {
+    if (i < 40) {
       std::string filename =
         "graph_exec_" + std::to_string(amd::Os::getProcessId()) + 
-        "_dot_print_" + std::to_string(i++);
+        "_dot_print_" + std::to_string(i++) + ".dot";
       std::ofstream ofs(filename);
       ofs << "digraph dot {" << std::endl;
       graphExec->GenerateDOT(ofs, (hipGraphDebugDotFlags)0);

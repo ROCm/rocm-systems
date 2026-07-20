@@ -600,6 +600,12 @@ bool demangleName(const std::string& mangledName, std::string& demangledName) {
     return false;
   }
 
+  // amd_comgr_get_data reports a size that includes the null terminator.
+  // Trim it so the std::string content doesn't contain an embedded '\0'.
+  if (!demangledName.empty() && demangledName.back() == '\0') {
+    demangledName.pop_back();
+  }
+
   amd::Comgr::release_data(mangled_data);
   amd::Comgr::release_data(demangled_data);
   return true;
