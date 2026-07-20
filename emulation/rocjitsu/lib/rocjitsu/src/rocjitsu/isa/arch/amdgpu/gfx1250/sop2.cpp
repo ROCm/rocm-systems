@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/sop2.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -2213,10 +2214,10 @@ SFmaakF32Sop2::SFmaakF32Sop2(const MachineInst *inst)
 }
 
 void SFmaakF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  float result = std::fma(std::bit_cast<float>(ssrc0.read_scalar(wf)),
-                          std::bit_cast<float>(ssrc1.read_scalar(wf)),
-                          std::bit_cast<float>(literal.read_scalar(wf)));
-  sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
+  float result = std::fma(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)),
+                          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)),
+                          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(literal)));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, std::bit_cast<uint32_t>(result));
 }
 
 SFmamkF32Sop2::SFmamkF32Sop2(const MachineInst *inst)
@@ -2265,10 +2266,10 @@ SFmamkF32Sop2::SFmamkF32Sop2(const MachineInst *inst)
 }
 
 void SFmamkF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  float result = std::fma(std::bit_cast<float>(ssrc0.read_scalar(wf)),
-                          std::bit_cast<float>(literal.read_scalar(wf)),
-                          std::bit_cast<float>(ssrc1.read_scalar(wf)));
-  sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
+  float result = std::fma(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)),
+                          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(literal)),
+                          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, std::bit_cast<uint32_t>(result));
 }
 
 SFmacF32Sop2::SFmacF32Sop2(const MachineInst *inst)
@@ -2307,10 +2308,10 @@ SFmacF32Sop2::SFmacF32Sop2(const MachineInst *inst)
 }
 
 void SFmacF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  float result = std::fma(std::bit_cast<float>(ssrc0.read_scalar(wf)),
-                          std::bit_cast<float>(ssrc1.read_scalar(wf)),
-                          std::bit_cast<float>(sdst.read_scalar(wf)));
-  sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
+  float result = std::fma(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)),
+                          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)),
+                          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(sdst)));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, std::bit_cast<uint32_t>(result));
 }
 
 SCvtPkRtzF16F32Sop2::SCvtPkRtzF16F32Sop2(const MachineInst *inst)
@@ -2349,11 +2350,12 @@ SCvtPkRtzF16F32Sop2::SCvtPkRtzF16F32Sop2(const MachineInst *inst)
 }
 
 void SCvtPkRtzF16F32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  sdst.write_scalar(
-      wf,
-      (static_cast<uint32_t>(util::f32_to_f16_rtz(std::bit_cast<float>(ssrc0.read_scalar(wf)))) |
-       (static_cast<uint32_t>(util::f32_to_f16_rtz(std::bit_cast<float>(ssrc1.read_scalar(wf))))
-        << 16)));
+  amdgpu::RegisterAccess(wf).write_scalar(
+      sdst, (static_cast<uint32_t>(util::f32_to_f16_rtz(
+                 std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)))) |
+             (static_cast<uint32_t>(util::f32_to_f16_rtz(
+                  std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))))
+              << 16)));
 }
 
 SAddF16Sop2::SAddF16Sop2(const MachineInst *inst)
@@ -2626,10 +2628,11 @@ void SFmacF16Sop2::implicit_uses(RegisterSet &uses) const {
 }
 
 void SFmacF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  float result = std::fma(util::f16_to_f32(static_cast<uint16_t>(ssrc0.read_scalar(wf))),
-                          util::f16_to_f32(static_cast<uint16_t>(ssrc1.read_scalar(wf))),
-                          util::f16_to_f32(static_cast<uint16_t>(sdst.read_scalar(wf))));
-  sdst.write_scalar(wf, util::f32_to_f16(result));
+  float result = std::fma(
+      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))),
+      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))),
+      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(sdst))));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, util::f32_to_f16(result));
 }
 
 SMinimumF32Sop2::SMinimumF32Sop2(const MachineInst *inst)

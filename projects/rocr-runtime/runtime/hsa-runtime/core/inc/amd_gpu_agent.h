@@ -1028,10 +1028,10 @@ class GpuAgent : public GpuAgentInt {
 
     /* Consumer thread for aggregated callback delivery */
     std::thread consumer_thread;            // Aggregates data and delivers callbacks
-    std::mutex consumer_mutex;              // Protects consumer_cv and pending_flush_count
+    std::mutex consumer_mutex;              // Protects consumer_cv, pending_flush_count, consumer_exit (for notify)
     std::condition_variable consumer_cv;    // Wakes consumer when XCC threads have new data
-    std::atomic<bool> consumer_exit;        // Signal consumer thread to exit
-    std::atomic<uint32_t> pending_flush_count;  // How many XCCs have notified consumer
+    std::atomic<bool> consumer_exit;        // Signal consumer thread to exit (atomic for lockless loop check)
+    uint32_t pending_flush_count;           // How many XCCs have notified consumer (protected by consumer_mutex)
     std::mutex delivery_mutex;              // Serializes callback delivery (consumer vs Flush)
 
     pcs::PcsRuntime::PcSamplingSession* session;

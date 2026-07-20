@@ -389,7 +389,6 @@ HELP_CASES = [
             r"--sample-cputime",
             r"--sample-realtime",
             r"--sample-overflow",
-            r"--sampling-ainics",
             r"--sampling-cputime-delay",
             r"--sampling-cputime-freq",
             r"--sampling-cputime-signal",

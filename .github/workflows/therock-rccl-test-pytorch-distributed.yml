@@ -1,0 +1,132 @@
+name: TheRock Test PyTorch Distributed for rccl
+
+on:
+  workflow_call:
+    inputs:
+      amdgpu_families:
+        type: string
+      artifact_group:
+        type: string
+      test_runs_on:
+        type: string
+      artifact_run_id:
+        type: string
+      test_scope:
+        type: string
+        default: 'smoke'
+      notify_email:
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      amdgpu_families:
+        type: string
+      artifact_group:
+        type: string
+      test_runs_on:
+        type: string
+      artifact_run_id:
+        type: string
+      test_scope:
+        description: 'smoke (22 curated tests, ~3min) or all'
+        type: string
+        default: 'smoke'
+      notify_email:
+        description: 'Email address to send test summary report'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  test_pytorch_distributed:
+    name: 'Test PyTorch c10d NCCL'
+    runs-on: ${{ inputs.test_runs_on }}
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add 110
+        --group-add 993
+        --group-add 992
+        --ulimit memlock=-1:-1
+        --security-opt seccomp=unconfined
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+        --user 0:0
+    defaults:
+      run:
+        shell: bash
+    env:
+      VENV_DIR: ${{ github.workspace }}/.venv
+      ARTIFACT_RUN_ID: "${{ inputs.artifact_run_id }}"
+      OUTPUT_ARTIFACTS_DIR: "./build"
+      PYTORCH_SRC: ${{ github.workspace }}/pytorch-src
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: "ROCm/TheRock"
+          ref: 99f48ca9ecc4f3c92dadc2baef9e560e5e7d18b0 # 2026-07-07 commit
+
+      - name: Checkout rocm-systems scripts
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          sparse-checkout: .github/scripts
+          path: rocm-systems
+
+      - name: Run setup test environment workflow
+        uses: './.github/actions/setup_test_environment'
+        with:
+          ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
+          AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+          ARTIFACT_GROUP: ${{ inputs.artifact_group }}
+          OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
+          VENV_DIR: ${{ env.VENV_DIR }}
+          FETCH_ARTIFACT_ARGS: "--rccl --tests"
+          IS_PR_FROM_FORK: ${{ github.event.pull_request.head.repo.fork }}
+
+      - name: Install PyTorch and test dependencies
+        timeout-minutes: 15
+        run: |
+          uv pip install --prerelease=allow \
+            "torch[device-gfx942]" \
+            --index-url https://rocm.nightlies.amd.com/whl-multi-arch/
+          uv pip install \
+            pytest \
+            pytest-timeout \
+            "expecttest>=0.3.0" \
+            hypothesis \
+            numpy \
+            psutil
+
+      - name: Run PyTorch c10d NCCL tests
+        timeout-minutes: 60
+        env:
+          NCCL_DEBUG: INFO
+          TORCH_NCCL_BLOCKING_WAIT: 1
+          TORCH_NCCL_ASYNC_ERROR_HANDLING: 1
+        run: |
+          NOTIFY_ARGS=""
+          if [ -n "${{ inputs.notify_email }}" ]; then
+            NOTIFY_ARGS="--notify-email ${{ inputs.notify_email }}"
+          fi
+          python rocm-systems/.github/scripts/test_pytorch_c10d.py \
+            --artifact-dir ${{ env.OUTPUT_ARTIFACTS_DIR }} \
+            --pytorch-src ${{ env.PYTORCH_SRC }} \
+            --results-log ${{ env.PYTORCH_SRC }}/pytorch_c10d_results.log \
+            --test-scope ${{ inputs.test_scope || 'smoke' }} \
+            $NOTIFY_ARGS
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pytorch-c10d-results-${{ inputs.amdgpu_families }}
+          path: |
+            ${{ env.PYTORCH_SRC }}/pytorch_c10d_results.log
+            ${{ env.PYTORCH_SRC }}/pytorch_c10d_results.xml
+            ${{ env.PYTORCH_SRC }}/pytorch_c10d_summary.txt
+          retention-days: 14
