@@ -24,7 +24,9 @@
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
-#include "core/output_file_registry.hpp"
+#include "core/output/process_tree.hpp"
+#include "core/output/registry.hpp"
+#include "core/output/summary_writer.hpp"
 #include "core/perfetto_fwd.hpp"
 #include "core/progress/bar.hpp"
 #include "core/progress/callback.hpp"
@@ -84,6 +86,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <iostream>
 #include <mutex>
 #include <pthread.h>
 #include <sstream>
@@ -107,6 +110,7 @@ setup() ROCPROFSYS_INTERNAL_API;
 
 namespace
 {
+const auto         library_load_time = std::chrono::steady_clock::now();
 std::atomic<bool>  rocprofsys_init_library_done{ false };
 std::atomic<pid_t> rocprofsys_init_tooling_done{ 0 };
 std::atomic<bool>  rocprofsys_finalization_done{ false };
@@ -1147,18 +1151,16 @@ rocprofsys_finalize_hidden(void)
         sampling::post_process();
     }
 
-    auto _output_registry = output_file_registry{};
-
     if(get_use_causal())
     {
         LOG_DEBUG("Finishing the causal experiments...");
         causal::finish_experimenting();
 
         auto _base = config::get_causal_output_filename();
-        _output_registry.register_file(fmt::format("{}.json", _base),
-                                       output_format::causal_json);
-        _output_registry.register_file(fmt::format("{}.txt", _base),
-                                       output_format::causal_text);
+        output::registry::instance().register_file(fmt::format("{}.json", _base),
+                                                   output::output_format::json);
+        output::registry::instance().register_file(fmt::format("{}.txt", _base),
+                                                   output::output_format::text);
     }
 
     if(get_use_process_sampling())
@@ -1185,7 +1187,7 @@ rocprofsys_finalize_hidden(void)
     {
         LOG_DEBUG("Finalizing perfetto...");
         rocprofsys::perfetto::post_process(_timemory_manager.get(),
-                                           _perfetto_output_error, _output_registry);
+                                           _perfetto_output_error);
     }
 
     {
@@ -1204,7 +1206,7 @@ rocprofsys_finalize_hidden(void)
             } };
         } };
 
-        _manager.post_process_bulk(_output_registry, _tracker);
+        _manager.post_process_bulk(_tracker);
     }
 
     if(_timemory_manager && _timemory_manager != nullptr)
@@ -1259,19 +1261,26 @@ rocprofsys_finalize_hidden(void)
             {
                 if(_comp_name.empty()) continue;
 
-                _output_registry.register_file(
+                output::registry::instance().register_file(
                     settings::compose_output_filename(_comp_name, "txt", _cfg),
-                    output_format::text, _comp_name);
-                _output_registry.register_file(
+                    output::output_format::text);
+                output::registry::instance().register_file(
                     settings::compose_output_filename(_comp_name, "json", _cfg),
-                    output_format::json, _comp_name);
+                    output::output_format::json);
             }
         }
     }
 
     if(config::output_filtering::is_log_output_enabled_for_current_mpi_rank())
     {
-        _output_registry.print_summary();
+        output::registry::instance().record_process(output::process_metadata{
+            .pid = getpid(), .ppid = getppid(), .command = config::get_exe_name() });
+
+        const auto rows = output::registry::instance().rows();
+        const auto tree =
+            output::process_tree{ rows, output::registry::instance().processes() };
+        const auto meta = output::run_metadata::capture(library_load_time);
+        output::write_summary(std::cout, tree, meta, rows);
     }
 
     categories::shutdown();

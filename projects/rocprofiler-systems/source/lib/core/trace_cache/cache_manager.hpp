@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "core/output_file_registry.hpp"
 #include "core/progress/tracker.hpp"
 #include "core/trace_cache/buffer_storage.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
@@ -27,8 +26,7 @@ public:
     buffer_storage_t&     get_buffer_storage() { return m_storage; }
     metadata_registry&    get_metadata_registry() { return *m_metadata; }
     void                  shutdown();
-    void                  post_process_bulk(output_file_registry& output_registry,
-                                            progress::tracker&    tracker);
+    void                  post_process_bulk(progress::tracker& tracker);
 
 private:
     cache_manager() = default;

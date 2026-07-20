@@ -3,7 +3,11 @@
 
 #pragma once
 
+#include <spdlog/fmt/fmt.h>
+
 #include <cstdint>
+#include <string>
+#include <string_view>
 #include <unistd.h>
 
 namespace rocprofsys::inline common::units
@@ -29,3 +33,20 @@ get_page_size()
 }
 
 }  // namespace rocprofsys::inline common::units
+
+namespace rocprofsys::inline common
+{
+inline constexpr std::string_view UNKNOWN_VALUE_PLACEHOLDER = "?";
+
+[[nodiscard]] inline std::string
+datasize_to_string(std::uint64_t bytes)
+{
+    if(bytes < units::kilobyte) return fmt::format("{} B", bytes);
+    if(bytes < units::megabyte)
+        return fmt::format("{:.2f} KB", static_cast<double>(bytes) / units::kilobyte);
+    if(bytes < units::gigabyte)
+        return fmt::format("{:.2f} MB", static_cast<double>(bytes) / units::megabyte);
+    return fmt::format("{:.2f} GB", static_cast<double>(bytes) / units::gigabyte);
+}
+
+}  // namespace rocprofsys::inline common

@@ -12,6 +12,9 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:perfetto-sinks-tests>
     $<TARGET_OBJECTS:emission-handshake-tls-contract-tests>
     $<TARGET_OBJECTS:output-format-tests>
+    $<TARGET_OBJECTS:process-tree-tests>
+    $<TARGET_OBJECTS:output-registry-tests>
+    $<TARGET_OBJECTS:summary-writer-tests>
     $<TARGET_OBJECTS:parse-numeric-range-tests>
     $<TARGET_OBJECTS:rank-passes-filter-tests>
     $<TARGET_OBJECTS:state-tests>

@@ -4,9 +4,10 @@
 #pragma once
 
 #include "core/agent_manager.hpp"
-#include "core/output_file_registry.hpp"
 #include "core/trace_cache/sample_processor.hpp"
 #include "core/trace_cache/sample_type.hpp"
+
+#include <sys/types.h>
 
 #include <array>
 #include <cstdint>
@@ -22,36 +23,6 @@ namespace rocprofsys
 {
 namespace trace_cache
 {
-
-class output_file_sink_view
-{
-public:
-    using register_file_fn_t = void (*)(void*, std::string, output_format);
-
-    template <typename SinkT>
-    // Non-owning sink view. The referenced sink object must outlive any
-    // unified_memory_processor_t storing this view.
-    explicit output_file_sink_view(SinkT& sink) noexcept
-    : m_object{ std::addressof(sink) }
-    , m_register_file_impl{ +[](void* obj, std::string path, output_format format) {
-        static_cast<SinkT*>(obj)->register_file(std::move(path), format);
-    } }
-    {}
-
-    output_file_sink_view(const output_file_sink_view&) noexcept            = default;
-    output_file_sink_view(output_file_sink_view&&) noexcept                 = default;
-    output_file_sink_view& operator=(const output_file_sink_view&) noexcept = default;
-    output_file_sink_view& operator=(output_file_sink_view&&) noexcept      = default;
-
-    void register_file(std::string path, output_format format) const
-    {
-        m_register_file_impl(m_object, std::move(path), format);
-    }
-
-private:
-    void*              m_object;
-    register_file_fn_t m_register_file_impl;
-};
 
 struct migration_stats
 {
@@ -146,8 +117,7 @@ static_assert(kTriggerTable.back().kfd_name == nullptr,
 class unified_memory_processor_t : public processor_t<unified_memory_processor_t>
 {
 public:
-    unified_memory_processor_t(std::shared_ptr<agent_manager> agent_mgr, int pid,
-                               output_file_sink_view output_sink);
+    unified_memory_processor_t(std::shared_ptr<agent_manager> agent_mgr, pid_t pid);
 
     unified_memory_processor_t(const unified_memory_processor_t&)            = delete;
     unified_memory_processor_t(unified_memory_processor_t&&)                 = delete;
@@ -208,9 +178,8 @@ private:
 
     unified_memory_data            m_data;
     std::shared_ptr<agent_manager> m_agent_manager;
-    int                            m_pid;
+    pid_t                          m_pid;
     std::string                    m_output_dir;
-    output_file_sink_view          m_output_sink;
 
     std::unordered_map<std::uint32_t, agent_type>  m_node_type_cache;
     std::unordered_map<std::uint32_t, std::string> m_gpu_name_cache;

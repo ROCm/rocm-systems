@@ -55,6 +55,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Introduced the new `profiler-hub` writer backend for trace persistence, as a
   replacement for the existing SQLite3/rocpd backend.
 
+- Output Summary now renders a process tree distinguishing multiple processes
+  in a single run by size and role, replacing the old flat per-process
+  listing that repeated identical blocks for fork-heavy workloads.
+
 ### Removed
 
 - Removed the `-p` / `--pid` option from `rocprof-sys-instrument` for attaching to

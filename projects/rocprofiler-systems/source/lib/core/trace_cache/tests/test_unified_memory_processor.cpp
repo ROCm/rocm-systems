@@ -1,12 +1,14 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Unit tests for unified_memory_processor_t using synthetic agents and a
-// recording output sink.
+// Unit tests for unified_memory_processor_t using synthetic agents; output
+// registration is observed via the real output::registry singleton, isolated
+// per test with start_new_session().
 
 #include "common/env_vars.hpp"
 #include "common/tests/filesystem.hpp"
 #include "core/categories.hpp"
+#include "core/output/registry.hpp"
 #include "core/trace_cache/unified_memory_processor.hpp"
 #include "unified_memory_test_helpers.hpp"
 #include <cstdint>
@@ -29,10 +31,9 @@
 
 using rocprofsys::agent_manager;
 using rocprofsys::agent_type;
-using rocprofsys::output_format;
+using rocprofsys::output::output_format;
 using rocprofsys::trace_cache::kfd_sample;
 using rocprofsys::trace_cache::migration_stats;
-using rocprofsys::trace_cache::output_file_sink_view;
 using rocprofsys::trace_cache::unified_memory_processor_t;
 using rocprofsys::trace_cache::detail::kTriggerTable;
 using rocprofsys::trace_cache::test::make_cpu_agent;
@@ -49,24 +50,6 @@ namespace
 {
 
 using TestProcessor = unified_memory_processor_t;
-
-struct registered_file
-{
-    std::string   path;
-    output_format format;
-};
-
-struct recording_output_sink
-{
-    void register_file(std::string path, output_format format)
-    {
-        files.push_back({ std::move(path), format });
-    }
-
-    void clear() { files.clear(); }
-
-    std::vector<registered_file> files = {};
-};
 
 // The processor reads output config from timemory globals at construction
 // time; these RAII guards isolate those globals so each test writes into
@@ -130,6 +113,8 @@ protected:
 
     void SetUp() override
     {
+        rocprofsys::output::registry::instance().start_new_session();
+
         m_suffix_guard = std::make_unique<ScopedUseOutputSuffix>(true);
 
         // Match the constructor's HSA_XNACK read so the JSON assertion uses
@@ -150,7 +135,6 @@ protected:
     void TearDown() override
     {
         processor.reset();
-        registry.clear();
         if(!tmp_dir.empty())
         {
             std::error_code ec;
@@ -181,9 +165,9 @@ protected:
         return j;
     }
 
-    [[nodiscard]] const std::vector<registered_file>& registered_files() const
+    [[nodiscard]] std::vector<rocprofsys::output::artifact> registered_files() const
     {
-        return registry.files;
+        return rocprofsys::output::registry::instance().rows();
     }
 
     [[nodiscard]] std::optional<std::string> get_registered_path(
@@ -209,8 +193,7 @@ protected:
         agent_mgr->insert_agent(gpu1);
         agent_mgr->insert_agent(gpu2);
 
-        processor = std::make_unique<TestProcessor>(agent_mgr, kPid,
-                                                    output_file_sink_view{ registry });
+        processor = std::make_unique<TestProcessor>(agent_mgr, kPid);
     }
 
     void feed_h2d_migrate_with_value(double v)
@@ -222,7 +205,6 @@ protected:
     }
 
     std::shared_ptr<agent_manager> agent_mgr;
-    recording_output_sink          registry;
     std::string                    tmp_dir;
     std::unique_ptr<TestProcessor> processor;
     bool                           expected_xnack_enabled = false;

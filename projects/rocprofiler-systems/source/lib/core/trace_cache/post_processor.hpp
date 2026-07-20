@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "core/output_file_registry.hpp"
 #include "core/perfetto/fwd.hpp"
 #include "core/progress/tracker.hpp"
 #include "core/trace_cache/data_types.hpp"
@@ -25,7 +24,7 @@ namespace rocprofsys::trace_cache
 class post_processor
 {
 public:
-    post_processor(progress::tracker& tracker, output_file_registry& registry) noexcept;
+    explicit post_processor(progress::tracker& tracker) noexcept;
 
     post_processor(const post_processor&)            = delete;
     post_processor& operator=(const post_processor&) = delete;
@@ -58,7 +57,6 @@ private:
         const data::enabled_formats_t&                                formats);
 
     progress::tracker&                                                  m_tracker;
-    output_file_registry&                                               m_registry;
     std::optional<std::reference_wrapper<core::cached_perfetto_engine>> m_engine{};
     std::optional<std::reference_wrapper<rocprofsys::track_registry>>   m_tracks{};
 };
