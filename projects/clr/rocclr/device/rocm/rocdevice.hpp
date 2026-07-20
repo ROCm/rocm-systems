@@ -610,7 +610,9 @@ class Device : public NullDevice {
   //! pooled, dedicated, cooperative and CU-masked queues alike).
   std::shared_ptr<RingTurnstile> GetOrCreateRingTurnstile(hsa_queue_t* queue);
 
-  //! Drop the turnstile for a ring once it is truly destroyed (refCount 0).
+  //! Remove the map entry for \p queue at a queue-destroy site. Any VirtualGPU
+  //! still holding a shared_ptr keeps the turnstile alive past this call —
+  //! lifetime is refcounted by shared_ptr, not by a check here.
   void EraseRingTurnstile(hsa_queue_t* queue);
 
   //! Return the pre-computed metadata packet version header bits
