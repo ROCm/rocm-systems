@@ -266,10 +266,10 @@ void restore_signal_backtrace_handlers() {
     return std::nullopt;
   }
 
-  auto target = parse_target(dbt_guest->host_isa);
+  auto target = parse_target(dbt_guest->host.isa);
   if (!target) {
     std::fprintf(stderr, "[rocjitsu-hooks] invalid dbt_guest.host_isa='%s'\n",
-                 dbt_guest->host_isa.c_str());
+                 dbt_guest->host.isa.c_str());
     return std::nullopt;
   }
   auto guest = parse_target(dbt_guest->guest_isa);
@@ -283,7 +283,7 @@ void restore_signal_backtrace_handlers() {
   config.target = *target;
   config.source_override = *guest;
   config.guest_target = *guest;
-  config.host_gpu_id = dbt_guest->host_gpu_id;
+  config.host_gpu_id = dbt_guest->host.gpu_id;
   config.log_level = clamp_log_level(dbt_guest->log_level);
   config.signal_backtrace = dbt_guest->signal_backtrace;
   return config;

@@ -100,6 +100,7 @@ struct DispatchEntry {
   uint64_t profiling_start_timestamp = 0;
   bool host_signal = false;
   bool barrier_bit = false;
+  bool execution_begun = false;
 
   bool fully_dispatched() const { return dispatched_wgs >= total_wgs; }
   bool fully_completed() const { return completed_wgs >= total_wgs; }
