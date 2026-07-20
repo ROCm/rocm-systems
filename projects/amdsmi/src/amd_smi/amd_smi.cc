@@ -3008,6 +3008,10 @@ amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_hand
                                           uint64_t* hops, amdsmi_link_type_t* type) {
   AMDSMI_CHECK_INIT();
 
+  if (hops == nullptr || type == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
   amd::smi::AMDSmiGPUDevice* src_device = nullptr;
   amd::smi::AMDSmiGPUDevice* dst_device = nullptr;
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle_src, &src_device);
@@ -3186,16 +3190,8 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle p
   *config = {};
 
   // initialization for devices which do not support partitions
-  amdsmi_nps_caps_t flags;
-  flags.nps_flags.nps1_cap = 0;
-  flags.nps_flags.nps2_cap = 0;
-  flags.nps_flags.nps4_cap = 0;
-  flags.nps_flags.nps8_cap = 0;
-  flags.nps_cap_mask = 0;
-  config->partition_caps = flags;
+  amdsmi_nps_caps_t flags = {};
   config->mp_mode = AMDSMI_MEMORY_PARTITION_UNKNOWN;
-  // TODO(amdsmi_team): Will BM/guest VMs have numa ranges?
-  config->num_numa_ranges = 0;
 
   // current memory partition
   constexpr uint32_t kCurrentPartitionSize = 5;
@@ -3284,12 +3280,7 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile_config(
   profile_config->resource_profiles->resource_type = AMDSMI_ACCELERATOR_MAX;
   profile_config->resource_profiles->partition_resource = 0;
   profile_config->resource_profiles->num_partitions_share_resource = 0;
-  amdsmi_nps_caps_t flags;
-  flags.nps_flags.nps1_cap = 0;
-  flags.nps_flags.nps2_cap = 0;
-  flags.nps_flags.nps4_cap = 0;
-  flags.nps_flags.nps8_cap = 0;
-  flags.nps_cap_mask = 0;
+  amdsmi_nps_caps_t flags = {};
 
   ss << __PRETTY_FUNCTION__ << " | 1";
   // std::cout << ss.str() << std::endl;
@@ -3438,7 +3429,7 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile_config(
      * *supported_configs, uint32_t len);
      */
     constexpr uint32_t kLenNPSConfigSize = 30;
-    char supported_nps_configs[kLenNPSConfigSize];
+    char supported_nps_configs[kLenNPSConfigSize] = {};
     std::string supported_nps_caps_str = "N/A";
     status = rsmi_wrapper(rsmi_dev_compute_partition_supported_nps_configs_get, processor_handle, 0,
                           supported_nps_configs, kLenNPSConfigSize);
@@ -3463,9 +3454,7 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile_config(
          r < static_cast<int>(RSMI_ACCELERATOR_MAX); r++) {
       rsmi_accelerator_partition_resource_type_t type =
           static_cast<rsmi_accelerator_partition_resource_type_t>(r);
-      rsmi_accelerator_partition_resource_profile_t profile;
-      profile.partition_resource = 0;
-      profile.num_partitions_share_resource = 0;
+      rsmi_accelerator_partition_resource_profile_t profile = {};
       profile_config->resource_profiles[resource_index].profile_index = 0;
       profile_config->resource_profiles[resource_index].resource_type = AMDSMI_ACCELERATOR_MAX;
       profile_config->resource_profiles[resource_index].partition_resource = 0;
@@ -3674,12 +3663,7 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
   profile->profile_index = std::numeric_limits<uint32_t>::max();
   profile->num_resources = 0;
 
-  amdsmi_nps_caps_t flags;
-  flags.nps_flags.nps1_cap = 0;
-  flags.nps_flags.nps2_cap = 0;
-  flags.nps_flags.nps4_cap = 0;
-  flags.nps_flags.nps8_cap = 0;
-  flags.nps_cap_mask = 0;
+  amdsmi_nps_caps_t flags = {};
   profile->memory_caps = flags;
 
   // TODO(amdsmi_team): add resources here ^

@@ -168,6 +168,14 @@ void TestHWTopologyRead::Run(void) {
               }
           }
         }
+        // Null output pointers must be rejected with AMDSMI_STATUS_INVAL
+        err = amdsmi_topo_get_p2p_status(processor_handles_[dv_ind_src],
+                                         processor_handles_[dv_ind_dst], nullptr,
+                                         &gpu_links[dv_ind_src][dv_ind_dst].cap);
+        ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+        err = amdsmi_topo_get_p2p_status(processor_handles_[dv_ind_src],
+                                         processor_handles_[dv_ind_dst], &type, nullptr);
+        ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
         DISPLAY_AMDSMI_API("amdsmi_topo_get_link_weight",
                            "gpu=" + std::to_string(dv_ind_src) + "," + std::to_string(dv_ind_dst),
                            VERB(STANDARD));
