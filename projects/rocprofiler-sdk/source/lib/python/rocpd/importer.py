@@ -31,6 +31,7 @@ import sys
 import os
 import sqlite3
 import stat
+import atexit
 from collections import OrderedDict
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -235,6 +236,35 @@ def _blob_struct_fmt(size: int, data_type: str, is_signed: int) -> str:
     return (signed_map if bool(is_signed) else unsigned_map)[size]
 
 
+def _codeobj_path_prefix_map():
+    """Return ``(source_prefix, replacement_prefix)`` pairs used to relocate
+    code-object paths recorded under a different filesystem layout.
+
+    Post-processing frequently runs in a different mount namespace than the
+    profiled process -- for example a code object recorded inside a container is
+    decoded on the host under a different mount point (or vice versa).  The
+    mapping is consulted only as a fallback when the recorded path does not
+    exist, and it only ever resolves to an *existing* regular file which callers
+    still offset/size-validate, so it cannot substitute unrelated data -- at
+    worst the object is not found and decoding reports "unavailable".
+
+    There is no built-in default: relocation is opt-in via
+    ``ROCPROF_CODEOBJ_PATH_PREFIX_MAP``, an ``os.pathsep``-separated list of
+    ``source=replacement`` prefix pairs (e.g.
+    ``/dockerx/=/home/user:/other/src=/other/dst``).  When it is unset or empty,
+    recorded code-object paths are used exactly as stored.
+    """
+    raw = os.environ.get("ROCPROF_CODEOBJ_PATH_PREFIX_MAP")
+    if not raw:
+        return []
+    pairs = []
+    for entry in raw.split(os.pathsep):
+        source_prefix, sep, replacement_prefix = entry.partition("=")
+        if sep and source_prefix:
+            pairs.append((source_prefix, replacement_prefix))
+    return pairs
+
+
 def setup_isa_decode_views(conn):
     """Register lazy ISA decode functions and enrich PC-sample decoded TEMP VIEWs.
 
@@ -294,14 +324,17 @@ def setup_isa_decode_views(conn):
             raise ValueError(f"Negative {name!r} in code-object URI")
         return parsed
 
+    path_prefix_map = _codeobj_path_prefix_map()
+
     def _existing_path(path):
         if os.path.exists(path):
             return path
-        home_prefix = os.path.expanduser("~").rstrip(os.sep) + os.sep
-        for source_prefix, replacement_prefix in (
-            ("/dockerx/", home_prefix),
-            (home_prefix, "/dockerx/"),
-        ):
+        # Fallback only: relocate the recorded path across known filesystem
+        # layout differences (see _codeobj_path_prefix_map).  This never
+        # fabricates data -- it only returns an existing regular file and
+        # callers still offset/size-validate it -- so at worst the object is
+        # not found and decoding reports "unavailable".
+        for source_prefix, replacement_prefix in path_prefix_map:
             if path.startswith(source_prefix):
                 candidate = replacement_prefix + path[len(source_prefix) :]
                 if os.path.exists(candidate):
@@ -358,6 +391,80 @@ def setup_isa_decode_views(conn):
     max_decoders = 64
     max_decoded_instructions = 4096
 
+    # Cached in decoder_cache when a decoder cannot be built for a
+    # (guid, code_object_id) so the potentially I/O-heavy build -- URI
+    # validation, os.stat, and for MEMORY code objects a full file read -- is
+    # attempted at most once instead of once per sampled program counter.
+    decoder_unavailable = object()
+
+    # ------------------------------------------------------------------
+    # Optional cross-session disassembly cache (opt-in via the
+    # ROCPD_CACHE_DISASSEMBLY environment variable).  When enabled, program
+    # counters disassembled lazily during this session are written back into
+    # rocpd_disassembly_data at interpreter exit, so a later open serves the
+    # stored text through the decoded view's COALESCE instead of decoding it
+    # again.  Strictly best-effort: any problem (read-only database, lock
+    # contention, a pre-3.0.3 input without the table, ...) silently disables
+    # the write-back and leaves the database untouched.  Default off preserves
+    # the "queries never modify the .db" contract.
+    # ------------------------------------------------------------------
+    _cache_env = os.environ.get("ROCPD_CACHE_DISASSEMBLY", "").strip().lower()
+    writeback_enabled = _cache_env in ("1", "true", "yes", "on")
+    writeback_pending = {}
+    writeback_targets = {}  # guid -> (db_path, base_table)
+    writeback_context = {}  # guid -> (nid, pid)
+    max_writeback_pending = 1 << 20
+
+    def _discover_writeback_targets():
+        try:
+            attached = conn.execute("PRAGMA database_list").fetchall()
+        except sqlite3.OperationalError:
+            return
+        for _seq, alias, path in attached:
+            if not path or alias == "temp":
+                continue
+            try:
+                uuid_row = conn.execute(
+                    f"SELECT value FROM {_quote_identifier(alias)}.rocpd_metadata "
+                    "WHERE tag = 'uuid'"
+                ).fetchone()
+                guid_row = conn.execute(
+                    f"SELECT value FROM {_quote_identifier(alias)}.rocpd_metadata "
+                    "WHERE tag = 'guid'"
+                ).fetchone()
+            except sqlite3.OperationalError:
+                continue
+            if not uuid_row or not guid_row:
+                continue
+            if uuid_row[0] is None or guid_row[0] is None:
+                continue
+            base_table = f"rocpd_disassembly_data{uuid_row[0]}"
+            try:
+                exists = conn.execute(
+                    f"SELECT 1 FROM {_quote_identifier(alias)}.sqlite_master "
+                    "WHERE type = 'table' AND name = ?",
+                    (base_table,),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                continue
+            if exists:
+                writeback_targets[str(guid_row[0])] = (path, base_table)
+
+    if writeback_enabled:
+        _discover_writeback_targets()
+        if writeback_targets:
+            try:
+                for guid_val, nid, pid in conn.execute(
+                    "SELECT guid, nid, pid FROM rocpd_gpu_pc_sample GROUP BY guid"
+                ).fetchall():
+                    if nid is not None and pid is not None:
+                        writeback_context[str(guid_val)] = (int(nid), int(pid))
+            except sqlite3.OperationalError:
+                pass
+        # With nothing to route rows to, keep the pure in-memory decode path.
+        if not writeback_targets or not writeback_context:
+            writeback_enabled = False
+
     def _remember(cache, key, value, limit):
         cache[key] = value
         cache.move_to_end(key)
@@ -366,13 +473,14 @@ def setup_isa_decode_views(conn):
         return value
 
     def _get_decoder(key):
-        decoder = decoder_cache.get(key)
-        if decoder is not None:
+        cached = decoder_cache.get(key)
+        if cached is not None:
             decoder_cache.move_to_end(key)
-            return decoder
+            return None if cached is decoder_unavailable else cached
 
         metadata = code_object_metadata.get(key)
         if not metadata or not metadata["uri"]:
+            _remember(decoder_cache, key, decoder_unavailable, max_decoders)
             return None
         try:
             decoder = libpyrocpd.isa_decoder()
@@ -408,8 +516,10 @@ def setup_isa_decode_views(conn):
                     metadata["load_size"],
                 )
             else:
+                _remember(decoder_cache, key, decoder_unavailable, max_decoders)
                 return None
         except (OSError, ValueError, TypeError, RuntimeError):
+            _remember(decoder_cache, key, decoder_unavailable, max_decoders)
             return None
         return _remember(decoder_cache, key, decoder, max_decoders)
 
@@ -428,6 +538,18 @@ def setup_isa_decode_views(conn):
                 result = decoder.decode(key[1], key[2])
             except (ValueError, TypeError, RuntimeError):
                 result = None
+        if (
+            writeback_enabled
+            and result is not None
+            and result.get("instruction") is not None
+            and key[0] in writeback_targets
+            and key[0] in writeback_context
+            and len(writeback_pending) < max_writeback_pending
+        ):
+            writeback_pending[key] = (
+                result.get("instruction"),
+                result.get("comment") or "",
+            )
         return _remember(decode_cache, key, result, max_decoded_instructions)
 
     def _instruction(guid, code_object_id, code_object_offset):
@@ -447,6 +569,67 @@ def setup_isa_decode_views(conn):
 
     conn.create_function("rocpd_isa_instruction", 3, _instruction)
     conn.create_function("rocpd_isa_comment", 3, _comment)
+
+    def _flush_writeback():
+        # Persist lazily decoded instructions into rocpd_disassembly_data so a
+        # future open reads the stored text instead of decoding again.  Runs at
+        # interpreter exit through a private writer connection (the import
+        # connection may already be closed), routes each row to its recording's
+        # table by guid, and dedups with NOT EXISTS + BEGIN IMMEDIATE so it can
+        # never create the duplicate rows that would inflate a decoded-view
+        # join.  Entirely best-effort; a failure just leaves the cache unwritten.
+        if not writeback_pending:
+            return
+        try:
+            by_path = {}
+            for key, value in writeback_pending.items():
+                guid_val, co_id, offset = key
+                instr, comment = value
+                target = writeback_targets.get(guid_val)
+                ctx = writeback_context.get(guid_val)
+                if not target or not ctx:
+                    continue
+                path, base_table = target
+                params = (guid_val, ctx[0], ctx[1], co_id, offset, instr, comment)
+                by_path.setdefault(path, []).append((base_table, params))
+            for path, rows in by_path.items():
+                writer = None
+                try:
+                    writer = sqlite3.connect(path, timeout=5.0)
+                    writer.execute("PRAGMA busy_timeout = 5000")
+                    writer.execute("BEGIN IMMEDIATE")
+                    for base_table, params in rows:
+                        quoted = _quote_identifier(base_table)
+                        writer.execute(
+                            f"INSERT INTO {quoted} "
+                            '("guid", "nid", "pid", "code_object_id", '
+                            '"code_object_offset", "instruction", "comment") '
+                            "SELECT ?, ?, ?, ?, ?, ?, ? "
+                            f"WHERE NOT EXISTS (SELECT 1 FROM {quoted} "
+                            'WHERE "guid" = ? AND "code_object_id" = ? '
+                            'AND "code_object_offset" = ?)',
+                            params + (params[0], params[3], params[4]),
+                        )
+                    writer.commit()
+                except Exception:  # noqa: BLE001 - best-effort cache write
+                    if writer is not None:
+                        try:
+                            writer.rollback()
+                        except Exception:  # noqa: BLE001
+                            pass
+                finally:
+                    if writer is not None:
+                        try:
+                            writer.close()
+                        except Exception:  # noqa: BLE001
+                            pass
+        except Exception:  # noqa: BLE001 - never raise from an atexit handler
+            pass
+        finally:
+            writeback_pending.clear()
+
+    if writeback_enabled:
+        atexit.register(_flush_writeback)
 
     blob_source = "rocpd_gpu_pc_sample_blob_decoded"
     if not _table_columns(conn, blob_source):
@@ -500,9 +683,13 @@ def setup_isa_decode_views(conn):
         comment_expr = "rocpd_isa_comment(s.guid, s.code_object_id, s.code_object_offset)"
         disasm_join = ""
 
-    conn.execute("DROP VIEW IF EXISTS temp.rocpd_gpu_pc_sample_decoded")
-    conn.execute(f"""
-            CREATE TEMP VIEW rocpd_gpu_pc_sample_decoded AS
+    # Publish the enriched view atomically with respect to the generic
+    # rocpd_gpu_pc_sample_decoded alias that setup_blob_views created: validate
+    # the SELECT under a scratch name first, then replace the alias only once the
+    # statement is known to be well-formed.  A malformed SELECT therefore fails
+    # with the working alias still in place instead of dropping it and leaving no
+    # decoded view at all.
+    view_body = f"""
             SELECT
                 {source_select},
                 {instruction_expr} AS instruction,
@@ -542,7 +729,16 @@ def setup_isa_decode_views(conn):
                 END AS stall_reason_name
             FROM {_quote_identifier(blob_source)} s
             {disasm_join}
-            """)
+            """
+
+    pending_view = _quote_identifier("rocpd_gpu_pc_sample_decoded__pending")
+    conn.execute(f"DROP VIEW IF EXISTS temp.{pending_view}")
+    conn.execute(f"CREATE TEMP VIEW {pending_view} AS {view_body}")
+    try:
+        conn.execute("DROP VIEW IF EXISTS temp.rocpd_gpu_pc_sample_decoded")
+        conn.execute(f"CREATE TEMP VIEW rocpd_gpu_pc_sample_decoded AS {view_body}")
+    finally:
+        conn.execute(f"DROP VIEW IF EXISTS temp.{pending_view}")
 
 
 def setup_blob_views(conn):

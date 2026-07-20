@@ -2731,17 +2731,19 @@ write_rocpd(
 
                     });
 
-                if(cfg.complete_isa_decode)
+                // Persist disassembly only for PCs the transformation already
+                // resolved (inst_index >= 0), reusing that instruction instead
+                // of disassembling again.  Mark a PC "seen" only when we write
+                // its row, so a later sample at the same (code_object_id,
+                // offset) that does resolve is still persisted rather than
+                // permanently skipped.
+                if(cfg.complete_isa_decode && itr.inst_index >= 0)
                 {
                     auto _disasm_key =
                         std::make_pair(static_cast<uint64_t>(record.pc.code_object_id),
                                        static_cast<uint64_t>(record.pc.code_object_offset));
                     if(disasm_seen.insert(_disasm_key).second)
                     {
-                        // PC transformation already resolved this instruction. Reuse
-                        // that cache instead of disassembling the same address again.
-                        if(itr.inst_index < 0) continue;
-
                         get_insert_statement(
                             db,
                             "rocpd_disassembly_data{{uuid}}",

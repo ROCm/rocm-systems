@@ -754,13 +754,16 @@ For attachment profiling of running processes:
         type=int,
     )
 
+    isa_decode_options = parser.add_argument_group("ISA decode options")
+
     add_parser_bool_argument(
-        pc_sampling_options,
+        isa_decode_options,
         "--complete-isa-decode",
         help=(
-            "Persist instruction text and comments already resolved while processing PC "
-            "samples directly in ROCPD output. Default: off (ROCPD post-processing attempts "
-            "lazy disassembly from trusted local code-object paths when no text is stored). "
+            "Persist the instruction text and comments resolved during ISA decode "
+            "(e.g. PC sample decode, thread trace decode) directly in ROCPD output. "
+            "Default: off (ROCPD post-processing attempts lazy disassembly from trusted "
+            "local code-object paths when no text is stored). "
             "WARNING: "
             "enabling this can drastically increase the database size, especially for "
             "applications with large code objects."
