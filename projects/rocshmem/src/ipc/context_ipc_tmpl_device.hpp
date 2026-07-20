@@ -740,13 +740,13 @@ __device__ void IPCContext::alltoall_wg(rocshmem_team_t team, T *dst,
 #else
   if (sizeof(T) * nelems < 512)
 #endif
-    alltoall_linear_thread_puts(team, dst, src, nelems);
+    alltoall_linear_thread_puts_wg(team, dst, src, nelems);
   else
-    alltoall_linear(team, dst, src, nelems);
+    alltoall_linear_wg(team, dst, src, nelems);
 }
 
 template <typename T>
-__device__ void IPCContext::alltoall_linear(rocshmem_team_t team, T *dst,
+__device__ void IPCContext::alltoall_linear_wg(rocshmem_team_t team, T *dst,
                                             const T *src, int nelems) {
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
@@ -769,7 +769,7 @@ __device__ void IPCContext::alltoall_linear(rocshmem_team_t team, T *dst,
 }
 
 template <typename T>
-__device__ void IPCContext::alltoall_linear_thread_puts(rocshmem_team_t team,
+__device__ void IPCContext::alltoall_linear_thread_puts_wg(rocshmem_team_t team,
     T *dst, const T *src, int nelems) {
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
