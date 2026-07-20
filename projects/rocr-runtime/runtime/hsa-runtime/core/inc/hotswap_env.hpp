@@ -1,11 +1,8 @@
-////////////////////////////////////////////////////////////////////////////////
-//
-// The University of Illinois/NCSA
-// Open Source License (NCSA)
-//
-// Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
-//
-////////////////////////////////////////////////////////////////////////////////
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef HSA_RUNTIME_CORE_INC_HOTSWAP_ENV_HPP_
 #define HSA_RUNTIME_CORE_INC_HOTSWAP_ENV_HPP_
