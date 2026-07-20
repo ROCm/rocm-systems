@@ -1127,6 +1127,18 @@ bool CodeObjectPatcher::patch_kernel_descriptor(uint64_t file_offset,
   return true;
 }
 
+bool CodeObjectPatcher::set_private_segment_fixed_size(uint64_t descriptor_file_offset,
+                                                      uint32_t bytes) {
+  if (!image_contains_range(image_.size(), descriptor_file_offset, sizeof(KD)))
+    return false;
+
+  KD desc;
+  std::memcpy(&desc, image_.data() + descriptor_file_offset, sizeof(desc));
+  desc.private_segment_fixed_size = bytes;
+  std::memcpy(image_.data() + descriptor_file_offset, &desc, sizeof(desc));
+  return true;
+}
+
 bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation &translation,
                                                             rj_code_arch_t target_arch) {
   if (!image_contains_range(image_.size(), translation.descriptor_file_offset, sizeof(KD)))

@@ -254,5 +254,67 @@ TEST(InstructionBuilder, BuildSCmpLgU32) {
             0xBF078002u);
 }
 
+TEST(InstructionBuilder, BuildVWritelaneB32) {
+  // VOP3: base v_writelane_b32 is 0xD28A0000 (cdna4) / 0xD7610000 (rdna4); vdst
+  // in word0 bits[7:0]; word1 = src0 | src1<<9 with lane 0 as inline const 128.
+  EXPECT_EQ(build_v_writelane_b32(/*vgpr_dst=*/2, /*sgpr_src=*/5, /*lane=*/0,
+                                  ROCJITSU_CODE_ARCH_CDNA4),
+            (std::array<uint32_t, 2>{0xD28A0002u, 0x00010005u}));
+  EXPECT_EQ(build_v_writelane_b32(2, 5, 0, ROCJITSU_CODE_ARCH_RDNA4),
+            (std::array<uint32_t, 2>{0xD7610002u, 0x00010005u}));
+}
+
+TEST(InstructionBuilder, BuildVReadlaneB32) {
+  // VOP3: base v_readlane_b32 is 0xD2890000 (cdna4) / 0xD7600000 (rdna4); sdst in
+  // word0 bits[7:0]; src0 is a VGPR (256 + index), so v3 -> 0x103.
+  EXPECT_EQ(build_v_readlane_b32(/*sgpr_dst=*/6, /*vgpr_src=*/3, /*lane=*/0,
+                                 ROCJITSU_CODE_ARCH_CDNA4),
+            (std::array<uint32_t, 2>{0xD2890006u, 0x00010103u}));
+  EXPECT_EQ(build_v_readlane_b32(6, 3, 0, ROCJITSU_CODE_ARCH_RDNA4),
+            (std::array<uint32_t, 2>{0xD7600006u, 0x00010103u}));
+}
+
+TEST(InstructionBuilder, BuildScratchStoreDword) {
+  // CDNA4: FLAT flat_store_dword base 0xDC700000 | seg=1<<14; word1 = data<<8 |
+  // saddr(0x7F)<<16. 2 words.
+  const auto cdna4 = build_scratch_store_dword(/*vdata=*/3, /*byte_offset=*/64,
+                                               ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_EQ(cdna4.size(), 2u);
+  EXPECT_EQ(cdna4[0], 0xDC704040u);
+  EXPECT_EQ(cdna4[1], 0x007F0300u);
+
+  // RDNA4: VSCRATCH scratch_store_b32 base 0xED068000 | saddr(0x7C); word1 =
+  // vsrc<<23; word2 = ioffset<<8. 3 words.
+  const auto rdna4 = build_scratch_store_dword(3, 64, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_EQ(rdna4.size(), 3u);
+  EXPECT_EQ(rdna4[0], 0xED06807Cu);
+  EXPECT_EQ(rdna4[1], 0x01800000u);
+  EXPECT_EQ(rdna4[2], 0x00004000u);
+}
+
+TEST(InstructionBuilder, BuildScratchLoadDword) {
+  // CDNA4: FLAT flat_load_dword base 0xDC500000 | seg=1<<14; word1 = saddr<<16 |
+  // vdst<<24. 2 words.
+  const auto cdna4 = build_scratch_load_dword(/*vdst=*/5, /*byte_offset=*/64,
+                                              ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_EQ(cdna4.size(), 2u);
+  EXPECT_EQ(cdna4[0], 0xDC504040u);
+  EXPECT_EQ(cdna4[1], 0x057F0000u);
+
+  // RDNA4: VSCRATCH scratch_load_b32 base 0xED050000 | saddr(0x7C); word1 = vdst;
+  // word2 = ioffset<<8. 3 words.
+  const auto rdna4 = build_scratch_load_dword(5, 64, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_EQ(rdna4.size(), 3u);
+  EXPECT_EQ(rdna4[0], 0xED05007Cu);
+  EXPECT_EQ(rdna4[1], 0x00000005u);
+  EXPECT_EQ(rdna4[2], 0x00004000u);
+}
+
+TEST(InstructionBuilder, BuildWaitLoadsComplete) {
+  // CDNA4: s_waitcnt 0 (all counters). RDNA4: s_wait_loadcnt 0 (split counter).
+  EXPECT_EQ(build_wait_loads_complete(ROCJITSU_CODE_ARCH_CDNA4), 0xBF8C0000u);
+  EXPECT_EQ(build_wait_loads_complete(ROCJITSU_CODE_ARCH_RDNA4), 0xBFC00000u);
+}
+
 } // namespace
 } // namespace rocjitsu
