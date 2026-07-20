@@ -56,9 +56,7 @@ inline ncclRma_t* GetRmaPlugin()
     const char* envNet = std::getenv("NCCL_NET");
     if (envNet == nullptr) return nullptr;
 
-    // Both IB and IB-CAST route the host-side data path through the single
-    // internal RMA IB proxy (the GIN split consolidated the two proxies).
-    if (strcasecmp(envNet, "IB-CAST") == 0) return &ncclRmaIbProxy;
+    if (strcasecmp(envNet, "IB-CAST") == 0) return &IbCastRmaIbProxy;
     if (strcasecmp(envNet, "IB") == 0) return &ncclRmaIbProxy;
 
     return nullptr;
