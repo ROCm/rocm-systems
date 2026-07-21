@@ -9,16 +9,14 @@ Checking system compatibility
 Before you run a hipFile workload, use the ``ais-check`` tool to confirm that
 your system has the components hipFile needs and that at least one mounted
 volume can use hipFile's fast (direct-to-GPU) path. If any required component is
-missing, or no volume qualifies, hipFile silently falls back to a slower
-compatibility path.
+missing, or no volume qualifies, hipFile falls back to the slower fallback path.
 
 ``ais-check`` ships with hipFile under ``tools/ais-check`` and is installed
 alongside the other host tools when ``AIS_INSTALL_TOOLS`` is enabled. After
 installation it lands in the ``bin`` directory beneath your ROCm prefix, for
 example ``/opt/rocm/bin/ais-check`` or, on versioned core installs,
-``/opt/rocm/core-<version>/bin/ais-check``. It is a self-contained Python 3 script
-that reads kernel state, probes the HIP runtime, and scans mounted filesystems.
-It makes no changes to your system.
+``/opt/rocm/core-<version>/bin/ais-check``. It is a Python 3 script that reads kernel state (optionally via ``dkms``), probes the HIP
+ runtime, and scans mounted filesystems. It makes no changes to your system.
 
 Run ais-check
 =============
