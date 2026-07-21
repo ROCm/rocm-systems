@@ -72,6 +72,13 @@ struct packet_data_t
     uint32_t kfd_doorbell_off          = 0;  // snapshot at enqueue
     uint32_t kfd_dispatch_idx_low32    = 0;  // hsa_queue_pkt_index & 0xFFFFFFFF
     uint32_t kfd_generation            = 0;  // snapshot at enqueue
+
+    // Transient — set only within get_dispatch_time() to carry the converted (but
+    // not-yet-validated) KFD timestamps into the HSA fallback block for parallel
+    // validation. Not part of the stable identity or correlation key.
+    uint64_t kfd_pending_start_ns = 0;
+    uint64_t kfd_pending_end_ns   = 0;
+    bool     kfd_pending_valid    = false;
 };
 
 // Internal session information that is used by write interceptor

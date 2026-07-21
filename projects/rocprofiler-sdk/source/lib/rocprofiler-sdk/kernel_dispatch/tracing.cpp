@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
+#include "lib/rocprofiler-sdk/kfd/timestamp_convert.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -63,11 +64,31 @@ get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_dat
         auto kfd_result = kfd::results_map().take(corr_key);
         kfd::correlation_table().erase(corr_key);
 
-        // NOTE: raw GPU ticks -> CLOCK_BOOTTIME ns conversion is not yet validated
-        // (Phase 9). Until then we CONSUME the KFD record but still emit HSA
-        // timestamps (spec Option B). When conversion lands, convert
-        // kfd_result->start_gpu_ticks/end_gpu_ticks here and return them.
-        (void) kfd_result;
+        if(kfd_result)
+        {
+            uint64_t kfd_start_ns = kfd::convert_gpu_ticks_to_ns(kfd_result->start_gpu_ticks);
+            uint64_t kfd_end_ns   = kfd::convert_gpu_ticks_to_ns(kfd_result->end_gpu_ticks);
+
+            if(kfd::conversion_validated())
+            {
+                // Conversion trusted for this session: emit firmware timestamps.
+                auto kfd_time =
+                    tracing::profiling_time{HSA_STATUS_SUCCESS, kfd_start_ns, kfd_end_ns};
+                return tracing::adjust_profiling_time(
+                    "dispatch",
+                    "kfd_dispatch_log",
+                    kfd_time,
+                    tracing::profiling_time{
+                        HSA_STATUS_SUCCESS, session.enqueue_ts, common::timestamp_ns()});
+            }
+
+            // Not yet validated: fall through to HSA (Option B), but stash the
+            // converted candidate so the fallback block can validate it against
+            // the authoritative HSA result on this same call.
+            packet_data.kfd_pending_start_ns = kfd_start_ns;
+            packet_data.kfd_pending_end_ns   = kfd_end_ns;
+            packet_data.kfd_pending_valid    = true;
+        }
     }
 
     // --- HSA fallback (unchanged; unconditional) ---
@@ -77,8 +98,22 @@ get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_dat
     auto        _signal         = packet_data.kernel_packet.kernel_dispatch.completion_signal;
     auto        _kern_id        = callback_record.dispatch_info.kernel_id;
 
-    return (_hsa_agent) ? get_dispatch_time(*_hsa_agent, _signal, _kern_id, session.enqueue_ts)
-                        : profiling_time{.status = HSA_STATUS_ERROR_INVALID_AGENT};
+    auto hsa_result = (_hsa_agent)
+                          ? get_dispatch_time(*_hsa_agent, _signal, _kern_id, session.enqueue_ts)
+                          : profiling_time{.status = HSA_STATUS_ERROR_INVALID_AGENT};
+
+    // Parallel validation: compare the (unvalidated) KFD candidate against the HSA
+    // result. Once enough samples land within tolerance, conversion flips to
+    // validated and subsequent dispatches emit KFD timestamps above.
+    if(packet_data.kfd_pending_valid && hsa_result.status == HSA_STATUS_SUCCESS)
+    {
+        kfd::validate_conversion(packet_data.kfd_pending_start_ns,
+                                 hsa_result.start,
+                                 packet_data.kfd_pending_end_ns,
+                                 hsa_result.end);
+    }
+
+    return hsa_result;
 }
 
 void

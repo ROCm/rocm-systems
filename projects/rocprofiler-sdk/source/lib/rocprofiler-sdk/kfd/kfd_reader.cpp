@@ -26,8 +26,10 @@
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
+#include "lib/rocprofiler-sdk/kfd/dlog_drain.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
+#include "lib/rocprofiler-sdk/kfd/timestamp_convert.hpp"
 
 // Active (v5) dispatch-log profiler ABI. Must be the ONLY kfd ioctl header in
 // this translation unit (it conflicts with lib/rocprofiler-sdk/details/kfd_ioctl.h).
@@ -35,6 +37,7 @@
 
 #include <fmt/core.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <cstdint>
@@ -59,25 +62,12 @@ namespace
 {
 constexpr int      kEventfdFlags = EFD_CLOEXEC | EFD_NONBLOCK;
 constexpr uint32_t kBufferKb     = 80;  // dlog ring size; matches reference harness default
-constexpr uint32_t kFwRecBytes   = KFD_DISPATCH_LOG_FW_RECORD_BYTES;  // 20
 
-// Firmware record type values (from the dispatch_log_format .ksy enum).
-constexpr uint32_t kRecPadding = 0;
-constexpr uint32_t kRecStart   = 1;  // dispatch_start
-constexpr uint32_t kRecEop     = 2;  // end-of-pipe (completion)
-
-// The 20-byte firmware record, laid out per the dispatch_log_format descriptor.
-// Not a UAPI type; overlaid onto the mmap'd ring bytes.
-struct fw_record
-{
-    uint32_t ts_lo;         // bytes 0-3:   low 32 bits of GPU timestamp
-    uint32_t ts_hi;         // bytes 4-7:   high 32 bits
-    uint32_t record_type;   // bytes 8-11:  0 padding, 1 dispatch_start, 2 eop
-    uint32_t dispatch_id;   // bytes 12-15: low 32 bits of HSA queue write index
-    uint32_t doorbell_off;  // bytes 16-19: queue identity (demux key)
-};
-static_assert(sizeof(fw_record) == KFD_DISPATCH_LOG_FW_RECORD_BYTES,
-              "fw_record must match the 20-byte firmware record layout");
+// fw_record, the 20-byte record layout, the kRec* type constants, kFwRecBytes, the
+// drain_state cursor bookkeeping, and the drain_pipes() logic all live in the
+// header-only dlog_drain.hpp so the drain is unit-testable without a GPU.
+static_assert(kFwRecBytes == KFD_DISPATCH_LOG_FW_RECORD_BYTES,
+              "dlog_drain.hpp fw record size must match the UAPI");
 
 size_t
 page_size()
@@ -105,22 +95,12 @@ struct dlog_session
     void*    smap         = MAP_FAILED;
     size_t   smap_len     = 0;
 
-    kfd_dlog_stream_info info      = {};
-    uint64_t             rptr[8]   = {};     // consumer read pos per region (up to 8)
-    bool                 rptr_init = false;  // sync rptr to wptr on first drain
+    kfd_dlog_stream_info info = {};
 
-    // dispatch_start records awaiting their matching eop, keyed by
-    // (doorbell_off << 32 | dispatch_id) -> start GPU ticks. Touched only by the
-    // reader thread, so no lock is needed.
-    // TODO: can grow unbounded if starts never receive a matching eop (queue dies
-    // mid-dispatch, ring overwrite). Age out stale entries periodically, like
-    // ResultsMap::evict_stale.
-    struct pending_start
-    {
-        uint64_t start_ticks = 0;  // GPU ticks from the dispatch_start record
-        uint64_t seen_at_ns  = 0;  // host CLOCK_BOOTTIME when recorded, for aging
-    };
-    std::unordered_map<uint64_t, pending_start> pending_starts = {};
+    // Per-pipe drain cursors + unmatched-start bookkeeping. Touched only by the
+    // reader thread, so no lock is needed. The drain logic itself lives in the
+    // header-only drain_pipes() so it can be unit-tested without a GPU.
+    drain_state drain = {};
 };
 
 // Reader thread state. Single instance via static_object (ordered teardown). Its
@@ -339,143 +319,41 @@ teardown_session(int kfd, dlog_session* s)
 void
 evict_stale_starts(dlog_session* s, uint64_t now_ns, uint64_t max_age_ns)
 {
-    for(auto it = s->pending_starts.begin(); it != s->pending_starts.end();)
-    {
-        if(now_ns > it->second.seen_at_ns && now_ns - it->second.seen_at_ns > max_age_ns)
-            it = s->pending_starts.erase(it);
-        else
-            ++it;
-    }
+    s->drain.evict_stale(now_ns, max_age_ns);
 }
 
-// Drain new firmware records from every region: parse each 20-byte record, and
-// pair dispatch_start with its matching eop by (doorbell_off, dispatch_id). A
-// completed pair yields (start_ticks, end_ticks) for that dispatch. Returns the
-// number of completed pairs observed this call. (Depositing pairs into the
-// ResultsMap requires the doorbell generation and lands in step 5.)
+// Drain new firmware records via the shared, unit-tested drain_pipes() core. This
+// wrapper supplies the reader-specific bits: the mmap'd ring pointers, the host
+// clock for start aging, and the two singleton sinks — doorbell binding on every
+// record, and a paired (start,end) deposit into ResultsMap keyed by the doorbell's
+// current generation. See dlog_drain.hpp for the per-pipe ring geometry.
 uint64_t
 drain_records(dlog_session* s)
 {
     if(s->smap == MAP_FAILED) return 0;
 
-    auto*          base     = static_cast<uint8_t*>(s->smap);
-    auto*          wptr_arr = reinterpret_cast<volatile uint64_t*>(base + s->info.wptr_offset);
-    auto*          rptr_arr = reinterpret_cast<volatile uint64_t*>(base + s->info.rptr_offset);
-    const uint32_t nreg     = s->info.num_regions;
-    const uint32_t slots    = s->info.region_record_count;
+    auto* base     = static_cast<uint8_t*>(s->smap);
+    auto* recs     = base + s->info.records_offset;
+    auto* wptr_arr = reinterpret_cast<volatile uint64_t*>(base + s->info.wptr_offset);
+    auto* rptr_arr = reinterpret_cast<volatile uint64_t*>(base + s->info.rptr_offset);
 
-    // On the first drain, sync each region's read cursor to the current write
-    // pointer so we do not replay records that predate the reader (mirrors the
-    // reference dmabuf_drain_init).
-    if(!s->rptr_init)
-    {
-        for(uint32_t r = 0; r < nreg && r < 8; ++r)
-        {
-            uint64_t w = __atomic_load_n(&wptr_arr[r], __ATOMIC_ACQUIRE);
-            s->rptr[r] = w;
-            __atomic_store_n(&rptr_arr[r], w, __ATOMIC_RELEASE);
-        }
-        s->rptr_init = true;
-        return 0;
-    }
-
-    uint64_t seen       = 0;
-    uint64_t dbg_starts = 0, dbg_eops = 0, dbg_unmatched_eop = 0;
-    for(uint32_t r = 0; r < nreg && r < 8; ++r)
-    {
-        uint64_t w    = __atomic_load_n(&wptr_arr[r], __ATOMIC_ACQUIRE);
-        uint64_t scan = s->rptr[r];
-
-        // Nothing new (or a spurious backwards wptr): skip. This guard is what
-        // prevents an unbounded loop when w <= scan.
-        if(w <= scan) continue;
-
-        // Overrun: firmware advanced more than the ring holds. Recover to
-        // w - slots + 1 (the +1 keeps us strictly behind the producer on a
-        // power-of-two ring, where w - slots aliases the slot w itself).
-        if(w - scan > slots) scan = w - slots + 1;
-
-        while(scan != w)
-        {
-            uint64_t       slot      = scan & (slots - 1);
-            const uint8_t* rec_bytes = base + s->info.records_offset +
-                                       (static_cast<uint64_t>(r) * slots + slot) * kFwRecBytes;
-            auto rec = fw_record{};
-            std::memcpy(&rec, rec_bytes, sizeof(rec));
-            ++scan;
-
-            // Padding / empty slot: skip (per the .ksy consumer rules).
-            if(rec.record_type == kRecPadding || rec.doorbell_off == 0) continue;
-
-            const uint64_t ts =
-                static_cast<uint64_t>(rec.ts_lo) | (static_cast<uint64_t>(rec.ts_hi) << 32);
-            const uint64_t key = (static_cast<uint64_t>(rec.doorbell_off) << 32) |
-                                 static_cast<uint64_t>(rec.dispatch_id);
-
-            // Empirical doorbell binding: the first record for an unbound doorbell
-            // binds it to the queue that enqueued this dispatch_id (recorded by
-            // capture). Cheap no-op once bound.
-            doorbell_map().bind_from_record(rec.doorbell_off, rec.dispatch_id);
-
-            if(rec.record_type == kRecStart)
-            {
-                // MUST overwrite (not emplace): dispatch_id is only the low 32 bits
-                // of the write index, so a key can recur (32-bit wrap or doorbell
-                // reuse). A collision means the prior start is stale -- its eop was
-                // lost -- and this new start is the live one. Emplace/first-wins
-                // would later pair this key's eop with the STALE start_ticks,
-                // producing a garbage (cross-dispatch) duration.
-                s->pending_starts[key] = dlog_session::pending_start{ts, common::timestamp_ns()};
-                ++dbg_starts;
-            }
-            else if(rec.record_type == kRecEop)
-            {
-                auto it = s->pending_starts.find(key);
-                if(it != s->pending_starts.end())
-                {
-                    // Completed pair: (start_ticks, end_ticks) for this dispatch.
-                    // start ticks = it->second, end ticks = ts.
-                    // (Deposit into ResultsMap happens in step 5, once the
-                    // doorbell generation is available for the correlation_key.)
-                    uint64_t start_ticks = it->second.start_ticks;
-                    s->pending_starts.erase(it);
-                    ++seen;
-                    ++dbg_eops;
-
-                    // Deposit the paired raw ticks into the ResultsMap keyed by the
-                    // full correlation_key. get_dispatch_time() takes it at
-                    // completion. Generation comes from the (now-bound) doorbell.
-                    uint32_t gen = doorbell_map().get_generation(rec.doorbell_off);
-                    results_map().deposit(
-                        correlation_key{rec.doorbell_off, rec.dispatch_id, gen},
-                        kfd_timing_result{start_ticks, ts, common::timestamp_ns()});
-                    ROCP_TRACE << fmt::format(
-                        "KFD dlog PAIR: doorbell={} dispatch_id={} start_ticks={} "
-                        "end_ticks={} dur_ticks={}",
-                        rec.doorbell_off,
-                        rec.dispatch_id,
-                        start_ticks,
-                        ts,
-                        (ts > start_ticks ? ts - start_ticks : 0));
-                }
-                else
-                    ++dbg_unmatched_eop;
-                // eop with no matching start (ring wrap / start predates us):
-                // drop it; that dispatch will fall back to HSA timestamps.
-            }
-        }
-
-        s->rptr[r] = scan;
-        __atomic_store_n(&rptr_arr[r], scan, __ATOMIC_RELEASE);
-    }
-    if(dbg_starts || dbg_eops || dbg_unmatched_eop)
-        ROCP_TRACE << fmt::format(
-            "KFD dispatch-log drain: starts={} paired_eops={} unmatched_eops={} pending={}",
-            dbg_starts,
-            dbg_eops,
-            dbg_unmatched_eop,
-            s->pending_starts.size());
-    return seen;
+    return drain_pipes(
+        recs,
+        s->info.num_regions,
+        s->info.region_record_count,
+        wptr_arr,
+        rptr_arr,
+        s->drain,
+        common::timestamp_ns(),
+        [](uint32_t doorbell_off, uint32_t dispatch_id) {
+            doorbell_map().bind_from_record(doorbell_off, dispatch_id);
+        },
+        [](uint32_t doorbell_off, uint32_t dispatch_id, uint64_t start_ticks, uint64_t end_ticks) {
+            uint32_t gen = doorbell_map().get_generation(doorbell_off);
+            results_map().deposit(
+                correlation_key{doorbell_off, dispatch_id, gen},
+                kfd_timing_result{start_ticks, end_ticks, common::timestamp_ns()});
+        });
 }
 
 void
@@ -523,10 +401,13 @@ reader_loop()
     auto     wake          = pollfd{.fd = st.wake_fd, .events = POLLIN, .revents = 0};
     uint64_t total_seen    = 0;
     uint64_t last_evict_ns = common::timestamp_ns();
+    uint64_t last_recal_ns = 0;  // 0 => calibrate on the first ready iteration
 
     // Age out unpaired starts at most this often (not every 1 ms poll).
     constexpr uint64_t kEvictIntervalNs = 1'000'000'000ull;  // 1 s
     constexpr uint64_t kStartMaxAgeNs   = 5'000'000'000ull;  // 5 s
+    // Re-anchor the GPU-tick -> boottime mapping this often to bound clock drift.
+    constexpr uint64_t kRecalIntervalNs = 100'000'000ull;  // 100 ms
 
     while(!st.stop.load(std::memory_order_acquire))
     {
@@ -545,9 +426,18 @@ reader_loop()
 
         if(st.session_ready.load(std::memory_order_acquire))
         {
+            uint64_t now_ns = common::timestamp_ns();
+
+            // Re-anchor the tick->ns clock mapping before draining so freshly
+            // deposited records convert against a recent anchor.
+            if(now_ns - last_recal_ns >= kRecalIntervalNs)
+            {
+                calibrate_clock();
+                last_recal_ns = now_ns;
+            }
+
             total_seen += drain_records(&st.session);
 
-            uint64_t now_ns = common::timestamp_ns();
             if(now_ns - last_evict_ns >= kEvictIntervalNs)
             {
                 evict_stale_starts(&st.session, now_ns, kStartMaxAgeNs);
