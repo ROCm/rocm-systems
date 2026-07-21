@@ -704,7 +704,8 @@ sampled_atomic_role(ConSanMoiAtomicEventKind kind) {
     const ConSanMoiAtomicAddressPlan &address_plan, const ConSanOptions &options,
     const VgprSpillSequence *spill, rj_code_arch_t arch, uint32_t selected_slot,
     const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
-    uint64_t return_text_offset, std::vector<std::string> &errors) {
+    uint64_t return_text_offset, std::vector<std::string> &errors,
+    uint32_t *guest_instruction_offset = nullptr) {
   if (!options.scratch_vgpr || !options.moi_report_buffer_address || !options.moi_owner_vgpr ||
       !options.moi_epoch_vgpr || !options.moi_exec_save_sgpr ||
       static_cast<uint32_t>(*options.scratch_vgpr) + 10u > kMaxVgprs ||
@@ -776,6 +777,8 @@ sampled_atomic_role(ConSanMoiAtomicEventKind kind) {
       return std::nullopt;
     words.insert(words.end(), materialize->begin(), materialize->end());
   }
+  if (guest_instruction_offset)
+    *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
   for (uint64_t offset = 0; offset < candidate.site.size; offset += sizeof(uint32_t)) {
     uint32_t word = 0;
     std::memcpy(&word, bytes.data() + candidate.site.file_offset + offset, sizeof(word));
@@ -966,7 +969,8 @@ sampled_atomic_role(ConSanMoiAtomicEventKind kind) {
     const ConSanMoiAtomicAddressPlan &address_plan, const ConSanOptions &options,
     const VgprSpillSequence *spill, rj_code_arch_t arch, uint32_t selected_slot,
     const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
-    uint64_t return_text_offset, std::vector<std::string> &errors) {
+    uint64_t return_text_offset, std::vector<std::string> &errors,
+    uint32_t *guest_instruction_offset = nullptr) {
   if (!options.scratch_vgpr || !options.moi_report_buffer_address || !options.moi_owner_vgpr ||
       !options.moi_epoch_vgpr || !options.moi_exec_save_sgpr ||
       static_cast<uint32_t>(*options.scratch_vgpr) + 10u > 256u ||
@@ -1054,6 +1058,8 @@ sampled_atomic_role(ConSanMoiAtomicEventKind kind) {
       return std::nullopt;
     words.insert(words.end(), materialize->begin(), materialize->end());
   }
+  if (guest_instruction_offset)
+    *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
   for (uint64_t offset = 0; offset < candidate.site.size; offset += sizeof(uint32_t)) {
     uint32_t word = 0;
     std::memcpy(&word, bytes.data() + candidate.site.file_offset + offset, sizeof(word));

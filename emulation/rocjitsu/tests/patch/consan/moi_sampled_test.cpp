@@ -520,7 +520,46 @@ TEST(ConSanMoi, SampledAtomicTrackingPublishesQualifiedTypedMetadata) {
             trampoline.end());
 }
 
-TEST(ConSanMoi, Gfx1250SampledRetainsIsolatedLdsRelease) {
+TEST(ConSanMoi, Gfx1250OrderedLdsAtomicComposesSampledAccessAndOrderingMetadata) {
+  const std::array<uint32_t, 7> words = {
+      0x360202ffu, 0x000000ffu, // release wait setup
+      0xbf94ffffu,              // s_barrier_wait -1
+      0xbfc10000u,              // release ordering completion
+      0xd8000000u, 0x00001210u, // ds_add_u32 v0, v18, no return
+      0xbfb00000u,              // s_endpgm
+  };
+  const std::vector<uint8_t> bytes = make_gfx1250_code_object(words, "sampled_ordered_lds_atomic");
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_track_atomics = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8, 8, 0, 0, 0, 8, 1);
+  options.max_patches = 8;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
+           patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+  });
+  const auto atomic = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
+  ASSERT_NE(access, result.patches.end());
+  ASSERT_NE(atomic, result.patches.end()) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(access->relocated_guest_instruction_offset);
+  ASSERT_TRUE(atomic->relocated_guest_instruction_offset);
+  EXPECT_EQ(access->anchor_offset, atomic->anchor_offset);
+  EXPECT_NE(*access->relocated_guest_instruction_offset,
+            *atomic->relocated_guest_instruction_offset);
+  EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [](const auto &site) {
+    return site.site_kind == ConSanResourceSiteKind::Atomic &&
+           site.lowering_outcome == ConSanSiteLoweringOutcome::Patched;
+  }));
+}
+
+TEST(ConSanMoi, Gfx1250SampledPublishesIsolatedLdsReleaseOrdering) {
   constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 4u, .data0 = 5u});
   constexpr auto atomic =
       gfx1250::build_vds(gfx1250::kDsAddU32Vds, {.offset0 = 12u, .addr = 2u, .data0 = 1u});
@@ -530,8 +569,8 @@ TEST(ConSanMoi, Gfx1250SampledRetainsIsolatedLdsRelease) {
   ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_atomics = true;
   options.moi_report_buffer_address = 0x123456780000ull;
-  options.moi_report_buffer_size = direct_sampled_report_bytes(2);
-  options.max_patches = 2;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(3);
+  options.max_patches = 3;
 
   const ConSanResult result = try_patch_consan(
       make_gfx1250_code_object(words, "gfx1250_sampled_isolated_lds_release"), options);
@@ -551,11 +590,11 @@ TEST(ConSanMoi, Gfx1250SampledRetainsIsolatedLdsRelease) {
                                                ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
                                   }),
             2u);
-  // The isolated release remains observable as an access, but without an
-  // acquire consumer it does not publish synchronization metadata.
+  // The qualified release is dual-role: ordinary atomic access observation
+  // and workgroup-scoped ordering metadata remain independently visible.
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
                                &ConSanPatchInfo::kind),
-            0u);
+            1u);
 }
 
 TEST(ConSanMoi, Cdna4SampledAtomicTracksCacheAssociatedOrdering) {

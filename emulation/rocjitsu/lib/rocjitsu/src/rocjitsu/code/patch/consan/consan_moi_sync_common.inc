@@ -53,11 +53,20 @@ sampled_atomic_semantics_for_site(const ConSanResult &result, std::string_view c
     unsupported_reason = "unsupported-qualified-memory-role";
     return std::nullopt;
   }
-  if (!sequence->raw_scope) {
+  // LDS visibility is inherently workgroup-scoped. gfx1250 DS encodings do
+  // not carry the raw scope field used by FLAT/GLOBAL atomics, so derive that
+  // semantic only after the shared sequence analysis has qualified the DS
+  // instruction as an ordering event.
+  const std::optional<uint32_t> semantic_scope =
+      sequence->raw_scope ? sequence->raw_scope
+                          : (result.arch_name == "gfx1250" && site.mnemonic.starts_with("ds_")
+                                 ? std::optional<uint32_t>(1u)
+                                 : std::nullopt);
+  if (!semantic_scope) {
     unsupported_reason = "missing-qualified-scope";
     return std::nullopt;
   }
-  switch (*sequence->raw_scope) {
+  switch (*semantic_scope) {
   case 0:
     semantics.scope = ConSanMoiSampledSyncScope::Wavefront;
     break;

@@ -262,8 +262,18 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
            ((next.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
              next.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore) &&
             existing->kind == ConSanPatchKind::TrampolineMoiAtomicRecord));
+      const bool nested_composed_sampled_access_atomic =
+          existing->phase == ConSanPatchPhase::Instrumentation &&
+          next.phase == ConSanPatchPhase::Instrumentation &&
+          existing->bytes.begin == next.bytes.begin &&
+          (((existing->kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
+             existing->kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore) &&
+            next.kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata) ||
+           ((next.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
+             next.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore) &&
+            existing->kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata));
       if (!exact_alias && !nested_cross_phase && !nested_sc_relay_donor &&
-          !nested_composed_access_atomic) {
+          !nested_composed_access_atomic && !nested_composed_sampled_access_atomic) {
         errors.emplace_back(
             "ConSan final validation found partially overlapping patch ranges: existing=" +
             std::to_string(existing->bytes.begin) + "-" + std::to_string(existing->bytes.end) +
@@ -1352,13 +1362,14 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       const bool sc_relocation = candidate.kind == ConSanPatchKind::TrampolineScPerturbation &&
                                  candidate.perturbation_composite_atomic_overlap &&
                                  candidate.perturbation_edge;
-      const bool record_replay_relocation =
-          candidate.kind == ConSanPatchKind::TrampolineMoiAtomicRecord &&
+      const bool moi_atomic_relocation =
+          (candidate.kind == ConSanPatchKind::TrampolineMoiAtomicRecord ||
+           candidate.kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata) &&
           candidate.relocated_guest_instruction_offset;
       const bool inline_shadow_relocation =
           candidate.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering &&
           candidate.relocated_guest_instruction_offset;
-      if (!sc_relocation && !record_replay_relocation && !inline_shadow_relocation)
+      if (!sc_relocation && !moi_atomic_relocation && !inline_shadow_relocation)
         continue;
       if (match != nullptr)
         return std::nullopt;
@@ -1368,6 +1379,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       return std::nullopt;
     uint64_t body_offset = 0;
     if (match->kind == ConSanPatchKind::TrampolineMoiAtomicRecord ||
+        match->kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata ||
         match->kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering) {
       body_offset = *match->relocated_guest_instruction_offset;
       if (match->trampoline_offset > replacement_text.size() ||

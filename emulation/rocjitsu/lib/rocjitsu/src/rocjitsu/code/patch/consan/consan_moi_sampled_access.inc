@@ -1,3 +1,7 @@
+[[nodiscard]] std::optional<ConSanMoiAtomicEventKind>
+atomic_event_kind_for_site(const ConSanResult &result, std::string_view container_name,
+                           bool in_kernel, const ConSanAtomicSite &site);
+
 void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                                                const ConSanOptions &options, rj_code_arch_t arch,
                                                const MoiResourcePlanningState &resource_state,
@@ -15,7 +19,6 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   if (options.moi_track_atomics) {
     for (const ConSanSyncSequence &sequence : result.sync_sequences) {
       if (sequence.kind != ConSanSyncSequenceKind::Atomic || sequence.width_bits != 32u ||
-          !sequence.raw_scope || (*sequence.raw_scope != 2u && *sequence.raw_scope != 3u) ||
           !consan_sync_confidence_meets(sequence.confidence,
                                         ConSanSemanticConfidence::Conservative) ||
           !consan_sync_confidence_meets(sequence.memory_role_confidence,
@@ -53,9 +56,14 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
               site = &*found;
           }
         }
-        if (site != nullptr &&
+        const bool supported_scope = sequence.raw_scope
+                                         ? *sequence.raw_scope >= 1u && *sequence.raw_scope <= 3u
+                                         : result.arch_name == "gfx1250" && site != nullptr &&
+                                               site->mnemonic.starts_with("ds_");
+        if (site != nullptr && supported_scope &&
             (site->mnemonic.starts_with("flat_atomic") ||
-             site->mnemonic.starts_with("global_atomic")) &&
+             site->mnemonic.starts_with("global_atomic") ||
+             (result.arch_name == "gfx1250" && site->mnemonic.starts_with("ds_"))) &&
             (sequence.rmw_outcome != ConSanSyncRmwOutcome::CompareExchange ||
              site->returns_old_value.value_or(false))) {
           eligible = true;
@@ -96,6 +104,25 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   apply_test_kernel_filter(candidates, options);
   std::ranges::sort(candidates, [](const ConSanMoiCandidate *lhs, const ConSanMoiCandidate *rhs) {
     return lhs->text_offset < rhs->text_offset;
+  });
+  // Sampled atomic metadata wraps the relocated guest instruction in a
+  // second text-growth pass. Keep dual-role access/ordering sites at the tail
+  // so their one-word nested anchors remain branch-reachable in large images.
+  std::unordered_set<uint64_t> ordering_atomic_offsets;
+  if (options.moi_track_atomics) {
+    const auto append_ordering_offsets = [&](const auto &container, bool in_kernel) {
+      for (const ConSanAtomicSite &site : container.atomic_sites) {
+        if (atomic_event_kind_for_site(result, container.name, in_kernel, site))
+          ordering_atomic_offsets.insert(site.text_offset);
+      }
+    };
+    for (const ConSanKernelInfo &kernel : result.kernels)
+      append_ordering_offsets(kernel, true);
+    for (const ConSanFunctionInfo &function : result.functions)
+      append_ordering_offsets(function, false);
+  }
+  std::stable_partition(candidates.begin(), candidates.end(), [&](const auto *candidate) {
+    return !ordering_atomic_offsets.contains(candidate->text_offset);
   });
   if (candidates.empty()) {
     result.warnings.emplace_back(
@@ -144,6 +171,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     std::optional<uint32_t> private_epoch_offset;
     std::optional<uint32_t> private_sample_sequence_offset;
     uint32_t required_private_bytes = 0;
+    uint32_t probe_guest_instruction_offset = 0;
   };
   std::vector<PlannedSampledPatch> planned_patches;
   planned_patches.reserve(candidates.size());
@@ -525,13 +553,15 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             : std::optional<uint32_t>(prior_patch->first_record_index);
     const uint32_t prior_access_range_count =
         prior_patch == planned_patches.rend() ? 0u : prior_patch->access_range_count;
+    uint32_t probe_guest_instruction_offset = 0;
     auto words = build_direct_sampled_watchpoint_words(
         bytes, lowered_candidate, candidate_options, arch, next_record_index,
         prior_first_record_index, prior_access_range_count, window_bank_count,
         layout.sampled_causal_windows_offset, layout.sampled_watchpoints_offset,
         layout.sampled_pending_acquires_offset,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
-        private_layout ? private_layout->sample_sequence_offset : std::nullopt, candidate_errors);
+        private_layout ? private_layout->sample_sequence_offset : std::nullopt, candidate_errors,
+        &probe_guest_instruction_offset);
     if (!words) {
       result.warnings.insert(result.warnings.end(), candidate_errors.begin(),
                              candidate_errors.end());
@@ -609,6 +639,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       planned.private_sample_sequence_offset = private_layout->sample_sequence_offset;
     planned.required_private_bytes = std::max(private_layout ? private_layout->ephemeral_base : 0u,
                                               spill ? spill->total_private_bytes : 0u);
+    planned.probe_guest_instruction_offset = probe_guest_instruction_offset;
     planned_patches.push_back(std::move(planned));
     if (use_indirect_appended && !use_dense_call)
       planned_anchor_end = candidate.text_offset + placement->original_size;
@@ -1059,11 +1090,13 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           }
           dense_gate_words = std::move(*gate);
         }
+        uint32_t body_guest_instruction_offset = 0;
         auto cave_words = assemble_moi_appended_body(
             planned_patch, *words, "sampled probe", result.errors,
             /*deferred_guest_word_count=*/0u, /*scalar_save_words=*/{},
             /*scalar_restore_words=*/{}, planned_patch.gfx1250_vgpr_msb_mode,
-            /*trailing_guest_word_count=*/0u, dense_gate_words);
+            /*trailing_guest_word_count=*/0u, dense_gate_words,
+            planned_patch.probe_guest_instruction_offset, &body_guest_instruction_offset);
         if (!cave_words)
           return;
         if (planned_patch.dense_call_anchor) {
@@ -1092,6 +1125,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         info.trampoline_offset = cave_text_offset;
         info.original_size = planned_patch.placement.original_size;
         info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
+        info.relocated_guest_instruction_offset = cave_text_offset + body_guest_instruction_offset;
       } else {
         const uint64_t patch_bytes = static_cast<uint64_t>(words->size() * sizeof(uint32_t));
         if (patch_bytes != planned_patch.placement.body_size) {
@@ -1108,6 +1142,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         info.trampoline_offset = candidate.text_offset + candidate.size;
         info.original_size = static_cast<uint32_t>(patch_bytes);
         info.trampoline_size = 0;
+        info.relocated_guest_instruction_offset =
+            candidate.text_offset + planned_patch.probe_guest_instruction_offset;
       }
       patches.push_back(info);
     }
@@ -1207,6 +1243,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             info.required_private_segment_size = planned_patch.required_private_bytes;
             info.owner_descriptor_file_offsets =
                 planned_patch.resources.owner_descriptor_file_offsets;
+            info.relocated_guest_instruction_offset =
+                candidate.text_offset + planned_patch.probe_guest_instruction_offset;
             return info;
           },
           [](std::vector<uint8_t> &, ConSanResult &) { return true; }, result))

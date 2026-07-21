@@ -1713,7 +1713,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     uint32_t window_bank_count, bool relocate_instruction,
     std::optional<uint16_t> preserved_lds_byte_offset_vgpr, size_t sampled_causal_windows_offset,
     size_t sampled_watchpoints_offset, size_t sampled_pending_acquires_offset,
-    std::vector<std::string> &errors) {
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI sampled probe requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
@@ -1850,6 +1850,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     if (select_guest_vgpr_bank)
       words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
           0u, static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), arch));
+    if (guest_instruction_offset)
+      *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
     for (uint64_t offset = 0; offset < candidate.size; offset += sizeof(uint32_t)) {
       uint32_t word = 0;
       std::memcpy(&word, bytes.data() + candidate.file_offset + offset, sizeof(word));
@@ -2328,7 +2330,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     uint32_t window_bank_count, size_t sampled_causal_windows_offset,
     size_t sampled_watchpoints_offset, size_t sampled_pending_acquires_offset,
     std::optional<uint32_t> private_epoch_offset,
-    std::optional<uint32_t> private_sample_sequence_offset, std::vector<std::string> &errors) {
+    std::optional<uint32_t> private_sample_sequence_offset, std::vector<std::string> &errors,
+    uint32_t *guest_instruction_offset = nullptr) {
   const auto access_ranges = candidate_access_ranges(bytes, candidate);
   if (!access_ranges || access_ranges->empty()) {
     errors.emplace_back("ConSan MOI sampled probe requires at least one LDS access range");
@@ -2402,14 +2405,19 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
                                        prior_range_index * window_bank_count);
       }
     }
+    uint32_t range_guest_instruction_offset = 0;
     auto range_words = build_direct_sampled_watchpoint_range_words(
         bytes, candidate, (*access_ranges)[range_index], options, arch,
         first_record_index + range_index * window_bank_count, prior_record_indices,
         window_bank_count, range_index == 0u, preserved_lds_byte_offset_vgpr,
         sampled_causal_windows_offset, sampled_watchpoints_offset, sampled_pending_acquires_offset,
-        errors);
+        errors, range_index == 0u ? &range_guest_instruction_offset : nullptr);
     if (!range_words)
       return std::nullopt;
+    if (range_index == 0u && guest_instruction_offset) {
+      *guest_instruction_offset =
+          static_cast<uint32_t>(words.size() * sizeof(uint32_t)) + range_guest_instruction_offset;
+    }
     words.insert(words.end(), range_words->begin(), range_words->end());
   }
   if (private_sample_sequence_offset) {

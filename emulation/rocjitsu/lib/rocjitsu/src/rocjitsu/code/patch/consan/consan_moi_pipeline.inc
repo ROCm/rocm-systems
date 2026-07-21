@@ -933,9 +933,9 @@ void finalize_moi_site_lowering_outcomes(ConSanResult &result) {
       continue;
     }
 
-    const auto resource_kind = resource_kind_by_offset.find(patch.anchor_offset);
-    if (resource_kind != resource_kind_by_offset.end())
-      patched_sites.insert({resource_kind->second, patch.anchor_offset});
+    const auto patch_kind = moi_instrumentation_patch_site_kind(patch, result);
+    if (patch_kind)
+      patched_sites.insert({*patch_kind, patch.anchor_offset});
     if (patch.covered_sync_event_count == 0)
       continue;
     const auto anchor_event = std::ranges::find_if(result.sync_events, [&](const auto &event) {

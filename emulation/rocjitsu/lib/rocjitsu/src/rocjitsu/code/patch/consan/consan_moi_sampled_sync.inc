@@ -1478,6 +1478,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     bool deferred_acquire = false;
   };
   std::vector<Candidate> candidates;
+  const bool allow_gfx1250_lds = result.arch_name == "gfx1250";
   const auto append = [&](std::string_view name, bool in_kernel, std::optional<uint64_t> descriptor,
                           const std::vector<ConSanAtomicSite> &sites) {
     for (const ConSanAtomicSite &site : sites) {
@@ -1488,20 +1489,21 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                                      ": compare-exchange-dynamic-outcome-unavailable");
         continue;
       }
-      if (!is_first_light_atomic_record_candidate(site))
+      const ConSanAtomicSite normalized = normalize_atomic_record_site(site, allow_gfx1250_lds);
+      if (!is_first_light_atomic_record_candidate(normalized, allow_gfx1250_lds))
         continue;
-      const auto event_kind = atomic_event_kind_for_site(result, name, in_kernel, site);
+      const auto event_kind = atomic_event_kind_for_site(result, name, in_kernel, normalized);
       if (!event_kind)
         continue;
       std::string reason;
       const auto semantics =
-          sampled_atomic_semantics_for_site(result, name, in_kernel, site, reason);
+          sampled_atomic_semantics_for_site(result, name, in_kernel, normalized, reason);
       if (!semantics) {
         result.warnings.emplace_back("ConSan MOI sampled atomic sync skipped " + std::string(name) +
                                      ": " + reason);
         continue;
       }
-      candidates.push_back({{(in_kernel ? "kernel:" : "function:") + std::string(name), site,
+      candidates.push_back({{(in_kernel ? "kernel:" : "function:") + std::string(name), normalized,
                              descriptor, *event_kind},
                             *semantics,
                             0,
@@ -1584,7 +1586,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         patch.kind != ConSanPatchKind::TrampolineMoiSampledWatchpointStore)
       continue;
     if (patch.sampled_access_kind != ConSanLdsAccessKind::Read &&
-        patch.sampled_access_kind != ConSanLdsAccessKind::Write)
+        patch.sampled_access_kind != ConSanLdsAccessKind::Write &&
+        patch.sampled_access_kind != ConSanLdsAccessKind::Atomic)
       continue;
     has_multi_range_window |= patch.sampled_access_range_count > 1u;
     for (const MoiKernelResourceContext &context : resource_state.contexts) {
@@ -1635,11 +1638,13 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       if (!owner_executes_candidate(*window.owner, candidate))
         continue;
       const bool release_side =
-          window.access_kind == ConSanLdsAccessKind::Write &&
+          (window.access_kind == ConSanLdsAccessKind::Write ||
+           window.access_kind == ConSanLdsAccessKind::Atomic) &&
           (candidate.semantics.role == ConSanMoiSampledSyncRole::RmwRelease ||
            candidate.semantics.role == ConSanMoiSampledSyncRole::RmwAcquireRelease);
       const bool acquire_side =
-          window.access_kind == ConSanLdsAccessKind::Read &&
+          (window.access_kind == ConSanLdsAccessKind::Read ||
+           window.access_kind == ConSanLdsAccessKind::Atomic) &&
           (candidate.semantics.role == ConSanMoiSampledSyncRole::RmwAcquire ||
            candidate.semantics.role == ConSanMoiSampledSyncRole::RmwAcquireRelease);
       std::optional<SampledCfgDistance> distance;
@@ -1685,11 +1690,13 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       if (!owner_executes_candidate(*window.owner, candidate))
         continue;
       const bool release_side =
-          window.access_kind == ConSanLdsAccessKind::Write &&
+          (window.access_kind == ConSanLdsAccessKind::Write ||
+           window.access_kind == ConSanLdsAccessKind::Atomic) &&
           (candidate.semantics.role == ConSanMoiSampledSyncRole::RmwRelease ||
            candidate.semantics.role == ConSanMoiSampledSyncRole::RmwAcquireRelease);
       const bool acquire_side =
-          window.access_kind == ConSanLdsAccessKind::Read &&
+          (window.access_kind == ConSanLdsAccessKind::Read ||
+           window.access_kind == ConSanLdsAccessKind::Atomic) &&
           (candidate.semantics.role == ConSanMoiSampledSyncRole::RmwAcquire ||
            candidate.semantics.role == ConSanMoiSampledSyncRole::RmwAcquireRelease);
       if (!release_side && !acquire_side)
@@ -1744,7 +1751,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     Candidate candidate = candidates[proposed[i].candidate_index];
     candidate.selected_slot = windows[proposed[i].window_index].slot;
     candidate.deferred_acquire =
-        windows[proposed[i].window_index].access_kind == ConSanLdsAccessKind::Read;
+        windows[proposed[i].window_index].access_kind == ConSanLdsAccessKind::Read ||
+        (windows[proposed[i].window_index].access_kind == ConSanLdsAccessKind::Atomic &&
+         candidate.semantics.role == ConSanMoiSampledSyncRole::RmwAcquire);
     associated.push_back(std::move(candidate));
   }
   std::ranges::sort(associated, {}, &Candidate::selected_slot);
@@ -1760,6 +1769,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     ResolvedMoiScratchPlan resources;
     ConSanMoiAtomicAddressPlan address_plan;
     std::optional<VgprSpillSequence> spill;
+    uint64_t physical_anchor_offset = 0;
   };
   std::vector<Planned> selected;
   MoiSpillManagers spill_managers;
@@ -1769,10 +1779,22 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   for (size_t index = 0; index < candidates.size() && selected.size() < remaining; ++index) {
     Candidate candidate = candidates[index];
     const ConSanAtomicSite &site = candidate.atomic.site;
-    if (site.text_offset > old_text.size() || site.size > old_text.size() - site.text_offset)
+    const auto composed_access_patch = std::ranges::find_if(result.patches, [&](const auto &patch) {
+      return (patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
+              patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore) &&
+             patch.anchor_offset == site.text_offset && patch.relocated_guest_instruction_offset;
+    });
+    const uint64_t physical_anchor_offset =
+        composed_access_patch == result.patches.end()
+            ? site.text_offset
+            : *composed_access_patch->relocated_guest_instruction_offset;
+    if (physical_anchor_offset > old_text.size() ||
+        site.size > old_text.size() - physical_anchor_offset)
       continue;
     const bool overlap = std::any_of(
         result.patches.begin(), result.patches.end(), [&](const ConSanPatchInfo &patch) {
+          if (composed_access_patch != result.patches.end() && &patch == &*composed_access_patch)
+            return false;
           const uint64_t patch_end =
               patch.anchor_offset + std::max<uint32_t>(patch.original_size, 1u);
           return site.text_offset < patch_end && patch.anchor_offset < site.text_offset + site.size;
@@ -1819,7 +1841,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       note_spill_descriptor_requirements(private_requirements, *resources, *spill);
     }
     note_descriptor_requirements(descriptor_requirements, *resources);
-    selected.push_back({std::move(candidate), *resources, address_plan, std::move(spill)});
+    selected.push_back(
+        {std::move(candidate), *resources, address_plan, std::move(spill), physical_anchor_offset});
   }
   if (selected.empty()) {
     result.warnings.emplace_back("ConSan MOI sampled atomic sync found no patchable sequence");
@@ -1865,19 +1888,23 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   std::vector<ConSanPatchInfo> patches;
   for (const Planned &planned : selected) {
     const ConSanAtomicSite &site = planned.candidate.atomic.site;
+    const uint64_t physical_anchor_offset = planned.physical_anchor_offset;
     const uint64_t cave_offset = placement_planner.appended_end();
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
+    uint32_t guest_instruction_offset = 0;
     auto cave_words =
         planned.candidate.deferred_acquire
             ? build_sampled_pending_acquire_cave_words(
-                  active_bytes, planned.candidate.atomic, planned.address_plan, candidate_options,
+                  bytes, planned.candidate.atomic, planned.address_plan, candidate_options,
                   planned.spill ? &*planned.spill : nullptr, arch, planned.candidate.selected_slot,
-                  layout, cave_offset, site.text_offset + site.size, result.errors)
+                  layout, cave_offset, physical_anchor_offset + site.size, result.errors,
+                  &guest_instruction_offset)
             : build_sampled_atomic_sync_cave_words(
-                  active_bytes, planned.candidate.atomic, planned.address_plan, candidate_options,
+                  bytes, planned.candidate.atomic, planned.address_plan, candidate_options,
                   planned.spill ? &*planned.spill : nullptr, arch, planned.candidate.selected_slot,
-                  layout, cave_offset, site.text_offset + site.size, result.errors);
+                  layout, cave_offset, physical_anchor_offset + site.size, result.errors,
+                  &guest_instruction_offset);
     if (!cave_words) {
       result.warnings.emplace_back(
           "ConSan MOI sampled atomic sync could not lower associated " +
@@ -1885,12 +1912,13 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
           " site at text offset " + std::to_string(site.text_offset));
       continue;
     }
-    const bool direct_entry = compute_sopp_branch_simm16(site.text_offset, cave_offset).has_value();
+    const bool direct_entry =
+        compute_sopp_branch_simm16(physical_anchor_offset, cave_offset).has_value();
     std::optional<uint64_t> indirect_entry_island;
     if (!direct_entry) {
-      indirect_entry_island = claim_appended_island(site.text_offset);
+      indirect_entry_island = claim_appended_island(physical_anchor_offset);
       if (!indirect_entry_island)
-        indirect_entry_island = indirect_allocator.claim_reachable(site.text_offset);
+        indirect_entry_island = indirect_allocator.claim_reachable(physical_anchor_offset);
     }
     if (!direct_entry && !indirect_entry_island) {
       result.warnings.emplace_back(
@@ -1900,7 +1928,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     }
     std::string placement_error;
     const auto placement = placement_planner.plan_indirect_appended(
-        site.text_offset, site.size, cave_words->size() * sizeof(uint32_t), &placement_error);
+        physical_anchor_offset, site.size, cave_words->size() * sizeof(uint32_t), &placement_error);
     if (!placement) {
       result.errors.emplace_back("ConSan MOI sampled atomic sync placement failed: " +
                                  placement_error);
@@ -1920,12 +1948,12 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     if (anchor.empty())
       return;
     anchor.front() = build_s_branch(*fwd, arch);
-    std::memcpy(new_text.data() + site.text_offset, anchor.data(),
+    std::memcpy(new_text.data() + physical_anchor_offset, anchor.data(),
                 anchor.size() * sizeof(uint32_t));
     if (indirect_entry_island &&
         !emit_moi_local_indirect_entry_island(
-            new_text, *indirect_entry_island, placement->body_offset, site.text_offset, options,
-            planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
+            new_text, *indirect_entry_island, placement->body_offset, physical_anchor_offset,
+            options, planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
             "ConSan MOI sampled atomic sync patch")) {
       return;
     }
@@ -1937,6 +1965,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     info.trampoline_offset = cave_offset;
     info.original_size = site.size;
     info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
+    info.relocated_guest_instruction_offset = cave_offset + guest_instruction_offset;
     info.scratch_vgpr = planned.resources.base;
     info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
     if (planned.spill) {
