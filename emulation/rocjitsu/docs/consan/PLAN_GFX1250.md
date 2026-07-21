@@ -134,7 +134,7 @@ flowchart TD
     XT0["XT0 DONE<br/>RocJITsu corpus runner, provenance,<br/>and one-repetition contract"]
     XT1["XT1 DONE<br/>both compact P0 kernels green<br/>in all four profiles"]
     XT2A["XT2A DONE<br/>four-client transpose/TDM P1 row green<br/>in all four profiles"]
-    XT2B["XT2B DONE<br/>broad multi-type transpose/TDM P1 row green<br/>in all four profiles"]
+    XT2B["XT2B DONE<br/>broad multi-type transpose/TDM P1 assessed;<br/>Inline strict-160-KiB rerun remains"]
     XT2C1["XT2C1 DONE<br/>001 Stream-K kernel green<br/>in all four profiles"]
     XT2C2["XT2C2 TODO<br/>004 Stream-K kernel 3/4;<br/>Inline long-bound completion remains"]
     XT2C3["XT2C3 TODO<br/>007 Stream-K kernel 3/4;<br/>Inline long-bound completion remains"]
