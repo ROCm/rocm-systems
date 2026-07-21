@@ -1,8 +1,8 @@
 # ConSan gfx1250 port plan
 
-This document tracks the `gfx1250` port of ConSan.  The work lives on
-`users/bjacob/consan-gfx1250` as a linear continuation of the gfx950 port, so
-shared fixes already proven on gfx950 remain in the history beneath this work.
+This document tracks the `gfx1250` port of ConSan.  The gfx950 and gfx1250 work
+is consolidated on `users/bjacob/consan` as a linear stack above the shared
+RocJITsu foundation.
 
 The primary success metric is [STATUS_GFX1250.md](STATUS_GFX1250.md): every
 applicable end-to-end workload must be accepted under SuperCollider,
@@ -120,7 +120,7 @@ flowchart TD
     XP2D["XP2D TODO<br/>torch.topk Record/Replay residual needs<br/>site/subgroup scalar routing"]
     XP3["XP3 TODO<br/>top-k SC at 160,752/160,848;<br/>96 remain after rotation"]
     XP9["XP9 DONE<br/>norm plus softmax Record/Replay clean, paired,<br/>and reviewed-fault bundle green"]
-    XP9B["XP9B ACTIVE<br/>norm plus softmax Sampled has 130 gaps<br/>from persistent dispatch-ID pressure"]
+    XP9B["XP9B ACTIVE<br/>norm plus softmax Sampled clean-complete;<br/>paired and reviewed-fault gates remain"]
     XP10["XP10 DONE<br/>cluster Record/Replay clean, paired, and reviewed-fault<br/>bundle accepted at 23/23 accesses and 2/2 barriers"]
     XT0["XT0 DONE<br/>RocJITsu corpus runner, provenance,<br/>and one-repetition contract"]
     XT1["XT1 DONE<br/>both compact P0 kernels green<br/>in all four profiles"]
@@ -343,6 +343,16 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP9B stays ACTIVE/blue but clears its implementation and clean
+  coverage gates.  Commit `19840819c2` replaces gfx1250 Sampled's persistent
+  dispatch-ID pair with the report's stable literal identity when scalar
+  pressure consumes the full ordinary SGPR range.  The focused suite passes
+  96/96, and one-repetition artifact
+  `consan-green-expansion-20260721-norm-softmax-sampled-literal-dispatch-independent-048`
+  accepts the exact norm/softmax oracle with complete 4,756/4,756 access and
+  4,572/4,572 barrier coverage.  The Mermaid box remains blue/ACTIVE for paired
+  overhead and reviewed-fault acceptance rather than falsely turning green.
 
 - 2026-07-21: XP2D rotates from ACTIVE to TODO after an exact-object offline
   experiment reproduces all 791 Record/Replay top-k gaps and proves that
