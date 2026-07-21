@@ -290,6 +290,11 @@ class IsaProfile(ABC):
         return False
 
     @property
+    def split_execution_sources(self) -> bool:
+        """True when execution bodies are emitted to separate source files."""
+        return False
+
+    @property
     def uses_true16_vop3_opsel(self) -> bool:
         """True when VOP3 16-bit operands use op_sel half selectors."""
         return False
@@ -1684,6 +1689,10 @@ class Gfx1250Profile(Rdna4Profile):
 
     @property
     def uses_packed_16bit_e32_source_selectors(self) -> bool:
+        return True
+
+    @property
+    def split_execution_sources(self) -> bool:
         return True
 
     @property
