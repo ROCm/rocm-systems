@@ -133,6 +133,12 @@ typedef enum {
    */
   HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH = 3,
 
+  /**
+   * Extended kernel dispatch packet with spatial locality computing support.
+   * Supports clusters, launch descriptor for advanced scheduling, and L2 prefetch.
+   */
+  HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD = 4,
+
   /* Reserved for a packet that is not yet released */
   HSA_AMD_PACKET_TYPE_RESERVED200 = 200,
 } hsa_amd_packet_type_t;
@@ -293,6 +299,10 @@ typedef union {
 
 /**
  * @brief AMD extended kernel dispatch packet.
+ *
+ * Supports both Format 3 (HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH) and
+ * Format 4 (HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD).
+ * The amd_format field determines which interpretation to use.
  */
 typedef struct hsa_amd_ext_kernel_dispatch_packet_s {
   /**
@@ -306,15 +316,18 @@ typedef struct hsa_amd_ext_kernel_dispatch_packet_s {
 
   /**
    * AMD vendor-specific packet type. Used to configure which vendor packet this
-   * is. The parameters are described by hsa_amd_packet_type_t. This packet is
-   * of type HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH.​
+   * is. The parameters are described by hsa_amd_packet_type_t.
+   * This packet supports:
+   * - HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH (Format 3)
+   * - HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD (Format 4)
    */
   hsa_amd_packet_type8_t amd_format;
 
   /**
-   * Dispatch setup parameters. Used to configure kernel dispatch parameters
-   * such as the number of dimensions in the grid. The parameters are described
-   * by hsa_kernel_dispatch_packet_setup_t.​
+   * Dispatch setup parameters.
+   * Used to configure kernel dispatch parameters such as the number of
+   * dimensions in the grid. The parameters are described by
+   * hsa_kernel_dispatch_packet_setup_t.
    */
   uint8_t setup;
 
@@ -410,16 +423,25 @@ typedef struct hsa_amd_ext_kernel_dispatch_packet_s {
   void* kernarg_address;
 
   /**
-   * Dependent signal object. This signal is read in the launch phase.​
+   * Format-dependent field (DW 14:13).
+   * Interpretation depends on amd_format:
    *
-   * The packet processor does not exit the launch phase for this packet, and
-   * thus does not perform the requested acquire fence scope’s actions, until
-   * the signal has been observed with the value 0.​
+   * Format 3 (HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH):
+   *   - dep_signal: Dependent signal object read in the launch phase.
+   *     The packet processor waits until the signal value is 0 before
+   *     exiting the launch phase. A signal handle value of 0 is allowed
+   *     and is interpreted as a satisfied dependency.
    *
-   * A signal handle value of 0 is allowed and is interpreted by the packet
-   * processor as a satisfied dependency.​
+   * Format 4 (HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD):
+   *   - launch_descriptor: Pointer to amd_launch_descriptor_t structure
+   *     providing advanced scheduling control (CU enable, wave limiter,
+   *     L2 prefetch, etc.). A NULL pointer indicates no launch descriptor
+   *     is used. Dependencies must be handled via barrier packets.
    */
-  hsa_signal_t dep_signal;
+  union {
+    hsa_signal_t dep_signal;                      // Format 3: signal-based dependency
+    amd_launch_descriptor_t* launch_descriptor;   // Format 4: pointer to descriptor
+  };
 
   /**
    * Signal used to indicate completion of the job. The application can use the
