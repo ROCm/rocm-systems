@@ -364,13 +364,13 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
         "ConSan MOI record/replay reverted to probe-local state after all access probes failed "
         "placement");
   }
+  if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::RecordReplay)
+    try_apply_atomic_record_patch(code_object_bytes, effective_options, arch, result);
   if (result.errors.empty())
     try_apply_barrier_epoch_patch(code_object_bytes, effective_options, arch,
                                   resource_planning_state, result);
   if (result.errors.empty())
     try_apply_inline_atomic_ordering_patch(code_object_bytes, effective_options, arch, result);
-  if (result.errors.empty())
-    try_apply_atomic_record_patch(code_object_bytes, effective_options, arch, result);
   if (result.errors.empty())
     try_apply_fence_record_patch(code_object_bytes, effective_options, arch, result);
   // Sampled and inline prologues only initialize state consumed by an emitted

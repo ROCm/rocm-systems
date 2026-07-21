@@ -1,3 +1,7 @@
+[[nodiscard]] std::optional<ConSanMoiAtomicEventKind>
+atomic_event_kind_for_site(const ConSanResult &result, std::string_view container_name,
+                           bool in_kernel, const ConSanAtomicSite &site);
+
 void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                                const ConSanOptions &options, rj_code_arch_t arch,
                                                const MoiResourcePlanningState &resource_state,
@@ -36,6 +40,26 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   std::ranges::sort(candidates, [](const ConSanMoiCandidate *lhs, const ConSanMoiCandidate *rhs) {
     return lhs->text_offset < rhs->text_offset;
   });
+  // Ordering instrumentation composes around the relocated guest access in a
+  // second text-growth pass. Keep those access bodies at the tail so their
+  // one-word branch anchors remain in direct reach of the appended ordering
+  // caves even for very large code objects.
+  std::unordered_set<uint64_t> ordering_atomic_offsets;
+  if (options.moi_track_atomics) {
+    const auto append_ordering_offsets = [&](const auto &container, bool in_kernel) {
+      for (const ConSanAtomicSite &site : container.atomic_sites) {
+        if (atomic_event_kind_for_site(result, container.name, in_kernel, site))
+          ordering_atomic_offsets.insert(site.text_offset);
+      }
+    };
+    for (const ConSanKernelInfo &kernel : result.kernels)
+      append_ordering_offsets(kernel, true);
+    for (const ConSanFunctionInfo &function : result.functions)
+      append_ordering_offsets(function, false);
+  }
+  std::stable_partition(candidates.begin(), candidates.end(), [&](const auto *candidate) {
+    return !ordering_atomic_offsets.contains(candidate->text_offset);
+  });
   if (candidates.empty()) {
     result.warnings.emplace_back("ConSan MOI first-light probe found no native LDS or likely group "
                                  "flat load/store candidate");
@@ -61,6 +85,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     std::optional<uint32_t> private_epoch_offset;
     uint32_t persistent_private_state_end = 0;
     uint32_t required_private_bytes = 0;
+    uint32_t probe_guest_instruction_offset = 0;
   };
   std::vector<PlannedAccessRecordPatch> planned_patches;
   uint32_t planned_record_count = 0;
@@ -452,10 +477,11 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       continue;
     }
     std::vector<std::string> candidate_errors;
+    uint32_t probe_guest_instruction_offset = 0;
     auto words = build_first_light_access_record_words(
         bytes, candidate, candidate_options, arch, 0, 0, layout.access_record_capacity,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
-        candidate_errors);
+        candidate_errors, &probe_guest_instruction_offset);
     if (!words) {
       result.warnings.insert(result.warnings.end(), candidate_errors.begin(),
                              candidate_errors.end());
@@ -577,6 +603,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     planned.displaced_tail_words = std::move(displaced_tail_words);
     planned.record_index = planned_record_count;
     planned.record_count = candidate_record_count;
+    planned.probe_guest_instruction_offset = probe_guest_instruction_offset;
     planned.resources = *resources;
     planned.spill = spill;
     planned.scalar_spill = scalar_spill;
@@ -993,6 +1020,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             return;
         }
 
+        uint32_t body_guest_instruction_offset = 0;
         auto cave_words = assemble_moi_appended_body(
             planned_patch, *words, "first-light probe", result.errors,
             /*deferred_guest_word_count=*/0u,
@@ -1001,7 +1029,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             planned_patch.scalar_spill ? planned_patch.scalar_spill->restore_words
                                        : std::span<const uint32_t>{},
             planned_patch.gfx1250_vgpr_msb_mode,
-            options.moi_dynamic_access_records ? 0u : candidate.size / sizeof(uint32_t));
+            options.moi_dynamic_access_records ? 0u : candidate.size / sizeof(uint32_t), {},
+            planned_patch.probe_guest_instruction_offset, &body_guest_instruction_offset);
         if (!cave_words)
           return;
         if (planned_patch.dense_call_anchor) {
@@ -1041,6 +1070,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         info.trampoline_offset = cave_text_offset;
         info.original_size = planned_patch.placement.original_size;
         info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
+        info.relocated_guest_instruction_offset = cave_text_offset + body_guest_instruction_offset;
       } else {
         const uint64_t patch_bytes = static_cast<uint64_t>(words->size() * sizeof(uint32_t));
         if (patch_bytes != planned_patch.placement.body_size) {
@@ -1057,6 +1087,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         info.trampoline_offset = candidate.text_offset + candidate.size;
         info.original_size = static_cast<uint32_t>(patch_bytes);
         info.trampoline_size = 0;
+        info.relocated_guest_instruction_offset =
+            candidate.text_offset + planned_patch.probe_guest_instruction_offset;
       }
       patches.push_back(info);
     }
@@ -1141,6 +1173,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             if (planned_patch.private_epoch_offset)
               info.persistent_private_state_end = planned_patch.persistent_private_state_end;
             info.required_private_segment_size = planned_patch.required_private_bytes;
+            info.relocated_guest_instruction_offset =
+                candidate.text_offset + planned_patch.probe_guest_instruction_offset;
             if (planned_patch.spill)
               info.spilled_vgpr_count = planned_patch.spill->vgpr_count;
             return info;

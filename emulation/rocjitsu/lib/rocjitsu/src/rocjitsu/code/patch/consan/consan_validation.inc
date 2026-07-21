@@ -252,7 +252,18 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
             existing->bytes.end - existing->bytes.begin >= 6u * sizeof(uint32_t) &&
             next.bytes.begin == existing->bytes.begin + sizeof(uint32_t) &&
             next.bytes.end == existing->bytes.begin + 4u * sizeof(uint32_t)));
-      if (!exact_alias && !nested_cross_phase && !nested_sc_relay_donor) {
+      const bool nested_composed_access_atomic =
+          existing->phase == ConSanPatchPhase::Instrumentation &&
+          next.phase == ConSanPatchPhase::Instrumentation &&
+          existing->bytes.begin == next.bytes.begin &&
+          (((existing->kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+             existing->kind == ConSanPatchKind::TrampolineMoiAccessRecordStore) &&
+            next.kind == ConSanPatchKind::TrampolineMoiAtomicRecord) ||
+           ((next.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+             next.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore) &&
+            existing->kind == ConSanPatchKind::TrampolineMoiAtomicRecord));
+      if (!exact_alias && !nested_cross_phase && !nested_sc_relay_donor &&
+          !nested_composed_access_atomic) {
         errors.emplace_back(
             "ConSan final validation found partially overlapping patch ranges: existing=" +
             std::to_string(existing->bytes.begin) + "-" + std::to_string(existing->bytes.end) +

@@ -4298,6 +4298,45 @@ TEST(ConSanMoi, AtomicRecordRetainsIsolatedNoReturnReleaseAndAccessReplay) {
   }));
 }
 
+TEST(ConSanMoi, Gfx1250OrderedLdsAtomicComposesAccessAndOrderingRecords) {
+  const std::array<uint32_t, 7> words = {
+      0x360202ffu, 0x000000ffu, // release wait setup
+      0xbf94ffffu,              // s_barrier_wait -1
+      0xbfc10000u,              // release ordering completion
+      0xd8000000u, 0x00001210u, // ds_add_u32 v0, v18, no return
+      0xbfb00000u,              // s_endpgm
+  };
+  const std::vector<uint8_t> bytes = make_gfx1250_code_object(words, "ordered_lds_atomic");
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_track_atomics = true;
+  options.moi_track_barriers = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8, 8, 0, 0, 0, 8, 1);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+           patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
+  });
+  const auto atomic = std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord,
+                                        &ConSanPatchInfo::kind);
+  ASSERT_NE(access, result.patches.end());
+  ASSERT_NE(atomic, result.patches.end());
+  ASSERT_TRUE(access->relocated_guest_instruction_offset);
+  ASSERT_TRUE(atomic->relocated_guest_instruction_offset);
+  EXPECT_EQ(access->anchor_offset, atomic->anchor_offset);
+  EXPECT_NE(*access->relocated_guest_instruction_offset,
+            *atomic->relocated_guest_instruction_offset);
+  EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [](const auto &site) {
+    return site.site_kind == ConSanResourceSiteKind::Atomic &&
+           site.lowering_outcome == ConSanSiteLoweringOutcome::Patched;
+  }));
+}
+
 TEST(ConSanMoi, FirstLightProbeRejectsScratchVgprsOverlappingLdsAddress) {
   std::array<uint32_t, 76> text_words{};
   text_words[0] = 0xD8340000u;

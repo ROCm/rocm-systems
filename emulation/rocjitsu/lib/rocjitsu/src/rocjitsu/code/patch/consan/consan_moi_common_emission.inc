@@ -546,7 +546,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
     const ConSanOptions &options, rj_code_arch_t arch, uint32_t record_index, uint32_t record_count,
     uint32_t access_record_capacity, std::optional<uint32_t> private_epoch_offset,
-    std::vector<std::string> &errors) {
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI first-light probe requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
@@ -670,6 +670,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   if (options.moi_dynamic_access_records)
     words.insert(words.end(), derived_owner_words.begin(), derived_owner_words.end());
   const auto append_guest_access = [&] {
+    if (guest_instruction_offset)
+      *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
     for (uint64_t offset = 0; offset < candidate.size; offset += sizeof(uint32_t)) {
       uint32_t word = 0;
       std::memcpy(&word, bytes.data() + candidate.file_offset + offset, sizeof(word));
