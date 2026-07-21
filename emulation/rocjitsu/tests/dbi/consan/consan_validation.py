@@ -2951,7 +2951,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.json:
                 print(json.dumps(result, indent=2, sort_keys=True))
             else:
-                for workload in WORKLOADS:
+                for workload in _workloads_for_target(target):
                     faults = ",".join(_fault_families(target, workload))
                     print(f"{workload.priority} {workload.id}: {faults}")
             return 0

@@ -73,6 +73,14 @@ official prebuilt wheel compatible with the machine's runtime and target when
 reproducing elsewhere.  The doctor requires this interpreter only when the
 selected target manifest contains a PyTorch workload.
 
+Official PyTorch ROCm wheels bundle a modern HSA runtime.  After successful
+rocprofiler registration that runtime does not consult legacy
+`HSA_TOOLS_LIB` tooling unless `HSA_TOOLS_ROCPROFILER_V1_TOOLS=1` is present.
+The runner therefore sets and audits that variable automatically for
+instrumented PyTorch rows and removes it from baseline rows.  It is classified
+as `runtime-plumbing`, never as workload tuning; users should not have to
+discover or manually preserve it.
+
 Run the preflight before GPU work:
 
 ```sh
@@ -175,7 +183,8 @@ python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
 `--allow-reference` only permits read-only explanation. The `fault` subcommand
 continues to reject the cumulative reference file.
 
-The current manifest covers Qwen3-0.6B prefill; Sharktank TP1 prefill and
+The current gfx1201 manifest covers Qwen3-0.6B prefill; a native
+PyTorch/Inductor compiled softmax; Sharktank TP1 prefill and
 decode/combined, TP2, and CLIP BF16; and the hip-moi D128, WMMA, Stream-K,
 tree-atomic-OR, and Jakub workloads. The profile IDs are `supercollider`,
 `record-replay`, `sampled`, and `inline-shadow`.

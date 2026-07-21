@@ -10,9 +10,9 @@ commit `640e575da2`, with hook SHA-256
 `c45aa0fece5a9aa7ef8b3ad24bcbb2077e477586df6b4eecf12990f7fafa693d`.  It is
 retained below as historical evidence, but it does not qualify the current
 branch.  After rebasing onto the 2026-07-21 sanitizer tip, the current
-certificate is being assembled from validation checkpoint `54aae692e4`, using
+certificate is being assembled from validation checkpoint `1590a332de`, using
 rebuilt hook SHA-256
-`40655ee40ccd28fac2cce7d4a24a1d37b5aa9a2aeee285bbb6dd84a3e3744d0f`.
+`0002cb3857910723f14621f9938de814318b9158912e77196eb5b2ce3add6a56`.
 Current-tip qualification is in progress; cells below name retained artifacts
 when post-rebase execution evidence has replaced the initial gray state.
 Intermediate `aff4853917` and `da7af06ef7` artifacts predate that rebase and
@@ -50,8 +50,9 @@ it does not assert that the implementation has regressed.
 
 ## Catch-up snapshot
 
-- **Immediate requalification:** the existing portable manifest has 11
-  workloads × 4 profiles = 44 current-tip cells.  Rebuild the exact hook, run
+- **Immediate requalification:** the portable manifest now has 12 workloads ×
+  4 profiles = 48 current-tip cells, including one independently selected
+  native gfx1201 PyTorch/Inductor workload.  Rebuild the exact hook, run
   clean and paired rows, regenerate target identities, review fault specs,
   execute contained faults, and freeze one provenance bundle.
 - **Historical comparator:** commit `640e575da2` accepted 55 clean
@@ -69,18 +70,16 @@ it does not assert that the implementation has regressed.
   model, but do not port its configurations, shapes, selectors, denominators,
   or expected outcomes to RDNA4.
 
-Thus the immediate regression campaign contains 44 cells.  The expanded
+Thus the immediate regression campaign contains 48 cells.  The expanded
 gfx1201 denominator is intentionally unknown until discovery produces concrete
 native workloads with independent oracles.  Survey rows and baselines are not
 counted as instrumentation cells.
 
-The current `gfx1201 manifest --json` still exposes only the original 11
-workloads.  Every expanded workload is declared with `targets=("gfx1250",)`.
-The Tensile configuration paths and launcher also name `gfx1250`, and the
-cluster workload uses a gfx1250-specific intrinsic.  These rows are not an
-RDNA4 porting queue.  They are examples of the kinds of real, dense, atomic,
-spill-heavy, and synchronization-heavy behavior for which independent gfx1201
-workloads should be found.
+The current `gfx1201 manifest --json` exposes the original 11 workloads plus
+`pytorch-rdna4-compiled-softmax`.  All other expanded PyTorch and Tensile
+workloads remain declared with `targets=("gfx1250",)`.  Their configuration
+paths, generated kernels, and in one case intrinsic are target-specific; they
+are examples to follow, not an RDNA4 porting queue.
 
 ## Current-tip requalification matrix
 
@@ -92,9 +91,10 @@ tip; a successful smoke or an old artifact is insufficient.
 
 | Priority workload | SuperCollider | Record/Replay | Sampled | Inline Shadow | First current-tip gate |
 |---|---|---|---|---|---|
-| **P0 Qwen3-0.6B prefill** | 🟨 Clean accepted at 20/20 accesses; paired timing and fresh fault pending | 🟨 Clean accepted at 20/20 accesses + 14/14 barriers; paired timing and fresh fault pending | 🟨 Clean accepted at 20/20 accesses + 26/26 applicable barriers; paired timing and fresh sensitivity sweep pending | 🟧 Complete 20/20 accesses + 14/14 barriers, but a diagnostic rejects the correct workload | Clean `rdna4-54aae692e4-clean-qwen-021`; next run paired timing, inventory, and reviewed faults |
+| **P0 Qwen3-0.6B prefill** | 🟨 Clean accepted at 20/20 accesses; paired timing and fresh fault pending | 🟨 Clean accepted at 20/20 accesses + 14/14 barriers; paired timing and fresh fault pending | 🟨 Clean accepted at 20/20 accesses + 26/26 applicable barriers; paired timing and fresh sensitivity sweep pending | 🟧 Complete 20/20 accesses + 14/14 barriers, but a diagnostic rejects the correct workload | Clean `rdna4-ac8dd77541-clean-qwen-022`; next run paired timing, inventory, and reviewed faults |
 | **P1 Sharktank TP1 prefill** | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | Establish clean completeness at the rebuilt hook before reusing any earlier selector or expectation |
 | **P1 Sharktank TP1 decode/combined** | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | Establish clean completeness at the rebuilt hook before reusing any earlier selector or expectation |
+| **P2 PyTorch/Inductor compiled softmax** | 🟨 Exact oracle, clean 4/4 LDS accesses, and paired overhead 0.997x; no effective injected barrier witness yet | 🟨 Exact oracle, clean 4/4 accesses + 3/3 barrier sequences, and paired overhead 1.011x; no effective injected barrier witness yet | 🟧 Exact oracle and complete 4/4 accesses + 6/6 barrier members, but reports one conflict on the correct workload | 🟧 Exact oracle and 3/3 barriers patch, but all 4 supported accesses fail lowering with `instrumentation_patch_missing` | Clean `rdna4-1590a332de-clean-pytorch-softmax-024`; overhead `...-sc-029` and `...-rr-030`; exact-one drops `...-sc-026` through `...-sc-028` were applied but schedule-masked |
 | **P2 Sharktank TP2 family** | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | Establish an untuned current baseline, then retain all-mode clean completeness and paired timing |
 | **P3 CLIP BF16** | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | Confirm the baseline remains practical on hardware; inventory both barrier-drop and barrier-move identities anew |
 | **P4 hip-moi D128 block attention** | 🟥 Clean process crashes before an analysis verdict | 🟧 Oracle passes and 12/12 accesses + 4/4 barriers patch dynamically; static analysis is incomplete | 🟥 Clean process crashes before an analysis verdict | 🟧 Complete 12/12 accesses + 4/4 barriers, but a diagnostic rejects the correct workload | `rdna4-54aae692e4-clean-d128-block-020`; shared post-rebase fixes did not remove these four distinct caveats |
@@ -141,10 +141,17 @@ environment now provides `torch 2.14.0.dev20260720+rocm7.1`, HIP 7.1.52802,
 and Triton 3.8.0.  It imports Triton Gluon, sees the Radeon RX 9070 as
 `gfx1201`, and passes an exact elementwise device oracle.  A direct ordinary
 `torch.topk` setup smoke also passes exact BF16 and FP64 values-and-indices
-oracles.  These prove the local execution setup, but do not promote a cell:
-the tested client shapes originated in the gfx1250 harness and have not been
-selected by native gfx1201 inventory.  The eventual admitted client must
-record both the source revision and installed PyTorch/ROCm build identity.
+oracles.  The runner now also carries one independently selected gfx1201
+client: ordinary `torch.softmax` compiled by Inductor at shape `128x256`.  It
+generates a compact Triton kernel with four supported LDS accesses and three
+split-barrier pairs, and records both the source revision and installed
+PyTorch/ROCm build identity.
+
+The official wheel bundles its own modern HSA runtime.  That runtime skips
+legacy `HSA_TOOLS_LIB` loading after successful rocprofiler registration unless
+`HSA_TOOLS_ROCPROFILER_V1_TOOLS=1` is set.  The validation runner supplies and
+audits this only for instrumented PyTorch rows; it is runtime plumbing, not a
+coverage or workload-tuning exception.
 
 The gfx1250 PyTorch rows demonstrate useful selection principles—dense
 control flow, spill pressure, barriers, atomics, dynamic LDS, and exact
@@ -158,7 +165,7 @@ after seeing what the RDNA4 stack actually dispatches.
 | **D0** `test/test_sort_and_select.py` and `test/test_reductions.py` | 🩶 Native case pending | 🩶 Native case pending | 🩶 Native case pending | 🩶 Native case pending | Seek gfx1201 `topk`, sort, or mode kernels with dense barriers, large code objects, or spill pressure.  Choose shapes from observed native structure, require exact values and indices, and do not copy gfx1250 shapes. |
 | **D0** Attention and model paths, including `test/inductor/test_fused_attention.py` and `test/nn/test_multihead_attention.py` | 🩶 Native case pending | 🩶 Native case pending | 🩶 Native case pending | 🩶 Native case pending | Prefer a real attention or small-model path with an independent PyTorch reference that complements Qwen/TP1 over isolated synthetic Triton code. |
 | **D1** `test/test_scatter_gather_ops.py` | 🩶 Atomic inventory pending | 🩶 Atomic inventory pending | 🩶 Atomic inventory pending | 🩶 Atomic inventory pending | Select a collision-heavy reduction only if gfx1201 inventory proves a meaningful atomic synchronization role; retain exact collision results. |
-| **D1** `test/test_reductions.py` and shared-memory softmax tests in `test/test_nn.py` | 🩶 Native case pending | 🩶 Native case pending | 🩶 Native case pending | 🩶 Native case pending | Sweep ordinary histogram, reduction, normalization, and softmax shapes only until distinct native kernel families appear; freeze the smallest representative exact client. |
+| **D1** `torch.compile` softmax selected from the reduction/softmax survey | 🟨 Promoted: clean 4/4; 0.997x | 🟨 Promoted: clean 4/4 + 3/3; 1.011x | 🟧 Promoted but clean false conflict | 🟧 Promoted but 0/4 access patches | The `128x256` exact client is now in the main matrix.  All three barrier-pair drops were applied and schedule-masked, so a separate PyTorch fault-bearing shape is still needed. |
 | **D2** `test/inductor/test_cooperative_reductions.py` and `test/inductor/test_online_softmax.py` | 🩶 Native case pending | 🩶 Native case pending | 🩶 Native case pending | 🩶 Native case pending | Admit only target-native generated kernels that terminate reliably and add dynamic/shared-memory or multi-stage coverage absent from D0/D1. |
 | **D3** Broader PyTorch model/test survey | 🩶 Survey pending | 🩶 Survey pending | 🩶 Survey pending | 🩶 Survey pending | Inventory first, then cluster by executed event, resource shape, and engine applicability to prevent a large redundant matrix. |
 

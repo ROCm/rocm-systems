@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import redirect_stdout
+import io
 import json
 import os
 from pathlib import Path
@@ -97,6 +99,15 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(
             workloads["pytorch-rdna4-compiled-softmax"]["targets"], ("gfx1201",)
         )
+
+    def test_text_manifest_filters_target_specific_workloads(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(validation.main(["--target", "gfx1201", "manifest"]), 0)
+        text = output.getvalue()
+        self.assertIn("pytorch-rdna4-compiled-softmax", text)
+        self.assertNotIn("pytorch-tdm-descriptor-add", text)
+        self.assertNotIn("tensile-sk-mxf8gemm-explicit", text)
 
     def test_gfx950_manifest_resolves_cdna4_native_workloads(self) -> None:
         manifest = validation._manifest("gfx950")
