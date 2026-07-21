@@ -306,6 +306,9 @@ void __hipUnregisterFatBinary(void** modules) {
         // By synchronizing devices ensure that all HSA signal handlers
         // complete before RemoveFatBinary
         hipDevice->SyncAllStreams(true);
+        // Drain the ROCr async event thread so all ReportActivity() callbacks
+        // complete before the Program (and its kernel name strings) are freed.
+        hipDevice->devices()[0]->WaitForHsaAsyncHandlersIdle();
       }
     });
   }

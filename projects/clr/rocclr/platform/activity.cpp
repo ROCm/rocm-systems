@@ -67,8 +67,9 @@ void ReportActivity(const amd::Command& command) {
   auto function = report_activity.load(std::memory_order_acquire);
   if (!function) return;
 
-  const auto* queue = command.queue();
-  assert(queue != nullptr);
+  // Use device_id_ and queue_id_ cached at enqueue time — do NOT dereference
+  // command.queue() here. The queue may be freed by hipStreamDestroy on T0
+  // while this runs on the async signal handler thread T1 (UAF race).
   activity_record_t record{
       ACTIVITY_DOMAIN_HIP_OPS,                  // activity domain
       command.type(),                           // activity kind
@@ -77,8 +78,8 @@ void ReportActivity(const amd::Command& command) {
       command.profilingInfo().start_,           // begin timestamp, ns
       command.profilingInfo().end_,             // end timestamp, ns
       {{
-          static_cast<int>(queue->device().info().driverNodeId_),  // device id
-          queue->vdev()->index()                                   // queue id
+          command.profilingInfo().device_id_,   // device id (cached at enqueue)
+          command.profilingInfo().queue_id_     // queue id  (cached at enqueue)
       }},
       {}  // copied data size for memcpy, or kernel name for dispatch
   };
@@ -141,10 +142,15 @@ void ReportActivity(const amd::Command& command) {
     // kernel_names and timestamps are both populated only when profiling is active
     // at dispatch time. Walk the shorter of the two as a safety bound.
     for (uint32_t i = 0; i < kernel_names.size() && i < timestamps.size(); i++) {
-      auto it = timestamps[i];
-      record.begin_ns = it.first;
-      record.end_ns = it.second;
+      auto& ts = timestamps[i];
+      record.begin_ns = ts.start;
+      record.end_ns = ts.end;
       record.kernel_name = kernel_names[i];
+      // Use per-packet queue_index when available so each kernel is assigned
+      // to the internal parallel stream it ran on, not the launch stream.
+      if (ts.queue_index != UINT32_MAX) {
+        record.queue_id = static_cast<uint64_t>(ts.queue_index);
+      }
       function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, &record);
     }
   } else {

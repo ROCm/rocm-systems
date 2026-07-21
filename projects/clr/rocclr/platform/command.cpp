@@ -398,6 +398,10 @@ void Command::enqueue() {
         (type() == CL_COMMAND_TASK)) {
       // The current HSA signal tracking logic requires profiling enabled for the markers
       EnableProfiling();
+      // Cache device/queue IDs while queue_ is alive. ReportActivity accesses these
+      // from the async signal handler (T1) which can race with hipStreamDestroy (T0).
+      profilingInfo_.device_id_ = static_cast<int>(queue_->device().info().driverNodeId_);
+      profilingInfo_.queue_id_  = static_cast<uint64_t>(queue_->vdev()->index());
       // Update batch head for the current marker. Hence the status of all commands can be
       // updated upon the marker completion
       SetBatchHead(queue_->GetSubmissionBatch());
@@ -457,6 +461,8 @@ NDRangeKernelCommand::NDRangeKernelCommand(HostQueue& queue, const EventWaitList
     profilingInfo_.clear();
     profilingInfo_.correlation_id_ = activity_prof::correlation_id;
     profilingInfo_.marker_ts_ = true;
+    profilingInfo_.device_id_ = static_cast<int>(queue.device().info().driverNodeId_);
+    profilingInfo_.queue_id_  = static_cast<uint64_t>(queue.vdev()->index());
   }
   kernel_.retain();
 }
