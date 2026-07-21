@@ -408,19 +408,16 @@ get_internal_libs_data_impl()
     auto _libs   = std::vector<std::string>{};
     _libs.assign(_libs_v.begin(), _libs_v.end());
 
-    auto _rocprofsys_base_path =
-        rocprofsys::path::parent_path(rocprofsys::path::realpath("/proc/self/exe"), 2);
-    auto _rocprofsys_lib_path = std::string{};
-
-    for(const auto* itr : { "lib", "lib64" })
+    auto rocprofsys_root = rocprofsys::path::get_rocprofsys_root();
+    for(const auto* lib_dir : { "lib", "lib64" })
     {
-        for(const auto* litr :
+        for(const auto* lib_fname :
             { "librocprof-sys-dl.so", "librocprof-sys-user.so", "librocprof-sys-rt.so" })
         {
-            auto _libpath = fmt::format("{}/{}/{}", _rocprofsys_base_path, itr, litr);
-            if(filepath::exists(_libpath))
+            auto libpath = fmt::format("{}/{}/{}", rocprofsys_root, lib_dir, lib_fname);
+            if(filepath::exists(libpath))
             {
-                _libs.emplace_back(rocprofsys::path::realpath(_libpath));
+                _libs.emplace_back(rocprofsys::path::realpath(libpath));
             }
         }
     }
