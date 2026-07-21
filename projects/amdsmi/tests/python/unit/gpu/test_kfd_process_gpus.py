@@ -20,8 +20,6 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """KFD process-to-GPU attribution unit tests (hardware-free)."""
 
-from __future__ import annotations
-
 import os
 import shutil
 import tempfile
