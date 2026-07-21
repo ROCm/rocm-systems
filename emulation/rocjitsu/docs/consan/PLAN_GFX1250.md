@@ -119,7 +119,8 @@ flowchart TD
     XP2B["XP2B DONE<br/>torch.topk Sampled exact client completes;<br/>construction indexes validated"]
     XP2C["XP2C DONE<br/>torch.topk unrestricted Record/Replay exact/dynamic;<br/>113,760/160,848 accesses, all barriers"]
     XP2D["XP2D TODO<br/>torch.topk Record/Replay residual needs<br/>site/subgroup scalar routing"]
-    XP2E["XP2E ACTIVE<br/>torch.topk Inline construction indexed;<br/>profile next host-side scaling frontier"]
+    XP2E["XP2E DONE<br/>torch.topk Inline construction scaled;<br/>both large objects finish patching"]
+    XP2F["XP2F ACTIVE<br/>torch.topk Inline execution signal;<br/>bounded independent cross-check"]
     XP3["XP3 TODO<br/>top-k SC oracle passes;<br/>88-site residual needs scalar continuation spills"]
     XP9["XP9 DONE<br/>norm plus softmax Record/Replay clean, paired,<br/>and reviewed-fault bundle green"]
     XP9B["XP9B DONE<br/>norm plus softmax Sampled clean, paired,<br/>and reviewed-fault bundle green"]
@@ -256,6 +257,7 @@ flowchart TD
   XP2A --> XP2C
   XP2C --> XP2D
   XP0 --> XP2E
+  XP2E --> XP2F
   XP0 --> XP9
   XP9 --> XP9B
   XP9 --> XP9C
@@ -289,6 +291,7 @@ flowchart TD
   XP2C --> XF
   XP2D --> XF
   XP2E --> XF
+  XP2F --> XF
   XP9 --> XF
   XP9B --> XF
   XP9C --> XF
@@ -316,7 +319,8 @@ flowchart TD
   class XT3B done
   class XP2B done
   class XT3G,XT3H done
-  class XP2E active
+  class XP2E done
+  class XP2F active
   class G0,XP2D,XP3,XT2C2,XT2C3,XT3A,XT3E,XT3I,XF,XG todo
 ```
 
@@ -365,6 +369,16 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP2E is DONE after three measured generic scaling fixes.
+  Commits `0007d051bf`, `d3b3cd0df3`, and `a793e5db1a` index
+  fault/synchronization annotation and automatic scalar-owner lookup, and
+  reuse one Inline relocation decoder.  Artifact
+  `consan-green-expansion-20260721-pytorch-topk-inline-owner-indexed-106`
+  completes the formerly stalled 13 MB and 3.6 MB objects with 72,766 and
+  55,482 patches.  It then signals during execution after legal resource
+  growth, before an oracle.  New node XP2F is the sole ACTIVE box for one
+  bounded independent execution cross-check; the cell remains orange.
 
 - 2026-07-21: XT3I rotates to TODO after its one-repetition Sampled paired
   attempt reaches the fixed 180-second instrumented bound with one of two
