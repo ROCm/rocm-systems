@@ -718,7 +718,7 @@ hsa_status_t HSA_API rj_amd_memory_copy_engine_status(hsa_agent_t dst_agent, hsa
 /// @brief Query preferred copy engines using mapped host agents.
 hsa_status_t HSA_API rj_amd_memory_get_preferred_copy_engine(hsa_agent_t dst_agent,
                                                              hsa_agent_t src_agent,
-                                                             hsa_amd_sdma_engine_id_t *engine_id);
+                                                             uint32_t *engine_ids_mask);
 
 /// @brief Map agent arrays before locking host memory for GPU access.
 hsa_status_t HSA_API rj_amd_memory_lock(void *host_ptr, size_t size, hsa_agent_t *agents,
@@ -2279,12 +2279,12 @@ hsa_status_t HSA_API rj_amd_memory_copy_engine_status(hsa_agent_t dst_agent, hsa
 
 hsa_status_t HSA_API rj_amd_memory_get_preferred_copy_engine(hsa_agent_t dst_agent,
                                                              hsa_agent_t src_agent,
-                                                             hsa_amd_sdma_engine_id_t *engine_id) {
+                                                             uint32_t *engine_ids_mask) {
   auto *original = layer().amd_memory_get_preferred_copy_engine();
   if (!original)
     return HSA_STATUS_ERROR;
   return forward_amd_call(original, mapped_agent_arg(dst_agent), mapped_agent_arg(src_agent),
-                          engine_id);
+                          engine_ids_mask);
 }
 
 hsa_status_t HSA_API rj_amd_memory_lock(void *host_ptr, size_t size, hsa_agent_t *agents,
