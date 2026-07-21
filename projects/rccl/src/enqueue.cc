@@ -3653,9 +3653,18 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       bool ceAllReduceFits = false;
       bool graphCapture = ncclCudaGraphValid(comm->planner.capturingGraph);
       if (info->coll == ncclFuncAllReduce) {
+#if NCCL_CE_REDUCE_ALL_OPS
+        const bool ceAllReduceOpSupported = (info->op == ncclSum || info->op == ncclProd ||
+                                             info->op == ncclMin || info->op == ncclMax);
+#else
+        const bool ceAllReduceOpSupported = (info->op == ncclSum);
+#endif
+        if (!ceAllReduceOpSupported) {
+          ceAvailable = false;
+        }
         if (graphCapture || (info->count % (size_t)comm->nRanks != 0) || !rcclParamCeAllReduce()) {
           ceAvailable = false;
-        } else {
+        } else if (ceAllReduceOpSupported) {
           // check if we want to force CE AllReduce without symmetric window registration
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
           if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES || !rcclParamForceCe() || !comm->symmetricSupport || comm->nNodes > 1) {

@@ -37,6 +37,12 @@ THE SOFTWARE.
 #define NCCL_CE_NUM_SLOTS 2
 #endif
 
+// NCCL_CE_REDUCE_ALL_OPS=0 (default): Sum-only reduce kernels.
+// NCCL_CE_REDUCE_ALL_OPS=1 (BUILD_CE_REDUCE_ALL_OPS=ON): also Prod/Min/Max.
+#ifndef NCCL_CE_REDUCE_ALL_OPS
+#define NCCL_CE_REDUCE_ALL_OPS 0
+#endif
+
 namespace cg = cooperative_groups;
 
 // Global atomic-counter barrier for regular launch (avoids CTA scheduling deadlock).
@@ -308,6 +314,7 @@ static ncclResult_t ncclCeLaunchReduceTyped(
         coopLaunch, blocks, threads, stream, in, out, nRanks,
         baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
         signalBuffer, totalSteps, d_barrierSync, kernelArgs);
+#if NCCL_CE_REDUCE_ALL_OPS
     case ncclProd:
       return ncclCeDispatchReduceKernel<T, 1, U>(
         coopLaunch, blocks, threads, stream, in, out, nRanks,
@@ -323,6 +330,7 @@ static ncclResult_t ncclCeLaunchReduceTyped(
         coopLaunch, blocks, threads, stream, in, out, nRanks,
         baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
         signalBuffer, totalSteps, d_barrierSync, kernelArgs);
+#endif
     default:
       return ncclInvalidArgument;
   }
@@ -340,9 +348,11 @@ ncclResult_t ncclCeLaunchPersistentReduce(
   int redOp;
   switch (op) {
     case ncclSum:  redOp = 0; break;
+#if NCCL_CE_REDUCE_ALL_OPS
     case ncclProd: redOp = 1; break;
     case ncclMin:  redOp = 2; break;
     case ncclMax:  redOp = 3; break;
+#endif
     default: return ncclInvalidArgument;
   }
 

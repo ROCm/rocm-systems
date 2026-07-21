@@ -1072,6 +1072,14 @@ if(RCCL_ROCPROFILER_REGISTER)
       rccl PRIVATE rocprofiler-register::rocprofiler-register)
 endif()
 
+if(BUILD_CE_REDUCE_ALL_OPS)
+  target_compile_definitions(rccl PRIVATE NCCL_CE_REDUCE_ALL_OPS=1)
+  message(STATUS "CE AllReduce reduce kernels: Sum, Prod, Min, Max (NCCL_CE_REDUCE_ALL_OPS=1)")
+else()
+  target_compile_definitions(rccl PRIVATE NCCL_CE_REDUCE_ALL_OPS=0)
+  message(STATUS "CE AllReduce reduce kernels: Sum only (NCCL_CE_REDUCE_ALL_OPS=0; set BUILD_CE_REDUCE_ALL_OPS=ON for all ops)")
+endif()
+
 # Device Linker: include pipeline and wire up dependencies
 # (placed after all target_compile_definitions so DeviceLinker.cmake
 #  can read the rccl target's definitions directly)

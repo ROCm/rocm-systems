@@ -623,7 +623,11 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count,
 
   // Only standard reduction ops with a simple kernel implementation.
   // ncclAvg (maps to SumPostDiv) and user-defined PreMulSum fall back to ring.
+#if NCCL_CE_REDUCE_ALL_OPS
   if (op != ncclSum && op != ncclProd && op != ncclMin && op != ncclMax) return false;
+#else
+  if (op != ncclSum) return false;
+#endif
 
   // Float8 types require specialised handling not yet implemented for CE AR.
   if (datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2) return false;

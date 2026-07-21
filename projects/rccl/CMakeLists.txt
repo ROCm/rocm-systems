@@ -97,6 +97,7 @@ option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_de
 # layout for diagnostics.  See cmake/linker_scripts/hip_fatbin_tail.ld.
 option(RCCL_HIP_FATBIN_AT_TAIL                 "Place .hip_fatbin at the end of librccl.so"    ON)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             ON)
+option(BUILD_CE_REDUCE_ALL_OPS                   "Build CE AllReduce reduce kernels for Prod/Min/Max (default: Sum only)" OFF)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
