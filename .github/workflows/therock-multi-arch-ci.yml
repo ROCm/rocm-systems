@@ -101,6 +101,8 @@ jobs:
 
       - name: Configure CI
         id: configure
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
             --event-name "${{ github.event_name }}" \
