@@ -74,7 +74,6 @@ int main(int argc, char **argv) {
     if (profiling) {
         uint32_t sync_channel_sizes[ROCJPEG_MAX_COMPONENT] = {};
 
-        std::cout << "Synchronous decoding started, please wait! ... " << std::endl;
         auto sync_start_time = std::chrono::high_resolution_clock::now();
 
         for (auto& file_path : file_paths) {
@@ -100,6 +99,10 @@ int main(int argc, char **argv) {
             }
 
             CHECK_ROCJPEG(rocJpegGetImageInfo(rocjpeg_handle, rocjpeg_stream_handle, &num_components, &subsampling, widths, heights));
+            rocjpeg_utils.GetChromaSubsamplingStr(subsampling, chroma_sub_sampling);
+            std::cout << "(Sync) Input file name: " << file_path << std::endl;
+            std::cout << "(Sync) Input image resolution: " << widths[0] << "x" << heights[0] << std::endl;
+            std::cout << "(Sync) Chroma subsampling: " << chroma_sub_sampling << std::endl;
             if (widths[0] < 64 || heights[0] < 64) { if (is_dir) continue; return EXIT_FAILURE; }
             if (subsampling == ROCJPEG_CSS_411 || subsampling == ROCJPEG_CSS_UNKNOWN) { if (is_dir) continue; return EXIT_FAILURE; }
 
@@ -141,9 +144,9 @@ int main(int argc, char **argv) {
         if (total_images > 0) {
             double sync_total_ms = std::chrono::duration<double, std::milli>(sync_end_time - sync_start_time).count();
             double sync_per_image_ms = sync_total_ms / (total_images * num_iterations);
-            std::cout << "Synchronous total decoded images: "          << total_images * num_iterations << std::endl;
-            std::cout << "Synchronous average per image (ms): "        << sync_per_image_ms << std::endl;
-            std::cout << "Synchronous images per sec (Images/Sec): "   << 1000.0 / sync_per_image_ms << std::endl;
+            std::cout << "(Sync) Total decoded images: "                << total_images * num_iterations << std::endl;
+            std::cout << "(Sync) Average processing time per image (ms): " << sync_per_image_ms << std::endl;
+            std::cout << "(Sync) Average images per sec (Images/Sec): " << 1000.0 / sync_per_image_ms << std::endl;
         }
         std::cout << std::endl;
         total_images = 0;
@@ -251,7 +254,7 @@ int main(int argc, char **argv) {
             return EXIT_FAILURE;
         }
 
-        std::cout << "Input file name: " << file_path << std::endl;
+        std::cout << "(Async) Input file name: " << file_path << std::endl;
         RocJpegStatus rocjpeg_status = rocJpegStreamParse(reinterpret_cast<uint8_t*>(file_data.data()), file_size, rocjpeg_stream_handle);
         if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
             if (is_dir) { num_bad_jpegs++; std::cout << std::endl; continue; }
@@ -266,8 +269,8 @@ int main(int argc, char **argv) {
             is_roi_valid = true;
 
         rocjpeg_utils.GetChromaSubsamplingStr(subsampling, chroma_sub_sampling);
-        std::cout << "Input image resolution: " << widths[0] << "x" << heights[0] << std::endl;
-        std::cout << "Chroma subsampling: " << chroma_sub_sampling << std::endl;
+        std::cout << "(Async) Input image resolution: " << widths[0] << "x" << heights[0] << std::endl;
+        std::cout << "(Async) Chroma subsampling: " << chroma_sub_sampling << std::endl;
 
         if (widths[0] < 64 || heights[0] < 64) {
             std::cerr << "The image resolution is not supported by VCN Hardware" << std::endl;
@@ -381,9 +384,9 @@ int main(int argc, char **argv) {
     } else if (total_images > 0) {
         double total_time_ms    = std::chrono::duration<double, std::milli>(total_end_time - total_start_time).count();
         double time_per_image_ms = total_time_ms / (total_images * num_iterations);
-        std::cout << "Total decoded images: "                       << total_images * num_iterations << std::endl;
-        std::cout << "Average processing time per image (ms): "     << time_per_image_ms             << std::endl;
-        std::cout << "Average images per sec (Images/Sec): "        << 1000.0 / time_per_image_ms    << std::endl;
+        std::cout << "(Async) Total decoded images: "                << total_images * num_iterations << std::endl;
+        std::cout << "(Async) Average processing time per image (ms): " << time_per_image_ms << std::endl;
+        std::cout << "(Async) Average images per sec (Images/Sec): " << 1000.0 / time_per_image_ms << std::endl;
     }
 
     if (num_bad_jpegs || num_jpegs_with_411_subsampling || num_jpegs_with_unknown_subsampling || num_jpegs_with_unsupported_resolution) {
