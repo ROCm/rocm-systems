@@ -139,7 +139,7 @@ flowchart TD
     XT3G["XT3G DONE<br/>quick SGEMM Sampled first problem;<br/>12/12 exact, 640/640 accesses, 40/40 barriers"]
     XT3H["XT3H DONE<br/>quick SGEMM Inline assessed;<br/>first problem exact, aggregate dynamic incomplete"]
     XT3I["XT3I TODO<br/>SPMM F8 Sampled paired run;<br/>one of two objects at fixed 180-second bound"]
-    XT3J["XT3J ACTIVE<br/>SPMM F8 Inline clean assessment;<br/>static stress inventory already complete"]
+    XT3J["XT3J DONE<br/>SPMM F8 Inline standard clean assessed;<br/>MT64x64 wrong-result rows isolate blocker"]
     XT3D["XT3D DONE<br/>full SGEMM first problem complete;<br/>quadratic 115,776-event frontier isolated"]
     XT3E["XT3E TODO<br/>both emulator baselines prove intrinsic full-grid bound;<br/>substantially longer unrestricted RR run remains"]
     XT3C["XT3C DONE<br/>SPMM F8 Sampled exact client passes;<br/>19,960 accesses and 806 barrier members covered"]
@@ -328,7 +328,7 @@ flowchart TD
   class XP2E done
   class XP2F done
   class XP2G done
-  class XT3J active
+  class XT3J done
   class G0,XP2D,XP3,XT2C2,XT2C3,XT3A,XT3E,XT3I,XF,XG todo
 ```
 
@@ -377,6 +377,16 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XT3J is DONE as an assessment node.  Standard-profile artifact
+  `consan-green-expansion-20260721-spmm-f8-ml-inline-clean-108` fully patches
+  the first applicable object at 22,074/22,074 accesses and 403/403 barriers,
+  then yields eight exact passes and five wrong-result rows before 180
+  seconds.  Failures are confined to the observed MT64x64 solutions; observed
+  MT16x16 rows pass.  Two bounded diagnostics are inconclusive rather than
+  exculpatory, so STATUS advances from pending yellow to a precise orange
+  clean-oracle blocker and the campaign rotates.  No node remains falsely
+  ACTIVE during that rotation.
 
 - 2026-07-21: XT3J is the sole ACTIVE box.  The campaign rotates from the
   resistant top-k Inline execution defect to P3 SPMM F8 Inline, whose static
