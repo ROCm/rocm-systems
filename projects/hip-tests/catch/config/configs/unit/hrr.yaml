@@ -63,6 +63,11 @@ hrr:
   Unit_HRR_CaptureReplayRoundtrip:
     <<: *level_2
     tags: [capture, playback, roundtrip]
+    # ROCM-27985: intermittent replay D2H failure on gfx1250/MI450, a runtime
+    # H2D->kernel input-coherency gap not addressed by the playback drain fix.
+    # Quarantined on gfx1250 only (other archs still run it) until the runtime
+    # fix lands; tracked in ROCM-27985.
+    disabled: [gfx1250]
   Unit_HRR_GraphRoundtrip:
     <<: *level_2
     tags: [capture, graph, playback, roundtrip]
