@@ -63,6 +63,7 @@ jobs:
             enable_ubsan: 0
             enable_tsan: 0
             enable_msan: 0
+            enable_expensive_checks: 0
           - name: asan-ubsan
             allow_failure: true
             test_regex: ''
@@ -71,6 +72,7 @@ jobs:
             enable_ubsan: 1
             enable_tsan: 0
             enable_msan: 0
+            enable_expensive_checks: 1
           - name: asan-ubsan-gcc
             allow_failure: true
             test_regex: ''
@@ -79,6 +81,7 @@ jobs:
             enable_ubsan: 1
             enable_tsan: 0
             enable_msan: 0
+            enable_expensive_checks: 1
             c_compiler: gcc
             cxx_compiler: g++
           - name: tsan-sparse-memory
@@ -196,7 +199,8 @@ jobs:
             -DRJ_ENABLE_ASAN=${{ matrix.enable_asan }} \
             -DRJ_ENABLE_UBSAN=${{ matrix.enable_ubsan }} \
             -DRJ_ENABLE_TSAN=${{ matrix.enable_tsan }} \
-            -DRJ_ENABLE_MSAN=${{ matrix.enable_msan }}
+            -DRJ_ENABLE_MSAN=${{ matrix.enable_msan }} \
+            -DRJ_ENABLE_EXPENSIVE_CHECKS=${{ matrix.enable_expensive_checks }}
 
           # Set a conservative number of workers to avoid OOM and excessive system load.
           WORKERS="$(( ($(nproc) + 1) / 2 ))"

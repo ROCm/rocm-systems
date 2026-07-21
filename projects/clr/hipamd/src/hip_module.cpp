@@ -500,7 +500,7 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
   if (deviceId != targetDevice) {
     return hipErrorInvalidResourceHandle;
   }
-  HIP_RETURN_ONFAIL(PlatformState::Instance().StatCO().InitManagedVarDevicePtr(deviceId));
+  IHIP_INIT_MANAGED_VAR_DEVICE_PTR(deviceId);
 
   if (f == nullptr) {
     LogPrintfError("%s", "Function passed is null");

@@ -24,6 +24,7 @@
 #define AMD_SMI_INCLUDE_IMPL_AMD_SMI_GPU_DEVICE_H_
 
 #include <map>
+#include <mutex>
 #include <set>
 #include <string>
 #include <string_view>
@@ -156,8 +157,11 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
   std::vector<uint64_t> get_bitmask_from_numa_node(int32_t node_id, uint32_t size) const;
   std::vector<uint64_t> get_bitmask_from_local_cpulist(uint32_t drm_card, uint32_t size) const;
 
-  // Get the UALoE handle
-  ualoe_handle_t get_ualoe_handle() const { return ualoe_handle_; }
+  // Get the UALoE handle, opening the IFoE/UALoE session on first use.
+  // Deferred out of the constructor so amdsmi_init() and non-fabric queries
+  // never block on the IFoE driver; a wedged IFoE driver would otherwise hang
+  // initialization in an uninterruptible generic-netlink wait.
+  ualoe_handle_t get_ualoe_handle();
 
   /** UALoE fabric sysfs:
    *    - partial reads; see amdsmi_get_gpu_fabric_info() for status info
@@ -185,8 +189,10 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
   int32_t get_compute_process_list_impl(GPUComputeProcessList_t& compute_process_list,
                                         ComputeProcessListType_t list_type);
   void populate_ifoe_fabric_bdf_list();
-  // UALoE
+  // UALoE — session is opened lazily on the first get_ualoe_handle() call
+  void open_ualoe_session();
   ualoe_handle_t ualoe_handle_ = (-1);
+  std::once_flag ualoe_open_once_;
 };
 
 }  // namespace amd::smi
