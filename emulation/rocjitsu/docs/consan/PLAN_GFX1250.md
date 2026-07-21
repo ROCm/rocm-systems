@@ -137,7 +137,7 @@ flowchart TD
     XT0["XT0 DONE<br/>RocJITsu corpus runner, provenance,<br/>and one-repetition contract"]
     XT1["XT1 DONE<br/>both compact P0 kernels green<br/>in all four profiles"]
     XT2A["XT2A DONE<br/>four-client transpose/TDM P1 row green<br/>in all four profiles"]
-    XT2B["XT2B DONE<br/>broad multi-type transpose/TDM P1 assessed;<br/>Inline strict-160-KiB rerun remains"]
+    XT2B["XT2B DONE<br/>broad multi-type transpose/TDM P1 green<br/>in all four profiles at strict capacity"]
     XT2C1["XT2C1 DONE<br/>001 Stream-K kernel green<br/>in all four profiles"]
     XT2C2["XT2C2 TODO<br/>004 Stream-K kernel 3/4;<br/>Inline long-bound completion remains"]
     XT2C3["XT2C3 TODO<br/>007 Stream-K kernel 3/4;<br/>Inline long-bound completion remains"]
@@ -415,6 +415,14 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XT2B's stale strict-capacity follow-up is DONE/green.  Current
+  one-repetition Inline clean and paired artifacts select a legal external-
+  shadow lowering, pass the full exact numeric matrix, and complete all
+  1,610/1,610 accesses plus 256/256 barriers.  The paired result is 1.61x
+  against the mean of two controls.  This promotes `016_spmm_tdm_all` Inline
+  from orange to green without restoring oversized LDS backing or changing
+  ConSan implementation.
 
 - 2026-07-21: XP3C is DONE/green at `31c3d937c2`.  Two independently
   precommitted fail-oracle selectors had already preserved `torch.sort`'s
