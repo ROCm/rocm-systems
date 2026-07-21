@@ -48,9 +48,9 @@ set_source_files_properties(rocshmem.cpp PROPERTIES LANGUAGE HIP)
 set_target_properties(
     rocshmem
     PROPERTIES
-        HIP_STANDARD          17
+        HIP_STANDARD 17
         HIP_STANDARD_REQUIRED ON
-        CXX_STANDARD          17
+        CXX_STANDARD 17
         CXX_STANDARD_REQUIRED ON
 )
 
