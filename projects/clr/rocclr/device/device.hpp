@@ -2426,6 +2426,13 @@ class Device : public RuntimeObject {
 #endif
 #endif
 
+#if defined(__linux__) && defined(__clang__)
+#if __has_feature(address_sanitizer)
+  void reportDeviceMemoryLeaks();
+  static void reportAllDeviceMemoryLeaks();
+#endif
+#endif
+
   static bool IsGPUInError() { return (gpu_error_.load(std::memory_order_relaxed) != CL_SUCCESS); }
   static cl_int GetGPUError() { return gpu_error_.load(std::memory_order_relaxed); }
 
