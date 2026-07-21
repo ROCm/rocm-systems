@@ -122,7 +122,7 @@ flowchart TD
     XP3["XP3 TODO<br/>top-k SC oracle passes;<br/>current exact object has 88 bounded gaps"]
     XP9["XP9 DONE<br/>norm plus softmax Record/Replay clean, paired,<br/>and reviewed-fault bundle green"]
     XP9B["XP9B DONE<br/>norm plus softmax Sampled clean, paired,<br/>and reviewed-fault bundle green"]
-    XP9C["XP9C TODO<br/>literal identity recovers 46 Inline sites;<br/>VGPR spill and publication contention remain"]
+    XP9C["XP9C ACTIVE<br/>norm/softmax Inline residual;<br/>16--19 VGPR spill/resource investigation"]
     XP10["XP10 DONE<br/>cluster Record/Replay clean, paired, and reviewed-fault<br/>bundle accepted at 23/23 accesses and 2/2 barriers"]
     XT0["XT0 DONE<br/>RocJITsu corpus runner, provenance,<br/>and one-repetition contract"]
     XT1["XT1 DONE<br/>both compact P0 kernels green<br/>in all four profiles"]
@@ -302,7 +302,8 @@ flowchart TD
   class R0,E0,D0,C0,V0,B0,B1,B2,B3,B4,B5,S0,S1,S2,S3,S4,S5,S6,A0,A1,A2,A3A,A4A,SC0,RR0,SA0,IS0,IS1,F0,Q0,V1,V2,V3,V8,V4A,V4B,V4C,V4D,V5A,V5B,V6A,V6B,V7,VT,VD,VP,VW,X0,XP0,XP1,XP1B,XP1C,XP2A,XP2C,XP4,XP5,XP6,XP7,XP8,XP9,XP10,XT1,XT2A,XT2B,XT2C1,XT3C,XT3D,XT4A,XT4 done
   class XP9B done
   class XT3B done
-  class G0,XP2B,XP2D,XP3,XP9C,XT2C2,XT2C3,XT3A,XT3E,XF,XG todo
+  class XP9C active
+  class G0,XP2B,XP2D,XP3,XT2C2,XT2C3,XT3A,XT3E,XF,XG todo
 ```
 
 Broader partial-EXEC, dynamic-stack, high-register, cache/fence-shape, and
@@ -350,6 +351,12 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP9C becomes the sole ACTIVE/blue Mermaid box after the bounded
+  XP2B rotation.  The next Inline Shadow target is the already-isolated
+  `torch.linalg.vector_norm`/large-row `torch.softmax` residual: 474 access and
+  189 barrier sites require 16--19 temporary VGPRs.  Work starts from the
+  captured object and resource plans rather than another blind long run.
 
 - 2026-07-21: XP2B receives one bounded post-index reassessment and remains
   TODO/gray.  Current-tip one-repetition artifact
