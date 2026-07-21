@@ -47,9 +47,13 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         )
         cases += [
             f'  case ROCJITSU_CODE_ARCH_{enum_name}:',
-            f'    return {{{supports_wgp_mode}, {descriptor_sgpr_count_encoded}, '
-            f'{uses_ttmp_workgroup_ids}, {uses_cluster_ttmp_workgroup_ids}, '
-            f'{addressable_vgprs}}};',
+            '    return {',
+            f'        .supports_wgp_mode = {supports_wgp_mode},',
+            f'        .descriptor_sgpr_count_encoded = {descriptor_sgpr_count_encoded},',
+            f'        .uses_ttmp_workgroup_ids = {uses_ttmp_workgroup_ids},',
+            f'        .uses_cluster_ttmp_workgroup_ids = {uses_cluster_ttmp_workgroup_ids},',
+            f'        .max_addressable_vgprs_per_wf = {addressable_vgprs},',
+            '    };',
         ]
 
     lines = [

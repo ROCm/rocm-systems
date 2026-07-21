@@ -26,25 +26,85 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
 [[nodiscard]] constexpr IsaProperties isa_properties(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
-    return {false, true, false, false, 256};
+    return {
+        .supports_wgp_mode = false,
+        .descriptor_sgpr_count_encoded = true,
+        .uses_ttmp_workgroup_ids = false,
+        .uses_cluster_ttmp_workgroup_ids = false,
+        .max_addressable_vgprs_per_wf = 256,
+    };
   case ROCJITSU_CODE_ARCH_CDNA2:
-    return {false, true, false, false, 256};
+    return {
+        .supports_wgp_mode = false,
+        .descriptor_sgpr_count_encoded = true,
+        .uses_ttmp_workgroup_ids = false,
+        .uses_cluster_ttmp_workgroup_ids = false,
+        .max_addressable_vgprs_per_wf = 256,
+    };
   case ROCJITSU_CODE_ARCH_CDNA3:
-    return {false, true, false, false, 256};
+    return {
+        .supports_wgp_mode = false,
+        .descriptor_sgpr_count_encoded = true,
+        .uses_ttmp_workgroup_ids = false,
+        .uses_cluster_ttmp_workgroup_ids = false,
+        .max_addressable_vgprs_per_wf = 256,
+    };
   case ROCJITSU_CODE_ARCH_CDNA4:
-    return {false, true, false, false, 256};
+    return {
+        .supports_wgp_mode = false,
+        .descriptor_sgpr_count_encoded = true,
+        .uses_ttmp_workgroup_ids = false,
+        .uses_cluster_ttmp_workgroup_ids = false,
+        .max_addressable_vgprs_per_wf = 256,
+    };
   case ROCJITSU_CODE_ARCH_RDNA1:
-    return {true, false, false, false, 256};
+    return {
+        .supports_wgp_mode = true,
+        .descriptor_sgpr_count_encoded = false,
+        .uses_ttmp_workgroup_ids = false,
+        .uses_cluster_ttmp_workgroup_ids = false,
+        .max_addressable_vgprs_per_wf = 256,
+    };
   case ROCJITSU_CODE_ARCH_RDNA2:
-    return {true, false, false, false, 256};
+    return {
+        .supports_wgp_mode = true,
+        .descriptor_sgpr_count_encoded = false,
+        .uses_ttmp_workgroup_ids = false,
+        .uses_cluster_ttmp_workgroup_ids = false,
+        .max_addressable_vgprs_per_wf = 256,
+    };
   case ROCJITSU_CODE_ARCH_RDNA3:
-    return {true, false, false, false, 256};
+    return {
+        .supports_wgp_mode = true,
+        .descriptor_sgpr_count_encoded = false,
+        .uses_ttmp_workgroup_ids = false,
+        .uses_cluster_ttmp_workgroup_ids = false,
+        .max_addressable_vgprs_per_wf = 256,
+    };
   case ROCJITSU_CODE_ARCH_RDNA3_5:
-    return {true, false, false, false, 256};
+    return {
+        .supports_wgp_mode = true,
+        .descriptor_sgpr_count_encoded = false,
+        .uses_ttmp_workgroup_ids = false,
+        .uses_cluster_ttmp_workgroup_ids = false,
+        .max_addressable_vgprs_per_wf = 256,
+    };
   case ROCJITSU_CODE_ARCH_RDNA4:
-    return {true, false, true, false, 256};
+    return {
+        .supports_wgp_mode = true,
+        .descriptor_sgpr_count_encoded = false,
+        .uses_ttmp_workgroup_ids = true,
+        .uses_cluster_ttmp_workgroup_ids = false,
+        .max_addressable_vgprs_per_wf = 256,
+    };
   case ROCJITSU_CODE_ARCH_GFX1250:
-    return {false, false, true, true, 1024};
+    return {
+        .supports_wgp_mode = false,
+        .descriptor_sgpr_count_encoded = false,
+        .uses_ttmp_workgroup_ids = true,
+        .uses_cluster_ttmp_workgroup_ids = true,
+        .max_addressable_vgprs_per_wf = 1024,
+    };
   default:
     return {};
   }

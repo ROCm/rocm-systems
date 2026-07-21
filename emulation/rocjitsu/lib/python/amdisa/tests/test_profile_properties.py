@@ -109,14 +109,33 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
     assert 'MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;' in output
     assert (
         'case ROCJITSU_CODE_ARCH_CDNA3:\n'
-        '    return {false, true, false, false, 256};'
+        '    return {\n'
+        '        .supports_wgp_mode = false,\n'
+        '        .descriptor_sgpr_count_encoded = true,\n'
+        '        .uses_ttmp_workgroup_ids = false,\n'
+        '        .uses_cluster_ttmp_workgroup_ids = false,\n'
+        '        .max_addressable_vgprs_per_wf = 256,\n'
+        '    };'
     ) in output
     assert (
-        'case ROCJITSU_CODE_ARCH_RDNA4:\n' '    return {true, false, true, false, 256};'
+        'case ROCJITSU_CODE_ARCH_RDNA4:\n'
+        '    return {\n'
+        '        .supports_wgp_mode = true,\n'
+        '        .descriptor_sgpr_count_encoded = false,\n'
+        '        .uses_ttmp_workgroup_ids = true,\n'
+        '        .uses_cluster_ttmp_workgroup_ids = false,\n'
+        '        .max_addressable_vgprs_per_wf = 256,\n'
+        '    };'
     ) in output
     assert (
         'case ROCJITSU_CODE_ARCH_GFX1250:\n'
-        '    return {false, false, true, true, 1024};'
+        '    return {\n'
+        '        .supports_wgp_mode = false,\n'
+        '        .descriptor_sgpr_count_encoded = false,\n'
+        '        .uses_ttmp_workgroup_ids = true,\n'
+        '        .uses_cluster_ttmp_workgroup_ids = true,\n'
+        '        .max_addressable_vgprs_per_wf = 1024,\n'
+        '    };'
     ) in output
 
 
