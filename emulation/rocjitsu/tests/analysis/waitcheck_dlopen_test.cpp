@@ -11,6 +11,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <string_view>
 #include <thread>
@@ -54,6 +55,16 @@ size_t thread_count() {
   for ([[maybe_unused]] const auto &entry : std::filesystem::directory_iterator("/proc/self/task"))
     ++count;
   return count;
+}
+
+bool wait_for_thread_count(size_t expected) {
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
+  do {
+    if (thread_count() == expected)
+      return true;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  } while (std::chrono::steady_clock::now() < deadline);
+  return thread_count() == expected;
 }
 
 struct CallbackState {
@@ -147,7 +158,11 @@ TEST(WaitcheckDlopenTest, AnalyzeManyBuffersAcrossRepeatedLoadUnloadCycles) {
     EXPECT_EQ(still_loaded, nullptr) << "waitcheck DSO retained after dlclose";
     if (still_loaded != nullptr)
       dlclose(still_loaded);
-    EXPECT_EQ(thread_count(), initial_thread_count);
+    // Under a saturated CTest run, Linux can retain exited task entries for a
+    // few scheduler ticks after pthread_join() and dlclose(). Keep detecting a
+    // real DSO-owned thread leak without requiring immediate /proc cleanup.
+    EXPECT_TRUE(wait_for_thread_count(initial_thread_count))
+        << "expected " << initial_thread_count << " thread(s), found " << thread_count();
     EXPECT_FALSE(is_object_loaded("libhsa-runtime64.so"));
   }
 }
