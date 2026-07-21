@@ -75,6 +75,7 @@ enum backend_tag : int
     callback_domains_generic_lookup = 99,
     callback_domains_implicit_flags = 100,
     callback_domains_invalid        = 101,
+    callback_domains_version_gating = 102,
 };
 
 template <int Tag>
@@ -545,6 +546,34 @@ TEST_F(sdk_core_domains_test, get_callback_domains_invalid_domain)
         EXPECT_STREQ(error.what(),
                      "unsupported ROCPROFSYS_ROCM_DOMAINS value: invalid_domain");
     }
+}
+
+TEST_F(sdk_core_domains_test,
+       get_callback_domains_runtime_before_0_6_excludes_rccl_and_ompt)
+{
+    using backend_t = tagged_backend<callback_domains_version_gating>;
+    using sut       = sdk_core<backend_t, mock_sdk_externals>;
+
+    auto config = std::make_shared<fake_settings>();
+    sut::config_settings(config);
+
+    EXPECT_CALL(*g_mock, get_version)
+        .Times(1)
+        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
+            *major = 0;
+            *minor = 5;
+            *patch = 99;
+        });
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{ "rccl_api,ompt" }));
+    EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(true));
+    EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(true));
+    EXPECT_CALL(*g_mock_externals, get_settings)
+        .Times(1)
+        .WillOnce(gtest::Return(config.get()));
+
+    EXPECT_THAT(sut::get_callback_domains(), gtest::IsEmpty());
 }
 
 // ─── get_buffered_domains ─────────────────────────────────────────────────────
