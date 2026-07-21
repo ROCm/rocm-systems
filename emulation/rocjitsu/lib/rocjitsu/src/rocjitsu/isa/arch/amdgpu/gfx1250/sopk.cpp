@@ -29,6 +29,10 @@ constexpr uint32_t HW_REG_GPR_ALLOC = 6;
 constexpr uint32_t HW_REG_VGPR_ALLOC = 7;
 constexpr uint32_t HW_REG_WAVE_SCHED_MODE = 26;
 constexpr uint32_t HW_REG_IB_STS2 = 28;
+constexpr uint32_t HW_REG_IB_STS2_CLUSTER_ID_SHIFT = 6;
+constexpr uint32_t HW_REG_IB_STS2_CLUSTER_ID_MASK = 0xFu;
+constexpr uint32_t HW_REG_IB_STS2_WG_IN_CLUSTER_SHIFT = 21;
+constexpr uint32_t HW_REG_IB_STS2_WG_IN_CLUSTER_MASK = 0xFu;
 
 [[maybe_unused]] uint32_t insert_hwreg_field(uint32_t reg_val, uint32_t src, uint32_t offset,
                                              uint32_t mask) {
@@ -59,7 +63,10 @@ constexpr uint32_t HW_REG_IB_STS2 = 28;
     reg_val = wf.wave_sched_mode_raw();
     return true;
   case HW_REG_IB_STS2:
-    reg_val = 0;
+    reg_val = (((wf.cluster_size() > 1 ? 1u : 0u) & HW_REG_IB_STS2_CLUSTER_ID_MASK)
+               << HW_REG_IB_STS2_CLUSTER_ID_SHIFT) |
+              ((wf.cluster_rank() & HW_REG_IB_STS2_WG_IN_CLUSTER_MASK)
+               << HW_REG_IB_STS2_WG_IN_CLUSTER_SHIFT);
     return true;
   default:
     return false;
@@ -116,9 +123,10 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
            make_exec_fn<SCmovkI32Sopk>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_[0] = &sdst;
   dst_operands_[0] = &sdst;
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
+  src_operands_[1] = &simm16;
+  num_src_ = 2;
   num_dst_ = 1;
   flags_ |= PREDICATED_DEF;
 }

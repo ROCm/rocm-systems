@@ -199,6 +199,9 @@ void Device::checkAtomicSupport() {
 }
 
 Device::~Device() {
+  // Drain the ROCr async-events thread before releasing any backend state.
+  // This guards OCL teardown; for HIP the drain already ran via RuntimeTearDown,
+  // so this is a safe no-op in that path.
   WaitForHsaAsyncHandlersIdle();
 
   // Release cached map targets

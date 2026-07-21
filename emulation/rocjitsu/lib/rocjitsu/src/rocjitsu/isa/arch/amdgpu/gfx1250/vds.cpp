@@ -4730,7 +4730,7 @@ DsStoreAddtidB32Vds::DsStoreAddtidB32Vds(const MachineInst *inst)
   src_operands_[0] = &data0;
   num_src_ = 1;
   num_dst_ = 0;
-  data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
 
@@ -4953,7 +4953,9 @@ DsLoadTr4B64Vds::DsLoadTr4B64Vds(const MachineInst *inst)
 
 void DsLoadTr4B64Vds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
+  d->dst_reg_base =
+      wf.vgpr_alloc().base +
+      *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
   d->num_elems = 2;
   d->is_load = true;
@@ -4979,7 +4981,9 @@ DsLoadTr6B96Vds::DsLoadTr6B96Vds(const MachineInst *inst)
 
 void DsLoadTr6B96Vds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
+  d->dst_reg_base =
+      wf.vgpr_alloc().base +
+      *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
   d->num_elems = 3;
   d->is_load = true;
@@ -5005,7 +5009,9 @@ DsLoadTr16B128Vds::DsLoadTr16B128Vds(const MachineInst *inst)
 
 void DsLoadTr16B128Vds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
+  d->dst_reg_base =
+      wf.vgpr_alloc().base +
+      *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
   d->num_elems = 4;
   d->is_load = true;
@@ -5031,7 +5037,9 @@ DsLoadTr8B64Vds::DsLoadTr8B64Vds(const MachineInst *inst)
 
 void DsLoadTr8B64Vds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
+  d->dst_reg_base =
+      wf.vgpr_alloc().base +
+      *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
   d->num_elems = 2;
   d->is_load = true;

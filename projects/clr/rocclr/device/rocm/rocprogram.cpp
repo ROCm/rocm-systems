@@ -9,6 +9,7 @@
 #include "utils/options.hpp"
 #include "rockernel.hpp"
 #include "device/hotswap.hpp"
+#include "rocurilocator.hpp"
 
 #include <string>
 #include <vector>
@@ -379,6 +380,12 @@ bool Program::setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc,
     buildLog_ += "\n";
     return false;
   }
+
+#if defined(__linux__) && defined(__clang__)
+#if __has_feature(address_sanitizer)
+  UriLocator::recordCodeObjects(hsaExecutable_);
+#endif
+#endif
 
   for (auto& kit : kernels()) {
     Kernel* kernel = static_cast<Kernel*>(kit.second);

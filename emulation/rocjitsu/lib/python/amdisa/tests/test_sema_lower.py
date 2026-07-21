@@ -188,7 +188,7 @@ class TestLowerVectorAdd:
         result = lower_sema_block(block)
         assert 'std::fma(' in result
 
-    def test_vector_explicit_vcc_dst_preserves_high_sgpr_on_wave32(self):
+    def test_vector_explicit_vcc_dst_uses_wave_mask_helper(self):
         body = SemaNode(
             SemaNodeKind.ASSIGN,
             children=(
@@ -221,12 +221,7 @@ class TestLowerVectorAdd:
 
         result = lower_sema_block(block, ctx)
 
-        assert 'if (wf.wf_size() <= 32)' in result
-        assert (
-            'amdgpu::RegisterAccess(wf).write_scalar(sdst, static_cast<uint32_t>(vcc))'
-            in result
-        )
-        assert 'amdgpu::RegisterAccess(wf).write_scalar64(sdst, vcc)' in result
+        assert 'amdgpu::write_wave_mask_scalar(sdst, wf, vcc);' in result
 
     def test_vector_block_can_write_scalar_destination(self):
         body = SemaNode(
@@ -375,24 +370,17 @@ class TestLowerVectorAdd:
             exec_model=ExecModel.VECTOR,
             operand_map=omap,
             true16_dst_select='inst_.pad_16',
-            true16_dst_reg='inst_.vdst & 0x7fu',
         )
 
         result = lower_sema_block(block, ctx)
 
-        assert (
-            'amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + (inst_.vdst & 0x7fu), lane)'
-            in result
-        )
-        assert (
-            'amdgpu::RegisterAccess(wf.cu()).write_vgpr(wf.vgpr_alloc().base + (inst_.vdst & 0x7fu), lane, merged)'
-            in result
-        )
+        assert 'amdgpu::RegisterAccess(wf).read_lane(vdst, lane)' in result
+        assert 'amdgpu::RegisterAccess(wf).write_lane(vdst, lane, merged)' in result
         assert '0x0000ffffu' in result
         assert '0xffff0000u' in result
         assert 'inst_.pad_16' in result
 
-    def test_true16_source_select_uses_raw_source(self):
+    def test_true16_source_uses_logical_operand(self):
         u16 = SemaType('U', 16)
         body = SemaNode(
             SemaNodeKind.ASSIGN,
@@ -409,18 +397,13 @@ class TestLowerVectorAdd:
         ctx = LoweringContext(
             exec_model=ExecModel.VECTOR,
             operand_map=omap,
-            true16_dst_select='inst_.opsel & 0x2u',
-            true16_src_select='inst_.opsel & 0x1u',
-            true16_src_raw='src0_raw',
         )
 
         result = lower_sema_block(block, ctx)
 
-        assert '(src0_raw >> 16)' in result
-        assert (
-            '(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)) >> 16)'
-            not in result
-        )
+        assert 'amdgpu::RegisterAccess(wf).read_lane(src0, lane)' in result
+        assert 'amdgpu::RegisterAccess(wf).write_lane(vdst, lane' in result
+        assert 'read_vgpr' not in result
 
     def test_true16_source_selects_are_per_operand(self):
         u16 = SemaType('U', 16)
@@ -590,15 +573,13 @@ class TestLowerVectorAdd:
             exec_model=ExecModel.VECTOR,
             operand_map=omap,
             true16_dst_select='inst_.opsel & 0x8u',
-            true16_dst_reg='inst_.vdst & 0x7fu',
         )
 
         result = lower_sema_block(block, ctx)
 
         assert (
             '((inst_.opsel & 0x8u) != 0 ? '
-            '(amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + (inst_.vdst & 0x7fu), lane) >> 16)'
-            in result
+            '(amdgpu::RegisterAccess(wf).read_lane(vdst, lane) >> 16)' in result
         )
 
 

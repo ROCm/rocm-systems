@@ -200,8 +200,11 @@ public:
   }
 
   ~ScalarSccFixture() {
-    if (cu)
-      cu->reset_all_wf();
+    // A wave frees its SGPR/VGPR blocks when it halts (s_endpgm-equivalent
+    // termination), so halt the resident wave to release its resources rather
+    // than a CU-wide reset.
+    if (wf && !wf->is_halted())
+      wf->halt();
   }
 
   bool ready() const { return cu != nullptr && decoder != nullptr && wf != nullptr; }
