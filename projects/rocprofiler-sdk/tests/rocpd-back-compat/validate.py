@@ -115,7 +115,7 @@ def test_csv_for_schema_3_0_2_changes_absent(old_schema, output_root):
     """
 
     # Check if the schema is 3.0.2 and newer, then call the present test instead
-    if old_schema >= "3.0.2":
+    if tuple(map(int, old_schema.split("."))) >= (3, 0, 2):
         print(
             f"Schema {old_schema} is newer than 3.0.2, calling test_csv_for_schema_3_0_2_changes_present instead"
         )
@@ -211,7 +211,7 @@ def test_otf2_no_graph_launch_locations(old_schema, output_root):
     pytest.importorskip("otf2", reason="otf2 package not installed")
 
     # Check if the schema is 3.0.2 and newer, then call the present test instead
-    if old_schema >= "3.0.2":
+    if tuple(map(int, old_schema.split("."))) >= (3, 0, 2):
         print(
             f"Schema {old_schema} is newer than 3.0.2, calling test_otf2_graph_launch_locations_latest instead"
         )

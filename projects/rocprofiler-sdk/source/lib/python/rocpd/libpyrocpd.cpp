@@ -515,9 +515,13 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                     auto* stmt = static_cast<sqlite3_stmt*>(nullptr);
                     if(sqlite3_prepare_v2(c, q, -1, &stmt, nullptr) == SQLITE_OK)
                     {
-                        sqlite3_step(stmt);
-                        ver_str = std::string(
-                            reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
+                        if(sqlite3_step(stmt) == SQLITE_ROW)
+                        {
+                            if(auto* text = sqlite3_column_text(stmt, 0))
+                            {
+                                ver_str = std::string(reinterpret_cast<const char*>(text));
+                            }
+                        }
                         sqlite3_finalize(stmt);
                     }
                 }
@@ -525,9 +529,19 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                 {
                     parts.emplace_back(part);
                 }
-                if(!parts.empty()) version.major = static_cast<uint32_t>(std::stoul(parts.at(0)));
-                if(parts.size() > 1) version.minor = static_cast<uint32_t>(std::stoul(parts.at(1)));
-                if(parts.size() > 2) version.patch = static_cast<uint32_t>(std::stoul(parts.at(2)));
+                try
+                {
+                    if(!parts.empty())
+                        version.major = static_cast<uint32_t>(std::stoul(parts.at(0)));
+                    if(parts.size() > 1)
+                        version.minor = static_cast<uint32_t>(std::stoul(parts.at(1)));
+                    if(parts.size() > 2)
+                        version.patch = static_cast<uint32_t>(std::stoul(parts.at(2)));
+                } catch(...)
+                {
+                    ROCP_WARNING << fmt::format("Error parsing schema version string: {}", ver_str);
+                    return rocpd_version_triplet_t{0, 0, 0};
+                }
                 return version;
             };
 
