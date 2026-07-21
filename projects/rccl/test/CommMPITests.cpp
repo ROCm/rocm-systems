@@ -357,7 +357,7 @@ TEST_F(CtaConfigMPITest, DefaultConfigDoesNotClampChannels)
  * (NCCL_INIT | NCCL_BOOTSTRAP | NCCL_ENV), so destroy/teardown INFO lines
  * disappear from plain `NCCL_DEBUG=INFO` output while remaining reachable via
  * `NCCL_DEBUG_SUBSYS=DESTROY` (or ALL). These tests use the
- * "comm ... - Destroy COMPLETE" line emitted unconditionally from commCleanup()
+ * "comm ... - Destroy COMPLETE" line emitted unconditionally from commFree()
  * (src/init.cc) as the marker, since it fires on every plain ncclCommDestroy().
  */
 class DestroySubsysMPITest : public MPITestBase {};
