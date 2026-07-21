@@ -420,7 +420,7 @@ void Backend::buffer_unregister_all() {
 
 int Backend::buffer_register_symmetric(void *addr, size_t length,
                                        void **registered_addr) {
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
   if (registered_addr == nullptr) {
     return ROCSHMEM_ERROR;
   }
@@ -498,7 +498,7 @@ int Backend::buffer_register_symmetric(void *addr, size_t length,
 }
 
 int Backend::buffer_unregister_symmetric(void *addr) {
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
   if (addr == nullptr) {
     return ROCSHMEM_ERROR;
   }
@@ -537,7 +537,7 @@ void Backend::symm_allgather(void* inout, size_t bytes_per_pe) {
 
 hipError_t Backend::create_symm_alias(void *addr, size_t length,
                                       void **alias) {
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
   return heap.get_allocator()->MapLocalAlias(addr, length, alias);
 #else
   (void)addr;
@@ -548,7 +548,7 @@ hipError_t Backend::create_symm_alias(void *addr, size_t length,
 }
 
 void Backend::destroy_symm_alias(void *alias, size_t length) {
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
   (void)heap.get_allocator()->UnmapLocalAlias(alias, length);
 #else
   (void)alias;

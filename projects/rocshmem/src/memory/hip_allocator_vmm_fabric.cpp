@@ -26,7 +26,7 @@
 #include "log.hpp"
 #include "hip_allocator_vmm_common.hpp"
 
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
 
 #include <cstring>
 
@@ -323,4 +323,4 @@ hipError_t HIPAllocatorVMMFabric::GetDmabufHandle(void *dev_ptr, size_t size, in
 
 }  // namespace rocshmem
 
-#endif  // HIP_VERSION >= 70000000
+#endif  // HIP_VERSION >= 70200000
