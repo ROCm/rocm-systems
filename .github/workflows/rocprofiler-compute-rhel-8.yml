@@ -44,7 +44,7 @@ jobs:
     # Using rocprofiler-systems images and later installing rocm, the official rocm images for al8 red hat variant are too large- this is a workaround.
     runs-on: ubuntu-latest
     container:
-      image: dgaliffiamd/rocprofiler-systems:ci-base-rhel-${{ matrix.os-release }}
+      image: rockylinux/rockylinux:${{ matrix.os-release }}
     strategy:
       fail-fast: false
       matrix:
