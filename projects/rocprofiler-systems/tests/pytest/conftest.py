@@ -2433,6 +2433,8 @@ def assert_perfetto(subtests, tests_dir, request, test_output_dir):
                 perfetto = Path(test_output_dir) / perfetto_file
             else:
                 perfetto = result.perfetto_file
+            if perfetto is None:
+                pytest.fail("No Perfetto trace file was produced by the run")
             if not perfetto.exists():
                 pytest.fail(f"Perfetto trace file {perfetto} not found")
 
