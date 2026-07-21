@@ -43,7 +43,7 @@ CollTrace::~CollTrace() {
       reportIfNeeded(false);
     }
 
-    INFO(NCCL_INIT, "COLLTRACE: commHash %s rank %d - Destroy COMPLETE", commHash_.c_str(), rank_);
+    INFO(NCCL_DESTROY, "COLLTRACE: commHash %s rank %d - Destroy COMPLETE", commHash_.c_str(), rank_);
   } catch (const std::exception& e) {
     WARN("COLLTRACE: commHash %s rank %d - Destroy FAILED: %s", commHash_.c_str(), rank_, e.what());
   }

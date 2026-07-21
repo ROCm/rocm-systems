@@ -569,6 +569,11 @@ TestLogAssertionOptions makeCombinedAssertionLogOptions(int mpi_rank)
     return o;
 }
 
+void resetNcclDebugState()
+{
+    resetNcclDebugFile();
+}
+
 TestLogAssertionContext::TestLogAssertionContext(const TestLogAssertionOptions& opts)
     : opts_(opts)
     , capture_nccl_(opts.capture_nccl_debug_file)

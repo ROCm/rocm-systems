@@ -346,4 +346,95 @@ TEST_F(CtaConfigMPITest, DefaultConfigDoesNotClampChannels)
     }
 }
 
+/**
+ * @class DestroySubsysMPITest
+ * @brief Regression coverage for the NCCL 2.30.3 log-volume-reduction cherry-pick
+ *        (upstream sync PR #6837 brought in NCCL_DESTROY and retagged the shared
+ *        comm-destroy/plugin-unload call sites; this covers the one RCCL-only
+ *        call site the sync did not touch: COLLTRACE's destroy-time INFO line).
+ *
+ * NCCL_DESTROY is not part of the default NCCL_DEBUG_SUBSYS mask
+ * (NCCL_INIT | NCCL_BOOTSTRAP | NCCL_ENV), so destroy/teardown INFO lines
+ * disappear from plain `NCCL_DEBUG=INFO` output while remaining reachable via
+ * `NCCL_DEBUG_SUBSYS=DESTROY` (or ALL). These tests use the
+ * "comm ... - Destroy COMPLETE" line emitted unconditionally from commCleanup()
+ * (src/init.cc) as the marker, since it fires on every plain ncclCommDestroy().
+ */
+class DestroySubsysMPITest : public MPITestBase {};
+
+/**
+ * @test DestroySubsysMPITest.DefaultSubsys_ExcludesDestroyNoise
+ * @brief Under the default subsystem mask, destroy-time INFO noise must be absent.
+ */
+TEST_F(DestroySubsysMPITest, DefaultSubsys_ExcludesDestroyNoise)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    MPIHelpers::MpiEnvGuard debugGuard("NCCL_DEBUG", "INFO");
+    // Force NCCL_DEBUG_SUBSYS unset so RCCL falls back to its default mask,
+    // regardless of any ambient value left by CI or a previous test.
+    MPIHelpers::MpiEnvUnsetGuard subsysGuard("NCCL_DEBUG_SUBSYS");
+    MPIHelpers::resetNcclDebugState();
+
+    MPIHelpers::TestLogAssertionContext log_ctx(
+        MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    // Destroy while log_ctx is still alive so destroy-time output is captured
+    // before TearDown() restores NCCL_DEBUG_FILE (and possibly unlinks the log).
+    ASSERT_MPI_EQ(ncclSuccess, cleanupTestCommunicator());
+
+    static constexpr const char* kDestroyNeedle = "- Destroy COMPLETE";
+    const std::string            from_nccl      = log_ctx.readNcclDebugLog();
+    const std::string            from_rank_log  = log_ctx.readPerRankStderrLog();
+    const bool hit_nccl   = from_nccl.find(kDestroyNeedle) != std::string::npos;
+    const bool hit_stderr = from_rank_log.find(kDestroyNeedle) != std::string::npos;
+    const bool found_line = hit_nccl || hit_stderr;
+
+    if(getTestMpiRank() == 0)
+    {
+        TEST_INFO("NCCL_DESTROY log line \"%s\" under default subsys mask: %s",
+                   kDestroyNeedle,
+                   found_line ? "unexpectedly present" : "correctly absent");
+    }
+
+    ASSERT_MPI_FALSE(found_line);
+}
+
+/**
+ * @test DestroySubsysMPITest.DestroySubsys_IncludesDestroyNoise
+ * @brief With NCCL_DEBUG_SUBSYS=DESTROY, the same destroy-time INFO line must be visible.
+ */
+TEST_F(DestroySubsysMPITest, DestroySubsys_IncludesDestroyNoise)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    MPIHelpers::MpiEnvGuard debugGuard("NCCL_DEBUG", "INFO");
+    MPIHelpers::MpiEnvGuard subsysGuard("NCCL_DEBUG_SUBSYS", "DESTROY");
+    MPIHelpers::resetNcclDebugState();
+
+    MPIHelpers::TestLogAssertionContext log_ctx(
+        MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ASSERT_MPI_EQ(ncclSuccess, cleanupTestCommunicator());
+
+    static constexpr const char* kDestroyNeedle = "- Destroy COMPLETE";
+    const std::string            from_nccl      = log_ctx.readNcclDebugLog();
+    const std::string            from_rank_log  = log_ctx.readPerRankStderrLog();
+    const bool hit_nccl   = from_nccl.find(kDestroyNeedle) != std::string::npos;
+    const bool hit_stderr = from_rank_log.find(kDestroyNeedle) != std::string::npos;
+    const bool found_line = hit_nccl || hit_stderr;
+
+    if(getTestMpiRank() == 0)
+    {
+        TEST_INFO("NCCL_DESTROY log line \"%s\" under NCCL_DEBUG_SUBSYS=DESTROY: %s",
+                   kDestroyNeedle,
+                   found_line ? "present" : "unexpectedly absent");
+    }
+
+    ASSERT_MPI_TRUE(found_line);
+}
+
 #endif // MPI_TESTS_ENABLED
