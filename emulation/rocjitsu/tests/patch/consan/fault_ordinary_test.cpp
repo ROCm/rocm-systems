@@ -874,6 +874,11 @@ TEST(ConSan, LargeSyncInventoryAnnotatesEverySequenceOwner) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.sync_events.size(), kLoadCount);
   ASSERT_EQ(result.sync_sequences.size(), kLoadCount);
+  ASSERT_EQ(result.fault_sites.size(), kLoadCount);
+  for (const ConSanFaultSite &site : result.fault_sites) {
+    EXPECT_TRUE(site.sync_event_identity.has_value());
+    EXPECT_TRUE(site.sync_sequence_identity.has_value());
+  }
   for (const ConSanSyncSequence &sequence : result.sync_sequences) {
     ASSERT_EQ(sequence.member_event_identities.size(), 1u);
     ASSERT_EQ(sequence.execution_owners.size(), 1u);

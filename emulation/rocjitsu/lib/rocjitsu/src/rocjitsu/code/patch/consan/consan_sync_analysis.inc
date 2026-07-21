@@ -2784,20 +2784,64 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
 }
 
 void annotate_fault_sites_with_sync_sequences(ConSanResult &result) {
+  struct EventKey {
+    ConSanSyncEventKind kind;
+    bool in_kernel;
+    std::string_view container_name;
+    uint64_t text_offset;
+
+    bool operator==(const EventKey &) const = default;
+  };
+  struct EventKeyHash {
+    size_t operator()(const EventKey &key) const {
+      size_t value = std::hash<std::string_view>{}(key.container_name);
+      const auto combine = [&](size_t part) {
+        value ^= part + 0x9e3779b9u + (value << 6u) + (value >> 2u);
+      };
+      combine(std::hash<uint64_t>{}(key.text_offset));
+      combine(std::hash<uint8_t>{}(static_cast<uint8_t>(key.kind)));
+      combine(std::hash<bool>{}(key.in_kernel));
+      return value;
+    }
+  };
+
+  // Aggregate code objects can contain tens of thousands of fault sites and
+  // synchronization events with long mangled owner names. A linear event
+  // search per site makes this annotation quadratic and spends most of its
+  // time comparing those names.
+  std::unordered_map<EventKey, const ConSanSyncEvent *, EventKeyHash> event_by_site;
+  event_by_site.reserve(result.sync_events.size());
+  for (const ConSanSyncEvent &event : result.sync_events) {
+    event_by_site.emplace(
+        EventKey{event.kind, event.in_kernel, event.container_name, event.text_offset}, &event);
+  }
+
+  size_t sequence_member_count = 0;
+  for (const ConSanSyncSequence &sequence : result.sync_sequences)
+    sequence_member_count += sequence.member_event_identities.size();
+  std::unordered_map<std::string_view, const ConSanSyncSequence *> sequence_by_event;
+  sequence_by_event.reserve(sequence_member_count);
+  for (const ConSanSyncSequence &sequence : result.sync_sequences) {
+    for (const std::string &identity : sequence.member_event_identities) {
+      const auto [entry, inserted] = sequence_by_event.emplace(identity, &sequence);
+      if (!inserted)
+        entry->second = nullptr;
+    }
+  }
+
   for (ConSanFaultSite &site : result.fault_sites) {
     const ConSanSyncEventKind expected_kind =
         site.kind == ConSanFaultSiteKind::Barrier  ? ConSanSyncEventKind::Barrier
         : site.kind == ConSanFaultSiteKind::Atomic ? ConSanSyncEventKind::Atomic
                                                    : ConSanSyncEventKind::OrdinaryMemory;
-    const auto event = std::ranges::find_if(result.sync_events, [&](const ConSanSyncEvent &item) {
-      return item.kind == expected_kind && item.in_kernel == site.in_kernel &&
-             item.container_name == site.container_name && item.text_offset == site.text_offset;
-    });
-    if (event == result.sync_events.end())
+    const auto event = event_by_site.find(
+        EventKey{expected_kind, site.in_kernel, site.container_name, site.text_offset});
+    if (event == event_by_site.end())
       continue;
-    site.sync_event_identity = event->identity;
+    site.sync_event_identity = event->second->identity;
+    const auto sequence_entry = sequence_by_event.find(event->second->identity);
     const ConSanSyncSequence *sequence =
-        find_consan_sync_sequence_for_event(result, event->identity);
+        sequence_entry == sequence_by_event.end() ? nullptr : sequence_entry->second;
     if (sequence == nullptr)
       continue;
     site.sync_sequence_identity = sequence->identity;
