@@ -52,6 +52,11 @@
 // symbol so that any future change to the signature is caught here rather than
 // by downstream ABI tooling.
 
+// RTLD_DEFAULT is a GNU extension exposed by <dlfcn.h> under _GNU_SOURCE.
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include <dlfcn.h>
 
 #include "gtest/gtest.h"
@@ -68,16 +73,16 @@ constexpr char kWriteDevInfoStrBoolSymbol[] =
 
 TEST(RsmiAbiStability, WriteDevInfoStrRetainsBoolParameter) {
   // rsmitst links librocm_smi64, so the library's exported symbols are part of
-  // the process' global symbol scope and can be resolved by name.
-  void* global_scope = dlopen(nullptr, RTLD_NOW | RTLD_GLOBAL);
-  ASSERT_NE(global_scope, nullptr) << dlerror();
+  // the process' global symbol scope. Resolve the symbol directly from that
+  // scope and use the standard dlerror() pattern to detect lookup failures.
+  dlerror();  // Clear any stale error state.
+  void* symbol = dlsym(RTLD_DEFAULT, kWriteDevInfoStrBoolSymbol);
+  const char* error = dlerror();
 
-  void* symbol = dlsym(global_scope, kWriteDevInfoStrBoolSymbol);
+  EXPECT_EQ(error, nullptr) << "dlsym failed to resolve the writeDevInfoStr symbol: " << error;
   EXPECT_NE(symbol, nullptr)
       << "amd::smi::Device::writeDevInfoStr(DevInfoTypes, std::string, bool) is "
          "missing from the exported ABI. Removing the trailing bool parameter "
          "breaks binary compatibility with consumers linked against earlier "
          "releases.";
-
-  dlclose(global_scope);
 }
