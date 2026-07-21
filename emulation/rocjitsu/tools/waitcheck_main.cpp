@@ -69,6 +69,7 @@ struct CliOptions {
   size_t max_diagnostics = 32;
   bool max_diagnostics_set = false;
   std::optional<std::string> diagnostics_jsonl_path;
+  std::optional<std::string> counter_parity_jsonl_path;
   bool all_code_objects = false;
   bool list_code_objects = false;
   bool recursive = false;
@@ -76,6 +77,7 @@ struct CliOptions {
   bool skip_unsupported = false;
   bool summary_only = false;
   bool stop_after_first_diagnostic = false;
+  bool check_counter_parity = false;
   bool no_fail = false;
   bool show_help = false;
   ProgressMode progress = ProgressMode::Auto;
@@ -103,6 +105,11 @@ struct ScanTotals {
   size_t memory_events_tracked = 0;
   size_t diagnostics = 0;
   bool diagnostics_truncated = false;
+  size_t counter_parity_fields = 0;
+  size_t counter_parity_exact = 0;
+  size_t counter_underaccounting = 0;
+  size_t counter_unmodeled_waits = 0;
+  size_t counter_parity_indeterminate_groups = 0;
   bool hazards = false;
   struct SlowKernel {
     std::chrono::nanoseconds elapsed{};
@@ -294,8 +301,11 @@ void print_help() {
             << "  --skip-unsupported       Skip unparsable or unsupported inputs\n"
             << "  --max-diagnostics N      Limit collected and printed diagnostics (default: 32)\n"
             << "  --diagnostics-jsonl PATH Losslessly write per-kernel diagnostics as JSONL\n"
+            << "  --counter-parity-jsonl PATH\n"
+            << "                           Write lossless gfx950 counter-parity findings as JSONL\n"
             << "  --stop-after-first-diagnostic\n"
             << "                           Stop each code object after the first observed hazard\n"
+            << "  --check-counter-parity   Compare gfx950 emitted waits with modeled requirements\n"
             << "  --summary-only           Print only final batch totals\n"
             << "  --no-fail                Return success even when hazards are reported\n"
             << "  --help                   Show this help\n\n"
@@ -350,6 +360,26 @@ void print_help() {
     return "pc";
   }
   return "unknown";
+}
+
+[[nodiscard]] std::string_view instruction_mnemonic(std::string_view disassembly) {
+  return disassembly.substr(0, disassembly.find_first_of(" \t"));
+}
+
+[[nodiscard]] std::string
+counter_parity_catalog_key(rj_code_target_id_t target,
+                           const WaitcheckCounterUnderaccountingDiagnostic &diagnostic) {
+  std::ostringstream os;
+  os << target_name(target) << "/" << (diagnostic.has_required_dependency ? "modeled" : "unmodeled")
+     << "/" << wait_counter_name(diagnostic.counter) << "/";
+  if (diagnostic.has_required_dependency) {
+    os << access_name(diagnostic.access) << "/" << register_class_name(diagnostic.reg.cls) << "/"
+       << instruction_mnemonic(diagnostic.producer_instruction) << "/";
+  } else {
+    os << "none/none/none/";
+  }
+  os << instruction_mnemonic(diagnostic.consumer_instruction);
+  return os.str();
 }
 
 void write_json_string(std::ostream &os, std::string_view value) {
@@ -515,6 +545,170 @@ private:
   std::mutex mutex_;
 };
 
+class CounterParityJsonlWriter {
+public:
+  CounterParityJsonlWriter(std::ostream &output, std::string tool_path)
+      : output_(output), tool_path_(std::move(tool_path)) {}
+
+  void write(std::string_view input_path, rj_code_target_id_t target, uint32_t code_object_index,
+             const WaitcheckKernelInfo *kernel,
+             std::span<const WaitcheckCounterUnderaccountingDiagnostic> diagnostics) {
+    if (diagnostics.empty())
+      return;
+    const std::lock_guard lock(mutex_);
+    for (const auto &diagnostic : diagnostics) {
+      output_ << "{\"schema\":\"rj-waitcheck-counter-parity-v1\",\"kind\":";
+      write_json_string(output_, diagnostic.has_required_dependency
+                                     ? "modeled-counter-underaccounting"
+                                     : "unmodeled-emitted-wait");
+      output_ << ",\"catalog_key\":";
+      write_json_string(output_, counter_parity_catalog_key(target, diagnostic));
+      output_ << ",\"root_cause_status\":\"untriaged\"";
+      output_ << ",\"input\":";
+      write_json_string(output_, input_path);
+      output_ << ",\"target\":";
+      write_json_string(output_, target_name(target));
+      output_ << ",\"code_object_index\":" << code_object_index << ",\"kernel_name\":";
+      if (diagnostic.has_kernel)
+        write_json_string(output_, diagnostic.kernel_name);
+      else if (kernel)
+        write_json_string(output_, kernel->name);
+      else
+        output_ << "null";
+      output_ << ",\"kernel_entry\":";
+      if (diagnostic.has_kernel)
+        output_ << diagnostic.kernel_entry_offset;
+      else if (kernel)
+        output_ << kernel->entry_offset;
+      else
+        output_ << "null";
+      output_ << ",\"kernel_entry_hex\":";
+      if (diagnostic.has_kernel)
+        write_json_string(output_, hex_value(diagnostic.kernel_entry_offset));
+      else if (kernel)
+        write_json_string(output_, hex_value(kernel->entry_offset));
+      else
+        output_ << "null";
+      output_ << ",\"wavefront_size\":";
+      if (kernel)
+        output_ << kernel->wavefront_size;
+      else
+        output_ << "null";
+      output_ << ",\"counter\":";
+      write_json_string(output_, wait_counter_name(diagnostic.counter));
+      output_ << ",\"emitted_count\":" << diagnostic.emitted_count
+              << ",\"required_count\":" << diagnostic.required_count
+              << ",\"has_required_dependency\":"
+              << (diagnostic.has_required_dependency ? "true" : "false") << ",\"access\":";
+      if (diagnostic.has_required_dependency)
+        write_json_string(output_, access_name(diagnostic.access));
+      else
+        output_ << "null";
+      output_ << ",\"register\":";
+      if (diagnostic.has_required_dependency) {
+        output_ << "{\"class\":";
+        write_json_string(output_, register_class_name(diagnostic.reg.cls));
+        output_ << ",\"index\":" << diagnostic.reg.index
+                << ",\"width\":" << static_cast<uint32_t>(diagnostic.reg.width) << "}";
+      } else {
+        output_ << "null";
+      }
+      output_ << ",\"section\":";
+      write_json_string(output_, diagnostic.section_name);
+      output_ << ",\"wait_section_offset\":" << diagnostic.wait_section_offset
+              << ",\"wait_section_offset_hex\":";
+      write_json_string(output_, hex_value(diagnostic.wait_section_offset));
+      output_ << ",\"wait_file_offset\":" << diagnostic.wait_file_offset
+              << ",\"wait_instruction\":";
+      write_json_string(output_, diagnostic.wait_instruction);
+      output_ << ",\"consumer_section_offset\":" << diagnostic.consumer_section_offset
+              << ",\"consumer_section_offset_hex\":";
+      write_json_string(output_, hex_value(diagnostic.consumer_section_offset));
+      output_ << ",\"consumer_file_offset\":" << diagnostic.consumer_file_offset
+              << ",\"consumer_class\":";
+      write_json_string(output_, instruction_mnemonic(diagnostic.consumer_instruction));
+      output_ << ",\"consumer_instruction\":";
+      write_json_string(output_, diagnostic.consumer_instruction);
+      output_ << ",\"producer_section_offset\":";
+      if (diagnostic.has_required_dependency)
+        output_ << diagnostic.producer_section_offset;
+      else
+        output_ << "null";
+      output_ << ",\"producer_section_offset_hex\":";
+      if (diagnostic.has_required_dependency)
+        write_json_string(output_, hex_value(diagnostic.producer_section_offset));
+      else
+        output_ << "null";
+      output_ << ",\"producer_file_offset\":";
+      if (diagnostic.has_required_dependency)
+        output_ << diagnostic.producer_file_offset;
+      else
+        output_ << "null";
+      output_ << ",\"producer_instruction\":";
+      if (diagnostic.has_required_dependency)
+        write_json_string(output_, diagnostic.producer_instruction);
+      else
+        output_ << "null";
+      output_ << ",\"producer_class\":";
+      if (diagnostic.has_required_dependency)
+        write_json_string(output_, instruction_mnemonic(diagnostic.producer_instruction));
+      else
+        output_ << "null";
+      output_ << ",\"message\":";
+      write_json_string(output_, diagnostic.message);
+
+      const uint64_t kernel_entry = diagnostic.has_kernel ? diagnostic.kernel_entry_offset
+                                                          : (kernel ? kernel->entry_offset : 0);
+      const bool has_kernel = diagnostic.has_kernel || kernel != nullptr;
+      const std::array<std::string, 9> fixed_repro_argv = {tool_path_,
+                                                           std::string(input_path),
+                                                           "--target",
+                                                           std::string(target_name(target)),
+                                                           "--code-object-index",
+                                                           std::to_string(code_object_index),
+                                                           "--check-counter-parity",
+                                                           "--no-fail",
+                                                           "--max-diagnostics"};
+      output_ << ",\"repro_argv\":[";
+      bool first = true;
+      for (const std::string &argument : fixed_repro_argv) {
+        if (!first)
+          output_ << ',';
+        first = false;
+        write_json_string(output_, argument);
+      }
+      output_ << ',';
+      write_json_string(output_, "4294967295");
+      if (has_kernel) {
+        output_ << ',';
+        write_json_string(output_, "--kernel-entry");
+        output_ << ',';
+        write_json_string(output_, hex_value(kernel_entry));
+      }
+      output_ << "],\"repro_command\":";
+      std::string repro_command;
+      for (const std::string &argument : fixed_repro_argv) {
+        if (!repro_command.empty())
+          repro_command += ' ';
+        repro_command += shell_quote(argument);
+      }
+      repro_command += " '4294967295'";
+      if (has_kernel) {
+        repro_command += " '--kernel-entry' ";
+        repro_command += shell_quote(hex_value(kernel_entry));
+      }
+      write_json_string(output_, repro_command);
+      output_ << "}\n";
+    }
+    output_.flush();
+  }
+
+private:
+  std::ostream &output_;
+  std::string tool_path_;
+  std::mutex mutex_;
+};
+
 [[nodiscard]] std::optional<rj_code_target_id_t> parse_target(std::string_view value) {
   for (const TargetInfo &info : kSupportedTargets) {
     if (value == info.name)
@@ -626,6 +820,10 @@ private:
       options.stop_after_first_diagnostic = true;
       continue;
     }
+    if (arg == "--check-counter-parity") {
+      options.check_counter_parity = true;
+      continue;
+    }
     if (arg == "--no-fail") {
       options.no_fail = true;
       continue;
@@ -682,6 +880,17 @@ private:
         return false;
       }
       options.diagnostics_jsonl_path = value;
+      continue;
+    }
+    if (arg == "--counter-parity-jsonl") {
+      if (!require_value(argc, argv, i, arg, value))
+        return false;
+      if (value.empty()) {
+        std::cerr << "counter-parity JSONL path cannot be empty\n";
+        return false;
+      }
+      options.counter_parity_jsonl_path = value;
+      options.check_counter_parity = true;
       continue;
     }
     if (arg == "--slowest-kernels") {
@@ -750,7 +959,20 @@ private:
     std::cerr << "--diagnostics-jsonl cannot be combined with --stop-after-first-diagnostic\n";
     return false;
   }
-  if (options.diagnostics_jsonl_path)
+  if (options.counter_parity_jsonl_path && !options.all_code_objects) {
+    std::cerr << "--counter-parity-jsonl requires --all-code-objects or --exhaustive\n";
+    return false;
+  }
+  if (options.counter_parity_jsonl_path && options.max_diagnostics_set) {
+    std::cerr << "--counter-parity-jsonl cannot be combined with --max-diagnostics\n";
+    return false;
+  }
+  if (options.counter_parity_jsonl_path && options.stop_after_first_diagnostic) {
+    std::cerr << "--counter-parity-jsonl cannot be combined with "
+                 "--stop-after-first-diagnostic\n";
+    return false;
+  }
+  if (options.diagnostics_jsonl_path || options.counter_parity_jsonl_path)
     options.max_diagnostics = std::numeric_limits<size_t>::max();
 
   return true;
@@ -936,6 +1158,39 @@ void print_diagnostics(const std::string &input_path, rj_code_target_id_t target
   }
 }
 
+void print_counter_underaccounting(const std::string &input_path, rj_code_target_id_t target,
+                                   uint32_t code_object_index, const WaitcheckReport &report,
+                                   size_t max_diagnostics) {
+  const size_t limit = std::min(max_diagnostics, report.counter_underaccounting_diagnostics.size());
+  for (size_t i = 0; i < limit; ++i) {
+    const auto &diag = report.counter_underaccounting_diagnostics[i];
+    std::cout << input_path << ":" << target_name(target) << "[" << code_object_index << "]";
+    if (diag.has_kernel)
+      std::cout << ":kernel=" << diag.kernel_name << "@.text+"
+                << hex_offset(diag.kernel_entry_offset);
+    std::cout << ":" << diag.section_name << "+" << hex_offset(diag.wait_section_offset)
+              << ": counter under-accounting: " << diag.message << "\n";
+    std::cout << "  wait " << diag.section_name << "+" << hex_offset(diag.wait_section_offset)
+              << ": " << diag.wait_instruction << "\n";
+    if (diag.has_required_dependency) {
+      std::cout << "  producer " << diag.section_name << "+"
+                << hex_offset(diag.producer_section_offset) << ": " << diag.producer_instruction
+                << "\n";
+    } else {
+      std::cout << "  producer <no modeled dependency>\n";
+    }
+    std::cout << "  consumer " << diag.section_name << "+"
+              << hex_offset(diag.consumer_section_offset) << ": " << diag.consumer_instruction
+              << "\n";
+  }
+  if (report.counter_underaccounting_diagnostics.size() > limit) {
+    std::cout << "omitted " << (report.counter_underaccounting_diagnostics.size() - limit)
+              << " additional counter-underaccounting diagnostic(s)\n";
+  } else if (report.counter_parity_diagnostics_truncated) {
+    std::cout << "omitted additional counter-underaccounting diagnostic(s) after limit\n";
+  }
+}
+
 void print_summary(const std::string &input_path, rj_code_target_id_t target,
                    uint32_t code_object_index, std::optional<uint64_t> kernel_entry,
                    const WaitcheckReport &report) {
@@ -946,7 +1201,15 @@ void print_summary(const std::string &input_path, rj_code_target_id_t target,
   std::cout << ": instructions=" << count_label(report.instructions_analyzed, report.stopped_early)
             << " memory-events=" << count_label(report.memory_events_tracked, report.stopped_early)
             << " diagnostics="
-            << count_label(report.diagnostics_observed, report.diagnostics_truncated) << "\n";
+            << count_label(report.diagnostics_observed, report.diagnostics_truncated);
+  if (report.counter_parity_fields_checked != 0 || report.counter_underaccounting_observed != 0) {
+    std::cout << " parity-fields=" << report.counter_parity_fields_checked
+              << " parity-exact=" << report.counter_parity_exact
+              << " counter-underaccounting=" << report.counter_underaccounting_observed
+              << " unmodeled-waits=" << report.counter_unmodeled_wait_observed
+              << " parity-indeterminate=" << report.counter_parity_indeterminate_groups;
+  }
+  std::cout << "\n";
 }
 
 void skip_input(const std::string &input_path, std::string_view reason, ScanTotals &totals,
@@ -989,6 +1252,8 @@ void record_analysis_error(const std::string &input_path, std::string_view reaso
   WaitcheckOptions analysis_options;
   analysis_options.max_diagnostics = options.max_diagnostics;
   analysis_options.stop_after_first_diagnostic = options.stop_after_first_diagnostic;
+  analysis_options.check_counter_parity = options.check_counter_parity;
+  analysis_options.max_counter_parity_diagnostics = options.max_diagnostics;
   if (progress)
     analysis_options.kernel_analyzed_callback = [&] { progress->kernel_analyzed(); };
   try {
@@ -1028,6 +1293,8 @@ run_kernel_batch_analysis(const CliOptions &options, const std::string &input_pa
   WaitcheckOptions analysis_options;
   analysis_options.max_diagnostics = options.max_diagnostics;
   analysis_options.stop_after_first_diagnostic = options.stop_after_first_diagnostic;
+  analysis_options.check_counter_parity = options.check_counter_parity;
+  analysis_options.max_counter_parity_diagnostics = options.max_diagnostics;
   if (progress)
     analysis_options.kernel_analyzed_callback = [&] { progress->kernel_analyzed(); };
   if (options.slowest_kernels != 0)
@@ -1069,6 +1336,11 @@ run_kernel_batch_analysis(const CliOptions &options, const std::string &input_pa
   totals.memory_events_tracked += report.memory_events_tracked;
   totals.diagnostics += report.diagnostics_observed;
   totals.diagnostics_truncated = totals.diagnostics_truncated || report.diagnostics_truncated;
+  totals.counter_parity_fields += report.counter_parity_fields_checked;
+  totals.counter_parity_exact += report.counter_parity_exact;
+  totals.counter_underaccounting += report.counter_underaccounting_observed;
+  totals.counter_unmodeled_waits += report.counter_unmodeled_wait_observed;
+  totals.counter_parity_indeterminate_groups += report.counter_parity_indeterminate_groups;
   totals.hazards = totals.hazards || !report.passed();
   if (!report.supported) {
     error = result.error;
@@ -1080,6 +1352,10 @@ run_kernel_batch_analysis(const CliOptions &options, const std::string &input_pa
   if (!options.summary_only) {
     print_summary(input_path, target, code_object_index, options.kernel_entry, report);
     print_diagnostics(input_path, target, code_object_index, report, options.max_diagnostics);
+    if (options.check_counter_parity) {
+      print_counter_underaccounting(input_path, target, code_object_index, report,
+                                    options.max_diagnostics);
+    }
   }
   return true;
 }
@@ -1133,6 +1409,14 @@ void merge_kernel_analysis(CodeObjectAnalysis &code_object_result,
   combined.diagnostics_observed += kernel.diagnostics_observed;
   combined.diagnostics_truncated = combined.diagnostics_truncated || kernel.diagnostics_truncated;
   combined.stopped_early = combined.stopped_early || kernel.stopped_early;
+  combined.counter_parity_wait_groups += kernel.counter_parity_wait_groups;
+  combined.counter_parity_fields_checked += kernel.counter_parity_fields_checked;
+  combined.counter_parity_exact += kernel.counter_parity_exact;
+  combined.counter_underaccounting_observed += kernel.counter_underaccounting_observed;
+  combined.counter_unmodeled_wait_observed += kernel.counter_unmodeled_wait_observed;
+  combined.counter_parity_indeterminate_groups += kernel.counter_parity_indeterminate_groups;
+  combined.counter_parity_diagnostics_truncated =
+      combined.counter_parity_diagnostics_truncated || kernel.counter_parity_diagnostics_truncated;
 
   for (const WaitcheckDiagnostic &diagnostic : kernel.diagnostics) {
     if (combined.diagnostics.size() >= max_diagnostics) {
@@ -1140,6 +1424,13 @@ void merge_kernel_analysis(CodeObjectAnalysis &code_object_result,
       break;
     }
     combined.diagnostics.push_back(diagnostic);
+  }
+  for (const auto &diagnostic : kernel.counter_underaccounting_diagnostics) {
+    if (combined.counter_underaccounting_diagnostics.size() >= max_diagnostics) {
+      combined.counter_parity_diagnostics_truncated = true;
+      break;
+    }
+    combined.counter_underaccounting_diagnostics.push_back(diagnostic);
   }
 
   if (!kernel.supported && combined.supported) {
@@ -1183,6 +1474,7 @@ void print_slowest_kernels(const ScanTotals &totals) {
 [[nodiscard]] bool scan_all_code_objects(const CliOptions &options, const std::string &input_path,
                                          ScanTotals &totals, std::string &error,
                                          DiagnosticJsonlWriter *diagnostic_writer,
+                                         CounterParityJsonlWriter *counter_parity_writer,
                                          ProgressDisplay *progress = nullptr) {
   Executable executable(input_path);
   if (!executable.is_valid()) {
@@ -1255,7 +1547,8 @@ void print_slowest_kernels(const ScanTotals &totals) {
   // Interleave bounded kernel batches from different code objects. Each batch
   // reuses one analyzer and decoder, while enough independent work remains for
   // a slow kernel to pin only its current worker.
-  const size_t kernel_batch_size = diagnostic_writer ? 1 : kKernelBatchSize;
+  const size_t kernel_batch_size =
+      diagnostic_writer || counter_parity_writer ? 1 : kKernelBatchSize;
   size_t max_batch_count = 0;
   for (size_t task_index = 0; task_index < code_object_tasks.size(); ++task_index) {
     CodeObjectTask &task = code_object_tasks[task_index];
@@ -1310,6 +1603,15 @@ void print_slowest_kernels(const ScanTotals &totals) {
         // worker arena; clear() alone retains one high-water capacity in every
         // work-result slot until the whole executable finishes.
         std::vector<WaitcheckDiagnostic>().swap(work_results[work_index].report.diagnostics);
+      }
+      if (counter_parity_writer) {
+        const WaitcheckKernelInfo *kernel =
+            work.kernel_count == 1 ? &task.kernels[work.first_kernel] : nullptr;
+        counter_parity_writer->write(
+            input_path, task.target, task.index, kernel,
+            work_results[work_index].report.counter_underaccounting_diagnostics);
+        std::vector<WaitcheckCounterUnderaccountingDiagnostic>().swap(
+            work_results[work_index].report.counter_underaccounting_diagnostics);
       }
       // Batch CFGs and diagnostic payloads can be much larger than their
       // code-object images. Return their freed pages before the worker takes
@@ -1393,6 +1695,19 @@ int main(int argc, char **argv) {
     diagnostic_writer =
         std::make_unique<DiagnosticJsonlWriter>(diagnostic_output, std::string(argv[0]));
   }
+  std::ofstream counter_parity_output;
+  std::unique_ptr<CounterParityJsonlWriter> counter_parity_writer;
+  if (options.counter_parity_jsonl_path) {
+    counter_parity_output.open(*options.counter_parity_jsonl_path,
+                               std::ios::binary | std::ios::out | std::ios::trunc);
+    if (!counter_parity_output) {
+      std::cerr << "failed to open counter-parity JSONL output: "
+                << *options.counter_parity_jsonl_path << "\n";
+      return kInputError;
+    }
+    counter_parity_writer =
+        std::make_unique<CounterParityJsonlWriter>(counter_parity_output, std::string(argv[0]));
+  }
 
   if (options.list_code_objects) {
     const bool include_path = options.input_paths.size() > 1;
@@ -1427,10 +1742,11 @@ int main(int argc, char **argv) {
   for (const std::string &input_path : options.input_paths) {
     ++totals.inputs;
     std::string error;
-    const bool ok = options.all_code_objects
-                        ? scan_all_code_objects(options, input_path, totals, error,
-                                                diagnostic_writer.get(), progress_ptr)
-                        : scan_selected_code_object(options, input_path, totals, error);
+    const bool ok =
+        options.all_code_objects
+            ? scan_all_code_objects(options, input_path, totals, error, diagnostic_writer.get(),
+                                    counter_parity_writer.get(), progress_ptr)
+            : scan_selected_code_object(options, input_path, totals, error);
     if (!ok) {
       if (progress_ptr)
         progress.before_message();
@@ -1447,13 +1763,24 @@ int main(int argc, char **argv) {
               << " kernels=" << totals.kernels_analyzed << "/" << totals.kernels_discovered
               << " instructions=" << totals.instructions_analyzed
               << " memory-events=" << totals.memory_events_tracked
-              << " diagnostics=" << count_label(totals.diagnostics, totals.diagnostics_truncated)
-              << " analysis-errors=" << totals.analysis_errors << "\n";
+              << " diagnostics=" << count_label(totals.diagnostics, totals.diagnostics_truncated);
+    if (options.check_counter_parity) {
+      std::cout << " parity-fields=" << totals.counter_parity_fields
+                << " parity-exact=" << totals.counter_parity_exact
+                << " counter-underaccounting=" << totals.counter_underaccounting
+                << " unmodeled-waits=" << totals.counter_unmodeled_waits
+                << " parity-indeterminate=" << totals.counter_parity_indeterminate_groups;
+    }
+    std::cout << " analysis-errors=" << totals.analysis_errors << "\n";
   } else if (batch_mode) {
     std::cout << "rj_waitcheck: scanned inputs=" << totals.inputs << " skipped=" << totals.skipped
               << " code-objects=" << totals.code_objects
-              << " diagnostics=" << count_label(totals.diagnostics, totals.diagnostics_truncated)
-              << "\n";
+              << " diagnostics=" << count_label(totals.diagnostics, totals.diagnostics_truncated);
+    if (options.check_counter_parity) {
+      std::cout << " counter-underaccounting=" << totals.counter_underaccounting
+                << " unmodeled-waits=" << totals.counter_unmodeled_waits;
+    }
+    std::cout << "\n";
   }
   if (options.slowest_kernels != 0)
     print_slowest_kernels(totals);

@@ -374,6 +374,61 @@ TEST(RjWaitcheck, ExhaustiveWritesLosslessPerKernelDiagnosticJsonl) {
   EXPECT_TRUE(contains(diagnostic_text, "\"repro_command\":")) << diagnostic_text;
 }
 
+TEST(RjWaitcheck, ExhaustiveWritesLosslessGfx950CounterParityJsonl) {
+  const TempDir temp_dir(
+      std::filesystem::temp_directory_path() /
+      ("rj_waitcheck_smoke_" + std::to_string(static_cast<long long>(getpid()))));
+
+  const auto input = temp_dir.path / "counter_parity_gfx950.co";
+  const auto output = temp_dir.path / "stdout.txt";
+  const auto error = temp_dir.path / "stderr.txt";
+  const auto diagnostics = temp_dir.path / "counter-parity.jsonl";
+  const auto image = rocjitsu::waitcheck_test::make_gfx_multi_kernel_code_object(
+      {{"strong_wait",
+        {0xE0501000u, 0x80000008u, // buffer_load_dword v0, v8, s[0:3] offen
+         0xE05D1000u, 0x80100008u, // buffer_load_dwordx4 ... lds
+         0xBF8C0F70u,              // s_waitcnt vmcnt(0); vmcnt(1) is sufficient
+         0x7E020300u,              // v_mov_b32 v1, v0
+         0xBF810000u}}},           // s_endpgm
+      rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ASSERT_TRUE(write_binary_file(input, image));
+
+  const std::string command = shell_quote(g_waitcheck_tool.string()) + " " +
+                              shell_quote(input.string()) +
+                              " --exhaustive --target gfx950 --summary-only --no-fail -j2 "
+                              "--counter-parity-jsonl " +
+                              shell_quote(diagnostics.string()) + " > " +
+                              shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+  const std::string diagnostic_text = read_text_file(diagnostics);
+
+  ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
+                                         << stderr_text << "\nstdout:\n"
+                                         << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+  EXPECT_TRUE(contains(stdout_text, "parity-fields=1 parity-exact=0")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "counter-underaccounting=1 unmodeled-waits=0")) << stdout_text;
+  EXPECT_EQ(std::count(diagnostic_text.begin(), diagnostic_text.end(), '\n'), 1);
+  EXPECT_TRUE(contains(diagnostic_text, "\"schema\":\"rj-waitcheck-counter-parity-v1\""))
+      << diagnostic_text;
+  EXPECT_TRUE(contains(diagnostic_text, "\"kind\":\"modeled-counter-underaccounting\""))
+      << diagnostic_text;
+  EXPECT_TRUE(contains(diagnostic_text, "\"catalog_key\":\"gfx950/modeled/loadcnt/use/"
+                                        "vgpr/buffer_load_dword/v_mov_b32_e32\""))
+      << diagnostic_text;
+  EXPECT_TRUE(contains(diagnostic_text, "\"root_cause_status\":\"untriaged\"")) << diagnostic_text;
+  EXPECT_TRUE(contains(diagnostic_text, "\"kernel_name\":\"strong_wait\"")) << diagnostic_text;
+  EXPECT_TRUE(contains(diagnostic_text, "\"counter\":\"loadcnt\"")) << diagnostic_text;
+  EXPECT_TRUE(contains(diagnostic_text, "\"emitted_count\":0,\"required_count\":1"))
+      << diagnostic_text;
+  EXPECT_TRUE(contains(diagnostic_text, "\"has_required_dependency\":true")) << diagnostic_text;
+  EXPECT_TRUE(contains(diagnostic_text, "\"repro_argv\":[")) << diagnostic_text;
+  EXPECT_TRUE(contains(diagnostic_text, "--check-counter-parity")) << diagnostic_text;
+  EXPECT_TRUE(contains(diagnostic_text, "--kernel-entry")) << diagnostic_text;
+}
+
 TEST(RjWaitcheck, AnalyzesGfx942CodeObject) {
   const TempDir temp_dir(
       std::filesystem::temp_directory_path() /

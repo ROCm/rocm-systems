@@ -36,8 +36,32 @@ struct OwnedDiagnostic {
   std::string message;
 };
 
+struct OwnedCounterParityDiagnostic {
+  size_t struct_size = 0;
+  uint32_t abi_version = 0;
+  rj_waitcheck_counter_parity_kind_t kind = ROCJITSU_WAITCHECK_COUNTER_PARITY_UNKNOWN;
+  bool has_kernel = false;
+  std::string kernel_name;
+  uint64_t kernel_entry_offset = 0;
+  rj_waitcheck_counter_t counter = ROCJITSU_WAITCHECK_COUNTER_INVALID;
+  uint32_t emitted_count = 0;
+  uint32_t required_count = 0;
+  bool has_required_dependency = false;
+  rj_waitcheck_access_t access = ROCJITSU_WAITCHECK_ACCESS_INVALID;
+  rj_waitcheck_register_t reg{};
+  std::string section_name;
+  uint64_t wait_section_offset = 0;
+  std::string wait_instruction;
+  uint64_t consumer_section_offset = 0;
+  std::string consumer_instruction;
+  uint64_t producer_section_offset = 0;
+  std::string producer_instruction;
+  std::string message;
+};
+
 struct CallbackState {
   std::vector<OwnedDiagnostic> diagnostics;
+  std::vector<OwnedCounterParityDiagnostic> counter_parity_diagnostics;
   std::vector<std::string> errors;
 };
 
@@ -59,6 +83,34 @@ void capture_diagnostic(const rj_waitcheck_diagnostic_t *diagnostic, void *user_
       .instruction = diagnostic->instruction,
       .producer_instruction = diagnostic->producer_instruction,
       .required_count = diagnostic->required_count,
+      .message = diagnostic->message,
+  });
+}
+
+void capture_counter_parity(const rj_waitcheck_counter_parity_diagnostic_t *diagnostic,
+                            void *user_data) {
+  auto &state = *static_cast<CallbackState *>(user_data);
+  state.counter_parity_diagnostics.push_back(OwnedCounterParityDiagnostic{
+      .struct_size = diagnostic->struct_size,
+      .abi_version = diagnostic->abi_version,
+      .kind = diagnostic->kind,
+      .has_kernel = diagnostic->has_kernel != 0,
+      .kernel_name = diagnostic->kernel_name ? diagnostic->kernel_name : "",
+      .kernel_entry_offset = diagnostic->kernel_entry_offset,
+      .counter = diagnostic->counter,
+      .emitted_count = diagnostic->emitted_count,
+      .required_count = diagnostic->required_count,
+      .has_required_dependency = diagnostic->has_required_dependency != 0,
+      .access = diagnostic->access,
+      .reg = diagnostic->reg,
+      .section_name = diagnostic->section_name,
+      .wait_section_offset = diagnostic->wait_section_offset,
+      .wait_instruction = diagnostic->wait_instruction,
+      .consumer_section_offset = diagnostic->consumer_section_offset,
+      .consumer_instruction = diagnostic->consumer_instruction,
+      .producer_section_offset = diagnostic->producer_section_offset,
+      .producer_instruction =
+          diagnostic->producer_instruction ? diagnostic->producer_instruction : "",
       .message = diagnostic->message,
   });
 }
@@ -94,8 +146,69 @@ TEST(WaitcheckCApiTest, DefaultOptionsReportEveryDiagnosticWithoutStoppingEarly)
   EXPECT_EQ(options.diagnostic_callback, nullptr);
   EXPECT_EQ(options.error_callback, nullptr);
   EXPECT_EQ(options.user_data, nullptr);
+  EXPECT_EQ(options.check_counter_parity, 0u);
+  EXPECT_EQ(options.max_counter_parity_diagnostics, 0u);
+  EXPECT_EQ(options.counter_parity_callback, nullptr);
 
   EXPECT_EQ(rj_waitcheck_options_init(nullptr, sizeof(options)), ROCJITSU_STATUS_INVALID_ARGUMENT);
+}
+
+TEST(WaitcheckCApiTest, ReportsGfx950CounterParityWithoutChangingPassStatus) {
+  const auto image = rocjitsu::waitcheck_test::make_gfx_multi_kernel_code_object(
+      {{"strong_wait",
+        {0xE0501000u, 0x80000008u, // buffer_load_dword v0, v8, s[0:3] offen
+         0xE05D1000u, 0x80100008u, // buffer_load_dwordx4 ... lds
+         0xBF8C0F70u,              // s_waitcnt vmcnt(0); vmcnt(1) is sufficient
+         0x7E020300u,              // v_mov_b32 v1, v0
+         0xBF810000u}}},           // s_endpgm
+      rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX950);
+  CallbackState state;
+  rj_waitcheck_options_t options = callback_options(state);
+  options.check_counter_parity = 1;
+  options.counter_parity_callback = capture_counter_parity;
+  rj_waitcheck_result_t result = initialized_result();
+
+  ASSERT_EQ(rj_waitcheck_analyze(image.data(), image.size(), &options, &result),
+            ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(result.target, ROCJITSU_WAITCHECK_TARGET_GFX950);
+  EXPECT_EQ(result.passed, 1u);
+  EXPECT_EQ(result.diagnostics_observed, 0u);
+  EXPECT_EQ(result.counter_parity_wait_groups, 1u);
+  EXPECT_EQ(result.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(result.counter_parity_exact, 0u);
+  EXPECT_EQ(result.counter_underaccounting_observed, 1u);
+  EXPECT_EQ(result.counter_unmodeled_wait_observed, 0u);
+  EXPECT_EQ(result.counter_parity_indeterminate_groups, 0u);
+  EXPECT_EQ(result.counter_parity_diagnostics_reported, 1u);
+  EXPECT_EQ(result.counter_parity_diagnostics_truncated, 0u);
+  ASSERT_EQ(state.counter_parity_diagnostics.size(), 1u);
+  EXPECT_TRUE(state.diagnostics.empty());
+  EXPECT_TRUE(state.errors.empty());
+
+  const auto &diagnostic = state.counter_parity_diagnostics.front();
+  EXPECT_EQ(diagnostic.struct_size, sizeof(rj_waitcheck_counter_parity_diagnostic_t));
+  EXPECT_EQ(diagnostic.abi_version, ROCJITSU_WAITCHECK_ABI_VERSION);
+  EXPECT_EQ(diagnostic.kind, ROCJITSU_WAITCHECK_COUNTER_PARITY_MODELED_UNDERACCOUNTING);
+  EXPECT_STREQ(rj_waitcheck_counter_parity_kind_name(diagnostic.kind),
+               "modeled-counter-underaccounting");
+  EXPECT_TRUE(diagnostic.has_kernel);
+  EXPECT_EQ(diagnostic.kernel_name, "strong_wait");
+  EXPECT_EQ(diagnostic.kernel_entry_offset, 0u);
+  EXPECT_EQ(diagnostic.counter, ROCJITSU_WAITCHECK_COUNTER_LOAD);
+  EXPECT_EQ(diagnostic.emitted_count, 0u);
+  EXPECT_EQ(diagnostic.required_count, 1u);
+  EXPECT_TRUE(diagnostic.has_required_dependency);
+  EXPECT_EQ(diagnostic.access, ROCJITSU_WAITCHECK_ACCESS_USE);
+  EXPECT_EQ(diagnostic.reg.register_class, ROCJITSU_WAITCHECK_REGISTER_VGPR);
+  EXPECT_EQ(diagnostic.reg.index, 0u);
+  EXPECT_EQ(diagnostic.reg.width, 1u);
+  EXPECT_EQ(diagnostic.section_name, ".text");
+  EXPECT_EQ(diagnostic.wait_section_offset, 16u);
+  EXPECT_EQ(diagnostic.consumer_section_offset, 20u);
+  EXPECT_EQ(diagnostic.producer_section_offset, 0u);
+  EXPECT_FALSE(diagnostic.wait_instruction.empty());
+  EXPECT_FALSE(diagnostic.consumer_instruction.empty());
+  EXPECT_FALSE(diagnostic.producer_instruction.empty());
 }
 
 TEST(WaitcheckCApiTest, ReportsStructuredDiagnosticFromHazardousBuffer) {
@@ -164,6 +277,21 @@ TEST(WaitcheckCApiTest, DiagnosticCodesAndNamesAreStable) {
   EXPECT_STREQ(rj_waitcheck_diagnostic_code_name(ROCJITSU_WAITCHECK_DIAGNOSTIC_VA_VDST), "va-vdst");
   EXPECT_STREQ(rj_waitcheck_diagnostic_code_name(static_cast<rj_waitcheck_diagnostic_code_t>(1234)),
                "unknown");
+
+  static_assert(ROCJITSU_WAITCHECK_COUNTER_PARITY_UNKNOWN == 0);
+  static_assert(ROCJITSU_WAITCHECK_COUNTER_PARITY_MODELED_UNDERACCOUNTING == 1);
+  static_assert(ROCJITSU_WAITCHECK_COUNTER_PARITY_UNMODELED_EMITTED_WAIT == 2);
+  EXPECT_STREQ(rj_waitcheck_counter_parity_kind_name(ROCJITSU_WAITCHECK_COUNTER_PARITY_UNKNOWN),
+               "unknown");
+  EXPECT_STREQ(rj_waitcheck_counter_parity_kind_name(
+                   ROCJITSU_WAITCHECK_COUNTER_PARITY_MODELED_UNDERACCOUNTING),
+               "modeled-counter-underaccounting");
+  EXPECT_STREQ(rj_waitcheck_counter_parity_kind_name(
+                   ROCJITSU_WAITCHECK_COUNTER_PARITY_UNMODELED_EMITTED_WAIT),
+               "unmodeled-emitted-wait");
+  EXPECT_STREQ(
+      rj_waitcheck_counter_parity_kind_name(static_cast<rj_waitcheck_counter_parity_kind_t>(1234)),
+      "unknown");
 }
 
 TEST(WaitcheckCApiTest, SupportsRdna35Targets) {
