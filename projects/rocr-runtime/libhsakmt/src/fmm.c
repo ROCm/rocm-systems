@@ -1231,13 +1231,18 @@ out:
 }
 
 /* Test if allocation type should be done with DRM or KFD (used for testing/debugging when transitioning to DRM) */
-static bool is_supported_on_drm(alloc_flags_t alloc_flags)
-{
-	/* ALLOC_DOMAIN_SYSTEM intentionally excluded: system (CPU/kernarg) memory
-	 * allocations fall through to the KFD path which handles GTT and blit
-	 * kernel buffers correctly. Routing system memory via DRM BO alloc fails
-	 * on current kernels for anonymous/non-pinned allocations. */
+static bool is_supported_on_drm(alloc_flags_t alloc_flags) {
+	/* ALLOC_DOMAIN_SYSTEM is routed through the DRM BO path so host (GTT/
+	 * userptr) memory is mapped into the DRM VM and visible to DRM user queues.
+	 * Earlier UKI kernels rejected anonymous GTT/userptr DRM BO allocs, so
+	 * system memory was excluded and fell back to the KFD path — leaving it in
+	 * the KFD VM, invisible to DRM user queues, which caused compute/CPF page
+	 * faults when a user-queue kernel touched host buffers (e.g. async copy
+	 * source/dest). Re-verified working on drm 3.64 (6.19.0-kfd): anonymous GTT
+	 * alloc, userptr, and GPU VA map all succeed. fmm_allocate_memory_object_drm
+	 * already handles ALLOC_DOMAIN_SYSTEM (userptr or GTT heap). */
 	return (alloc_flags.domain == ALLOC_DOMAIN_VRAM) ||
+               (alloc_flags.domain == ALLOC_DOMAIN_SYSTEM) ||
                (alloc_flags.domain == ALLOC_DOMAIN_USERMEM) ||
                (alloc_flags.domain == ALLOC_DOMAIN_MMIO);
 }
