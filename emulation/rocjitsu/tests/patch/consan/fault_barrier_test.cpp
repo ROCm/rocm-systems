@@ -1490,7 +1490,7 @@ TEST(ConSan, FaultBarrierMarkerlessExecutionRelocatesExactPairEarlierAndLater) {
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
-  for (const auto [direction, destination_offset] :
+  for (const auto &[direction, destination_offset] :
        {std::pair{ConSanBarrierMoveDirection::Earlier, 0u},
         std::pair{ConSanBarrierMoveDirection::Later, 16u}}) {
     const auto destination =

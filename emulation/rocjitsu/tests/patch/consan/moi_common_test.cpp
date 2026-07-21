@@ -348,10 +348,11 @@ TEST(ConSanMoi, SharedHelperAtomicSpillUsesOneLayoutForEveryOwner) {
     KD descriptor{};
     std::memcpy(&descriptor, result.elf_bytes.data() + kernel.descriptor_file_offset,
                 sizeof(descriptor));
-    if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1")
+    if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1") {
       EXPECT_EQ(descriptor.private_segment_fixed_size, 76u);
-    else if (kernel.name == "unrelated_kernel")
+    } else if (kernel.name == "unrelated_kernel") {
       EXPECT_EQ(descriptor.private_segment_fixed_size, 0u);
+    }
   }
 }
 
@@ -436,10 +437,11 @@ TEST(ConSanMoi, SharedHelperPlanGrowsEveryOwnerForOneFreshWindow) {
                 sizeof(descriptor));
     const uint32_t granulated = AMDHSA_BITS_GET(
         descriptor.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
-    if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1")
+    if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1") {
       EXPECT_EQ(granulated, 1u);
-    else if (kernel.name == "unrelated_kernel")
+    } else if (kernel.name == "unrelated_kernel") {
       EXPECT_EQ(granulated, kRdna4Wave64AllVgprsGranulated);
+    }
   }
 }
 
@@ -481,10 +483,11 @@ TEST(ConSanMoi, SharedHelperSpillUsesOneLayoutAndGrowsEveryOwner) {
     KD descriptor{};
     std::memcpy(&descriptor, result.elf_bytes.data() + kernel.descriptor_file_offset,
                 sizeof(descriptor));
-    if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1")
+    if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1") {
       EXPECT_EQ(descriptor.private_segment_fixed_size, 44u);
-    else if (kernel.name == "unrelated_kernel")
+    } else if (kernel.name == "unrelated_kernel") {
       EXPECT_EQ(descriptor.private_segment_fixed_size, 0u);
+    }
   }
 }
 
@@ -540,10 +543,11 @@ TEST(ConSanMoi, ScopedSpillPlanningExcludesUnselectedFullVgprCandidate) {
     KD descriptor{};
     std::memcpy(&descriptor, result.elf_bytes.data() + kernel.descriptor_file_offset,
                 sizeof(descriptor));
-    if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1")
+    if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1") {
       EXPECT_EQ(descriptor.private_segment_fixed_size, 44u);
-    else if (kernel.name == "unrelated_kernel")
+    } else if (kernel.name == "unrelated_kernel") {
       EXPECT_EQ(descriptor.private_segment_fixed_size, 0u);
+    }
   }
 }
 

@@ -52,7 +52,7 @@ public:
     }
     std::ranges::sort(occupied_ranges);
     std::vector<std::pair<uint64_t, uint64_t>> merged_occupied_ranges;
-    for (const auto range : occupied_ranges) {
+    for (const auto &range : occupied_ranges) {
       if (merged_occupied_ranges.empty() || merged_occupied_ranges.back().second < range.first) {
         merged_occupied_ranges.push_back(range);
       } else {

@@ -216,10 +216,17 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       return;
     const bool direct_entry =
         compute_sopp_branch_simm16(fence.text_offset, cave_text_offset).has_value();
-    const std::optional<uint64_t> indirect_entry_island =
-        direct_entry ? std::nullopt : indirect_allocator.claim_reachable(fence.text_offset);
+    uint64_t indirect_entry_island = 0;
+    bool has_indirect_entry_island = false;
+    if (!direct_entry) {
+      const auto claimed_island = indirect_allocator.claim_reachable(fence.text_offset);
+      if (claimed_island) {
+        indirect_entry_island = *claimed_island;
+        has_indirect_entry_island = true;
+      }
+    }
     std::optional<DenseFenceRelay> dense_relay;
-    if (!direct_entry && !indirect_entry_island && arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+    if (!direct_entry && !has_indirect_entry_island && arch == ROCJITSU_CODE_ARCH_GFX1250 &&
         planned.candidate.kernel_descriptor_file_offset && options.moi_exec_save_sgpr) {
       dense_relay = find_dense_fence_relay(*planned.candidate.kernel_descriptor_file_offset);
       if (dense_relay &&
@@ -236,7 +243,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
           return;
       }
     }
-    if (!direct_entry && !indirect_entry_island && !dense_relay) {
+    if (!direct_entry && !has_indirect_entry_island && !dense_relay) {
       result.warnings.emplace_back(
           "ConSan MOI fence record patch found no reachable indirect entry island in " +
           fence.container_name);
@@ -255,7 +262,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     }
     const uint64_t entry_target = dense_relay
                                       ? dense_relay->island_offset
-                                      : indirect_entry_island.value_or(placement->body_offset);
+                                      : (has_indirect_entry_island ? indirect_entry_island
+                                                                   : placement->body_offset);
     const auto fwd = compute_sopp_branch_simm16(placement->anchor_offset, entry_target);
     if (!fwd) {
       result.errors.emplace_back("ConSan MOI fence record forward branch is out of range");
@@ -279,9 +287,9 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     }
     std::memcpy(new_text.data() + fence.text_offset, anchor_words.data(),
                 anchor_words.size() * sizeof(uint32_t));
-    if (indirect_entry_island &&
+    if (has_indirect_entry_island &&
         !emit_moi_local_indirect_entry_island(
-            new_text, *indirect_entry_island, placement->body_offset, fence.text_offset, options,
+            new_text, indirect_entry_island, placement->body_offset, fence.text_offset, options,
             planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
             "ConSan MOI fence record patch")) {
       return;

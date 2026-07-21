@@ -337,17 +337,19 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       }
       std::ranges::sort(owners);
       owners.erase(std::ranges::unique(owners).begin(), owners.end());
-      std::optional<uint16_t> common_allocated_vgpr_count;
+      uint16_t common_allocated_vgpr_count = 0;
+      bool has_common_allocated_vgpr_count = false;
       std::optional<uint16_t> max_owner_sgpr_ref;
       for (uint64_t owner : owners) {
         const auto allocated = descriptor_vgpr_allocation_count(original_bytes, owner, arch);
         if (!allocated) {
-          common_allocated_vgpr_count.reset();
+          has_common_allocated_vgpr_count = false;
           break;
         }
-        common_allocated_vgpr_count = common_allocated_vgpr_count
-                                          ? std::min(*common_allocated_vgpr_count, *allocated)
+        common_allocated_vgpr_count = has_common_allocated_vgpr_count
+                                          ? std::min(common_allocated_vgpr_count, *allocated)
                                           : *allocated;
+        has_common_allocated_vgpr_count = true;
         const auto owner_kernel =
             std::ranges::find(result.kernels, owner, &ConSanKernelInfo::descriptor_file_offset);
         if (owner_kernel != result.kernels.end()) {
@@ -361,8 +363,12 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       std::optional<uint16_t> min_fresh_sgpr;
       if (max_owner_sgpr_ref && *max_owner_sgpr_ref + 1u < REGISTER_SET_ALLOCATABLE_SGPRS)
         min_fresh_sgpr = static_cast<uint16_t>(*max_owner_sgpr_ref + 1u);
-      visit_site(site, std::nullopt, common_allocated_vgpr_count, min_fresh_sgpr,
-                 std::move(owners));
+      if (has_common_allocated_vgpr_count) {
+        visit_site(site, std::nullopt, common_allocated_vgpr_count, min_fresh_sgpr,
+                   std::move(owners));
+      } else {
+        visit_site(site, std::nullopt, std::nullopt, min_fresh_sgpr, std::move(owners));
+      }
     }
   }
   if (!result.errors.empty())

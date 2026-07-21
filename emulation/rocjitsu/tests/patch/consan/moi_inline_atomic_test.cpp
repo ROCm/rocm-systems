@@ -2108,7 +2108,7 @@ TEST(ConSanMoi, InlineShadowExactConflictRejectsLegacyPairScopedAcquireToken) {
   EXPECT_EQ(std::find(words.begin(), words.end(), *disable_legacy_token_authority), words.end())
       << "the stable full-token reader replaces unconditional legacy suppression disablement";
 
-  for (const auto [offset, destination] : std::array<std::pair<size_t, uint16_t>, 12>{
+  for (const auto &[offset, destination] : std::array<std::pair<size_t, uint16_t>, 12>{
            {{offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version), scratch + 7u},
             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, workgroup_key), temporary},
             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_owner_id), temporary},
@@ -2132,7 +2132,7 @@ TEST(ConSanMoi, InlineShadowExactConflictRejectsLegacyPairScopedAcquireToken) {
         << "missing acquired-token field at offset " << offset;
   }
 
-  for (const auto [offset, destination] : std::array<std::pair<size_t, uint16_t>, 7>{
+  for (const auto &[offset, destination] : std::array<std::pair<size_t, uint16_t>, 7>{
            {{offsetof(ConSanMoiInlineAtomicReleaseSlot, version), scratch + 16u},
             {offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address), temporary},
             {offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address) + sizeof(uint32_t),

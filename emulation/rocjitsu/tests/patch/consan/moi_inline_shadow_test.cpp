@@ -3275,10 +3275,11 @@ TEST(ConSanMoi, SharedInlineShadowUsesOnePrivateEpochLayoutForEveryOwner) {
     KD descriptor{};
     std::memcpy(&descriptor, result.elf_bytes.data() + kernel.descriptor_file_offset,
                 sizeof(descriptor));
-    if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1")
+    if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1") {
       EXPECT_EQ(descriptor.private_segment_fixed_size, 52u);
-    else if (kernel.name == "unrelated_kernel")
+    } else if (kernel.name == "unrelated_kernel") {
       EXPECT_EQ(descriptor.private_segment_fixed_size, 0u);
+    }
   }
 }
 
@@ -3395,7 +3396,7 @@ TEST(ConSanMoi, InlineExactSnapshotRequiresStableVersionedDispatchIdentity) {
     EXPECT_EQ(classify(version, packed, dispatch, 0, version).state,
               ConSanMoiInlineExactSnapshotState::Publishing);
   }
-  for (const auto [before, after] : {std::pair{2u, 4u}, std::pair{2u, 3u}, std::pair{1u, 2u}}) {
+  for (const auto &[before, after] : {std::pair{2u, 4u}, std::pair{2u, 3u}, std::pair{1u, 2u}}) {
     EXPECT_EQ(classify(before, packed, dispatch, 0, after).state,
               ConSanMoiInlineExactSnapshotState::ChangedDuringRead);
   }

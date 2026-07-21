@@ -15,7 +15,7 @@ public:
     }
     std::ranges::sort(ranges_);
     std::vector<std::pair<uint64_t, uint64_t>> merged;
-    for (const auto range : ranges_) {
+    for (const auto &range : ranges_) {
       if (merged.empty() || merged.back().second < range.first)
         merged.push_back(range);
       else
@@ -1686,13 +1686,18 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanO
 
     const bool direct_entry =
         compute_sopp_branch_simm16(site.text_offset, cave_text_offset).has_value();
-    const std::optional<uint64_t> indirect_entry_island =
-        direct_entry ? std::nullopt : indirect_allocator.claim_reachable(site.text_offset);
-    if (!direct_entry && !indirect_entry_island) {
-      result.warnings.emplace_back(
-          "ConSan MOI barrier record patch found no reachable indirect entry island in " +
-          candidate.container_name);
-      continue;
+    uint64_t indirect_entry_island = 0;
+    bool has_indirect_entry_island = false;
+    if (!direct_entry) {
+      const auto claimed_island = indirect_allocator.claim_reachable(site.text_offset);
+      if (!claimed_island) {
+        result.warnings.emplace_back(
+            "ConSan MOI barrier record patch found no reachable indirect entry island in " +
+            candidate.container_name);
+        continue;
+      }
+      indirect_entry_island = *claimed_island;
+      has_indirect_entry_island = true;
     }
     std::string placement_error;
     const auto placement = placement_planner.plan_indirect_appended(
@@ -1706,7 +1711,8 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanO
       return;
     }
 
-    const uint64_t entry_target = indirect_entry_island.value_or(placement->body_offset);
+    const uint64_t entry_target =
+        has_indirect_entry_island ? indirect_entry_island : placement->body_offset;
     const auto fwd = compute_sopp_branch_simm16(placement->anchor_offset, entry_target);
     if (!fwd) {
       result.errors.emplace_back("ConSan MOI barrier record forward branch is out of range");
@@ -1716,9 +1722,9 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanO
       result.errors.emplace_back("ConSan MOI barrier record patch could not rewrite barrier slot");
       return;
     }
-    if (indirect_entry_island &&
+    if (has_indirect_entry_island &&
         !emit_moi_local_indirect_entry_island(
-            new_text, *indirect_entry_island, placement->body_offset, site.text_offset, options,
+            new_text, indirect_entry_island, placement->body_offset, site.text_offset, options,
             planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
             "ConSan MOI barrier record patch")) {
       return;

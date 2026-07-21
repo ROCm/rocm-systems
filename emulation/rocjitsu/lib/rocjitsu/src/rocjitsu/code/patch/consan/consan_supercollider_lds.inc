@@ -1960,7 +1960,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         min_rejected_source = std::min(min_rejected_source, source_offsets[rejected_index]);
         max_rejected_source = std::max(max_rejected_source, source_offsets[rejected_index]);
       }
-      for (const auto [from, to] : relay_plan.min_cut_hops) {
+      for (const auto &[from, to] : relay_plan.min_cut_hops) {
         min_cut_from = std::min(min_cut_from, from);
         max_cut_from = std::max(max_cut_from, from);
         min_cut_to = std::min(min_cut_to, to);
