@@ -113,8 +113,12 @@ static hipError_t hrr_sync_after_replayed_h2d(PlaybackContext& ctx,
     // the restore so following kernels see the replayed input bytes. This is
     // skipped during graph capture because device/stream sync is illegal there.
     if (!hrr_replayed_h2d_needs_drain(ctx.in_graph_capture)) return hipSuccess;
+    // Clear any pre-existing sticky error so we attribute only an error surfaced
+    // by this drain, matching the kernel-launch sync path.
+    (void)hipGetLastError();
     hipError_t r = hrr_watchdog_device_sync(ctx, what);
-    if (r == hipSuccess) r = hipGetLastError();
+    hipError_t last_r = hipGetLastError();
+    if (r == hipSuccess && last_r != hipSuccess) r = last_r;
     return r;
 }
 
