@@ -1011,13 +1011,18 @@ def _required_paths(
     return paths
 
 
-def _pytorch_python() -> Path:
+def _pytorch_python(workspace: Path | None = None) -> Path:
     # Preserve a virtual environment's interpreter path. Resolving its python
     # symlink would silently bypass that environment and lose torch/triton.
+    configured = os.environ.get(PYTORCH_PYTHON_ENV)
+    if configured:
+        return Path(os.path.abspath(Path(configured).expanduser()))
+    if workspace is not None:
+        workspace_interpreter = workspace / "consan-pytorch-venv" / "bin" / "python"
+        if workspace_interpreter.is_file():
+            return workspace_interpreter
     return Path(
-        os.path.abspath(
-            Path(os.environ.get(PYTORCH_PYTHON_ENV, sys.executable)).expanduser()
-        )
+        os.path.abspath(Path(sys.executable).expanduser())
     )
 
 
@@ -1054,7 +1059,7 @@ def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, 
     workload = _resolved_workload(target, workload)
     if workload.kind == "pytorch":
         return {
-            "python": _pytorch_python(),
+            "python": _pytorch_python(workspace),
             "workload-source": Path(__file__).with_name(workload.relative_path),
         }
     if workload.kind == "tensile":
@@ -1126,7 +1131,52 @@ def _doctor(
                 "path": str(path),
                 "present": path.is_file(),
             }
-    ok = all(item["present"] for item in path_checks.values()) and all(tools.values())
+    runtimes = {}
+    if any(workload.kind == "pytorch" for workload in workloads):
+        python = _pytorch_python(workspace)
+        if python.is_file():
+            try:
+                probe = subprocess.run(
+                    [
+                        str(python),
+                        "-c",
+                        (
+                            "import json, torch, triton; "
+                            "print(json.dumps({'torch': torch.__version__, "
+                            "'hip': torch.version.hip, "
+                            "'triton': triton.__version__}))"
+                        ),
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=TIMEOUT_SECONDS,
+                )
+                detail = probe.stdout.strip()
+                runtimes["pytorch"] = {
+                    "ok": probe.returncode == 0,
+                    "python": str(python),
+                    "detail": (
+                        detail if probe.returncode == 0 else probe.stderr.strip()
+                    ),
+                }
+            except (OSError, subprocess.TimeoutExpired) as error:
+                runtimes["pytorch"] = {
+                    "ok": False,
+                    "python": str(python),
+                    "detail": str(error),
+                }
+        else:
+            runtimes["pytorch"] = {
+                "ok": False,
+                "python": str(python),
+                "detail": "interpreter is missing",
+            }
+    ok = (
+        all(item["present"] for item in path_checks.values())
+        and all(tools.values())
+        and all(item["ok"] for item in runtimes.values())
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "ok": ok,
@@ -1134,6 +1184,7 @@ def _doctor(
         "target": target,
         "workloads": list(selected_ids),
         "paths": path_checks,
+        "runtimes": runtimes,
         "tools": tools,
     }
 
@@ -1389,7 +1440,7 @@ def _workload_command(
         ]
     if workload.kind == "pytorch":
         return [
-            str(_pytorch_python()),
+            str(_pytorch_python(workspace)),
             str(Path(__file__).with_name(workload.relative_path)),
             "--workload",
             workload.id.removeprefix("pytorch-"),
@@ -1466,6 +1517,8 @@ def _source_identities(workspace: Path, workload: Workload) -> list[dict | None]
                 workspace / "TheRock" / "rocm-libraries",
             ]
         )
+    if workload.kind == "pytorch":
+        roots.append(workspace / "pytorch")
     return [git_identity(root) for root in roots]
 
 
@@ -2990,6 +3043,12 @@ def main(argv: list[str] | None = None) -> int:
                 for tool, path in result["tools"].items():
                     print(
                         f"{'ok' if path else 'MISSING':7} PATH tool {tool}: {path or '-'}"
+                    )
+                for runtime, item in result.get("runtimes", {}).items():
+                    state = "ok" if item["ok"] else "BROKEN"
+                    print(
+                        f"{state:7} {runtime} runtime {item['python']}: "
+                        f"{item['detail']}"
                     )
             return 0 if result["ok"] else 1
         if args.command == "inventory":

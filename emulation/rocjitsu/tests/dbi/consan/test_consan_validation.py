@@ -362,6 +362,48 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
         self.assertEqual(command[command.index("--workload") + 1], "tdm-descriptor-add")
 
+    def test_pytorch_python_discovers_standard_workspace_environment(self) -> None:
+        with temporary_root() as workspace:
+            python = workspace / "consan-pytorch-venv" / "bin" / "python"
+            python.parent.mkdir(parents=True)
+            python.touch()
+            with mock.patch.dict(
+                os.environ, {validation.PYTORCH_PYTHON_ENV: ""}, clear=False
+            ):
+                self.assertEqual(validation._pytorch_python(workspace), python)
+
+    def test_pytorch_python_explicit_environment_overrides_workspace(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {validation.PYTORCH_PYTHON_ENV: "/custom/venv/bin/python"},
+            clear=False,
+        ):
+            self.assertEqual(
+                validation._pytorch_python(Path("/workspace")),
+                Path("/custom/venv/bin/python"),
+            )
+
+    def test_pytorch_doctor_rejects_interpreter_with_broken_imports(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-compiled-softmax"]
+        with temporary_root() as workspace:
+            python = workspace / "consan-pytorch-venv" / "bin" / "python"
+            python.parent.mkdir(parents=True)
+            python.touch()
+            completed = subprocess.CompletedProcess(
+                [str(python)], 1, stdout="", stderr="No module named torch"
+            )
+            with (
+                mock.patch.object(validation.shutil, "which", return_value="/tool"),
+                mock.patch.object(
+                    validation.subprocess, "run", return_value=completed
+                ) as run,
+            ):
+                doctor = validation._doctor(workspace, "gfx1201", (workload.id,))
+        self.assertFalse(doctor["ok"])
+        self.assertFalse(doctor["runtimes"]["pytorch"]["ok"])
+        self.assertIn("No module named torch", doctor["runtimes"]["pytorch"]["detail"])
+        self.assertEqual(run.call_args.args[0][0], str(python))
+
     def test_pytorch_cluster_workload_runs_once(self) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-cluster-load-sync"]
         with mock.patch.dict(

@@ -69,6 +69,14 @@ python3 -m venv "$CONSAN_VALIDATION_WORKSPACE_DIR/consan-pytorch-venv"
 export CONSAN_VALIDATION_PYTORCH_PYTHON="$CONSAN_VALIDATION_WORKSPACE_DIR/consan-pytorch-venv/bin/python"
 ```
 
+The final export is optional when the environment uses that standard workspace
+path: the runner discovers
+`$CONSAN_VALIDATION_WORKSPACE_DIR/consan-pytorch-venv/bin/python`
+automatically.  Set `CONSAN_VALIDATION_PYTORCH_PYTHON` only to select a
+different prebuilt-wheel environment.  The doctor imports both `torch` and
+`triton` with the selected interpreter and records their versions, so an
+existing but unusable virtual environment fails before any GPU work.
+
 Freeze the exact wheel and bundled Triton versions in the campaign artifacts.
 The example index matches the current ROCm 7.1 validation stack; choose an
 official prebuilt wheel compatible with the machine's runtime and target when
