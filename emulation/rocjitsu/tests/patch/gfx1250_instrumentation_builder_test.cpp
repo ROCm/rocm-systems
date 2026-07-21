@@ -18,6 +18,12 @@ TEST(Gfx1250InstructionBuilder, BuildSSetVgprMsb) {
   EXPECT_EQ(build_gfx1250_s_set_vgpr_msb(/*mode=*/0x40, ROCJITSU_CODE_ARCH_GFX1250), 0xBF860040u);
   EXPECT_EQ(build_gfx1250_s_set_vgpr_msb(/*mode=*/0x100, ROCJITSU_CODE_ARCH_GFX1250), 0xBF860100u);
   EXPECT_FALSE(build_gfx1250_s_set_vgpr_msb(/*mode=*/0x40, ROCJITSU_CODE_ARCH_RDNA4));
+
+  EXPECT_EQ(build_gfx1250_s_set_vgpr_msb_transition(
+                /*previous_mode=*/0x44, /*new_mode=*/0x08, ROCJITSU_CODE_ARCH_GFX1250),
+            0xBF864408u);
+  EXPECT_FALSE(build_gfx1250_s_set_vgpr_msb_transition(
+      /*previous_mode=*/0x44, /*new_mode=*/0x08, ROCJITSU_CODE_ARCH_RDNA4));
 }
 
 TEST(Gfx1250InstructionBuilder, BuildSCallI64) {
