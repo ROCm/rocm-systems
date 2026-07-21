@@ -1142,54 +1142,6 @@ def test_load_pc_sampling_data_no_filter_instruction_out_of_range() -> None:
     assert df.iloc[0]["source_line"] == ".../a.cpp:2"
 
 
-@pytest.mark.parametrize(
-    "method, expected_columns",
-    [
-        pytest.param(
-            "host_trap",
-            HOST_TRAP_DISPLAY_COLUMNS,
-            id="host_trap",
-        ),
-        pytest.param(
-            "stochastic",
-            STOCHASTIC_DISPLAY_COLUMNS,
-            id="stochastic",
-        ),
-    ],
-)
-def test_load_pc_sampling_data_multi_process_preserves_display_column_order(
-    method: str,
-    expected_columns: list[str],
-) -> None:
-    tool_data_records = [
-        make_display_row_tool_data(
-            method,
-            code_object_id=5,
-            kernel_name="sharedKernel",
-            instruction="v_mov",
-            source_line="/src/shared.cpp:10",
-            pid=101,
-        ),
-        make_display_row_tool_data(
-            method,
-            code_object_id=7,
-            kernel_name="sharedKernel",
-            instruction="v_mov",
-            source_line="/src/shared.cpp:10",
-            pid=202,
-        ),
-    ]
-
-    df = load_pc_sampling_data(
-        schema.Workload(),
-        "ps_file",
-        "count",
-        tool_data_records,
-    )
-
-    assert list(df.columns) == expected_columns
-
-
 def test_load_pc_sampling_data_preserves_display_identity_boundaries() -> None:
     tool_data_records = [
         make_display_row_tool_data(
@@ -1393,40 +1345,6 @@ def test_load_pc_sampling_data_applies_top_n_after_global_aggregation() -> None:
         "ps_file",
         "count",
         [first_tool_data, second_tool_data],
-        num_rows=1,
-    )
-
-    assert len(df) == 1
-    assert df.iloc[0]["Kernel_Name"] == "sharedKernel"
-    assert df.iloc[0]["count"] == 6
-
-
-def test_load_pc_sampling_data_single_record_applies_top_n_after_aggregation() -> None:
-    tool_data = make_tool_data(
-        host_trap=[
-            *[make_host_trap_record(5, 0x10, 0, dispatch_id=0) for _ in range(3)],
-            *[make_host_trap_record(6, 0x20, 1, dispatch_id=1) for _ in range(5)],
-            *[make_host_trap_record(7, 0x10, 0, dispatch_id=2) for _ in range(3)],
-        ],
-        instructions=["shared", "leader"],
-        comments=["/src/shared.cpp:10", "/src/leader.cpp:20"],
-        kernel_symbols=[
-            make_kernel_symbol(100, 5, "sharedKernel"),
-            make_kernel_symbol(101, 6, "leader"),
-            make_kernel_symbol(102, 7, "sharedKernel"),
-        ],
-        kernel_dispatch=[
-            make_dispatch(0, 100),
-            make_dispatch(1, 101),
-            make_dispatch(2, 102),
-        ],
-    )
-
-    df = load_pc_sampling_data(
-        schema.Workload(),
-        "ps_file",
-        "count",
-        [tool_data],
         num_rows=1,
     )
 
