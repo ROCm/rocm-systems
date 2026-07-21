@@ -82,16 +82,18 @@ void L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid) {
   if (cache_.lookup(addr, nullptr, vmid))
     return;
 
+  fetch_line(addr, vmid);
+}
+
+const uint8_t *L1VectorCache::fetch_line(uint64_t addr, uint32_t vmid) {
   uint64_t line_addr = CacheStore::line_address(addr);
   simdojo::CacheTag evicted;
-  uint8_t evicted_data[LINE_SIZE];
-  cache_.allocate(addr, vmid, &evicted, evicted_data);
+  auto allocated = cache_.allocate_with_data(addr, vmid, &evicted);
 
   assert(!evicted.dirty && "L1 V$ is write-through; lines should never be dirty");
 
-  uint8_t line_buf[LINE_SIZE];
-  l2_->fetch_line(line_addr, line_buf, vmid);
-  cache_.fill_line(addr, line_buf, vmid);
+  l2_->fetch_line(line_addr, allocated.data, vmid);
+  return allocated.data;
 }
 
 // Per-line CC invalidation is sufficient: the CP serializes dispatch N's cache
@@ -101,6 +103,7 @@ void L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, bool 
                                bool request_l1_bypass, uint32_t vmid,
                                RequestMtypeResolver &mtypes) {
   const Mtype effective = mtypes.at(addr);
+  ++read_count_;
 
   util::Logger::cp([&](auto &os) {
     static thread_local uint64_t mtype_counts[5] = {};
@@ -115,6 +118,20 @@ void L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, bool 
                         static_cast<int>(effective), vmid);
     }
   });
+
+  if ((!memory_ || vmid == 0) && !non_temporal && !request_l1_bypass &&
+      (effective == Mtype::RW || effective == Mtype::WB)) {
+    uint32_t copied = 0;
+    while (copied < size) {
+      const uint64_t ea = addr + copied;
+      const uint32_t line_offset = CacheStore::line_offset(ea);
+      const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
+      const uint8_t *line = line_data_for_read(ea, vmid);
+      std::memcpy(dst + copied, line + line_offset, chunk);
+      copied += chunk;
+    }
+    return;
+  }
 
   uint32_t copied = 0;
   while (copied < size) {
@@ -137,8 +154,8 @@ void L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, bool 
       continue;
     }
 
-    ensure_line(ea, vmid);
-    cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
+    const uint8_t *line = line_data_for_read(ea, vmid);
+    std::memcpy(dst + copied, line + line_offset, chunk);
     copied += chunk;
   }
 }
