@@ -130,17 +130,11 @@ class TestRocSHMEMTracing(RocprofsysTest):
         if mode == "sys_run":
             assert_perfetto(
                 result,
-                # TODO: uncomment and remove skip_on_fail once rocprofiler-sdk
-                # PR #6090 (rocSHMEM API tracing) is merged and released.
-                # categories=["rocm_rocshmem_api"],
-                # label_substrings=EXPECTED_OPERATIONS,
-                skip_on_fail=True,
+                categories=["rocm_rocshmem_api"],
+                label_substrings=EXPECTED_OPERATIONS,
             )
             assert_rocpd(
                 result,
-                # TODO: uncomment and remove skip_on_fail once rocprofiler-sdk
-                # PR #6090 (rocSHMEM API tracing) is merged and released.
-                # categories=["rocm_rocshmem_api"],
-                # label_substrings=EXPECTED_OPERATIONS,
-                skip_on_fail=True,
+                categories=["rocm_rocshmem_api"],
+                label_substrings=EXPECTED_OPERATIONS,
             )
