@@ -20,6 +20,7 @@
 #include "shm.h"
 #include "compiler.h"
 #include <atomic>
+#include <map>
 #include <assert.h>
 #include "graph.h"
 #include "graph/topo.h"
