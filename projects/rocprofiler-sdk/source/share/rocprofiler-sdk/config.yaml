@@ -7559,6 +7559,9 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
           expression: reduce(TA_TA_BUSY,avr)
+        - architectures:
+            - gfx1250
+          expression: reduce(TX_VCA_VCA_BUSY,avr)
     - name: TA_BUSY_max
       description: TA block is busy. Max over TA instances.
       properties: []
