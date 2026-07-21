@@ -110,6 +110,11 @@ uint64_t g_fake_symbol_kernel_object = 0;
 uint32_t g_fake_symbol_group_segment_size = 0;
 uint32_t g_fake_symbol_private_segment_size = 0;
 std::string g_fake_symbol_name = "oversized_kernel.kd";
+// Records the arguments the hook forwards to the original agent-code-object
+// loader, so a test can assert a non-guest load reaches the loader unchanged.
+int g_fake_load_agent_calls = 0;
+hsa_agent_t g_last_load_agent{};
+hsa_code_object_reader_t g_last_load_reader{};
 constexpr hsa_executable_t kFakeExecutable{123};
 constexpr hsa_executable_symbol_t kFakeKernelSymbol{500};
 
@@ -325,9 +330,12 @@ hsa_status_t HSA_API fake_code_object_reader_destroy(hsa_code_object_reader_t) {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t HSA_API
-fake_executable_load_agent_code_object(hsa_executable_t, hsa_agent_t, hsa_code_object_reader_t,
-                                       const char *, hsa_loaded_code_object_t *loaded_code_object) {
+hsa_status_t HSA_API fake_executable_load_agent_code_object(
+    hsa_executable_t, hsa_agent_t agent, hsa_code_object_reader_t reader, const char *,
+    hsa_loaded_code_object_t *loaded_code_object) {
+  ++g_fake_load_agent_calls;
+  g_last_load_agent = agent;
+  g_last_load_reader = reader;
   if (loaded_code_object != nullptr)
     loaded_code_object->handle = 77;
   return HSA_STATUS_SUCCESS;
@@ -714,6 +722,9 @@ void reset_queue_fakes() {
   g_fake_symbol_group_segment_size = 0;
   g_fake_symbol_private_segment_size = 0;
   g_fake_symbol_name = "oversized_kernel.kd";
+  g_fake_load_agent_calls = 0;
+  g_last_load_agent = {};
+  g_last_load_reader = {};
 }
 
 void write_bytes(std::vector<uint8_t> &image, size_t offset, const void *src, size_t size) {
@@ -792,8 +803,9 @@ make_translated_metadata_elf(uint32_t mach, const std::vector<VirtualLdsMetadata
     const auto layout =
         rocjitsu::make_kernarg_extension_layout(record.kernarg_size, std::span{&payload, 1});
     EXPECT_TRUE(layout.has_value());
-    if (layout)
+    if (layout) {
       EXPECT_EQ(layout->payload_offsets.front(), record.backing_pointer_kernarg_offset);
+    }
     virtual_lds.push_back({
         .kernel_name = record.kernel_name,
         .sidecar_variant_name = std::string(rocjitsu::kVirtualLdsSidecarVariantName),
@@ -2454,10 +2466,10 @@ TEST(HsaHooksUnitTest, DoorbellForwardsOversizedPacketOnUnrelatedAgentQueueUncha
   ASSERT_TRUE(hook.installed());
 
   // A queue on an agent that is neither the guest nor the guest's execution host.
-  // host_lds_bytes is derived from the guest target arch (gfx1201 -> 64 KiB), so
-  // it does not describe this agent. Its dispatches must be forwarded unchanged
-  // even when the group segment exceeds that guest-derived limit -- the fail-close
-  // for oversized-no-metadata launches applies only to the guest's own queue.
+  // host_lds_bytes is derived from the configured host target (gfx1201 -> 64 KiB),
+  // so it does not describe this agent. Its dispatches must be forwarded unchanged
+  // even when the group segment exceeds that host limit -- the fail-close for
+  // oversized-no-metadata launches applies only to the guest's own queue.
   hsa_queue_t *queue = nullptr;
   ASSERT_EQ(api.core.hsa_queue_create_fn(kUnrelatedAgent, 2, HSA_QUEUE_TYPE_SINGLE, nullptr,
                                          nullptr, 0, 0, &queue),
@@ -2537,6 +2549,70 @@ TEST(HsaHooksUnitTest, InterceptForwardsOversizedPacketOnUnrelatedAgentQueueUnch
   EXPECT_EQ(written.private_segment_size, 12u);
 
   EXPECT_EQ(api.core.hsa_queue_destroy_fn(queue), HSA_STATUS_SUCCESS);
+}
+
+TEST(HsaHooksUnitTest, LoadOnUnrelatedAgentForwardsDifferentTargetImageUnchanged) {
+  // A code object for an unrelated GPU (a different, non-guest target ISA) loaded
+  // on a non-guest agent must be forwarded verbatim to the original loader. The
+  // hook must NOT reinterpret it as the guest ISA, translate it, or run
+  // rocjitsu metadata validation on it. Even though the reader's bytes ARE
+  // registered (memory-backed), the load is gated out by the non-guest early
+  // return before any reader lookup or target detection.
+  reset_pool_blocker(false);
+  reset_queue_fakes();
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  // A minimal, valid AMDGPU ELF for gfx942 (neither the guest gfx950 nor the
+  // configured host gfx1201). Content is irrelevant: the load must pass through
+  // untouched.
+  std::vector<uint8_t> image(sizeof(rocjitsu::Elf64_Ehdr), 0);
+  const auto ehdr = make_amdgpu_elf_header(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX942);
+  write_struct(image, 0, ehdr);
+
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(
+      api.core.hsa_code_object_reader_create_from_memory_fn(image.data(), image.size(), &reader),
+      HSA_STATUS_SUCCESS);
+
+  hsa_loaded_code_object_t loaded{};
+  const hsa_status_t status = api.core.hsa_executable_load_agent_code_object_fn(
+      kFakeExecutable, kUnrelatedAgent, reader, nullptr, &loaded);
+  EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+
+  // The original loader saw the unrelated agent and reader verbatim (no remap to
+  // the guest execution host, no translated reader substituted).
+  ASSERT_EQ(g_fake_load_agent_calls, 1);
+  EXPECT_EQ(g_last_load_agent.handle, kUnrelatedAgent.handle);
+  EXPECT_EQ(g_last_load_reader.handle, reader.handle);
+}
+
+TEST(HsaHooksUnitTest, LoadOnUnrelatedAgentForwardsMalformedMetadataImageUnchanged) {
+  // A non-guest load must reach the original loader even if its bytes are not a
+  // parseable code object / carry malformed rocjitsu metadata: the hook only
+  // validates the guest's own loads. Garbage bytes that would fail
+  // parse_virtual_lds_hook_metadata must still pass through unchanged.
+  reset_pool_blocker(false);
+  reset_queue_fakes();
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  const std::vector<uint8_t> image(64, 0xAB); // not a valid ELF
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(
+      api.core.hsa_code_object_reader_create_from_memory_fn(image.data(), image.size(), &reader),
+      HSA_STATUS_SUCCESS);
+
+  hsa_loaded_code_object_t loaded{};
+  const hsa_status_t status = api.core.hsa_executable_load_agent_code_object_fn(
+      kFakeExecutable, kUnrelatedAgent, reader, nullptr, &loaded);
+  EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+
+  ASSERT_EQ(g_fake_load_agent_calls, 1);
+  EXPECT_EQ(g_last_load_agent.handle, kUnrelatedAgent.handle);
+  EXPECT_EQ(g_last_load_reader.handle, reader.handle);
 }
 
 TEST(HsaHooksUnitDeathTest, InterceptGuestUnregisteredOversizedDispatchAborts) {

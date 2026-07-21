@@ -135,6 +135,14 @@ bool write_kernarg_extension_wrapper(std::span<uint8_t> wrapper,
     return false;
   if (layout.original_kernarg_size != 0 && original_kernarg == nullptr)
     return false;
+  // KernargExtensionLayout is public plain data, so a forged/inconsistent layout
+  // can reach here without going through make_kernarg_extension_layout. Reject a
+  // copy that would overrun the wrapper or overlap the saved original pointer
+  // before memcpy'ing original_kernarg_size bytes.
+  if (layout.original_kernarg_size > layout.wrapper_size ||
+      layout.original_kernarg_size > layout.original_kernarg_pointer_offset) {
+    return false;
+  }
   if (layout.original_kernarg_pointer_offset >
       layout.wrapper_size - static_cast<uint32_t>(sizeof(uint64_t))) {
     return false;

@@ -174,6 +174,22 @@ TEST(KernargExtensionTest, WrapperWriteRejectsNullPayloadDataWithNonZeroSize) {
       /*original_kernarg_pointer=*/0, std::span{writes}));
 }
 
+TEST(KernargExtensionTest, WrapperWriteRejectsForgedOversizedOriginalKernarg) {
+  // KernargExtensionLayout is public plain data; a forged layout can claim an
+  // original_kernarg_size far larger than the wrapper. The writer must reject it
+  // rather than memcpy nearly 4 GiB into a tiny buffer.
+  rocjitsu::KernargExtensionLayout layout;
+  layout.original_kernarg_size = std::numeric_limits<uint32_t>::max();
+  layout.original_kernarg_pointer_offset = 8;
+  layout.wrapper_size = 16;
+
+  std::vector<uint8_t> wrapper(layout.wrapper_size, 0);
+  EXPECT_FALSE(rocjitsu::write_kernarg_extension_wrapper(
+      std::span<uint8_t>(wrapper.data(), wrapper.size()), layout,
+      /*original_kernarg=*/wrapper.data(),
+      /*original_kernarg_pointer=*/0, std::span<const rocjitsu::KernargExtensionPayloadWrite>{}));
+}
+
 // --- make_kernarg_extension_layout overflow guards --------------------------
 
 TEST(KernargExtensionTest, LayoutRejectsPayloadSizeOverflow) {
@@ -222,6 +238,14 @@ void poke_u32(std::vector<uint8_t> &bytes, size_t offset, uint32_t value) {
   std::memcpy(bytes.data() + offset, &value, sizeof(value));
 }
 } // namespace
+
+TEST(KernargExtensionTest, ParseAcceptsValidMetadata) {
+  // Positive control: the negative tests below all mutate valid_metadata_bytes(),
+  // so they would pass vacuously if the baseline builder stopped producing a
+  // parseable buffer. Anchor it here so each EXPECT_FALSE can only fail for its
+  // intended mutation.
+  EXPECT_TRUE(rocjitsu::parse_kernarg_extension_metadata(valid_metadata_bytes()).has_value());
+}
 
 TEST(KernargExtensionTest, ParseRejectsTruncatedHeader) {
   auto bytes = valid_metadata_bytes();

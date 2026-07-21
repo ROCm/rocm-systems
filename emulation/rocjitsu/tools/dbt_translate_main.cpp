@@ -546,8 +546,7 @@ int main(int argc, char **argv) {
   // silently produce wrong results if dispatched. Refuse to emit an executable
   // code object in that case (the HSA hook rejects the same load). Diff/Disasm
   // are diagnostic-only inspection modes and remain available.
-  if (options.output_mode == OutputMode::CodeObject &&
-      has_skipped_kernel(result.value.diagnostics)) {
+  if (options.output_mode == OutputMode::CodeObject && !result.value.dispatchable()) {
     std::cerr << "error: translation skipped one or more kernels; the code object is not "
                  "dispatchable and will not be written\n";
     return kTranslationError;

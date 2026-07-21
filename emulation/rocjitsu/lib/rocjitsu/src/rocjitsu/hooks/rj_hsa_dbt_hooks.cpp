@@ -2403,10 +2403,10 @@ private:
     uint32_t host_lds_bytes = 0;
     bool uses_packet_interceptor = false;
     // True only for the queue running guest work on the guest's execution host
-    // agent. host_lds_bytes is derived from the guest target arch, so it is only
-    // meaningful for this queue. Other agents' queues are tracked (so their
-    // doorbell stores still forward) but their dispatches are never rewritten and
-    // an oversized packet on them is the driver's concern, not ours.
+    // agent. host_lds_bytes is derived from the configured host target arch, so
+    // its limit is only meaningful for this queue. Other agents' queues are
+    // tracked (so their doorbell stores still forward) but their dispatches are
+    // never rewritten and an oversized packet on them is the driver's concern.
     bool is_guest_queue = false;
     std::vector<VirtualLdsDispatchBuffers> slots;
     std::vector<VirtualLdsDispatchBuffers> retired_buffers;
@@ -2615,9 +2615,10 @@ private:
       // No virtual-LDS variant for this kernel object. On the guest's own queue a
       // group segment exceeding the host LDS limit has no sidecar to fall back to
       // and the normal descriptor would fault the host, so fail closed (consistent
-      // with the post-plan paths). host_lds_bytes is derived from the guest target
-      // arch, so this check is only meaningful for the guest queue; an unrelated
-      // agent with a larger real LDS capacity must keep its packet unchanged.
+      // with the post-plan paths). host_lds_bytes is derived from the configured
+      // host target arch, so this check is only meaningful for the guest queue; an
+      // unrelated agent with a larger real LDS capacity must keep its packet
+      // unchanged.
       if (state.is_guest_queue && exceeds_host_lds_limit(state, packet.group_segment_size)) {
         abort_virtual_lds_dispatch("kernel has no virtual-LDS variant but its group segment "
                                    "exceeds the host LDS limit",
@@ -3747,18 +3748,28 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
               static_cast<unsigned long long>(agent.handle), guest_load ? 1 : 0,
               static_cast<unsigned long long>(code_object_reader.handle));
 
-  hsa_agent_t load_agent = guest_load ? AgentMapper::instance().host_for_guest() : agent;
-  if (guest_load && load_agent.handle == 0)
+  // Only the configured guest agent's loads belong to the DBT pipeline. An
+  // unrelated GPU's native code object must not be reinterpreted as the guest
+  // ISA, translated for the configured host, or subjected to rocjitsu metadata
+  // validation/registration -- doing so could misdecode it and load a wrong
+  // artifact on that agent. Forward it verbatim before any reader lookup, target
+  // detection, source override, translation, or registry mutation.
+  if (!guest_load)
+    return original_load(executable, agent, code_object_reader, options, loaded_code_object);
+
+  hsa_agent_t load_agent = AgentMapper::instance().host_for_guest();
+  if (load_agent.handle == 0)
     return HSA_STATUS_ERROR_INVALID_AGENT;
 
   CodeObjectReaderRegistry::ReaderBytes reader_bytes =
       CodeObjectReaderRegistry::instance().lookup(code_object_reader);
   if (!reader_bytes) {
+    // A guest load with no registered memory bytes cannot be translated (the DBT
+    // path needs the source image); fail rather than load an untranslated guest
+    // object on the host.
     log_message(kLogInfo, "no memory bytes registered for reader=%llu",
                 static_cast<unsigned long long>(code_object_reader.handle));
-    if (guest_load)
-      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
-    return original_load(executable, load_agent, code_object_reader, options, loaded_code_object);
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
   }
   const uint8_t *bytes = reader_bytes.bytes;
   size_t size = reader_bytes.size;
