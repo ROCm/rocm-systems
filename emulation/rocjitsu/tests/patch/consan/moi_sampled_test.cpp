@@ -1211,6 +1211,36 @@ TEST(ConSanMoi, DirectSampledProbeRuntimeAddressSelectionKeepsAllSitesPatchable)
   }
 }
 
+TEST(ConSanMoi, Gfx1250RuntimeSamplingUsesLiteralDispatchIdAtFullScalarPressure) {
+  std::vector<uint32_t> text_words(800, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
+  text_words[0] = store[0];
+  text_words[1] = store[1];
+  text_words[2] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/106u, ROCJITSU_CODE_ARCH_GFX1250);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  const std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_generation = 7u;
+  options.moi_report_dispatch_id = 0x1122334455667788ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(16u);
+  options.moi_runtime_sample_stride = 4u;
+  options.max_patches = 16u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_TRUE(result.patches.front().kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
+              result.patches.front().kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_NE(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
+}
+
 TEST(ConSanMoi, DirectSampledProbeCanCheckPriorSlotInKernel) {
   constexpr uint32_t kSecondSiteWord = 500;
   std::vector<uint32_t> text_words(1100, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));

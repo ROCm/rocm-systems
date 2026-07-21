@@ -1383,11 +1383,22 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     words.insert(words.end(), zero->begin(), zero->end());
     return true;
   }
-  if (!options.moi_dispatch_id_sgpr)
+  if (options.moi_dispatch_id_sgpr) {
+    words.push_back(build_v_mov_b32_e32(bank_vgpr, *options.moi_dispatch_id_sgpr, arch));
+    words.push_back(build_v_mov_b32_e32(
+        temporary_vgpr, static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u), arch));
+  } else if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+    const auto low = instrumentation::build_v_mov_b32_literal(
+        bank_vgpr, static_cast<uint32_t>(options.moi_report_dispatch_id), arch);
+    const auto high = instrumentation::build_v_mov_b32_literal(
+        temporary_vgpr, static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u), arch);
+    if (!low || !high)
+      return false;
+    words.insert(words.end(), low->begin(), low->end());
+    words.insert(words.end(), high->begin(), high->end());
+  } else {
     return false;
-  words.push_back(build_v_mov_b32_e32(bank_vgpr, *options.moi_dispatch_id_sgpr, arch));
-  words.push_back(build_v_mov_b32_e32(
-      temporary_vgpr, static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u), arch));
+  }
   const auto mix = [&](uint16_t source) {
     const auto word =
         instrumentation::build_v_xor_b32(bank_vgpr, vector_source_vgpr(source), bank_vgpr, arch);
@@ -1534,7 +1545,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     errors.emplace_back("ConSan MOI runtime sampled probe could not derive a wave owner");
     return std::nullopt;
   }
-  if (runtime_sampled && !options.moi_dispatch_id_sgpr) {
+  if (runtime_sampled && !options.moi_dispatch_id_sgpr && arch != ROCJITSU_CODE_ARCH_GFX1250) {
     errors.emplace_back("ConSan MOI runtime sampled probe requires a hardware dispatch ID");
     return std::nullopt;
   }
@@ -2172,8 +2183,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     [[maybe_unused]] uint32_t first_record_index, uint64_t island_text_offset,
     uint64_t cave_text_offset, uint64_t return_text_offset, uint64_t island_word_count,
     rj_code_arch_t arch) {
-  if (!options.moi_exec_save_sgpr || !options.moi_dispatch_id_sgpr ||
-      options.moi_runtime_sample_stride <= 1u)
+  if (!options.moi_exec_save_sgpr || options.moi_runtime_sample_stride <= 1u ||
+      (!options.moi_dispatch_id_sgpr && arch != ROCJITSU_CODE_ARCH_GFX1250))
     return std::nullopt;
   const uint16_t saved_scc = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u);
   const uint16_t quotient = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 5u);
@@ -2187,8 +2198,10 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
   words.reserve(island_word_count);
   const auto save_scc_word = instrumentation::build_s_cselect_b32(
       saved_scc, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
-  const auto mix_dispatch = instrumentation::build_s_sub_u32(residue, scalar_positive_inline_u32(0),
-                                                             *options.moi_dispatch_id_sgpr, arch);
+  const uint16_t dispatch_mix = options.moi_dispatch_id_sgpr.value_or(
+      scalar_positive_inline_u32(static_cast<uint32_t>(options.moi_report_dispatch_id) & 63u));
+  const auto mix_dispatch =
+      instrumentation::build_s_sub_u32(residue, scalar_positive_inline_u32(0), dispatch_mix, arch);
   if (!save_scc_word || !mix_dispatch)
     return std::nullopt;
   words.push_back(*save_scc_word);
@@ -2284,8 +2297,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     const ConSanOptions &options, const ConSanMoiWorkgroupSources &workgroup_sources,
     uint64_t gate_text_offset, uint64_t return_text_offset, uint64_t reserved_word_count,
     rj_code_arch_t arch) {
-  if (!options.moi_exec_save_sgpr || !options.moi_dispatch_id_sgpr ||
-      options.moi_runtime_sample_stride <= 1u)
+  if (!options.moi_exec_save_sgpr || options.moi_runtime_sample_stride <= 1u ||
+      (!options.moi_dispatch_id_sgpr && arch != ROCJITSU_CODE_ARCH_GFX1250))
     return std::nullopt;
   const uint16_t saved_scc = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u);
   const uint16_t quotient = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 5u);
@@ -2299,8 +2312,10 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
   words.reserve(reserved_word_count);
   const auto save_scc_word = instrumentation::build_s_cselect_b32(
       saved_scc, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
-  const auto mix_dispatch = instrumentation::build_s_sub_u32(residue, scalar_positive_inline_u32(0),
-                                                             *options.moi_dispatch_id_sgpr, arch);
+  const uint16_t dispatch_mix = options.moi_dispatch_id_sgpr.value_or(
+      scalar_positive_inline_u32(static_cast<uint32_t>(options.moi_report_dispatch_id) & 63u));
+  const auto mix_dispatch =
+      instrumentation::build_s_sub_u32(residue, scalar_positive_inline_u32(0), dispatch_mix, arch);
   if (!save_scc_word || !mix_dispatch)
     return std::nullopt;
   words.push_back(*save_scc_word);
