@@ -80,22 +80,24 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
 
   // The 64-bit addend S2 is added as two 32-bit halves read from src2 and
   // src2 + 1. That +1 high-half derivation is only valid when src2 names a real
-  // 64-bit register pair: a VGPR pair (256..511), an even SGPR pair (0..104), or
-  // VCC (106/107). For an inline constant (128..208, 240..247) the encodings are
-  // consecutive single values, so src2 + 1 would read the NEXT constant (e.g.
-  // addend 0 encoded as 128 -> high half reads 129 == constant 1), and a literal
-  // (254/255) has no second encoded dword. Reject those non-register addends
-  // rather than silently miscompiling; S0 is fed whole to v_lshlrev_b64 so it may
-  // be any 64-bit source form and needs no such guard.
+  // 64-bit register pair: a VGPR pair (256..510, so the high half src2+1 is still
+  // a VGPR <= 511 -- v255/511 is rejected because 512 does not encode a VGPR), an
+  // even SGPR pair (0..104), or VCC (106/107). For an inline constant (128..208,
+  // 240..247) the encodings are consecutive single values, so src2 + 1 would read
+  // the NEXT constant (e.g. addend 0 encoded as 128 -> high half reads 129 ==
+  // constant 1), and a literal (254/255) has no second encoded dword. Reject
+  // those non-register addends rather than silently miscompiling; S0 is fed whole
+  // to v_lshlrev_b64 so it may be any 64-bit source form and needs no such guard.
   constexpr uint16_t kVccLo = 106;
-  const bool src2_is_vgpr_pair = src2 >= 256 && src2 <= 511;
+  const bool src2_is_vgpr_pair = src2 >= 256 && src2 <= 510;
   const bool src2_is_sgpr_pair = src2 <= 104 && (src2 % 2) == 0;
   const bool src2_is_vcc = src2 == kVccLo;
   if (!src2_is_vgpr_pair && !src2_is_sgpr_pair && !src2_is_vcc)
-    return ExpandResult::failed(std::string(inst.mnemonic()) +
-                                " v_lshl_add_u64 lowering does not support a non-register 64-bit "
-                                "addend (inline constant or "
-                                "literal); the high-half derivation requires a register pair");
+    return ExpandResult::failed(
+        std::string(inst.mnemonic()) +
+        " v_lshl_add_u64 lowering does not support a non-register 64-bit "
+        "addend (inline constant, literal, or v255 whose high half cannot "
+        "encode a VGPR); the high-half derivation requires a register pair");
 
   // v_lshl_add_u64 computes D = (S0 << S1[5:0]) + S2, lowered as a shift into a
   // 64-bit temporary followed by a 64-bit carry-add of S2. The shift result must
@@ -105,7 +107,7 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
   //     v_lshlrev_b64 reads all of S0 before writing.
   //   - If vdst overlaps a VGPR S2, shifting into vdst would destroy S2 first, so
   //     shift into a dead scratch pair instead and add scratch + S2 into vdst.
-  const bool src2_is_vgpr = src2 >= 256 && src2 <= 511;
+  const bool src2_is_vgpr = src2_is_vgpr_pair;
   const uint16_t src2_vgpr = src2_is_vgpr ? static_cast<uint16_t>(src2 - 256) : 0;
   const bool vdst_aliases_src2 = src2_is_vgpr && vdst < static_cast<uint16_t>(src2_vgpr + 2) &&
                                  src2_vgpr < static_cast<uint16_t>(vdst + 2);
@@ -127,6 +129,19 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
     context.require_vgprs(static_cast<uint32_t>(shift_dst) + 2u);
   }
 
+  // The carry chain needs a scalar carry destination. v_lshl_add_u64 defines no
+  // carry output, and VCC is NOT liveness-tracked here, so hardcoding VCC would
+  // silently clobber a live VCC that the surrounding code still depends on.
+  // Allocate a dead ordinary SGPR pair instead and grow the target descriptor to
+  // cover it, matching the EXEC-save precedent in the MFMA lowering.
+  const auto carry_sgpr_opt = liveness.find_free_sgpr_pair(&inst);
+  if (!carry_sgpr_opt)
+    return ExpandResult::failed(
+        std::string(inst.mnemonic()) +
+        " v_lshl_add_u64 lowering could not find a free SGPR pair for the add carry");
+  const uint8_t carry_sgpr = static_cast<uint8_t>(*carry_sgpr_opt);
+  context.require_sgprs(static_cast<uint32_t>(carry_sgpr) + 2u);
+
   // These generated opcodes currently match on RDNA3 and RDNA4. Keep the
   // architecture-specific selection explicit so an ISA XML change cannot
   // silently make this shared lowering emit the other target's opcode.
@@ -138,11 +153,6 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
   const uint16_t add_co_ci_u32_op = host_arch == ROCJITSU_CODE_ARCH_RDNA3
                                         ? rdna3::kVAddCoCiU32Vop3SdstEnc
                                         : rdna4::kVAddCoCiU32Vop3SdstEnc;
-
-  // This lowering introduces VCC as the explicit carry register. VCC is special
-  // scalar state, not a liveness-allocated scratch SGPR pair, so it must not
-  // grow the ordinary SGPR descriptor allocation. Treating it as normal SGPRs
-  // makes valid RDNA targets look unsupported once diagnostics become fatal.
 
   std::vector<uint32_t> words;
 
@@ -160,11 +170,12 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
   if (host_arch == ROCJITSU_CODE_ARCH_RDNA4)
     words.push_back(rdna4::build_sopp(rdna4::kSWaitAlu, {.simm16 = 0xFFFD})[0]);
 
-  // vdst = shift_dst + S2. v_add_co_u32 writes VCC, then v_add_co_ci_u32 consumes
-  // VCC as carry-in. The low add reads the freshly shifted low half.
+  // vdst = shift_dst + S2. v_add_co_u32 writes the carry into the dead SGPR pair,
+  // then v_add_co_ci_u32 consumes it as carry-in. The low add reads the freshly
+  // shifted low half.
   {
     auto [w0, w1] = build_rdna_vop3_sdst(host_arch, add_co_u32_op, static_cast<uint8_t>(vdst),
-                                         kVccLo, static_cast<uint16_t>(256 + shift_dst), src2);
+                                         carry_sgpr, static_cast<uint16_t>(256 + shift_dst), src2);
     words.push_back(w0);
     words.push_back(w1);
   }
@@ -177,8 +188,8 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
 
   {
     auto [w0, w1] = build_rdna_vop3_sdst(
-        host_arch, add_co_ci_u32_op, static_cast<uint8_t>(vdst + 1), kVccLo,
-        static_cast<uint16_t>(256 + shift_dst + 1), static_cast<uint16_t>(src2 + 1), kVccLo);
+        host_arch, add_co_ci_u32_op, static_cast<uint8_t>(vdst + 1), carry_sgpr,
+        static_cast<uint16_t>(256 + shift_dst + 1), static_cast<uint16_t>(src2 + 1), carry_sgpr);
     words.push_back(w0);
     words.push_back(w1);
   }

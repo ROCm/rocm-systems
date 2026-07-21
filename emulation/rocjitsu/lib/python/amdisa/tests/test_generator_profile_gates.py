@@ -1281,7 +1281,13 @@ def test_output_operand_read_facts_cover_liveness_sensitive_families():
     assert codegen._output_operand_is_also_source(
         Instruction('S_CMOVK_I32', 'ENC_SOPK', 0, [sdst]), sdst
     )
-    assert codegen._output_operand_is_also_source(
+    # A sub-dword (true16) destination is a partial def: the old lane value
+    # survives, so it is a read too. That read is surfaced through an
+    # implicit_uses() override (see _partial_def_outputs), NOT by appending the
+    # destination to src_operands_ — appending it would print the destination a
+    # second time in disassembly and misrepresent the architectural sources.
+    # _output_operand_is_also_source therefore returns False for this case.
+    assert not codegen._output_operand_is_also_source(
         Instruction('V_ADD_F16', 'ENC_VOP3', 0, [true16_vdst]), true16_vdst
     )
 

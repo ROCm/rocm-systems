@@ -811,16 +811,17 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     return leave_unchanged();
   }
 
-  // Likewise, DBT moves (and can duplicate) .text function blocks but does not
-  // remap text-defined STT_FUNC symbol values. A relocation elsewhere (e.g. a
-  // function-pointer table in .data) that resolves against such a symbol would
-  // point at the function's stale pre-move PC. Kernel entries are dispatched via
-  // the descriptor (not address-taken through relocations), so this rejects only
-  // genuinely address-taken text helpers we cannot relocate yet.
-  if (patcher.has_relocation_to_text_function_symbol()) {
+  // Likewise, DBT moves (and can duplicate) .text blocks but does not remap the
+  // st_value of anything defined in .text. A relocation elsewhere (e.g. a
+  // function-pointer table in .data) that resolves against a text-defined symbol
+  // -- STT_FUNC helper, STT_NOTYPE label, or an STT_SECTION(.text)+addend -- would
+  // point at its stale pre-move PC. Kernel entries are dispatched via the
+  // descriptor (not address-taken through relocations), so this rejects only
+  // genuinely address-taken text locations we cannot relocate yet.
+  if (patcher.has_relocation_to_text_symbol()) {
     append_error(result.diagnostics, DiagnosticKind::Legalization,
-                 "code object has a relocation referencing a function defined in .text; DBT does "
-                 "not remap text-defined function symbols and would resolve it to a stale address");
+                 "code object has a relocation referencing a symbol defined in .text; DBT does not "
+                 "remap text-defined symbols and would resolve it to a stale address");
     return leave_unchanged();
   }
 

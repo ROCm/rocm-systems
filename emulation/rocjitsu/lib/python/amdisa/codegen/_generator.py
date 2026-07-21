@@ -7171,14 +7171,37 @@ class CodeGenerator:
                                         f'        sdwa_old_dst_[ln] = {_old_dst_read};\n'
                                         '  }\n'
                                     )
-                            if _dpp_struct and _supports_dpp_encoding:
+                            # apply_dpp/apply_dpp8 modify the architectural src0,
+                            # which the emitted code addresses as src_operands_[0].
+                            # That index only holds src0 when src0 is the first
+                            # registered source. Swap-style ops (vector_swap /
+                            # permlane*_swap) read every output, so a read/write
+                            # output (vdst) is registered at src_operands_[0] and
+                            # src0 moves later — applying DPP to [0] would shuffle
+                            # the destination instead of src0. DPP on a lane-
+                            # crossing swap is not a modeled/legal combination, so
+                            # fail loudly instead of silently permuting the wrong
+                            # operand.
+                            _reads_all_outputs = (
+                                sem is not None
+                                and sem.semantic_class in self._READS_ALL_OUTPUT_CLASSES
+                            )
+                            if _reads_all_outputs and (
+                                _supports_dpp_encoding or _dpp8_struct
+                            ):
+                                _dpp_preamble += (
+                                    '  if (inst_.src0 == amdgpu::SRC_DPP ||\n'
+                                    '      amdgpu::dpp::is_src_dpp8(inst_.src0))\n'
+                                    '    throw util::UnimplementedInst(mnemonic());\n'
+                                )
+                            elif _dpp_struct and _supports_dpp_encoding:
                                 _dpp_preamble += (
                                     '  if (inst_.src0 == amdgpu::SRC_DPP)\n'
                                     '    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_,\n'
                                     '        dpp_row_mask_, dpp_bank_mask_, dpp_bound_ctrl_, dpp_fi_,\n'
                                     '        dpp_src0_, wf);\n'
                                 )
-                            if _dpp8_struct:
+                            if not _reads_all_outputs and _dpp8_struct:
                                 _dpp_preamble += (
                                     '  if (amdgpu::dpp::is_src_dpp8(inst_.src0))\n'
                                     '    amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_,\n'

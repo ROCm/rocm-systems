@@ -779,6 +779,155 @@ make_minimal_amdgpu_elf_with_relocation_after_text(bool place_reloc_in_text = fa
   return image;
 }
 
+// Build an ET_DYN object whose .data relocation resolves against a symbol of a
+// chosen type, defined either in .text or .data. Used to prove the text-symbol
+// relocation guard keys on the defining section (st_shndx) rather than the symbol
+// type: STT_FUNC, STT_NOTYPE, and STT_SECTION symbols in .text must all be
+// rejected, while an equivalent symbol in .data must be accepted.
+std::vector<uint8_t> make_amdgpu_elf_with_symbol_relocation(uint8_t sym_type,
+                                                            bool defined_in_text) {
+  constexpr uint64_t text_offset = 0x100;
+  constexpr uint64_t text_vaddr = 0x1100;
+  constexpr uint64_t text_size = 8;
+  constexpr uint64_t data_size = 8;
+  constexpr uint64_t load_align = 0x1000;
+
+  std::vector<uint8_t> shstrtab{'\0'};
+  const uint32_t text_name = add_elf_name(shstrtab, ".text");
+  const uint32_t data_name = add_elf_name(shstrtab, ".data");
+  const uint32_t symtab_name = add_elf_name(shstrtab, ".symtab");
+  const uint32_t strtab_name = add_elf_name(shstrtab, ".strtab");
+  const uint32_t rela_name = add_elf_name(shstrtab, ".rela.dyn");
+  const uint32_t shstrtab_name = add_elf_name(shstrtab, ".shstrtab");
+
+  std::vector<uint8_t> strtab{'\0'};
+  const uint32_t sym_name = add_elf_name(strtab, "target");
+
+  constexpr uint16_t text_index = 1;
+  constexpr uint16_t data_index = 2;
+
+  const uint64_t data_offset = text_offset + text_size;
+  const uint64_t data_vaddr = text_vaddr + text_size + load_align;
+  const uint64_t symtab_offset = align_up_for_test(data_offset + data_size, 8);
+  constexpr size_t sym_count = 2; // STN_UNDEF + target
+  const uint64_t strtab_offset = symtab_offset + sym_count * sizeof(Elf64_Sym);
+  const uint64_t rela_offset = align_up_for_test(strtab_offset + strtab.size(), 8);
+  constexpr size_t rela_count = 1;
+  const uint64_t shstrtab_offset = rela_offset + rela_count * sizeof(Elf64_Rela);
+  const uint64_t shoff = align_up_for_test(shstrtab_offset + shstrtab.size(), 8);
+  constexpr uint16_t section_count = 7;
+  constexpr uint16_t phdr_count = 2;
+
+  std::vector<uint8_t> image(shoff + section_count * sizeof(Elf64_Shdr), 0);
+
+  Elf64_Ehdr ehdr{};
+  std::memcpy(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
+  ehdr.e_ident[EI_CLASS] = ELFCLASS64;
+  ehdr.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
+  ehdr.e_type = ET_DYN;
+  ehdr.e_machine = EM_AMDGPU;
+  ehdr.e_version = 1;
+  ehdr.e_phoff = sizeof(Elf64_Ehdr);
+  ehdr.e_shoff = shoff;
+  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
+  ehdr.e_ehsize = sizeof(Elf64_Ehdr);
+  ehdr.e_phentsize = sizeof(Elf64_Phdr);
+  ehdr.e_phnum = phdr_count;
+  ehdr.e_shentsize = sizeof(Elf64_Shdr);
+  ehdr.e_shnum = section_count;
+  ehdr.e_shstrndx = 6;
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+
+  std::array<Elf64_Phdr, phdr_count> phdrs{};
+  phdrs[0].p_type = PT_LOAD;
+  phdrs[0].p_flags = 0x5; // PF_R | PF_X
+  phdrs[0].p_offset = text_offset;
+  phdrs[0].p_vaddr = text_vaddr;
+  phdrs[0].p_paddr = text_vaddr;
+  phdrs[0].p_filesz = text_size;
+  phdrs[0].p_memsz = text_size;
+  phdrs[0].p_align = load_align;
+
+  phdrs[1].p_type = PT_LOAD;
+  phdrs[1].p_flags = 0x6; // PF_R | PF_W
+  phdrs[1].p_offset = data_offset;
+  phdrs[1].p_vaddr = data_vaddr;
+  phdrs[1].p_paddr = data_vaddr;
+  phdrs[1].p_filesz = data_size;
+  phdrs[1].p_memsz = data_size;
+  phdrs[1].p_align = load_align;
+  std::memcpy(image.data() + ehdr.e_phoff, phdrs.data(), phdrs.size() * sizeof(Elf64_Phdr));
+
+  const std::array<uint32_t, 2> text_words = {0xBF800000u, 0xBF800000u};
+  std::memcpy(image.data() + text_offset, text_words.data(), text_size);
+
+  std::array<Elf64_Sym, sym_count> syms{};
+  syms[1].st_name = sym_name;
+  syms[1].st_info = elf_symbol_info(kElfSymbolBindGlobal, sym_type);
+  syms[1].st_shndx = defined_in_text ? text_index : data_index;
+  syms[1].st_value = defined_in_text ? text_vaddr : data_vaddr;
+  syms[1].st_size = defined_in_text ? text_size : data_size;
+  std::memcpy(image.data() + symtab_offset, syms.data(), syms.size() * sizeof(Elf64_Sym));
+
+  std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
+
+  Elf64_Rela rela{};
+  rela.r_offset = data_vaddr; // place in .data, safely shifted with the section
+  rela.r_info = (static_cast<uint64_t>(1) << 32);
+  std::memcpy(image.data() + rela_offset, &rela, sizeof(rela));
+
+  std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
+
+  std::array<Elf64_Shdr, section_count> shdrs{};
+  shdrs[1].sh_name = text_name;
+  shdrs[1].sh_type = SHT_PROGBITS;
+  shdrs[1].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
+  shdrs[1].sh_addr = text_vaddr;
+  shdrs[1].sh_offset = text_offset;
+  shdrs[1].sh_size = text_size;
+  shdrs[1].sh_addralign = sizeof(uint32_t);
+
+  shdrs[2].sh_name = data_name;
+  shdrs[2].sh_type = SHT_PROGBITS;
+  shdrs[2].sh_flags = SHF_ALLOC | SHF_WRITE;
+  shdrs[2].sh_addr = data_vaddr;
+  shdrs[2].sh_offset = data_offset;
+  shdrs[2].sh_size = data_size;
+  shdrs[2].sh_addralign = sizeof(uint64_t);
+
+  shdrs[3].sh_name = symtab_name;
+  shdrs[3].sh_type = SHT_SYMTAB;
+  shdrs[3].sh_offset = symtab_offset;
+  shdrs[3].sh_size = syms.size() * sizeof(Elf64_Sym);
+  shdrs[3].sh_link = 4;
+  shdrs[3].sh_info = 1;
+  shdrs[3].sh_addralign = 8;
+  shdrs[3].sh_entsize = sizeof(Elf64_Sym);
+
+  shdrs[4].sh_name = strtab_name;
+  shdrs[4].sh_type = SHT_STRTAB;
+  shdrs[4].sh_offset = strtab_offset;
+  shdrs[4].sh_size = strtab.size();
+  shdrs[4].sh_addralign = 1;
+
+  shdrs[5].sh_name = rela_name;
+  shdrs[5].sh_type = SHT_RELA;
+  shdrs[5].sh_offset = rela_offset;
+  shdrs[5].sh_size = rela_count * sizeof(Elf64_Rela);
+  shdrs[5].sh_link = 3; // .symtab
+  shdrs[5].sh_addralign = 8;
+  shdrs[5].sh_entsize = sizeof(Elf64_Rela);
+
+  shdrs[6].sh_name = shstrtab_name;
+  shdrs[6].sh_type = SHT_STRTAB;
+  shdrs[6].sh_offset = shstrtab_offset;
+  shdrs[6].sh_size = shstrtab.size();
+  shdrs[6].sh_addralign = 1;
+
+  std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+  return image;
+}
+
 std::vector<uint8_t> make_large_amdgpu_elf_with_waitcnt_entry() {
   constexpr uint64_t rodata_offset = 0x100;
   constexpr uint64_t rodata_vaddr = 0x100;
@@ -1526,6 +1675,45 @@ TEST(BinaryTranslatorE2E, RejectsRelocationTargetingText) {
   EXPECT_EQ(result.elf_bytes, image);
   EXPECT_TRUE(rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
                                              "relocations targeting .text"));
+}
+
+// The text-symbol relocation guard must key on the defining section, not the
+// symbol type: a relocation resolving against any symbol defined in .text aliases
+// code DBT moves without remapping st_value. STT_FUNC, STT_NOTYPE, and
+// STT_SECTION(.text)+addend all point at stale post-move offsets.
+TEST(CodeObjectPatcher, DetectsRelocationToTextSymbolRegardlessOfType) {
+  for (uint8_t sym_type :
+       {kElfSymbolTypeFunc, kElfSymbolTypeNone, kElfSymbolTypeObject, kElfSymbolTypeSection}) {
+    auto text_image = make_amdgpu_elf_with_symbol_relocation(sym_type, /*defined_in_text=*/true);
+    AmdGpuCodeObject text_co(text_image.data(), text_image.size());
+    ASSERT_TRUE(text_co.is_valid()) << "sym_type=" << static_cast<int>(sym_type);
+    CodeObjectPatcher text_patcher(text_co);
+    EXPECT_TRUE(text_patcher.has_relocation_to_text_symbol())
+        << "text-defined sym_type=" << static_cast<int>(sym_type) << " must be rejected";
+
+    auto data_image = make_amdgpu_elf_with_symbol_relocation(sym_type, /*defined_in_text=*/false);
+    AmdGpuCodeObject data_co(data_image.data(), data_image.size());
+    ASSERT_TRUE(data_co.is_valid()) << "sym_type=" << static_cast<int>(sym_type);
+    CodeObjectPatcher data_patcher(data_co);
+    EXPECT_FALSE(data_patcher.has_relocation_to_text_symbol())
+        << "data-defined sym_type=" << static_cast<int>(sym_type) << " must be accepted";
+  }
+}
+
+TEST(BinaryTranslatorE2E, RejectsRelocationToTextNotypeSymbol) {
+  // A STT_NOTYPE label defined in .text is address-taken by a .data relocation.
+  // The pre-move guard only recognized STT_FUNC; this proves the broadened guard
+  // rejects untyped text labels too, leaving the object unchanged.
+  auto image = make_amdgpu_elf_with_symbol_relocation(kElfSymbolTypeNone, /*defined_in_text=*/true);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  auto result = translator.translate(source);
+
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
+                                             "symbol defined in .text"));
 }
 
 TEST(BinaryTranslator, InlineExpansionAvoidsCaveBranchOverflow) {
@@ -4205,6 +4393,66 @@ TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaRejectsInlineConstantAddend) {
   EXPECT_EQ(result.elf_bytes, image);
   EXPECT_TRUE(rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::ExpandFailed,
                                              "non-register 64-bit addend"));
+}
+
+TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaRejectsV255Addend) {
+  // v[4:5] = (v[0:1] << 2) + v[255:256]. src2=v255 (selector 511) has no valid
+  // high half: the derived src2+1 selector is 512, which does not encode a VGPR.
+  // The lowering must fail closed rather than emit an add reading an invalid
+  // operand.
+  constexpr uint16_t kV255 = 256 + 255;
+  const auto words = make_cdna4_v_lshl_add_u64_words(/*vdst=*/4, /*src0=*/256 + 0,
+                                                     /*src1=*/2, /*src2=*/kV255);
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {words[0], words[1], 0xBF810000u});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  auto result = translator.translate(source);
+
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::ExpandFailed,
+                                             "non-register 64-bit addend"));
+}
+
+TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaCarryUsesScalarSgprNotVcc) {
+  // v_lshl_add_u64 defines no carry output and VCC is not liveness-tracked, so
+  // the carry chain must target a dead ordinary SGPR pair, never VCC (which could
+  // be live across the instruction). Verify the emitted v_add_co_u32 /
+  // v_add_co_ci_u32 write a scalar SDST that is not VCC.
+  const auto words = make_cdna4_v_lshl_add_u64_words(/*vdst=*/4, /*src0=*/256 + 0,
+                                                     /*src1=*/2, /*src2=*/256 + 2);
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {words[0], words[1], 0xBF810000u});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_RDNA4);
+
+  // VCC_LO is scalar selector 106. The carry SDST must be an ordinary SGPR.
+  constexpr uint32_t kVccLo = 106;
+  bool saw_add = false;
+  for (const auto &inst : decoded) {
+    const auto mnemonic = inst->mnemonic();
+    if (mnemonic != "v_add_co_u32" && mnemonic != "v_add_co_ci_u32")
+      continue;
+    saw_add = true;
+    ASSERT_GE(inst->num_dst_operands(), 2)
+        << mnemonic << " must expose an explicit scalar carry destination";
+    const auto sdst = inst->dst_operand(1)->to_register_ref();
+    ASSERT_TRUE(sdst.has_value()) << mnemonic << " carry SDST must be a register";
+    EXPECT_NE(sdst->index, kVccLo) << mnemonic << " must not clobber VCC as its carry destination";
+  }
+  EXPECT_TRUE(saw_add) << "lowering must emit the carry-add pair";
 }
 
 TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersDsReadB32ToFlatGlobalLoad) {

@@ -660,7 +660,7 @@ bool CodeObjectPatcher::has_relocations_within_text() const {
   return false;
 }
 
-bool CodeObjectPatcher::has_relocation_to_text_function_symbol() const {
+bool CodeObjectPatcher::has_relocation_to_text_symbol() const {
   if (text_size_ == 0)
     return false;
 
@@ -670,9 +670,14 @@ bool CodeObjectPatcher::has_relocation_to_text_function_symbol() const {
   if (!text_index)
     return false;
 
-  // Return the symtab index referenced by a symbol index in the given symtab, and
-  // whether that symbol is an STT_FUNC defined in .text.
-  auto symbol_is_text_func = [&](const Elf64_Shdr &symtab, uint32_t sym_index) {
+  // True if the referenced symbol is *defined in .text*, regardless of type. DBT
+  // does not remap text-defined st_value, so any such reference resolves to a
+  // stale pre-move PC. This deliberately matches all types: STT_FUNC helpers,
+  // STT_NOTYPE labels, and an STT_SECTION symbol for .text (whose reloc addend
+  // names an in-.text offset) all alias moved code. Keying on st_shndx (not the
+  // symbol type) is what makes the section-symbol and untyped-label cases fail
+  // closed. STN_UNDEF (index 0) has st_shndx == SHN_UNDEF, so it never matches.
+  auto symbol_is_defined_in_text = [&](const Elf64_Shdr &symtab, uint32_t sym_index) {
     if (symtab.sh_entsize != sizeof(Elf64_Sym))
       return false;
     if (!image_contains_range(image_.size(), symtab.sh_offset, symtab.sh_size))
@@ -682,7 +687,7 @@ bool CodeObjectPatcher::has_relocation_to_text_function_symbol() const {
     Elf64_Sym symbol{};
     std::memcpy(&symbol, image_.data() + symtab.sh_offset + sym_index * sizeof(Elf64_Sym),
                 sizeof(symbol));
-    return symbol.st_shndx == *text_index && elf_symbol_type(symbol.st_info) == kElfSymbolTypeFunc;
+    return symbol.st_shndx == *text_index;
   };
 
   for (const Elf64_Shdr &relocs : shdrs) {
@@ -712,7 +717,7 @@ bool CodeObjectPatcher::has_relocation_to_text_function_symbol() const {
         r_info = rel.r_info;
       }
       const uint32_t sym_index = static_cast<uint32_t>(r_info >> 32); // ELF64_R_SYM
-      if (sym_index != 0 && symbol_is_text_func(symtab, sym_index))
+      if (sym_index != 0 && symbol_is_defined_in_text(symtab, sym_index))
         return true;
     }
   }
