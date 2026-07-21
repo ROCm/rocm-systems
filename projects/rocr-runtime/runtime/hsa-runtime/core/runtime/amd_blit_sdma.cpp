@@ -123,8 +123,8 @@ uint32_t BlitSdma<useGCR, scopeFields>::gcr_command_size() {
 
 template <bool useGCR, bool scopeFields>
 BlitSdma<useGCR, scopeFields>::BlitSdma()
-    : agent_(NULL),
-      queue_start_addr_(NULL),
+    : agent_(nullptr),
+      queue_start_addr_(nullptr),
       bytes_queued_(0),
       parity_(false),
       cached_reserve_index_(0),
@@ -155,7 +155,7 @@ template <bool useGCR, bool scopeFields> BlitSdma<useGCR, scopeFields>::~BlitSdm
 template <bool useGCR, bool scopeFields>
 hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent, bool use_xgmi,
                                           size_t linear_copy_size_override, int rec_eng) {
-  if (queue_start_addr_ != NULL) {
+  if (queue_start_addr_ != nullptr) {
     // Already initialized.
     return HSA_STATUS_SUCCESS;
   }
@@ -223,7 +223,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent,
       kQueueSize, 0x1000,
       core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateNonPaged);
 
-  if (queue_start_addr_ == NULL) {
+  if (queue_start_addr_ == nullptr) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
   MAKE_NAMED_SCOPE_GUARD(cleanupOnException, [&]() { Destroy(); };);
@@ -287,17 +287,19 @@ template <bool useGCR, bool scopeFields> hsa_status_t BlitSdma<useGCR, scopeFiel
   if (queue_resource_.QueueId != 0) {
     // Release queue resources from the kernel
     auto err = agent_->driver().DestroyQueue(queue_resource_.QueueId);
-    assert(err == HSA_STATUS_SUCCESS);
-    (void)err;
+    if (err != HSA_STATUS_SUCCESS) {
+      assert(false && "DestroyQueue failed");
+      // Continue cleanup even on failure
+    }
     memset(&queue_resource_, 0, sizeof(queue_resource_));
   }
 
-  if (queue_start_addr_ != NULL) {
+  if (queue_start_addr_ != nullptr) {
     // Release queue buffer.
     agent_->system_deallocator()(queue_start_addr_);
   }
 
-  queue_start_addr_ = NULL;
+  queue_start_addr_ = nullptr;
   cached_reserve_index_ = 0;
   cached_commit_index_ = 0;
 
@@ -2098,7 +2100,10 @@ template <bool useGCR, bool scopeFields> bool BlitSdma<useGCR, scopeFields>::Can
 template <bool useGCR, bool scopeFields>
 void BlitSdma<useGCR, scopeFields>::BuildFenceCommand(char* fence_command_addr, uint32_t* fence,
                                          uint32_t fence_value) {
-  assert(fence_command_addr != NULL);
+  if (fence_command_addr == nullptr) {
+    assert(false && "fence_command_addr is NULL");
+    abort();  // Unrecoverable: null command addr would submit garbage to SDMA ring
+  }
 
   // GFX12 or later use a different packet format that is incompatible (fields changed in size and location).
   if (agent_->supported_isas()[0]->GetMajorVersion() >= 12) {
@@ -2986,13 +2991,19 @@ template <bool useGCR, bool scopeFields> void BlitSdma<useGCR, scopeFields>::Bui
 }
 
 template <bool useGCR, bool scopeFields> void BlitSdma<useGCR, scopeFields>::BuildHdpFlushCommand(char* cmd_addr) {
-  assert(cmd_addr != NULL);
+  if (cmd_addr == nullptr) {
+    assert(false && "cmd_addr is NULL in BuildHdpFlushCommand");
+    abort();  // Unrecoverable: null command addr would submit garbage to SDMA ring
+  }
   SDMA_PKT_POLL_REGMEM* addr = reinterpret_cast<SDMA_PKT_POLL_REGMEM*>(cmd_addr);
   memcpy(addr, &hdp_flush_cmd, flush_command_size_);
 }
 
 template <bool useGCR, bool scopeFields> void BlitSdma<useGCR, scopeFields>::BuildGCRCommand(char* cmd_addr, bool invalidate) {
-  assert(cmd_addr != NULL);
+  if (cmd_addr == nullptr) {
+    assert(false && "cmd_addr is NULL in BuildGCRCommand");
+    abort();  // Unrecoverable: null command addr would submit garbage to SDMA ring
+  }
   assert(useGCR && "Unsupported SDMA command - GCR.");
 
   if (is_gfx125plus_) {
