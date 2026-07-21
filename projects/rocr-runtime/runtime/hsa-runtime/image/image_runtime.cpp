@@ -800,7 +800,7 @@ hsa_status_t ImageRuntime::DestroyMipmapArrayHandle(
     const hsa_ext_image_t& image_handle) {
   const MipmappedArray* mipmap_array = MipmappedArray::Convert(image_handle.handle);
 
-  if (mipmap_array == NULL) {
+  if (mipmap_array == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 

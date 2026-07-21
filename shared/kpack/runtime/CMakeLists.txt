@@ -18,6 +18,9 @@ set(KPACK_HEADERS
     include/rocm_kpack/kpack_export.h
 )
 
+add_compile_definitions($<$<CONFIG:Debug>:-D_ITERATOR_DEBUG_LEVEL=0>)
+set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded)
+
 # Create library (static or shared based on BUILD_SHARED_LIBS)
 add_library(rocm_kpack ${KPACK_SOURCES} ${KPACK_HEADERS})
 
@@ -32,7 +35,7 @@ target_include_directories(rocm_kpack
 target_link_libraries(rocm_kpack
     PRIVATE
         msgpack-cxx
-        zstd::libzstd
+        ${zstd_libzstd}
 )
 
 # Symbol visibility control

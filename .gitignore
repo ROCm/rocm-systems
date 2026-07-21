@@ -19,3 +19,7 @@ __pycache__
 /.rocshmem-worktree
 /projects/cuid/_build
 build/
+
+.idea/
+.depend/
+depend

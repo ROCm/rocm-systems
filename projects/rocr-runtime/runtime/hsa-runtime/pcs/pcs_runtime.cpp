@@ -338,7 +338,7 @@ hsa_status_t PcsRuntime::PcSamplingDestroy(hsa_ven_amd_pcs_t handle) {
   std::lock_guard<std::mutex> lock(pc_sampling_lock_);
   auto pcSamplingSessionIt = pc_sampling_.find(static_cast<uint64_t>(handle.handle));
   if (pcSamplingSessionIt == pc_sampling_.end()) {
-    debug_warning(false && "Cannot find PcSampling session");
+    debug_warning(false, "Cannot find PcSampling session");
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
   AMD::GpuAgentInt* gpu_agent = static_cast<AMD::GpuAgentInt*>(pcSamplingSessionIt->second.agent);
@@ -352,7 +352,7 @@ hsa_status_t PcsRuntime::PcSamplingStart(hsa_ven_amd_pcs_t handle) {
   std::lock_guard<std::mutex> lock(pc_sampling_lock_);
   auto pcSamplingSessionIt = pc_sampling_.find(static_cast<uint64_t>(handle.handle));
   if (pcSamplingSessionIt == pc_sampling_.end()) {
-    debug_warning(false && "Cannot find PcSampling session");
+    debug_warning(false, "Cannot find PcSampling session");
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
   AMD::GpuAgentInt* gpu_agent = static_cast<AMD::GpuAgentInt*>(pcSamplingSessionIt->second.agent);
@@ -364,7 +364,7 @@ hsa_status_t PcsRuntime::PcSamplingStop(hsa_ven_amd_pcs_t handle) {
   std::lock_guard<std::mutex> lock(pc_sampling_lock_);
   auto pcSamplingSessionIt = pc_sampling_.find(static_cast<uint64_t>(handle.handle));
   if (pcSamplingSessionIt == pc_sampling_.end()) {
-    debug_warning(false && "Cannot find PcSampling session");
+    debug_warning(false, "Cannot find PcSampling session");
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
   AMD::GpuAgentInt* gpu_agent = static_cast<AMD::GpuAgentInt*>(pcSamplingSessionIt->second.agent);
@@ -376,7 +376,7 @@ hsa_status_t PcsRuntime::PcSamplingFlush(hsa_ven_amd_pcs_t handle) {
   std::lock_guard<std::mutex> lock(pc_sampling_lock_);
   auto pcSamplingSessionIt = pc_sampling_.find(static_cast<uint64_t>(handle.handle));
   if (pcSamplingSessionIt == pc_sampling_.end()) {
-    debug_warning(false && "Cannot find PcSampling session");
+    debug_warning(false, "Cannot find PcSampling session");
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
   AMD::GpuAgentInt* gpu_agent = static_cast<AMD::GpuAgentInt*>(pcSamplingSessionIt->second.agent);

@@ -48,12 +48,12 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
 if(BUILD_SHARED_LIBS)
   add_library(amdhip64 SHARED)
-  if(WIN32)
-    set_target_properties(amdhip64 PROPERTIES RUNTIME_OUTPUT_NAME "amdhip64_${HIP_VERSION_MAJOR}")
-  endif()
   # Windows doesn't have a strip utility, so CMAKE_STRIP won't be set.
   if((CMAKE_BUILD_TYPE STREQUAL "Release") AND NOT ("${CMAKE_STRIP}" STREQUAL ""))
     add_custom_command(TARGET amdhip64 POST_BUILD COMMAND ${CMAKE_STRIP} $<TARGET_FILE:amdhip64>)
+  endif()
+  if(WIN32)
+      set(HIP_RUNTIME_LIBRARY_SUFFIX "_${HIP_VERSION_MAJOR}")
   endif()
 else()
   add_library(amdhip64 STATIC $<TARGET_OBJECTS:rocclr>)
@@ -75,7 +75,7 @@ else()
 endif()
 
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-  set_target_properties(amdhip64 PROPERTIES OUTPUT_NAME "amdhip64")
+  set_target_properties(amdhip64 PROPERTIES OUTPUT_NAME "amdhip64${HIP_RUNTIME_LIBRARY_SUFFIX}")
 else()
   set_target_properties(amdhip64 PROPERTIES OUTPUT_NAME "amdhip32")
 endif()
@@ -178,8 +178,8 @@ target_link_libraries(amdhip64 PRIVATE ${CMAKE_DL_LIBS})
 # Add link to comgr, hsa-runtime and other required libraries in target files
 # This is required for static libraries
 if(NOT BUILD_SHARED_LIBS)
-  find_package(hsa-runtime64)
-  find_package(amd_comgr)
+  find_package(hsa-runtime64 REQUIRED)
+  find_package(amd_comgr REQUIRED)
   target_link_libraries(amdhip64 PRIVATE
     pthread numa rt c amd_comgr hsa-runtime64::hsa-runtime64)
 endif()
@@ -202,6 +202,8 @@ endif()
 option(ROCM_KPACK_ENABLED "Enable kpack runtime loading for split device code" OFF)
 if(ROCM_KPACK_ENABLED)
   find_package(rocm-kpack REQUIRED)
+  find_package(zstd REQUIRED)
+  find_package(msgpack-cxx REQUIRED)
   target_compile_definitions(amdhip64 PRIVATE ROCM_KPACK_ENABLED=1)
   target_link_libraries(amdhip64 PRIVATE rocm::rocm_kpack)
 endif()
@@ -319,7 +321,7 @@ endif()
 
 if(HIP_ENABLE_ROCPROFILER_REGISTER)
     find_package(rocprofiler-register REQUIRED
-        HINTS $ENV{rocprofiler_register_ROOT} $ENV{ROCPROFILER_REGISTER_ROOT} ${CMAKE_INSTALL_PREFIX}
+        HINTS $ENV{rocprofiler_register_ROOT} $ENV{ROCPROFILER_REGISTER_ROOT}
         PATHS ${ROCM_PATH})
 
     # don't use HIP_VERSION_PATCH because it is too large (> 100) for rocprofiler register
@@ -349,40 +351,43 @@ target_link_libraries(device INTERFACE host)
 # Relying on CMake to choose the library directory for us will default in that case to lib64
 # Hence there will be a mismatch between where HIP is installed and where CMake thinks it is
 
-INSTALL(TARGETS amdhip64 host device
-  EXPORT hip-targets
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-INSTALL(EXPORT hip-targets DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hip NAMESPACE hip::)
+install(TARGETS amdhip64 host device
+        EXPORT hip-targets
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-INSTALL(TARGETS amdhip64 host device
-  EXPORT hip-lang-targets
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-INSTALL(EXPORT hip-lang-targets DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hip-lang NAMESPACE hip-lang::)
+install(EXPORT hip-targets
+        NAMESPACE hip::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hip)
+
+install(TARGETS amdhip64 host device
+        EXPORT hip-lang-targets
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+install(EXPORT hip-lang-targets
+        NAMESPACE hip-lang::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hip-lang)
 
 include(CMakePackageConfigHelpers)
 
 configure_package_config_file(
-  ${HIP_COMMON_DIR}/hip-lang-config.cmake.in
-  ${CMAKE_CURRENT_BINARY_DIR}/hip-lang-config.cmake
-  INSTALL_DESTINATION ${CONFIG_LANG_PACKAGE_INSTALL_DIR}
-  NO_SET_AND_CHECK_MACRO
-  NO_CHECK_REQUIRED_COMPONENTS_MACRO
-  PATH_VARS LIB_INSTALL_DIR INCLUDE_INSTALL_DIR BIN_INSTALL_DIR)
+        ${HIP_COMMON_DIR}/hip-lang-config.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-lang-config.cmake
+        INSTALL_DESTINATION ${CONFIG_LANG_PACKAGE_INSTALL_DIR}
+        NO_SET_AND_CHECK_MACRO
+        NO_CHECK_REQUIRED_COMPONENTS_MACRO)
+
 
 write_basic_package_version_file(
-  ${CMAKE_CURRENT_BINARY_DIR}/hip-lang-config-version.cmake
-  VERSION "${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH}"
-  COMPATIBILITY SameMajorVersion)
-install(
-    FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/hip-lang-config.cmake
-    ${CMAKE_CURRENT_BINARY_DIR}/hip-lang-config-version.cmake
-    DESTINATION
-    ${CONFIG_LANG_PACKAGE_INSTALL_DIR}/
-    )
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-lang-config-version.cmake
+        VERSION "${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH}"
+        COMPATIBILITY SameMajorVersion)
+
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/hip-lang-config.cmake
+              ${CMAKE_CURRENT_BINARY_DIR}/hip-lang-config-version.cmake
+        DESTINATION ${CONFIG_LANG_PACKAGE_INSTALL_DIR})

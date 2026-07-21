@@ -102,8 +102,6 @@ if(NOT DEFINED BITCODE_DIR)
       HINTS
         "${LLVM_LIBRARY_DIR}/amdgcn/bitcode"
         "${LLVM_LIBRARY_DIR}/../amdgcn/bitcode"
-        "${CMAKE_INSTALL_PREFIX}/amdgcn/bitcode"
-        "${CMAKE_INSTALL_PREFIX}/lib/amdgcn/bitcode"
       NO_DEFAULT_PATH
       REQUIRED
     )

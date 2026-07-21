@@ -15,10 +15,7 @@
 
 file(GLOB sources *.cpp *.hpp)
 add_library(amdhsaloader STATIC ${sources})
-set_target_properties(amdhsaloader PROPERTIES
-  MSVC_RUNTIME_LIBRARY          "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-  POSITION_INDEPENDENT_CODE     ON
-)
+set_target_properties(amdhsaloader PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|(Apple)?Clang)$")
   target_compile_options(amdhsaloader PRIVATE
