@@ -3113,9 +3113,9 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     if (srcMemories[i] == nullptr && dstMemories[i] == nullptr) {
       type = hipHostToHost;
     } else if (srcMemories[i] == nullptr) {
-      type = hipWriteBuffer;
+      type = (getMemoryType(dstMemories[i]) == hipMemoryTypeHost) ? hipHostToHost : hipWriteBuffer;
     } else if (dstMemories[i] == nullptr) {
-      type = hipReadBuffer;
+      type = (getMemoryType(srcMemories[i]) == hipMemoryTypeHost) ? hipHostToHost : hipReadBuffer;
     } else {
       type = ihipGetMemcpyType(srcMemories[i], dstMemories[i], hipMemcpyDefault);
     }
