@@ -1558,7 +1558,7 @@ TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
 // ---------------------------------------------------------------------------
 
 // rcclCanUseWarpSpeedAuto: gfx950 single-node with auto mode on -> eligible.
-TEST(RcclwrapWarpSpeed, CanUseWarpSpeedAuto_Gfx950SingleNode_True)
+TEST(Rcclwrap, CanUseWarpSpeedAuto_Gfx950SingleNode_True)
 {
     // Auto mode defaults to 1; if the environment forces it off, the eligibility
     // result would legitimately be false, so skip to keep the test deterministic.
@@ -1583,7 +1583,7 @@ TEST(RcclwrapWarpSpeed, CanUseWarpSpeedAuto_Gfx950SingleNode_True)
 }
 
 // rcclCanUseWarpSpeedAuto: non-gfx950 arch is never eligible.
-TEST(RcclwrapWarpSpeed, CanUseWarpSpeedAuto_NonGfx950_False)
+TEST(Rcclwrap, CanUseWarpSpeedAuto_NonGfx950_False)
 {
     ncclComm_t            comm = nullptr;
     struct ncclTopoSystem topo;
@@ -1596,7 +1596,7 @@ TEST(RcclwrapWarpSpeed, CanUseWarpSpeedAuto_NonGfx950_False)
 }
 
 // rcclCanUseWarpSpeedAuto: multi-node is never eligible (auto mode is single-node).
-TEST(RcclwrapWarpSpeed, CanUseWarpSpeedAuto_MultiNode_False)
+TEST(Rcclwrap, CanUseWarpSpeedAuto_MultiNode_False)
 {
     ncclComm_t            comm = nullptr;
     struct ncclTopoSystem topo;
@@ -1610,7 +1610,7 @@ TEST(RcclwrapWarpSpeed, CanUseWarpSpeedAuto_MultiNode_False)
 
 // rcclCanUseWarpSpeedAuto: RCCL_WARP_SPEED_AUTO=0 disables eligibility even on
 // gfx950 single-node. Isolated so the cached RCCL_PARAM value doesn't leak.
-TEST(RcclwrapWarpSpeed, CanUseWarpSpeedAuto_AutoModeDisabled_False)
+TEST(Rcclwrap, CanUseWarpSpeedAuto_AutoModeDisabled_False)
 {
     RUN_ISOLATED_TEST_WITH_ENV(
         "CanUseWarpSpeedAuto_AutoModeDisabled_False",
@@ -1631,7 +1631,7 @@ TEST(RcclwrapWarpSpeed, CanUseWarpSpeedAuto_AutoModeDisabled_False)
 }
 
 // rcclGetMaxWarpsPerBlock: single node -> RCCL_SINGLE_NODE_MAX_NTHREADS / WarpSize.
-TEST(RcclwrapWarpSpeed, GetMaxWarpsPerBlock_SingleNode)
+TEST(Rcclwrap, GetMaxWarpsPerBlock_SingleNode)
 {
     ncclComm_t            comm = nullptr;
     struct ncclTopoSystem topo;
@@ -1646,7 +1646,7 @@ TEST(RcclwrapWarpSpeed, GetMaxWarpsPerBlock_SingleNode)
 }
 
 // rcclGetMaxWarpsPerBlock: multi-node gfx950 -> RCCL_GFX950_MAX_NTHREADS / WarpSize.
-TEST(RcclwrapWarpSpeed, GetMaxWarpsPerBlock_MultiNodeGfx950)
+TEST(Rcclwrap, GetMaxWarpsPerBlock_MultiNodeGfx950)
 {
     ncclComm_t            comm = nullptr;
     struct ncclTopoSystem topo;
@@ -1661,7 +1661,7 @@ TEST(RcclwrapWarpSpeed, GetMaxWarpsPerBlock_MultiNodeGfx950)
 }
 
 // rcclGetMaxWarpsPerBlock: multi-node non-gfx950 -> RCCL_DEFAULT_MAX_NTHREADS / WarpSize.
-TEST(RcclwrapWarpSpeed, GetMaxWarpsPerBlock_MultiNodeOtherArch)
+TEST(Rcclwrap, GetMaxWarpsPerBlock_MultiNodeOtherArch)
 {
     ncclComm_t            comm = nullptr;
     struct ncclTopoSystem topo;
@@ -1681,7 +1681,7 @@ TEST(RcclwrapWarpSpeed, GetMaxWarpsPerBlock_MultiNodeOtherArch)
 // RCCL_DEFAULT_MAX_NTHREADS (all 256), so every branch returns the same value and
 // the intended single-node halving is currently a no-op. If the constants are ever
 // differentiated (as the comment intends), this test should be updated.
-TEST(RcclwrapWarpSpeed, GetMaxWarpsPerBlock_BranchesCurrentlyEquivalent)
+TEST(Rcclwrap, GetMaxWarpsPerBlock_BranchesCurrentlyEquivalent)
 {
     ncclComm_t            comm = nullptr;
     struct ncclTopoSystem topo;
@@ -1703,7 +1703,7 @@ TEST(RcclwrapWarpSpeed, GetMaxWarpsPerBlock_BranchesCurrentlyEquivalent)
 
 // rcclWarpSpeedComputeNChannels: single-node, no user override, gfx950 8-rank ->
 // nc*nChannels*mult, then halved for the gfx950 single-node 8-rank special case.
-TEST(RcclwrapWarpSpeed, ComputeNChannels_SingleNode_Gfx950_8Ranks_Halved)
+TEST(Rcclwrap, ComputeNChannels_SingleNode_Gfx950_8Ranks_Halved)
 {
     ncclComm_t            comm = nullptr;
     struct ncclTopoSystem topo;
@@ -1723,7 +1723,7 @@ TEST(RcclwrapWarpSpeed, ComputeNChannels_SingleNode_Gfx950_8Ranks_Halved)
 }
 
 // rcclWarpSpeedComputeNChannels: single-node, non-8-rank -> no halving.
-TEST(RcclwrapWarpSpeed, ComputeNChannels_SingleNode_4Ranks_NoHalving)
+TEST(Rcclwrap, ComputeNChannels_SingleNode_4Ranks_NoHalving)
 {
     ncclComm_t            comm = nullptr;
     struct ncclTopoSystem topo;
@@ -1742,7 +1742,7 @@ TEST(RcclwrapWarpSpeed, ComputeNChannels_SingleNode_4Ranks_NoHalving)
 
 // rcclWarpSpeedComputeNChannels: multi-node, no user override -> capped by maxChannels,
 // no halving (halving is single-node only).
-TEST(RcclwrapWarpSpeed, ComputeNChannels_MultiNode_CappedByMaxChannels)
+TEST(Rcclwrap, ComputeNChannels_MultiNode_CappedByMaxChannels)
 {
     ncclComm_t            comm = nullptr;
     struct ncclTopoSystem topo;
@@ -1762,7 +1762,7 @@ TEST(RcclwrapWarpSpeed, ComputeNChannels_MultiNode_CappedByMaxChannels)
 
 // rcclWarpSpeedComputeNChannels: user override path uses adjustedMaxNchannels*mult
 // (never halved), below the MAXCHANNELS clamp.
-TEST(RcclwrapWarpSpeed, ComputeNChannels_UserOverride_NoClamp)
+TEST(Rcclwrap, ComputeNChannels_UserOverride_NoClamp)
 {
     ncclComm_t            comm = nullptr;
     struct ncclTopoSystem topo;
@@ -1781,7 +1781,7 @@ TEST(RcclwrapWarpSpeed, ComputeNChannels_UserOverride_NoClamp)
 }
 
 // rcclWarpSpeedComputeNChannels: user override clamps to MAXCHANNELS (512 with WS).
-TEST(RcclwrapWarpSpeed, ComputeNChannels_UserOverride_ClampedToMaxChannels)
+TEST(Rcclwrap, ComputeNChannels_UserOverride_ClampedToMaxChannels)
 {
     ncclComm_t            comm = nullptr;
     struct ncclTopoSystem topo;
@@ -1800,7 +1800,7 @@ TEST(RcclwrapWarpSpeed, ComputeNChannels_UserOverride_ClampedToMaxChannels)
 }
 
 // rcclWarpSpeedAdjustChannels: disabled -> nc unchanged.
-TEST(RcclwrapWarpSpeed, AdjustChannels_Disabled_NoChange)
+TEST(Rcclwrap, AdjustChannels_Disabled_NoChange)
 {
     ncclComm_t            comm = nullptr;
     struct ncclTopoSystem topo;
@@ -1819,7 +1819,7 @@ TEST(RcclwrapWarpSpeed, AdjustChannels_Disabled_NoChange)
 
 // rcclWarpSpeedAdjustChannels: enabled -> nc divided by the channel multiplier.
 // Non-gfx950 arch avoids the single-node 8-rank doubling special case.
-TEST(RcclwrapWarpSpeed, AdjustChannels_Enabled_DividesByMultiplier)
+TEST(Rcclwrap, AdjustChannels_Enabled_DividesByMultiplier)
 {
     ncclComm_t            comm = nullptr;
     struct ncclTopoSystem topo;
@@ -1838,7 +1838,7 @@ TEST(RcclwrapWarpSpeed, AdjustChannels_Enabled_DividesByMultiplier)
 
 // rcclWarpSpeedAdjustChannels: gfx950 single-node 8-rank, non-(AR/AG/RS) collective
 // -> divided then doubled (the "reduced CU usage" special case).
-TEST(RcclwrapWarpSpeed, AdjustChannels_Gfx950SingleNode8Ranks_NonMainColl_Doubles)
+TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_NonMainColl_Doubles)
 {
     // Relies on default RCCL_MAX_NCHANNELS (-2, i.e. < 0). Isolate so the cached
     // ncclParamMaxNchannels() value is deterministic regardless of test ordering.
@@ -1867,7 +1867,7 @@ TEST(RcclwrapWarpSpeed, AdjustChannels_Gfx950SingleNode8Ranks_NonMainColl_Double
 
 // rcclWarpSpeedAdjustChannels: gfx950 single-node 8-rank, main collective
 // (AllReduce) -> divided only, not doubled.
-TEST(RcclwrapWarpSpeed, AdjustChannels_Gfx950SingleNode8Ranks_MainColl_NoDouble)
+TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_MainColl_NoDouble)
 {
     RUN_ISOLATED_TEST_WITH_ENV(
         "AdjustChannels_Gfx950SingleNode8Ranks_MainColl_NoDouble",
