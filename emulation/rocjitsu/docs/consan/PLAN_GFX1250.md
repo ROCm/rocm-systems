@@ -121,7 +121,7 @@ flowchart TD
     XP2D["XP2D TODO<br/>torch.topk Record/Replay residual needs<br/>site/subgroup scalar routing"]
     XP2E["XP2E DONE<br/>torch.topk Inline construction scaled;<br/>both large objects finish patching"]
     XP2F["XP2F DONE<br/>torch.topk Inline execution signal;<br/>reproduced on independent software path"]
-    XP2G["XP2G ACTIVE<br/>torch.topk Inline signal;<br/>one-site common-state discriminator"]
+    XP2G["XP2G DONE<br/>torch.topk Inline one-site discriminator bounded;<br/>relay reservation rejects before execution"]
     XP3["XP3 TODO<br/>top-k SC oracle passes;<br/>88-site residual needs scalar continuation spills"]
     XP9["XP9 DONE<br/>norm plus softmax Record/Replay clean, paired,<br/>and reviewed-fault bundle green"]
     XP9B["XP9B DONE<br/>norm plus softmax Sampled clean, paired,<br/>and reviewed-fault bundle green"]
@@ -324,7 +324,7 @@ flowchart TD
   class XT3G,XT3H done
   class XP2E done
   class XP2F done
-  class XP2G active
+  class XP2G done
   class G0,XP2D,XP3,XT2C2,XT2C3,XT3A,XT3E,XT3I,XF,XG todo
 ```
 
@@ -373,6 +373,14 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP2G is DONE as a bounded attempt.  The one-site top-k Inline
+  run does not reach execution: its sole admitted site exceeds the dense
+  dispatcher's reserved relay space, leaving zero relevant patches, after
+  which the required-patch guard stops the client before an oracle.  It
+  therefore cannot classify the execution signal and does not promote the
+  orange cell.  No engineering node is marked ACTIVE while this completed
+  result is recorded and the campaign rotates.
 
 - 2026-07-21: XP2F is DONE as a bounded discriminator.  Independent-path
   artifact

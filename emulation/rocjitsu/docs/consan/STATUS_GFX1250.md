@@ -213,14 +213,23 @@ do not promote matrix cells without the end-to-end evidence above.
 
 ## Progress log
 
+- 2026-07-21: The bounded one-site top-k Inline discriminator did not reach
+  client execution.  Its sole admitted site failed the dense dispatcher's
+  reserved relay-space check, so zero relevant patches were applied and the
+  required-patch guard stopped the run before an oracle.  This is useful
+  construction evidence but cannot distinguish common Inline execution state
+  from a later-probe defect.  It is not acceptance evidence, does not change
+  the orange cell, and is not being repeated with a wider bound.
+
 - 2026-07-21: Top-k Inline's execution signal reproduces on an independent
   software path.  Artifact
   `consan-green-expansion-20260721-pytorch-topk-inline-rocjitsu-crosscheck-107`
   completes the same two large transformations and signals at 115 seconds
   before an oracle.  This rules out a backend-specific launch quirk and
-  classifies the new boundary as a ConSan execution defect.  One bounded
-  one-site discriminator will distinguish common Inline state from a later
-  probe; no broad patch cap is acceptance evidence.
+  classifies the new boundary as a ConSan execution defect.  A bounded
+  one-site discriminator was scheduled next; the newer entry above records
+  why it stopped before providing that distinction.  No broad patch cap is
+  acceptance evidence.
 
 - 2026-07-21: Advanced P0 `torch.topk` Inline Shadow from a construction
   timeout to an execution-stage signal, without a color promotion.  Live
