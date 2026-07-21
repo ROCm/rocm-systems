@@ -76,7 +76,7 @@ RJ_RACE=1 build/tools/rocjitsu/rocjitsu --config configs/gfx950_cdna4.json -- /t
 You should see output:
 
 ```
-RACE type=LDS reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
+RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
 Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
   ==>  ds_write_b32 v0, v1  ; <-- wave 1
        v_sub_u32_e32 v1, 0, v0
@@ -84,8 +84,11 @@ Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
 END_RACE
 ```
 
-This tells you that wave 1 wrote to LDS (`ds_write_b32`) and wave 0 read from
-the same address (`ds_read_b32`) without a barrier in between. The fix is to add
+This tells you that dispatch 1 of `transpose_lds` reported a race: wave 1 wrote
+to LDS (`ds_write_b32`) and wave 0 read from the same address (`ds_read_b32`)
+without a barrier in between. The `kernel` field is a compact display name, and
+`symbol` is the exact ELF symbol when rocjitsu can resolve it. If a name cannot
+be resolved, rocjitsu reports `?` for the unresolved field. The fix is to add
 `__syncthreads()` between the write and the read.
 
 ### Running your own application

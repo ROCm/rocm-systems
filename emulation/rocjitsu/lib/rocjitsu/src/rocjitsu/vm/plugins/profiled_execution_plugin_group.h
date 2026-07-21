@@ -167,7 +167,8 @@ private:
   }
 
   void print_profile_summary() {
-    const char *kname = current_kernel_name_.empty() ? "?" : current_kernel_name_.c_str();
+    const char *kname =
+        current_kernel_name_.empty() ? kUnknownKernelIdentity : current_kernel_name_.c_str();
     sink().write(std::format("HOOK_PROFILE --- {} ---\n", kname));
     auto print_hook = [this](const char *name, const HookProfile &p) {
       if (p.count == 0)

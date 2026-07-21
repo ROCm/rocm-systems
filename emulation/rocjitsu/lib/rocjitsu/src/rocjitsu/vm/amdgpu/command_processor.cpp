@@ -1261,27 +1261,32 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
       cu->flush_all(queue.process_id);
   }
 
-  std::string kernel_sym;
+  std::string kernel_symbol;
   if (host_accessible && memory_) {
-    auto [range_base, range_size] = memory_->find_host_range(pkt.kernel_object, queue.process_id);
-    auto *mapped_page = memory_->resolve_host_ptr(pkt.kernel_object, queue.process_id);
-    if (range_base != 0 && mapped_page) {
-      auto *ko = mapped_page + (pkt.kernel_object & GpuMemory::PAGE_MASK);
-      auto *range_start = reinterpret_cast<const uint8_t *>(range_base);
-      auto *elf = find_elf_base(ko, range_start);
-      if (elf) {
-        uint64_t accessible = range_size - static_cast<uint64_t>(elf - range_start);
-        kernel_sym = find_kernel_symbol(ko, elf, accessible);
+    auto [host_range_base, host_range_size] =
+        memory_->find_host_range(pkt.kernel_object, queue.process_id);
+    auto *kernel_object_page = memory_->resolve_host_ptr(pkt.kernel_object, queue.process_id);
+    if (host_range_base != 0 && kernel_object_page) {
+      auto *kernel_object_host_ptr =
+          kernel_object_page + (pkt.kernel_object & GpuMemory::PAGE_MASK);
+      auto *host_range_begin = reinterpret_cast<const uint8_t *>(host_range_base);
+      auto *elf_base = find_elf_base(kernel_object_host_ptr, host_range_begin);
+      if (elf_base) {
+        uint64_t elf_accessible =
+            host_range_size - static_cast<uint64_t>(elf_base - host_range_begin);
+        kernel_symbol = find_kernel_symbol(kernel_object_host_ptr, elf_base, elf_accessible);
       }
     }
   }
+  std::string kernel_name = kernel_display_name(kernel_symbol);
   ++total_dispatched_;
 
   KernelDispatchInfo dispatch_info{};
   dispatch_info.dispatch_id = dp.dispatch_id;
   dispatch_info.kernel_object = pkt.kernel_object;
   dispatch_info.entry_pc = entry_pc;
-  dispatch_info.kernel_name = kernel_sym;
+  dispatch_info.kernel_symbol = kernel_symbol;
+  dispatch_info.kernel_name = kernel_name;
   dispatch_info.grid_size_x = pkt.grid_size_x;
   dispatch_info.grid_size_y = pkt.grid_size_y;
   dispatch_info.grid_size_z = pkt.grid_size_z;
@@ -1295,20 +1300,22 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   plugin_group_->onAmdgpuDispatchPacketProcessed(dispatch_info);
 
   util::Logger::vm([&](auto &os) {
-    os << std::format("dispatch #{} d={} \"{}\" grid=[{},{},{}] wg=[{},{},{}] wgs={} "
+    os << std::format("dispatch #{} d={} \"{}\" symbol=\"{}\" grid=[{},{},{}] wg=[{},{},{}] wgs={} "
                       "lds={} mode={} sgpr={} vgpr={} sig={:#x}",
-                      total_dispatched_, dp.dispatch_id, kernel_sym.empty() ? "?" : kernel_sym,
-                      pkt.grid_size_x, pkt.grid_size_y, pkt.grid_size_z, pkt.workgroup_size_x,
-                      pkt.workgroup_size_y, pkt.workgroup_size_z, total_wgs,
-                      kd.group_segment_fixed_size, dp.wgp_mode ? "WGP" : "CU", dp.sgprs_per_wf,
-                      dp.vgprs_per_wf, dp.completion_signal);
+                      total_dispatched_, dp.dispatch_id, dispatch_info.kernelNameOrUnknown(),
+                      dispatch_info.kernelSymbolOrUnknown(), pkt.grid_size_x, pkt.grid_size_y,
+                      pkt.grid_size_z, pkt.workgroup_size_x, pkt.workgroup_size_y,
+                      pkt.workgroup_size_z, total_wgs, kd.group_segment_fixed_size,
+                      dp.wgp_mode ? "WGP" : "CU", dp.sgprs_per_wf, dp.vgprs_per_wf,
+                      dp.completion_signal);
   });
   util::Logger::cp([&](auto &os) {
-    os << std::format("DISPATCH #{} d={} \"{}\" wgs={} wfs/wg={} sig={:#x} pid={} ko={:#x} pc={:#x}"
-                      " kernarg={:#x} user_sgprs={}",
-                      total_dispatched_, dp.dispatch_id, kernel_sym.empty() ? "?" : kernel_sym,
-                      total_wgs, wfs_per_wg, dp.completion_signal, dp.process_id, pkt.kernel_object,
-                      entry_pc, dp.kernarg_addr, dp.num_user_sgprs);
+    os << std::format("DISPATCH #{} d={} \"{}\" symbol=\"{}\" wgs={} wfs/wg={} sig={:#x} pid={} "
+                      "ko={:#x} pc={:#x} kernarg={:#x} user_sgprs={}",
+                      total_dispatched_, dp.dispatch_id, dispatch_info.kernelNameOrUnknown(),
+                      dispatch_info.kernelSymbolOrUnknown(), total_wgs, wfs_per_wg,
+                      dp.completion_signal, dp.process_id, pkt.kernel_object, entry_pc,
+                      dp.kernarg_addr, dp.num_user_sgprs);
     if (memory_) {
       auto *ko_ptr = memory_->translate_debug(pkt.kernel_object, queue.process_id);
       auto *pc_ptr = memory_->translate_debug(entry_pc, queue.process_id);
