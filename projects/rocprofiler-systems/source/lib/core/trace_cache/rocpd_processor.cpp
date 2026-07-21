@@ -1162,8 +1162,10 @@ rocpd_processor_t::post_process_metadata()
         uid.agent_id            = pmc_agent_uid;
         pmc_info_data.unique_id = uid;
         pmc_info_data.target_arch =
-            is_cpu_gpu_agent ? std::make_optional<std::string>(pmc_info.target_arch)
-                             : std::nullopt;
+    pmc_info_data.target_arch =
+        is_cpu_gpu_agent
+            ? std::optional<std::string_view>{ pmc_info.target_arch }
+            : std::nullopt;
         pmc_info_data.event_code       = pmc_info.event_code;
         pmc_info_data.instance_id      = pmc_info.instance_id;
         pmc_info_data.symbol           = pmc_info.symbol;
