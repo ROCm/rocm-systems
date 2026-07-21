@@ -91,6 +91,11 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         "ConSan MOI inline-shadow probe does not support this architecture");
     return;
   }
+  std::unique_ptr<Decoder> relocation_decoder = Decoder::create(arch);
+  if (!relocation_decoder) {
+    result.warnings.emplace_back("ConSan MOI inline-shadow could not create a relocation decoder");
+    return;
+  }
 
   const ConSanMoiReportBufferLayout layout = resolve_inline_report_layout(options);
   if (options.max_patches == 0)
@@ -349,7 +354,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
               while (displaced_words.size() < kHostWords) {
                 auto decoded = decode_relocatable_entry_instruction(
                     original_text, host_offset + displaced_words.size() * sizeof(uint32_t), arch,
-                    decode_errors);
+                    decode_errors, relocation_decoder.get());
                 if (!decoded) {
                   displaced_words.clear();
                   break;
@@ -638,7 +643,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         while (displaced_words.size() < kIndirectIslandWords) {
           auto decoded = decode_relocatable_entry_instruction(
               original_text, candidate.text_offset + displaced_words.size() * sizeof(uint32_t),
-              arch, candidate_errors);
+              arch, candidate_errors, relocation_decoder.get());
           if (!decoded) {
             displaced_words.clear();
             break;
