@@ -24,7 +24,7 @@ correctly.
 |------|-------|
 | Type | One of `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert` |
 | Scope | `(amdsmi)` by default; a narrower lowercase scope is fine (`fix(cli): …`, `feat(fabric): …`) |
-| Mood | Imperative ("add", "fix", "remove" — not "added"/"fixes"/"fixing") |
+| Mood | Imperative, verb-first ("add", "fix", "remove" — not "added"/"fixes"/"fixing", and not a noun phrase like "More cleanup" or "status-string tests") |
 | Length | PR title 10–80 chars (bot limit); keep commit subjects ≤ 72 (git norm, safely under the cap) |
 | Punctuation | No trailing period |
 | Breaking | Append `!` before the colon (`feat(amdsmi)!: …`) for an ABI/behavior break |
@@ -34,6 +34,19 @@ Bad: `[AMD-SMI] Fixed the partition bug.` (legacy tag, past tense, period)
 
 **No `[AMD-SMI]` / `[ROCM-NNNNN]` tag** — the `[…]` form fails the bot's title
 regex. Ticket references live only in the PR's `JIRA ID` section (below).
+
+Self-check a subject (structure + length) before committing:
+
+```bash
+SUBJECT="fix(amdsmi): reject nullptr mode pointer in compute-partition getter"
+printf '%s' "$SUBJECT" | grep -qP '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z][a-z0-9_/-]*\))?!?: .+[^.]$' \
+  && [ "${#SUBJECT}" -le 72 ] && echo OK || echo 'FAIL: not type(scope): imperative, or ends in a period, or >72 chars'
+```
+
+The regex enforces the type list, a lowercase scope, no trailing period, and a
+body after the colon; the length test enforces the ≤ 72 cap. It cannot judge
+mood — a subject can pass the regex and still be past-tense or a noun phrase, so
+read the verb by eye (see the Mood row).
 
 ## Commit Message Body
 
@@ -128,6 +141,7 @@ of the bot's label logic above.
 |---------|-----|
 | Legacy `[AMD-SMI]` / `[ROCM-NNNNN]` tag in the title | Conventional Commits `type(amdsmi): …` (the `[…]` form fails the bot) |
 | Past-tense subject ("Fixed…", "Added…") | Imperative ("fix", "add") |
+| Noun-phrase subject ("More cleanup", "status-string tests") | Start with a verb ("clean up…", "add…") |
 | `ROCM-NNNNN` in commit body or code comment | PR `JIRA ID` section only |
 | Source change with no `test_*` / `*_test.*` file | Add a test in the same PR (bot blocks otherwise) |
 | `Resolves ROCM-NNNNN` as the only ticket ref | Use `JIRA ID: ROCM-NNNNN` or `Closes #N` (bot needs the prefix or `#`) |
