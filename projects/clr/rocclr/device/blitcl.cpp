@@ -195,27 +195,42 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
     // TODO: Once the sequential for-loop fix lands in llvm-project/amd/device-libs/opencl/src/misc/amdblit.cl
     // (replacing get_global_id(0) with a for loop), revert this back to:
     //   __amd_batchMemOp(params, count);
+    //
+    // Local definitions mirroring hipStreamBatchMemOpParams / BatchMemOpType in amdblit.cl.
+    // Each entry is 6 x ulong (48 bytes) — matches pad[6] in the host struct.
+    typedef enum {
+      ROCCLR_STREAM_WAIT_VALUE_32  = 0x1,
+      ROCCLR_STREAM_WRITE_VALUE_32 = 0x2,
+      ROCCLR_STREAM_WAIT_VALUE_64  = 0x4,
+      ROCCLR_STREAM_WRITE_VALUE_64 = 0x5,
+    } RocclrBatchMemOpType;
+    typedef struct {
+      RocclrBatchMemOpType  operation;
+      __global ulong*       address;
+      ulong                 value64;   // union { uint value; ulong value64; }
+      uint                  flags;
+      uint                  _pad;
+      __global ulong*       alias;
+    } RocclrBatchMemOpParams;
     __kernel void __amd_rocclr_batchMemOp(__global void* params, uint count) {
-      __global BatchMemOpParams* p = (__global BatchMemOpParams*)params;
+      __global RocclrBatchMemOpParams* p = (__global RocclrBatchMemOpParams*)params;
       for (uint i = 0; i < count; i++) {
         switch (p[i].operation) {
-          case STREAM_WAIT_VALUE_32:
-            __amd_streamOpsWait((__global atomic_uint*)p[i].waitValue.address, NULL,
-                                (uint)p[i].waitValue.value, (uint)p[i].waitValue.flags,
-                                (ulong)~0UL);
+          case ROCCLR_STREAM_WAIT_VALUE_32:
+            __amd_streamOpsWait((__global uint*)p[i].address, NULL,
+                                (uint)p[i].value64, p[i].flags, (ulong)~0UL);
             break;
-          case STREAM_WRITE_VALUE_32:
-            __amd_streamOpsWrite((__global atomic_uint*)p[i].writeValue.address, NULL,
-                                 (uint)p[i].writeValue.value);
+          case ROCCLR_STREAM_WRITE_VALUE_32:
+            __amd_streamOpsWrite((__global uint*)p[i].address, NULL,
+                                 (uint)p[i].value64);
             break;
-          case STREAM_WAIT_VALUE_64:
-            __amd_streamOpsWait(NULL, (__global atomic_ulong*)p[i].waitValue.address,
-                                (ulong)p[i].waitValue.value64, (uint)p[i].waitValue.flags,
-                                (ulong)~0UL);
+          case ROCCLR_STREAM_WAIT_VALUE_64:
+            __amd_streamOpsWait(NULL, (__global ulong*)p[i].address,
+                                p[i].value64, p[i].flags, (ulong)~0UL);
             break;
-          case STREAM_WRITE_VALUE_64:
-            __amd_streamOpsWrite(NULL, (__global atomic_ulong*)p[i].writeValue.address,
-                                 (ulong)p[i].writeValue.value64);
+          case ROCCLR_STREAM_WRITE_VALUE_64:
+            __amd_streamOpsWrite(NULL, (__global ulong*)p[i].address,
+                                 p[i].value64);
             break;
           default:
             break;
