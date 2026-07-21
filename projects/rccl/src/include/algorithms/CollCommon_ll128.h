@@ -42,10 +42,10 @@
 namespace meta::comms {
 
 // ---- LL128 line geometry ----
-constexpr int    kDdaLL128LineElems = 16;                    // 16 x uint64 = 128B
-constexpr int    kDdaLL128DataElems = 15;                    // 15 payload words
-constexpr int    kDdaLL128FlagElem  = 15;                    // word 15 == flag
-constexpr int    kDdaLL128Lanes     = kDdaLL128LineElems;    // 16 lanes/line
+constexpr int kDdaLL128LineElems = 16;                    // 16 x uint64 = 128B
+constexpr int kDdaLL128DataElems = 15;                    // 15 payload words
+constexpr int kDdaLL128FlagElem = 15;                    // word 15 == flag
+constexpr int kDdaLL128Lanes = kDdaLL128LineElems;    // 16 lanes/line
 constexpr size_t kDdaLL128LineBytes = 128;
 constexpr size_t kDdaLL128DataBytes = (size_t)kDdaLL128DataElems * 8; // 120
 
@@ -68,8 +68,7 @@ __device__ __forceinline__ void ddaLL128StoreWord(uint64_t* p, uint64_t v) {
   __hip_atomic_store((u64_gptr)p, v, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
 }
 __device__ __forceinline__ uint64_t ddaLL128LoadWord(const uint64_t* p) {
-  return __hip_atomic_load(
-      (u64_gptr)const_cast<uint64_t*>(p), __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+  return __hip_atomic_load((u64_gptr) const_cast<uint64_t*>(p), __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
 }
 
 // Element-wise add of the T-elements packed into two 8B payload words. An 8B
@@ -87,8 +86,8 @@ __device__ __forceinline__ uint64_t ddaLL128AddWord(uint64_t a, uint64_t b) {
 // derives the next flag on-device, and broadcasts it via the caller-provided
 // shared slot. flag 0 is the "cleared scratch" sentinel and is skipped so bank
 // parity (flag & 1) is preserved. Returns the flag for this launch.
-__device__ __forceinline__ uint32_t ddaLLEpochBegin(
-    const uint32_t* __restrict__ epochDev, int flatBlockId, uint32_t& s_flag) {
+__device__ __forceinline__ uint32_t ddaLLEpochBegin(const uint32_t* __restrict__ epochDev, int flatBlockId,
+                                                    uint32_t& s_flag) {
   if (threadIdx.x == 0) {
     uint32_t f = epochDev[flatBlockId] + 1u;
     if (f == 0u) f = 2u; // skip 0 sentinel; keep bank parity
@@ -101,9 +100,8 @@ __device__ __forceinline__ uint32_t ddaLLEpochBegin(
 // Exit: tid 0 advances every epoch cell this block strides over to `flag`, so
 // all cells stay in lock-step even when a later launch uses a different block
 // count. `total` == gridDim.x * gridDim.y.
-__device__ __forceinline__ void ddaLLEpochEnd(
-    uint32_t* __restrict__ epochDev, int flatBlockId, int total, int epochLen,
-    uint32_t flag) {
+__device__ __forceinline__ void ddaLLEpochEnd(uint32_t* __restrict__ epochDev, int flatBlockId, int total, int epochLen,
+                                              uint32_t flag) {
   if (threadIdx.x == 0) {
     for (int e = flatBlockId; e < epochLen; e += total) {
       epochDev[e] = flag;

@@ -517,12 +517,11 @@ bool HsaAmdSignalHandler(hsa_signal_value_t value, void* arg) {
 
   VirtualGPU* const gpu = ts->gpu();
 
-  ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Handler: value(%d), timestamp(%p), handle(0x%lx)",
-          static_cast<uint32_t>(value), arg,
-          ts->HwProfiling() ? ts->Signals()[0]->signal_.handle : 0);
-
   // Save callback signal
   hsa_signal_t callback_signal = ts->GetCallbackSignal();
+
+  ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Handler: value(%d), timestamp(%p), callback_signal(0x%lx)",
+          static_cast<uint32_t>(value), arg, callback_signal.handle);
 
   bool isBlocking = ts->GetBlocking();
 
@@ -812,6 +811,7 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
   prof_signal->engine_ = engine_;
   prof_signal->flags_.isPacketDispatch_ = false;
   prof_signal->ResetCachedTiming();
+  prof_signal->queue_index_ = gpu_.index();
 
   // Release any existing HwEvent before setting new one for the same command
   VirtualGPU::AttachHwEvent(cmd, prof_signal);
@@ -1559,9 +1559,12 @@ bool VirtualGPU::dispatchAqlPacket(hsa_barrier_and_packet_t* packet, uint16_t he
 bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPacketData,
                                             const std::vector<uint32_t>& validFullHeaders,
                                             amd::AccumulateCommand* vcmd, bool attach_signal,
-                                            const std::vector<const std::string*>* kernelNames,
                                             bool pre_patched, bool blocking,
                                             const std::vector<uint8_t>* flatMetadataData) {
+  // Both base and ext kernel dispatch packets place kernel_object at the same offset.
+  static_assert(offsetof(hsa_kernel_dispatch_packet_t, kernel_object) ==
+                    offsetof(hsa_amd_ext_kernel_dispatch_packet_t, kernel_object),
+                "kernel_object offset mismatch between base and ext dispatch packets");
   if (vcmd == nullptr || flatPacketData.empty() || validFullHeaders.empty()) {
     return false;
   }
@@ -1570,14 +1573,9 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
   if (flatPacketData.size() != numPackets * 64) {
     return false;
   }
-
   std::scoped_lock lock(execution());
   profilingBegin(*vcmd);
   dispatchBlockingWait(nullptr);
-
-  if (kernelNames != nullptr) {
-    vcmd->setKernelNamesRef(kernelNames);
-  }
 
   const uint32_t queueSize = gpu_queue_->size;
   const uint32_t queueMask = queueSize - 1;
@@ -1695,8 +1693,11 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
       lastSlotPtr->completion_signal = Barriers().ActiveSignal();
     }
 
-    // Per-packet fixups: profiling signals, kernel-name printing, and inline barrier logging.
-    if (timestamp_ != nullptr || IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
+    // Per-packet fixups: profiling signals, kernel-name collection, kernel-name
+    // printing, and inline barrier logging.
+    const bool needKernelNames = amd::activity_prof::IsEnabled(OP_ID_DISPATCH);
+    if (timestamp_ != nullptr || needKernelNames ||
+        IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
         IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
       for (size_t i = chunkStart; i < chunkEnd; ++i) {
         const uint64_t slotIdx = (startIndex + i) & queueMask;
@@ -1735,12 +1736,18 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
             slot->reserved2 = timestamp_->command().profilingInfo().correlation_id_;
           }
         }
-        if ((IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
-             IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) &&
-            kernelNames != nullptr && i < kernelNames->size() && isKernelDispatch) {
+        if (isKernelDispatch && (needKernelNames ||
+            IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
+            IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL))) {
+          auto kit = dev().KernelMap().find(slot->kernel_object);
+          const char* kname = kit != dev().KernelMap().end()
+                                  ? kit->second.getDemangledName().c_str()
+                                  : "<unknown>";
+          if (needKernelNames) {
+            vcmd->addKernelName(kname);
+          }
           ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2, "Graph ShaderName : %s, device id : %u",
-                  (*kernelNames)[i] != nullptr ? (*kernelNames)[i]->c_str() : "<null>",
-                  dev().index());
+                  kname, dev().index());
           if (isBaseKernelDispatch) {
             logAqlDispatchPacket(roc_device_, gpu_queue_, hdr, slot, slotIdx, priority_);
           } else {

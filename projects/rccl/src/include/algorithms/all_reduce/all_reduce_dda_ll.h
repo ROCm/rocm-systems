@@ -35,7 +35,7 @@ namespace meta::comms {
 // small-message fast lane, so the full-message payload is well under this cap.
 // Footprint = 2 banks * nRanks * (kDdaLLArMaxBytes * 2) for the 8B->16B
 // expansion; 4 MiB at 128 KiB / 8 ranks, within the 64 MiB DDA scratch.
-constexpr size_t kDdaLLArMaxBytes       = 131072;                 // 128 KiB
+constexpr size_t kDdaLLArMaxBytes = 131072;                 // 128 KiB
 constexpr size_t kDdaLLArSlotStridePkts = kDdaLLArMaxBytes / 8;   // 16384
 
 // LL flat all-reduce kernel. 1D grid over packets (8B payload each).
@@ -54,15 +54,13 @@ template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
-__global__ void ddaAllReduceFlatLL(
-    T* const* __restrict__ peerScratch,    // ddaPeerPtrsDev: nRanks scratch bases
-    T* __restrict__ recvbuff,              // local user output
-    const T* __restrict__ sendbuff,        // local user input
-    size_t count,                          // full-message element count
-    int selfRank,
-    int nRanksRt,
-    uint32_t* __restrict__ epochDev,       // per-block LL epoch cells (shared AG+AR)
-    int epochLen) {                        // number of cells in epochDev
+  __global__ void ddaAllReduceFlatLL(T* const* __restrict__ peerScratch,    // ddaPeerPtrsDev: nRanks scratch bases
+                                     T* __restrict__ recvbuff,              // local user output
+                                     const T* __restrict__ sendbuff,        // local user input
+                                     size_t count,                          // full-message element count
+                                     int selfRank, int nRanksRt,
+                                     uint32_t* __restrict__ epochDev,       // per-block LL epoch cells (shared AG+AR)
+                                     int epochLen) {                        // number of cells in epochDev
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = count * sizeof(T);
@@ -95,20 +93,16 @@ __global__ void ddaAllReduceFlatLL(
     const uint32_t d0 = in[2 * pk];
     const uint32_t d1 = in[2 * pk + 1];
 
-    #pragma unroll
+#pragma unroll
     for (int r = 1; r < nRanks; ++r) {
-        const int peer = (selfRank + r) % nRanks;
-        LLPacket16* dst = reinterpret_cast<LLPacket16*>(peerScratch[peer]) +
-            bankOffsetPkts + (size_t)selfRank * slot;
-        ddaLLStoreLineB128(
-            reinterpret_cast<uint32_t*>(&dst[pk]),
-            d0, flag, d1, flag);
+      const int peer = (selfRank + r) % nRanks;
+      LLPacket16* dst = reinterpret_cast<LLPacket16*>(peerScratch[peer]) + bankOffsetPkts + (size_t)selfRank * slot;
+      ddaLLStoreLineB128(reinterpret_cast<uint32_t*>(&dst[pk]), d0, flag, d1, flag);
     }
   }
 
   // Phase 2: poll my slots for the other ranks, reduce with my own data.
-  LLPacket16* myBase =
-      reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts;
+  LLPacket16* myBase = reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts;
   for (size_t pk = gtid; pk < nPk; pk += stride) {
     uint32_t acc0 = in[2 * pk];
     uint32_t acc1 = in[2 * pk + 1];
@@ -117,9 +111,7 @@ __global__ void ddaAllReduceFlatLL(
       volatile LLPacket16* src = myBase + (size_t)peer * slot;
       uint32_t d0, f0, d1, f1;
       do {
-        ddaLLLoadLineB128(
-            reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])),
-            d0, f0, d1, f1);
+        ddaLLLoadLineB128(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), d0, f0, d1, f1);
       } while (f0 != flag || f1 != flag);
       acc0 = vecElementAdd<T>(acc0, d0);
       acc1 = vecElementAdd<T>(acc1, d1);

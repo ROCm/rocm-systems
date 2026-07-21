@@ -69,8 +69,8 @@ constexpr int kDdaLLAgMaxBlocksPerPeer = 8;
 // keeps its per-launch epoch reset cheap (see ddaLLEpochEnd). Because it shares
 // scratch bytes with the LL128 tier, its flags live in a disjoint high namespace
 // (seeded below) so a leftover LL128 flag can never false-match an LL flag.
-constexpr int      kDdaFabricLLArMaxBlocks = 24;
-constexpr uint32_t kDdaLLArEpochSeed       = 0x40000000u; // first LL flag = seed+1
+constexpr int kDdaFabricLLArMaxBlocks = 24;
+constexpr uint32_t kDdaLLArEpochSeed = 0x40000000u; // first LL flag = seed+1
 
 // Number of device epoch cells for the LL collectives. it is sized for the larger of the two
 // max(AG total blocks, AR total blocks).

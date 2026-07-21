@@ -78,8 +78,7 @@ constexpr size_t kDdaLL128AgLinesPerBlock = 4;
 
 static inline int ddaLL128AgBlocksPerPeer(size_t perRankBytes) {
   const size_t nWords = perRankBytes >> 3;
-  const size_t numLines =
-      (nWords + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems;
+  const size_t numLines = (nWords + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems;
   const size_t linesPerBlock = ddaLL128AgLinesPerBlockEnv(kDdaLL128AgLinesPerBlock);
   const int maxBpp = ddaLL128AgMaxBppEnv(kDdaLLAgMaxBlocksPerPeer);
   if (numLines <= linesPerBlock) {
@@ -94,11 +93,9 @@ static inline int ddaLL128AgBlocksPerPeer(size_t perRankBytes) {
 
 template <typename T>
 static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t sendcount, // per-rank element count of T (== bytes when T == int8_t)
-    ncclComm* comm,
-    cudaStream_t stream) {
+  const void* sendbuff, void* recvbuff,
+  size_t sendcount, // per-rank element count of T (== bytes when T == int8_t)
+  ncclComm* comm, cudaStream_t stream) {
   const int nRanks = comm->nRanks;
   const size_t perRankBytes = sendcount * sizeof(T);
 
@@ -120,27 +117,25 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
   dim3 block(threads);
   dim3 grid((unsigned)nRanks, (unsigned)blocksPerPeer);
 
-  INFO(
-      NCCL_COLL,
-      "DDA fabric AllGather LL128: nRanks=%d perRankBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%d)",
-      nRanks, perRankBytes, grid.x, grid.y, block.x, blocksPerPeer);
+  INFO(NCCL_COLL, "DDA fabric AllGather LL128: nRanks=%d perRankBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%d)",
+       nRanks, perRankBytes, grid.x, grid.y, block.x, blocksPerPeer);
 
   // NRANKS_CT 4/8: unrolled; 0: runtime fallback.
   switch (nRanks) {
   case 4:
-    meta::comms::ddaAllGatherFabricLL128<T, 4><<<grid, block, 0, stream>>>(
-        peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        perRankBytes, comm->rank, nRanks, epochDev, epochLen);
+    meta::comms::ddaAllGatherFabricLL128<T, 4>
+      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), perRankBytes,
+                                   comm->rank, nRanks, epochDev, epochLen);
     break;
   case 8:
-    meta::comms::ddaAllGatherFabricLL128<T, 8><<<grid, block, 0, stream>>>(
-        peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        perRankBytes, comm->rank, nRanks, epochDev, epochLen);
+    meta::comms::ddaAllGatherFabricLL128<T, 8>
+      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), perRankBytes,
+                                   comm->rank, nRanks, epochDev, epochLen);
     break;
   default:
-    meta::comms::ddaAllGatherFabricLL128<T, 0><<<grid, block, 0, stream>>>(
-        peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        perRankBytes, comm->rank, nRanks, epochDev, epochLen);
+    meta::comms::ddaAllGatherFabricLL128<T, 0>
+      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), perRankBytes,
+                                   comm->rank, nRanks, epochDev, epochLen);
     break;
   }
 
@@ -151,19 +146,14 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
 
 } // namespace
 
-bool ncclAllGatherDdaFabricLL128Eligible(
-    ncclComm* comm,
-    const void* sendbuff,
-    void* recvbuff,
-    size_t sendcount,
-    ncclDataType_t datatype) {
+bool ncclAllGatherDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t sendcount,
+                                         ncclDataType_t datatype) {
   (void)sendbuff;
   (void)recvbuff;
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
-  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr ||
-      comm->ddaPeerPtrsDev == nullptr) {
+  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) {
     return false;
   }
   if (sendcount == 0) {
@@ -172,8 +162,7 @@ bool ncclAllGatherDdaFabricLL128Eligible(
   if (comm->nRanks < 2 || comm->nRanks > meta::comms::kDdaMaxNranks) {
     return false;
   }
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 &&
-      datatype != ncclBfloat16) {
+  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
     return false;
   }
 
@@ -191,20 +180,13 @@ bool ncclAllGatherDdaFabricLL128Eligible(
   return true;
 }
 
-ncclResult_t ncclAllGatherDdaFabricLL128(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t sendcount,
-    ncclDataType_t datatype,
-    ncclComm* comm,
-    cudaStream_t stream) {
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 &&
-      datatype != ncclBfloat16) {
+ncclResult_t ncclAllGatherDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t sendcount,
+                                         ncclDataType_t datatype, ncclComm* comm, cudaStream_t stream) {
+  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
     return ncclInvalidArgument;
   }
   // AllGather is a pure copy, so the payload moves as raw bytes: instantiate the
   // kernel once for int8_t and scale the count, like ncclAllGatherDdaFabricLL.
   const int typeSize = ncclTypeSize(datatype);
-  return ncclAllGatherDdaFabricLL128Typed<int8_t>(
-      sendbuff, recvbuff, sendcount * typeSize, comm, stream);
+  return ncclAllGatherDdaFabricLL128Typed<int8_t>(sendbuff, recvbuff, sendcount * typeSize, comm, stream);
 }

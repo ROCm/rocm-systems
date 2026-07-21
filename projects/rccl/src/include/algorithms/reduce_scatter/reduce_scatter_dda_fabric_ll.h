@@ -36,7 +36,7 @@ namespace meta::comms {
 // double-buffered layout is identical on every rank and call.
 // Footprint = 2 banks * nRanks * (kDdaLLRsMaxBytes * 2) for the 8B->16B
 // expansion; 4 MiB at 128 KiB / 8 ranks, within the 64 MiB DDA scratch.
-constexpr size_t kDdaLLRsMaxBytes       = 131072;                 // 128 KiB
+constexpr size_t kDdaLLRsMaxBytes = 131072;                 // 128 KiB
 constexpr size_t kDdaLLRsSlotStridePkts = kDdaLLRsMaxBytes / 8;   // 16384
 
 // LL reduce-scatter kernel. 1D grid over packets (8B payload each) of the
@@ -52,21 +52,19 @@ template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
-__global__ void ddaReduceScatterFabricLL(
-    T* const* __restrict__ peerScratch,    // ddaPeerPtrsDev: nRanks scratch bases
-    T* __restrict__ recvbuff,              // local user output (recvcount elems)
-    const T* __restrict__ sendbuff,        // local user input (recvcount*nRanks)
-    size_t recvcount,                      // per-rank shard element count
-    int selfRank,
-    int nRanksRt,
-    uint32_t* __restrict__ epochDev,       // per-block LL epoch cells
-    int epochLen) {                        // number of cells in epochDev
+  __global__ void ddaReduceScatterFabricLL(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: nRanks scratch bases
+                                           T* __restrict__ recvbuff, // local user output (recvcount elems)
+                                           const T* __restrict__ sendbuff, // local user input (recvcount*nRanks)
+                                           size_t recvcount, // per-rank shard element count
+                                           int selfRank, int nRanksRt,
+                                           uint32_t* __restrict__ epochDev, // per-block LL epoch cells
+                                           int epochLen) { // number of cells in epochDev
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = recvcount * sizeof(T);
-  const size_t nPk = bytes >> 3;           // 8 payload bytes per packet
+  const size_t nPk = bytes >> 3; // 8 payload bytes per packet
   const size_t slot = kDdaLLRsSlotStridePkts;
-  const size_t chunkWords = nPk * 2;       // uint32 words per shard chunk
+  const size_t chunkWords = nPk * 2; // uint32 words per shard chunk
 
   // On-device, graph-safe flag/bank derivation (1D grid: flatBlockId=blockIdx.x).
   const int flatBlockId = blockIdx.x;
@@ -74,7 +72,7 @@ __global__ void ddaReduceScatterFabricLL(
   __shared__ uint32_t s_flag;
   if (threadIdx.x == 0) {
     uint32_t f = epochDev[flatBlockId] + 1u;
-    if (f == 0u) f = 2u;                   // skip 0 sentinel; keep bank parity
+    if (f == 0u) f = 2u; // skip 0 sentinel; keep bank parity
     s_flag = f;
   }
   __syncthreads();
@@ -89,23 +87,20 @@ __global__ void ddaReduceScatterFabricLL(
 
   // Phase 1: scatter my chunk-for-peer (sendbuff[peer]) into peer's slot[self].
   for (size_t pk = gtid; pk < nPk; pk += stride) {
-    #pragma unroll
+#pragma unroll
     for (int r = 1; r < nRanks; ++r) {
       const int peer = (selfRank + r) % nRanks;
       const uint32_t* inPeer = in + (size_t)peer * chunkWords;
       const uint32_t d0 = inPeer[2 * pk];
       const uint32_t d1 = inPeer[2 * pk + 1];
-      LLPacket16* dst = reinterpret_cast<LLPacket16*>(peerScratch[peer]) +
-          bankOffsetPkts + (size_t)selfRank * slot;
-      ddaLLStoreLineB128(
-          reinterpret_cast<uint32_t*>(&dst[pk]), d0, flag, d1, flag);
+      LLPacket16* dst = reinterpret_cast<LLPacket16*>(peerScratch[peer]) + bankOffsetPkts + (size_t)selfRank * slot;
+      ddaLLStoreLineB128(reinterpret_cast<uint32_t*>(&dst[pk]), d0, flag, d1, flag);
     }
   }
 
   // Phase 2: seed with my self-chunk, poll my slots for the others, reduce.
   const uint32_t* inSelf = in + (size_t)selfRank * chunkWords;
-  LLPacket16* myBase =
-      reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts;
+  LLPacket16* myBase = reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts;
   for (size_t pk = gtid; pk < nPk; pk += stride) {
     uint32_t acc0 = inSelf[2 * pk];
     uint32_t acc1 = inSelf[2 * pk + 1];
@@ -114,9 +109,7 @@ __global__ void ddaReduceScatterFabricLL(
       volatile LLPacket16* src = myBase + (size_t)peer * slot;
       uint32_t d0, f0, d1, f1;
       do {
-        ddaLLLoadLineB128(
-            reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])),
-            d0, f0, d1, f1);
+        ddaLLLoadLineB128(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), d0, f0, d1, f1);
       } while (f0 != flag || f1 != flag);
       acc0 = vecElementAdd<T>(acc0, d0);
       acc1 = vecElementAdd<T>(acc1, d1);

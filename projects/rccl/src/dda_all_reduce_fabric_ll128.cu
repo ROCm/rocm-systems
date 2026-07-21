@@ -43,8 +43,7 @@ static inline size_t ddaLL128ArSlotLines(size_t numLines) {
 
 // LL128 scratch for this call: 2 banks * nRanks slots * slotLines * 128B.
 static inline size_t ddaLL128ArScratchSize(int nRanks, size_t numLines) {
-  return (size_t)2 * (size_t)nRanks * ddaLL128ArSlotLines(numLines) *
-         sizeof(LLLine128);
+  return (size_t)2 * (size_t)nRanks * ddaLL128ArSlotLines(numLines) * sizeof(LLLine128);
 }
 
 // Validated block size from the runtime flag; falls back to `dflt` if the
@@ -58,17 +57,12 @@ static inline unsigned ddaLL128ArThreads(unsigned dflt) {
 }
 
 template <typename T>
-static ncclResult_t ncclAllReduceDdaFabricLL128Typed(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclComm* comm,
-    cudaStream_t stream) {
+static ncclResult_t ncclAllReduceDdaFabricLL128Typed(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
+                                                     cudaStream_t stream) {
   const int nRanks = comm->nRanks;
   const size_t bytes = count * sizeof(T);
   const size_t nWords = bytes >> 3;
-  const size_t numLines =
-      (nWords + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems;
+  const size_t numLines = (nWords + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems;
   const size_t slotStrideLines = ddaLL128ArSlotLines(numLines);
 
   // 1D grid over line-groups; each block has threads/16 groups.
@@ -78,8 +72,7 @@ static ncclResult_t ncclAllReduceDdaFabricLL128Typed(
   if (nBlocksMax < 1) {
     nBlocksMax = 1;
   }
-  unsigned blocks = (unsigned)std::min<size_t>(
-      (numLines + groups - 1) / groups, (size_t)nBlocksMax);
+  unsigned blocks = (unsigned)std::min<size_t>((numLines + groups - 1) / groups, (size_t)nBlocksMax);
   if (blocks == 0) {
     blocks = 1;
   }
@@ -95,27 +88,25 @@ static ncclResult_t ncclAllReduceDdaFabricLL128Typed(
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
 
-  INFO(
-      NCCL_COLL,
-      "DDA fabric AllReduce LL128: nRanks=%d bytes=%zu numLines=%zu grid=%u block=%u",
-      nRanks, bytes, numLines, grid.x, block.x);
+  INFO(NCCL_COLL, "DDA fabric AllReduce LL128: nRanks=%d bytes=%zu numLines=%zu grid=%u block=%u", nRanks, bytes,
+       numLines, grid.x, block.x);
 
   // NRANKS_CT 4/8: unrolled reduce loop; 0: runtime fallback.
   switch (nRanks) {
   case 4:
-    meta::comms::ddaAllReduceFlatLL128<T, 4><<<grid, block, 0, stream>>>(
-        peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines);
+    meta::comms::ddaAllReduceFlatLL128<T, 4>
+      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank,
+                                   nRanks, epochDev, epochLen, slotStrideLines);
     break;
   case 8:
-    meta::comms::ddaAllReduceFlatLL128<T, 8><<<grid, block, 0, stream>>>(
-        peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines);
+    meta::comms::ddaAllReduceFlatLL128<T, 8>
+      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank,
+                                   nRanks, epochDev, epochLen, slotStrideLines);
     break;
   default:
-    meta::comms::ddaAllReduceFlatLL128<T, 0><<<grid, block, 0, stream>>>(
-        peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines);
+    meta::comms::ddaAllReduceFlatLL128<T, 0>
+      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank,
+                                   nRanks, epochDev, epochLen, slotStrideLines);
     break;
   }
 
@@ -126,20 +117,14 @@ static ncclResult_t ncclAllReduceDdaFabricLL128Typed(
 
 } // namespace
 
-bool ncclAllReduceDdaFabricLL128Eligible(
-    ncclComm* comm,
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclDataType_t datatype,
-    ncclRedOp_t op) {
+bool ncclAllReduceDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                         ncclDataType_t datatype, ncclRedOp_t op) {
   (void)sendbuff;
   (void)recvbuff;
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
-  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr ||
-      comm->ddaPeerPtrsDev == nullptr) {
+  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) {
     return false;
   }
   if (comm->nRanks < 2 || comm->nRanks > meta::comms::kDdaMaxNranks) {
@@ -151,8 +136,7 @@ bool ncclAllReduceDdaFabricLL128Eligible(
   if (op != ncclSum) {
     return false;
   }
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 &&
-      datatype != ncclBfloat16) {
+  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
     return false;
   }
 
@@ -167,8 +151,7 @@ bool ncclAllReduceDdaFabricLL128Eligible(
   // Scratch is sized from the actual message (compact per-call slot stride), so
   // eligibility is bounded by the runtime scratch capacity for this size.
   const size_t nWords = bytes >> 3;
-  const size_t numLines =
-      (nWords + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems;
+  const size_t numLines = (nWords + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems;
   if (ddaLL128ArScratchSize(comm->nRanks, numLines) > comm->ddaScratchBytes) {
     return false;
   }
@@ -176,25 +159,16 @@ bool ncclAllReduceDdaFabricLL128Eligible(
   return true;
 }
 
-ncclResult_t ncclAllReduceDdaFabricLL128(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclDataType_t datatype,
-    ncclRedOp_t op,
-    ncclComm* comm,
-    cudaStream_t stream) {
+ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                         ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
   (void)op;
   switch (datatype) {
   case ncclFloat32:
-    return ncclAllReduceDdaFabricLL128Typed<float>(
-        sendbuff, recvbuff, count, comm, stream);
+    return ncclAllReduceDdaFabricLL128Typed<float>(sendbuff, recvbuff, count, comm, stream);
   case ncclFloat16:
-    return ncclAllReduceDdaFabricLL128Typed<half>(
-        sendbuff, recvbuff, count, comm, stream);
+    return ncclAllReduceDdaFabricLL128Typed<half>(sendbuff, recvbuff, count, comm, stream);
   case ncclBfloat16:
-    return ncclAllReduceDdaFabricLL128Typed<bf16>(
-        sendbuff, recvbuff, count, comm, stream);
+    return ncclAllReduceDdaFabricLL128Typed<bf16>(sendbuff, recvbuff, count, comm, stream);
   default:
     return ncclInvalidArgument;
   }

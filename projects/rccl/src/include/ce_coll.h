@@ -22,9 +22,11 @@
 // one reduce-scratch slot (chunkBytes = totalBytes/nRanks), so the buffer
 // must satisfy: totalBytes * (nRanks+1)/nRanks <= ceARTmpBufSize.
 //
-// Default is <= 2 MiB (covers most deep-learning AllReduce sizes).  
-#define NCCL_CE_AR_MAX_MSG_BYTES  (256ull * 1024 * 1024)
-#define NCCL_CE_AR_MIN_MSG_BYTES  (4ull * 1024 * 1024)
+// Eligible message sizes are gated to the
+// [NCCL_CE_AR_MIN_MSG_BYTES, NCCL_CE_AR_MAX_MSG_BYTES] range below
+// (default 4 MiB .. 256 MiB).
+#define NCCL_CE_AR_MAX_MSG_BYTES (256ull * 1024 * 1024)
+#define NCCL_CE_AR_MIN_MSG_BYTES (4ull * 1024 * 1024)
 
 struct ncclCeColl {
   uint8_t* baseUCSymReadyPtr;
@@ -46,7 +48,7 @@ struct ncclCeColl {
   // CE AllReduce staging buffer (symmetric, size = nRanks*maxChunk + maxChunk).
   // Layout: [0 .. nRanks*chunkBytes) scatter staging,
   //         [nRanks*chunkBytes .. (nRanks+1)*chunkBytes) reduce scratch.
-  uint8_t*               ceARTmpBuf;
+  uint8_t* ceARTmpBuf;
   struct ncclDevrWindow* ceARTmpWin;
 
   // Latched while this comm has live graph-captured plans. CE 2-shot AllReduce
@@ -58,7 +60,7 @@ struct ncclCeColl {
 };
 
 struct ncclCeInitTask {
-  struct ncclCeInitTask *next;
+  struct ncclCeInitTask* next;
   struct ncclComm* comm;
 };
 
@@ -76,9 +78,10 @@ struct alignas(16) ncclCeCollArgs {
   void* ceCollProfHandle;    // CE collective profiler event handle
   bool useDda;
   void** ddaPeerBases;      // host-side table of every rank's DDA scratch base pointer
-  void*  ddaUserRecvBuff;   // user recvbuff (using DDA staging) or NULL otherwise (if recvbuffer is using symmetric windows)
-  size_t ddaCopyBackBytes;  // bytes to copy scratch -> user recvbuff 
-  ncclRedOp_t redOp;         // Only used for AllReduce
+  void*
+    ddaUserRecvBuff; // user recvbuff (using DDA staging) or NULL otherwise (if recvbuffer is using symmetric windows)
+  size_t ddaCopyBackBytes; // bytes to copy scratch -> user recvbuff
+  ncclRedOp_t redOp; // Only used for AllReduce
 };
 
 struct ncclCeBatchOpsParams {
@@ -94,11 +97,13 @@ struct ncclCeBatchOpsParams {
 #endif
 };
 
-bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty, ncclSymRegType_t winRegType);
+bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
+                     ncclSymRegType_t winRegType);
 
-bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty, ncclSymRegType_t winRegType);
+bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
+                            ncclSymRegType_t winRegType);
 
-bool ncclCeImplemented(ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty);
+bool ncclCeImplemented(ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty);
 
 ncclResult_t ncclCeInit(struct ncclComm* comm);
 
@@ -118,9 +123,7 @@ ncclResult_t ncclCeAlltoAll(struct ncclComm* comm, struct ncclCeCollArgs* args, 
 
 // CE AllReduce: scatter → local-reduce → allgather (→ optional copy-to-user-recvbuff).
 // Requires comm->ceColl.ceARTmpBuf != NULL (i.e. ncclCeInit has run).
-ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff,
-                              void* recvbuff, size_t count,
-                              ncclDataType_t datatype, ncclRedOp_t op,
-                              cudaStream_t stream,
-                              struct ncclDevrWindow* recvWin = nullptr);
+ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                             ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
+                             struct ncclDevrWindow* recvWin = nullptr);
 #endif /* NCCL_CE_COLL_H_ */

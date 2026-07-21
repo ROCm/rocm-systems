@@ -33,12 +33,8 @@ static inline size_t ddaLLRsScratchSize(int nRanks) {
 }
 
 template <typename T>
-static ncclResult_t ncclReduceScatterDdaFabricLLTyped(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t recvcount,
-    ncclComm* comm,
-    cudaStream_t stream) {
+static ncclResult_t ncclReduceScatterDdaFabricLLTyped(const void* sendbuff, void* recvbuff, size_t recvcount,
+                                                      ncclComm* comm, cudaStream_t stream) {
   const int nRanks = comm->nRanks;
   const size_t bytes = recvcount * sizeof(T); // per-rank shard bytes
   const size_t nPk = bytes >> 3;              // 8 payload bytes per packet
@@ -48,8 +44,7 @@ static ncclResult_t ncclReduceScatterDdaFabricLLTyped(
   if (nBlocksMax < 1) {
     nBlocksMax = 1;
   }
-  unsigned blocks = (unsigned)std::min<size_t>(
-      (nPk + threads - 1) / threads, (size_t)nBlocksMax);
+  unsigned blocks = (unsigned)std::min<size_t>((nPk + threads - 1) / threads, (size_t)nBlocksMax);
   if (blocks == 0) {
     blocks = 1;
   }
@@ -65,27 +60,25 @@ static ncclResult_t ncclReduceScatterDdaFabricLLTyped(
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
 
-  INFO(
-      NCCL_COLL,
-      "DDA fabric ReduceScatter LL: nRanks=%d shardBytes=%zu nPk=%zu grid=%u block=%u",
-      nRanks, bytes, nPk, grid.x, block.x);
+  INFO(NCCL_COLL, "DDA fabric ReduceScatter LL: nRanks=%d shardBytes=%zu nPk=%zu grid=%u block=%u", nRanks, bytes, nPk,
+       grid.x, block.x);
 
   // NRANKS_CT 4/8: unrolled reduce loop; 0: runtime fallback.
   switch (nRanks) {
   case 4:
-    meta::comms::ddaReduceScatterFabricLL<T, 4><<<grid, block, 0, stream>>>(
-        peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        recvcount, comm->rank, nRanks, epochDev, epochLen);
+    meta::comms::ddaReduceScatterFabricLL<T, 4><<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff),
+                                                                            static_cast<const T*>(sendbuff), recvcount,
+                                                                            comm->rank, nRanks, epochDev, epochLen);
     break;
   case 8:
-    meta::comms::ddaReduceScatterFabricLL<T, 8><<<grid, block, 0, stream>>>(
-        peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        recvcount, comm->rank, nRanks, epochDev, epochLen);
+    meta::comms::ddaReduceScatterFabricLL<T, 8><<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff),
+                                                                            static_cast<const T*>(sendbuff), recvcount,
+                                                                            comm->rank, nRanks, epochDev, epochLen);
     break;
   default:
-    meta::comms::ddaReduceScatterFabricLL<T, 0><<<grid, block, 0, stream>>>(
-        peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        recvcount, comm->rank, nRanks, epochDev, epochLen);
+    meta::comms::ddaReduceScatterFabricLL<T, 0><<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff),
+                                                                            static_cast<const T*>(sendbuff), recvcount,
+                                                                            comm->rank, nRanks, epochDev, epochLen);
     break;
   }
 
@@ -96,20 +89,14 @@ static ncclResult_t ncclReduceScatterDdaFabricLLTyped(
 
 } // namespace
 
-bool ncclReduceScatterDdaFabricLLEligible(
-    ncclComm* comm,
-    const void* sendbuff,
-    void* recvbuff,
-    size_t recvcount,
-    ncclDataType_t datatype,
-    ncclRedOp_t op) {
+bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
+                                          ncclDataType_t datatype, ncclRedOp_t op) {
   (void)sendbuff;
   (void)recvbuff;
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
-  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr ||
-      comm->ddaPeerPtrsDev == nullptr) {
+  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) {
     return false;
   }
   if (comm->nRanks < 2 || comm->nRanks > meta::comms::kDdaMaxNranks) {
@@ -121,8 +108,7 @@ bool ncclReduceScatterDdaFabricLLEligible(
   if (op != ncclSum) {
     return false;
   }
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 &&
-      datatype != ncclBfloat16) {
+  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
     return false;
   }
 
@@ -142,25 +128,17 @@ bool ncclReduceScatterDdaFabricLLEligible(
   return true;
 }
 
-ncclResult_t ncclReduceScatterDdaFabricLL(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t recvcount,
-    ncclDataType_t datatype,
-    ncclRedOp_t op,
-    ncclComm* comm,
-    cudaStream_t stream) {
+ncclResult_t ncclReduceScatterDdaFabricLL(const void* sendbuff, void* recvbuff, size_t recvcount,
+                                          ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
+                                          cudaStream_t stream) {
   (void)op;
   switch (datatype) {
   case ncclFloat32:
-    return ncclReduceScatterDdaFabricLLTyped<float>(
-        sendbuff, recvbuff, recvcount, comm, stream);
+    return ncclReduceScatterDdaFabricLLTyped<float>(sendbuff, recvbuff, recvcount, comm, stream);
   case ncclFloat16:
-    return ncclReduceScatterDdaFabricLLTyped<half>(
-        sendbuff, recvbuff, recvcount, comm, stream);
+    return ncclReduceScatterDdaFabricLLTyped<half>(sendbuff, recvbuff, recvcount, comm, stream);
   case ncclBfloat16:
-    return ncclReduceScatterDdaFabricLLTyped<bf16>(
-        sendbuff, recvbuff, recvcount, comm, stream);
+    return ncclReduceScatterDdaFabricLLTyped<bf16>(sendbuff, recvbuff, recvcount, comm, stream);
   default:
     return ncclInvalidArgument;
   }

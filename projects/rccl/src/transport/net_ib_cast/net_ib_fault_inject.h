@@ -84,8 +84,8 @@ ncclResult_t ncclIbCastFaultOpsSetPostRecvError(void* recvComm, int qpIdx, int e
  *  injectCount   : completions to corrupt; <0 = unlimited.
  *  injectWhenIdle: if true, synthesize an error WC when poll_cq is idle;
  *                  if false, only rewrite the status of real matching completions. */
-ncclResult_t ncclIbCastFaultOpsSetPollCqError(void* comm, int qpIdx, int wcStatus,
-                                              int injectCount, bool injectWhenIdle);
+ncclResult_t ncclIbCastFaultOpsSetPollCqError(void* comm, int qpIdx, int wcStatus, int injectCount,
+                                              bool injectWhenIdle);
 
 /* Clear all ops-overload fault config on the connection (shims stay installed). */
 ncclResult_t ncclIbCastFaultOpsClear(void* comm);

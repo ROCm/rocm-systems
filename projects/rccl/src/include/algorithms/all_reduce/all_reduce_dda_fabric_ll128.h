@@ -50,22 +50,20 @@ template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(1024)
 #endif
-__global__ void ddaAllReduceFlatLL128(
-    T* const* __restrict__ peerScratch,    // ddaPeerPtrsDev: nRanks scratch bases
-    T* __restrict__ recvbuff,              // local user output
-    const T* __restrict__ sendbuff,        // local user input
-    size_t count,                          // full-message element count
-    int selfRank,
-    int nRanksRt,
-    uint32_t* __restrict__ epochDev,       // per-block LL epoch cells (shared AG+AR)
-    int epochLen,                          // number of cells in epochDev
-    size_t slotStrideLines) {              // per-call lines/slot (from host)
+  __global__ void ddaAllReduceFlatLL128(T* const* __restrict__ peerScratch,    // ddaPeerPtrsDev: nRanks scratch bases
+                                        T* __restrict__ recvbuff,              // local user output
+                                        const T* __restrict__ sendbuff,        // local user input
+                                        size_t count,                          // full-message element count
+                                        int selfRank, int nRanksRt,
+                                        uint32_t* __restrict__ epochDev, // per-block LL epoch cells (shared AG+AR)
+                                        int epochLen, // number of cells in epochDev
+                                        size_t slotStrideLines) { // per-call lines/slot (from host)
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = count * sizeof(T);
-  const size_t nWords = bytes >> 3;                        // 8B payload words
-  const size_t numLines = ddaLL128NumLines(nWords);        // 128B lines this size
-  const size_t slot = slotStrideLines;                     // lines per slot (per-call)
+  const size_t nWords = bytes >> 3; // 8B payload words
+  const size_t numLines = ddaLL128NumLines(nWords); // 128B lines this size
+  const size_t slot = slotStrideLines; // lines per slot (per-call)
 
   // On-device, graph-safe flag/bank derivation (1D grid: flatBlockId=blockIdx.x).
   const int flatBlockId = blockIdx.x;
@@ -91,11 +89,10 @@ __global__ void ddaAllReduceFlatLL128(
       const size_t e = base + (size_t)lane;
       v = (e < nWords) ? sw[e] : 0ull;
     }
-    #pragma unroll
+#pragma unroll
     for (int r = 1; r < nRanks; ++r) {
       const int peer = (selfRank + r) % nRanks;
-      LLLine128* dst = reinterpret_cast<LLLine128*>(peerScratch[peer]) +
-          bankOffsetLines + (size_t)selfRank * slot;
+      LLLine128* dst = reinterpret_cast<LLLine128*>(peerScratch[peer]) + bankOffsetLines + (size_t)selfRank * slot;
       if (lane < kDdaLL128DataElems) {
         ddaLL128StoreWord(&dst[ln].w[lane], v);
       }
@@ -108,8 +105,7 @@ __global__ void ddaAllReduceFlatLL128(
   }
 
   // Phase 2: poll my slots for the other ranks, fold with my own data.
-  LLLine128* myBase =
-      reinterpret_cast<LLLine128*>(peerScratch[selfRank]) + bankOffsetLines;
+  LLLine128* myBase = reinterpret_cast<LLLine128*>(peerScratch[selfRank]) + bankOffsetLines;
   uint64_t* out = reinterpret_cast<uint64_t*>(recvbuff);
   for (size_t ln = groupBase; ln < numLines; ln += groupStride) {
     const size_t base = ln * (size_t)kDdaLL128DataElems;

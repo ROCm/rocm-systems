@@ -32,7 +32,7 @@ namespace meta::comms {
 // Footprint = 2 banks * nRanks * (kDdaLLAgMaxPerRankBytes * 2) for the 8B->16B
 // expansion; 36 MiB at 128 KiB / 72 ranks, within the 64 MiB DDA scratch.
 constexpr size_t kDdaLLAgMaxPerRankBytes = 131072;                     // 128 KiB
-constexpr size_t kDdaLLAgSlotStridePkts  = kDdaLLAgMaxPerRankBytes / 8; // 16384
+constexpr size_t kDdaLLAgSlotStridePkts = kDdaLLAgMaxPerRankBytes / 8; // 16384
 
 // LL all-gather kernel. 2D grid: grid.x == nRanks selects the peer (column b
 // owns peer b); grid.y == blocksPerPeer splits that peer's packets into gridDim.y
@@ -45,15 +45,13 @@ template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
-__global__ void ddaAllGatherFabricLL(
-    T* const* __restrict__ peerScratch,    // ddaPeerPtrsDev: nRanks scratch bases
-    T* __restrict__ recvbuff,              // local user output
-    const T* __restrict__ sendbuff,        // local user input
-    size_t perRankBytes,                   // per-rank payload; multiple of 16
-    int selfRank,
-    int nRanksRt,
-    uint32_t* __restrict__ epochDev,       // per-block LL epoch cells
-    int epochLen) {                        // number of cells in epochDev
+  __global__ void ddaAllGatherFabricLL(T* const* __restrict__ peerScratch,    // ddaPeerPtrsDev: nRanks scratch bases
+                                       T* __restrict__ recvbuff,              // local user output
+                                       const T* __restrict__ sendbuff,        // local user input
+                                       size_t perRankBytes,                   // per-rank payload; multiple of 16
+                                       int selfRank, int nRanksRt,
+                                       uint32_t* __restrict__ epochDev,       // per-block LL epoch cells
+                                       int epochLen) {                        // number of cells in epochDev
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const int peer = blockIdx.x;             // grid.x == nRanks: one column/peer
@@ -89,8 +87,7 @@ __global__ void ddaAllGatherFabricLL(
   if (peer == selfRank) {
     // self column: local copy sendbuff -> recvbuff[self].
     const uint4* s4 = reinterpret_cast<const uint4*>(sendbuff);
-    uint4* d4 = reinterpret_cast<uint4*>(
-        reinterpret_cast<char*>(recvbuff) + (size_t)selfRank * perRankBytes);
+    uint4* d4 = reinterpret_cast<uint4*>(reinterpret_cast<char*>(recvbuff) + (size_t)selfRank * perRankBytes);
     const size_t nVec = perRankBytes >> 4; // number of 16B chunks
     // split the copy across this peer's blocks too.
     const size_t vecPerChunk = (nVec + (size_t)nChunks - 1) / (size_t)nChunks;
@@ -113,26 +110,19 @@ __global__ void ddaAllGatherFabricLL(
   } else {
     // scatter: write my payload into peer's slot (== selfRank).
     const uint32_t* sw = reinterpret_cast<const uint32_t*>(sendbuff);
-    LLPacket16* dst = reinterpret_cast<LLPacket16*>(peerScratch[peer]) +
-        (size_t)selfRank * slot + bankOffsetPkts;
+    LLPacket16* dst = reinterpret_cast<LLPacket16*>(peerScratch[peer]) + (size_t)selfRank * slot + bankOffsetPkts;
     for (size_t pk = pkBegin + tid; pk < pkEnd; pk += nthreads) {
-      ddaLLStoreLineB128(
-          reinterpret_cast<uint32_t*>(&dst[pk]),
-          sw[2 * pk], flag, sw[2 * pk + 1], flag);
+      ddaLLStoreLineB128(reinterpret_cast<uint32_t*>(&dst[pk]), sw[2 * pk], flag, sw[2 * pk + 1], flag);
     }
 
     // gather: poll my slot for peer, unpack into recvbuff[peer].
     volatile LLPacket16* src =
-        reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts +
-        (size_t)peer * slot;
-    uint32_t* out = reinterpret_cast<uint32_t*>(
-        reinterpret_cast<char*>(recvbuff) + (size_t)peer * perRankBytes);
+      reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts + (size_t)peer * slot;
+    uint32_t* out = reinterpret_cast<uint32_t*>(reinterpret_cast<char*>(recvbuff) + (size_t)peer * perRankBytes);
     for (size_t pk = pkBegin + tid; pk < pkEnd; pk += nthreads) {
       uint32_t d0, f0, d1, f1;
       do {
-        ddaLLLoadLineB128(
-            reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])),
-            d0, f0, d1, f1);
+        ddaLLLoadLineB128(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), d0, f0, d1, f1);
       } while (f0 != flag || f1 != flag);
       out[2 * pk] = d0;
       out[2 * pk + 1] = d1;

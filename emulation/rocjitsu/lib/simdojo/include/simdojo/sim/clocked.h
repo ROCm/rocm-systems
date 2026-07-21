@@ -31,8 +31,8 @@ public:
   Clocked(std::string name, const ClockDomain &domain) : Base(std::move(name)), domain_(domain) {}
 
   /// @brief Schedule the first clock-edge event when the simulation starts.
-  void initialize() override {
-    assert(this->engine() && "Clocked component must be added to a topology before initialize()");
+  void startup() override {
+    assert(this->engine() && "Clocked component must be added to a topology before startup()");
     running_ = true;
     this->schedule_event(&clock_event_, domain_.first_edge());
   }

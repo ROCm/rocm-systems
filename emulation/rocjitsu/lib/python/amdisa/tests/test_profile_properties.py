@@ -10,6 +10,7 @@ import pytest
 from amdisa.codegen._generator import CodeGenerator, _SourceImplUnit
 from amdisa.__main__ import _detect_profile
 from amdisa.gpuisa import InstEncoding, Instruction, MicrocodeField
+from amdisa.isa_properties_codegen import emit_isa_properties
 from amdisa.isa_profile import (
     Cdna1Profile,
     Cdna2Profile,
@@ -20,6 +21,101 @@ from amdisa.isa_profile import (
     Rdna3Profile,
     Rdna4Profile,
 )
+
+
+@pytest.mark.parametrize(
+    ('profile', 'expected'),
+    [
+        (CdnaProfile(), False),
+        (Rdna1Profile(), True),
+        (Rdna3Profile(), True),
+        (Rdna4Profile(), True),
+        (Gfx1250Profile(), False),
+    ],
+)
+def test_supports_wgp_mode(profile, expected):
+    assert profile.supports_wgp_mode is expected
+
+
+@pytest.mark.parametrize(
+    ('profile', 'expected'),
+    [
+        (CdnaProfile(), 256),
+        (Rdna4Profile(), 256),
+        (Gfx1250Profile(), 1024),
+    ],
+)
+def test_max_addressable_vgprs_per_wf(profile, expected):
+    assert profile.max_addressable_vgprs_per_wf == expected
+
+
+@pytest.mark.parametrize(
+    ('profile', 'enc_name', 'expected'),
+    [
+        (CdnaProfile(), 'ENC_FLAT', '0x7F'),
+        (Rdna3Profile(), 'ENC_FLAT', '0x7F'),
+        (Rdna4Profile(), 'ENC_VFLAT', 'OPR_SREG_NULL'),
+        (Rdna4Profile(), 'ENC_VGLOBAL', 'OPR_SREG_NULL'),
+        (Gfx1250Profile(), 'ENC_VFLAT', 'OPR_SREG_NULL'),
+        (Gfx1250Profile(), 'ENC_VGLOBAL', 'OPR_SREG_NULL'),
+    ],
+)
+def test_saddr_null_selector_is_encoding_specific(profile, enc_name, expected):
+    assert profile.saddr_null_selector_expr(enc_name) == expected
+
+
+def test_saddr_null_selector_rejects_unrelated_encodings():
+    assert Rdna3Profile().saddr_null_selector_expr('ENC_VOP3') is None
+    assert Rdna4Profile().saddr_null_selector_expr('ENC_VSCRATCH') is None
+
+
+def test_isa_properties_codegen_uses_profile_values(tmp_path):
+    specs = [
+        ('cdna3', SimpleNamespace(profile=CdnaProfile()), None),
+        ('rdna4', SimpleNamespace(profile=Rdna4Profile()), None),
+        ('gfx1250', SimpleNamespace(profile=Gfx1250Profile()), None),
+    ]
+
+    output = emit_isa_properties(str(tmp_path), specs).read_text()
+
+    assert 'uint32_t max_addressable_vgprs_per_wf = 0;' in output
+    assert 'MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;' in output
+    assert 'case ROCJITSU_CODE_ARCH_CDNA3:\n    return {false, 256};' in output
+    assert 'case ROCJITSU_CODE_ARCH_RDNA4:\n    return {true, 256};' in output
+    assert 'case ROCJITSU_CODE_ARCH_GFX1250:\n    return {false, 1024};' in output
+
+
+@pytest.mark.parametrize(
+    ('arch', 'profile', 'raw_exec'),
+    [
+        ('cdna3', CdnaProfile(), False),
+        ('rdna4', Rdna4Profile(), True),
+    ],
+)
+def test_operand_exec_register_access_is_wave32_gated(
+    tmp_path, arch, profile, raw_exec
+):
+    generator = CodeGenerator(
+        SimpleNamespace(
+            arch_name=arch,
+            opnd_selectors=[],
+            operand_types=['OPR_SIMM16', 'OPR_SIMM32', 'OPR_VGPR'],
+            profile=profile,
+        ),
+        str(tmp_path),
+    )
+
+    generator.gen_operand()
+    operand_cpp = (tmp_path / arch / 'operand.cpp').read_text()
+
+    assert 'return static_cast<uint32_t>(wf.exec());' in operand_cpp
+    assert 'wf.set_exec((wf.exec() & 0xFFFFFFFF00000000ULL) | val);' in operand_cpp
+    if raw_exec:
+        assert 'return static_cast<uint32_t>(wf.exec_raw() >> 32);' in operand_cpp
+        assert 'wf.set_exec_raw((wf.exec_raw() & 0x00000000FFFFFFFFULL)' in operand_cpp
+    else:
+        assert 'exec_raw' not in operand_cpp
+        assert 'set_exec_raw' not in operand_cpp
 
 
 class TestCdnaProfile:

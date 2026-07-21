@@ -39,17 +39,17 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
-  if (comm->nRanks < 2 || comm->nRanks > kDdaMaxNranks ||
-      comm->bootstrap == nullptr) {
+  if (comm->nRanks < 2 || comm->nRanks > kDdaMaxNranks || comm->bootstrap == nullptr) {
     return ncclSuccess;
   }
 
   // Fabric DDA assumes every rank shares one UALink clique; skip (fall back to
   // normal RCCL) if this comm spans multiple cliques -- e.g. multiple racks.
   if (comm->clique.size != comm->nRanks) {
-    INFO(NCCL_INIT,
-         "ncclDdaFabricCommInit: comm spans multiple fabric cliques (nRanks %d, clique.size %d); skipping fabric DDA path",
-         comm->nRanks, comm->clique.size);
+    INFO(
+      NCCL_INIT,
+      "ncclDdaFabricCommInit: comm spans multiple fabric cliques (nRanks %d, clique.size %d); skipping fabric DDA path",
+      comm->nRanks, comm->clique.size);
     return ncclSuccess;
   }
 
@@ -65,9 +65,7 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   // is unavailable the fabric path is skipped (DDA disabled, normal RCCL path
   // used). ncclCuMemAlloc rounds size up to the allocation granularity.
   if (!ncclCuMemEnable()) {
-    INFO(
-        NCCL_INIT,
-        "ncclDdaFabricCommInit: VMM unavailable; skipping fabric DDA path");
+    INFO(NCCL_INIT, "ncclDdaFabricCommInit: VMM unavailable; skipping fabric DDA path");
     return ncclSuccess;
   }
 
@@ -87,25 +85,20 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   const size_t epochLen = ddaLLEpochCount(nRanks, nBlocksMax);
   ncclResult_t res = ncclSuccess;
 
-  res = ncclCuMemAlloc(
-      &scratch, &scratchHandle, ncclCuMemHandleType, bytes, comm->memManager);
+  res = ncclCuMemAlloc(&scratch, &scratchHandle, ncclCuMemHandleType, bytes, comm->memManager);
   if (res != ncclSuccess || scratch == nullptr) {
-    INFO(
-        NCCL_INIT,
-        "ncclDdaFabricCommInit: VMM scratch alloc failed; skipping fabric DDA path");
+    INFO(NCCL_INIT, "ncclDdaFabricCommInit: VMM scratch alloc failed; skipping fabric DDA path");
     scratch = nullptr;
     goto fail;
   }
 
-  handler = new (std::nothrow)
-      ncclFabricMemHandler(comm->bootstrap, comm->rank, nRanks, comm->memManager);
+  handler = new (std::nothrow) ncclFabricMemHandler(comm->bootstrap, comm->rank, nRanks, comm->memManager);
   if (handler == nullptr) {
     WARN("ncclDdaFabricCommInit: OOM allocating ncclFabricMemHandler");
     goto fail;
   }
 
-  NCCLCHECKGOTO(
-      handler->addSelfDeviceMem(scratch, scratchHandle, bytes), res, fail);
+  NCCLCHECKGOTO(handler->addSelfDeviceMem(scratch, scratchHandle, bytes), res, fail);
   NCCLCHECKGOTO(handler->exchangeMemPtrs(), res, fail);
 
   CUDACHECKGOTO(cudaMalloc(&peerDev, nRanks * sizeof(void*)), res, fail);
@@ -114,22 +107,13 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
     NCCLCHECKGOTO(handler->getPeerDeviceMemPtr(i, &h_ptrs[i]), res, fail);
   }
 
-  CUDACHECKGOTO(
-      cudaMemcpy(
-          peerDev, h_ptrs.data(), nRanks * sizeof(void*),
-          cudaMemcpyHostToDevice),
-      res, fail);
+  CUDACHECKGOTO(cudaMemcpy(peerDev, h_ptrs.data(), nRanks * sizeof(void*), cudaMemcpyHostToDevice), res, fail);
   NCCLCHECKGOTO(ncclCalloc(&peerHost, nRanks), res, fail);
-  CUDACHECKGOTO(
-      cudaMemcpy(
-          peerHost, h_ptrs.data(), nRanks * sizeof(void*),
-          cudaMemcpyHostToHost),
-      res, fail);
-
+  CUDACHECKGOTO(cudaMemcpy(peerHost, h_ptrs.data(), nRanks * sizeof(void*), cudaMemcpyHostToHost), res, fail);
 
   {
-    auto barrierPair = meta::comms::FabricGpuBarrier::mallocAndInit(
-        nRanks, nBlocksMax, comm->rank, comm->bootstrap, comm->memManager);
+    auto barrierPair =
+      meta::comms::FabricGpuBarrier::mallocAndInit(nRanks, nBlocksMax, comm->rank, comm->bootstrap, comm->memManager);
     if (!barrierPair.first) {
       WARN("ncclDdaFabricCommInit: FabricGpuBarrier malloc/init failed");
       goto fail;
@@ -150,10 +134,8 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
 
   // Device epoch cells for the LL collectives: zero-initialised
   // so the first device-derived flag is 1. Bumped on the device every LL launch.
-  CUDACHECKGOTO(
-      cudaMalloc(&epochDev, epochLen * sizeof(uint32_t)), res, fail);
-  CUDACHECKGOTO(
-      cudaMemset(epochDev, 0, epochLen * sizeof(uint32_t)), res, fail);
+  CUDACHECKGOTO(cudaMalloc(&epochDev, epochLen * sizeof(uint32_t)), res, fail);
+  CUDACHECKGOTO(cudaMemset(epochDev, 0, epochLen * sizeof(uint32_t)), res, fail);
 
   // Dedicated epoch array for the LL AllReduce tier. Seeded to a disjoint high
   // flag namespace (kDdaLLArEpochSeed) so that, although it shares scratch bytes
@@ -162,17 +144,10 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   // per-launch epoch reset cheap for this latency-bound tier.
   {
     const size_t arEpochLen = (size_t)kDdaFabricLLArMaxBlocks;
-    CUDACHECKGOTO(
-        cudaMalloc(&arEpochDev, arEpochLen * sizeof(uint32_t)), res, fail);
+    CUDACHECKGOTO(cudaMalloc(&arEpochDev, arEpochLen * sizeof(uint32_t)), res, fail);
     std::vector<uint32_t> arSeed(arEpochLen, kDdaLLArEpochSeed);
-    CUDACHECKGOTO(
-        cudaMemcpy(
-            arEpochDev,
-            arSeed.data(),
-            arEpochLen * sizeof(uint32_t),
-            cudaMemcpyHostToDevice),
-        res,
-        fail);
+    CUDACHECKGOTO(cudaMemcpy(arEpochDev, arSeed.data(), arEpochLen * sizeof(uint32_t), cudaMemcpyHostToDevice), res,
+                  fail);
   }
 
   // Success: hand ownership of every resource to comm.
@@ -188,12 +163,9 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   comm->ddaLLEpochLen = (int)epochLen;
   comm->ddaLLArEpochDev = arEpochDev;
   comm->ddaLLArEpochLen = kDdaFabricLLArMaxBlocks;
-  INFO(
-      NCCL_INIT,
-      "ncclDdaFabricCommInit: nRanks %d, scratch %zu bytes (vmm), FabricGpuBarrier nBlocks=%d, peer table on device",
-      nRanks,
-      bytes,
-      nBlocksMax);
+  INFO(NCCL_INIT,
+       "ncclDdaFabricCommInit: nRanks %d, scratch %zu bytes (vmm), FabricGpuBarrier nBlocks=%d, peer table on device",
+       nRanks, bytes, nBlocksMax);
   return ncclSuccess;
 
 fail:

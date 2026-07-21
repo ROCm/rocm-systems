@@ -37,8 +37,7 @@ namespace meta::comms {
 // bounds the scratch footprint.
 constexpr size_t kDdaLL128A2AMaxPerChunkBytes = 524288;              // 512 KiB
 constexpr size_t kDdaLL128A2ASlotStrideLines =
-    (kDdaLL128A2AMaxPerChunkBytes / 8 + (size_t)kDdaLL128DataElems - 1) /
-    (size_t)kDdaLL128DataElems;                                      // ceil(nWords/15)
+  (kDdaLL128A2AMaxPerChunkBytes / 8 + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems; // ceil(nWords/15)
 
 // LL128 all-to-all kernel. 2D grid: grid.x == nRanks selects the peer column;
 // grid.y == blocksPerPeer splits that peer's line range into gridDim.y chunks.
@@ -50,25 +49,23 @@ template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(1024)
 #endif
-__global__ void ddaAllToAllFabricLL128(
-    T* const* __restrict__ peerScratch,    // ddaPeerPtrsDev: nRanks scratch bases
-    T* __restrict__ recvbuff,              // local user output (nRanks chunks)
-    const T* __restrict__ sendbuff,        // local user input (nRanks chunks)
-    size_t perChunkBytes,                  // per-peer chunk payload; multiple of 16
-    int selfRank,
-    int nRanksRt,
-    uint32_t* __restrict__ epochDev,       // per-block LL epoch cells
-    int epochLen) {                        // number of cells in epochDev
+  __global__ void ddaAllToAllFabricLL128(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: nRanks scratch bases
+                                         T* __restrict__ recvbuff, // local user output (nRanks chunks)
+                                         const T* __restrict__ sendbuff, // local user input (nRanks chunks)
+                                         size_t perChunkBytes, // per-peer chunk payload; multiple of 16
+                                         int selfRank, int nRanksRt,
+                                         uint32_t* __restrict__ epochDev, // per-block LL epoch cells
+                                         int epochLen) { // number of cells in epochDev
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
-  const int peer = blockIdx.x;             // grid.x == nRanks: one column/peer
-  if (peer >= nRanks) return;              // safety if grid.x > nRanks
-  const int chunk = blockIdx.y;            // grid.y == blocksPerPeer
-  const int nChunks = gridDim.y;           // >= 1
+  const int peer = blockIdx.x; // grid.x == nRanks: one column/peer
+  if (peer >= nRanks) return; // safety if grid.x > nRanks
+  const int chunk = blockIdx.y; // grid.y == blocksPerPeer
+  const int nChunks = gridDim.y; // >= 1
 
-  const size_t nWords = perChunkBytes >> 3;                // 8B payload words
-  const size_t numLines = ddaLL128NumLines(nWords);        // 128B lines this size
-  const size_t slot = kDdaLL128A2ASlotStrideLines;         // lines per slot
+  const size_t nWords = perChunkBytes >> 3; // 8B payload words
+  const size_t numLines = ddaLL128NumLines(nWords); // 128B lines this size
+  const size_t slot = kDdaLL128A2ASlotStrideLines; // lines per slot
 
   // On-device, graph-safe flag/bank derivation.
   const int flatBlockId = blockIdx.x * gridDim.y + blockIdx.y;
@@ -85,10 +82,9 @@ __global__ void ddaAllToAllFabricLL128(
 
   if (peer == selfRank) {
     // self column: local copy sendbuff[self] -> recvbuff[self] (16B nontemporal).
-    const uint4* s4 = reinterpret_cast<const uint4*>(
-        reinterpret_cast<const char*>(sendbuff) + (size_t)selfRank * perChunkBytes);
-    uint4* d4 = reinterpret_cast<uint4*>(
-        reinterpret_cast<char*>(recvbuff) + (size_t)selfRank * perChunkBytes);
+    const uint4* s4 =
+      reinterpret_cast<const uint4*>(reinterpret_cast<const char*>(sendbuff) + (size_t)selfRank * perChunkBytes);
+    uint4* d4 = reinterpret_cast<uint4*>(reinterpret_cast<char*>(recvbuff) + (size_t)selfRank * perChunkBytes);
     const size_t nVec = perChunkBytes >> 4; // number of 16B chunks
     const int tid = threadIdx.x;
     const int nthreads = blockDim.x;
@@ -114,12 +110,11 @@ __global__ void ddaAllToAllFabricLL128(
     const int group = threadIdx.x / kDdaLL128Lanes;
     const int lane = threadIdx.x % kDdaLL128Lanes;
     const int groups = blockDim.x / kDdaLL128Lanes;
-    const uint64_t* sw = reinterpret_cast<const uint64_t*>(
-        reinterpret_cast<const char*>(sendbuff) + (size_t)peer * perChunkBytes);
+    const uint64_t* sw =
+      reinterpret_cast<const uint64_t*>(reinterpret_cast<const char*>(sendbuff) + (size_t)peer * perChunkBytes);
 
     // scatter: write my chunk-for-peer into peer's slot (== selfRank), flag-last.
-    LLLine128* dst = reinterpret_cast<LLLine128*>(peerScratch[peer]) +
-        (size_t)selfRank * slot + bankOffsetLines;
+    LLLine128* dst = reinterpret_cast<LLLine128*>(peerScratch[peer]) + (size_t)selfRank * slot + bankOffsetLines;
     for (size_t ln = lnBegin + group; ln < lnEnd; ln += groups) {
       const size_t base = ln * (size_t)kDdaLL128DataElems;
       if (lane < kDdaLL128DataElems) {
@@ -135,10 +130,8 @@ __global__ void ddaAllToAllFabricLL128(
     }
 
     // gather: poll my slot for peer, unpack into recvbuff[peer].
-    LLLine128* src = reinterpret_cast<LLLine128*>(peerScratch[selfRank]) +
-        bankOffsetLines + (size_t)peer * slot;
-    uint64_t* out = reinterpret_cast<uint64_t*>(
-        reinterpret_cast<char*>(recvbuff) + (size_t)peer * perChunkBytes);
+    LLLine128* src = reinterpret_cast<LLLine128*>(peerScratch[selfRank]) + bankOffsetLines + (size_t)peer * slot;
+    uint64_t* out = reinterpret_cast<uint64_t*>(reinterpret_cast<char*>(recvbuff) + (size_t)peer * perChunkBytes);
     for (size_t ln = lnBegin + group; ln < lnEnd; ln += groups) {
       const size_t base = ln * (size_t)kDdaLL128DataElems;
       // all 16 lanes poll the shared flag word (broadcast); unfenced.

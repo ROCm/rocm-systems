@@ -35,7 +35,7 @@ namespace meta::comms {
 // identical on every rank and call. The effective size gate is the runtime LL
 // threshold (see collectives.cc). Footprint = 2 banks * nRanks * slot * 16B.
 constexpr size_t kDdaLLA2AMaxPerChunkBytes = 131072;                    // 128 KiB
-constexpr size_t kDdaLLA2ASlotStridePkts   = kDdaLLA2AMaxPerChunkBytes / 8; // 16384
+constexpr size_t kDdaLLA2ASlotStridePkts = kDdaLLA2AMaxPerChunkBytes / 8; // 16384
 
 // LL all-to-all kernel. 2D grid: grid.x == nRanks selects the peer (column b
 // owns peer b); grid.y == blocksPerPeer splits that peer's packets into gridDim.y
@@ -48,15 +48,13 @@ template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
-__global__ void ddaAllToAllFabricLL(
-    T* const* __restrict__ peerScratch,    // ddaPeerPtrsDev: nRanks scratch bases
-    T* __restrict__ recvbuff,              // local user output (nRanks chunks)
-    const T* __restrict__ sendbuff,        // local user input (nRanks chunks)
-    size_t perChunkBytes,                  // per-peer chunk payload; multiple of 16
-    int selfRank,
-    int nRanksRt,
-    uint32_t* __restrict__ epochDev,       // per-block LL epoch cells
-    int epochLen) {                        // number of cells in epochDev
+  __global__ void ddaAllToAllFabricLL(T* const* __restrict__ peerScratch,    // ddaPeerPtrsDev: nRanks scratch bases
+                                      T* __restrict__ recvbuff,              // local user output (nRanks chunks)
+                                      const T* __restrict__ sendbuff,        // local user input (nRanks chunks)
+                                      size_t perChunkBytes,                  // per-peer chunk payload; multiple of 16
+                                      int selfRank, int nRanksRt,
+                                      uint32_t* __restrict__ epochDev,       // per-block LL epoch cells
+                                      int epochLen) {                        // number of cells in epochDev
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const int peer = blockIdx.x;             // grid.x == nRanks: one column/peer
@@ -89,10 +87,9 @@ __global__ void ddaAllToAllFabricLL(
 
   if (peer == selfRank) {
     // self column: local copy sendbuff[self] -> recvbuff[self].
-    const uint4* s4 = reinterpret_cast<const uint4*>(
-        reinterpret_cast<const char*>(sendbuff) + (size_t)selfRank * perChunkBytes);
-    uint4* d4 = reinterpret_cast<uint4*>(
-        reinterpret_cast<char*>(recvbuff) + (size_t)selfRank * perChunkBytes);
+    const uint4* s4 =
+      reinterpret_cast<const uint4*>(reinterpret_cast<const char*>(sendbuff) + (size_t)selfRank * perChunkBytes);
+    uint4* d4 = reinterpret_cast<uint4*>(reinterpret_cast<char*>(recvbuff) + (size_t)selfRank * perChunkBytes);
     const size_t nVec = perChunkBytes >> 4; // number of 16B chunks
     const size_t vecPerChunk = (nVec + (size_t)nChunks - 1) / (size_t)nChunks;
     const size_t vBegin = (size_t)chunk * vecPerChunk;
@@ -113,28 +110,21 @@ __global__ void ddaAllToAllFabricLL(
     }
   } else {
     // scatter: write my chunk-for-peer (sendbuff[peer]) into peer's slot (== selfRank).
-    const uint32_t* sw = reinterpret_cast<const uint32_t*>(
-        reinterpret_cast<const char*>(sendbuff) + (size_t)peer * perChunkBytes);
-    LLPacket16* dst = reinterpret_cast<LLPacket16*>(peerScratch[peer]) +
-        (size_t)selfRank * slot + bankOffsetPkts;
+    const uint32_t* sw =
+      reinterpret_cast<const uint32_t*>(reinterpret_cast<const char*>(sendbuff) + (size_t)peer * perChunkBytes);
+    LLPacket16* dst = reinterpret_cast<LLPacket16*>(peerScratch[peer]) + (size_t)selfRank * slot + bankOffsetPkts;
     for (size_t pk = pkBegin + tid; pk < pkEnd; pk += nthreads) {
-      ddaLLStoreLineB128(
-          reinterpret_cast<uint32_t*>(&dst[pk]),
-          sw[2 * pk], flag, sw[2 * pk + 1], flag);
+      ddaLLStoreLineB128(reinterpret_cast<uint32_t*>(&dst[pk]), sw[2 * pk], flag, sw[2 * pk + 1], flag);
     }
 
     // gather: poll my slot for peer, unpack into recvbuff[peer].
     volatile LLPacket16* src =
-        reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts +
-        (size_t)peer * slot;
-    uint32_t* out = reinterpret_cast<uint32_t*>(
-        reinterpret_cast<char*>(recvbuff) + (size_t)peer * perChunkBytes);
+      reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts + (size_t)peer * slot;
+    uint32_t* out = reinterpret_cast<uint32_t*>(reinterpret_cast<char*>(recvbuff) + (size_t)peer * perChunkBytes);
     for (size_t pk = pkBegin + tid; pk < pkEnd; pk += nthreads) {
       uint32_t d0, f0, d1, f1;
       do {
-        ddaLLLoadLineB128(
-            reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])),
-            d0, f0, d1, f1);
+        ddaLLLoadLineB128(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), d0, f0, d1, f1);
       } while (f0 != flag || f1 != flag);
       out[2 * pk] = d0;
       out[2 * pk + 1] = d1;

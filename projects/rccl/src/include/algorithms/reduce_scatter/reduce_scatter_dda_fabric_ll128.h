@@ -37,8 +37,7 @@ namespace meta::comms {
 // bounds the scratch footprint.
 constexpr size_t kDdaLL128RsMaxBytes = 524288;                       // 512 KiB
 constexpr size_t kDdaLL128RsSlotStrideLines =
-    (kDdaLL128RsMaxBytes / 8 + (size_t)kDdaLL128DataElems - 1) /
-    (size_t)kDdaLL128DataElems;                                      // ceil(nWords/15)
+  (kDdaLL128RsMaxBytes / 8 + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems; // ceil(nWords/15)
 
 // LL128 reduce-scatter kernel. 1D grid over 128B lines of the per-rank shard;
 // within a block the threads split into 16-lane groups, each owning one line.
@@ -53,21 +52,20 @@ template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(1024)
 #endif
-__global__ void ddaReduceScatterFabricLL128(
-    T* const* __restrict__ peerScratch,    // ddaPeerPtrsDev: nRanks scratch bases
-    T* __restrict__ recvbuff,              // local user output (recvcount elems)
-    const T* __restrict__ sendbuff,        // local user input (recvcount*nRanks)
-    size_t recvcount,                      // per-rank shard element count
-    int selfRank,
-    int nRanksRt,
-    uint32_t* __restrict__ epochDev,       // per-block LL epoch cells
-    int epochLen) {                        // number of cells in epochDev
+  __global__
+  void ddaReduceScatterFabricLL128(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: nRanks scratch bases
+                                   T* __restrict__ recvbuff, // local user output (recvcount elems)
+                                   const T* __restrict__ sendbuff, // local user input (recvcount*nRanks)
+                                   size_t recvcount, // per-rank shard element count
+                                   int selfRank, int nRanksRt,
+                                   uint32_t* __restrict__ epochDev, // per-block LL epoch cells
+                                   int epochLen) { // number of cells in epochDev
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = recvcount * sizeof(T);
-  const size_t nWords = bytes >> 3;                        // 8B payload words
-  const size_t numLines = ddaLL128NumLines(nWords);        // 128B lines this size
-  const size_t slot = kDdaLL128RsSlotStrideLines;          // lines per slot
+  const size_t nWords = bytes >> 3; // 8B payload words
+  const size_t numLines = ddaLL128NumLines(nWords); // 128B lines this size
+  const size_t slot = kDdaLL128RsSlotStrideLines; // lines per slot
 
   // On-device, graph-safe flag/bank derivation (1D grid: flatBlockId=blockIdx.x).
   const int flatBlockId = blockIdx.x;
@@ -88,12 +86,11 @@ __global__ void ddaReduceScatterFabricLL128(
   // Phase 1: scatter my chunk-for-peer (sendbuff[peer]) into peer's slot[self].
   for (size_t ln = groupBase; ln < numLines; ln += groupStride) {
     const size_t base = ln * (size_t)kDdaLL128DataElems;
-    #pragma unroll
+#pragma unroll
     for (int r = 1; r < nRanks; ++r) {
       const int peer = (selfRank + r) % nRanks;
       const uint64_t* swPeer = sw + (size_t)peer * nWords;
-      LLLine128* dst = reinterpret_cast<LLLine128*>(peerScratch[peer]) +
-          bankOffsetLines + (size_t)selfRank * slot;
+      LLLine128* dst = reinterpret_cast<LLLine128*>(peerScratch[peer]) + bankOffsetLines + (size_t)selfRank * slot;
       if (lane < kDdaLL128DataElems) {
         const size_t e = base + (size_t)lane;
         const uint64_t v = (e < nWords) ? swPeer[e] : 0ull;
@@ -109,8 +106,7 @@ __global__ void ddaReduceScatterFabricLL128(
 
   // Phase 2: seed with my self-chunk, poll my slots for the others, fold.
   const uint64_t* swSelf = sw + (size_t)selfRank * nWords;
-  LLLine128* myBase =
-      reinterpret_cast<LLLine128*>(peerScratch[selfRank]) + bankOffsetLines;
+  LLLine128* myBase = reinterpret_cast<LLLine128*>(peerScratch[selfRank]) + bankOffsetLines;
   uint64_t* out = reinterpret_cast<uint64_t*>(recvbuff);
   for (size_t ln = groupBase; ln < numLines; ln += groupStride) {
     const size_t base = ln * (size_t)kDdaLL128DataElems;
