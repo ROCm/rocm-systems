@@ -14,9 +14,9 @@ set(ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY
 )
 
 set(ROCPROFSYS_PROFILER_HUB_GIT_TAG
-    "develop"
+    "0e57a383b016cfd75b02e83dfb2adcd55f395b42"
     CACHE STRING
-    "Git tag/branch for profiler-hub fallback sparse checkout"
+    "Git commit for profiler-hub fallback sparse checkout (pinned to the #8610 merge commit that fixes profiler-hub's export-set and schema-API build failures)"
 )
 
 set(ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR
@@ -84,10 +84,34 @@ else()
         file(MAKE_DIRECTORY "${_PROFILER_HUB_CHECKOUT}")
 
         execute_process(
+            COMMAND ${GIT_EXECUTABLE} init ${_PROFILER_HUB_CHECKOUT}
+            RESULT_VARIABLE _git_result
+            ERROR_VARIABLE _git_error
+        )
+        if(NOT _git_result EQUAL 0)
+            message(FATAL_ERROR "[profiler-hub] git init failed: ${_git_error}")
+        endif()
+
+        execute_process(
             COMMAND
-                ${GIT_EXECUTABLE} clone --filter=blob:none --no-checkout --depth 1
-                --branch ${ROCPROFSYS_PROFILER_HUB_GIT_TAG}
-                ${ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY} ${_PROFILER_HUB_CHECKOUT}
+                ${GIT_EXECUTABLE} remote add origin
+                ${ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY}
+            WORKING_DIRECTORY ${_PROFILER_HUB_CHECKOUT}
+            RESULT_VARIABLE _git_result
+            ERROR_VARIABLE _git_error
+        )
+        if(NOT _git_result EQUAL 0)
+            message(FATAL_ERROR "[profiler-hub] git remote add failed: ${_git_error}")
+        endif()
+
+        # fetch (rather than clone --branch) so ROCPROFSYS_PROFILER_HUB_GIT_TAG can be
+        # a branch, a tag, or a raw commit SHA; GitHub's smart-HTTP transport allows
+        # fetching any reachable commit, not just named refs.
+        execute_process(
+            COMMAND
+                ${GIT_EXECUTABLE} fetch --filter=blob:none --depth 1 origin
+                ${ROCPROFSYS_PROFILER_HUB_GIT_TAG}
+            WORKING_DIRECTORY ${_PROFILER_HUB_CHECKOUT}
             RESULT_VARIABLE _git_result
             OUTPUT_VARIABLE _git_output
             ERROR_VARIABLE _git_error
@@ -95,7 +119,7 @@ else()
         if(NOT _git_result EQUAL 0)
             message(
                 FATAL_ERROR
-                "[profiler-hub] git clone failed (${_git_result}): ${_git_error}\n${_git_output}"
+                "[profiler-hub] git fetch failed (${_git_result}): ${_git_error}\n${_git_output}"
             )
         endif()
 
@@ -128,7 +152,7 @@ else()
         endif()
 
         execute_process(
-            COMMAND ${GIT_EXECUTABLE} checkout ${ROCPROFSYS_PROFILER_HUB_GIT_TAG}
+            COMMAND ${GIT_EXECUTABLE} checkout FETCH_HEAD
             WORKING_DIRECTORY ${_PROFILER_HUB_CHECKOUT}
             RESULT_VARIABLE _git_result
             ERROR_VARIABLE _git_error
