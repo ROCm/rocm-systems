@@ -587,8 +587,6 @@ def _aggregate_pc_sampling_display_rows(
     method: str,
 ) -> pd.DataFrame:
     aggregations: dict[str, Any] = {
-        "source_line": ("source_line", "first"),
-        "instruction": ("instruction", "first"),
         "code_object_id": ("code_object_id", "first"),
         "count": ("count", "sum"),
     }
@@ -599,7 +597,13 @@ def _aggregate_pc_sampling_display_rows(
             "stall_reason": ("stall_reason", _merge_stall_reason_rows),
         })
 
-    return df.groupby(["Kernel_Name", "offset"], as_index=False).agg(**aggregations)
+    row_identity = ["Kernel_Name", "offset", "instruction", "source_line"]
+    aggregated_df = df.groupby(
+        row_identity,
+        as_index=False,
+        dropna=False,
+    ).agg(**aggregations)
+    return aggregated_df[df.columns]
 
 
 def _sort_pc_sampling_display_rows(
