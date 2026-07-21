@@ -863,7 +863,10 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
                 // Check if SQTT buffer was wrapped
                 for(size_t se_index = 0; se_index < se_number_total; se_index++)
                 {
-                    auto full_status = sqttbuilder->SupportsDoubleBuffer()
+                    // gfx11+ report the buffer-full bits in STATUS2; gfx9-family and gfx10 keep
+                    // them in STATUS. Mirror the v2 iterate_data gate so the correct register is
+                    // checked (GetBufferFullMask() returns the STATUS2 bits on gfx11+).
+                    auto full_status = (pm4_factory->GetGpuId() >= aql_profile::GFX11_GPU_ID)
                                            ? control_ptr[se_index].status2
                                            : control_ptr[se_index].status;
                     if(control_ptr[se_index].status & sqttbuilder->GetUTCErrorMask())

@@ -29,7 +29,7 @@ namespace aql_profile
 const GpuBlockInfo* Gfx115xFactory::block_table_[AQLPROFILE_BLOCKS_NUMBER] = {};
 
 Gfx115xFactory::Gfx115xFactory(const AgentInfo* agent_info)
-: Gfx11Factory(block_table_, sizeof(block_table_), agent_info, /*double_buffer=*/true)
+: Gfx11Factory(block_table_, sizeof(block_table_), agent_info)
 {
     for(unsigned i = 0; i < AQLPROFILE_BLOCKS_NUMBER; ++i)
     {

@@ -35,13 +35,10 @@ public:
     {
         Init(agent_info);
     }
-    Gfx11Factory(const GpuBlockInfo** table,
-                 const uint32_t&      size,
-                 const AgentInfo*     agent_info,
-                 bool                 double_buffer = false)
+    Gfx11Factory(const GpuBlockInfo** table, const uint32_t& size, const AgentInfo* agent_info)
     : Pm4Factory(BlockInfoMap(table, size))
     {
-        Init(agent_info, double_buffer);
+        Init(agent_info);
     }
     bool IsGFX11() const override { return true; }
 
@@ -49,8 +46,7 @@ public:
     virtual int GetAccumHiID() const override { return 1; }
 
 protected:
-    // double_buffer selects the SQTT double-buffer scheme (set by the gfx11.5 factory).
-    void                       Init(const AgentInfo* agent_info, bool double_buffer = false);
+    void                       Init(const AgentInfo* agent_info);
     static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
 };
 

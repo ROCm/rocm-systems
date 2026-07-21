@@ -94,8 +94,9 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
             ERR_LOGGING("SQTT memory error received, SE({})", se_index);
             status = HSA_STATUS_ERROR_EXCEPTION;
         }
-        auto status2_value = sqttbuilder->SupportsDoubleBuffer() ? control_ptr[se_index].status2
-                                                                 : control_ptr[se_index].status;
+        auto status2_value = (pm4_factory->GetGpuId() >= aql_profile::GFX11_GPU_ID)
+                                 ? control_ptr[se_index].status2
+                                 : control_ptr[se_index].status;
         if(status2_value & sqttbuilder->GetBufferFullMask())
         {
             AQL_WARNING << "SQTT data buffer full, SE(" << se_index << ")";
@@ -418,11 +419,16 @@ aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
         manager->GetTraceControlBuf<pm4_builder::TraceControl>()[shader_engine_id];
     uint32_t status = control.status_double_buffer;
 
+    auto* pm4_factory = aql_profile::Pm4Factory::Create(manager->GetAgent());
+    auto* sqttbuilder = pm4_factory->GetSqttBuilder();
+
     out->_size       = sizeof(aqlprofile_att_buffer_status_t);
     out->is_too_late = false;
-    out->needs_swap  = (status & aql_profile::Pm4Factory::Create(manager->GetAgent())
-                                    ->GetSqttBuilder()
-                                    ->GetBufferFullMask()) != 0;
+    // gfx11 erratum: the per-buffer full indication (STATUS2 BUF0_FULL/BUF1_FULL) can be reported
+    // against the wrong buffer under some conditions. GetBufferFullMask() covers both bits and the
+    // buffer to drain is chosen by the swap counter below, so the swap logic only depends on "a
+    // buffer is full" and is therefore immune to which of the two bits the hardware flipped.
+    out->needs_swap = (status & sqttbuilder->GetBufferFullMask()) != 0;
 
     auto it = manager->config.buffer_data.find(shader_engine_id);
     if(it == manager->config.buffer_data.end()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -430,13 +436,16 @@ aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
     if(out->needs_swap)
     {
         // Lockdown error signals we have overflown the buffer and the trace has already stopped
-        out->is_too_late = (status & aql_profile::Pm4Factory::Create(manager->GetAgent())
-                                         ->GetSqttBuilder()
-                                         ->GetLockDownFailMask()) != 0;
+        out->is_too_late = (status & sqttbuilder->GetLockDownFailMask()) != 0;
 
         auto& buffer_data = it->second;
         out->read_size    = manager->config.capacity_per_se;
-        out->num_swaps    = manager->buffer_swaps.fetch_add(1);
+        // gfx11 erratum: the final 32-byte write granule of a wrapped SQTT buffer may be
+        // incomplete/garbage, so discard it from the reported size. gfx11.5 (GFX115X_GPU_ID) is
+        // not affected.
+        if(pm4_factory->GetGpuId() == aql_profile::GFX11_GPU_ID)
+            out->read_size -= sqttbuilder->GetWritePtrBlk();
+        out->num_swaps = manager->buffer_swaps.fetch_add(1);
         out->data = buffer_data.at((out->num_swaps + buffer_data.size() - 1) % buffer_data.size());
 
         out->read_offset = sizeof(uint16_t) * (control.wptr_doublebuffer >> 30);

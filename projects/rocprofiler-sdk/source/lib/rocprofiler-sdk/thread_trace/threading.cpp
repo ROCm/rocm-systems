@@ -187,6 +187,8 @@ producer_loop(
 
     auto     start_t0 = std::chrono::system_clock::now();
     bool     do_sleep{false};
+    bool     saw_buffer_swap{false};
+    bool     startup_poll_completed{false};
     uint64_t next_chunk_index = 0;
     int64_t  shader_engine_id = parameters.shader_engine_id;
 
@@ -290,23 +292,38 @@ producer_loop(
     send_header();
 
     // Wait until ATT start packets have been executed
+    parameters.shared->producer_waiting.store(true, std::memory_order_release);
     signal_wait(*parameters.start_pkt_signal);
+    auto startup_poll_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(5);
 
     while(worker_flag.load() == WORKER_FLAG_RUNNING)
     {
-        if(do_sleep) sleep_fn();
+        if(do_sleep)
+        {
+            if(saw_buffer_swap || std::chrono::steady_clock::now() >= startup_poll_deadline)
+                sleep_fn();
+            else
+                sched_yield();
+        }
         do_sleep = true;  // Reset value
 
         // PHASE 1: Poll SQTT buffer status
         att_queue_submit(queue, &buffer_packet.query_status, &submit_signal.sig);
-        if(!submit_wait_timeout()) break;
+        const bool query_completed = submit_wait_timeout();
+        if(!startup_poll_completed)
+        {
+            parameters.shared->producer_ready.store(true, std::memory_order_release);
+            startup_poll_completed = true;
+        }
+        if(!query_completed) break;
 
         if(auto status = buffer_packet.query_buffer_status())
         {
+            saw_buffer_swap = true;
             ROCP_TRACE << "Sending buffer swap";
             // PHASE 2: trigger GPU buffer swap and stage the data into a CPU slot
             att_queue_submit(queue, &status->packet, &submit_signal.sig);
-            ROCP_FATAL_IF(status->size != buffer_size)
+            ROCP_FATAL_IF(status->size > buffer_size)
                 << "GPU buffer overflow: " << status->size << " vs " << buffer_size;
 
             // Try to claim a free CPU slot. If none free, the consumers haven't
@@ -324,7 +341,7 @@ producer_loop(
             // If CPU was full we must wait for a slot before we can publish.
             if(cpu_full) slot_idx = wait_for_free_slot();
             send_to_consumer(
-                status->data, buffer_size, flags, slot_idx, false, status->read_offset);
+                status->data, status->size, flags, slot_idx, false, status->read_offset);
 
             if(cpu_full || status->gpu_full)
             {

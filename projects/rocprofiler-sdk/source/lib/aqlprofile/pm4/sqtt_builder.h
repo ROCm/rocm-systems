@@ -137,10 +137,6 @@ public:
 
     virtual void InsertTimestampMarker(CmdBuffer* cmd_buffer, uint64_t* addr){};
 
-    // Whether the active agent supports SQTT double buffering. When true, the buffer-full status
-    // lives in the STATUS2 register; consumers must read STATUS2 instead of STATUS.
-    virtual bool SupportsDoubleBuffer() const = 0;
-
     // Returns TT_CONTROL_UTC_ERR_MASK
     virtual size_t GetUTCErrorMask() const = 0;
     // Returns TT_CONTROL_FULL_MASK
@@ -170,30 +166,18 @@ class GpuSqttBuilder
     Builder builder;
 
 public:
-    explicit GpuSqttBuilder(const AgentInfo* agent_info, bool double_buffer_supported = false)
+    explicit GpuSqttBuilder(const AgentInfo* agent_info)
     : builder(acquire_ip_offset_table(agent_info))
     , xcc_number_(agent_info->xcc_num)
     , se_number_total(agent_info->se_num)
     , timestamp_freq(agent_info->timestamp_freq)
     , cu_per_se(agent_info->cu_num / agent_info->se_num)
-    // gfx12 always supports double buffering; on other levels it is opt-in via the flag the
-    // factory supplies (set only for the gfx11.5 factory).
-    , double_buffer_supported_(Primitives::GFXIP_LEVEL == 12 || double_buffer_supported)
     {}
-
-    // Whether the active agent supports SQTT double buffering.
-    virtual bool SupportsDoubleBuffer() const override { return double_buffer_supported_; }
 
     // Returns TT_CONTROL_UTC_ERR_MASK
     virtual size_t GetUTCErrorMask() const override { return Primitives::TT_CONTROL_UTC_ERR_MASK; };
-    // Returns TT_CONTROL_FULL_MASK. On gfx11 the buffer-full bits live in STATUS2, which is only
-    // meaningful when double buffering is supported; otherwise return 0 so STATUS bits are not
-    // misread as "full".
-    virtual size_t GetBufferFullMask() const override
-    {
-        if(Primitives::GFXIP_LEVEL == 11 && !double_buffer_supported_) return 0;
-        return Primitives::TT_CONTROL_FULL_MASK;
-    };
+    // Returns TT_CONTROL_FULL_MASK
+    virtual size_t GetBufferFullMask() const override { return Primitives::TT_CONTROL_FULL_MASK; };
     virtual size_t GetLockDownFailMask() const override { return Primitives::TT_LOCKDOWN_FAIL; };
     // Returns TT_WRITE_PTR_MASK
     virtual size_t GetWritePtrMask() const override { return Primitives::TT_WRITE_PTR_MASK; };
@@ -268,11 +252,9 @@ public:
         // to 4KB per thread trace specification
         const uint64_t se_number_xcc = se_number_total / GetXCCNumber();
         uint64_t       base_addr     = reinterpret_cast<uint64_t>(config->data_buffer_ptr);
-        // gfx10/gfx11 single-buffer mode reserves a minimal stub per disabled SE. In double-buffer
-        // mode gfx11 follows the gfx12 scheme (disabled SEs are skipped), so the enabled SE gets
-        // the full buffer and the per-SE capacity matches the buffer size the consumer expects.
-        if(Primitives::GFXIP_LEVEL == 10 ||
-           (Primitives::GFXIP_LEVEL == 11 && config->buffer_data.empty()))
+        // gfx10 reserves a minimal stub buffer per disabled SE. gfx11 follows gfx12: disabled SEs
+        // are skipped, so enabled SEs divide the complete allocation.
+        if(Primitives::GFXIP_LEVEL == 10)
             config->capacity_per_disabled_se = 1 << Primitives::TT_BUFF_ALIGN_SHIFT;
 
         const uint64_t base_step = GetBaseStep(config);
@@ -466,12 +448,28 @@ public:
                     {
                         const uint32_t sqtt_reg_size =
                             Primitives::sqtt_buffer_size_value(sqtt_size, baddr_hi);
-                        // Program size of buffer to use for thread trace
-                        WriteConfigPacket(
-                            cmd_buffer, Primitives::SQ_THREAD_TRACE_SIZE_ADDR, sqtt_reg_size);
-                        // Program base address of buffer to use for thread trace
-                        WriteConfigPacket(
-                            cmd_buffer, Primitives::SQ_THREAD_TRACE_BASE_ADDR, baddr_lo);
+                        if(Primitives::GFXIP_LEVEL == 11)
+                        {
+                            // gfx11 packs BASE_HI into the SIZE register, so SIZE is the latch that
+                            // commits the base address. Mirror the Swapbuffer()/BUF1 order (and
+                            // gfx12's BASE_HI-last order): write BASE (low bits) first, then SIZE
+                            // (size + BASE_HI) last, otherwise the hardware latches a stale BASE_LO.
+                            WriteConfigPacket(
+                                cmd_buffer, Primitives::SQ_THREAD_TRACE_BASE_ADDR, baddr_lo);
+                            WriteConfigPacket(
+                                cmd_buffer, Primitives::SQ_THREAD_TRACE_SIZE_ADDR, sqtt_reg_size);
+                            // Mirror gfx12 and start BUF0 with a reset write pointer.
+                            WriteConfigPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_WPTR_ADDR, 0);
+                        }
+                        else
+                        {
+                            // Program size of buffer to use for thread trace
+                            WriteConfigPacket(
+                                cmd_buffer, Primitives::SQ_THREAD_TRACE_SIZE_ADDR, sqtt_reg_size);
+                            // Program base address of buffer to use for thread trace
+                            WriteConfigPacket(
+                                cmd_buffer, Primitives::SQ_THREAD_TRACE_BASE_ADDR, baddr_lo);
+                        }
                     }
 
                     // Program the thread trace mask
@@ -491,15 +489,12 @@ public:
                         cmd_buffer, Primitives::SQ_THREAD_TRACE_TOKEN_MASK_ADDR, token_mask);
                     // Program the thread trace ctrl register
                     WriteConfigPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_CTRL_ADDR, ctrl_val);
-                    // If we are in double buffer mode. Only masked-in SEs have a second buffer in
-                    // buffer_data; on gfx11 disabled SEs are not skipped above
-                    // (capacity_per_disabled_se is non-zero) so they must not index into
-                    // buffer_data here.
+                    // If we are in double buffer mode, program the second (BUF1) buffer. Only
+                    // masked-in SEs have an entry in buffer_data.
                     if(bMaskedIn && !config->buffer_data.empty())
                     {
-                        if(!SupportsDoubleBuffer())
-                            throw std::runtime_error(
-                                "Double buffering not supported on this agent");
+                        if(Primitives::GFXIP_LEVEL == 10)
+                            throw std::runtime_error("Not supported");
 
                         uint64_t buf1_addr =
                             reinterpret_cast<uint64_t>(config->buffer_data.at(global_se).at(0));
@@ -507,31 +502,33 @@ public:
                         unsigned buff1_hi = High32(buf1_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
 
                         if(Primitives::GFXIP_LEVEL == 12)
-                        {
                             WriteConfigPacket(cmd_buffer,
                                               Primitives::SQ_THREAD_TRACE_BUF1_SIZE_ADDR,
                                               Primitives::sqtt_buffer0_size_value(sqtt_size));
-                            WriteConfigPacket(cmd_buffer,
-                                              Primitives::SQ_THREAD_TRACE_BUF1_BASE_LO_ADDR,
-                                              buff1_lo);
-                            builder.BuildWriteWaitIdlePacket(cmd_buffer);
+
+                        // BASE_LO and the ordering barrier are common. The final write is the
+                        // address latch: BASE_HI on gfx12, SIZE (which contains BASE_HI) on gfx11.
+                        WriteConfigPacket(cmd_buffer,
+                                          Primitives::SQ_THREAD_TRACE_BUF1_BASE_LO_ADDR,
+                                          buff1_lo);
+                        builder.BuildWriteWaitIdlePacket(cmd_buffer);
+
+                        if(Primitives::GFXIP_LEVEL == 12)
+                        {
                             WriteConfigPacket(cmd_buffer,
                                               Primitives::SQ_THREAD_TRACE_BUF1_BASE_HI_ADDR,
                                               buff1_hi);
                         }
                         else
                         {
-                            // gfx11 packs BASE_HI into the SIZE register and has no separate
-                            // BUF1_BASE_HI register, so program BUF1_SIZE (size + BASE_HI) then
-                            // BUF1_BASE (low bits).
+                            // gfx11 packs BASE_HI into the BUF1_SIZE register, so that register is
+                            // the latch that commits the base address. Mirror gfx12's BASE_LO-then-
+                            // BASE_HI(latch) order: write BASE_LO first, then SIZE (size + BASE_HI)
+                            // last, otherwise the hardware latches the stale BASE_LO.
                             WriteConfigPacket(
                                 cmd_buffer,
                                 Primitives::SQ_THREAD_TRACE_BUF1_SIZE_ADDR,
                                 Primitives::sqtt_buffer_size_value(sqtt_size, buff1_hi));
-                            builder.BuildWriteWaitIdlePacket(cmd_buffer);
-                            WriteConfigPacket(cmd_buffer,
-                                              Primitives::SQ_THREAD_TRACE_BUF1_BASE_LO_ADDR,
-                                              buff1_lo);
                         }
                     }
                     base_addr += sqtt_size;
@@ -731,8 +728,7 @@ public:
                                        Primitives::COPY_DATA_SEL_COUNT_1DW_PRM,
                                        true);
 
-        if(Primitives::GFXIP_LEVEL >= 12 ||
-           (Primitives::GFXIP_LEVEL == 11 && double_buffer_supported_))
+        if(Primitives::GFXIP_LEVEL >= 11)
             builder.BuildCopyRegDataPacket(cmd_buffer,
                                            Primitives::SQ_THREAD_TRACE_STATUS2_ADDR,
                                            &control.status2,
@@ -824,10 +820,9 @@ public:
             builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, false, mask_val, 1);
         }
 
-        const bool use_status2 = Primitives::GFXIP_LEVEL >= 12 ||
-                                 (Primitives::GFXIP_LEVEL == 11 && double_buffer_supported_);
-        auto status_addr = use_status2 ? Primitives::SQ_THREAD_TRACE_STATUS2_ADDR
-                                       : Primitives::SQ_THREAD_TRACE_STATUS_ADDR;
+        auto status_addr = (Primitives::GFXIP_LEVEL >= 11)
+                               ? Primitives::SQ_THREAD_TRACE_STATUS2_ADDR
+                               : Primitives::SQ_THREAD_TRACE_STATUS_ADDR;
         builder.BuildCopyRegDataPacket(cmd_buffer,
                                        status_addr,
                                        &control.status_double_buffer,
@@ -872,9 +867,10 @@ public:
         }
         else if(Primitives::GFXIP_LEVEL == 11)
         {
-            // gfx11 has no separate BUF0 base register (buf0 uses SQ_THREAD_TRACE_BASE/SIZE) and
-            // packs the high address bits into the SIZE register, so reprogram the SIZE register
-            // (size + BASE_HI) and the low base register for the buffer being swapped.
+            // gfx11 packs the high address bits into the SIZE register (SIZE and BASE_HI are the
+            // same register), so SIZE is the latch that commits the base address. Write BASE (low
+            // bits) first, then SIZE (size + BASE_HI) last, otherwise the hardware latches the
+            // stale BASE_LO. BUF0 lives in SQ_THREAD_TRACE_BASE/SIZE; BUF1 in the BUF1 registers.
             const unsigned base_lo = Low32(base_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
             const unsigned base_hi = High32(base_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
 
@@ -883,10 +879,10 @@ public:
             auto reg_size = buf1 ? Primitives::SQ_THREAD_TRACE_BUF1_SIZE_ADDR
                                  : Primitives::SQ_THREAD_TRACE_SIZE_ADDR;
 
+            WriteConfigPacket(cmd_buffer, reg_base, base_lo);
             WriteConfigPacket(cmd_buffer,
                               reg_size,
                               Primitives::sqtt_buffer_size_value(config->capacity_per_se, base_hi));
-            WriteConfigPacket(cmd_buffer, reg_base, base_lo);
         }
         else
         {
@@ -910,7 +906,6 @@ public:
     size_t   xcc_number_{};
     uint32_t timestamp_freq{};
     uint32_t cu_per_se{};
-    bool     double_buffer_supported_{false};
 };
 
 }  // namespace pm4_builder

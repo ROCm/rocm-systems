@@ -93,11 +93,14 @@ public:
     static constexpr Register SQ_THREAD_TRACE_BUF0_BASE_LO_ADDR{};
     static constexpr Register SQ_THREAD_TRACE_BUF0_BASE_HI_ADDR{};
     static constexpr Register SQ_THREAD_TRACE_BUF0_SIZE_ADDR{};
+    // gfx11 has no separate BUF1 BASE_HI register: the high address bits are packed into the
+    // BUF1_SIZE register (see sqtt_buffer_size_value), so only the low base + size registers exist.
     static constexpr Register SQ_THREAD_TRACE_BUF1_BASE_LO_ADDR =
         REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_BUF1_BASE);
     static constexpr Register SQ_THREAD_TRACE_BUF1_BASE_HI_ADDR{};
     static constexpr Register SQ_THREAD_TRACE_BUF1_SIZE_ADDR =
         REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_BUF1_SIZE);
+    // BUF0 uses SQ_THREAD_TRACE_BASE_ADDR / SQ_THREAD_TRACE_SIZE_ADDR below.
     static constexpr Register SQ_THREAD_TRACE_BASE_ADDR =
         REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_BUF0_BASE);
     static constexpr Register SQ_THREAD_TRACE_BASE2_ADDR{};
@@ -783,7 +786,9 @@ public:
     {
         // Mask to check if memory error was received
         TT_CONTROL_UTC_ERR_MASK = SQ_THREAD_TRACE_STATUS__WRITE_ERROR_MASK,
-        // Navi has 2 full bits on status2, one for each buffer
+        // Navi reports buffer-full in STATUS2, one bit per buffer. Both bits are OR'd together so
+        // the full/swap decision is immune to the gfx11 erratum where the per-buffer full bit may
+        // be reported against the wrong buffer.
         TT_CONTROL_FULL_MASK =
             SQ_THREAD_TRACE_STATUS2__BUF0_FULL_MASK | SQ_THREAD_TRACE_STATUS2__BUF1_FULL_MASK,
         TT_WRITE_PTR_MASK = SQ_THREAD_TRACE_WPTR__OFFSET_MASK,

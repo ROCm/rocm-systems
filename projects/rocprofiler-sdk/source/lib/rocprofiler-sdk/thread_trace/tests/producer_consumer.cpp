@@ -159,6 +159,9 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     control_packet->populate_before();
     control_packet->populate_after();
     auto buffer_packet = std::make_unique<MockPackets>(control_packet->GetHandle(), query_fn);
+    // Exercise the header/chunk-index path consistently; real gfx10+ traces do not provide the
+    // legacy gfx9 header, so leaving this architecture-dependent makes these unit tests flaky.
+    buffer_packet->header = 1;
 
     auto mock_queue          = make_mock_queue(*agent);
     auto worker_data         = std::make_shared<triple_buffer_shared_data_t>();
@@ -326,6 +329,45 @@ TEST(thread_trace, read_offset)
     threads.join_all();
 
     EXPECT_EQ(read_offset_received.load(), EXPECTED_READ_OFFSET);
+}
+
+TEST(thread_trace, honors_reported_buffer_size)
+{
+    rocprofiler::thread_trace::test_init();
+    constexpr size_t BUFFER_SIZE = rocprofiler::thread_trace::MOCK_BUFFER_SIZE;
+    constexpr size_t READ_SIZE   = BUFFER_SIZE - 32;
+
+    auto received_size = std::atomic<size_t>{0};
+    auto fetch_cb      = [](rocprofiler_thread_trace_shader_data_t shader_data,
+                       rocprofiler_user_data_t                userdata) {
+        if(shader_data.chunk_index == 0) return;  // synthetic warmup header
+        auto*  received = static_cast<std::atomic<size_t>*>(userdata.ptr);
+        size_t expected = 0;
+        received->compare_exchange_strong(expected, shader_data.data_size);
+    };
+
+    auto input_buffer = std::vector<uint8_t>(BUFFER_SIZE);
+    auto status_sent  = std::atomic<bool>{false};
+    auto return_once  = [&]() -> std::optional<rocprofiler::hsa::sqtt_buffer_status_t> {
+        if(status_sent.exchange(true)) return std::nullopt;
+
+        auto status   = rocprofiler::hsa::sqtt_buffer_status_t{};
+        status.data   = input_buffer.data();
+        status.size   = READ_SIZE;
+        status.packet = {};
+        return status;
+    };
+
+    auto userdata = rocprofiler_user_data_t{.ptr = &received_size};
+    auto threads  = rocprofiler::thread_trace::start_threads(fetch_cb, return_once, userdata);
+
+    while(received_size.load() == 0)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
+    threads.join_all();
+
+    EXPECT_EQ(received_size.load(), READ_SIZE);
 }
 
 TEST(thread_trace, data_integrity)

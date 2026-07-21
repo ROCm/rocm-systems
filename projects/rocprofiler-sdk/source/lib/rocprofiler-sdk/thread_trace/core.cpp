@@ -286,14 +286,14 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
                        nullptr);
     }
 
-    // Submit the start packets without waiting: the producer thread (multi-buffer
-    // path) and DeviceThreadTracer::start_context (single-buffer path) wait on the
-    // returned signal so multiple agents can be launched in parallel.
-    auto unique_signal = att_queue_submit_signal_last(*queue, control_packet_copy->before_krn_pkt);
-    auto shared_signal = std::shared_ptr<hsa_signal_t>(std::move(unique_signal));
+    auto shared_signal = std::shared_ptr<hsa_signal_t>{};
 
     if(params.num_buffers > 1)
     {
+        auto unique_signal = make_signal();
+        signal_reset(*unique_signal);
+        shared_signal = std::shared_ptr<hsa_signal_t>(std::move(unique_signal));
+
         // Find unique shader engine ID from mask
         int64_t shader_engine_id = 0;
         for(uint64_t i = 0; (params.shader_engine_mask >> i) != 0; i++)
@@ -313,6 +313,8 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
         for(size_t i = 0; i < worker_data->num_buffers; i++)
             worker_data->buffers[i].memory = worker_data->queue->cpu_buffers.at(i);
 
+        auto start_packets = control_packet_copy->before_krn_pkt;
+        ROCP_FATAL_IF(start_packets.empty()) << "ATT start packet list is empty";
         auto producer_data             = triple_buffer_producer_data_t{};
         producer_data.producer_running = worker_flag;
         producer_data.start_pkt_signal = shared_signal;
@@ -343,6 +345,25 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
             consumers.emplace_back(consumer_loop, std::move(consumer_data));
             internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
         }
+
+        // Hardware buffers can fill before a newly-created producer gets its first CPU timeslice.
+        // Arm the worker first, then enable SQTT, and do not return to the application until the
+        // producer has observed completion and performed its initial status poll.
+        while(!worker_data->producer_waiting.load(std::memory_order_acquire))
+            std::this_thread::yield();
+
+        att_queue_submit_signal_last(*queue, start_packets, *shared_signal);
+
+        while(!worker_data->producer_ready.load(std::memory_order_acquire))
+            std::this_thread::yield();
+    }
+    else
+    {
+        // Submit without waiting so multiple agents can be launched in parallel. The caller waits
+        // on all returned signals after every agent has been armed.
+        auto unique_signal =
+            att_queue_submit_signal_last(*queue, control_packet_copy->before_krn_pkt);
+        shared_signal = std::shared_ptr<hsa_signal_t>(std::move(unique_signal));
     }
     return shared_signal;
 }
