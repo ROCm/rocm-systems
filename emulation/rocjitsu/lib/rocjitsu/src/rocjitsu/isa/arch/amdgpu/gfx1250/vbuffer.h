@@ -249,6 +249,7 @@ public:
   BufferAtomicCmpswapB32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
@@ -389,6 +390,7 @@ public:
   BufferAtomicCmpswapB64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand soffset;

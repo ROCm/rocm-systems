@@ -734,6 +734,11 @@ ErrorCode GpuMemory::ImportPhysicalAllocHandle(const GpuMemoryCreateInfo& create
     // corrupt importer-side flag state (e.g. is_shared, is_queue_referenced).
     desc_.mem_flags = shared_info_ptr->mem_flags;
     desc_.adapter_luid = shared_info_ptr->adapter_luid;
+#ifdef __linux__
+    GpuMemoryDescFlags exporter_flags{};
+    exporter_flags.reserved = shared_info_ptr->flags;
+    desc_.flags.is_shared = exporter_flags.is_shared;
+#endif
 
     if (desc_.size == 0) {
       pr_err("import failed: could not determine allocation size from shared handle\n");

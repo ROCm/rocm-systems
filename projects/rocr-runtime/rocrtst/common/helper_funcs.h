@@ -112,6 +112,10 @@ uint64_t RoundToPowerOf2(uint64_t val);
 ///  Checks if a value is a power of 2
 bool IsPowerOf2(uint64_t val);
 
+/// Read drm_render_minor from KFD topology sysfs for the given node id.
+/// Returns true on success and sets *drm_render_minor when the value is positive.
+bool ReadDrmRenderMinor(uint32_t node_id, int32_t* drm_render_minor);
+
 // Count set bits.
 static __forceinline uint32_t popcount(uint32_t value) {
   return __builtin_popcount(value);

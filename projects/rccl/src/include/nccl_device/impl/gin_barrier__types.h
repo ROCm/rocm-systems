@@ -17,7 +17,7 @@ struct ncclGinBarrierHandle {
 };
 
 #if NCCL_CHECK_CUDACC
-template<typename Coop>
+template <typename Coop>
 struct ncclGinBarrierSession_internal {
   Coop coop;
   ncclGin net;
@@ -26,7 +26,7 @@ struct ncclGinBarrierSession_internal {
   int index;
   ncclGinSignal_t signal;
 
-  template<bool EnableTimeout>
+  template <bool EnableTimeout>
   NCCL_DEVICE_INLINE ncclResult_t syncInternal(Coop, cuda::memory_order ord, ncclGinFenceLevel fence,
                                                uint64_t timeoutCycles);
 };

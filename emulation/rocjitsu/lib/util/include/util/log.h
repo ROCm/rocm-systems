@@ -42,6 +42,7 @@ public:
     GROUP_CP = 1,        ///< Command processor: doorbell, dispatch, completion.
     GROUP_DBT_HOOKS = 2, ///< ROCR HSA tools DBT hook tracing.
     GROUP_PLUGINS = 3,   ///< Plugin discovery, loading, and configuration.
+    GROUP_DRIVER = 4,    ///< KFD driver: ioctl dispatch, process/session state.
   };
 
   /// @brief Human-readable group name for log prefixes.
@@ -55,6 +56,8 @@ public:
       return "DBT_HOOKS";
     case GROUP_PLUGINS:
       return "PLUGINS";
+    case GROUP_DRIVER:
+      return "DRIVER";
     default:
       return " ";
     }
@@ -191,6 +194,18 @@ public:
     requires std::invocable<Fn, std::ostringstream &>
   static void plugins(Fn &&fn) {
     print<GROUP_PLUGINS>(std::forward<Fn>(fn));
+  }
+
+  /// @brief Convenience for logging in GROUP_DRIVER, variadic.
+  template <typename... Args> static void driver(Args &&...args) {
+    print<GROUP_DRIVER>(std::forward<Args>(args)...);
+  }
+
+  /// @brief Convenience for logging in GROUP_DRIVER, lambda.
+  template <typename Fn>
+    requires std::invocable<Fn, std::ostringstream &>
+  static void driver(Fn &&fn) {
+    print<GROUP_DRIVER>(std::forward<Fn>(fn));
   }
 
 private:

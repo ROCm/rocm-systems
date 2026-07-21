@@ -14,11 +14,14 @@ from amdisa.sema_ast import (
     SemaNodeKind,
     SemaType,
 )
+from amdisa.sema_effects import inline_binary_op_effects
 from amdisa.sema_properties import (
     InstructionProperty,
     derive_properties,
     summarize_properties,
 )
+from amdisa.sema_derive import derive_sema_block
+from amdisa.semantics import derive_semantics
 
 _MRISA = os.environ.get('MRISA_PATH', os.path.expanduser('~/rocm-dev/mrisa'))
 SEMA_XML_PATH = os.path.join(_MRISA, 'amdgpu_isa_cdna4.semantics.xml')
@@ -78,6 +81,53 @@ class TestDeriveWritesScc:
         assert InstructionProperty.WRITES_SCC not in props
 
 
+class TestDeriveInlineSccEffects:
+    @pytest.mark.parametrize(
+        ('operation', 'reads_scc'),
+        [('addc', True), ('subb', True), ('lshl1_add', False)],
+    )
+    def test_inline_effects(self, operation, reads_scc):
+        body = SemaNode(
+            SemaNodeKind.CALL,
+            call_name=operation,
+            children=(
+                SemaNode(SemaNodeKind.LIT, lit_value='1'),
+                SemaNode(SemaNodeKind.LIT, lit_value='2'),
+            ),
+        )
+        props = derive_properties(SemaBlock('S_TEST', ExecModel.SCALAR, body))
+
+        assert InstructionProperty.WRITES_SCC in props
+        assert (InstructionProperty.READS_SCC in props) == reads_scc
+
+    def test_explicit_scc_read_is_not_confused_with_write_target(self):
+        scc = SemaNode(SemaNodeKind.ID, id_name='SCC')
+        body = SemaNode(
+            SemaNodeKind.SEQ,
+            children=(
+                SemaNode(SemaNodeKind.CALL, call_name='use', children=(scc,)),
+                SemaNode(
+                    SemaNodeKind.ASSIGN,
+                    children=(
+                        scc,
+                        SemaNode(SemaNodeKind.LIT, lit_value='1'),
+                    ),
+                ),
+            ),
+        )
+        props = derive_properties(SemaBlock('S_TEST', ExecModel.SCALAR, body))
+
+        assert InstructionProperty.READS_SCC in props
+        assert InstructionProperty.WRITES_SCC in props
+
+    @pytest.mark.parametrize('operation', [None, 'unknown', 'add_co'])
+    def test_neutral_effect_fallback(self, operation):
+        effects = inline_binary_op_effects(operation)
+
+        assert not effects.reads_scc
+        assert not effects.writes_scc
+
+
 class TestDeriveWritesVcc:
     def test_vcc_arrayderef(self):
         body = _assign(
@@ -97,19 +147,32 @@ class TestDeriveWritesVcc:
 
 
 class TestDeriveWritesExec:
-    def test_exec_assign(self):
-        body = _assign(_id('EXEC', SemaType.U64), _lit('0', SemaType.U64))
+    @pytest.mark.parametrize('exec_id', ['EXEC', 'EXEC_RAW'])
+    def test_direct_write_only(self, exec_id):
+        body = _assign(_id(exec_id, SemaType.U64), _lit('0', SemaType.U64))
         block = SemaBlock('S_WREXEC', ExecModel.SCALAR, body)
         props = derive_properties(block)
-        assert InstructionProperty.WRITES_EXEC in props
 
-    def test_exec_arrayderef(self):
+        assert InstructionProperty.WRITES_EXEC in props
+        assert InstructionProperty.READS_EXEC not in props
+
+    @pytest.mark.parametrize('exec_id', ['EXEC', 'EXEC_RAW'])
+    def test_direct_read_only(self, exec_id):
+        body = _assign(_id('tmp'), _id(exec_id, SemaType.U64))
+        block = SemaBlock('S_GETEXEC', ExecModel.SCALAR, body)
+        props = derive_properties(block)
+
+        assert InstructionProperty.READS_EXEC in props
+        assert InstructionProperty.WRITES_EXEC not in props
+
+    @pytest.mark.parametrize('exec_id', ['EXEC', 'EXEC_RAW'])
+    def test_array_write_is_read_modify_write(self, exec_id):
         body = _assign(
             SemaNode(
                 SemaNodeKind.ARRAYDEREF,
                 ty=SemaType.U1,
                 children=(
-                    _id('EXEC', SemaType.U64),
+                    _id(exec_id, SemaType.U64),
                     _id('laneId', SemaType.U32),
                 ),
             ),
@@ -117,7 +180,48 @@ class TestDeriveWritesExec:
         )
         block = SemaBlock('V_CMPX', ExecModel.VECTOR, body)
         props = derive_properties(block)
+
         assert InstructionProperty.WRITES_EXEC in props
+        assert InstructionProperty.READS_EXEC in props
+
+    @pytest.mark.parametrize('exec_id', ['EXEC', 'EXEC_RAW'])
+    def test_array_read_only(self, exec_id):
+        body = _assign(
+            _id('tmp'),
+            SemaNode(
+                SemaNodeKind.ARRAYDEREF,
+                ty=SemaType.U1,
+                children=(
+                    _id(exec_id, SemaType.U64),
+                    _id('laneId', SemaType.U32),
+                ),
+            ),
+        )
+        block = SemaBlock('V_READ_EXEC', ExecModel.VECTOR, body)
+        props = derive_properties(block)
+
+        assert InstructionProperty.READS_EXEC in props
+        assert InstructionProperty.WRITES_EXEC not in props
+
+    @pytest.mark.parametrize(
+        'name',
+        [
+            'S_AND_SAVEEXEC_B32',
+            'S_AND_SAVEEXEC_B64',
+            'S_ANDN1_WREXEC_B32',
+            'S_ANDN1_WREXEC_B64',
+        ],
+    )
+    def test_derived_exec_operations_read_and_write_exec(self, name):
+        sem = derive_semantics(name, 'ENC_SOP1')
+        assert sem is not None
+        block = derive_sema_block(sem)
+        assert block is not None
+
+        props = derive_properties(block)
+        assert InstructionProperty.READS_EXEC in props
+        assert InstructionProperty.WRITES_EXEC in props
+        assert InstructionProperty.WRITES_SCC in props
 
 
 class TestDeriveCrossLane:

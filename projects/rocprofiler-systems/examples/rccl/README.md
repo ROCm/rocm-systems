@@ -2,11 +2,11 @@
 
 ## Overview
 
-This example builds the rccl-tests performance test suite, which benchmarks RCCL (ROCm Communication Collectives Library) operations across multiple GPUs. It includes performance tests for all major collectives - AllGather, AllReduce, AllToAll, Broadcast, Gather, Reduce, ReduceScatter, Scatter, and SendRecv - measuring bandwidth and latency for inter-GPU communication. This is useful for profiling GPU-to-GPU collective communication patterns and PCIe/Infinity Fabric interconnect performance.
+This example builds the rccl-tests performance test suite, which benchmarks RCCL (ROCm Communication Collectives Library) operations across multiple GPUs. It includes performance tests for the major collectives - AllGather, AllReduce, AllToAll, AllToAllV, Broadcast, Reduce, and ReduceScatter - measuring bandwidth and latency for inter-GPU communication. This is useful for profiling GPU-to-GPU collective communication patterns and PCIe/Infinity Fabric interconnect performance.
 
 ## Source Files
 
-- `rccl-tests/` - Git submodule containing the RCCL performance test suite with source under `src/` and verification utilities under `verifiable/`.
+- `rccl-tests/` - Vendored copy of the RCCL performance test suite, with source under `src/` and verification utilities under `verifiable/`.
 
 ## Prerequisites
 
@@ -35,16 +35,13 @@ cmake --build <build_dir> --target all_reduce_perf
 
 | Target | Description |
 | -------- | ------------- |
-| `all_gather_perf` | AllGather performance test |
-| `all_reduce_perf` | AllReduce performance test |
-| `alltoall_perf` | AllToAll performance test |
-| `alltoallv_perf` | AllToAllV performance test |
-| `broadcast_perf` | Broadcast performance test |
-| `gather_perf` | Gather performance test |
-| `reduce_perf` | Reduce performance test |
-| `reduce_scatter_perf` | ReduceScatter performance test |
-| `scatter_perf` | Scatter performance test |
-| `sendrecv_perf` | SendRecv performance test |
+| `all_gather_perf` | AllGather performance test (`ncclAllGather`) |
+| `all_reduce_perf` | AllReduce performance test (`ncclAllReduce`) |
+| `alltoall_perf` | AllToAll performance test (`ncclAllToAll`) |
+| `alltoallv_perf` | AllToAllV performance test (`ncclAllToAllv`, `ncclSend`/`ncclRecv`) |
+| `broadcast_perf` | Broadcast performance test (`ncclBroadcast`, `ncclBcast`) |
+| `reduce_perf` | Reduce performance test (`ncclReduce`) |
+| `reduce_scatter_perf` | ReduceScatter performance test (`ncclReduceScatter`) |
 
 ## Running
 
@@ -66,13 +63,16 @@ rocprof-sys-run -- ./all_reduce_perf -b 8 -e 128M -f 2 -g 2
 
 | Variable | Value | Purpose |
 | ---------- | ------- | --------- |
-| `ROCPROFSYS_ROCM_DOMAINS` | `hip_runtime_api,kernel_dispatch,memory_copy` | Trace HIP API and GPU operations |
+| `ROCPROFSYS_ROCM_DOMAINS` | `rccl_api, hip_runtime_api,kernel_dispatch,memory_copy` | RCCL collective API calls, Trace HIP API and GPU operations |
+| `ROCPROFSYS_USE_RCCLP` | `true` | Alternative way to enable RCCL API tracing (implicitly adds the `rccl_api` domain) |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace for timeline analysis |
 | `ROCPROFSYS_PROFILE` | `true` | Generate call-stack profile |
 
+> **Note:** RCCL collective calls (`ncclAllReduce`, `ncclBroadcast`, ...) are only captured when the `rccl_api` domain is enabled. Add `rccl_api` to `ROCPROFSYS_ROCM_DOMAINS`, or set `ROCPROFSYS_USE_RCCLP=true` (which enables the `rccl_api` domain for you).
+
 ```bash
 rocprof-sys-run \
-    -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy \
+    -e ROCPROFSYS_ROCM_DOMAINS=rccl_api,hip_runtime_api,kernel_dispatch,memory_copy \
     -e ROCPROFSYS_TRACE=true \
     -- ./all_reduce_perf -b 8 -e 128M -f 2 -g 2
 ```

@@ -57,6 +57,7 @@ struct TestPaths {
   std::string hip_memcpy_bin = RJ_HIP_MEMCPY_BIN;
   std::string hip_rccl_bin = RJ_HIP_RCCL_BIN;
   std::string daemon_logging_config = RJ_DAEMON_LOGGING_CONFIG;
+  std::string interposer_dup_bin = RJ_INTERPOSER_DUP_BIN;
 };
 
 std::filesystem::path resolve_relative_to_exe(const std::filesystem::path &exe_dir,
@@ -76,12 +77,19 @@ std::filesystem::path current_exe_dir() {
 }
 
 bool installed_paths_exist(const TestPaths &paths) {
+  // Only the UNCONDITIONALLY-built artifacts are required here. hip_rccl_bin is
+  // deliberately excluded: the RCCL test binary (and the RcclDaemonTest cases
+  // that use it) are built/registered only when RCCL_LIB is found at configure
+  // time, so requiring it would make this check fail on non-RCCL installs and
+  // wrongly fall back to build-tree paths that a pure install does not have.
   return std::filesystem::exists(paths.daemon_bin) &&
          std::filesystem::exists(paths.daemon_config) &&
          std::filesystem::exists(paths.daemon_config_2gpu) &&
          std::filesystem::exists(paths.preload_lib) &&
          std::filesystem::exists(paths.hip_vector_add_bin) &&
-         std::filesystem::exists(paths.hip_memcpy_bin);
+         std::filesystem::exists(paths.hip_memcpy_bin) &&
+         std::filesystem::exists(paths.daemon_logging_config) &&
+         std::filesystem::exists(paths.interposer_dup_bin);
 }
 
 TestPaths installed_paths(const std::filesystem::path &exe_dir) {
@@ -94,6 +102,7 @@ TestPaths installed_paths(const std::filesystem::path &exe_dir) {
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_MEMCPY_BIN).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_RCCL_BIN).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_DAEMON_LOGGING_CONFIG).string(),
+      resolve_relative_to_exe(exe_dir, RJ_INSTALLED_INTERPOSER_DUP_BIN).string(),
   };
 }
 
@@ -125,6 +134,7 @@ const char *hip_memcpy_bin() { return test_paths().hip_memcpy_bin.c_str(); }
 const char *hip_rccl_bin() { return test_paths().hip_rccl_bin.c_str(); }
 
 const char *daemon_logging_config() { return test_paths().daemon_logging_config.c_str(); }
+const char *interposer_dup_bin() { return test_paths().interposer_dup_bin.c_str(); }
 
 class DaemonTest : public ::testing::Test {
 protected:
@@ -141,7 +151,8 @@ protected:
     std::string tmpl = base + "/rocjitsu-test-XXXXXX";
     ASSERT_NE(mkdtemp(tmpl.data()), nullptr) << "mkdtemp failed: " << strerror(errno);
     tmp_dir_ = tmpl;
-    sock_path_ = tmp_dir_ + "/rocjitsu/daemon.sock";
+    runtime_dir_ = tmp_dir_ + "/rocjitsu";
+    sock_path_ = runtime_dir_ + "/daemon.sock";
 
     ASSERT_NO_FATAL_FAILURE(config_path_ = daemon_config_for_test());
     ASSERT_FALSE(config_path_.empty()) << "daemon config unavailable";
@@ -151,6 +162,7 @@ protected:
 
     if (daemon_pid_ == 0) {
       setenv("XDG_RUNTIME_DIR", tmp_dir_.c_str(), 1);
+      setenv("ROCJITSU_RUNTIME_DIR", runtime_dir_.c_str(), 1);
       execl(daemon_bin(), daemon_bin(), "--daemon", "--config", config_path_.c_str(), nullptr);
       _exit(127);
     }
@@ -180,7 +192,12 @@ protected:
   }
 
   ProcessResult run_hip_test(const char *binary, const char *gtest_filter) {
-    std::string cmd = "XDG_RUNTIME_DIR=";
+    // CTest sets ROCJITSU_RUNTIME_DIR for isolation and the RPC layer prefers it
+    // over XDG_RUNTIME_DIR. Override both here so the daemon and all client
+    // subprocesses agree on the same socket and config-path directory.
+    std::string cmd = "ROCJITSU_RUNTIME_DIR=";
+    cmd += runtime_dir_;
+    cmd += " XDG_RUNTIME_DIR=";
     cmd += tmp_dir_;
     cmd += " LD_PRELOAD=";
     cmd += preload_lib();
@@ -208,7 +225,9 @@ protected:
 
   ProcessResult run_rccl_rank(int rank, int world_size, const std::string &shared_dir,
                               const char *gtest_filter) {
-    std::string cmd = "XDG_RUNTIME_DIR=";
+    std::string cmd = "ROCJITSU_RUNTIME_DIR=";
+    cmd += runtime_dir_;
+    cmd += " XDG_RUNTIME_DIR=";
     cmd += tmp_dir_;
     cmd += " ";
     cmd += daemon_bin();
@@ -264,6 +283,7 @@ protected:
 
   pid_t daemon_pid_ = -1;
   std::string tmp_dir_;
+  std::string runtime_dir_;
   std::string sock_path_;
   std::string config_path_;
 };
@@ -367,6 +387,39 @@ TEST_F(DaemonPluginTest, LoggingPluginDispatchLogged) {
   EXPECT_NE(contents.find("vgprs="), std::string::npos) << "log:\n" << contents;
 }
 
+// --- Remote-backend dup/backend bookkeeping ---
+//
+// Runs the interposer dup/dup2/dup3 regression binary against a live daemon, so
+// open("/dev/kfd") is serviced by the RemoteDriver (Remote backend) rather than
+// the in-process SimulatedKfd. This gives the fd/backend state machine coverage
+// on the remote path — the primary-fd re-mint (reissue_synthetic_kfd_fd) and the
+// invalidation-vs-open serialization — which the CLI-launched (local) variant of
+// the same tests cannot reach.
+
+TEST_F(DaemonTest, InterposerDupReopenAfterPrimaryOverwriteRemote) {
+  auto r = run_hip_test(interposer_dup_bin(),
+                        "InterposerDupTest.ReopenAfterPrimaryOverwriteKeepsBackend");
+  EXPECT_EQ(r.exit_code, 0) << r.output;
+}
+
+TEST_F(DaemonTest, InterposerDupSerializedReopenUnderContentionRemote) {
+  auto r = run_hip_test(interposer_dup_bin(),
+                        "InterposerDupTest.SerializedReopenUnderContentionStaysRoutable");
+  EXPECT_EQ(r.exit_code, 0) << r.output;
+}
+
+TEST_F(DaemonTest, InterposerDupKeepsRoutingAfterPrimaryCloseRemote) {
+  auto r =
+      run_hip_test(interposer_dup_bin(), "InterposerDupTest.DupKeepsKfdRoutingAfterPrimaryClose");
+  EXPECT_EQ(r.exit_code, 0) << r.output;
+}
+
+TEST_F(DaemonTest, InterposerDup2OverPrimaryInvalidatesRemote) {
+  auto r =
+      run_hip_test(interposer_dup_bin(), "InterposerDupTest.Dup2OverPrimaryInvalidatesKfdIdentity");
+  EXPECT_EQ(r.exit_code, 0) << r.output;
+}
+
 // --- RCCL collective tests (2-GPU daemon) ---
 
 class RcclDaemonTest : public ::testing::Test {
@@ -377,13 +430,15 @@ protected:
     std::string tmpl = base + "/rocjitsu-rccl-XXXXXX";
     ASSERT_NE(mkdtemp(tmpl.data()), nullptr) << "mkdtemp failed: " << strerror(errno);
     tmp_dir_ = tmpl;
-    sock_path_ = tmp_dir_ + "/rocjitsu/daemon.sock";
+    runtime_dir_ = tmp_dir_ + "/rocjitsu";
+    sock_path_ = runtime_dir_ + "/daemon.sock";
 
     daemon_pid_ = fork();
     ASSERT_GE(daemon_pid_, 0) << "fork failed: " << strerror(errno);
 
     if (daemon_pid_ == 0) {
       setenv("XDG_RUNTIME_DIR", tmp_dir_.c_str(), 1);
+      setenv("ROCJITSU_RUNTIME_DIR", runtime_dir_.c_str(), 1);
       execl(daemon_bin(), daemon_bin(), "--daemon", "--config", daemon_config_2gpu(), nullptr);
       _exit(127);
     }
@@ -415,7 +470,9 @@ protected:
 
   ProcessResult run_rccl_rank(int rank, int world_size, const std::string &shared_dir,
                               const char *gtest_filter) {
-    std::string cmd = "timeout 150 env XDG_RUNTIME_DIR=";
+    std::string cmd = "timeout 150 env ROCJITSU_RUNTIME_DIR=";
+    cmd += runtime_dir_;
+    cmd += " XDG_RUNTIME_DIR=";
     cmd += tmp_dir_;
     cmd += " HIP_VISIBLE_DEVICES=";
     cmd += std::to_string(rank);
@@ -475,6 +532,7 @@ protected:
 
   pid_t daemon_pid_ = -1;
   std::string tmp_dir_;
+  std::string runtime_dir_;
   std::string sock_path_;
 };
 

@@ -148,7 +148,7 @@ fn signal_request_is_written_then_consumed_by_host() {
     assert!(ended, "exec did not end after SIGKILL");
 
     env.mirage()
-        .args(["session", "stop", "s-sigfile", "-f"])
+        .args(["session", "stop", "s-sigfile"])
         .assert()
         .success();
 }
@@ -191,7 +191,7 @@ fn keep_true_exec_persists_after_signal_kill() {
     assert!(String::from_utf8_lossy(&list.stdout).contains(&eid));
 
     env.mirage()
-        .args(["session", "stop", "s-keep", "-f"])
+        .args(["session", "stop", "s-keep"])
         .assert()
         .success();
 }
@@ -214,7 +214,7 @@ fn keep_false_exec_is_removed_after_signal_kill() {
     assert!(gone, "keep=false exec dir was never removed: {exec_dir:?}");
 
     env.mirage()
-        .args(["session", "stop", "s-nokeep", "-f"])
+        .args(["session", "stop", "s-nokeep"])
         .assert()
         .success();
 }
@@ -238,7 +238,7 @@ fn keep_false_exec_is_removed_after_natural_exit() {
     assert!(gone, "keep=false exec dir was not removed after exit");
 
     env.mirage()
-        .args(["session", "stop", "s-natural", "-f"])
+        .args(["session", "stop", "s-natural"])
         .assert()
         .success();
 }
@@ -263,7 +263,7 @@ fn signal_invalid_number_is_rejected() {
     );
 
     env.mirage()
-        .args(["session", "stop", "s-bad", "-f"])
+        .args(["session", "stop", "s-bad"])
         .assert()
         .success();
 }
@@ -324,7 +324,7 @@ fn session_destroy_invokes_container_provider_when_state_present() {
     std::fs::write(session_dir.join("node/1/cid"), "cid-1").unwrap();
 
     env.mirage()
-        .args(["session", "stop", "s-cont", "-f"])
+        .args(["session", "stop", "s-cont"])
         .assert()
         .success();
 
@@ -381,7 +381,7 @@ fn session_destroy_skips_provider_when_no_container_state() {
     // No container.json is written → the provider must not run.
 
     env.mirage()
-        .args(["session", "stop", "s-no-cid", "-f"])
+        .args(["session", "stop", "s-no-cid"])
         .assert()
         .success();
     assert!(

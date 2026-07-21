@@ -14,9 +14,17 @@
 #include <timemory/macros/language.hpp>
 
 #include <fstream>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_set>
+
+#if(defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0) ||            \
+    (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
+#    define ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED 1
+#else
+#    define ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED 0
+#endif
 
 namespace rocprofsys
 {
@@ -144,9 +152,6 @@ get_config_file();
 
 Mode
 get_mode();
-
-bool&
-is_attached();
 
 bool&
 is_binary_rewrite();
@@ -342,6 +347,9 @@ std::string
 get_sampling_ainics();
 
 bool
+get_ainic_supported();
+
+bool
 get_trace_thread_locks();
 
 bool
@@ -369,6 +377,15 @@ is_file_output_enabled_for_current_mpi_rank();
 
 bool
 is_log_output_enabled_for_current_mpi_rank();
+
+#if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
+// Pure decision core for MPI rank-based output filtering, exposed for unit
+// testing. See full documentation at the definition in config.cpp.
+bool
+rank_passes_filter(std::optional<std::uint64_t> current_rank,
+                   std::optional<std::uint64_t> world_size,
+                   std::string                  enabled_ranks_str);
+#endif
 }  // namespace output_filtering
 
 std::string

@@ -38,8 +38,8 @@ set(SOURCES_CHECK_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/check_sources.py)
 set(HIP_TEST_CONFIG_HEADER ${CATCH_INCLUDE_BINARY_DIR}/hip_test_config.hh)
 set(HIP_TEST_PARAMETERS_HEADER ${CATCH_INCLUDE_BINARY_DIR}/hip_test_parameters.hh)
 
-file(GLOB HIP_TESTS_GROUP_CONFIGS ${HIP_TESTS_CONFIGS_DIR}/*.yaml)
-file(GLOB HIP_TESTS_UNIT_CONFIGS ${HIP_TESTS_CONFIGS_DIR}/unit/*.yaml)
+file(GLOB HIP_TESTS_GROUP_CONFIGS CONFIGURE_DEPENDS ${HIP_TESTS_CONFIGS_DIR}/*.yaml)
+file(GLOB HIP_TESTS_UNIT_CONFIGS CONFIGURE_DEPENDS ${HIP_TESTS_CONFIGS_DIR}/unit/*.yaml)
 
 # When building with Address Sanitizer, pass --asan so the parser skips test
 # cases that list 'asan' in their 'disabled' field.
