@@ -543,6 +543,9 @@ struct PendingState {
   // Vectors stay sorted by static event identity so CFG equality is stable.
   // min_younger, rather than vector position, represents hardware issue order.
   std::array<std::vector<PendingEvent>, kCounterCount> pending;
+  // Keep scalar-memory presence even for counter-only requests that do not
+  // need a full PendingEvent. Scalar memory makes its counter out of order.
+  std::array<bool, kCounterCount> pending_smem{};
   std::array<bool, kCounterCount> uncertain_order{};
   RegisterSet ready_regs;
   SgprHazardState sgpr_hazards;
@@ -565,6 +568,14 @@ struct DependencyRequirement {
   RegisterRef reg{RegClass::VGPR, 0, 1};
   WaitcheckAccessKind access = WaitcheckAccessKind::Use;
   uint32_t required_count = 0;
+};
+
+enum class DependencyView {
+  // Model which committed VGPR generation an ISA instruction can observe.
+  RuntimeVisibleGeneration,
+  // Mirror LLVM's post-RA wait insertion: every pending physical-register
+  // definition that intersects an operand contributes to the required wait.
+  CompilerPendingDefinition,
 };
 
 struct PendingWaitGroup {
@@ -832,6 +843,8 @@ struct Analyzer {
       for (size_t counter = 0; counter < kCounterCount; ++counter) {
         if (lhs.pending[counter] != rhs.pending[counter])
           append(wait_counter_name(static_cast<WaitCounterKind>(counter)));
+        if (lhs.pending_smem[counter] != rhs.pending_smem[counter])
+          append("pending-smem");
         if (lhs.uncertain_order[counter] != rhs.uncertain_order[counter])
           append("uncertain-order");
       }
@@ -1202,6 +1215,7 @@ private:
 
     std::array<std::optional<DependencyRequirement>, kCounterCount> strongest_requirements;
     visit_dependencies(requirement_state, consumer, du, current_events, arch,
+                       DependencyView::CompilerPendingDefinition,
                        [&](const PendingEvent &event, RegisterRef reg, WaitcheckAccessKind access,
                            uint32_t required_count) {
                          if (!event_can_reach_wait(event, group.section_offset, arch))
@@ -1321,6 +1335,7 @@ private:
 
   static void merge_into(PendingState &dst, const PendingState &src) {
     for (size_t i = 0; i < kCounterCount; ++i) {
+      dst.pending_smem[i] = dst.pending_smem[i] || src.pending_smem[i];
       dst.uncertain_order[i] = dst.uncertain_order[i] || src.uncertain_order[i];
       for (const auto &event : src.pending[i]) {
         auto position = std::ranges::lower_bound(dst.pending[i], event, event_identity_less);
@@ -1489,6 +1504,7 @@ private:
     auto &pending = state.pending[idx];
     if (count == 0) {
       retire_events(state, pending, [](const PendingEvent &) { return true; });
+      state.pending_smem[idx] = false;
       state.uncertain_order[idx] = false;
       return;
     }
@@ -1668,7 +1684,28 @@ private:
     apply_xcnt_wait(state, count);
   }
 
-  static void apply_memory_wait(PendingState &state, WaitCounterKind counter, uint32_t count) {
+  [[nodiscard]] static bool scalar_memory_makes_counter_out_of_order(const PendingState &state,
+                                                                     WaitCounterKind counter,
+                                                                     rj_code_arch_t arch) {
+    return counter == smem_wait_counter(arch) && state.pending_smem[counter_index(counter)];
+  }
+
+  [[nodiscard]] static uint32_t dependency_required_count(const PendingState &state,
+                                                          const PendingEvent &event,
+                                                          rj_code_arch_t arch) {
+    if (event.kind == WaitEventKind::Smem ||
+        scalar_memory_makes_counter_out_of_order(state, event.counter, arch))
+      return 0;
+    return event.min_younger;
+  }
+
+  static void apply_memory_wait(PendingState &state, WaitCounterKind counter, uint32_t count,
+                                rj_code_arch_t arch) {
+    // SIInsertWaitcnts cannot use a nonzero wait to retire a particular event
+    // while scalar memory is pending on this counter. This notably covers
+    // legacy LGKMCNT shared by SMEM and DS operations.
+    if (count != 0 && scalar_memory_makes_counter_out_of_order(state, counter, arch))
+      return;
     apply_wait(state, counter, count);
     apply_implied_vm_vsrc_wait(state, counter, count);
     if (counter == WaitCounterKind::Load)
@@ -1840,17 +1877,17 @@ private:
 
     if (uses_legacy_waitcnt(arch) && mnemonic == "s_waitcnt") {
       const LegacyWaitcnt wait = decode_legacy_waitcnt(value, arch);
-      apply_memory_wait(state, WaitCounterKind::Load, wait.vmcnt);
+      apply_memory_wait(state, WaitCounterKind::Load, wait.vmcnt, arch);
       apply_wait(state, WaitCounterKind::Exp, wait.expcnt);
-      apply_memory_wait(state, WaitCounterKind::Ds, wait.lgkmcnt);
+      apply_memory_wait(state, WaitCounterKind::Ds, wait.lgkmcnt, arch);
     } else if (uses_legacy_waitcnt(arch) && mnemonic == "s_waitcnt_vmcnt") {
-      apply_memory_wait(state, WaitCounterKind::Load, value);
+      apply_memory_wait(state, WaitCounterKind::Load, value, arch);
     } else if (has_legacy_vscnt(arch) && mnemonic == "s_waitcnt_vscnt") {
-      apply_memory_wait(state, WaitCounterKind::Store, value);
+      apply_memory_wait(state, WaitCounterKind::Store, value, arch);
     } else if (uses_legacy_waitcnt(arch) && mnemonic == "s_waitcnt_expcnt") {
       apply_wait(state, WaitCounterKind::Exp, value);
     } else if (uses_legacy_waitcnt(arch) && mnemonic == "s_waitcnt_lgkmcnt") {
-      apply_memory_wait(state, WaitCounterKind::Ds, value);
+      apply_memory_wait(state, WaitCounterKind::Ds, value, arch);
     } else if (mnemonic == "s_wait_alu") {
       apply_sgpr_hazard_wait(state.sgpr_hazards, value);
       constexpr uint32_t kDepctrVmVsrcShift = 2;
@@ -1858,17 +1895,17 @@ private:
       apply_wait(state, WaitCounterKind::VmVsrc,
                  depctr_field(value, kDepctrVmVsrcShift, kDepctrVmVsrcWidth));
     } else if (mnemonic == "s_wait_loadcnt") {
-      apply_memory_wait(state, WaitCounterKind::Load, value);
+      apply_memory_wait(state, WaitCounterKind::Load, value, arch);
     } else if (mnemonic == "s_wait_storecnt") {
-      apply_memory_wait(state, WaitCounterKind::Store, value);
+      apply_memory_wait(state, WaitCounterKind::Store, value, arch);
     } else if (mnemonic == "s_wait_dscnt") {
-      apply_memory_wait(state, WaitCounterKind::Ds, value);
+      apply_memory_wait(state, WaitCounterKind::Ds, value, arch);
     } else if (mnemonic == "s_wait_kmcnt") {
       apply_kmcnt_wait(state, value);
     } else if (mnemonic == "s_wait_samplecnt") {
-      apply_memory_wait(state, WaitCounterKind::Sample, value);
+      apply_memory_wait(state, WaitCounterKind::Sample, value, arch);
     } else if (mnemonic == "s_wait_bvhcnt") {
-      apply_memory_wait(state, WaitCounterKind::Bvh, value);
+      apply_memory_wait(state, WaitCounterKind::Bvh, value, arch);
     } else if (mnemonic == "s_wait_expcnt") {
       apply_wait(state, WaitCounterKind::Exp, value);
     } else if (mnemonic == "s_wait_xcnt") {
@@ -1878,11 +1915,11 @@ private:
     } else if (mnemonic == "s_wait_tensorcnt") {
       apply_wait(state, WaitCounterKind::Tensor, value);
     } else if (mnemonic == "s_wait_loadcnt_dscnt") {
-      apply_memory_wait(state, WaitCounterKind::Load, (value >> 8) & 0x3Fu);
-      apply_memory_wait(state, WaitCounterKind::Ds, value & 0x3Fu);
+      apply_memory_wait(state, WaitCounterKind::Load, (value >> 8) & 0x3Fu, arch);
+      apply_memory_wait(state, WaitCounterKind::Ds, value & 0x3Fu, arch);
     } else if (mnemonic == "s_wait_storecnt_dscnt") {
-      apply_memory_wait(state, WaitCounterKind::Store, (value >> 8) & 0x3Fu);
-      apply_memory_wait(state, WaitCounterKind::Ds, value & 0x3Fu);
+      apply_memory_wait(state, WaitCounterKind::Store, (value >> 8) & 0x3Fu, arch);
+      apply_memory_wait(state, WaitCounterKind::Ds, value & 0x3Fu, arch);
     }
   }
 
@@ -3498,7 +3535,7 @@ private:
   template <typename Visitor>
   void visit_dependencies(const PendingState &state, const Instruction &inst, const InstDefUse &du,
                           std::span<const ClassifiedEvent> current_events, rj_code_arch_t arch,
-                          Visitor &&visit) {
+                          DependencyView dependency_view, Visitor &&visit) {
     for (size_t counter_idx = 0; counter_idx < state.pending.size(); ++counter_idx) {
       const auto &events = state.pending[counter_idx];
       for (size_t i = 0; i < events.size(); ++i) {
@@ -3512,15 +3549,21 @@ private:
           // Restrict RAW diagnostics to lanes for which no such old generation
           // exists. Definitions are handled separately below because CDNA also
           // supports synchronous overlays of the visible generation.
-          const RegisterSet pending_only_regs = event.regs - event.old_value_regs;
-          reg = first_dependency_intersection(event, pending_only_regs, inst, du.uses,
+          const RegisterSet dependency_regs =
+              dependency_view == DependencyView::CompilerPendingDefinition
+                  ? event.regs
+                  : event.regs - event.old_value_regs;
+          reg = first_dependency_intersection(event, dependency_regs, inst, du.uses,
                                               WaitcheckAccessKind::Use, arch);
         }
         if (!reg && event.check_defs) {
-          RegisterSet pending_only_regs = event.regs - event.old_value_regs;
-          if (creates_immediate_overlay_generation(arch, inst, current_events))
-            pending_only_regs -= du.defs;
-          reg = first_dependency_intersection(event, pending_only_regs, inst, du.defs,
+          RegisterSet dependency_regs = dependency_view == DependencyView::CompilerPendingDefinition
+                                            ? event.regs
+                                            : event.regs - event.old_value_regs;
+          if (dependency_view == DependencyView::RuntimeVisibleGeneration &&
+              creates_immediate_overlay_generation(arch, inst, current_events))
+            dependency_regs -= du.defs;
+          reg = first_dependency_intersection(event, dependency_regs, inst, du.defs,
                                               WaitcheckAccessKind::Def, arch);
           access = WaitcheckAccessKind::Def;
         }
@@ -3553,7 +3596,7 @@ private:
         if (access == WaitcheckAccessKind::Def && ordered_waw(event, current_events))
           continue;
 
-        const auto required_count = event.kind == WaitEventKind::Smem ? 0u : event.min_younger;
+        const auto required_count = dependency_required_count(state, event, arch);
         visit(event, *reg, access, required_count);
       }
     }
@@ -3567,7 +3610,7 @@ private:
         const PendingEvent &event = events[i];
         if (!event.check_exec_defs)
           continue;
-        const auto required_count = event.kind == WaitEventKind::Smem ? 0u : event.min_younger;
+        const auto required_count = dependency_required_count(state, event, arch);
         visit(event, RegisterRef{RegClass::EXEC, 0, 1}, WaitcheckAccessKind::Def, required_count);
       }
     }
@@ -3577,6 +3620,7 @@ private:
                           std::span<const ClassifiedEvent> current_events, uint64_t section_offset,
                           uint64_t file_offset, rj_code_arch_t arch) {
     visit_dependencies(state, inst, du, current_events, arch,
+                       DependencyView::RuntimeVisibleGeneration,
                        [&](const PendingEvent &event, RegisterRef reg, WaitcheckAccessKind access,
                            uint32_t required_count) {
                          emit_diagnostic(inst, event, reg, access, required_count, section_offset,
@@ -3871,6 +3915,8 @@ private:
     event.check_memory_order = classification.check_memory_order;
     event.check_program_end = classification.check_program_end;
     const size_t idx = counter_index(classification.counter);
+    if (classification.kind == WaitEventKind::Smem)
+      state.pending_smem[idx] = true;
     const uint32_t max_wait = maximum_dependency_wait(arch, classification.counter);
     for (PendingEvent &pending_event : state.pending[idx]) {
       if (pending_event.min_younger < max_wait)
