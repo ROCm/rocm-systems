@@ -40,12 +40,6 @@ using strview_init_t   = std::initializer_list<std::string_view>;
 using strview_set_t    = std::set<std::string_view>;
 using open_modes_vec_t = std::vector<int>;
 
-auto
-get_exe_realpath()
-{
-    return rocprofsys::path::realpath("/proc/self/exe");
-}
-
 auto&
 get_symtab_file_cache()
 {
