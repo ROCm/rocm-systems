@@ -188,6 +188,7 @@ jobs:
             "RaceTest\..*"
           )
           # https://github.com/ROCm/rocm-systems/issues/8922
+          # https://github.com/ROCm/rocm-systems/issues/8922
           TSAN_EXCLUDED_TESTS=(
             "${ASAN_UBSAN_EXCLUDED_TESTS[@]}"
             "MatmulStressTest\.TiledAllCU"
