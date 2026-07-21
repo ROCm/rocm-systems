@@ -123,35 +123,19 @@ uint32_t max_scratch_offset_bytes(rj_code_arch_t arch) {
   }
 }
 
-// Special machine state has no save/restore path across a probe call yet.
-// Only SCC (via the trampoline envelope) and ordinary GPRs (via the spill
-// policy) are handled today. Until each special register gains a real consumer,
-// fail closed on any probe whose body touches them rather than letting it
-// silently corrupt the host kernel's state.
+// Special machine state preserved across a probe call: SCC (via the trampoline
+// envelope), EXEC/VCC/M0 (saved to a dead SGPR temp; the orchestrator sets the
+// plan.preserve_* flags below), and ordinary GPRs (via the spill policy).
+// FLAT_SCRATCH stays rejected: the spill store/load depend on it, so a probe
+// that clobbers it entangles with the spill mechanism. Fail closed there rather
+// than let it silently corrupt the host kernel's state.
 bool check_probe_special_state(const ProbeClobberSummary &summary, std::string *error_out) {
-  std::vector<const char *> touched;
-  if (summary.touches_exec)
-    touched.push_back("EXEC");
-  if (summary.touches_vcc)
-    touched.push_back("VCC");
-  if (summary.touches_m0)
-    touched.push_back("M0");
-  if (summary.touches_flat_scratch)
-    touched.push_back("FLAT_SCRATCH");
-  if (touched.empty())
-    return true;
-  if (error_out != nullptr) {
-    std::string msg = "probe body writes special machine state not yet preserved across a "
-                      "probe call:";
-    bool first = true;
-    for (const char *name : touched) {
-      msg += first ? " " : ", ";
-      msg += name;
-      first = false;
-    }
-    *error_out = std::move(msg);
+  if (summary.touches_flat_scratch) {
+    report(error_out, "probe body writes FLAT_SCRATCH, which the spill store/load depend on; "
+                      "not preservable across a probe call");
+    return false;
   }
-  return false;
+  return true;
 }
 
 // Check that the probe does not clobber the link pair.
@@ -738,6 +722,12 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       // Set the probe's offset
       TrampolinePlan plan = make_base_plan(site, arch_, trampoline_offset);
       plan.probe_target_offset = probe.output_text_offset;
+      // Preserve any special state the probe body clobbers by saving it to a dead
+      // SGPR around the call. EXEC/VCC/M0 liveness is not tracked, so save
+      // whenever the probe clobbers the register (conservative but correct).
+      plan.preserve_exec = summary->touches_exec;
+      plan.preserve_vcc = summary->touches_vcc;
+      plan.preserve_m0 = summary->touches_m0;
       // Given liveness, clobbers, and calling convention, select registers
       // for trampoline and determine how big the trampoline will be
       if (!TrampolineBuilder::plan_probe_call(plan, probe.cc, live, summary->ordinary_clobbers,

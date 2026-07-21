@@ -48,6 +48,15 @@ struct SgprSpillSlot {
   uint32_t byte_offset = 0; ///< Per-lane scratch byte offset.
 };
 
+/// @brief One special register (EXEC/VCC/M0) saved to a dead SGPR temp before the
+///        call and restored after. `operand` is its scalar-operand code
+///        (arch-specific for M0).
+struct SpecialStateSlot {
+  uint16_t operand = 0;   ///< Scalar-operand code of the special register.
+  uint16_t temp_base = 0; ///< Dead SGPR (pair base when width==2) holding the save.
+  uint8_t width = 1;      ///< Register lanes: 2 for EXEC/VCC, 1 for M0.
+};
+
 /// @brief Builder-facing description of one trampoline.
 ///
 /// Coordinates are .text-relative byte offsets. The orchestrator fills this
@@ -77,13 +86,21 @@ struct TrampolinePlan {
   // TrampolinePlan for now since this is the builder's one input;
   // lift back out into a dedicated resource-plan type if it grows unwieldy.
   //----------------------------------------------------------------------------
-  bool is_probe_call = false;     ///< True once plan_probe_call() populated these.
-  uint16_t link_pair_base = 30;   ///< Return-link pair, derived from the probe cc.
-  uint16_t target_pair_base = 0;  ///< Dead even SGPR pair holding the probe address.
-  bool preserve_scc = true;       ///< v0 preserves SCC across target materialization.
-  uint16_t scc_temp = 0;          ///< Dead SGPR holding saved SCC across the call.
-  RegisterSet builder_clobbers;   ///< {link} | {target pair} | {scc_temp}; feeds the spill formula.
-  uint32_t before_word_count = 0; ///< Envelope words emitted before the relocated original.
+  bool is_probe_call = false;    ///< True once plan_probe_call() populated these.
+  uint16_t link_pair_base = 30;  ///< Return-link pair, derived from the probe cc.
+  uint16_t target_pair_base = 0; ///< Dead even SGPR pair holding the probe address.
+  bool preserve_scc = true;      ///< v0 preserves SCC across target materialization.
+  uint16_t scc_temp = 0;         ///< Dead SGPR holding saved SCC across the call.
+
+  // Special-state preservation: set by the orchestrator when the probe body
+  // clobbers the register; plan_probe_call allocates a dead SGPR temp for each
+  // and records it in special_state_saves (one plan/emit loop, not a branch each).
+  bool preserve_exec = false;
+  bool preserve_vcc = false;
+  bool preserve_m0 = false;
+  std::vector<SpecialStateSlot> special_state_saves; ///< Filled by plan_probe_call.
+  RegisterSet builder_clobbers;     ///< {link} | {target pair} | {scc/special temps}; feeds spill.
+  uint32_t before_word_count = 0;   ///< Envelope words emitted before the relocated original.
   uint64_t probe_target_offset = 0; ///< .text-relative byte offset of the copied probe body.
 
   /// VGPRs to save/restore around the call; emit_probe_call brackets each with a
@@ -137,6 +154,10 @@ public:
   ///   - SCC is preserved with one dead SGPR temp. The temp lives across the call
   ///     (saved before materialization, restored after), so it must avoid both
   ///     the live set and @p probe_body_clobbers. Extending this is deferred.
+  ///   - EXEC/VCC/M0 are preserved when the corresponding plan.preserve_* flag is
+  ///     set (the orchestrator sets it from the probe's clobbers). Each gets its
+  ///     own dead SGPR temp (a pair for EXEC/VCC, single for M0) recorded in
+  ///     plan.special_state_saves, drawn from the same dead pool as the SCC temp.
   ///
   /// Returns false and writes a diagnostic naming the unavailable resource to
   /// @p error_out (if non-null) when @p cc is unknown, the link pair is live, or
