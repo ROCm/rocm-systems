@@ -101,6 +101,7 @@ test_categories:
     regex_includes:
       - ".*"
     regex_excludes: *_common_therock_regex_excludes
+    label_excludes: *_common_therock_labels_exclude
     added_supplementary_labels:
       - "full"
       - "all"

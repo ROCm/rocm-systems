@@ -1345,6 +1345,10 @@ rocprofiler_set_api_table(const char* name,
                     hsa_api_table->core_, enable_queue_interposition);
         }
 
+        // Replay device thread trace contexts started before hsa_init(). Must run
+        // after queue_controller_init + interposition; starting SQTT earlier hangs the GPU.
+        rocprofiler::thread_trace::start_active_contexts();
+
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         // Initialize PC sampling service if configured
         if(runtime_pc_sampling_table)
@@ -1543,6 +1547,7 @@ rocprofiler_set_api_table(const char* name,
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         rocprofiler::pc_sampling::code_object::initialize(rocattach_api);
 #endif
+        rocprofiler::thread_trace::code_object::initialize(rocattach_api);
     }
     else
     {
