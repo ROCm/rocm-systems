@@ -22,6 +22,16 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   function include/restrict (`--function-include`/`-I`, `--function-restrict`/`-R`)
   regexes.
 
+- rocSHMEM host-stream API tracing via `ROCPROFSYS_ROCM_DOMAINS=rocshmem_api`.
+  ROCm Systems Profiler now captures the nine host-stream rocSHMEM API calls
+  (`putmem_on_stream`, `getmem_on_stream`, `putmem_signal_on_stream`,
+  `signal_wait_until_on_stream`, `broadcastmem_on_stream`, `alltoallmem_on_stream`,
+  `barrier_all_on_stream`, `sync_all_on_stream`, `quiet_on_stream`) as
+  `rocm_rocshmem_api` spans in Perfetto traces and rocpd databases. Requires
+  rocprofiler-sdk >= 1.3.4 and a rocSHMEM installation built with
+  `USE_ROCPROFILER_REGISTER=ON`. A `rocshmem` example demonstrating two-PE
+  usage of all nine APIs is included under `examples/rocshmem`.
+
 ### Changed
 
 - `ROCPROFSYS_BUILD_TESTING` no longer implies `ROCPROFSYS_BUILD_EXAMPLES`.
