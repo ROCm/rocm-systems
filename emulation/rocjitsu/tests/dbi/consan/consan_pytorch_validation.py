@@ -397,6 +397,46 @@ def _run_rdna4_llm_topk(repetitions: int) -> dict[str, object]:
     }
 
 
+def _run_rdna4_sdpa(repetitions: int) -> dict[str, object]:
+    """Runs ordinary causal PyTorch attention with an independent CPU oracle."""
+    shape = (1, 8, 64, 64)
+    base = torch.arange(torch.tensor(shape).prod().item(), dtype=torch.float32).reshape(
+        shape
+    )
+    query = ((base % 113) - 56) / 31
+    key = ((base * 3 % 127) - 63) / 29
+    value = ((base * 5 % 131) - 65) / 27
+    expected = torch.nn.functional.scaled_dot_product_attention(
+        query, key, value, is_causal=True
+    )
+    device_query = query.to(device="cuda")
+    device_key = key.to(device="cuda")
+    device_value = value.to(device="cuda")
+    elapsed_ms = []
+    actual = None
+    for _ in range(repetitions):
+        start = time.monotonic()
+        actual = torch.nn.functional.scaled_dot_product_attention(
+            device_query, device_key, device_value, is_causal=True
+        )
+        torch.cuda.synchronize()
+        elapsed_ms.append((time.monotonic() - start) * 1000.0)
+    assert actual is not None
+    host_actual = actual.cpu()
+    if not torch.allclose(host_actual, expected, rtol=2.0e-4, atol=2.0e-4):
+        maximum_error = torch.max(torch.abs(host_actual - expected)).item()
+        raise RuntimeError(f"scaled-dot-product-attention oracle failed: {maximum_error}")
+    return {
+        "median_ms": statistics.median(elapsed_ms),
+        "repetitions": repetitions,
+        "oracle": "cpu-scaled-dot-product-attention-allclose",
+        "oracle_passed": True,
+        "shape": list(shape),
+        "dtype": str(query.dtype),
+        "is_causal": True,
+    }
+
+
 def _run_sort(repetitions: int) -> dict[str, object]:
     rows = 4
     columns = 256
@@ -598,6 +638,7 @@ def _parse_args() -> argparse.Namespace:
             "softmax",
             "rdna4-compiled-softmax",
             "rdna4-llm-topk",
+            "rdna4-sdpa",
         ),
         required=True,
     )
@@ -657,8 +698,10 @@ def main() -> int:
                     args.repetitions
                 )
             }
-        else:
+        elif args.workload == "rdna4-llm-topk":
             result = _run_rdna4_llm_topk(args.repetitions)
+        else:
+            result = {"rdna4-sdpa": _run_rdna4_sdpa(args.repetitions)}
     except Exception as exc:
         _write_oracle_result(
             "fail", {"workload": args.workload, "reason": str(exc)}

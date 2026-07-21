@@ -87,13 +87,13 @@ class ConSanValidationTest(unittest.TestCase):
 
     def test_manifest_is_the_complete_north_star_matrix(self) -> None:
         manifest = validation._manifest("gfx1201")
-        self.assertEqual(len(manifest["workloads"]), 13)
+        self.assertEqual(len(manifest["workloads"]), 14)
         self.assertEqual(
             [profile["id"] for profile in manifest["profiles"]],
             list(validation.PROFILE_IDS),
         )
         self.assertEqual(
-            len({workload["id"] for workload in manifest["workloads"]}), 13
+            len({workload["id"] for workload in manifest["workloads"]}), 14
         )
         workloads = {workload["id"]: workload for workload in manifest["workloads"]}
         self.assertEqual(
@@ -101,6 +101,9 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(
             workloads["pytorch-rdna4-llm-topk"]["targets"], ("gfx1201",)
+        )
+        self.assertEqual(
+            workloads["pytorch-rdna4-sdpa"]["targets"], ("gfx1201",)
         )
 
     def test_text_manifest_filters_target_specific_workloads(self) -> None:
@@ -110,6 +113,7 @@ class ConSanValidationTest(unittest.TestCase):
         text = output.getvalue()
         self.assertIn("pytorch-rdna4-compiled-softmax", text)
         self.assertIn("pytorch-rdna4-llm-topk", text)
+        self.assertIn("pytorch-rdna4-sdpa", text)
         self.assertNotIn("pytorch-tdm-descriptor-add", text)
         self.assertNotIn("tensile-sk-mxf8gemm-explicit", text)
 
@@ -508,6 +512,23 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(command[0], "/workspace/venv/bin/python")
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
         self.assertEqual(command[command.index("--workload") + 1], "rdna4-llm-topk")
+
+    def test_pytorch_rdna4_sdpa_uses_native_client(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-sdpa"]
+        with mock.patch.dict(
+            os.environ,
+            {validation.PYTORCH_PYTHON_ENV: "/workspace/venv/bin/python"},
+        ):
+            command = validation._workload_command(
+                Path("/workspace"),
+                "gfx1201",
+                workload,
+                "clean",
+                Path("/unused"),
+            )
+        self.assertEqual(command[0], "/workspace/venv/bin/python")
+        self.assertEqual(command[command.index("--repetitions") + 1], "1")
+        self.assertEqual(command[command.index("--workload") + 1], "rdna4-sdpa")
 
     def test_tensile_gfx1250_uses_numeric_runner_once(self) -> None:
         workload = validation.WORKLOAD_BY_ID["tensile-sk-mxf8gemm-explicit"]
