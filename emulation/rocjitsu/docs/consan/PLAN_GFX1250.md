@@ -135,7 +135,8 @@ flowchart TD
     XT3A["XT3A TODO<br/>reduced SGEMM SC/RR/Sampled green;<br/>Inline backend-dependent and long"]
     XT3B["XT3B DONE<br/>quick-GEMM SuperCollider assessed;<br/>SGEMM first problem 12/12 exact and fully covered"]
     XT3G["XT3G DONE<br/>quick SGEMM Sampled first problem;<br/>12/12 exact, 640/640 accesses, 40/40 barriers"]
-    XT3H["XT3H ACTIVE<br/>quick SGEMM Inline Shadow;<br/>bounded clean assessment"]
+    XT3H["XT3H DONE<br/>quick SGEMM Inline assessed;<br/>first problem exact, aggregate dynamic incomplete"]
+    XT3I["XT3I ACTIVE<br/>SPMM F8 Sampled;<br/>paired overhead and reviewed fault"]
     XT3D["XT3D DONE<br/>full SGEMM first problem complete;<br/>quadratic 115,776-event frontier isolated"]
     XT3E["XT3E TODO<br/>both emulator baselines prove intrinsic full-grid bound;<br/>substantially longer unrestricted RR run remains"]
     XT3C["XT3C DONE<br/>SPMM F8 Sampled exact client passes;<br/>19,960 accesses and 806 barrier members covered"]
@@ -271,6 +272,7 @@ flowchart TD
   XT1 --> XT3B
   XT1 --> XT3G
   XT1 --> XT3H
+  XT3C --> XT3I
   XT1 --> XT3D
   XT3D --> XT3E
   XT2B --> XT3C
@@ -298,6 +300,7 @@ flowchart TD
   XT3B --> XF
   XT3G --> XF
   XT3H --> XF
+  XT3I --> XF
   XT3E --> XF
   XT3C --> XF
   XT4 --> XF
@@ -312,8 +315,8 @@ flowchart TD
   class XP9B done
   class XT3B done
   class XP2B done
-  class XT3G done
-  class XT3H active
+  class XT3G,XT3H done
+  class XT3I active
   class G0,XP2D,XP2E,XP3,XT2C2,XT2C3,XT3A,XT3E,XF,XG todo
 ```
 
@@ -362,6 +365,15 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XT3H is DONE as a bounded assessment without a STATUS color
+  promotion.  Quick SGEMM Inline artifact
+  `consan-green-expansion-20260721-sgemm-quick-inline-102` completes the
+  first problem's 12/12 exact rows and patches 640/640 accesses plus 22/22
+  barriers, but the interrupted second problem leaves aggregate dynamic
+  analysis incomplete at the fixed 120-second bound.  The sole ACTIVE box
+  rotates to XT3I, the already-blue SPMM F8 Sampled cell's paired and
+  reviewed-fault acceptance work.
 
 - 2026-07-21: XT3G is DONE after quick SGEMM Sampled matches the bounded
   SuperCollider promotion.  One-repetition artifact
