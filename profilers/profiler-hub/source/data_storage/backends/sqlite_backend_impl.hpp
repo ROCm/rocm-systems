@@ -27,7 +27,6 @@
 #    include <regex>
 
 #    include "schema/data_views.hpp"
-#    include "schema/marker_views.hpp"
 #    include "schema/rocpd_tables.hpp"
 #    include "schema/rocpd_views.hpp"
 #    include "schema/summary_views.hpp"
@@ -42,7 +41,6 @@ enum rocpd_sql_schema_kind_t
     ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
     ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
     ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS,
-    ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS,
     ROCPD_SQL_SCHEMA_LAST,
 };
 }  // namespace
@@ -133,9 +131,6 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& uuid)
             break;
         case ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS:
             schema_content = rocpd::data_storage::schema::DATA_VIEWS_SQL;
-            break;
-        case ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS:
-            schema_content = rocpd::data_storage::schema::MARKER_VIEWS_SQL;
             break;
         case ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS:
             schema_content = rocpd::data_storage::schema::SUMMARY_VIEWS_SQL;
@@ -281,7 +276,6 @@ database_backend<SqlitePolicy>::initialize_schema()
         ROCPD_SQL_SCHEMA_ROCPD_TABLES,
         ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
         ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
-        ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS,
         ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS
     };
 
