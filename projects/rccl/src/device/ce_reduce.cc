@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include <hip/hip_bfloat16.h>
 #include <stdint.h>
 #include <algorithm>
+#include <hip/hip_cooperative_groups.h>
 #include "nccl.h"
 
 #ifndef NCCL_CE_REDUCE_MAX_BLOCKS
@@ -35,6 +36,8 @@ THE SOFTWARE.
 #ifndef NCCL_CE_NUM_SLOTS
 #define NCCL_CE_NUM_SLOTS 2
 #endif
+
+namespace cg = cooperative_groups;
 
 // Global atomic-counter barrier for regular launch (avoids CTA scheduling deadlock).
 __device__ __forceinline__ void ncclCeGlobalBlockBarrier(
@@ -96,6 +99,7 @@ template<> struct VecTrait<hip_bfloat16> { using LoadT = uint4; static constexpr
 template<> struct VecTrait<int8_t>  { using LoadT = uint4; static constexpr int W = 16; static constexpr int GpuUnroll = 4; };
 template<> struct VecTrait<uint8_t> { using LoadT = uint4; static constexpr int W = 16; static constexpr int GpuUnroll = 4; };
 
+
 // *********************************************************************************
 // ReduceOp<T, RedOp> — compile-time reduction functor
 // 0=Sum  1=Prod  2=Min  3=Max
@@ -113,6 +117,7 @@ template<typename T> struct ReduceOp<T, 2> {
 template<typename T> struct ReduceOp<T, 3> {
   __device__ __forceinline__ static T apply(T a, T b) { return a > b ? a : b; }
 };
+
 
 // *********************************************************************************
 // ncclCeLocalReduceKernelVec<T, RedOp, U>
@@ -132,13 +137,15 @@ void ncclCeLocalReduceKernelVec(
   size_t slotChunkElems,
   volatile uint32_t* signalBuffer,
   size_t totalSteps,
-  uint32_t* d_barrierSync) {
+  uint32_t* d_barrierSync,
+  bool coopLaunch) {
 
   if (blockIdx.x >= NCCL_CE_REDUCE_MAX_BLOCKS) return;
-
   __shared__ uint64_t s_gen;
-  if (threadIdx.x == 0) s_gen = 1;
-  __syncthreads();
+  if (!coopLaunch) {
+    if (threadIdx.x == 0) s_gen = 1;
+    __syncthreads();
+  }
 
   using LT = typename VecTrait<T>::LoadT;
   constexpr int W = VecTrait<T>::W;
@@ -169,7 +176,11 @@ void ncclCeLocalReduceKernelVec(
             __builtin_amdgcn_s_sleep(1);
           }
       }
-      ncclCeBlockBarrier(blockIdx.x, &s_gen, d_barrierSync);
+      if (!coopLaunch) {
+        ncclCeBlockBarrier(blockIdx.x, &s_gen, d_barrierSync);
+      } else {
+        cg::this_grid().sync();
+      }
     }
     const size_t slotStrideElems = slotChunkElems * (size_t)nRanks;
     const T* __restrict__ slotIn = in + ((size_t)slot * slotStrideElems);
@@ -229,7 +240,11 @@ void ncclCeLocalReduceKernelVec(
       }
     }
     if (totalSteps > 1) {
-      ncclCeBlockBarrier(blockIdx.x, &s_gen, d_barrierSync);
+      if (!coopLaunch) {
+        ncclCeBlockBarrier(blockIdx.x, &s_gen, d_barrierSync);
+      } else {
+        cg::this_grid().sync();
+      }
       if (blockIdx.x == 0) {
         for (int r = (int)threadIdx.x; r < nRanks; r += (int)blockDim.x) {
           __hip_atomic_store((uint32_t*)&signalBuffer[(size_t)slot * nRanks + r],
@@ -241,63 +256,76 @@ void ncclCeLocalReduceKernelVec(
   }
 }
 // *********************************************************************************
+// ncclCeDispatchReduceKernel — regular or cooperative launch; kernel uses
+// ncclCeBlockBarrier (not grid.sync()) in both cases.
+// *********************************************************************************
+template<typename T, int RedOp, int U>
+static ncclResult_t ncclCeDispatchReduceKernel(
+  bool coopLaunch, int blocks, int threads, hipStream_t stream,
+  const void* in, void* out, int nRanks,
+  size_t baseChunkElems, size_t tailChunkElems, size_t chunksPerShard, size_t slotChunkElems,
+  uint32_t* signalBuffer, size_t totalSteps, uint32_t* d_barrierSync,
+  void** kernelArgs) {
+
+  auto kernelFn = ncclCeLocalReduceKernelVec<T, RedOp, U>;
+  (void)hipGetLastError();
+  hipError_t e;
+  if (coopLaunch) {
+    e = hipLaunchCooperativeKernel(
+      reinterpret_cast<const void*>(kernelFn),
+      dim3(blocks), dim3(threads), kernelArgs, 0, stream);
+  } else {
+    hipLaunchKernelGGL(
+      kernelFn,
+      dim3(blocks), dim3(threads), 0, stream,
+      static_cast<const T*>(in), static_cast<T*>(out), nRanks,
+      baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
+      signalBuffer, totalSteps, d_barrierSync, coopLaunch);
+    e = hipGetLastError();
+  }
+  if (e != hipSuccess) return ncclUnhandledCudaError;
+  return ncclSuccess;
+}
+
+// *********************************************************************************
 // ncclCeLaunchReduceTyped — per-type launch dispatch (coop or GGL).
 // *********************************************************************************
 template<typename T>
 static ncclResult_t ncclCeLaunchReduceTyped(
   const void* in, void* out, int nRanks,
   size_t baseChunkElems, size_t tailChunkElems, size_t chunksPerShard, size_t slotChunkElems,
-  uint32_t* signalBuffer, size_t totalSteps, uint32_t* d_barrierSync, int redOp, int threads, 
-  void** kernelArgs, hipStream_t stream) {
+  uint32_t* signalBuffer, size_t totalSteps, uint32_t* d_barrierSync, int redOp, int threads,
+  void** kernelArgs, hipStream_t stream, bool coopLaunch) {
 
   constexpr int U = VecTrait<T>::GpuUnroll;
   const int blocks = (int)std::clamp<size_t>(
     (baseChunkElems / VecTrait<T>::W + (size_t)threads * VecTrait<T>::GpuUnroll - 1)
       / ((size_t)threads * VecTrait<T>::GpuUnroll), (size_t)1, (size_t)NCCL_CE_REDUCE_MAX_BLOCKS);
 
-  (void)hipGetLastError();
-    switch (redOp) {
-      case ncclSum: {
-        auto kernelFn = ncclCeLocalReduceKernelVec<T, 0, U>;
-        hipLaunchKernelGGL(
-          kernelFn,
-          dim3(blocks), dim3(threads), 0, stream,
-          static_cast<const T*>(in), static_cast<T*>(out), nRanks,
-          baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
-          signalBuffer, totalSteps, d_barrierSync);
-        break;
-        } case ncclProd: {
-        auto kernelFn = ncclCeLocalReduceKernelVec<T, 1, U>;
-        hipLaunchKernelGGL(
-          kernelFn,
-          dim3(blocks), dim3(threads), 0, stream,
-          static_cast<const T*>(in), static_cast<T*>(out), nRanks,
-          baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
-          signalBuffer, totalSteps, d_barrierSync);
-        break;
-      } case ncclMin: {
-        auto kernelFn = ncclCeLocalReduceKernelVec<T, 2, U>;
-        hipLaunchKernelGGL(
-          kernelFn,
-          dim3(blocks), dim3(threads), 0, stream,
-          static_cast<const T*>(in), static_cast<T*>(out), nRanks,
-          baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
-          signalBuffer, totalSteps, d_barrierSync);
-        break;
-      } case ncclMax: {
-        auto kernelFn = ncclCeLocalReduceKernelVec<T, 3, U>;
-        hipLaunchKernelGGL(
-          kernelFn,
-          dim3(blocks), dim3(threads), 0, stream,
-          static_cast<const T*>(in), static_cast<T*>(out), nRanks,
-          baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
-          signalBuffer, totalSteps, d_barrierSync);
-        break;
-      }
-    }
-    hipError_t e = hipGetLastError();
-    if (e != hipSuccess) return ncclUnhandledCudaError;
-  return ncclSuccess;
+  switch (redOp) {
+    case ncclSum:
+      return ncclCeDispatchReduceKernel<T, 0, U>(
+        coopLaunch, blocks, threads, stream, in, out, nRanks,
+        baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
+        signalBuffer, totalSteps, d_barrierSync, kernelArgs);
+    case ncclProd:
+      return ncclCeDispatchReduceKernel<T, 1, U>(
+        coopLaunch, blocks, threads, stream, in, out, nRanks,
+        baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
+        signalBuffer, totalSteps, d_barrierSync, kernelArgs);
+    case ncclMin:
+      return ncclCeDispatchReduceKernel<T, 2, U>(
+        coopLaunch, blocks, threads, stream, in, out, nRanks,
+        baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
+        signalBuffer, totalSteps, d_barrierSync, kernelArgs);
+    case ncclMax:
+      return ncclCeDispatchReduceKernel<T, 3, U>(
+        coopLaunch, blocks, threads, stream, in, out, nRanks,
+        baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
+        signalBuffer, totalSteps, d_barrierSync, kernelArgs);
+    default:
+      return ncclInvalidArgument;
+  }
 }
 
 // *********************************************************************************
@@ -307,7 +335,7 @@ ncclResult_t ncclCeLaunchPersistentReduce(
   const void* in, void* out, int nRanks,
   size_t baseChunkElems, size_t tailChunkElems, size_t chunksPerShard,
    size_t slotChunkElems, uint32_t* signalBuffer, size_t totalSteps, uint32_t* d_barrierSync,
-  ncclDataType_t datatype, ncclRedOp_t op, hipStream_t stream) {
+  ncclDataType_t datatype, ncclRedOp_t op, hipStream_t stream, int coopLaunch) {
 
   int redOp;
   switch (op) {
@@ -319,53 +347,54 @@ ncclResult_t ncclCeLaunchPersistentReduce(
   }
 
   const int threads = 256;
+  bool useCoopLaunch = (coopLaunch != 0);
 
   void* kernelArgs[] = {
     &in, &out, &nRanks, &baseChunkElems, &tailChunkElems, &chunksPerShard, &slotChunkElems,
-    &signalBuffer, &totalSteps, &d_barrierSync,
+    &signalBuffer, &totalSteps, &d_barrierSync, &useCoopLaunch,
   };
 
   switch (datatype) {
     case ncclFloat32:
     return ncclCeLaunchReduceTyped<float>(
       in, out, nRanks, baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
-      signalBuffer, totalSteps, d_barrierSync, redOp, threads, kernelArgs, stream);
+      signalBuffer, totalSteps, d_barrierSync, redOp, threads, kernelArgs, stream, useCoopLaunch);
     case ncclFloat64:
       return ncclCeLaunchReduceTyped<double>(
         in, out, nRanks, baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
-        signalBuffer, totalSteps, d_barrierSync, redOp, threads, kernelArgs, stream);
+        signalBuffer, totalSteps, d_barrierSync, redOp, threads, kernelArgs, stream, useCoopLaunch);
     case ncclFloat16:
       return ncclCeLaunchReduceTyped<__half>(
         in, out, nRanks, baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
-        signalBuffer, totalSteps, d_barrierSync, redOp, threads, kernelArgs, stream);
+        signalBuffer, totalSteps, d_barrierSync, redOp, threads, kernelArgs, stream, useCoopLaunch);
     case ncclBfloat16:
       return ncclCeLaunchReduceTyped<hip_bfloat16>(
         in, out, nRanks, baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
-        signalBuffer, totalSteps, d_barrierSync, redOp, threads, kernelArgs, stream);
+        signalBuffer, totalSteps, d_barrierSync, redOp, threads, kernelArgs, stream, useCoopLaunch);
     case ncclInt32:
       return ncclCeLaunchReduceTyped<int32_t>(
         in, out, nRanks, baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
-        signalBuffer, totalSteps, d_barrierSync, redOp, threads, kernelArgs, stream);
+        signalBuffer, totalSteps, d_barrierSync, redOp, threads, kernelArgs, stream, useCoopLaunch);
     case ncclUint32:
       return ncclCeLaunchReduceTyped<uint32_t>(
         in, out, nRanks, baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
-        signalBuffer, totalSteps, d_barrierSync, redOp, threads, kernelArgs, stream);
+        signalBuffer, totalSteps, d_barrierSync, redOp, threads, kernelArgs, stream, useCoopLaunch);
     case ncclInt64:
       return ncclCeLaunchReduceTyped<int64_t>(
         in, out, nRanks, baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
-        signalBuffer, totalSteps, d_barrierSync, redOp, threads, kernelArgs, stream);
+        signalBuffer, totalSteps, d_barrierSync, redOp, threads, kernelArgs, stream, useCoopLaunch);
     case ncclUint64:
       return ncclCeLaunchReduceTyped<uint64_t>(
         in, out, nRanks, baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
-        signalBuffer, totalSteps, d_barrierSync, redOp, threads, kernelArgs, stream);
+        signalBuffer, totalSteps, d_barrierSync, redOp, threads, kernelArgs, stream, useCoopLaunch);
     case ncclInt8:
       return ncclCeLaunchReduceTyped<int8_t>(
         in, out, nRanks, baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
-        signalBuffer, totalSteps, d_barrierSync, redOp, threads, kernelArgs, stream);
+        signalBuffer, totalSteps, d_barrierSync, redOp, threads, kernelArgs, stream, useCoopLaunch);
     case ncclUint8:
       return ncclCeLaunchReduceTyped<uint8_t>(
         in, out, nRanks, baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
-        signalBuffer, totalSteps, d_barrierSync, redOp, threads, kernelArgs, stream);
+        signalBuffer, totalSteps, d_barrierSync, redOp, threads, kernelArgs, stream, useCoopLaunch);
     default: return ncclInvalidArgument;
   }
 

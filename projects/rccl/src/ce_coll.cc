@@ -34,7 +34,8 @@ ncclResult_t ncclCeLaunchPersistentReduce(
   const void* in, void* out, int nRanks,
   size_t baseChunkElems, size_t tailChunkElems, size_t chunksPerShard,
   size_t slotChunkElems, uint32_t* signalBuffer, size_t totalSteps,
-  uint32_t* d_barrierSync, ncclDataType_t datatype, ncclRedOp_t op, hipStream_t stream);
+  uint32_t* d_barrierSync, ncclDataType_t datatype, ncclRedOp_t op, hipStream_t stream,
+  int coopLaunch);
 
 RCCL_PARAM(CeMultiStreams, "CE_MULTI_STREAMS", 0);
 RCCL_PARAM(CeBatchAsyncEnable, "CE_BATCH_ASYNC_ENABLE", -2);
@@ -946,6 +947,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff,
 
   struct ncclCeBatchOpsParams batchOpsParams = {};
   struct ncclCeCollArgs collArgs = {};
+  const int coopLaunch = rcclParamCeCoopLaunch();
   collArgs.func = ncclFuncAllReduce;
   collArgs.datatype = datatype;
   collArgs.redOp = op;
@@ -984,7 +986,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff,
       tmpBuf, outShard, comm->nRanks,
       baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
       signalBuffer, totalSteps, ceColl->d_barrierSync,
-      datatype, op, stream), ret, fail);
+      datatype, op, stream, coopLaunch), ret, fail);
   }
   
 
@@ -1050,7 +1052,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff,
         tmpBuf, outShard, comm->nRanks,
         baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
         signalBuffer, totalSteps, ceColl->d_barrierSync,
-        datatype, op, ceStream), ret, fail);
+        datatype, op, ceStream, coopLaunch), ret, fail);
     }
   }
   if (totalSteps > 1) {
