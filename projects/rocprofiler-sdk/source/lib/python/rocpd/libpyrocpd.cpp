@@ -501,9 +501,9 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
 
             // We can parse the schema_version string populated from python side when
             // RocpdImportData was initialized
-            auto get_db_schema_version = [&data](sqlite3* conn) -> rocpd_version_triplet_t {
-                auto       version = rocpd_version_triplet_t{0, 0, 0};
-                auto const q       = const_cast<char*>(
+            auto get_db_schema_version = [&data](sqlite3* c) -> rocpd_version_triplet_t {
+                auto        version = rocpd_version_triplet_t{0, 0, 0};
+                auto* const q       = const_cast<char*>(
                     "SELECT value FROM rocpd_metadata WHERE tag='schema_version'");
                 auto ver_str = data.schema_version_str;
                 auto parts   = std::vector<std::string>{};
@@ -513,7 +513,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                 if(ver_str == "0.0.0")
                 {
                     auto* stmt = static_cast<sqlite3_stmt*>(nullptr);
-                    if(sqlite3_prepare_v2(conn, q, -1, &stmt, nullptr) == SQLITE_OK)
+                    if(sqlite3_prepare_v2(c, q, -1, &stmt, nullptr) == SQLITE_OK)
                     {
                         sqlite3_step(stmt);
                         ver_str = std::string(
