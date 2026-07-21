@@ -80,6 +80,14 @@ if(attdecoder_FOUND)
     set(IS_DISABLED OFF)
 endif()
 
+# WSL/DXG exposes no /dev/kfd; the standalone sample selects the KFD agent enumerator
+# and cannot seed rocprofiler agents there (the rocprofv3 tool path via LD_PRELOAD is
+# unaffected, and ATT capture/decode is covered by the integration tests).
+rocprofiler_sdk_kfd_available(_KFD_AVAILABLE)
+if(NOT _KFD_AVAILABLE)
+    set(IS_DISABLED ON)
+endif()
+
 rocprofiler_samples_get_preload_env(PRELOAD_ENV)
 list(APPEND PRELOAD_ENV "ROCPROFILER_TRACE_DECODER_LIB_PATH=${attdecoder_LIB_DIR}")
 
