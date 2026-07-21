@@ -88,9 +88,6 @@ ROCPROFSYS_RUNNER_CLASSES = {
 # Accepted runner types when using parametrized "mode" marker
 ROCPROFSYS_RUNNER_NAMES = list(ROCPROFSYS_RUNNER_CLASSES.keys())
 
-# rocprofiler-sdk < 1.2.2 can abort on undefined KFD node IDs; product disables KFD domains.
-KFD_MIN_SDK_VERSION: tuple[int, int, int] = (1, 2, 2)
-
 # ============================================================================
 #
 # Pytest Hooks (Placed in the general order they are called)
@@ -200,6 +197,10 @@ def pytest_configure(config: pytest.Config) -> None:
     )
     config.addinivalue_line(
         "markers",
+        "rocprofiler_sdk_min_version(version): mark test as requiring minimum rocprofiler-sdk version",
+    )
+    config.addinivalue_line(
+        "markers",
         "rocpd(env): mark test as using ROCpd and inject ROCpd env into given env",
     )
     config.addinivalue_line(
@@ -252,7 +253,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "no_docker",
         "shmem",
         "nic",
-        "ainic",
+        "ainic_required",
     ]
 
     # Informational markers, only used for test labeling
@@ -291,6 +292,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "time_window",
         "transpose",
         "nic",
+        "ainic",
         "network",
         "fork",
         "user_api",
@@ -502,12 +504,15 @@ def pytest_collection_modifyitems(config, items) -> None:
             _msg = nic_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
-        if "ainic" in item.keywords:
+        if "ainic_required" in item.keywords:
             _msg = ainic_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
-        if "kfd" in item.keywords or "unified_memory" in item.keywords:
-            _msg = kfd_unavailable_reason(rocprof_config)
+        if "rocprofiler_sdk_min_version" in item.keywords:
+            req_version = item.get_closest_marker("rocprofiler_sdk_min_version").args[0]
+            _msg = rocprofiler_sdk_min_version_unavailable_reason(
+                rocprof_config, req_version
+            )
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
         if "rocm_min_version" in item.keywords:
@@ -765,14 +770,25 @@ def ainic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
     return None
 
 
-def kfd_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
-    sdk = rocprof_config.capabilities.rocprofiler_sdk_version
-    if sdk is not None and sdk >= KFD_MIN_SDK_VERSION:
+def rocprofiler_sdk_min_version_unavailable_reason(
+    rocprof_config: RocprofsysConfig, req_version: str
+) -> Optional[str]:
+    """Return a skip reason if the detected rocprofiler-sdk is older than req_version.
+
+    ``req_version`` is a dotted version string (e.g. ``"1.2.2"``) supplied by the
+    test via the ``rocprofiler_sdk_min_version`` marker.
+    """
+    system_version = rocprof_config.capabilities.rocprofiler_sdk_version
+    min_parts = req_version.split(".")
+    min_tuple = tuple(int(p) for p in (min_parts + ["0", "0", "0"])[:3])
+    if system_version is not None and system_version >= min_tuple:
         return None
-    _req = ".".join(map(str, KFD_MIN_SDK_VERSION))
-    _found = ".".join(map(str, sdk)) if sdk is not None else "not found"
+    _found = (
+        ".".join(map(str, system_version)) if system_version is not None else "not found"
+    )
     return (
-        f"Requires rocprofiler-sdk minimum {_req}, but system detected version {_found}"
+        f"Requires rocprofiler-sdk minimum {req_version}, "
+        f"but system detected version {_found}"
     )
 
 
@@ -1174,6 +1190,7 @@ def _ctest_generate_tests(
         "rocm_min_version",
         "amdsmi_min_version",
         "amdgpu_min_version",
+        "rocprofiler_sdk_min_version",
         "run_if_gpu_category",
         "preserve",
         # For CTests

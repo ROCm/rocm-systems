@@ -48,7 +48,6 @@ hipError_t HIPAllocatorVMMFabric::VMMAlloc(void** ptr, size_t size)
   VMMFabricAllocationInfo info;
   info.handle = common_info.handle;
   info.size = common_info.size;
-  info.fabric_id = 0;  // Not yet exported
   allocations_[*ptr] = info;
 
   return hipSuccess;

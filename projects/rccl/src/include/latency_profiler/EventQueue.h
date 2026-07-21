@@ -18,12 +18,12 @@ namespace latency_profiler {
 
 template <class Element>
 class EventQueue {
- private:
+private:
   std::deque<std::unique_ptr<Element>> queue_;
   std::condition_variable cv_;
   mutable std::mutex mutex_;
 
- public:
+public:
   void push(std::unique_ptr<Element> item) {
     {
       std::lock_guard<std::mutex> lock(mutex_);

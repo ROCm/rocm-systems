@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -343,7 +344,7 @@ void BufferStoreB8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
   set_data(std::move(d));
@@ -386,7 +387,7 @@ void BufferStoreB16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
   set_data(std::move(d));
@@ -429,7 +430,7 @@ void BufferStoreB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -472,9 +473,9 @@ void BufferStoreB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -517,11 +518,11 @@ void BufferStoreB96Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 12 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 12 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(data_base + 2, lane);
+    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
     std::memcpy(&d->store_data[lane * 12 + 8], &val2, 4);
   }
   set_data(std::move(d));
@@ -564,13 +565,13 @@ void BufferStoreB128Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(data_base + 2, lane);
+    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
     std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = cu.read_vgpr(data_base + 3, lane);
+    uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 3, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
   }
   set_data(std::move(d));
@@ -825,7 +826,7 @@ void BufferStoreD16HiB8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     val0 >>= 16;
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
@@ -869,7 +870,7 @@ void BufferStoreD16HiB16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     val0 >>= 16;
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
@@ -884,12 +885,14 @@ BufferAtomicSwapB32Vbuffer::BufferAtomicSwapB32Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -916,7 +919,7 @@ void BufferAtomicSwapB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -926,17 +929,21 @@ BufferAtomicCmpswapB32Vbuffer::BufferAtomicCmpswapB32Vbuffer(const MachineInst *
     : Vbuffer("buffer_atomic_cmpswap_b32", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicCmpswapB32Vbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata_return(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata_return;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  vdata_return.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
 }
@@ -962,9 +969,9 @@ void BufferAtomicCmpswapB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -978,12 +985,14 @@ BufferAtomicAddU32Vbuffer::BufferAtomicAddU32Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1010,7 +1019,7 @@ void BufferAtomicAddU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1024,12 +1033,14 @@ BufferAtomicSubU32Vbuffer::BufferAtomicSubU32Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1056,7 +1067,7 @@ void BufferAtomicSubU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1070,12 +1081,14 @@ BufferAtomicSubClampU32Vbuffer::BufferAtomicSubClampU32Vbuffer(const MachineInst
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1102,7 +1115,7 @@ void BufferAtomicSubClampU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1116,12 +1129,14 @@ BufferAtomicMinI32Vbuffer::BufferAtomicMinI32Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1148,7 +1163,7 @@ void BufferAtomicMinI32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1162,12 +1177,14 @@ BufferAtomicMinU32Vbuffer::BufferAtomicMinU32Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1194,7 +1211,7 @@ void BufferAtomicMinU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1208,12 +1225,14 @@ BufferAtomicMaxI32Vbuffer::BufferAtomicMaxI32Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1240,7 +1259,7 @@ void BufferAtomicMaxI32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1254,12 +1273,14 @@ BufferAtomicMaxU32Vbuffer::BufferAtomicMaxU32Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1286,7 +1307,7 @@ void BufferAtomicMaxU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1300,12 +1321,14 @@ BufferAtomicAndB32Vbuffer::BufferAtomicAndB32Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1332,7 +1355,7 @@ void BufferAtomicAndB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1346,12 +1369,14 @@ BufferAtomicOrB32Vbuffer::BufferAtomicOrB32Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1378,7 +1403,7 @@ void BufferAtomicOrB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1392,12 +1417,14 @@ BufferAtomicXorB32Vbuffer::BufferAtomicXorB32Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1424,7 +1451,7 @@ void BufferAtomicXorB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1438,12 +1465,14 @@ BufferAtomicIncU32Vbuffer::BufferAtomicIncU32Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1470,7 +1499,7 @@ void BufferAtomicIncU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1484,12 +1513,14 @@ BufferAtomicDecU32Vbuffer::BufferAtomicDecU32Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1516,7 +1547,7 @@ void BufferAtomicDecU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1530,12 +1561,14 @@ BufferAtomicSwapB64Vbuffer::BufferAtomicSwapB64Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1562,9 +1595,9 @@ void BufferAtomicSwapB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1574,17 +1607,21 @@ BufferAtomicCmpswapB64Vbuffer::BufferAtomicCmpswapB64Vbuffer(const MachineInst *
     : Vbuffer("buffer_atomic_cmpswap_b64", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicCmpswapB64Vbuffer>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata_return(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata_return;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  vdata_return.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
 }
@@ -1610,13 +1647,13 @@ void BufferAtomicCmpswapB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(data_base + 2, lane);
+    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
     std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = cu.read_vgpr(data_base + 3, lane);
+    uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 3, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
   }
   set_data(std::move(d));
@@ -1630,12 +1667,14 @@ BufferAtomicAddU64Vbuffer::BufferAtomicAddU64Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1662,9 +1701,9 @@ void BufferAtomicAddU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1678,12 +1717,14 @@ BufferAtomicSubU64Vbuffer::BufferAtomicSubU64Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1710,9 +1751,9 @@ void BufferAtomicSubU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1726,12 +1767,14 @@ BufferAtomicMinI64Vbuffer::BufferAtomicMinI64Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1758,9 +1801,9 @@ void BufferAtomicMinI64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1774,12 +1817,14 @@ BufferAtomicMinU64Vbuffer::BufferAtomicMinU64Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1806,9 +1851,9 @@ void BufferAtomicMinU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1822,12 +1867,14 @@ BufferAtomicMaxI64Vbuffer::BufferAtomicMaxI64Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1854,9 +1901,9 @@ void BufferAtomicMaxI64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1870,12 +1917,14 @@ BufferAtomicMaxU64Vbuffer::BufferAtomicMaxU64Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1902,9 +1951,9 @@ void BufferAtomicMaxU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1918,12 +1967,14 @@ BufferAtomicAndB64Vbuffer::BufferAtomicAndB64Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1950,9 +2001,9 @@ void BufferAtomicAndB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1966,12 +2017,14 @@ BufferAtomicOrB64Vbuffer::BufferAtomicOrB64Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1998,9 +2051,9 @@ void BufferAtomicOrB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2014,12 +2067,14 @@ BufferAtomicXorB64Vbuffer::BufferAtomicXorB64Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -2046,9 +2101,9 @@ void BufferAtomicXorB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2062,12 +2117,14 @@ BufferAtomicIncU64Vbuffer::BufferAtomicIncU64Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -2094,9 +2151,9 @@ void BufferAtomicIncU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2110,12 +2167,14 @@ BufferAtomicDecU64Vbuffer::BufferAtomicDecU64Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -2142,9 +2201,9 @@ void BufferAtomicDecU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2158,12 +2217,14 @@ BufferAtomicCondSubU32Vbuffer::BufferAtomicCondSubU32Vbuffer(const MachineInst *
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -2190,7 +2251,7 @@ void BufferAtomicCondSubU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -2204,12 +2265,14 @@ BufferAtomicMinNumF32Vbuffer::BufferAtomicMinNumF32Vbuffer(const MachineInst *in
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -2236,7 +2299,7 @@ void BufferAtomicMinNumF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -2250,12 +2313,14 @@ BufferAtomicMaxNumF32Vbuffer::BufferAtomicMaxNumF32Vbuffer(const MachineInst *in
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -2282,7 +2347,7 @@ void BufferAtomicMaxNumF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -2296,12 +2361,14 @@ BufferAtomicAddF64Vbuffer::BufferAtomicAddF64Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -2328,9 +2395,9 @@ void BufferAtomicAddF64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2344,12 +2411,14 @@ BufferAtomicAddF32Vbuffer::BufferAtomicAddF32Vbuffer(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -2376,7 +2445,7 @@ void BufferAtomicAddF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -2390,12 +2459,14 @@ BufferAtomicPkAddF16Vbuffer::BufferAtomicPkAddF16Vbuffer(const MachineInst *inst
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -2422,7 +2493,7 @@ void BufferAtomicPkAddF16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -2436,12 +2507,14 @@ BufferAtomicPkAddBf16Vbuffer::BufferAtomicPkAddBf16Vbuffer(const MachineInst *in
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -2468,7 +2541,7 @@ void BufferAtomicPkAddBf16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -2482,12 +2555,14 @@ BufferAtomicMinNumF64Vbuffer::BufferAtomicMinNumF64Vbuffer(const MachineInst *in
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -2514,9 +2589,9 @@ void BufferAtomicMinNumF64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2530,12 +2605,14 @@ BufferAtomicMaxNumF64Vbuffer::BufferAtomicMaxNumF64Vbuffer(const MachineInst *in
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &rsrc;
-  src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdata;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -2562,9 +2639,9 @@ void BufferAtomicMaxNumF64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
