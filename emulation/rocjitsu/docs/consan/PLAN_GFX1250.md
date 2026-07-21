@@ -109,7 +109,7 @@ flowchart TD
     XP0["XP0 DONE<br/>PyTorch/Triton TDM plus clustered-dispatch<br/>clean vertical passes all four profiles"]
     XP1["XP1 DONE<br/>torch.mode SuperCollider and Record/Replay<br/>full bundles accepted"]
     XP1B["XP1B DONE<br/>torch.mode Inline dynamic-LDS clean, paired,<br/>and reviewed-fault bundle accepted"]
-    XP1C["XP1C ACTIVE<br/>torch.mode Sampled clean accepted/blue;<br/>paired and reviewed-fault gates"]
+    XP1C["XP1C DONE<br/>torch.mode Sampled clean, paired,<br/>and reviewed-fault bundle accepted"]
     XP4["XP4 DONE<br/>tagged LDS atomic address token plus isolated-release<br/>classification pass torch.mode clean"]
     XP5["XP5 DONE<br/>histogram Inline paired and reviewed-fault bundle<br/>green at 175-access denominator"]
     XP6["XP6 DONE<br/>histogram Record/Replay paired and fault bundle<br/>green at 175-access denominator"]
@@ -299,10 +299,9 @@ flowchart TD
   classDef todo fill:#e8e8e8,stroke:#666666,color:#111111,stroke-width:1px
   classDef blocked fill:#9e2a2b,stroke:#ffd0d0,color:#ffffff,stroke-width:3px
 
-  class R0,E0,D0,C0,V0,B0,B1,B2,B3,B4,B5,S0,S1,S2,S3,S4,S5,S6,A0,A1,A2,A3A,A4A,SC0,RR0,SA0,IS0,IS1,F0,Q0,V1,V2,V3,V8,V4A,V4B,V4C,V4D,V5A,V5B,V6A,V6B,V7,VT,VD,VP,VW,X0,XP0,XP1,XP1B,XP2A,XP2C,XP4,XP5,XP6,XP7,XP8,XP9,XP10,XT1,XT2A,XT2B,XT2C1,XT3C,XT3D,XT4A,XT4 done
+  class R0,E0,D0,C0,V0,B0,B1,B2,B3,B4,B5,S0,S1,S2,S3,S4,S5,S6,A0,A1,A2,A3A,A4A,SC0,RR0,SA0,IS0,IS1,F0,Q0,V1,V2,V3,V8,V4A,V4B,V4C,V4D,V5A,V5B,V6A,V6B,V7,VT,VD,VP,VW,X0,XP0,XP1,XP1B,XP1C,XP2A,XP2C,XP4,XP5,XP6,XP7,XP8,XP9,XP10,XT1,XT2A,XT2B,XT2C1,XT3C,XT3D,XT4A,XT4 done
   class XP9B done
   class XT3B done
-  class XP1C active
   class G0,XP2B,XP2D,XP3,XP9C,XT2C2,XT2C3,XT3A,XT3E,XF,XG todo
 ```
 
@@ -351,6 +350,16 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP1C is DONE/green.  Paired artifact
+  `consan-green-expansion-20260721-pytorch-mode-sampled-overhead-072`
+  accepts 96.82/19,932.30/99.05 ms, or 203.53x against the mean baseline,
+  while repeating complete coverage.  Fresh inventory `...-073` retains the
+  reviewed selector.  Fault artifact `...-074` applies exactly one whole
+  barrier mutation, preserves the exact oracle with the precommitted
+  no-diagnosis outcome, covers all 28,939 accesses and 8,890 surviving barrier
+  members, completely cleans its 43.3 MB peak report, and passes target health
+  before and after.  Its Mermaid box is green; no XP1C box remains active.
 
 - 2026-07-21: XP1C advances to clean-complete/blue at commit `2dea78db37`.
   Clean-tree artifact
