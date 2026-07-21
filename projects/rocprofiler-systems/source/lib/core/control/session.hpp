@@ -8,7 +8,9 @@
 
 #include <atomic>
 #include <mutex>
+#include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace rocprofsys::control
@@ -46,22 +48,16 @@ public:
         return m_active.load(std::memory_order_relaxed);
     }
 
-    /// True iff every trigger except @p name has voted active or abstain.
-    /// Used where a trigger's own write decision must
-    /// also respect other triggers' votes without double-counting its own.
-    [[nodiscard]] bool is_active_excluding_trigger(std::string_view name) const noexcept;
-
 private:
-    std::vector<vote_entry> m_votes;
-    std::vector<subscriber> m_subscribers;
-    std::atomic<bool>       m_active{ true };
+    std::unordered_map<std::string, vote> m_votes;
+    std::vector<subscriber>               m_subscribers;
+    std::atomic<bool>                     m_active{ true };
 
     mutable std::mutex m_votes_mutex;
     std::mutex         m_subscribers_mutex;
     std::mutex         m_notify_mutex;
 
     [[nodiscard]] bool resolve_locked() const noexcept;
-    vote_entry&        find_or_insert_locked(std::string_view name, vote v);
     void               notify_pause();
     void               notify_resume();
 };
