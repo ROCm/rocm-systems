@@ -109,7 +109,7 @@ flowchart TD
     XP0["XP0 DONE<br/>PyTorch/Triton TDM plus clustered-dispatch<br/>clean vertical passes all four profiles"]
     XP1["XP1 DONE<br/>torch.mode SuperCollider and Record/Replay<br/>full bundles accepted"]
     XP1B["XP1B DONE<br/>torch.mode Inline dynamic-LDS clean, paired,<br/>and reviewed-fault bundle accepted"]
-    XP1C["XP1C ACTIVE<br/>torch.mode Sampled dirty clean run accepted;<br/>committed repetition pending"]
+    XP1C["XP1C ACTIVE<br/>torch.mode Sampled clean accepted/blue;<br/>paired and reviewed-fault gates"]
     XP4["XP4 DONE<br/>tagged LDS atomic address token plus isolated-release<br/>classification pass torch.mode clean"]
     XP5["XP5 DONE<br/>histogram Inline paired and reviewed-fault bundle<br/>green at 175-access denominator"]
     XP6["XP6 DONE<br/>histogram Record/Replay paired and fault bundle<br/>green at 175-access denominator"]
@@ -351,6 +351,13 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP1C advances to clean-complete/blue at commit `2dea78db37`.
+  Clean-tree artifact
+  `consan-green-expansion-20260721-pytorch-mode-sampled-semantic-clean-071`
+  accepts in 21.72 seconds with the exact oracle, static/dynamic completeness,
+  all 28,939 accesses, and all 8,892 barrier members.  XP1C remains the sole
+  ACTIVE/blue Mermaid box for paired overhead and reviewed-fault gates.
 
 - 2026-07-21: XP1C remains ACTIVE/blue, but its bottleneck has moved.  Reverse
   CFG-distance, interval, and final-lowering indexes reduce host-only
