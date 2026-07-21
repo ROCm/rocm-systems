@@ -6,6 +6,13 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Scoped knowledge observation store.** Trusted `analyze`, `diff`, and `ci`
+  orchestration now retains allowlisted predictions, trace analyses, and
+  measured comparisons in a project-namespaced SQLite database. Adds explicit
+  durable prediction receipts, current-scope READ_ONLY history tools,
+  `perfxpert knowledge` lifecycle commands, path redaction, quotas, and
+  cross-process prediction explanation. Retention is distinct from curated
+  YAML, RAG, and model training.
 - **Advanced specialist tools — 8 new READ_ONLY MCP tools.** The
   specialist fences now consume eight additional deterministic
   tools surfaced on the MCP wire:
@@ -63,9 +70,9 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `perfxpert_agent_latency_specialist`,
   `perfxpert_agent_diff_specialist`. Backend TUIs (Claude Code,
   Gemini CLI, Codex CLI, opencode) read the agent hierarchy as
-  reference in `AGENTS.md` and freely pick whichever of the **56**
+  reference in `AGENTS.md` and freely pick whichever of the **60**
   MCP tools matches the user's intent. Current MCP tool
-  inventory: **56** (8 agent-hierarchy + 48 classifier / knowledge
+  inventory: **60** (8 agent-hierarchy + 52 classifier / knowledge
   / advanced-specialist / trace_diff). Schemas remain frozen per
   `perfxpert/agents/schemas.py`.
 - **Public Python API (`perfxpert.api`).** 1:1 mirror of the 8 agent
@@ -107,7 +114,7 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   call a single `perfxpert_run_root_analysis` after
   `perfxpert_intent_classify`. The "MUST call
   `perfxpert_run_root_analysis`" contract is gone; backends choose
-  any of the 56 MCP tools based on intent. The tool-priority gate
+  any of the 60 MCP tools based on intent. The tool-priority gate
   still requires `perfxpert_intent_classify` as the first call.
 - **FallbackProvider exception taxonomy.** Documented the full
   typed-error set — `AuthError`, `RateLimitError`,

@@ -182,6 +182,21 @@ def main(argv=None):
     )
     _ci_cmd.add_args(ci_parser)
 
+    # ------------------------------------------------------------------
+    # knowledge subcommand
+    # ------------------------------------------------------------------
+    from perfxpert.cli import knowledge_cmd as _knowledge_cmd
+
+    knowledge_parser = subparsers.add_parser(
+        "knowledge",
+        help="Query and administer retained performance observations",
+        description=(
+            "Inspect, query, clear, or prune the project-namespaced local "
+            "knowledge observation store."
+        ),
+    )
+    _knowledge_cmd.add_args(knowledge_parser)
+
     if argv is None:
         argv = sys.argv[1:]
 
@@ -256,6 +271,8 @@ def main(argv=None):
         sys.exit(_diff_cmd.run_diff(args))
     elif args.subcommand == "ci":
         sys.exit(_ci_cmd.run_ci(args))
+    elif args.subcommand == "knowledge":
+        sys.exit(_knowledge_cmd.run_knowledge(args))
     else:
         parser.print_help()
         sys.exit(1)

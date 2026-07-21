@@ -9,7 +9,7 @@ tooling without running the MCP server.
 Cross-links:
 
 - [MCP server](../integration/mcp-server.md) — the same 8 agent tools
-  + 48 classifier / knowledge tools re-exposed over stdio JSON-RPC.
+  + 52 classifier / knowledge tools re-exposed over stdio JSON-RPC.
   **This API is the same surface as the MCP tools.**
 - [Agent hierarchy](../architecture/agent-hierarchy.md) — tier map,
   fence-slice pattern, and where each agent lives in source.
@@ -454,14 +454,40 @@ internally; each is also exposed over the MCP wire.
 | `pragma.lookup_pragmas` | `from perfxpert.tools.pragma import lookup_pragmas` | Enumerate the 3 allowlisted LLVM loop-hint pragmas (+ 7 rejected entries kept for fence visibility). |
 | `pragma.explain_pragma` | `from perfxpert.tools.pragma import explain_pragma` | Full catalog entry for a given `pragma_id`. |
 | `pragma.suggest_pragmas_for_kernel` | `from perfxpert.tools.pragma import suggest_pragmas_for_kernel` | Amdahl-gated pragma candidates for a hot kernel. |
-| `predict_impact.predict_change_impact` | `from perfxpert.tools.predict_impact import predict_change_impact` | Change-Impact Prediction: return `{predicted_speedup_range, confidence, rationale, roofline_delta, assumptions, source_citation, prediction_id}` for a baseline DB + kernel + change_type. Amdahl + tier-2 gates enforced internally. **Stub today — durable prediction store lands in a follow-up; status field surfaces "unsupported" when hit.** |
+| `predict_impact.predict_change_impact` | `from perfxpert.tools.predict_impact import predict_change_impact` | Pure Change-Impact Prediction: return `{predicted_speedup_range, confidence, rationale, roofline_delta, assumptions, source_citation, prediction_id}` for a baseline DB + kernel + change_type. The source-independent `prediction_id` is a full SHA-256 semantic identity. Amdahl + tier-2 gates are enforced internally. |
 | `predict_impact.list_supported_changes` | `from perfxpert.tools.predict_impact import list_supported_changes` | Enumerate the change_type ids in `knowledge/change_impact_models.yaml`. Returns `[{id, applies_to, required_metrics}]`. |
-| `predict_impact.explain_prediction` | `from perfxpert.tools.predict_impact import explain_prediction` | Re-hydrate a prediction by its `prediction_id`. In-process only today; durable store lands in a follow-up. |
+| `predict_impact.explain_prediction` | `from perfxpert.tools.predict_impact import explain_prediction` | Re-hydrate a prediction by its `prediction_id`, first from the exact in-process cache and then from a no-create current-project durable lookup. Durable provenance may be redacted according to policy. |
+| `knowledge_history.get_knowledge_observation` | `from perfxpert import api; api.get_knowledge_observation(...)` | Read one retained observation from the current project scope. |
+| `knowledge_history.query_knowledge` | `from perfxpert import api; api.query_knowledge(...)` | Exact current-project filters for retained prediction, trace-analysis, and run-comparison records. |
+| `knowledge_history.knowledge_stats` | `from perfxpert import api; api.knowledge_stats()` | Current-project retained record and observation counts. |
 
 All are READ_ONLY (safe for external callers) and deterministic
 (no LLM, no sudo, no live device access). The runtime-monitor parsers
 ingest a user-supplied JSON log — set `PERFXPERT_GPU_MONITOR_LOG=<path>`
 to let specialists pick it up automatically.
+
+### Explicit durable recording
+
+Persistence is separate from READ_ONLY computation:
+
+```python
+# SKIP-SAMPLE — illustrative local trace path
+from perfxpert.retention import predict_change_impact_durable
+
+prediction, receipt = predict_change_impact_durable(
+    "trace.db",
+    "my_kernel",
+    "vgpr_reduction",
+    {"kernel_time_pct": 0.4, "counter_data_available": True},
+)
+if receipt.persisted:
+    print(prediction["prediction_id"], receipt.record_id)
+```
+
+The writer returns `persisted`, `disabled`, `quota_exceeded`, or `error`.
+Cross-project query/clear/prune operations live under the explicit non-MCP
+`perfxpert.retention` administration API. See
+[knowledge retention](../architecture/knowledge-retention.md).
 
 ## See also
 

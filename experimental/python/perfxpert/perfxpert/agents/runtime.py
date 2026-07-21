@@ -19,6 +19,7 @@ import contextlib
 import os
 import threading
 import uuid
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Callable, Iterator, Optional
 
@@ -34,6 +35,14 @@ from perfxpert.agents import (
     schemas,
 )
 from perfxpert.runtime import ensure_not_recursive
+
+
+_LAST_PROVIDER_EXECUTION: ContextVar[tuple[Optional[str], Optional[str]]] = (
+    ContextVar(
+        "perfxpert_last_provider_execution",
+        default=(None, None),
+    )
+)
 
 
 # Defensive import — fallback registry keeps this module importable when
@@ -139,7 +148,20 @@ class AnalysisSession:
             candidate_key = self.api_key if provider == self.provider else None
             try:
                 with _override_provider_env(provider, candidate_key):
-                    return fn(provider)
+                    result = fn(provider)
+                from perfxpert.agents.framework import _resolve_model
+
+                resolved_model = _resolve_model(provider)
+                if provider == "opencode":
+                    resolved_model = (
+                        os.environ.get("PERFXPERT_AGENTS_MODEL_OPENCODE")
+                        or os.environ.get("PERFXPERT_LLM_MODEL")
+                        or "opencode-default"
+                    )
+                _LAST_PROVIDER_EXECUTION.set(
+                    (provider, resolved_model)
+                )
+                return result
             except (RateLimitError, TransientError) as exc:
                 last_retryable = exc
                 if idx == len(providers) - 1:
@@ -257,6 +279,16 @@ def _airgap_from_env() -> bool:
     return os.environ.get("PERFXPERT_AIRGAP", "0") == "1"
 
 
+def clear_last_provider_execution() -> None:
+    _LAST_PROVIDER_EXECUTION.set((None, None))
+
+
+def last_provider_execution() -> tuple[Optional[str], Optional[str]]:
+    """Return the provider/model that completed in the current context."""
+
+    return _LAST_PROVIDER_EXECUTION.get()
+
+
 def build_session(
     *,
     provider: Optional[str] = None,
@@ -305,4 +337,11 @@ def build_session(
     )
 
 
-__all__ = ["AnalysisSession", "build_session", "PROVIDER_REGISTRY", "DEFAULT_PROVIDER"]
+__all__ = [
+    "AnalysisSession",
+    "DEFAULT_PROVIDER",
+    "PROVIDER_REGISTRY",
+    "build_session",
+    "clear_last_provider_execution",
+    "last_provider_execution",
+]

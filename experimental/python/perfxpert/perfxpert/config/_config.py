@@ -33,6 +33,19 @@ class PerfXpertConfig(BaseModel):
     airgap: bool = Field(False, description="When true, skip all LLM calls (tools-only)")
     regression_threshold_pct: float = Field(3.0, ge=0.0, le=100.0)
     hot_kernel_coverage_pct: float = Field(80.0, ge=0.0, le=100.0)
+    knowledge_retention: bool = Field(
+        True,
+        description="Persist allowlisted performance observations at trusted orchestration boundaries",
+    )
+    knowledge_max_mb: int = Field(
+        256,
+        ge=1,
+        description="Maximum retained-knowledge database size in MiB",
+    )
+    knowledge_store_paths: bool = Field(
+        False,
+        description="Store full source paths in retained provenance instead of redacted display paths",
+    )
 
 
 def _coerce(value: str, hint: Any) -> Any:
@@ -53,6 +66,9 @@ _ENV_MAP = {
     "PERFXPERT_AIRGAP": ("airgap", bool),
     "PERFXPERT_REGRESSION_THRESHOLD_PCT": ("regression_threshold_pct", float),
     "PERFXPERT_HOT_KERNEL_COVERAGE_PCT": ("hot_kernel_coverage_pct", float),
+    "PERFXPERT_KNOWLEDGE_RETENTION": ("knowledge_retention", bool),
+    "PERFXPERT_KNOWLEDGE_MAX_MB": ("knowledge_max_mb", int),
+    "PERFXPERT_KNOWLEDGE_STORE_PATHS": ("knowledge_store_paths", bool),
 }
 
 

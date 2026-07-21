@@ -7,8 +7,6 @@ the hierarchy is callable from backend TUIs without a forced handoff.
 
 from __future__ import annotations
 
-import pytest
-
 from perfxpert.tools._class import ToolClass
 
 
@@ -67,13 +65,14 @@ def test_old_run_root_analysis_tool_is_gone() -> None:
     )
 
 
-def test_total_tool_count_is_56() -> None:
+def test_total_tool_count_is_60() -> None:
     """After the Phase-10 advanced-specialist work PLUS the RCCL / NIC
     communication-analysis additions PLUS the ``arch.lookup_peaks``
     dedupe (the ``sol.lookup_peaks`` + ``roofline.lookup_peaks`` aliases
     that resolved to the same callable were dropped in favor of the
-    canonical ``arch.lookup_peaks`` name), the registry holds 48
-    non-agent tools plus 8 agent tools -- 56 total.
+    canonical ``arch.lookup_peaks`` name), GPU discovery, and scoped retained
+    history readers, the registry holds 52 non-agent tools plus 8 agent tools
+    -- 60 total.
 
     Phase-10 advanced specialists (+9 over the prior baseline):
       +1 kernel_fusion.find_fusion_candidates
@@ -91,12 +90,16 @@ def test_total_tool_count_is_56() -> None:
     MCP-surface dedupe (-2 after the above):
       -1 sol.lookup_peaks      (was an alias of arch.lookup_peaks)
       -1 roofline.lookup_peaks (was an alias of arch.lookup_peaks)
+
+    Retained observation history (+3):
+      +3 knowledge_history.{get_knowledge_observation, query_knowledge,
+                             knowledge_stats}
     """
     from mcp_server._registry import discover_read_only_tools
 
     reg = discover_read_only_tools()
-    assert len(reg) == 56, (
-        f"expected 56 tools (48 non-agent + 8 agent); got {len(reg)}: "
+    assert len(reg) == 60, (
+        f"expected 60 tools (52 non-agent + 8 agent); got {len(reg)}: "
         f"{sorted(reg.keys())}"
     )
     # arch.lookup_peaks is the single canonical name; the sol / roofline

@@ -10,6 +10,7 @@ sub-systems.
 | Agent tier map — Root / Analysis / Recommendation / Correctness / specialists, plus the fence-slice prompt pattern | [agent-hierarchy.md](agent-hierarchy.md) | Contributors adding or modifying agents; integrators reading the code path |
 | 5-gate correctness cascade (middleware) — Compile, SOL, Bitwise, Regression, Test Anchors | [gate-cascade.md](gate-cascade.md) | Contributors touching correctness logic; reviewers validating anti-reward-hack invariants |
 | Multi-backend launcher contract — shared install/verify/spawn lifecycle for opencode, Claude Code, Gemini CLI, and Codex CLI | [backend-adapter.md](backend-adapter.md) | Contributors extending `perfxpert-code` or validating backend-specific behavior |
+| Scoped knowledge retention — observation identities, privacy, lifecycle, and the distinction from RAG/training | [knowledge-retention.md](knowledge-retention.md) | Contributors integrating persistence; users administering retained observations |
 
 ## See also
 

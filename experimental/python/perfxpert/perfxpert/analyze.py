@@ -461,6 +461,7 @@ def _splice_baseline_diff(
     new_db: str,
     output_format: str,
     top_kernels: int,
+    diff_result: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Append / splice a trace-diff section into ``report_text``.
 
@@ -477,15 +478,17 @@ def _splice_baseline_diff(
                     the closing ``</div></body></html>`` tags.
     """
     try:
-        from perfxpert.tools.trace_diff import diff_runs
         from perfxpert.cli.diff_cmd import render_diff
+        if diff_result is None:
+            from perfxpert.tools.trace_diff import diff_runs
+
+            diff_result = diff_runs(
+                baseline_db,
+                new_db,
+                top_kernels=int(top_kernels or 20),
+            )
     except Exception:
         return report_text  # best-effort; never crash analyze on diff failure
-
-    try:
-        diff_result = diff_runs(baseline_db, new_db, top_kernels=int(top_kernels or 20))
-    except Exception:
-        return report_text
 
     if output_format == "json":
         import json as _json_mod
@@ -811,6 +814,7 @@ _CATEGORY_TO_CHANGE_TYPE: Dict[str, str] = {
 def _attach_predictions_by_category(
     recs: List[Dict[str, Any]],
     *,
+    baseline_db: str,
     hotspots: List[Dict[str, Any]],
     primary_bottleneck: str,
     counter_data_available: bool,
@@ -876,7 +880,7 @@ def _attach_predictions_by_category(
             continue
         try:
             prediction = predict_impact.predict_change_impact(
-                baseline_db="",
+                baseline_db=baseline_db,
                 kernel_name=kernel_name,
                 change_type=target_change_type,
                 change_params={
@@ -902,6 +906,60 @@ def _attach_predictions_by_category(
     return out
 
 
+def _assemble_agentic_report(
+    root_output: Any,
+    *,
+    database_path: str = "",
+    analysis_payload: Optional[Dict[str, Any]] = None,
+    advanced: bool = False,
+) -> Dict[str, Any]:
+    """Merge agent and deterministic results before persistence or rendering."""
+
+    from .analysis.payload import merge_recommendations
+
+    def _read(name: str, default: Any) -> Any:
+        if isinstance(root_output, dict):
+            return root_output.get(name, default)
+        return getattr(root_output, name, default)
+
+    payload = analysis_payload or {}
+    narrative = _read("narrative", "") or ""
+    primary_bottleneck = _read("primary_bottleneck", "mixed") or "mixed"
+    warnings = list(_read("warnings", []) or [])
+    metadata = dict(_read("metadata", {}) or {})
+    llm_recs = list(_read("recommendations", []) or [])
+    det_recs = list(payload.get("recommendations_deterministic") or [])
+    merged_recs = merge_recommendations(llm_recs, det_recs)
+    merged_recs = _filter_advanced_recs(merged_recs, advanced=advanced)
+
+    hardware_counters = payload.get("hardware_counters") or {}
+    hotspots = payload.get("hotspots") or []
+    merged_recs = _attach_predictions_by_category(
+        merged_recs,
+        baseline_db=database_path,
+        hotspots=hotspots,
+        primary_bottleneck=primary_bottleneck,
+        counter_data_available=bool(hardware_counters.get("has_counters")),
+    )
+    return {
+        "narrative": narrative,
+        "primary_bottleneck": primary_bottleneck,
+        "warnings": warnings,
+        "metadata": metadata,
+        "time_breakdown": payload.get("time_breakdown") or {},
+        "hotspots": hotspots,
+        "memory_analysis": payload.get("memory_analysis") or {},
+        "hardware_counters": hardware_counters,
+        "kernel_resources": payload.get("kernel_resources") or {},
+        "api_overhead": payload.get("api_overhead") or {},
+        "thread_trace": payload.get("thread_trace"),
+        "tier0_findings": payload.get("tier0_findings"),
+        "roofline_points": payload.get("roofline"),
+        "communication": payload.get("communication"),
+        "merged_recs": merged_recs,
+    }
+
+
 def _format_agentic_output(
     root_output: Any,
     output_format: str,
@@ -909,6 +967,7 @@ def _format_agentic_output(
     database_path: str = "",
     analysis_payload: Optional[Dict[str, Any]] = None,
     advanced: bool = False,
+    assembled_report: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Render an agentic RootOutput + deterministic analysis payload.
 
@@ -931,58 +990,29 @@ def _format_agentic_output(
     no database-backed sections (i.e. ``--source-dir`` without ``-i``), the
     tier-0-specific formatters are used for a source-only report.
     """
-    from .analysis.payload import merge_recommendations, tier0_dict_to_ns
+    from .analysis.payload import tier0_dict_to_ns
 
-    def _read(name: str, default: Any) -> Any:
-        if isinstance(root_output, dict):
-            return root_output.get(name, default)
-        return getattr(root_output, name, default)
-
-    narrative = _read("narrative", "") or ""
-    llm_recs = list(_read("recommendations", []) or [])
-    primary_bottleneck = _read("primary_bottleneck", "mixed") or "mixed"
-    warnings = list(_read("warnings", []) or [])
-    metadata = dict(_read("metadata", {}) or {})
-
-    payload = analysis_payload or {}
-
-    time_breakdown = payload.get("time_breakdown") or {}
-    hotspots = payload.get("hotspots") or []
-    memory_analysis = payload.get("memory_analysis") or {}
-    hardware_counters = payload.get("hardware_counters") or {}
-    kernel_resources = payload.get("kernel_resources") or {}
-    api_overhead = payload.get("api_overhead") or {}
-    thread_trace = payload.get("thread_trace")
-    tier0_findings = payload.get("tier0_findings")
-    roofline_points = payload.get("roofline")
-    communication = payload.get("communication")  # Phase 10 RCCL / NIC
-    det_recs = list(payload.get("recommendations_deterministic") or [])
-
-    # Merge LLM + deterministic recommendations (dedupe by (type,target) or
-    # (category,issue)). LLM recs keep their verdict; deterministic citations
-    # / code snippets are carried across when they disambiguate the same rec.
-    merged_recs = merge_recommendations(llm_recs, det_recs)
-
-    # Phase 10: advanced-gate filter. When --advanced (or
-    # PERFXPERT_ADVANCED_RECS=1) is OFF, pragma recs never render —
-    # keeping default output clean while the pipeline itself stays
-    # stateless. See docs/guides/getting-started.md §4.1.
-    merged_recs = _filter_advanced_recs(merged_recs, advanced=advanced)
-
-    # Phase 10 — Change-Impact Prediction final-pass. Attach predicted
-    # speedup + confidence + source citation to the rec card whose
-    # category matches a named optimization technique in
-    # ``knowledge/change_impact_models.yaml``. See
-    # docs/guides/getting-started.md §4 "Predicted impact on
-    # recommendations".
-    merged_recs = _attach_predictions_by_category(
-        merged_recs,
-        hotspots=hotspots,
-        primary_bottleneck=primary_bottleneck,
-        counter_data_available=bool(
-            (hardware_counters or {}).get("has_counters")
-        ),
+    assembled = assembled_report or _assemble_agentic_report(
+        root_output,
+        database_path=database_path,
+        analysis_payload=analysis_payload,
+        advanced=advanced,
     )
+    narrative = assembled["narrative"]
+    primary_bottleneck = assembled["primary_bottleneck"]
+    warnings = assembled["warnings"]
+    metadata = assembled["metadata"]
+    time_breakdown = assembled["time_breakdown"]
+    hotspots = assembled["hotspots"]
+    memory_analysis = assembled["memory_analysis"]
+    hardware_counters = assembled["hardware_counters"]
+    kernel_resources = assembled["kernel_resources"]
+    api_overhead = assembled["api_overhead"]
+    thread_trace = assembled["thread_trace"]
+    tier0_findings = assembled["tier0_findings"]
+    roofline_points = assembled["roofline_points"]
+    communication = assembled["communication"]
+    merged_recs = assembled["merged_recs"]
 
     # Source-only path: dispatch entirely to the tier-0 formatters when
     # there is no DB-side data at all.
@@ -1647,6 +1677,44 @@ def _execute_agentic(
     # Get source_dir if provided (for Tier 0 analysis)
     source_dir = kwargs.get("source_dir")
 
+    source_paths: List[str] = []
+    if input is not None and hasattr(input, "_paths") and input._paths:
+        paths = input._paths if isinstance(input._paths, list) else [input._paths]
+        source_paths = [str(path) for path in paths]
+
+    from perfxpert.retention import (
+        SourceSnapshot,
+        build_retention_policy,
+        capture_directory_sources,
+        record_analysis,
+        record_comparison,
+        record_prediction,
+    )
+
+    retention_policy = None
+    analysis_source_snapshots = []
+    prediction_source_snapshots = []
+    try:
+        retention_policy = build_retention_policy(source_dir=source_dir)
+        if retention_policy.enabled:
+            analysis_source_snapshots = [
+                SourceSnapshot.capture(path, role="input", ordinal=index)
+                for index, path in enumerate(source_paths)
+            ]
+            prediction_source_snapshots = [
+                SourceSnapshot.capture(
+                    path,
+                    role="baseline" if index == 0 else "input",
+                    ordinal=0 if index == 0 else index - 1,
+                )
+                for index, path in enumerate(source_paths)
+            ]
+    except Exception as exc:
+        print(
+            f"warning: knowledge retention setup failed: {exc}",
+            file=sys.stderr,
+        )
+
     # Get custom prompt if provided. CLI emits `prompt` (argparse dest);
     # accept `custom_prompt` as a back-compat alias for library callers.
     custom_prompt = kwargs.get("prompt") or kwargs.get("custom_prompt")
@@ -1657,6 +1725,17 @@ def _execute_agentic(
     no_progress = bool(kwargs.get("no_progress", False))
     verbose = bool(kwargs.get("verbose", False))
     att_dir = kwargs.get("att_dir")
+    try:
+        att_source_snapshots = (
+            capture_directory_sources(att_dir, role="att_input")
+            if retention_policy is not None
+            and retention_policy.enabled
+            and att_dir
+            else []
+        )
+    except (OSError, ValueError):
+        att_source_snapshots = []
+    analysis_source_snapshots.extend(att_source_snapshots)
     top_kernels = int(kwargs.get("top_kernels") or 10)
     min_duration = float(kwargs.get("min_duration") or 0.0)
     analysis_options = {
@@ -1679,6 +1758,11 @@ def _execute_agentic(
     effective_provider = None if effective_airgap else llm_provider
     if effective_provider == "claude-code":
         effective_provider = "opencode"
+    retention_provider = effective_provider
+    if not effective_airgap and retention_provider is None:
+        from perfxpert.agents.runtime import DEFAULT_PROVIDER
+
+        retention_provider = DEFAULT_PROVIDER
     effective_api_key = None if effective_airgap else llm_api_key
 
     # Bug 3 — pre-flight auth check. Surface a clean ``AuthError`` BEFORE
@@ -1726,6 +1810,12 @@ def _execute_agentic(
     # exceptions (schema / wiring bugs, our own code) get wrapped as
     # RuntimeError with the "Agentic root analysis failed" diagnostic.
     from perfxpert.providers._exceptions import ProviderError
+    from perfxpert.agents.runtime import (
+        clear_last_provider_execution,
+        last_provider_execution,
+    )
+
+    clear_last_provider_execution()
     try:
         with progress_cm:
             root_output = perfxpert_api.agent_root(
@@ -1742,6 +1832,15 @@ def _execute_agentic(
         raise  # let __main__.main render clean one-liner
     except Exception as e:
         raise RuntimeError(f"Agentic root analysis failed: {e}") from e
+
+    actual_provider, actual_model = last_provider_execution()
+    if llm_active and actual_provider:
+        retention_provider = actual_provider
+    retention_model = (
+        actual_model
+        or analysis_options.get("llm_model")
+        or ("<provider-default>" if llm_active else None)
+    )
 
     # Tier-0 timing emit — only if the scan was the primary work AND it
     # took > 500 ms (per the phase-8 design).
@@ -1791,7 +1890,7 @@ def _execute_agentic(
             "metadata": {},
         }
 
-    # Format output according to requested format.
+    # Assemble one structured report before persistence and rendering.
     #
     # The legacy formatters (_format_as_markdown / _format_as_webview)
     # produce AMD-themed HTML and structured Markdown with headings.
@@ -1800,12 +1899,101 @@ def _execute_agentic(
     # emits a real HTML report (not a plaintext narrative).
     output_format = kwargs.get("output_format") or kwargs.get("format", "text")
     advanced_effective = _resolve_advanced_flag(kwargs.get("advanced"))
+    assembled_report = _assemble_agentic_report(
+        root_output,
+        database_path=database_path,
+        analysis_payload=analysis_payload,
+        advanced=advanced_effective,
+    )
+
+    retention_receipts = []
+    if source_paths and retention_policy is not None:
+        try:
+            analysis_receipt = record_analysis(
+                analysis_payload,
+                primary_bottleneck=assembled_report["primary_bottleneck"],
+                source_snapshots=analysis_source_snapshots,
+                options={
+                    **{
+                        key: value
+                        for key, value in analysis_options.items()
+                        if key != "att_dir"
+                    },
+                    "att_enabled": bool(att_dir),
+                    "att_file_count": sum(
+                        snapshot.role == "att_input"
+                        for snapshot in att_source_snapshots
+                    ),
+                    "provider": retention_provider,
+                    "airgap": effective_airgap,
+                    "llm_model": retention_model,
+                },
+                mode="llm" if llm_active else "deterministic",
+                model_derived=llm_active,
+                policy=retention_policy,
+            )
+        except Exception as exc:
+            print(
+                f"warning: analysis was not retained: {exc}",
+                file=sys.stderr,
+            )
+        else:
+            retention_receipts.append(analysis_receipt)
+
+        from perfxpert.tools import predict_impact as _predict_impact
+
+        seen_predictions = set()
+        for recommendation in assembled_report["merged_recs"]:
+            prediction_id = str(recommendation.get("prediction_id") or "")
+            if not prediction_id or prediction_id in seen_predictions:
+                continue
+            seen_predictions.add(prediction_id)
+            try:
+                prediction = _predict_impact.explain_prediction(prediction_id)
+            except Exception:
+                import warnings as _warnings
+
+                _warnings.warn(
+                    f"prediction {prediction_id!r} could not be rehydrated for retention",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                continue
+            if not prediction.get("baseline_db") and database_path:
+                prediction = {**prediction, "baseline_db": database_path}
+            try:
+                prediction_receipt = record_prediction(
+                    prediction,
+                    source_snapshots=prediction_source_snapshots,
+                    policy=retention_policy,
+                    mode="llm" if llm_active else "deterministic",
+                )
+            except Exception as exc:
+                print(
+                    f"warning: prediction was not retained: {exc}",
+                    file=sys.stderr,
+                )
+            else:
+                retention_receipts.append(prediction_receipt)
+
+    if retention_receipts:
+        assembled_report["metadata"]["knowledge_retention"] = [
+            receipt.to_dict() for receipt in retention_receipts
+        ]
+        for receipt in retention_receipts:
+            if receipt.status in {"error", "quota_exceeded"}:
+                print(
+                    f"warning: observation was not retained: {receipt.detail}",
+                    file=sys.stderr,
+                )
+
     output = _format_agentic_output(
         root_output,
         output_format,
         database_path=database_path,
         analysis_payload=analysis_payload,
         advanced=advanced_effective,
+        assembled_report=assembled_report,
     )
 
     # ``--baseline <db>`` splice (Confluence row #7 end-of-session recap).
@@ -1814,13 +2002,71 @@ def _execute_agentic(
     # effect of changes without a second command.
     baseline_db = kwargs.get("baseline_db")
     if baseline_db and database_path and os.path.exists(baseline_db):
-        output = _splice_baseline_diff(
-            output,
-            baseline_db=baseline_db,
-            new_db=database_path,
-            output_format=output_format,
-            top_kernels=top_kernels,
+        comparison_snapshots = (
+            [
+                SourceSnapshot.capture(
+                    baseline_db,
+                    role="baseline",
+                    ordinal=0,
+                ),
+                SourceSnapshot.capture(
+                    database_path,
+                    role="candidate",
+                    ordinal=0,
+                ),
+            ]
+            if retention_policy is not None and retention_policy.enabled
+            else []
         )
+        try:
+            from perfxpert.tools.trace_diff import diff_runs
+
+            diff_result = diff_runs(
+                baseline_db,
+                database_path,
+                top_kernels=int(top_kernels or 20),
+            )
+        except Exception:
+            diff_result = None
+        if diff_result is not None and retention_policy is not None:
+            try:
+                comparison_receipt = record_comparison(
+                    diff_result,
+                    baseline_db=baseline_db,
+                    new_db=database_path,
+                    top_kernels=top_kernels,
+                    source_snapshots=comparison_snapshots,
+                    policy=retention_policy,
+                )
+            except Exception as exc:
+                print(
+                    f"warning: comparison was not retained: {exc}",
+                    file=sys.stderr,
+                )
+            else:
+                if comparison_receipt.status in {"error", "quota_exceeded"}:
+                    print(
+                        f"warning: comparison was not retained: "
+                        f"{comparison_receipt.detail}",
+                        file=sys.stderr,
+                    )
+            output = _splice_baseline_diff(
+                output,
+                baseline_db=baseline_db,
+                new_db=database_path,
+                output_format=output_format,
+                top_kernels=top_kernels,
+                diff_result=diff_result,
+            )
+        elif diff_result is not None:
+            output = _splice_baseline_diff(
+                output,
+                baseline_db=baseline_db,
+                new_db=database_path,
+                output_format=output_format,
+                top_kernels=top_kernels,
+                diff_result=diff_result,
+            )
 
     # Handle output writing
     _ext_map = {"json": ".json", "markdown": ".md", "webview": ".html", "text": ".txt"}

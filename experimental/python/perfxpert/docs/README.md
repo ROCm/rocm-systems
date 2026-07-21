@@ -18,7 +18,7 @@ the map for everything that follows.
 | Area | Index |
 |------|-------|
 | User guides (install, formats, providers, MCP) | [guides/README.md](guides/README.md) |
-| Architecture (agent hierarchy, gate cascade, backend adapter) | [architecture/README.md](architecture/README.md) |
+| Architecture (agents, gates, backends, knowledge retention) | [architecture/README.md](architecture/README.md) |
 | Integration (MCP server, REST shim) | [integration/README.md](integration/README.md) |
 | Contributing (extension surfaces, governance, audit gate) | [contributing/README.md](contributing/README.md) |
 | RFCs (architectural change proposals) | [rfcs/README.md](rfcs/README.md) |
@@ -35,7 +35,8 @@ docs/
 │   ├── README.md            ← architecture sub-index
 │   ├── agent-hierarchy.md   ← Root → Analysis → Recommendation → specialists
 │   ├── gate-cascade.md      ← correctness gate + revert path
-│   └── backend-adapter.md   ← per-backend installer / verifier surface
+│   ├── backend-adapter.md   ← per-backend installer / verifier surface
+│   └── knowledge-retention.md ← scoped observation store; not RAG/training
 ├── guides/
 │   ├── README.md            ← guides sub-index
 │   ├── getting-started.md   ← install, run, formats, providers, troubleshooting
@@ -45,7 +46,7 @@ docs/
 │   └── assets/gifs/         ← checked-in guide demo recordings
 ├── integration/
 │   ├── README.md
-│   └── mcp-server.md        ← the MCP wire surface (56 tools)
+│   └── mcp-server.md        ← the MCP wire surface (60 tools)
 ├── contributing/
 │   ├── README.md            ← per-surface extension guides
 │   ├── tools.md, knowledge.md, providers.md, agents.md, mcp_tools.md,

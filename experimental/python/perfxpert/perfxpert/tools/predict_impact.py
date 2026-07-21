@@ -11,9 +11,8 @@ Three READ_ONLY MCP tools:
     (seeded from knowledge/change_impact_models.yaml).
 
   - explain_prediction(prediction_id)
-    Re-hydrates an in-process prediction by its id. Persistence is in-
-    process only for the MVP; Phase 11 will wire up a persistent event
-    store.
+    Re-hydrates an exact in-process prediction by its id, then falls back
+    to a no-create current-project retained-observation lookup.
 
 Hard rules (spec §6):
 
@@ -30,49 +29,77 @@ Tool class: READ_ONLY. No filesystem writes, no network access.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import sqlite3
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from perfxpert import __version__ as _PERFXPERT_VERSION
 from perfxpert.knowledge import load_yaml
+from perfxpert.retention.identity import (
+    PREDICTOR_SCHEMA_VERSION,
+    catalog_entry_hash,
+    semantic_prediction_id_from_context,
+)
+from perfxpert.retention.scope import resolve_scope_context
 from perfxpert.tools._class import ToolClass, tool_class
 
 
 # ---------------------------------------------------------------------------
-# In-process prediction store (Phase 11 will make this durable).
+# In-process prediction cache. Durable writes live outside this READ_ONLY tool.
 # ---------------------------------------------------------------------------
 
 _STORE_LOCK = threading.Lock()
-_PREDICTION_STORE: Dict[str, Dict[str, Any]] = {}
+_PREDICTION_STORE: Dict[tuple[str, str], Dict[str, Dict[str, Any]]] = {}
+_PREDICTION_IDENTITIES: Dict[str, Dict[str, Any]] = {}
 
 
-def _persist_prediction(prediction: Dict[str, Any]) -> str:
-    """Stash prediction under a deterministic id, return the id.
+def _cache_prediction(
+    prediction: Dict[str, Any],
+    *,
+    effective_params: Dict[str, Any],
+    catalog_entry: Optional[Dict[str, Any]],
+) -> str:
+    """Cache a prediction under its source-independent semantic identity."""
 
-    The id is a SHA-1 of the canonical payload so identical calls reuse
-    the same key. This is cheap, deterministic, and cross-platform stable.
-    """
-    canonical = json.dumps(
-        {
-            "change_type": prediction.get("change_type"),
-            "kernel_name": prediction.get("kernel_name"),
-            "baseline_db": prediction.get("baseline_db"),
-        },
-        sort_keys=True,
+    identity_context = {
+        "effective_params": dict(effective_params),
+        "catalog_hash": catalog_entry_hash(catalog_entry),
+        "producer_version": _PERFXPERT_VERSION,
+        "predictor_version": PREDICTOR_SCHEMA_VERSION,
+    }
+    pid = semantic_prediction_id_from_context(
+        prediction,
+        **identity_context,
     )
-    pid = hashlib.sha1(canonical.encode("utf-8")).hexdigest()[:16]
+    cached = dict(prediction)
+    cached["prediction_id"] = pid
+    scope_id = resolve_scope_context().scope_id
+    source_key = str(prediction.get("baseline_db") or "")
     with _STORE_LOCK:
-        _PREDICTION_STORE[pid] = prediction
+        previous_context = _PREDICTION_IDENTITIES.get(pid)
+        if previous_context is not None and previous_context != identity_context:
+            raise RuntimeError(f"prediction identity collision for {pid!r}")
+        _PREDICTION_IDENTITIES[pid] = identity_context
+        _PREDICTION_STORE.setdefault((scope_id, pid), {})[source_key] = cached
     return pid
+
+
+def _prediction_identity_context_for_retention(
+    prediction_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Return source-free identity metadata for explicit recorders."""
+
+    with _STORE_LOCK:
+        context = _PREDICTION_IDENTITIES.get(prediction_id)
+        return dict(context) if context is not None else None
 
 
 def _reset_store_for_tests() -> None:
     """Private helper — clears the prediction store. Tests only."""
     with _STORE_LOCK:
         _PREDICTION_STORE.clear()
+        _PREDICTION_IDENTITIES.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +163,12 @@ def _kernel_time_pct(baseline_db: str, kernel_name: str) -> Optional[float]:
     return match / total if total else None
 
 
-_COUNTER_TABLE_CANDIDATES = ("rocpd_counter_values", "counter_values", "COUNTER")
+_COUNTER_TABLE_CANDIDATES = (
+    "pmc_events",
+    "rocpd_counter_values",
+    "counter_values",
+    "COUNTER",
+)
 
 
 def _readonly_sqlite_uri(db_path: str) -> str:
@@ -241,7 +273,11 @@ def predict_change_impact(
             "kernel_name": kernel_name,
             "baseline_db": baseline_db,
         }
-        prediction["prediction_id"] = _persist_prediction(prediction)
+        prediction["prediction_id"] = _cache_prediction(
+            prediction,
+            effective_params={},
+            catalog_entry=None,
+        )
         return prediction
 
     catalog_lo = float(model["speedup_bounds"]["lo"])
@@ -274,7 +310,11 @@ def predict_change_impact(
             "kernel_name": kernel_name,
             "baseline_db": baseline_db,
         }
-        prediction["prediction_id"] = _persist_prediction(prediction)
+        prediction["prediction_id"] = _cache_prediction(
+            prediction,
+            effective_params={"kernel_time_pct": ktp},
+            catalog_entry=model,
+        )
         return prediction
 
     # ---- Tier-2 counter gate -----------------------------------------
@@ -300,7 +340,14 @@ def predict_change_impact(
             "kernel_name": kernel_name,
             "baseline_db": baseline_db,
         }
-        prediction["prediction_id"] = _persist_prediction(prediction)
+        prediction["prediction_id"] = _cache_prediction(
+            prediction,
+            effective_params={
+                "kernel_time_pct": ktp,
+                "counter_data_available": False,
+            },
+            catalog_entry=model,
+        )
         return prediction
 
     # ---- Build roofline delta (best-effort, optional) ----------------
@@ -340,7 +387,19 @@ def predict_change_impact(
         "kernel_name": kernel_name,
         "baseline_db": baseline_db,
     }
-    prediction["prediction_id"] = _persist_prediction(prediction)
+    effective_params: Dict[str, Any] = {
+        "kernel_time_pct": ktp,
+        "counter_data_available": True,
+    }
+    if isinstance(ai_before, (int, float)):
+        effective_params["arithmetic_intensity_before"] = float(ai_before)
+    if isinstance(ai_after, (int, float)):
+        effective_params["arithmetic_intensity_after"] = float(ai_after)
+    prediction["prediction_id"] = _cache_prediction(
+        prediction,
+        effective_params=effective_params,
+        catalog_entry=model,
+    )
     return prediction
 
 
@@ -371,21 +430,39 @@ def list_supported_changes() -> List[Dict[str, Any]]:
 def explain_prediction(prediction_id: str) -> Dict[str, Any]:
     """Re-hydrate a prediction previously returned by ``predict_change_impact``.
 
-    Phase 10 stores predictions in-process only — the ``prediction_id``
-    is only valid for the lifetime of the current Python process. Phase 11
-    will wire this to a durable event store.
+    The in-process cache preserves the exact prediction result. On a cache
+    miss, a no-create read of the current project's retained-observation store
+    provides a durable fallback when the prediction was explicitly persisted.
 
     Raises:
-        KeyError: when the id is unknown (typical cause: cross-process
-        call, or caller misplaced the id).
+        KeyError: when the id is unknown in both the process cache and current
+            project scope.
     """
+    scope_id = resolve_scope_context().scope_id
     with _STORE_LOCK:
-        if prediction_id not in _PREDICTION_STORE:
-            raise KeyError(
-                f"prediction_id {prediction_id!r} not found — "
-                "predictions persist in-process only in Phase 10."
-            )
-        return dict(_PREDICTION_STORE[prediction_id])
+        cached_by_source = _PREDICTION_STORE.get((scope_id, prediction_id))
+        if cached_by_source:
+            cached = dict(next(reversed(cached_by_source.values())))
+            if len(cached_by_source) > 1:
+                cached["baseline_db"] = ""
+                cached["provenance_redacted"] = True
+                cached["provenance_ambiguous"] = True
+            return cached
+
+    from perfxpert.retention.recorder import load_persisted_prediction
+
+    retained = load_persisted_prediction(prediction_id)
+    if retained is None:
+        raise KeyError(
+            f"prediction_id {prediction_id!r} not found in the process cache "
+            "or current project retention scope"
+        )
+    with _STORE_LOCK:
+        source_key = str(retained.get("baseline_db") or "")
+        _PREDICTION_STORE.setdefault((scope_id, prediction_id), {})[
+            source_key
+        ] = dict(retained)
+    return dict(retained)
 
 
 __all__ = [

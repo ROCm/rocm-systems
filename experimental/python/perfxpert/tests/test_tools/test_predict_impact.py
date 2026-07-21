@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from perfxpert.tools import predict_impact
@@ -31,6 +33,15 @@ def test_readonly_sqlite_uri_escapes_path_metacharacters(tmp_path):
 
 def test_baseline_has_counters_empty_path_returns_false():
     assert predict_impact._baseline_has_counters("") is False
+
+
+def test_baseline_has_counters_accepts_pmc_events(tmp_path):
+    trace = tmp_path / "trace.db"
+    with sqlite3.connect(trace) as conn:
+        conn.execute("CREATE TABLE pmc_events (counter_name TEXT)")
+        conn.execute("INSERT INTO pmc_events VALUES ('SQ_WAVES')")
+
+    assert predict_impact._baseline_has_counters(str(trace)) is True
 
 
 def test_predict_change_impact_vgpr_reduction_returns_bracket(tmp_path):

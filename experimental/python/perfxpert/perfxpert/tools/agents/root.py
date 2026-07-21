@@ -99,13 +99,16 @@ def agent_root(
         analysis_options=dict(analysis_options or {}),
     )
 
-    try:
-        output = session.run_root(payload, progress_callback=progress_callback)
-    except TypeError as exc:
-        if "progress_callback" in str(exc):
-            output = session.run_root(payload)
-        else:
-            raise
+    from perfxpert.agents._predict_attach import prediction_baseline_context
+
+    with prediction_baseline_context(database_path or ""):
+        try:
+            output = session.run_root(payload, progress_callback=progress_callback)
+        except TypeError as exc:
+            if "progress_callback" in str(exc):
+                output = session.run_root(payload)
+            else:
+                raise
 
     # RootOutput is a frozen Pydantic model; ``model_dump`` gives us the
     # documented schema-shaped dict. Fall back to attribute reads if the

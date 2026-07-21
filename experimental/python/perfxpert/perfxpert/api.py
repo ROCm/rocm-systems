@@ -1,10 +1,10 @@
-"""Public Python API for PerfXpert's agent hierarchy.
+"""Public Python API for PerfXpert agents and current-scope history readers.
 
-1:1 mirror of the MCP tools under :mod:`perfxpert.tools.agents`. Each
-callable exported here IS the same function the MCP server wraps — the
-Python API and the MCP surface share a single implementation. Use this
-module to embed PerfXpert's analysis brain in your own tooling without
-running the MCP server.
+Agent callables are a 1:1 mirror of the MCP tools under
+:mod:`perfxpert.tools.agents`. The retained-observation readers are the same
+current-project READ_ONLY functions exposed by MCP. Use this module to embed
+PerfXpert's analysis brain and exact history queries without running the MCP
+server.
 
 Examples:
     >>> from perfxpert import api
@@ -30,6 +30,11 @@ from perfxpert.tools.agents.latency import agent_latency_specialist
 from perfxpert.tools.agents.memory import agent_memory_specialist
 from perfxpert.tools.agents.recommendation import agent_recommendation
 from perfxpert.tools.agents.root import agent_root
+from perfxpert.tools.knowledge_history import (
+    get_knowledge_observation,
+    knowledge_stats,
+    query_knowledge,
+)
 from perfxpert.tools.trace_diff import diff_runs as trace_diff_diff_runs
 
 __all__ = [
@@ -42,4 +47,7 @@ __all__ = [
     "agent_latency_specialist",
     "agent_diff_specialist",
     "trace_diff_diff_runs",
+    "get_knowledge_observation",
+    "query_knowledge",
+    "knowledge_stats",
 ]

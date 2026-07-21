@@ -379,12 +379,16 @@ def build_analysis_payload(
     _progress("Running deterministic analysis (hotspots, memory, counters…)")
 
     database_path = ""
+    database_paths: List[str] = []
     if connection is not None and hasattr(connection, "_paths") and connection._paths:
         paths = connection._paths
-        database_path = str(paths[0] if isinstance(paths, list) else paths)
+        path_list = paths if isinstance(paths, list) else [paths]
+        database_paths = [str(path) for path in path_list]
+        database_path = database_paths[0]
 
     payload: Dict[str, Any] = {
         "database_path": database_path,
+        "database_paths": database_paths,
         "time_breakdown": {},
         "hotspots": [],
         "memory_analysis": {},
@@ -441,6 +445,19 @@ def build_analysis_payload(
         except Exception:
             payload["hardware_counters"] = {"has_counters": False, "metrics": {}, "counters": {}}
 
+        # Resolve GPU architecture once for provenance and downstream tools.
+        gfx_id = None
+        try:
+            cur = connection.execute(
+                "SELECT name FROM rocpd_info_agent WHERE type='GPU' LIMIT 1"
+            )
+            row = cur.fetchone()
+            if row and row[0]:
+                gfx_id = str(row[0])
+                payload["metadata"]["gfx_id"] = gfx_id
+        except Exception:
+            gfx_id = None
+
         # 4b. RCCL / NIC communication analysis (Phase 10). Populated only
         # when the trace actually contains RCCL spans OR RCCL-named kernels
         # (fallback). Key is left as ``None`` otherwise so formatters can
@@ -448,20 +465,6 @@ def build_analysis_payload(
         if database_path:
             try:
                 from perfxpert.tools.rccl_analysis import analyze_collectives
-
-                # Try to read the gfx_id from rocpd_info_agent. Best-effort;
-                # communication analysis still produces a useful shape
-                # without a peak (efficiency_pct just stays at 0).
-                gfx_id = None
-                try:
-                    cur = connection.execute(
-                        "SELECT name FROM rocpd_info_agent WHERE type='GPU' LIMIT 1"
-                    )
-                    row = cur.fetchone()
-                    if row and row[0]:
-                        gfx_id = str(row[0])
-                except Exception:
-                    gfx_id = None
 
                 comm = analyze_collectives(database_path, gfx_id=gfx_id)
                 if comm and comm.get("collectives"):

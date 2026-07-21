@@ -268,7 +268,7 @@ perfxpert doctor
 ![doctor](assets/gifs/03-doctor.gif)
 
 *`perfxpert doctor` end-to-end: Python check, MCP server reachable
-(56 tools registered), hosted/local/private LLM provider readiness,
+(60 tools registered), hosted/local/private LLM provider readiness,
 bundled opencode availability, `ALL CLEAN`.*
 
 Expected output ends with `ALL CLEAN` when everything is wired. The
@@ -276,7 +276,7 @@ doctor checks:
 
 - `perfxpert` version + Python ≥ 3.10
 - openai-agents SDK
-- MCP server reachable (`perfxpert-mcp` boots + 56 tools registered — 8 agent-hierarchy + 47 classifier/knowledge + 1 `trace_diff.diff_runs`)
+- MCP server reachable (`perfxpert-mcp` boots + 60 tools registered — 8 agent-hierarchy + 52 classifier/knowledge/history tools)
 - task store (`~/.perfxpert` or `$PERFXPERT_TASK_ROOT`)
 - patched opencode binary resolution + bundled opencode config dir
 - LLM providers configured (counts hosted/local/private providers against
@@ -300,11 +300,11 @@ agent runtime.
   a rocprofv3 `.db`, emits a single report (text / JSON / markdown /
   webview HTML). Deterministic with `--llm` omitted; LLM-augmented
   with `--llm {anthropic,openai,ollama,private,opencode}`.
-- **`perfxpert-mcp`** — stdio MCP server that re-exposes the 56
+- **`perfxpert-mcp`** — stdio MCP server that re-exposes the 60
   READ-ONLY analysis tools over JSON-RPC (8 agent-hierarchy entry
   points — Root, Analysis, Recommendation, Correctness, +3 technique
-  specialists, + diff specialist — plus 47 classifier / knowledge
-  tools and 1 `trace_diff.diff_runs`). Meant to be
+  specialists, + diff specialist — plus 52 classifier / knowledge /
+  retained-history tools). Meant to be
   spawned by an MCP client (Claude Desktop, Claude Code, Codex CLI,
   Gemini CLI, opencode). See `../integration/mcp-server.md`.
 - **`perfxpert-code`** — interactive TUI (the patched opencode
@@ -895,6 +895,14 @@ carries `predicted_impact_range`; the Live Roofline payload
 (`roofline` top-level key) then bumps it to `0.3.4`, and ATT data
 (when present) pins it at `0.4.0`.
 
+Batch analysis retains surfaced predictions and trace findings in the current
+project's local observation store by default. This is structured history, not
+model training or RAG. Inspect or manage it with `perfxpert knowledge stats`,
+`query`, `prune`, and `clear`; set `PERFXPERT_KNOWLEDGE_RETENTION=0` to disable
+new writes. Full paths are redacted unless
+`PERFXPERT_KNOWLEDGE_STORE_PATHS=1`. See
+[knowledge retention](../architecture/knowledge-retention.md).
+
 ## 5. Multi-GPU / MPI workflows
 
 **Correct pattern — MPI OUTSIDE, rocprofv3 INSIDE, per rank.** Each
@@ -1388,7 +1396,7 @@ See `python-api.md` for the full surface.
 
 ## 13. Connecting other MCP clients
 
-Any MCP-compatible client can consume the 56 READ-ONLY tools exposed
+Any MCP-compatible client can consume the 60 READ-ONLY tools exposed
 by `perfxpert-mcp` (8 agent-hierarchy entry points + 47
 classifier/knowledge tools + 1 `trace_diff.diff_runs`). Configuration snippets for Claude Desktop,
 Claude Code, Codex CLI, Gemini CLI, and generic stdio clients live in

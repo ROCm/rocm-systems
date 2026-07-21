@@ -13,8 +13,8 @@ native TUI with `perfxpert-mcp` already attached.
 This guide covers the user-visible surface. For the architectural
 contract every adapter satisfies, see
 [../architecture/backend-adapter.md](../architecture/backend-adapter.md).
-For the underlying MCP server (56 READ_ONLY tools — 8 agent-hierarchy
-entry points + 47 classifier/knowledge tools + 1 `trace_diff.diff_runs`),
+For the underlying MCP server (60 READ_ONLY tools — 8 agent-hierarchy
+entry points + 52 classifier/knowledge/history tools),
 see
 [../integration/mcp-server.md](../integration/mcp-server.md). The
 rationale for the Claude PreToolUse choice is captured in the local
@@ -24,7 +24,7 @@ Codex is captured in the local Codex hook-surface decision record.
 **Backend LLM freely picks tools.** There is no
 forced-call contract between `perfxpert_intent_classify` and any
 aggregator tool. The backend LLM reads the agent hierarchy as
-reference in `AGENTS.md` and calls whichever of the 56 MCP tools
+reference in `AGENTS.md` and calls whichever of the 60 MCP tools
 match the user's intent — it may invoke any agent-hierarchy tool
 (`perfxpert_agent_root`, `perfxpert_agent_analysis`,
 `perfxpert_agent_diff_specialist`, etc.) directly,
@@ -441,8 +441,8 @@ here.
 - [../architecture/backend-adapter.md](../architecture/backend-adapter.md)
   — the `BackendAdapter` protocol + lifecycle contract (contributors)
 - [../integration/mcp-server.md](../integration/mcp-server.md) —
-  underlying MCP server + 56 READ_ONLY tool list (8 agent-hierarchy
-  + 47 classifier/knowledge + 1 `trace_diff.diff_runs`)
+  underlying MCP server + 60 READ_ONLY tool list (8 agent-hierarchy
+  + 52 classifier/knowledge/history)
 - Local Claude hook-surface decision record — why Claude uses the
   native `PreToolUse` hook surface.
 - Local Codex hook-surface decision record — why Codex uses

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from perfxpert.agents import (
@@ -9,6 +11,10 @@ from perfxpert.agents import (
     latency_specialist as ls_module,
     memory_specialist as ms_module,
     schemas,
+)
+from perfxpert.agents._predict_attach import (
+    attach_predictions_to_techniques,
+    prediction_baseline_context,
 )
 from perfxpert.tools import predict_impact
 
@@ -178,3 +184,22 @@ def test_specialist_attach_preserves_unrelated_fields(monkeypatch):
     hit = result.techniques[0]
     assert hit["description"] == "my narrative"
     assert hit["expected_impact"] == 0.30
+
+
+def test_internal_context_supplies_baseline_without_public_hotspot_field(tmp_path):
+    trace = tmp_path / "trace.db"
+    trace.write_bytes(b"trace")
+    payload = SimpleNamespace(
+        hot_kernels=[{"name": "kernel", "percent_of_total": 40.0}],
+        counter_data={"counter": 1},
+    )
+
+    with prediction_baseline_context(str(trace)):
+        techniques = attach_predictions_to_techniques(
+            [{"name": "vgpr_reduction"}],
+            payload,
+        )
+
+    assert techniques[0]["prediction_id"]
+    explained = predict_impact.explain_prediction(techniques[0]["prediction_id"])
+    assert explained["baseline_db"] == str(trace)

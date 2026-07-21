@@ -75,6 +75,7 @@ _PERFXPERT_SUBCOMMANDS: "dict[str, str]" = {
     "init": "First-run wizard: detect GPU, write config, and suggest rocprofv3 commands",
     "diff": "Compare baseline vs new trace databases and emit a diff report",
     "ci": "CI wrapper over diff; returns non-zero on regressions above a threshold",
+    "knowledge": "Query and administer retained performance observations",
     "config": "Show or set perfxpert configuration (~/.config/perfxpert/config.yaml)",
     "doctor": "Health check: verify MCP server, LLM providers, and dependencies",
     "install-patches": "(deprecated) Build the patched opencode submodule into perfxpert/_bundled/opencode",
@@ -87,7 +88,7 @@ _PERFXPERT_SUBCOMMANDS: "dict[str, str]" = {
 # or handles inline. These must short-circuit BEFORE resolve_opencode_binary()
 # so they work on a fresh install without opencode on disk.
 _PERFXPERT_DISPATCH_SUBCOMMANDS = frozenset(
-    {"init", "diff", "ci", "doctor", "install-patches", "uninstall"}
+    {"init", "diff", "ci", "knowledge", "doctor", "install-patches", "uninstall"}
 )
 
 

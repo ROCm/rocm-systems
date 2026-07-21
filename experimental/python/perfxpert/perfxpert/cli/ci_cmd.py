@@ -83,14 +83,62 @@ def run_ci(args: argparse.Namespace) -> int:
         return 2
 
     from perfxpert.cli.diff_cmd import render_diff
+    from perfxpert.retention import (
+        SourceSnapshot,
+        build_retention_policy,
+        record_comparison,
+    )
     from perfxpert.tools.trace_diff import diff_runs
 
     threshold = resolve_ci_threshold(args.threshold)
+    policy = None
+    snapshots = []
+    try:
+        policy = build_retention_policy()
+        if policy.enabled:
+            snapshots = [
+                SourceSnapshot.capture(
+                    args.baseline_db,
+                    role="baseline",
+                    ordinal=0,
+                ),
+                SourceSnapshot.capture(
+                    args.new_db,
+                    role="candidate",
+                    ordinal=0,
+                ),
+            ]
+    except Exception as exc:
+        print(
+            f"warning: knowledge retention setup failed: {exc}",
+            file=sys.stderr,
+        )
     diff_result = diff_runs(
         args.baseline_db,
         args.new_db,
         top_kernels=getattr(args, "top_kernels", 20),
     )
+    if policy is not None:
+        try:
+            receipt = record_comparison(
+                diff_result,
+                baseline_db=args.baseline_db,
+                new_db=args.new_db,
+                top_kernels=getattr(args, "top_kernels", 20),
+                source_snapshots=snapshots,
+                policy=policy,
+            )
+        except Exception as exc:
+            print(
+                f"warning: comparison was not retained: {exc}",
+                file=sys.stderr,
+            )
+        else:
+            if receipt.status in {"error", "quota_exceeded"}:
+                print(
+                    f"warning: comparison was not retained: {receipt.detail}",
+                    file=sys.stderr,
+                )
     wall_pct = float(diff_result.get("wall_delta_pct", 0.0))
 
     sys.stdout.write(render_diff(diff_result, args.format))

@@ -23,10 +23,27 @@ returns zero-confidence or a null range.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Dict, List, Optional
 
 
 _CATALOG_IDS_CACHE: Optional[set] = None
+_PREDICTION_BASELINE_DB: ContextVar[str] = ContextVar(
+    "perfxpert_prediction_baseline_db",
+    default="",
+)
+
+
+@contextmanager
+def prediction_baseline_context(database_path: str):
+    """Provide internal baseline provenance without changing public schemas."""
+
+    token = _PREDICTION_BASELINE_DB.set(str(database_path or ""))
+    try:
+        yield
+    finally:
+        _PREDICTION_BASELINE_DB.reset(token)
 
 
 def _catalog_ids() -> set:
@@ -95,9 +112,16 @@ def attach_predictions_to_techniques(
         hot_kernels[0].get("baseline_db")
         or getattr(payload, "baseline_db", None)
         or getattr(payload, "database_path", None)
+        or _PREDICTION_BASELINE_DB.get()
         or ""
     )
-    kernel_time_pct = hot_kernels[0].get("pct") or hot_kernels[0].get("pct_total")
+    kernel_time_pct = (
+        hot_kernels[0].get("pct")
+        or hot_kernels[0].get("pct_total")
+        or hot_kernels[0].get("percent_of_total")
+    )
+    if isinstance(kernel_time_pct, (int, float)) and kernel_time_pct > 1.0:
+        kernel_time_pct = float(kernel_time_pct) / 100.0
 
     out: List[Dict[str, Any]] = []
     for technique in techniques:
@@ -139,4 +163,4 @@ def attach_predictions_to_techniques(
     return out
 
 
-__all__ = ["attach_predictions_to_techniques"]
+__all__ = ["attach_predictions_to_techniques", "prediction_baseline_context"]

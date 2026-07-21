@@ -75,7 +75,7 @@ with **dotted** names because that's what `discover_read_only_tools()`
 returns; the equivalent wire names have the dots replaced by
 underscores.
 
-## Tools exposed (56)
+## Tools exposed (60)
 
 Auto-discovered by `mcp_server._registry.discover_read_only_tools()`
 every boot. The registry walks `perfxpert.tools.*` modules but skips
@@ -124,7 +124,7 @@ Call it conversationally from any TUI backend ("diff this run against
 baseline.db", "what got slower since yesterday's trace?") instead of
 running `analyze` twice.
 
-### Snapshot: classifier / knowledge tools (48)
+### Snapshot: classifier / knowledge tools (52)
 
 Lower-level building blocks the agents themselves compose. External
 clients can call these directly when they want the raw classifier
@@ -148,6 +148,9 @@ gpu_runtime_monitor.parse_rocm_smi_json     # rocm-smi log parser
 intent.classify
 interconnect.lookup_peaks
 kernel_fusion.find_fusion_candidates        # Adjacent-short-kernel fusion
+knowledge_history.get_knowledge_observation # Current-scope retained record lookup
+knowledge_history.knowledge_stats           # Current-scope retention counts
+knowledge_history.query_knowledge           # Exact current-scope history filters
 memory.classify_cache_performance
 metrics.compute_gpu_utilization
 metrics.compute_hbm_bandwidth
@@ -180,6 +183,11 @@ tracelens.lookup_metrics
 unified_memory.analyze_paging               # MI300X paging / XCD penalty
 workflow.next_step
 ```
+
+The `knowledge_history.*` readers use no-create SQLite connections and are
+restricted to the MCP server's current project scope. MCP exposes no retention
+writer, clear/prune operation, migration path, or cross-project scope argument.
+See [knowledge retention](../architecture/knowledge-retention.md).
 
 `trace_diff.diff_runs` is the newest READ_ONLY tool (Confluence row
 #7): compares two rocpd databases and returns a schema-0.3.1 diff dict.
@@ -379,7 +387,7 @@ load-bearing for the security posture in spec §5.8.
 ## Client integration
 
 `perfxpert-mcp` speaks stdio MCP (JSON-RPC, protocol `2024-11-05`), so
-any MCP-compatible client can consume the 56 READ_ONLY tools. The
+any MCP-compatible client can consume the 60 READ_ONLY tools. The
 `command` field in every example below must resolve on the client's
 `PATH` — run `which perfxpert-mcp` to get an absolute path if your
 client launches with a narrower env than your login shell.
@@ -403,7 +411,7 @@ add a `perfxpert` entry under `mcpServers`:
 }
 ```
 
-Restart Claude Desktop. The 56 tools appear under the 🔌 panel with
+Restart Claude Desktop. The 60 tools appear under the 🔌 panel with
 `perfxpert_` name prefixes (underscored-on-the-wire — see §"Naming
 convention").
 

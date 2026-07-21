@@ -18,6 +18,9 @@ def test_defaults():
     assert c.airgap is False
     assert c.regression_threshold_pct == 3.0
     assert c.hot_kernel_coverage_pct == 80.0
+    assert c.knowledge_retention is True
+    assert c.knowledge_max_mb == 256
+    assert c.knowledge_store_paths is False
 
 
 def test_frozen_immutable():
@@ -72,12 +75,18 @@ def test_env_overrides(monkeypatch, tmp_path):
     monkeypatch.setenv("PERFXPERT_MAX_TOKENS", "4096")
     monkeypatch.setenv("PERFXPERT_FENCE_PROFILE", "full")
     monkeypatch.setenv("PERFXPERT_AIRGAP", "1")
+    monkeypatch.setenv("PERFXPERT_KNOWLEDGE_RETENTION", "0")
+    monkeypatch.setenv("PERFXPERT_KNOWLEDGE_MAX_MB", "128")
+    monkeypatch.setenv("PERFXPERT_KNOWLEDGE_STORE_PATHS", "yes")
     c = load_config()
     assert c.provider == "ollama"
     assert c.model == "llama3:70b"
     assert c.max_tokens == 4096
     assert c.fence_profile == "full"
     assert c.airgap is True
+    assert c.knowledge_retention is False
+    assert c.knowledge_max_mb == 128
+    assert c.knowledge_store_paths is True
 
 
 def test_yaml_file_loaded(monkeypatch, tmp_path):
