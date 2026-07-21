@@ -1234,7 +1234,15 @@ def _doctor(
         }
         for label, path in paths.items()
     }
-    required_tools = ("rocminfo",)
+    # PyTorch's runtime probe performs a numeric dispatch and reports the
+    # device architecture from the same process that loads the ConSan hook.
+    # Requiring a separately installed rocminfo for a PyTorch-only row adds no
+    # target assurance and can reject an otherwise complete wheel-based setup.
+    required_tools = (
+        ("rocminfo",)
+        if any(workload.kind != "pytorch" for workload in workloads)
+        else ()
+    )
     if any(workload.kind == "qwen" for workload in workloads):
         required_tools = TOOLS
     tools = {tool: shutil.which(tool) for tool in required_tools}

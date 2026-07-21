@@ -52,6 +52,10 @@ For compatibility with the original gfx1201 workspace, it also recognizes
 
 `iree-run-module`, `iree-benchmark-module`, and `rocminfo` are resolved from
 `PATH`; IREE is not vendored or found through a machine-specific build path.
+`rocminfo` is required by mixed and non-PyTorch campaigns.  A PyTorch-only
+doctor or row instead verifies the target through its stronger in-process
+numeric dispatch, device-architecture, and exact-hook mapping probe, so a
+prebuilt-wheel setup does not need a separate `rocminfo` installation.
 The Python used to launch the runner must be able to import the IREE Python
 bindings and their `numpy`/`ml_dtypes` dependencies needed by the Sharktank
 tests.  Launch the runner with that configured interpreter; putting a bare

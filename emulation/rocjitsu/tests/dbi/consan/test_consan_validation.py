@@ -461,6 +461,41 @@ class ConSanValidationTest(unittest.TestCase):
             "PyTorch HSA runtime did not load the ConSan hook", runtime["reasons"]
         )
 
+    def test_pytorch_only_doctor_uses_runtime_target_probe_without_rocminfo(
+        self,
+    ) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-compiled-softmax"]
+        with temporary_root() as workspace:
+            python = workspace / "consan-pytorch-venv" / "bin" / "python"
+            hook = (
+                workspace
+                / "rocjitsu-build/lib/rocjitsu/src/rocjitsu/hooks/"
+                "librocjitsu_dbi_hooks.so"
+            )
+            python.parent.mkdir(parents=True)
+            hook.parent.mkdir(parents=True)
+            python.touch()
+            hook.touch()
+            runtime = {
+                "ok": True,
+                "python": str(python),
+                "detail": {
+                    "arch": "gfx1201",
+                    "numeric_oracle": True,
+                    "hook_loaded": True,
+                },
+                "reasons": [],
+            }
+            with (
+                mock.patch.object(validation.shutil, "which", return_value=None),
+                mock.patch.object(
+                    validation, "_pytorch_runtime_probe", return_value=runtime
+                ),
+            ):
+                doctor = validation._doctor(workspace, "gfx1201", (workload.id,))
+        self.assertTrue(doctor["ok"])
+        self.assertEqual(doctor["tools"], {})
+
     def test_pytorch_cluster_workload_runs_once(self) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-cluster-load-sync"]
         with mock.patch.dict(
