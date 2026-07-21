@@ -49,6 +49,7 @@ set(TEST_SRC
     hipMallocHost.cc
     hipMemAllocHost.cc
     hipMallocManaged_MultiScenario.cc
+    hipManagedMultiGpuVaConsistency.cc
     hipMemsetNegative.cc
     hipMemset.cc
     hipMemset3D.cc

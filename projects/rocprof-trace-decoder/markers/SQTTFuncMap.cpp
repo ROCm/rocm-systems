@@ -45,10 +45,9 @@ void SQTTInstrumentPass::emitFuncMap(Module& M)
     };
     SmallVector<const MarkerRecord*, 8> rows[5];
     for (const MarkerRecord& entry : Markers) rows[rowFor(entry.Kind)].push_back(&entry);
-    std::sort(rows[0].begin(), rows[0].end(), [](const MarkerRecord* a, const MarkerRecord* b)
-    {
-        return a->ID < b->ID;
-    });
+    std::sort(
+        rows[0].begin(), rows[0].end(), [](const MarkerRecord* a, const MarkerRecord* b) { return a->ID < b->ID; }
+    );
 
     std::string mapData;
     if (ShaderClockBitsUsed > 0)
@@ -70,9 +69,9 @@ void SQTTInstrumentPass::emitFuncMap(Module& M)
         }
         for (const MarkerRecord* entry : rows[row])
         {
-            char kind = entry->Kind == MarkerKind::Kernel   ? 'K'
-                        : entry->Kind == MarkerKind::Function ? 'F'
-                        : entry->Kind == MarkerKind::UserScope ? 'U'
+            char kind = entry->Kind == MarkerKind::Kernel    ? 'K'
+                      : entry->Kind == MarkerKind::Function  ? 'F'
+                      : entry->Kind == MarkerKind::UserScope ? 'U'
                                                              : 'P';
             mapData += kind;
             mapData += ':';

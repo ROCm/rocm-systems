@@ -2611,6 +2611,9 @@ inline void execute_s_subb_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]
 }
 
 template <typename Inst>
+inline void execute_s_trap_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
+
+template <typename Inst>
 inline void execute_s_trunc_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   float result = util::trunc_scalar(
       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))));
@@ -10071,7 +10074,7 @@ inline void execute_v_div_scale_f64_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_dot2_f32_bf16_vop3p([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3P_DOT_F16();
+  ROCJITSU_TRY_SIMD_VOP3P_DOT_F16(BF16);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -10082,10 +10085,10 @@ inline void execute_v_dot2_f32_bf16_vop3p([[maybe_unused]] Inst &inst,
     bool sel1_lo = (inst.inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst.inst_.op_sel_hi >> 0) & 1;
     bool sel1_hi = (inst.inst_.op_sel_hi >> 1) & 1;
-    float a0 = util::f16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));
-    float a1 = util::f16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));
-    float b0 = util::f16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));
-    float b1 = util::f16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));
+    float a0 = util::bf16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));
+    float a1 = util::bf16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));
+    float b0 = util::bf16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));
+    float b1 = util::bf16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));
     if (inst.inst_.neg & 1)
       a0 = -a0;
     if (inst.inst_.neg & 2)
@@ -10107,7 +10110,7 @@ inline void execute_v_dot2_f32_bf16_vop3p([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_dot2_f32_f16_vop3p([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3P_DOT_F16();
+  ROCJITSU_TRY_SIMD_VOP3P_DOT_F16(F16);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))

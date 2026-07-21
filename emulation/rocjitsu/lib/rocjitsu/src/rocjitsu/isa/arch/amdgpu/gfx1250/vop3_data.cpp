@@ -516,7 +516,9 @@ VPermlane16SwapB32Vop3::VPermlane16SwapB32Vop3(const MachineInst *inst)
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   dst_operands_[1] = &src0;
-  num_src_ = 0;
+  src_operands_[0] = &vdst;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -558,21 +560,18 @@ void VPermlane16SwapB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       if (ex & (1ULL << ln))
         sdwa_old_dst_[ln] = amdgpu::RegisterAccess(wf).read_lane(vdst, ln);
   }
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
-                           dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
+    throw util::UnimplementedInst(mnemonic());
   uint32_t tmp_dst[64] = {}, tmp_src[64] = {};
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     tmp_dst[lane] = amdgpu::RegisterAccess(wf).read_lane(vdst, lane);
     tmp_src[lane] = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
   }
-  for (uint32_t lane = 0; lane < 16; ++lane) {
-    if (lane + 16 >= wf.wf_size())
-      break;
-    amdgpu::RegisterAccess(wf).write_lane(src0, lane, tmp_dst[lane + 16]);
-    amdgpu::RegisterAccess(wf).write_lane(vdst, lane + 16, tmp_src[lane]);
+  for (uint32_t base = 0; base + 16 < wf.wf_size(); base += 2u * 16) {
+    for (uint32_t i = 0; i < 16; ++i) {
+      amdgpu::RegisterAccess(wf).write_lane(src0, base + i, tmp_dst[base + 16 + i]);
+      amdgpu::RegisterAccess(wf).write_lane(vdst, base + 16 + i, tmp_src[base + i]);
+    }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
@@ -2690,7 +2689,8 @@ VWritelaneB32Vop3::VWritelaneB32Vop3(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(

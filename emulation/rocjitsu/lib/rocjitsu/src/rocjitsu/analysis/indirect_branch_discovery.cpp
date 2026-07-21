@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <cstring>
 #include <deque>
@@ -181,6 +182,50 @@ struct TempDeltaPattern {
   size_t instruction_count = 0;
 };
 
+/// @brief Compact SGPR-only write mask for the indirect-PC recovery pass.
+///
+/// @details This analysis only needs to know which scalar general-purpose
+/// registers an unmodeled instruction writes. Storing that local fact in a full
+/// RegisterSet causes recovery performance regressions because every
+/// invalidation scans SGPR, VGPR, and AccVGPR bitsets even though vector classes
+/// are irrelevant here. Keep two words instead and iterate only set SGPR bits.
+struct SgprWriteMask {
+  uint64_t lo = 0;
+  uint64_t hi = 0;
+
+  void set(uint16_t sgpr) {
+    if (sgpr < 64) {
+      lo |= uint64_t{1} << sgpr;
+    } else if (sgpr < REGISTER_SET_MAX_SGPRS) {
+      hi |= uint64_t{1} << (sgpr - 64);
+    }
+  }
+
+  void expand(RegisterRef ref) {
+    if (ref.cls != RegClass::SGPR)
+      return;
+    const uint16_t width = std::max<uint16_t>(1, ref.width);
+    for (uint16_t i = 0; i < width; ++i)
+      set(static_cast<uint16_t>(ref.index + i));
+  }
+
+  template <typename F> void for_each(F &&f) const {
+    uint64_t bits = lo;
+    while (bits != 0) {
+      const auto sgpr = static_cast<uint16_t>(std::countr_zero(bits));
+      f(sgpr);
+      bits &= bits - 1;
+    }
+
+    bits = hi;
+    while (bits != 0) {
+      const auto sgpr = static_cast<uint16_t>(64 + std::countr_zero(bits));
+      f(sgpr);
+      bits &= bits - 1;
+    }
+  }
+};
+
 /// @brief Cached per-instruction facts used by the analysis.
 ///
 /// @details Decoding instruction operands can be expensive on large code
@@ -196,7 +241,7 @@ struct InstructionFacts {
   std::optional<uint16_t> swappc_ssrc;
   std::optional<uint16_t> swappc_sdst;
   std::optional<uint16_t> call_sdst;
-  RegisterSet written_sgprs;
+  SgprWriteMask written_sgprs;
   bool written_sgprs_computed = false;
 };
 
@@ -525,8 +570,6 @@ private:
 }
 
 void record_written_sgpr_ref(InstructionFacts &facts, RegisterRef ref) {
-  if (ref.cls != RegClass::SGPR)
-    return;
   facts.written_sgprs.expand(ref);
 }
 
@@ -545,10 +588,9 @@ void record_written_sgprs(const Instruction &inst, InstructionFacts &facts) {
 
   RegisterSet implicit_defs;
   inst.implicit_defs(implicit_defs);
-  implicit_defs.for_each([&](RegisterRef ref) {
-    if (ref.cls == RegClass::SGPR)
-      record_written_sgpr_ref(facts, ref);
-  });
+  if (!implicit_defs.none()) {
+    implicit_defs.for_each([&](RegisterRef ref) { record_written_sgpr_ref(facts, ref); });
+  }
   facts.written_sgprs_computed = true;
 }
 
@@ -570,10 +612,7 @@ void invalidate_written_sgprs(AnalysisContext &ctx, size_t index, BlockState &st
   // processed normally.
   ensure_written_sgprs(ctx, index);
   const InstructionFacts &facts = ctx.facts[index];
-  facts.written_sgprs.for_each([&](RegisterRef ref) {
-    if (ref.cls == RegClass::SGPR)
-      state.invalidate_half(ref.index, protected_pair);
-  });
+  facts.written_sgprs.for_each([&](uint16_t sgpr) { state.invalidate_half(sgpr, protected_pair); });
 }
 
 [[nodiscard]] bool is_program_terminator(const Instruction &inst) {
