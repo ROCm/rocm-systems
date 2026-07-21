@@ -148,7 +148,7 @@ flowchart TD
     XT3L["XT3L DONE<br/>causal reduced-SGEMM Inline fault<br/>diagnosed; four-profile row green"]
     XT3M["XT3M DONE<br/>quick F8/HGEMM Inline resource retest;<br/>49/189 exact rows, zero failures"]
     XT3N["XT3N DONE<br/>quick F8 SuperCollider current paired<br/>fault and containment bundle green"]
-    XT3O["XT3O ACTIVE<br/>HGEMM Record/Replay cross-dispatch isolation;<br/>four false conflicts block stale-green refresh"]
+    XT3O["XT3O ACTIVE<br/>HGEMM Record/Replay isolation fixed;<br/>clean pass; paired acceptance remains"]
     XT3B["XT3B DONE<br/>quick-GEMM SuperCollider assessed;<br/>SGEMM first problem 12/12 exact and fully covered"]
     XT3G["XT3G DONE<br/>quick SGEMM Sampled first problem;<br/>12/12 exact, 640/640 accesses, 40/40 barriers"]
     XT3H["XT3H DONE<br/>quick SGEMM Inline assessed;<br/>first problem exact, aggregate dynamic incomplete"]
@@ -428,6 +428,14 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XT3O remains ACTIVE/blue, with its implementation and clean-run
+  blocker resolved in `6270cbbfd2`.  All 688 focused ConSan tests pass.  The
+  exact one-repetition HGEMM Record/Replay rerun exits cleanly in 202.26
+  seconds with the workload oracle passing, zero diagnostics, complete static
+  and dynamic analysis, and 7,812/7,812 access, 270/270 barrier, and 72/72
+  fence coverage.  A paired/reviewed-fault acceptance bundle is the remaining
+  evidence needed before promoting the node and matrix cell to DONE/green.
 
 - 2026-07-21: XT3O is ACTIVE/blue on the stale-orange HGEMM
   Record/Replay override.  The current exact client already completes with
