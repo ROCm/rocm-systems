@@ -43,6 +43,14 @@ namespace amdgpu {
 ///            the backing store so completed dispatches are globally visible.
 ///   - NT: Allocate in L2 (L1 is bypassed, but L2 still caches).
 ///
+/// Ordinary cache entries are keyed by (VMID, GPU virtual line), not resolved
+/// backing identity. Different aliases of the same backing line therefore keep
+/// independent cached copies. Functional write() stores update backing memory
+/// but do not invalidate other aliases; CC/UC access or explicit cache
+/// maintenance is required before an alias refetches that data. Dirty lines are
+/// written back through their owning VMID. Atomic RMW is intentionally stronger:
+/// GpuMemory resolves mapped aliases to one backing identity for serialization.
+///
 /// Serves as the backing store for both L1 Scalar (K$) and L1 Vector (V$).
 ///
 /// Provides structural ports for the topology graph (IN for CU L1 miss

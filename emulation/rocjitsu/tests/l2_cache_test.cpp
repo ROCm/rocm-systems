@@ -233,6 +233,59 @@ TEST(L2CacheThreadingTest, CrossL2AtomicRmwAliasedVasIsSerialized) {
   EXPECT_EQ(actual, kThreads * kIterations);
 }
 
+TEST(L2CacheTest, AliasedVasRequireCoherenceBoundary) {
+  GpuMemory memory("memory");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+
+  constexpr uint32_t kVmidA = 7;
+  constexpr uint32_t kVmidB = 8;
+  constexpr uint64_t kVaA = 0x100000;
+  constexpr uint64_t kVaB = 0x201000;
+
+  rocjitsu::KfdProcess process_a(kVmidA);
+  rocjitsu::KfdProcess process_b(kVmidB);
+  std::array<uint8_t, GpuMemory::PAGE_SIZE> backing{};
+  process_a.map_pages(kVaA, backing.data(), backing.size());
+  process_b.map_pages(kVaB, backing.data(), backing.size());
+  memory.register_process(kVmidA, &process_a.page_table_, &process_a.page_table_mutex_,
+                          process_a.page_table_generation());
+  memory.register_process(kVmidB, &process_b.page_table_, &process_b.page_table_mutex_,
+                          process_b.page_table_generation());
+
+  std::array<uint8_t, L2Cache::LINE_SIZE> initial{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> replacement{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> actual{};
+  initial.fill(0x11);
+  replacement.fill(0x22);
+  dirty.fill(0x33);
+
+  memory.write_block(kVaA, std::span<const uint8_t>(initial), kVmidA);
+  l2.read(kVaA, actual.data(), actual.size(), Mtype::RW, kVmidA);
+  ASSERT_EQ(actual, initial);
+  l2.read(kVaB, actual.data(), actual.size(), Mtype::RW, kVmidB);
+  ASSERT_EQ(actual, initial);
+
+  l2.write(kVaB, replacement.data(), replacement.size(), Mtype::RW, kVmidB);
+  l2.read(kVaA, actual.data(), actual.size(), Mtype::RW, kVmidA);
+  EXPECT_EQ(actual, initial);
+  l2.read(kVaA, actual.data(), actual.size(), Mtype::CC, kVmidA);
+  EXPECT_EQ(actual, replacement);
+
+  l2.writeback_line(kVaA, dirty.data(), Mtype::RW, kVmidA);
+  memory.read_block(kVaB, std::span<uint8_t>(actual), kVmidB);
+  EXPECT_EQ(actual, replacement);
+  l2.flush_line(kVaA, kVmidA);
+  memory.read_block(kVaB, std::span<uint8_t>(actual), kVmidB);
+  EXPECT_EQ(actual, dirty);
+
+  l2.read(kVaB, actual.data(), actual.size(), Mtype::RW, kVmidB);
+  EXPECT_EQ(actual, replacement);
+  l2.read(kVaB, actual.data(), actual.size(), Mtype::CC, kVmidB);
+  EXPECT_EQ(actual, dirty);
+}
+
 TEST(L2CacheThreadingTest, ConcurrentFlushAllPreservesDirtyWritebacks) {
   GpuMemory memory("memory");
   L2Cache l2("l2");
