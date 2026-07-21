@@ -192,8 +192,35 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
       __amd_copyBufferRectAligned(src, dst, srcRect, dstRect, size);
     }
 
+    // TODO: Once the sequential for-loop fix lands in llvm-project/amd/device-libs/opencl/src/misc/amdblit.cl
+    // (replacing get_global_id(0) with a for loop), revert this back to:
+    //   __amd_batchMemOp(params, count);
     __kernel void __amd_rocclr_batchMemOp(__global void* params, uint count) {
-      __amd_batchMemOp(params, count);
+      __global BatchMemOpParams* p = (__global BatchMemOpParams*)params;
+      for (uint i = 0; i < count; i++) {
+        switch (p[i].operation) {
+          case STREAM_WAIT_VALUE_32:
+            __amd_streamOpsWait((__global atomic_uint*)p[i].waitValue.address, NULL,
+                                (uint)p[i].waitValue.value, (uint)p[i].waitValue.flags,
+                                (ulong)~0UL);
+            break;
+          case STREAM_WRITE_VALUE_32:
+            __amd_streamOpsWrite((__global atomic_uint*)p[i].writeValue.address, NULL,
+                                 (uint)p[i].writeValue.value);
+            break;
+          case STREAM_WAIT_VALUE_64:
+            __amd_streamOpsWait(NULL, (__global atomic_ulong*)p[i].waitValue.address,
+                                (ulong)p[i].waitValue.value64, (uint)p[i].waitValue.flags,
+                                (ulong)~0UL);
+            break;
+          case STREAM_WRITE_VALUE_64:
+            __amd_streamOpsWrite(NULL, (__global atomic_ulong*)p[i].writeValue.address,
+                                 (ulong)p[i].writeValue.value64);
+            break;
+          default:
+            break;
+        }
+      }
     });
 
 const char* HipExtraSourceCode = BLIT_KERNELS(

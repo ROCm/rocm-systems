@@ -3569,19 +3569,32 @@ class hipGraphExternalSemWaitNode : public GraphNode {
 class hipGraphBatchMemOpNode : public GraphNode {
   hipBatchMemOpNodeParams batchMemOpNodeParam_;
 
+  void copyParams(const hipBatchMemOpNodeParams* src) {
+    delete[] batchMemOpNodeParam_.paramArray;
+    batchMemOpNodeParam_ = *src;
+    if (src->paramArray && src->count > 0) {
+      // Deep-copy paramArray — caller's array may be freed before graph replay.
+      batchMemOpNodeParam_.paramArray = new hipStreamBatchMemOpParams[src->count];
+      std::memcpy(batchMemOpNodeParam_.paramArray, src->paramArray,
+                  src->count * sizeof(hipStreamBatchMemOpParams));
+    }
+  }
+
  protected:
   // Copy constructor is needed for cloning the node, but it should not be used for any other
   // purpose. To prevent accidental misuse, the copy-assignment operator is deleted.
   hipGraphBatchMemOpNode(const hipGraphBatchMemOpNode& rhs) : GraphNode(rhs) {
-    batchMemOpNodeParam_ = rhs.batchMemOpNodeParam_;
+    batchMemOpNodeParam_.paramArray = nullptr;
+    copyParams(&rhs.batchMemOpNodeParam_);
   }
 
  public:
   hipGraphBatchMemOpNode(const hipBatchMemOpNodeParams* pNodeParams)
       : GraphNode(hipGraphNodeTypeBatchMemOp, "solid", "rectangle", "BATCH_MEM_OP_NODE") {
-    batchMemOpNodeParam_ = *pNodeParams;
+    batchMemOpNodeParam_.paramArray = nullptr;
+    copyParams(pNodeParams);
   }
-  ~hipGraphBatchMemOpNode() {}
+  ~hipGraphBatchMemOpNode() { delete[] batchMemOpNodeParam_.paramArray; }
 
   // Delete copy-assignment operator to prevent accidental copies causing unexpected behaviors.
   hipGraphBatchMemOpNode& operator=(const hipGraphBatchMemOpNode&) = delete;
@@ -3607,7 +3620,7 @@ class hipGraphBatchMemOpNode : public GraphNode {
   }
 
   hipError_t SetParams(const hipBatchMemOpNodeParams* pNodeParams) {
-    std::memcpy(&batchMemOpNodeParam_, pNodeParams, sizeof(hipBatchMemOpNodeParams));
+    copyParams(pNodeParams);
     return hipSuccess;
   }
 };
