@@ -28,6 +28,17 @@
 name: TheRock Multi-Arch CI
 
 on:
+  # TODO(geomin12): Remove push/pull_request after testing stage reuse
+  push:
+    branches:
+      - develop
+      - release/therock-*
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:

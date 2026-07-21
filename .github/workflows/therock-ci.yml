@@ -1,16 +1,17 @@
 name: TheRock CI
 
 on:
-  push:
-    branches:
-      - develop
-      - release/therock-*
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - labeled
+  # TODO(geomin12): Re-enable after testing stage reuse on multi-arch CI
+  # push:
+  #   branches:
+  #     - develop
+  #     - release/therock-*
+  # pull_request:
+  #   types:
+  #     - opened
+  #     - synchronize
+  #     - reopened
+  #     - labeled
   workflow_dispatch:
     inputs:
       projects:
