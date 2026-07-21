@@ -1062,14 +1062,14 @@ static bool setCUMask(uint32_t *pMask, mask_config_t maskConfig, uint32_t seMask
  * single *global* interleaved compaction across all (se, sa) of the XCC.
  *
  * Compacting each (se, sa) column independently is only equivalent when every
- * column has the same active-WGP count. When counts differ (harvested/inactive
- * WGPs), the surviving high-level slots of later columns shift, so a per-column
+ * column has the same active-WGP count. When counts differ (inactive WGPs),
+ * the surviving high-level slots of later columns shift, so a per-column
  * model writes bits at the wrong indices. Replicate KFD's enumeration instead:
  * for each surviving physical slot (se, sa, wgp) at global index k, request it
  * (set bit targetXcc + k*numXcc) iff the user asked for that (se, sa, wgp).
  *
- * A harvested WGP can sit at any position within a column, not just the top:
- * waves report the *physical* WGP index, so a mid-column harvest shows up as a
+ * An inactive WGP can sit at any position within a column, not just the top:
+ * waves report the *physical* WGP index, so a mid-column gap shows up as a
  * gap (e.g. physical WGPs 0-5,7 active with 6 missing). We therefore record the
  * ordered list of surviving physical WGPs per column and map KFD's compacted
  * slot k to the actual surviving physical WGP before consulting the user mask.
@@ -1374,28 +1374,17 @@ static void extendedCuMaskingXcc(int gpuNode, const std::string &nodeStr,
     uint32_t totalConfigTested = 0;
     const uint32_t randomCount = 250;   // per XCC
     /*
-     * Two WGP counts matter here:
-     *
-     *   gridWgpPerXcc - the addressing grid the mask is built on. numWGPperSA
-     *                   is the per-SA maximum applied uniformly to every SA, so
-     *                   the grid is SEsPerXcc * numSAperSE * numWGPperSA. This
-     *                   is what the ABI bit layout is sized to.
-     *   physWgpPerXcc - the WGPs that physically exist. The per-SA count is not
-     *                   uniform: only SA0 carries the top (numWGPperSA-th) WGP;
-     *                   every other SA holds one fewer, matching KFD's ABI which
-     *                   only reserves that top slot for sh==0. On gfx1250 that is
-     *                   9 WGPs on SA0 and 8 on SA1 -> 17/SE, 34/XCC (not 36).
-     *
-     * The extra grid slots on SA1+ are never real hardware, and additional
-     * harvested WGPs are discovered by the full-mask probe below.
+     * gridWgpPerXcc is the addressing grid the mask is built on. numWGPperSA is
+     * the per-SA maximum applied uniformly to every SA, so the grid is
+     * SEsPerXcc * numSAperSE * numWGPperSA. This is what the ABI bit layout is
+     * sized to. Grid slots that do not map to real hardware are discovered as
+     * inactive by the full-mask probe below.
      */
     const uint32_t gridWgpPerXcc = SEsPerXcc * numSAperSE * numWGPperSA;
-    const uint32_t physWgpPerXcc = gridWgpPerXcc - SEsPerXcc * (numSAperSE - 1);
 
     LOG() << nodeStr << " gfx12.1 multi-XCC CU masking: " << numXcc
-          << " XCCs, " << physWgpPerXcc << " WGPs/XCC (SA0=" << numWGPperSA
-          << ", other SAs=" << (numWGPperSA - 1)
-          << "; 1 bit/WGP interleaved)\n";
+          << " XCCs, " << gridWgpPerXcc
+          << " grid WGPs/XCC (1 bit/WGP interleaved)\n";
 
     for (uint32_t xcc = 0; xcc < numXcc; xcc++) {
         mask_config_t cfg = { maskNumDwords, maskNumBits, SEsPerXcc,
@@ -1418,16 +1407,11 @@ static void extendedCuMaskingXcc(int gpuNode, const std::string &nodeStr,
         /*
          * The full-mask probe drives every grid slot, so the slots that report
          * active are the WGPs that physically exist and are enabled. Anything in
-         * the grid that stays inactive is either a non-existent SA1+ top slot or
-         * a harvested WGP; report the active count against the physical total so
-         * the addressing grid is not mistaken for real hardware.
+         * the grid that stays inactive is a non-existent SA1+ top slot.
          */
         const uint32_t activeWgp = gridWgpPerXcc - inactiveCount;
-        const uint32_t harvested =
-            (physWgpPerXcc > activeWgp) ? (physWgpPerXcc - activeWgp) : 0;
         LOG() << nodeStr << " XCC " << xcc << " active WGPs: " << activeWgp
-              << " (of " << physWgpPerXcc << " physical, " << harvested
-              << " harvested)\n";
+              << " (of " << gridWgpPerXcc << " grid)\n";
 
         // All SE combinations (0 not allowed).
         for (uint32_t i = 1; i < (1u << SEsPerXcc); i++) {
@@ -1529,14 +1513,14 @@ void KFDQMTest::extendedCuMasking(int gpuNode) {
          * gfx12.1 (multi-XCC): KFD topology is WGP-granular and the CU mask ABI
          * is one bit per WGP. The physical WGP-per-SA count is NOT uniform on
          * these parts: SA0 can hold 9 WGPs and SA1 up to 8 (e.g. gfx1250/MI450 is
-         * 9/8 on SA0 and 8/7 on SA1, 34 physical slots, 2 harvested -> 32 active
-         * per XCC). KFD's per-XCC CU-mask ABI walks WGP levels (cu, sh, se) and a
+         * 9/8 on SA0 and 8/7 on SA1, 34 physical slots per XCC). KFD's per-XCC
+         * CU-mask ABI walks WGP levels (cu, sh, se) and a
          * 9th WGP of SA0 (cu == 8, sh == 0) is even mapped to a special hardware
          * slot. We therefore size the model to the per-SA *maximum* (NumCUPerArray,
          * which is WGP-granular here, e.g. 9) rather than the average
          * activeCU/(numSEs*numSAperSE) (which is 8 and truncates SA0's 9th WGP,
          * shifting every later ABI bit and dropping the last WGP). Shorter columns
-         * (SA1, harvested WGPs) are discovered as inactive by the full-mask probe.
+         * (SA1) are discovered as inactive by the full-mask probe.
          * Pre-gfx12.1 topology is CU-granular (two CUs per WGP), so convert.
          */
         const bool wgpGranular = (numXcc > 1);
