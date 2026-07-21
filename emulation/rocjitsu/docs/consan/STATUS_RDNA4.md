@@ -9,8 +9,10 @@ The last complete gfx1201 certificate was produced on 2026-07-16 at executable
 commit `640e575da2`, with hook SHA-256
 `c45aa0fece5a9aa7ef8b3ad24bcbb2077e477586df6b4eecf12990f7fafa693d`.  It is
 retained below as historical evidence, but it does not qualify the current
-branch.  This document was audited on 2026-07-21 at branch tip `de3f2270a0`.
-Current-tip qualification is in progress; cells below name the retained artifact
+branch.  The current certificate is being assembled for executable revision
+`aff4853917`, using hook SHA-256
+`876765e78818db9026f3670f1b48a920c9d784fda9c61b496f95dad79ff56272`.
+Current-tip qualification is in progress; cells below name retained artifacts
 when execution evidence has replaced the initial gray state.
 
 The executable authority is
@@ -79,7 +81,7 @@ workloads should be found.
 
 ## Current-tip requalification matrix
 
-Every cell begins gray because the intervening work changed shared decoding,
+Every cell began gray because the intervening work changed shared decoding,
 instrumentation builders, register allocation and spilling, branch-relay
 planning, synchronization admission, report sizing, hook composition, runtime
 cleanup, and the validation protocol.  Promotion must use one rebuilt current
@@ -87,9 +89,9 @@ tip; a successful smoke or an old artifact is insufficient.
 
 | Priority workload | SuperCollider | Record/Replay | Sampled | Inline Shadow | First current-tip gate |
 |---|---|---|---|---|---|
-| **P0 Qwen3-0.6B prefill** | 🟨 Clean accepted with complete 20/20 applicable accesses | 🟨 Clean accepted with complete 20/20 accesses + 14/14 barriers | 🟨 Clean accepted with complete 20/20 accesses + 26/26 applicable barriers | 🟧 Complete 20/20 accesses + 14/14 barriers, but a clean diagnostic rejects execution | `rdna4-de3f2270a0-clean-qwen-004`; paired overhead and fresh barrier fault next |
-| **P1 Sharktank TP1 prefill** | 🟨 Clean accepted with complete 352/352 applicable accesses | 🟨 Clean accepted with complete 352/352 accesses + 46/46 barriers | 🟨 Clean accepted with complete 352/352 accesses + 86/86 applicable barriers | 🟨 Clean accepted with complete 352/352 accesses + 46/46 barriers | `rdna4-de3f2270a0-clean-tp1-006`; paired overhead and fresh barrier fault next |
-| **P1 Sharktank TP1 decode/combined** | 🟨 Clean accepted with complete 704/704 applicable accesses | 🟨 Clean accepted with complete 704/704 accesses + 92/92 barriers | 🟨 Clean accepted with complete 704/704 accesses + 172/172 applicable barriers | 🟨 Clean accepted with complete 704/704 accesses + 92/92 barriers | `rdna4-de3f2270a0-clean-tp1-006`; paired overhead and fresh barrier fault next |
+| **P0 Qwen3-0.6B prefill** | 🟩 Clean 20/20; 1.004x; exact barrier drop detected and oracle fails | 🟩 Clean 20/20 + 14/14 barriers; 0.998x; exact drop is a qualified diagnostic miss and oracle fails | 🟩 Clean 20/20 + 26/26 applicable barriers; 1.001x; declared 32-offset sweep detects 15/32 and every oracle fails | 🟧 Complete 20/20 + 14/14, but a false-positive diagnostic rejects clean execution, preventing paired timing and fault qualification | Clean `rdna4-aff4853917-clean-llm-013`; overhead `-overhead-007`; inventory `-inventory-008`; faults `-fault-qwen-*-011` and `-012` |
+| **P1 Sharktank TP1 prefill** | 🟨 Clean 352/352; 1.238x; exact drop leaves oracle correct but expected instability diagnostic is absent | 🟨 Clean 352/352 + 46/46 barriers; 2.127x; exact drop unexpectedly diagnoses while oracle stays correct | 🟩 Clean 352/352 + 86/86 applicable barriers; 1.143x; exact drop is the precommitted qualified miss and oracle passes | 🟩 Clean 352/352 + 46/46 barriers; 2.735x; exact drop produces the precommitted diagnostic and oracle passes | Clean `rdna4-aff4853917-clean-llm-013`; overhead `-overhead-007`; inventory `-inventory-008`; fault `-fault-tp1-prefill-009` |
+| **P1 Sharktank TP1 decode/combined** | 🟨 Clean 704/704; 1.180x; exact drop leaves oracle correct but expected instability diagnostic is absent | 🟨 Clean 704/704 + 92/92 barriers; 1.580x; diagnostic miss matches but expected oracle corruption is absent | 🟩 Clean 704/704 + 172/172 applicable barriers; 1.132x; exact drop is the precommitted qualified miss and both oracles pass | 🟨 Clean 704/704 + 92/92 barriers; 1.841x; exact drop diagnoses where the frozen policy expected a qualified miss | Clean `rdna4-aff4853917-clean-llm-013`; overhead `-overhead-007`; inventory `-inventory-008`; fault `-fault-tp1-decode-010` |
 | **P2 Sharktank TP2 family** | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | Establish an untuned current baseline, then retain all-mode clean completeness and paired timing |
 | **P3 CLIP BF16** | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | Confirm the baseline remains practical on hardware; inventory both barrier-drop and barrier-move identities anew |
 | **P4 hip-moi D128 block attention** | 🟥 Clean patching crashes after `flat check/trap proof could not encode readback` | 🟧 Both exact host-reference tests pass and 12/12 accesses + 4/4 barriers patch; static analysis remains incomplete after wait-hazard preflight | 🟥 Clean patching crashes because sampled barrier sync cannot use its reserved entry island | 🟧 Both exact host-reference tests pass with complete 12/12 accesses + 4/4 barriers, but a false-positive diagnostic rejects the clean workload | `rdna4-c91323fc27-clean-001`; fix or qualify each distinct failure, then paired timing and contained barrier drop |
