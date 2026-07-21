@@ -2950,7 +2950,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "doctor":
             workload_ids = (
-                tuple(WORKLOAD_BY_ID) if args.workload == "all" else (args.workload,)
+                None if args.workload == "all" else (args.workload,)
             )
             result = _doctor(workspace, target, workload_ids)
             if args.json:

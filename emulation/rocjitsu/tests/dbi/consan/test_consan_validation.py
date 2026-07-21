@@ -181,6 +181,25 @@ class ConSanValidationTest(unittest.TestCase):
             jakub["path"].endswith("hip_moi_reference_gfx1250_jakub_matmul")
         )
 
+    def test_main_doctor_all_uses_target_filtered_workloads(self) -> None:
+        result = {
+            "ok": True,
+            "workspace": "/workspace",
+            "target": "gfx1201",
+            "paths": {},
+            "tools": {},
+        }
+        with (
+            mock.patch.object(
+                validation,
+                "_workspace_from_environment",
+                return_value=Path("/workspace"),
+            ),
+            mock.patch.object(validation, "_doctor", return_value=result) as doctor,
+        ):
+            self.assertEqual(validation.main(["--target", "gfx1201", "doctor"]), 0)
+        doctor.assert_called_once_with(Path("/workspace"), "gfx1201", None)
+
     def test_workload_doctor_requires_only_selected_corpus_and_tools(self) -> None:
         with temporary_root() as workspace:
             with mock.patch.object(validation.shutil, "which", return_value="/tool"):
