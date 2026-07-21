@@ -1323,6 +1323,15 @@ kmd_driver_t::check_version () const
         }
     }
 
+  /* Multi-GPU configurations are not supported on Windows.  */
+  if (m_agents.size () > 1)
+    {
+      warning ("GPU debugging on Windows supports only a single AMD GPU "
+	       "debug agent; %zu agents were detected.  GPU debugging will "
+	       "not be available.", m_agents.size ());
+      return AMD_DBGAPI_STATUS_ERROR_RESTRICTION;
+    }
+
   return AMD_DBGAPI_STATUS_SUCCESS;
 }
 
