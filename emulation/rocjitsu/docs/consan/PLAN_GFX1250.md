@@ -116,13 +116,13 @@ flowchart TD
     XP7["XP7 DONE<br/>histogram Sampled paired and fault bundle<br/>green at 175-access denominator"]
     XP8["XP8 DONE<br/>scatter all four profiles green;<br/>inapplicable fault families recorded as typed N/A"]
     XP2A["XP2A DONE<br/>torch.topk exact oracles and dense Record/Replay<br/>106/106 diagnostic vertical"]
-    XP2B["XP2B TODO<br/>torch.topk Sampled report fits;<br/>distinct construction bottleneck exceeds 180 seconds"]
+    XP2B["XP2B ACTIVE<br/>torch.topk Sampled report fits;<br/>profile post-index construction bottleneck"]
     XP2C["XP2C DONE<br/>torch.topk unrestricted Record/Replay exact/dynamic;<br/>113,760/160,848 accesses, all barriers"]
     XP2D["XP2D TODO<br/>torch.topk Record/Replay residual needs<br/>site/subgroup scalar routing"]
     XP3["XP3 TODO<br/>top-k SC oracle passes;<br/>current exact object has 88 bounded gaps"]
     XP9["XP9 DONE<br/>norm plus softmax Record/Replay clean, paired,<br/>and reviewed-fault bundle green"]
     XP9B["XP9B DONE<br/>norm plus softmax Sampled clean, paired,<br/>and reviewed-fault bundle green"]
-    XP9C["XP9C ACTIVE<br/>norm/softmax Inline clean and paired complete;<br/>reviewed-fault containment retry"]
+    XP9C["XP9C DONE<br/>norm/softmax Inline clean, paired,<br/>and reviewed-fault bundle green"]
     XP10["XP10 DONE<br/>cluster Record/Replay clean, paired, and reviewed-fault<br/>bundle accepted at 23/23 accesses and 2/2 barriers"]
     XT0["XT0 DONE<br/>RocJITsu corpus runner, provenance,<br/>and one-repetition contract"]
     XT1["XT1 DONE<br/>both compact P0 kernels green<br/>in all four profiles"]
@@ -299,10 +299,10 @@ flowchart TD
   classDef todo fill:#e8e8e8,stroke:#666666,color:#111111,stroke-width:1px
   classDef blocked fill:#9e2a2b,stroke:#ffd0d0,color:#ffffff,stroke-width:3px
 
-  class R0,E0,D0,C0,V0,B0,B1,B2,B3,B4,B5,S0,S1,S2,S3,S4,S5,S6,A0,A1,A2,A3A,A4A,SC0,RR0,SA0,IS0,IS1,F0,Q0,V1,V2,V3,V8,V4A,V4B,V4C,V4D,V5A,V5B,V6A,V6B,V7,VT,VD,VP,VW,X0,XP0,XP1,XP1B,XP1C,XP2A,XP2C,XP4,XP5,XP6,XP7,XP8,XP9,XP10,XT1,XT2A,XT2B,XT2C1,XT3C,XT3D,XT4A,XT4 done
+  class R0,E0,D0,C0,V0,B0,B1,B2,B3,B4,B5,S0,S1,S2,S3,S4,S5,S6,A0,A1,A2,A3A,A4A,SC0,RR0,SA0,IS0,IS1,F0,Q0,V1,V2,V3,V8,V4A,V4B,V4C,V4D,V5A,V5B,V6A,V6B,V7,VT,VD,VP,VW,X0,XP0,XP1,XP1B,XP1C,XP2A,XP2C,XP4,XP5,XP6,XP7,XP8,XP9,XP9C,XP10,XT1,XT2A,XT2B,XT2C1,XT3C,XT3D,XT4A,XT4 done
   class XP9B done
   class XT3B done
-  class XP9C active
+  class XP2B active
   class G0,XP2B,XP2D,XP3,XT2C2,XT2C3,XT3A,XT3E,XF,XG todo
 ```
 
@@ -351,6 +351,16 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP9C is DONE/green.  Reviewed fault artifact
+  `consan-green-expansion-20260721-norm-softmax-inline-component-spill-fault-084`
+  applies exactly one logical barrier mutation as two instruction rewrites,
+  observes the precommitted no-diagnosis/pass-oracle result, retains complete
+  surviving coverage at 4,756/4,756 accesses and 2,351/2,351 barriers, cleans
+  all 25,839,568 report bytes, and passes exact target health before and after.
+  The norm/softmax row is now green in all four columns.  The sole ACTIVE/blue
+  box rotates across engines to XP2B, the P0 top-k Sampled post-index patch-
+  construction bottleneck.
 
 - 2026-07-21: XP9C remains the sole ACTIVE/blue box with implementation,
   clean correctness, and paired overhead complete.  Clean-tree paired artifact
