@@ -1183,7 +1183,7 @@ auto rocshmem_api_ext_bf_records =
     std::deque<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t>{};
 auto hipfile_api_bf_records     = std::deque<rocprofiler_buffer_tracing_hipfile_api_record_t>{};
 auto hipfile_api_ext_bf_records = std::deque<rocprofiler_buffer_tracing_hipfile_api_ext_record_t>{};
-auto ompt_bf_records = std::deque<rocprofiler_buffer_tracing_ompt_record_t>{};
+auto ompt_bf_records            = std::deque<rocprofiler_buffer_tracing_ompt_record_t>{};
 auto kfd_page_migrate_event_records =
     std::deque<rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t>{};
 auto kfd_page_fault_event_records =
@@ -1912,7 +1912,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                        tool_tracing_callback,
                                                        nullptr),
         "rocshmem api callback tracing service configure");
-  
+
     ROCPROFILER_CALL(
         rocprofiler_configure_callback_tracing_service(hipfile_api_callback_ctx,
                                                        ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,

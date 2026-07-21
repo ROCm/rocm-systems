@@ -185,7 +185,7 @@ typedef enum rocprofiler_callback_tracing_kind_t  // NOLINT(performance-enum-siz
                                                          ///< ::rocprofiler_marker_core_range_api_id_t
     ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH,     ///< @see ::rocprofiler_hip_graph_operation_t
     ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API,  ///< rocSHMEM API tracing
-    ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,  ///< hipFILE API Tracing
+    ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,   ///< hipFILE API Tracing
     ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_callback_tracing_kind_t;
 
@@ -240,7 +240,7 @@ typedef enum rocprofiler_buffer_tracing_kind_t  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_HIP_GRAPH,              ///< One record per hipGraphLaunch invocation
     ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API,           ///< rocSHMEM tracing
     ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API_EXT,
-    ROCPROFILER_BUFFER_TRACING_HIPFILE_API,            ///< hipFILE tracing
+    ROCPROFILER_BUFFER_TRACING_HIPFILE_API,  ///< hipFILE tracing
     ROCPROFILER_BUFFER_TRACING_HIPFILE_API_EXT,
     ROCPROFILER_BUFFER_TRACING_LAST,
 
