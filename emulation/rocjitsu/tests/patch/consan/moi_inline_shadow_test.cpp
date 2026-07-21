@@ -968,6 +968,40 @@ TEST(ConSanMoi, Gfx1250InlineWorkgroupShadowCachesEvidenceInFreshScalarState) {
   EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
 }
 
+TEST(ConSanMoi, Gfx1250InlineWorkgroupShadowValidatesAtomicAccessCandidate) {
+  constexpr auto atomic =
+      gfx1250::build_vds(gfx1250::kDsAddU32Vds, {.offset0 = 12u, .addr = 2u, .data0 = 1u});
+  const std::array<uint32_t, 3> text_words = {atomic[0], atomic[1],
+                                              build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
+  std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "local_atomic_shadow");
+  append_kernel_metadata_note(bytes, "local_atomic_shadow",
+                              /*uses_dynamic_stack=*/false, /*sgpr_count=*/0u, std::nullopt,
+                              std::array<uint8_t, 3>{64u, 1u, 1u});
+  mutate_first_kernel_descriptor(bytes,
+                                 [](KD &descriptor) { descriptor.group_segment_fixed_size = 16u; });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_inline_workgroup_shadow = true;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.moi_candidates.size(), 1u);
+  EXPECT_EQ(result.moi_candidates.front().kind, ConSanLdsAccessKind::Atomic);
+  const auto exact_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
+           patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
+  });
+  ASSERT_NE(exact_patch, result.patches.end());
+  EXPECT_NE(exact_patch->workgroup_shadow_size, 0u);
+  EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
+}
+
 TEST(ConSanMoi, Gfx1250InlineGlobalShadowUsesLiteralDispatchIdAtFullScalarPressure) {
   std::vector<uint32_t> text_words(800, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 1});

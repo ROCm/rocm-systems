@@ -1301,8 +1301,8 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
           replacement_word != nop) {
         errors.emplace_back(
             "ConSan mutation proof did not replace the selected barrier at text offset " +
-            std::to_string(patch.anchor_offset) + " with s_nop 0 (replacement=" +
-            std::to_string(replacement_word) + ")");
+            std::to_string(patch.anchor_offset) +
+            " with s_nop 0 (replacement=" + std::to_string(replacement_word) + ")");
       }
       continue;
     }
@@ -2468,7 +2468,8 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
     if (patch.workgroup_shadow_size != 0u) {
       const auto candidate = std::ranges::find_if(result.moi_candidates, [&](const auto &item) {
         return item.text_offset == patch.anchor_offset &&
-               (item.kind == ConSanLdsAccessKind::Read || item.kind == ConSanLdsAccessKind::Write);
+               (item.kind == ConSanLdsAccessKind::Read || item.kind == ConSanLdsAccessKind::Write ||
+                item.kind == ConSanLdsAccessKind::Atomic);
       });
       const uint32_t minimum_cell_count =
           candidate == result.moi_candidates.end()
