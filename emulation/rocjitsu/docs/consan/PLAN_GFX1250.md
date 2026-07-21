@@ -129,7 +129,7 @@ flowchart TD
     XP3["XP3 DONE<br/>top-k SC 88-site residual bounded;<br/>scalar-continuation subsystem required"]
     XP3A["XP3A DONE<br/>SuperCollider scalar spill plus bidirectional continuation<br/>synthetic exact; real relay capacity bounded"]
     XP3B["XP3B DONE<br/>torch.sort Sampled clean plus paired accepted;<br/>two reviewed selectors remain noncausal"]
-    XP3C["XP3C ACTIVE<br/>torch.sort Sampled noncausal fault classification;<br/>precommit observed-stable pass expectation"]
+    XP3C["XP3C DONE<br/>torch.sort Sampled clean, paired, inventory, and<br/>reviewed noncausal fault bundle green"]
     XP9["XP9 DONE<br/>norm plus softmax Record/Replay clean, paired,<br/>and reviewed-fault bundle green"]
     XP9B["XP9B DONE<br/>norm plus softmax Sampled clean, paired,<br/>and reviewed-fault bundle green"]
     XP9C["XP9C DONE<br/>norm/softmax Inline clean, paired,<br/>and reviewed-fault bundle green"]
@@ -366,7 +366,7 @@ flowchart TD
   class XP3B done
   class XP3A done
   class XP5S,XP1A done
-  class XP3C active
+  class XP3C done
   class G0,V9,XP2D,XT2C2,XT2C3,XT3E,XT3I,XF,XG todo
 ```
 
@@ -415,6 +415,15 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP3C is DONE/green at `31c3d937c2`.  Two independently
+  precommitted fail-oracle selectors had already preserved `torch.sort`'s
+  exact oracle, so a new no-diagnosis/pass-oracle contract was frozen before
+  this run.  One-repetition clean and paired artifacts accept with complete
+  48,224/48,224 access and 12,064/12,064 barrier-member coverage at 171.77x.
+  Fresh inventory retains the selector, and the reviewed fault applies it
+  once, preserves the oracle without a diagnostic, and passes both target
+  health gates.  The Sampled sort STATUS cell and Mermaid box are green.
 
 - 2026-07-21: XP1A is DONE/green.  The XP5S atomic-exclusion admission fix
   also closes the `torch.mode` SuperCollider override with no residual emitter
