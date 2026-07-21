@@ -147,9 +147,9 @@ Capture wire version must match the `hrr-playback` reader (see DESIGN.md wire-fo
 
 ## Agent tooling
 
-Optional Cursor/agent skill for structured decode and triage lives at
-[skills/decode-and-triage/SKILL.md](skills/decode-and-triage/SKILL.md). It wraps the
-same `hrr-playback` workflow above; human users do not need it.
+Optional Cursor/agent skill: [skills/decode-and-triage/SKILL.md](skills/decode-and-triage/SKILL.md).
+Docker replay uses the image HRR stack by default; set `HRR_DOCKER_MOUNT_CLR=1` to overlay
+a host dev build (`CLR_BUILD` / `HRR_PLAYBACK`).
 
 ## Copyright
 

@@ -133,13 +133,6 @@ def _docker_cmd(*args: str) -> list[str]:
     return ["docker", *args]
 
 
-_DOCKER_ROC_LIB = (
-    "/opt/python/lib/python3.13/site-packages/_rocm_sdk_core/lib:"
-    "/opt/python/lib/python3.13/site-packages/_rocm_sdk_devel/lib:"
-    "/opt/rocm/lib"
-)
-
-
 def resolve_clr_lib_dir(
     *,
     clr_build: str | None = None,
@@ -334,10 +327,7 @@ def _parse_rocm_smi(text: str) -> tuple[int, list[str], list[str]]:
     return count, archs, names
 
 
-def probe_host_replay_env(
-    *,
-    clr_lib: Path | None = None,
-) -> ReplayEnvironment:
+def probe_host_replay_env() -> ReplayEnvironment:
     env = ReplayEnvironment(source="host")
     if shutil.which("rocm-smi"):
         proc = _run(["rocm-smi", "--showid", "--showproductname"])
@@ -351,11 +341,7 @@ def probe_host_replay_env(
         render_nodes = sorted(Path("/dev/dri").glob("renderD*"))
         if render_nodes:
             env.visible_gpus = len(render_nodes)
-    if clr_lib is not None:
-        env.hip_runtime_version = hip_version_from_clr_lib(clr_lib)
-        if env.hip_runtime_version:
-            env.source = f"host:mounted:{clr_lib}"
-    if env.hip_runtime_version is None and shutil.which("hipconfig"):
+    if shutil.which("hipconfig"):
         proc = _run(["hipconfig", "--version"])
         env.hip_runtime_version = _parse_hip_version(proc.stdout + proc.stderr)
     env.comgr_version = probe_comgr_version()
@@ -591,7 +577,7 @@ def main() -> int:
         docker_image=args.docker_image,
         clr_build=os.environ.get("CLR_BUILD"),
         hrr_playback=os.environ.get("HRR_PLAYBACK"),
-        clr_lib=args.clr_lib or os.environ.get("HRR_DOCKER_CLR_LIB"),
+        clr_lib=args.clr_lib,
         rocr_lib=args.rocr_lib or os.environ.get("ROCR_LIB"),
         extra_ld=os.environ.get("HRR_DOCKER_EXTRA_LD"),
         mount_clr=args.mode == "docker" and docker_mount_clr_enabled(),
@@ -620,7 +606,7 @@ def main() -> int:
             extra_ld=extra_ld,
         )
     else:
-        replay = probe_host_replay_env(clr_lib=clr_lib)
+        replay = probe_host_replay_env()
 
     if replay.visible_gpus is None:
         print(

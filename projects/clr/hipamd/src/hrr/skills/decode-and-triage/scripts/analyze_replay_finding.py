@@ -257,21 +257,7 @@ def run_archive_info(archive: Path, hrr_playback: str | None) -> str:
         return "[timeout running hrr-playback --info]"
 
 
-def parse_sweep_tsv(path: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    if not lines:
-        return rows
-    header = lines[0].split("\t")
-    for line in lines[1:]:
-        if not line.strip():
-            continue
-        cols = line.split("\t")
-        rows.append(dict(zip(header, cols)))
-    return rows
-
-
-def render_markdown(f: Finding, sweep: list[dict[str, Any]] | None = None) -> str:
+def render_markdown(f: Finding) -> str:
     lines = [
         "# HRR replay finding",
         "",
@@ -314,14 +300,6 @@ def render_markdown(f: Finding, sweep: list[dict[str, Any]] | None = None) -> st
     if f.notes:
         lines.extend(["", "## Notes"])
         lines.extend(f"- {n}" for n in f.notes)
-    if sweep:
-        lines.extend(["", "## Multi-run sweep"])
-        lines.append("| run | gpu | outcome | fault_addr |")
-        lines.append("|-----|-----|---------|------------|")
-        for r in sweep:
-            lines.append(
-                f"| {r.get('run','')} | {r.get('gpu','')} | {r.get('outcome','')} | {r.get('fault_addr','')} |"
-            )
     return "\n".join(lines) + "\n"
 
 
@@ -352,14 +330,13 @@ def main() -> int:
         "--log", action="append", default=[], help="Replay or capture log (repeatable)"
     )
     ap.add_argument("--archive", help="HRR archive pid-* directory for --info")
-    ap.add_argument("--sweep-tsv", help="multi-replay sweep summary TSV")
     ap.add_argument("--hrr-playback", help="Path to hrr-playback binary")
     ap.add_argument("--format", choices=("json", "markdown"), default="markdown")
     ap.add_argument("-o", "--output", help="Write report to file")
     args = ap.parse_args()
 
-    if not args.log and not args.archive and not args.sweep_tsv:
-        ap.error("provide --log, --archive, and/or --sweep-tsv")
+    if not args.log and not args.archive:
+        ap.error("provide --log and/or --archive")
 
     finding = Finding(outcome="UNKNOWN", fault_class="unknown")
     for log_path in args.log:
@@ -381,14 +358,10 @@ def main() -> int:
             )
             finding.sources.append(str(arch))
 
-    sweep = parse_sweep_tsv(Path(args.sweep_tsv)) if args.sweep_tsv else None
-    if sweep:
-        finding.notes.append(f"multi-replay sweep: {len(sweep)} runs")
-
     out = (
         json.dumps(finding.to_dict(), indent=2)
         if args.format == "json"
-        else render_markdown(finding, sweep)
+        else render_markdown(finding)
     )
     if args.output:
         Path(args.output).write_text(out, encoding="utf-8")
