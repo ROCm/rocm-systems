@@ -324,14 +324,144 @@ class TestGpuPartition(unittest.TestCase):
     # Uses clk_type_name instead of clk_type
     # Uses clk_limit_type_name instead of clk_limit_type
 
-    def test_set_gpu_memory_partition(self):
+    def test_set_gpu_memory_partition_return_codes(self):
+        """Verify that set accepts supported modes and rejects unsupported ones."""
         self.common.print_func_name("")
 
-        self.common.Test_Per_GPU_With_One_Enum(
-            amdsmi_set_gpu_memory_partition=amdsmi.amdsmi_set_gpu_memory_partition,
-            memory_partition_type=common.MEMORY_PARTITION_TYPES,
-        )
-        return
+        NPS_NAME_TO_TYPE = {
+            "NPS1": amdsmi.AmdSmiMemoryPartitionType.NPS1,
+            "NPS2": amdsmi.AmdSmiMemoryPartitionType.NPS2,
+            "NPS4": amdsmi.AmdSmiMemoryPartitionType.NPS4,
+            "NPS8": amdsmi.AmdSmiMemoryPartitionType.NPS8,
+        }
+
+        raise_exception = None
+        for i, gpu in enumerate(self.common.processors):
+            self.common.print_device_header(i)
+
+            # Read current partition for restore.
+            original_partition = None
+            msg = f"\t### amdsmi_get_gpu_memory_partition(gpu={i}):"
+            try:
+                original_partition = amdsmi.amdsmi_get_gpu_memory_partition(gpu)
+                self.common.print(msg, original_partition)
+            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                if self.common.check_ret(msg, e, self.common.PASS):
+                    raise_exception = e
+                continue
+
+            # Read hardware capabilities to build per-GPU condition map.
+            supported_modes = set()
+            msg = f"\t### amdsmi_get_gpu_memory_partition_config(gpu={i}):"
+            try:
+                config = amdsmi.amdsmi_get_gpu_memory_partition_config(gpu)
+                caps = config.get("partition_caps", [])
+                self.common.print(msg, caps)
+                supported_modes = {c for c in caps if c in NPS_NAME_TO_TYPE}
+            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                # Older kernels may not support config query; fall through with empty set.
+                self.common.print(msg, e)
+
+            # Attempt each NPS mode; condition is driven by hardware capabilities.
+            for mode_name, mode_type in NPS_NAME_TO_TYPE.items():
+                cond = self.common.PASS if mode_name in supported_modes else self.common.FAIL
+                msg = f"\t### amdsmi_set_gpu_memory_partition(gpu={i}, mode={mode_name}):"
+                try:
+                    amdsmi.amdsmi_set_gpu_memory_partition(gpu, mode_type)
+                    self.common.print(msg, "SUCCESS")
+                    if self.common.check_ret("", "", cond):
+                        raise_exception = amdsmi.AmdSmiLibraryException(0)
+                    if mode_type != amdsmi.AmdSmiMemoryPartitionType(
+                        list(NPS_NAME_TO_TYPE.values())[-1]
+                    ):
+                        self.common.print(
+                            f"\t   [info] Staged {mode_name}. Apply with: "
+                            "sudo modprobe -r amdgpu && sudo modprobe amdgpu",
+                            "",
+                        )
+                except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                    if self.common.check_ret(msg, e, cond):
+                        raise_exception = e
+
+            # Restore original partition (stages the write; driver reload applies it).
+            if original_partition and original_partition in NPS_NAME_TO_TYPE:
+                msg = f"\t### amdsmi_set_gpu_memory_partition restore(gpu={i}, mode={original_partition}):"
+                try:
+                    amdsmi.amdsmi_set_gpu_memory_partition(
+                        gpu, NPS_NAME_TO_TYPE[original_partition]
+                    )
+                    self.common.print(msg, "SUCCESS")
+                    self.common.print(
+                        f"\t   [info] Restore staged to {original_partition}. Apply with: "
+                        "sudo modprobe -r amdgpu && sudo modprobe amdgpu",
+                        "",
+                    )
+                except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                    if self.common.check_ret(msg, e, self.common.PASS):
+                        raise_exception = e
+
+        if raise_exception:
+            raise raise_exception
+
+    def test_set_gpu_memory_partition_idempotent(self):
+        """Setting the current partition mode must succeed and leave the read-back unchanged."""
+        self.common.print_func_name("")
+
+        NPS_NAME_TO_TYPE = {
+            "NPS1": amdsmi.AmdSmiMemoryPartitionType.NPS1,
+            "NPS2": amdsmi.AmdSmiMemoryPartitionType.NPS2,
+            "NPS4": amdsmi.AmdSmiMemoryPartitionType.NPS4,
+            "NPS8": amdsmi.AmdSmiMemoryPartitionType.NPS8,
+        }
+
+        raise_exception = None
+        for i, gpu in enumerate(self.common.processors):
+            self.common.print_device_header(i)
+
+            # Read current partition.
+            current_partition = None
+            msg = f"\t### amdsmi_get_gpu_memory_partition(gpu={i}):"
+            try:
+                current_partition = amdsmi.amdsmi_get_gpu_memory_partition(gpu)
+                self.common.print(msg, current_partition)
+            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                if self.common.check_ret(msg, e, self.common.PASS):
+                    raise_exception = e
+                continue
+
+            if current_partition not in NPS_NAME_TO_TYPE:
+                self.common.print(f"\t   [skip] Unknown partition mode: {current_partition}", "")
+                continue
+
+            # Set the same mode again — must succeed.
+            msg = f"\t### amdsmi_set_gpu_memory_partition idempotent(gpu={i}, mode={current_partition}):"
+            try:
+                amdsmi.amdsmi_set_gpu_memory_partition(gpu, NPS_NAME_TO_TYPE[current_partition])
+                self.common.print(msg, "SUCCESS")
+                self.common.check_ret("", "", self.common.PASS)
+            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                if self.common.check_ret(msg, e, self.common.PASS):
+                    raise_exception = e
+                continue
+
+            # Read back — value must be unchanged (no reload occurred).
+            msg = f"\t### amdsmi_get_gpu_memory_partition post-idempotent-set(gpu={i}):"
+            try:
+                post_partition = amdsmi.amdsmi_get_gpu_memory_partition(gpu)
+                self.common.print(msg, post_partition)
+                if post_partition != current_partition:
+                    self.common.print(
+                        f"\t   TEST FAILURE: partition changed from {current_partition} "
+                        f"to {post_partition} without a driver reload",
+                        "",
+                    )
+                    raise_exception = amdsmi.AmdSmiLibraryException(0)
+            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                if self.common.check_ret(msg, e, self.common.PASS):
+                    raise_exception = e
+
+        if raise_exception:
+            raise raise_exception
 
     def test_set_gpu_memory_partition_mode(self):
         self.common.print_func_name("")

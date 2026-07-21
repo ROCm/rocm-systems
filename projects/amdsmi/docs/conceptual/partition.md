@@ -693,7 +693,6 @@ int main() {
 
     // Step 4: Reload the driver -- required to apply the memory partition change.
     // Stop all GPU workloads first. The reload may reset the accelerator partition.
-    // some code to reload driver here?
 
     // Step 5: Re-initialize to pull in the updated topology (new device count/handles)
     amdsmi_shut_down();
@@ -766,7 +765,6 @@ amdsmi.amdsmi_set_gpu_memory_partition_mode(gpu, amdsmi.AmdSmiMemoryPartitionTyp
 
 # Step 4: Reload the driver -- required to apply the memory partition change.
 # Stop all GPU workloads first. The reload may reset the accelerator partition.
-# some code to reload driver here
 
 # Step 5: Re-initialize to pull in the updated topology (new device count/handles)
 amdsmi.amdsmi_shut_down()
