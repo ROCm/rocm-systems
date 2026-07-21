@@ -26,6 +26,9 @@
 #include <utility>
 #include <vector>
 
+#include <cstddef>
+#include <new>
+
 typedef gfx10::Token Token;
 
 namespace gfx11
@@ -148,7 +151,11 @@ enum EINST
     einst_final
 };
 
-static const std::unordered_map<int, mapped_inst_t> table_map_to_common_type{
+// clang-format off
+using InstructionTable = std::unordered_map<int, mapped_inst_t>;
+alignas(InstructionTable) static std::byte table_map_to_common_type_storage[sizeof(InstructionTable)];
+static const InstructionTable& table_map_to_common_type =
+    *::new (static_cast<void*>(table_map_to_common_type_storage)) InstructionTable{
     {(int) EINST::salu,               {WaveInstCategory::SALU, 1}            },
     {(int) EINST::smem_rd,            {WaveInstCategory::SMEM, 1}            },
     {(int) EINST::smem_wr,            {WaveInstCategory::SMEM, 1}            },
@@ -260,6 +267,7 @@ static const std::unordered_map<int, mapped_inst_t> table_map_to_common_type{
     {(int) EINST::vmem_other_simd_11, {WaveInstCategory::VMEM_OTHER_SIMD, 11}},
     {(int) EINST::vmem_other_simd_12, {WaveInstCategory::VMEM_OTHER_SIMD, 12}}
 };
+// clang-format on
 
 mapped_inst_t map_to_common_type(int einst, int dprate, int derate)
 {

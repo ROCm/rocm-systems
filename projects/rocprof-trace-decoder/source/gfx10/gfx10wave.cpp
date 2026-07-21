@@ -31,6 +31,9 @@
 #include "mi400/mi400wave.h"
 #include "segment.hpp"
 
+#include <cstddef>
+#include <new>
+
 #define INST_JUMP_TYPE 5
 #define INST_TRAP_TYPE 6
 #define INST_RFE_TYPE  117
@@ -129,7 +132,11 @@ enum EINST
     einst_final
 };
 
-static std::unordered_map<int, mapped_inst_t> table_map_to_common_type{
+// clang-format off
+using InstructionTable = std::unordered_map<int, mapped_inst_t>;
+alignas(InstructionTable) static std::byte table_map_to_common_type_storage[sizeof(InstructionTable)];
+static InstructionTable& table_map_to_common_type =
+    *::new (static_cast<void*>(table_map_to_common_type_storage)) InstructionTable{
     {(int) EINST::salu,              {WaveInstCategory::SALU, 1} },
     {(int) EINST::smem_rd,           {WaveInstCategory::SMEM, 1} },
     {(int) EINST::smem_wr,           {WaveInstCategory::SMEM, 1} },
@@ -209,6 +216,7 @@ static std::unordered_map<int, mapped_inst_t> table_map_to_common_type{
     {(int) EINST::subv_loop_begin,   {WaveInstCategory::SALU, 1} },
     {(int) EINST::subv_loop_end,     {WaveInstCategory::SALU, 1} }
 };
+// clang-format on
 
 mapped_inst_t map_to_common_type(int einst, int dprate, int derate)
 {

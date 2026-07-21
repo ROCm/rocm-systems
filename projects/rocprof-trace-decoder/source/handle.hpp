@@ -25,9 +25,12 @@
 
 #include <array>
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <new>
+#include <shared_mutex>
 #include <unordered_map>
 
 #ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
@@ -132,8 +135,10 @@ public:
 
     static std::unordered_map<uint64_t, std::shared_ptr<HandleData>>& get_map()
     {
-        static std::unordered_map<uint64_t, std::shared_ptr<HandleData>> map;
-        return map;
+        using Map = std::unordered_map<uint64_t, std::shared_ptr<HandleData>>;
+        alignas(Map) static std::byte storage[sizeof(Map)];
+        static Map* map = ::new (static_cast<void*>(storage)) Map{};
+        return *map;
     }
 
     static ReadLock<HandleData> get_read_handle(rocprof_trace_decoder_handle_t handle)
