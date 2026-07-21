@@ -87,13 +87,13 @@ class ConSanValidationTest(unittest.TestCase):
 
     def test_manifest_is_the_complete_north_star_matrix(self) -> None:
         manifest = validation._manifest("gfx1201")
-        self.assertEqual(len(manifest["workloads"]), 14)
+        self.assertEqual(len(manifest["workloads"]), 15)
         self.assertEqual(
             [profile["id"] for profile in manifest["profiles"]],
             list(validation.PROFILE_IDS),
         )
         self.assertEqual(
-            len({workload["id"] for workload in manifest["workloads"]}), 14
+            len({workload["id"] for workload in manifest["workloads"]}), 15
         )
         workloads = {workload["id"]: workload for workload in manifest["workloads"]}
         self.assertEqual(
@@ -105,6 +105,9 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(
             workloads["pytorch-rdna4-sdpa"]["targets"], ("gfx1201",)
         )
+        self.assertEqual(
+            workloads["pytorch-torch-histc"]["targets"], ("gfx1250", "gfx1201")
+        )
 
     def test_text_manifest_filters_target_specific_workloads(self) -> None:
         output = io.StringIO()
@@ -114,6 +117,7 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertIn("pytorch-rdna4-compiled-softmax", text)
         self.assertIn("pytorch-rdna4-llm-topk", text)
         self.assertIn("pytorch-rdna4-sdpa", text)
+        self.assertIn("pytorch-torch-histc", text)
         self.assertNotIn("pytorch-tdm-descriptor-add", text)
         self.assertNotIn("tensile-sk-mxf8gemm-explicit", text)
 

@@ -546,7 +546,11 @@ WORKLOADS = (
         tracks_atomics=True,
         overhead_processes=1,
         fault_families=("barrier-drop", "atomic-weaken-order", "atomic-weaken-scope"),
-        targets=("gfx1250",),
+        # This ordinary upstream operation is selected independently by each
+        # installed wheel.  The gfx1201 wheel chooses a native histogram
+        # kernel with LDS accesses, split barriers, and LDS atomics; target
+        # evidence and qualification remain separate.
+        targets=("gfx1250", "gfx1201"),
     ),
     Workload(
         id="pytorch-norm-softmax",
