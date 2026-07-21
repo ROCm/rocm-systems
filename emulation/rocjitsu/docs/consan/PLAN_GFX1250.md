@@ -108,7 +108,7 @@ flowchart TD
     X0["X0 DONE<br/>expansion corpus surveyed and<br/>aggregate four-profile contract defined"]
     XP0["XP0 DONE<br/>PyTorch/Triton TDM plus clustered-dispatch<br/>clean vertical passes all four profiles"]
     XP1["XP1 DONE<br/>torch.mode SuperCollider and Record/Replay<br/>full bundles accepted"]
-    XP1B["XP1B TODO<br/>torch.mode Inline static/oracle passes with contention gap;<br/>Sampled construction remains long"]
+    XP1B["XP1B ACTIVE<br/>torch.mode Inline dynamic-LDS mirror gap isolated;<br/>dynamic-LDS-aware shadow selection in progress"]
     XP4["XP4 DONE<br/>tagged LDS atomic address token plus isolated-release<br/>classification pass torch.mode clean"]
     XP5["XP5 DONE<br/>histogram Inline paired and reviewed-fault bundle<br/>green at 175-access denominator"]
     XP6["XP6 DONE<br/>histogram Record/Replay paired and fault bundle<br/>green at 175-access denominator"]
@@ -131,7 +131,7 @@ flowchart TD
     XT2C2["XT2C2 TODO<br/>004 Stream-K kernel 3/4;<br/>Inline long-bound completion remains"]
     XT2C3["XT2C3 TODO<br/>007 Stream-K kernel 3/4;<br/>Inline long-bound completion remains"]
     XT3A["XT3A TODO<br/>reduced SGEMM SC/RR/Sampled green;<br/>Inline backend-dependent and long"]
-    XT3B["XT3B ACTIVE<br/>HGEMM reaches 136 exact rows at 300 seconds;<br/>F8 SuperCollider fault health under bounded review"]
+    XT3B["XT3B DONE<br/>quick-GEMM SuperCollider assessment bounded;<br/>HGEMM duration and two F8 fault-health sites recorded"]
     XT3D["XT3D DONE<br/>full SGEMM first problem complete;<br/>quadratic 115,776-event frontier isolated"]
     XT3E["XT3E TODO<br/>both emulator baselines prove intrinsic full-grid bound;<br/>substantially longer unrestricted RR run remains"]
     XT3C["XT3C DONE<br/>SPMM F8 Sampled exact client passes;<br/>19,960 accesses and 806 barrier members covered"]
@@ -298,8 +298,9 @@ flowchart TD
 
   class R0,E0,D0,C0,V0,B0,B1,B2,B3,B4,B5,S0,S1,S2,S3,S4,S5,S6,A0,A1,A2,A3A,A4A,SC0,RR0,SA0,IS0,IS1,F0,Q0,V1,V2,V3,V8,V4A,V4B,V4C,V4D,V5A,V5B,V6A,V6B,V7,VT,VD,VP,VW,X0,XP0,XP1,XP2A,XP2C,XP4,XP5,XP6,XP7,XP8,XP9,XP10,XT1,XT2A,XT2B,XT2C1,XT3C,XT3D,XT4A,XT4 done
   class XP9B done
-  class XT3B active
-  class G0,XP1B,XP2B,XP2D,XP3,XP9C,XT2C2,XT2C3,XT3A,XT3E,XF,XG todo
+  class XT3B done
+  class XP1B active
+  class G0,XP2B,XP2D,XP3,XP9C,XT2C2,XT2C3,XT3A,XT3E,XF,XG todo
 ```
 
 Broader partial-EXEC, dynamic-stack, high-register, cache/fence-shape, and
@@ -347,6 +348,18 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP1B returns to ACTIVE after the latest `torch.mode` Inline
+  experiment replaced its earlier contention hypothesis with an actionable
+  cause.  Increasing the exact-shadow bank count from 32 to 128 leaves all
+  13,342 undercoverage events unchanged and is fully reverted.  The captured
+  object declares a 2-byte fixed group segment and a hidden dynamic-LDS
+  argument, while the executed dispatch supplies 1,540 group bytes; the
+  current local mirror is sized from the descriptor alone.  Dynamic-LDS-aware
+  local/external shadow selection is now the active fix.  XT3B is DONE as a
+  bounded assessment: HGEMM's clean duration boundary and two independently
+  selected F8 barrier-drop sites are recorded, with both F8 mutations losing
+  postflight device health and no third-site repetition justified.
 
 - 2026-07-21: XT3C is DONE and its Sampled matrix cell advances to blue.  The
   former unrestricted assertion came from a mode-zero barrier cave entering
