@@ -120,7 +120,8 @@ flowchart TD
     XP2C["XP2C DONE<br/>torch.topk unrestricted Record/Replay exact/dynamic;<br/>113,760/160,848 accesses, all barriers"]
     XP2D["XP2D TODO<br/>torch.topk Record/Replay residual needs<br/>site/subgroup scalar routing"]
     XP2E["XP2E DONE<br/>torch.topk Inline construction scaled;<br/>both large objects finish patching"]
-    XP2F["XP2F ACTIVE<br/>torch.topk Inline execution signal;<br/>bounded independent cross-check"]
+    XP2F["XP2F DONE<br/>torch.topk Inline execution signal;<br/>reproduced on independent software path"]
+    XP2G["XP2G ACTIVE<br/>torch.topk Inline signal;<br/>one-site common-state discriminator"]
     XP3["XP3 TODO<br/>top-k SC oracle passes;<br/>88-site residual needs scalar continuation spills"]
     XP9["XP9 DONE<br/>norm plus softmax Record/Replay clean, paired,<br/>and reviewed-fault bundle green"]
     XP9B["XP9B DONE<br/>norm plus softmax Sampled clean, paired,<br/>and reviewed-fault bundle green"]
@@ -258,6 +259,7 @@ flowchart TD
   XP2C --> XP2D
   XP0 --> XP2E
   XP2E --> XP2F
+  XP2F --> XP2G
   XP0 --> XP9
   XP9 --> XP9B
   XP9 --> XP9C
@@ -292,6 +294,7 @@ flowchart TD
   XP2D --> XF
   XP2E --> XF
   XP2F --> XF
+  XP2G --> XF
   XP9 --> XF
   XP9B --> XF
   XP9C --> XF
@@ -320,7 +323,8 @@ flowchart TD
   class XP2B done
   class XT3G,XT3H done
   class XP2E done
-  class XP2F active
+  class XP2F done
+  class XP2G active
   class G0,XP2D,XP3,XT2C2,XT2C3,XT3A,XT3E,XT3I,XF,XG todo
 ```
 
@@ -369,6 +373,15 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP2F is DONE as a bounded discriminator.  Independent-path
+  artifact
+  `consan-green-expansion-20260721-pytorch-topk-inline-rocjitsu-crosscheck-107`
+  completes both transformed objects and reproduces the pre-oracle signal at
+  115 seconds.  The failure is therefore a ConSan execution defect, not one
+  software GPU's launch quirk.  XP2G is the sole ACTIVE box for one
+  diagnostic one-site run that separates common Inline state from a later
+  probe; it is not acceptance evidence.
 
 - 2026-07-21: XP2E is DONE after three measured generic scaling fixes.
   Commits `0007d051bf`, `d3b3cd0df3`, and `a793e5db1a` index
