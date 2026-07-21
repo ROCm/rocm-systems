@@ -187,9 +187,11 @@ public:
   }
 
   /// @brief Invalidate L2 lines covering an address range.
-  /// @details Used after host/SDMA writes to ensure GPU reads reload from
-  /// backing store. No writeback: the backing store already has latest data.
-  void invalidate_range(uint64_t addr, uint32_t size);
+  /// @details Used after a host/SDMA write has completed. Bytes inside the
+  /// range are authoritative in backing memory. Dirty bytes outside a partial
+  /// line update are preserved before the target VMID's line is invalidated.
+  /// @param vmid Owning process address space to invalidate.
+  void invalidate_range(uint64_t addr, uint32_t size, uint32_t vmid);
 
   /// @brief Flush all dirty L2 lines to HBM and invalidate.
   /// @param vmid Ignored. Each dirty line is written back under its own owning

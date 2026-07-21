@@ -368,7 +368,7 @@ TEST(L2CacheTest, InvalidateRangeClampsAtAddressSpaceEnd) {
   ASSERT_EQ(actual, initial);
 
   memory.write_block(kLineAddr, std::span<const uint8_t>(replacement));
-  l2.invalidate_range(kRangeAddr, L2Cache::LINE_SIZE);
+  l2.invalidate_range(kRangeAddr, L2Cache::LINE_SIZE, 0);
   l2.read(kLineAddr, actual.data(), actual.size());
 
   EXPECT_EQ(actual, replacement);
@@ -395,7 +395,7 @@ TEST(L2CacheTest, InvalidateRangeRefreshesOnlyCoveredSetsAndZeroSizeIsNoOp) {
     memory.write_block(addr, std::span<const uint8_t>(replacement[line]));
   }
 
-  l2.invalidate_range(kBase + L2Cache::LINE_SIZE + 32, 2 * L2Cache::LINE_SIZE);
+  l2.invalidate_range(kBase + L2Cache::LINE_SIZE + 32, 2 * L2Cache::LINE_SIZE, 0);
 
   for (uint32_t line = 0; line < kLines; ++line) {
     const uint64_t addr = kBase + static_cast<uint64_t>(line) * L2Cache::LINE_SIZE;
@@ -404,11 +404,89 @@ TEST(L2CacheTest, InvalidateRangeRefreshesOnlyCoveredSetsAndZeroSizeIsNoOp) {
     EXPECT_EQ(actual, expected) << "line=" << line;
   }
 
-  l2.invalidate_range(kBase, 0);
+  l2.invalidate_range(kBase, 0, 0);
   l2.read(kBase, actual.data(), actual.size());
   EXPECT_EQ(actual, initial[0]);
 }
 
+TEST(L2CacheTest, InvalidateRangeOnlyAffectsRequestedVmid) {
+  GpuMemory memory("memory");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+
+  constexpr uint32_t kVmidA = 7;
+  constexpr uint32_t kVmidB = 8;
+  constexpr uint64_t kAddr = 0x500000;
+  rocjitsu::KfdProcess process_a(kVmidA);
+  rocjitsu::KfdProcess process_b(kVmidB);
+  std::array<uint8_t, GpuMemory::PAGE_SIZE> backing_a{};
+  std::array<uint8_t, GpuMemory::PAGE_SIZE> backing_b{};
+  process_a.map_pages(kAddr, backing_a.data(), backing_a.size());
+  process_b.map_pages(kAddr, backing_b.data(), backing_b.size());
+  memory.register_process(kVmidA, &process_a.page_table_, &process_a.page_table_mutex_,
+                          process_a.page_table_generation());
+  memory.register_process(kVmidB, &process_b.page_table_, &process_b.page_table_mutex_,
+                          process_b.page_table_generation());
+
+  std::array<uint8_t, L2Cache::LINE_SIZE> initial_a{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> initial_b{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty_a{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> replacement_b{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> actual{};
+  initial_a.fill(0x11);
+  initial_b.fill(0x22);
+  dirty_a.fill(0x33);
+  replacement_b.fill(0x44);
+
+  memory.write_block(kAddr, std::span<const uint8_t>(initial_a), kVmidA);
+  memory.write_block(kAddr, std::span<const uint8_t>(initial_b), kVmidB);
+  l2.read(kAddr, actual.data(), actual.size(), Mtype::RW, kVmidA);
+  ASSERT_EQ(actual, initial_a);
+  l2.read(kAddr, actual.data(), actual.size(), Mtype::RW, kVmidB);
+  ASSERT_EQ(actual, initial_b);
+  l2.writeback_line(kAddr, dirty_a.data(), Mtype::RW, kVmidA);
+
+  memory.write_block(kAddr, std::span<const uint8_t>(replacement_b), kVmidB);
+  l2.invalidate_range(kAddr, L2Cache::LINE_SIZE, kVmidB);
+  l2.read(kAddr, actual.data(), actual.size(), Mtype::RW, kVmidB);
+  EXPECT_EQ(actual, replacement_b);
+
+  l2.flush_line(kAddr, kVmidA);
+  memory.read_block(kAddr, std::span<uint8_t>(actual), kVmidA);
+  EXPECT_EQ(actual, dirty_a);
+}
+
+TEST(L2CacheTest, InvalidateRangePreservesDirtyBytesOutsidePartialWrite) {
+  GpuMemory memory("memory");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+
+  constexpr uint64_t kAddr = 0x600000;
+  constexpr uint32_t kOffset = 32;
+  std::array<uint8_t, L2Cache::LINE_SIZE> initial{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  std::array<uint8_t, 16> host_write{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> expected{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> actual{};
+  initial.fill(0x11);
+  dirty.fill(0x22);
+  host_write.fill(0x33);
+  expected = dirty;
+  std::memcpy(expected.data() + kOffset, host_write.data(), host_write.size());
+
+  memory.write_block(kAddr, std::span<const uint8_t>(initial));
+  l2.read(kAddr, actual.data(), actual.size());
+  ASSERT_EQ(actual, initial);
+  l2.writeback_line(kAddr, dirty.data());
+
+  memory.write_block(kAddr + kOffset, std::span<const uint8_t>(host_write));
+  l2.invalidate_range(kAddr + kOffset, host_write.size(), 0);
+
+  memory.read_block(kAddr, std::span<uint8_t>(actual));
+  EXPECT_EQ(actual, expected);
+  l2.read(kAddr, actual.data(), actual.size());
+  EXPECT_EQ(actual, expected);
+}
 
 TEST(GpuMemoryTest, BlockAccessHandlesPageBoundaries) {
   GpuMemory memory("memory");

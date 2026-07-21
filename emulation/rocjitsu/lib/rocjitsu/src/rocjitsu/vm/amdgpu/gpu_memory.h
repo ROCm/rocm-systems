@@ -421,20 +421,26 @@ private:
 
   template <typename F> bool with_host_ptr(uint64_t addr, uint32_t vmid, F &&fn) const {
     if (vmid == 0) {
-      if (!passthrough_ || addr >= kUserSpaceLimit)
+      auto *page = reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
+      if (!passthrough_ || addr >= kUserSpaceLimit || page == nullptr)
         return false;
-      fn(reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK));
+      fn(page);
       return true;
     }
 
     static thread_local PteCache cache;
     return cached_walk(addr, vmid, cache, [&](const KfdProcess::PageTableEntry *pte) {
       if (pte) {
+        if (pte->host_ptr == nullptr)
+          return false;
         fn(pte->host_ptr);
         return true;
       }
       if (passthrough_ && addr < kUserSpaceLimit) {
-        fn(reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK));
+        auto *page = reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
+        if (page == nullptr)
+          return false;
+        fn(page);
         return true;
       }
       return false;
