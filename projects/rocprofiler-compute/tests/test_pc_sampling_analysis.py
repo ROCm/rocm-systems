@@ -1143,7 +1143,7 @@ def test_load_pc_sampling_data_no_filter_instruction_out_of_range() -> None:
         ),
     ],
 )
-def test_load_pc_sampling_data_multi_process_preserves_legacy_column_order(
+def test_load_pc_sampling_data_multi_process_preserves_display_column_order(
     method: str,
     expected_columns: list[str],
 ) -> None:
@@ -1541,12 +1541,20 @@ def test_load_pc_sampling_results_falls_back_to_legacy(
     assert [record["metadata"]["pid"] for record in tool_data_records] == [77]
 
 
-def test_load_pc_sampling_results_returns_empty_for_missing_folder(
+@pytest.mark.parametrize(
+    "directory_exists",
+    [
+        pytest.param(True, id="empty_directory"),
+        pytest.param(False, id="missing_directory"),
+    ],
+)
+def test_load_pc_sampling_results_returns_empty_without_result_files(
     tmp_path: Path,
+    directory_exists: bool,
 ) -> None:
-    missing_workload_path = tmp_path / "missing"
+    workload_path = tmp_path if directory_exists else tmp_path / "missing"
 
-    assert load_pc_sampling_results(str(missing_workload_path)) == []
+    assert load_pc_sampling_results(str(workload_path)) == []
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1554,14 +1562,7 @@ def test_load_pc_sampling_results_returns_empty_for_missing_folder(
 # ═══════════════════════════════════════════════════════════════
 
 
-def test_pc_sampling_empty_results_preserve_legacy_loader_behavior(
-    tmp_path: Path,
-) -> None:
-    """Return an empty list when the results json is absent."""
-    assert load_pc_sampling_results(str(tmp_path)) == []
-
-
-def test_pc_sampling_single_result_preserves_legacy_loader_behavior(
+def test_load_pc_sampling_results_parses_single_unprefixed_file(
     tmp_path: Path,
 ) -> None:
     """Return a list containing the rocprofiler-sdk-tool[0] dict."""
@@ -1771,42 +1772,6 @@ def test_load_pc_sampling_tool_data_gate(tmp_path: Path) -> None:
     instance._profiling_config = {"filter_blocks": ["2"]}  # counters only
     assert instance.pc_sampling_collected() is False
     assert instance.load_pc_sampling_tool_data(str(tmp_path)) == []
-
-
-def test_pc_sampling_single_result_preserves_analysis_statistics(
-    tmp_path: Path,
-) -> None:
-    """Repeated single-process dispatches retain their statistics and PID."""
-    tool_data = make_tool_data(
-        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
-        kernel_dispatch=[
-            make_dispatch(1, 100, start=10, end=20),
-            make_dispatch(2, 100, start=30, end=50),
-        ],
-        pid=42,
-    )
-    workload = schema.Workload()
-    args = argparse.Namespace(time_unit="ns", kernel_verbose=5)
-    instance = make_db_analysis(str(tmp_path))
-
-    instance.build_pc_sampling_only_workload(
-        workload,
-        str(tmp_path),
-        args,
-        [tool_data],
-    )
-
-    assert workload.raw_pmc["Dispatch_ID"].tolist() == [1, 2]
-    assert workload.raw_pmc["PID"].tolist() == [42, 42]
-    assert workload.dfs[PMC_KERNEL_TOP_TABLE_ID].iloc[0]["Count"] == 2
-    dispatch_info = workload.dfs[PMC_DISPATCH_INFO_TABLE_ID]
-    assert list(dispatch_info.columns) == [
-        "Dispatch_ID",
-        "PID",
-        "Kernel_Name",
-        "GPU_ID",
-    ]
-    assert dispatch_info["Dispatch_ID"].tolist() == [1, 2]
 
 
 def test_pc_sampling_multiprocess_dispatch_statistics_include_every_row(
@@ -2092,29 +2057,10 @@ def test_calc_dispatch_data_uses_provided_tool_data(tmp_path: Path) -> None:
     assert df.iloc[0]["gpu_id"] == 0
 
 
-def test_pc_sampling_single_result_preserves_legacy_db_dispatches(
+def test_calc_dispatch_data_warns_for_empty_pc_sampling_results(
     tmp_path: Path,
 ) -> None:
-    """Database preprocessing retains every dispatch from one legacy record."""
-    tool_data = make_tool_data(
-        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
-        kernel_dispatch=[
-            make_dispatch(1, 100, start=10, end=20),
-            make_dispatch(2, 100, start=30, end=50),
-        ],
-    )
-    instance = make_db_analysis(str(tmp_path))
-    instance._profiling_config = {"filter_blocks": ["21"]}
-
-    result = instance.calc_dispatch_data({str(tmp_path): [tool_data]})
-
-    assert result[str(tmp_path)]["dispatch_id"].tolist() == [1, 2]
-
-
-def test_pc_sampling_empty_results_preserve_legacy_db_behavior(
-    tmp_path: Path,
-) -> None:
-    """An empty collection retains the legacy missing-results warning."""
+    """An empty collection emits the missing-results warning."""
     instance = make_db_analysis(str(tmp_path))
     instance._profiling_config = {"filter_blocks": ["21"]}
 
@@ -2220,7 +2166,7 @@ def test_pc_sampling_analyze_sorting_type(
     common.clean_output_dir(True, workload_dir)
 
 
-def test_pc_sampling_single_result_preserves_legacy_database(
+def test_pc_sampling_analyze_database_output(
     binary_handler_analyze_rocprof_compute,
     monkeypatch,
 ) -> None:
@@ -2317,7 +2263,7 @@ def test_pc_sampling_single_result_preserves_legacy_database(
         common.clean_output_dir(True, str(workload_dir))
 
 
-def test_pc_sampling_single_result_preserves_legacy_csv(
+def test_pc_sampling_analyze_csv_output(
     binary_handler_analyze_rocprof_compute,
     monkeypatch,
 ) -> None:
