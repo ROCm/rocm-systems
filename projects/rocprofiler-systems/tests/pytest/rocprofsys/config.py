@@ -169,15 +169,19 @@ class RocprofsysConfig:
     def get_target_executable(self, name: str) -> Path:
         """Get path to a test target executable.
 
-        When is_installed is True, searches in the following order:
-        1. rocprofsys_build_dir/name (build directory layout)
-        2. rocprofsys_examples_dir/name/name (build directory layout)
-        3. PATH lookup
+        The executable is always resolved from the build/install tree; the
+        system PATH is never consulted, so the suite cannot silently pick up an
+        unrelated copy (e.g. one under /opt/rocm/bin).
 
-        When is_installed is False, searches in the following order:
+        When is_installed is True, searches in the following order:
         1. rocprofsys_examples_dir/name
         2. rocprofsys_bin_dir/name
-        3. PATH lookup
+
+        When is_installed is False, searches in the following order:
+        1. rocprofsys_examples_dir/examples/python/name (python scripts)
+        2. rocprofsys_examples_dir/name
+        3. rocprofsys_examples_dir/examples/code-coverage/name (code-coverage.py only)
+        4. rocprofsys_bin_dir/name
 
         Args:
             name: Name of the target executable
@@ -200,16 +204,10 @@ class RocprofsysConfig:
             if exe.exists() and exe.is_file():
                 return exe
 
-            # PATH lookup via shutil.which
-            exe = shutil.which(name)
-            if exe:
-                return Path(exe)
-
             raise FileNotFoundError(
                 f"Target executable '{name}' not found. Searched in:\n"
                 f"  - {self.rocprofsys_examples_dir}/{name}\n"
                 f"  - {self.rocprofsys_bin_dir}/{name}\n"
-                f"  - PATH"
             )
 
         else:
@@ -229,34 +227,17 @@ class RocprofsysConfig:
                 if exe.exists() and exe.is_file():
                     return exe
 
-            exe = self.rocprofsys_examples_dir / "examples" / name / name
-            if exe.exists() and exe.is_file():
-                return exe
-
-            # rccl tests lie in their own directory
-            exe = self.rocprofsys_examples_dir / "examples" / "rccl" / name
-            if exe.exists() and exe.is_file():
-                return exe
-
             # binary directory
             exe = self.rocprofsys_bin_dir / name
             if exe.exists() and exe.is_file():
                 return exe
-
-            # PATH lookup via shutil.which
-            exe = shutil.which(name)
-            if exe:
-                return Path(exe)
 
             raise FileNotFoundError(
                 f"Target executable '{name}' not found. Searched in:\n"
                 f"  - {self.rocprofsys_examples_dir}/examples/python/{name}\n"
                 f"  - {self.rocprofsys_examples_dir}/{name}\n"
                 f"  - {self.rocprofsys_examples_dir}/examples/code-coverage/{name}\n"
-                f"  - {self.rocprofsys_examples_dir}/examples/rccl/{name}\n"
-                f"  - {self.rocprofsys_examples_dir}/examples/{name}/{name}\n"
                 f"  - {self.rocprofsys_bin_dir}/{name}\n"
-                f"  - PATH"
             )
 
 
@@ -309,16 +290,19 @@ def _get_rocm_version(rocm_optional: bool = False) -> Optional[tuple[int, int, i
 
 
 def _find_executable(name: str, search_paths: list[Path]) -> Optional[Path]:
-    """Find an executable in search paths or via PATH."""
+    """Find a rocprof-sys executable within the given search paths.
+
+    Only the explicit search paths are consulted -- these are the build/install
+    ``bin`` directory, which already honors the ROCPROFSYS_BUILD_DIR and
+    ROCPROFSYS_INSTALL_DIR overrides. PATH is intentionally NOT searched: the
+    suite must exercise the rocprof-sys binaries from the build/install under
+    test, never an unrelated copy that happens to be on PATH (e.g.
+    ``/opt/rocm/bin``), which would silently test the wrong build.
+    """
     for search_dir in search_paths:
         exe = search_dir / name
         if exe.exists() and exe.is_file():
             return exe.resolve()
-
-    # Fallback to PATH
-    path_exe = shutil.which(name)
-    if path_exe:
-        return Path(path_exe)
 
     return None
 
@@ -347,8 +331,10 @@ def _find_rocprofsys_core_executables(
     missing = [name for name, path in required_executables.items() if path is None]
     if missing:
         raise FileNotFoundError(
-            f"Required executables not found: {', '.join(missing)}. "
-            f"Searched in: {search_paths}"
+            f"Required rocprof-sys executables not found: {', '.join(missing)}. "
+            f"Searched in: {search_paths}. Build the project first, or point the "
+            f"suite at the correct location with ROCPROFSYS_BUILD_DIR (build tree) "
+            f"or ROCPROFSYS_INSTALL_DIR (install prefix)."
         )
 
     return required_executables
