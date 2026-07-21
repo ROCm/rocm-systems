@@ -12,7 +12,7 @@ if(HIP_PLATFORM MATCHES "amd" AND UNIX AND GXX_EXEC)
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/malloc.o
         COMMAND ${GXX_EXEC} -c
         ${CMAKE_CURRENT_SOURCE_DIR}/hipMalloc.cpp -I${HIP_INCLUDE_DIR}
-        -D__HIP_PLATFORM_AMD__ -o ${CMAKE_CURRENT_BINARY_DIR}/malloc.o
+        -fPIC -D__HIP_PLATFORM_AMD__ -o ${CMAKE_CURRENT_BINARY_DIR}/malloc.o
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/hipMalloc.cpp
         COMMENT "Compiling malloc.o with g++")
     add_custom_target(malloc_custom DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/malloc.o)
