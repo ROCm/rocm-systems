@@ -191,14 +191,17 @@ if(HIP_PLATFORM MATCHES "amd")
                   COMMENT "Compiling copyKernel.code")
   add_custom_target(copyKernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code)
 
-  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
-                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} -mcode-object-version=5 -S -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
-                  -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
-                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
-                  COMMENT "Compiling copyKernel.s")
-  add_custom_target(copyKernel_s DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s)
+  # Dump HSA metadata from the real device code object (LTO-independent).
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.metadata
+                  COMMAND ${CMAKE_COMMAND}
+                    -DHIP_COMPILER=${CMAKE_HIP_COMPILER}
+                    -DCODE_OBJECT=${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code
+                    -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/copyKernel.metadata
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/DumpCodeObjectMetadata.cmake
+                  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code
+                          ${CMAKE_CURRENT_SOURCE_DIR}/DumpCodeObjectMetadata.cmake
+                  COMMENT "Dumping copyKernel.metadata")
+  add_custom_target(copyKernel_metadata DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.metadata)
 
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/addKernel.code
                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} -mcode-object-version=5 --cuda-device-only -x hip
@@ -291,7 +294,7 @@ if(HIP_PLATFORM MATCHES "amd")
 
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code
-  ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
+  ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.metadata
   ${CMAKE_CURRENT_BINARY_DIR}/addKernel.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelCompressed.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTarget.code
@@ -412,7 +415,7 @@ add_dependencies(ModuleTest empty_module)
 if(HIP_PLATFORM MATCHES "amd")
   # Wire kernel artifacts to ModuleTest so `make ModuleTest` builds them.
   # These are loaded at runtime by tests in the ModuleTest binary.
-  add_dependencies(ModuleTest copyKernel_code copyKernel_s)
+  add_dependencies(ModuleTest copyKernel_code copyKernel_metadata)
   add_dependencies(ModuleTest addKernel_code)
   # TODO - Rock build failure from clang
   if(NOT WIN32)

@@ -73,7 +73,7 @@ static bool searchRegExpr(const std::regex& expr, const char* filename) {
 /**
  * Test Description
  * ------------------------
- *    - Parse the Code Object Assembly file copyKernel.s and verify
+ *    - Parse the code-object metadata dump copyKernel.metadata and verify
  * if .uniform_work_group_size metadata is available.
  * ------------------------
  *    - catch\unit\module\hipExtModuleLaunchKernel.cc
@@ -82,9 +82,8 @@ static bool searchRegExpr(const std::regex& expr, const char* filename) {
  *    - HIP_VERSION >= 5.7
  */
 HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_CheckCodeObjAttr) {
-  // Open copyKernel.s and read the file
   const std::regex regexp("uniform_work_group_size\\s*:\\s*[0-1]");
-  REQUIRE(true == searchRegExpr(regexp, "copyKernel.s"));
+  REQUIRE(true == searchRegExpr(regexp, "copyKernel.metadata"));
 }
 
 /**
@@ -105,10 +104,10 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_CheckCodeObjAttr) {
 HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_NonUniformWorkGroup) {
   // first check if uniform_work_group_size = 1.
   const std::regex regexp("uniform_work_group_size\\s*:\\s*1");
-  if (false == searchRegExpr(regexp, "copyKernel.s")) {
+  if (false == searchRegExpr(regexp, "copyKernel.metadata")) {
     HIP_SKIP_TEST("test requires uniform work group size 1.");
   }
-  REQUIRE(true == searchRegExpr(regexp, "copyKernel.s"));
+  REQUIRE(true == searchRegExpr(regexp, "copyKernel.metadata"));
   auto isEven = GENERATE(0, 1);
   // Calculate size
   auto lastWorkSize = isEven ? lastWorkSizeEven : lastWorkSizeOdd;
