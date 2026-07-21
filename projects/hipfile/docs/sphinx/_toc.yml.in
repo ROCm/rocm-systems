@@ -4,6 +4,8 @@ subtrees:
     entries:
       - file: install/install
         title: Install
+      - file: install/checking-system-compatibility
+        title: Checking system compatibility
       - file: install/build-from-source
         title: Build from source
       - file: install/python-bindings
