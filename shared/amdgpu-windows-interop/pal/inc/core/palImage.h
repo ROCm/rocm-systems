@@ -118,6 +118,7 @@ enum class MetadataTcCompatMode : uint16
     Count,
 };
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 992
 /// Image shared metadata support level
 enum class MetadataSharingLevel : uint32
 {
@@ -125,11 +126,12 @@ enum class MetadataSharingLevel : uint32
     ReadOnly    = 1,    ///< The metadata are expected to have read-only usage after the ownership is transitioned.
     FullOptimal = 2,    ///< The metadata can remain as-is if possible at ownership transition time.
 };
+#endif
 
 /// Specifies the type of PRT map image being created.
 enum class PrtMapType : uint32
 {
-    None            = 0, ///< This is not an auxiliary image used for PRT plus functionality.
+    None            = 0, ///< This is not an auxillary image used for PRT plus functionality.
     Residency       = 1, ///< Image data is really a low-resolution map containing the finest populated LOD
                          ///  for a particular UV space region.
     SamplingStatus  = 2, ///< Indicates the validity of a given tile on a per-mip level basis.
@@ -207,7 +209,7 @@ union ImageCreateFlags
         uint32 sampleLocsAlwaysKnown   :  1; ///< Sample pattern is always known in client driver for MSAA depth image.
 #if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 963
         uint32 fullResolveDstOnly      :  1; ///< Indicates any ICmdBuffer::CmdResolveImage using this image as a
-                                             ///  designation will overwrite the entire image (width and height of
+                                             ///  desination will overwrite the entire image (width and height of
                                              ///  resolve region is same as width and height of resolve dst).
 #else
         uint32 reserved963             :  1;
@@ -621,7 +623,7 @@ struct ImageLayout
 /**
 ****************************************************************************************************
 * @brief
-*   Enumerates swizzle modes usable on any supported GPU.
+*   Enumerates swizzle modes useable on any supported GPU.
 * @note
 * For details please check _AddrSwizzleMode
 *
@@ -896,17 +898,10 @@ public:
     virtual uint64 GetOptimalSharingId() const = 0;
 #endif
 
-    /// Sets level of optimal sharing by opening APIs using this optimal sharable image and pass this information to the
-    /// creator. This function is supposed to be called by openers only. The call by creator is ignored.
-    ///
-    /// @param  [in]    level        Level to be set to specified client API.
-    virtual void SetOptimalSharingLevel(
-        MetadataSharingLevel level) = 0;
-
-    /// Returns support level set by all possible opening APIs.
-    ///
-    /// @returns A summarized supporting level.
-    virtual MetadataSharingLevel GetOptimalSharingLevel() const = 0;
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 992
+    virtual void SetOptimalSharingLevel(MetadataSharingLevel level) {}
+    virtual MetadataSharingLevel GetOptimalSharingLevel() const { return MetadataSharingLevel::FullOptimal; }
+#endif
 
     /// Gives the client access to the resource ID used for internal Pal events.
     /// EX: Resource Create, Resource Bind, Resource Destroy.

@@ -8,8 +8,11 @@
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/mubuf.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/vbuffer.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3/mubuf.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
@@ -273,6 +276,76 @@ TEST(RegisterSetAnalysis, KeepsRegisterClassesSeparate) {
   EXPECT_FALSE(set.contains({RegClass::ACC_VGPR, 4, 1}));
 }
 
+TEST(RegisterSetAnalysis, TracksGfx1250HighBankVectorRegisters) {
+  RegisterSet set;
+  set.expand({RegClass::VGPR, 768, 2});
+
+  EXPECT_TRUE(set.contains({RegClass::VGPR, 768, 2}));
+  EXPECT_EQ(set.size(), 2u);
+
+  set.erase({RegClass::VGPR, 769, 1});
+  EXPECT_TRUE(set.contains({RegClass::VGPR, 768, 1}));
+  EXPECT_FALSE(set.contains({RegClass::VGPR, 769, 1}));
+}
+
+template <typename AtomicInst>
+void expect_gfx1250_buffer_cmpswap_def_use(uint8_t return_control, uint8_t payload_width,
+                                           uint8_t return_width) {
+  gfx1250::VbufferMachineInst raw{};
+  raw.vdata = 4;
+  raw.th = return_control;
+  AtomicInst inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+
+  InstDefUse def_use(inst);
+  EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 4, payload_width}));
+  if (return_width == 0) {
+    EXPECT_EQ(def_use.defs.size(), 0u);
+  } else {
+    EXPECT_TRUE(def_use.defs.contains({RegClass::VGPR, 4, return_width}));
+    EXPECT_FALSE(def_use.defs.contains({RegClass::VGPR, 4, payload_width}));
+  }
+}
+
+TEST(GeneratedInstDefUse, Gfx1250BufferCmpswapReturnUsesElementWidth) {
+  constexpr uint8_t kAtomicNoReturn = 0;
+  constexpr uint8_t kAtomicReturn = 1;
+
+  expect_gfx1250_buffer_cmpswap_def_use<gfx1250::BufferAtomicCmpswapB32Vbuffer>(kAtomicReturn, 2,
+                                                                                1);
+  expect_gfx1250_buffer_cmpswap_def_use<gfx1250::BufferAtomicCmpswapB32Vbuffer>(kAtomicNoReturn, 2,
+                                                                                0);
+  expect_gfx1250_buffer_cmpswap_def_use<gfx1250::BufferAtomicCmpswapB64Vbuffer>(kAtomicReturn, 4,
+                                                                                2);
+  expect_gfx1250_buffer_cmpswap_def_use<gfx1250::BufferAtomicCmpswapB64Vbuffer>(kAtomicNoReturn, 4,
+                                                                                0);
+}
+
+TEST(GeneratedInstDefUse, MubufCmpswapReturnUsesElementWidthAndTargetGate) {
+  cdna3::MubufMachineInst cdna_raw{};
+  cdna_raw.vdata = 4;
+  cdna_raw.acc = 1;
+  for (uint8_t sc0 : {uint8_t{0}, uint8_t{1}}) {
+    cdna_raw.sc0 = sc0;
+    cdna3::BufferAtomicCmpswapMubuf inst(reinterpret_cast<const cdna3::MachineInst *>(&cdna_raw));
+    InstDefUse def_use(inst);
+    EXPECT_TRUE(def_use.uses.contains({RegClass::ACC_VGPR, 4, 2}));
+    EXPECT_EQ(def_use.defs.contains({RegClass::ACC_VGPR, 4, 1}), sc0 != 0);
+    EXPECT_FALSE(def_use.defs.contains({RegClass::ACC_VGPR, 4, 2}));
+  }
+
+  rdna3::MubufMachineInst rdna_raw{};
+  rdna_raw.vdata = 8;
+  for (uint8_t glc : {uint8_t{0}, uint8_t{1}}) {
+    rdna_raw.glc = glc;
+    rdna3::BufferAtomicCmpswapB32Mubuf inst(
+        reinterpret_cast<const rdna3::MachineInst *>(&rdna_raw));
+    InstDefUse def_use(inst);
+    EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 8, 2}));
+    EXPECT_EQ(def_use.defs.contains({RegClass::VGPR, 8, 1}), glc != 0);
+    EXPECT_FALSE(def_use.defs.contains({RegClass::VGPR, 8, 2}));
+  }
+}
+
 TEST(RegisterSetAnalysis, IgnoresSpecialRegisterClasses) {
   RegisterSet set;
   set.expand({RegClass::EXEC, 0, 2});
@@ -299,6 +372,20 @@ TEST(RegisterSetAnalysis, GeneratedCdna4OperandsMapTrackedRegisterRefs) {
   ASSERT_TRUE(acc.to_register_ref().has_value());
   EXPECT_EQ(*acc.to_register_ref(), (RegisterRef{RegClass::ACC_VGPR, 7, 1}));
   EXPECT_FALSE(imm32.to_register_ref().has_value());
+}
+
+TEST(RegisterSetAnalysis, Cdna4WritelaneDestinationIsUseAndDef) {
+  constexpr std::array<uint32_t, 2> kWritelaneV141S4Lane2 = {0xd28a008du, 0x00010404u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+
+  std::unique_ptr<Instruction> inst(decoder->decode(kWritelaneV141S4Lane2.data()));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_writelane_b32");
+
+  InstDefUse du(*inst);
+  EXPECT_TRUE(du.defs.contains({RegClass::VGPR, 141, 1}));
+  EXPECT_TRUE(du.uses.contains({RegClass::VGPR, 141, 1}));
+  EXPECT_TRUE(du.uses.contains({RegClass::SGPR, 4, 1}));
 }
 
 TEST(CfgAnalysis, LoopBackEdgeLinksPredecessor) {
@@ -678,6 +765,37 @@ TEST(LivenessAnalysis, MinFreeVgprForcesScratchAllocationAboveFloor) {
   EXPECT_EQ(liveness.find_free_sgpr(&use, 0), 0);
   EXPECT_EQ(liveness.find_free_run(&use, 1, 0), 4);
   EXPECT_EQ(liveness.find_free_run(&use, 1, 7), 7);
+}
+
+TEST(LivenessAnalysis, FreeVgprAllocationHonorsDestinationLimit) {
+  auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  const Instruction &use = *blocks[0]->instructions().begin();
+
+  LivenessAnalysisOptions limited_options;
+  limited_options.min_free_vgpr = 256;
+  LivenessAnalysis limited(KernelBlockScope(scope), limited_options);
+  EXPECT_EQ(limited.find_free_run(&use, 1), std::nullopt);
+
+  LivenessAnalysisOptions gfx1250_options;
+  gfx1250_options.min_free_vgpr = 256;
+  gfx1250_options.max_free_vgpr = 1024;
+  LivenessAnalysis gfx1250(KernelBlockScope(scope), gfx1250_options);
+  EXPECT_EQ(gfx1250.find_free_run(&use, 1), 256);
+}
+
+TEST(LivenessAnalysis, FindFreeRunHonorsBaseAlignment) {
+  auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.min_free_vgpr = 93;
+
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  const Instruction &use = *blocks[0]->instructions().begin();
+  EXPECT_EQ(liveness.find_free_run(&use, 4, 0, 2), 94);
+  EXPECT_EQ(liveness.find_free_run(&use, 4, 94, 4), 96);
 }
 
 TEST(LivenessAnalysis, ReadWriteSameRegisterIsLiveBeforeInstruction) {

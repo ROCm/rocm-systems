@@ -58,7 +58,7 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank) {
            sdmaThreshold, numChannels, shm_size);
 
   // Initialize the Anvil library
-  anvil::anvil.init();
+  sdma_anvil::anvil.init();
 
   // Get current device
   int deviceId;
@@ -67,9 +67,9 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank) {
   // Create SDMA connections to all local PEs including self
   for (int i = 0; i < shm_size; i++) {
     if (i != deviceId) {
-      anvil::EnablePeerAccess(deviceId, i);
+      sdma_anvil::EnablePeerAccess(deviceId, i);
     }
-    anvil::anvil.connect(deviceId, i, numChannels);
+    sdma_anvil::anvil.connect(deviceId, i, numChannels);
   }
 
   // Total number of handles: shm_size * numChannels
@@ -78,20 +78,20 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank) {
 
   // Allocate device-side array to hold SDMA queue device handles
   CHECK_HIP(hipMalloc(&deviceHandles_d,
-                      total_handles * sizeof(anvil::SdmaQueueDeviceHandle*)));
+                      total_handles * sizeof(sdma_anvil::SdmaQueueDeviceHandle*)));
 
   // Copy device handles to device memory
-  anvil::SdmaQueueDeviceHandle** handles_h =
-      new anvil::SdmaQueueDeviceHandle*[total_handles];
+  sdma_anvil::SdmaQueueDeviceHandle** handles_h =
+      new sdma_anvil::SdmaQueueDeviceHandle*[total_handles];
   for (int i = 0; i < shm_size; i++) {
     for (int ch = 0; ch < numChannels; ch++) {
       int idx = i * numChannels + ch;
-      anvil::SdmaQueue* queue = anvil::anvil.getSdmaQueue(deviceId, i, ch);
+      sdma_anvil::SdmaQueue* queue = sdma_anvil::anvil.getSdmaQueue(deviceId, i, ch);
       handles_h[idx] = queue ? queue->deviceHandle() : nullptr;
     }
   }
   CHECK_HIP(hipMemcpy(deviceHandles_d, handles_h,
-                      total_handles * sizeof(anvil::SdmaQueueDeviceHandle*),
+                      total_handles * sizeof(sdma_anvil::SdmaQueueDeviceHandle*),
                       hipMemcpyHostToDevice));
   delete[] handles_h;
 
@@ -103,7 +103,7 @@ __host__ void SdmaImpl::sdmaHostStop() {
     CHECK_HIP(hipFree(deviceHandles_d));
     deviceHandles_d = nullptr;
   }
-  anvil::anvil.disconnect();
+  sdma_anvil::anvil.disconnect();
 }
 
 #endif  // USE_SDMA

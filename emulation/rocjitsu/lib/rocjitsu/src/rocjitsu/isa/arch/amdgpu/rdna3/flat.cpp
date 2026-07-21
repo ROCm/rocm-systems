@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_cache_flags.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -360,7 +361,7 @@ void FlatStoreB8Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
   set_data(std::move(d));
@@ -406,7 +407,7 @@ void FlatStoreB16Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
   set_data(std::move(d));
@@ -452,7 +453,7 @@ void FlatStoreB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -498,9 +499,9 @@ void FlatStoreB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -546,11 +547,11 @@ void FlatStoreB96Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 12 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 12 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(data_base + 2, lane);
+    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
     std::memcpy(&d->store_data[lane * 12 + 8], &val2, 4);
   }
   set_data(std::move(d));
@@ -596,13 +597,13 @@ void FlatStoreB128Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(data_base + 2, lane);
+    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
     std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = cu.read_vgpr(data_base + 3, lane);
+    uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 3, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
   }
   set_data(std::move(d));
@@ -878,7 +879,7 @@ void FlatStoreD16HiB8Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     val0 >>= 16;
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
@@ -925,7 +926,7 @@ void FlatStoreD16HiB16Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     val0 >>= 16;
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
@@ -939,11 +940,12 @@ FlatAtomicSwapB32Flat::FlatAtomicSwapB32Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -976,7 +978,7 @@ void FlatAtomicSwapB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -989,11 +991,12 @@ FlatAtomicCmpswapB32Flat::FlatAtomicCmpswapB32Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -1026,9 +1029,9 @@ void FlatAtomicCmpswapB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1041,11 +1044,12 @@ FlatAtomicAddU32Flat::FlatAtomicAddU32Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -1078,7 +1082,7 @@ void FlatAtomicAddU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1091,11 +1095,12 @@ FlatAtomicSubU32Flat::FlatAtomicSubU32Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -1128,7 +1133,7 @@ void FlatAtomicSubU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1141,11 +1146,12 @@ FlatAtomicMinI32Flat::FlatAtomicMinI32Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -1178,7 +1184,7 @@ void FlatAtomicMinI32Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1191,11 +1197,12 @@ FlatAtomicMinU32Flat::FlatAtomicMinU32Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -1228,7 +1235,7 @@ void FlatAtomicMinU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1241,11 +1248,12 @@ FlatAtomicMaxI32Flat::FlatAtomicMaxI32Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -1278,7 +1286,7 @@ void FlatAtomicMaxI32Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1291,11 +1299,12 @@ FlatAtomicMaxU32Flat::FlatAtomicMaxU32Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -1328,7 +1337,7 @@ void FlatAtomicMaxU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1341,11 +1350,12 @@ FlatAtomicAndB32Flat::FlatAtomicAndB32Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -1378,7 +1388,7 @@ void FlatAtomicAndB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1391,11 +1401,12 @@ FlatAtomicOrB32Flat::FlatAtomicOrB32Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -1428,7 +1439,7 @@ void FlatAtomicOrB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1441,11 +1452,12 @@ FlatAtomicXorB32Flat::FlatAtomicXorB32Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -1478,7 +1490,7 @@ void FlatAtomicXorB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1491,11 +1503,12 @@ FlatAtomicIncU32Flat::FlatAtomicIncU32Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -1528,7 +1541,7 @@ void FlatAtomicIncU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1541,11 +1554,12 @@ FlatAtomicDecU32Flat::FlatAtomicDecU32Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -1578,7 +1592,7 @@ void FlatAtomicDecU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1591,11 +1605,12 @@ FlatAtomicSwapB64Flat::FlatAtomicSwapB64Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -1628,9 +1643,9 @@ void FlatAtomicSwapB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1643,11 +1658,12 @@ FlatAtomicCmpswapB64Flat::FlatAtomicCmpswapB64Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -1680,13 +1696,13 @@ void FlatAtomicCmpswapB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(data_base + 2, lane);
+    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
     std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = cu.read_vgpr(data_base + 3, lane);
+    uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 3, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
   }
   set_data(std::move(d));
@@ -1699,11 +1715,12 @@ FlatAtomicAddU64Flat::FlatAtomicAddU64Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -1736,9 +1753,9 @@ void FlatAtomicAddU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1751,11 +1768,12 @@ FlatAtomicSubU64Flat::FlatAtomicSubU64Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -1788,9 +1806,9 @@ void FlatAtomicSubU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1803,11 +1821,12 @@ FlatAtomicMinI64Flat::FlatAtomicMinI64Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -1840,9 +1859,9 @@ void FlatAtomicMinI64Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1855,11 +1874,12 @@ FlatAtomicMinU64Flat::FlatAtomicMinU64Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -1892,9 +1912,9 @@ void FlatAtomicMinU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1907,11 +1927,12 @@ FlatAtomicMaxI64Flat::FlatAtomicMaxI64Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -1944,9 +1965,9 @@ void FlatAtomicMaxI64Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1959,11 +1980,12 @@ FlatAtomicMaxU64Flat::FlatAtomicMaxU64Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -1996,9 +2018,9 @@ void FlatAtomicMaxU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2011,11 +2033,12 @@ FlatAtomicAndB64Flat::FlatAtomicAndB64Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -2048,9 +2071,9 @@ void FlatAtomicAndB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2063,11 +2086,12 @@ FlatAtomicOrB64Flat::FlatAtomicOrB64Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -2100,9 +2124,9 @@ void FlatAtomicOrB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2115,11 +2139,12 @@ FlatAtomicXorB64Flat::FlatAtomicXorB64Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -2152,9 +2177,9 @@ void FlatAtomicXorB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2167,11 +2192,12 @@ FlatAtomicIncU64Flat::FlatAtomicIncU64Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -2204,9 +2230,9 @@ void FlatAtomicIncU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2219,11 +2245,12 @@ FlatAtomicDecU64Flat::FlatAtomicDecU64Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -2256,9 +2283,9 @@ void FlatAtomicDecU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2271,11 +2298,12 @@ FlatAtomicCmpswapF32Flat::FlatAtomicCmpswapF32Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -2308,9 +2336,9 @@ void FlatAtomicCmpswapF32Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2323,11 +2351,12 @@ FlatAtomicMinF32Flat::FlatAtomicMinF32Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -2360,7 +2389,7 @@ void FlatAtomicMinF32Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -2373,11 +2402,12 @@ FlatAtomicMaxF32Flat::FlatAtomicMaxF32Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -2410,7 +2440,7 @@ void FlatAtomicMaxF32Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -2423,11 +2453,12 @@ FlatAtomicAddF32Flat::FlatAtomicAddF32Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
       saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -2460,7 +2491,7 @@ void FlatAtomicAddF32Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));

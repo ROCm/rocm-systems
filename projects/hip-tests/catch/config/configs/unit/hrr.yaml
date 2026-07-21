@@ -78,6 +78,9 @@ hrr:
   Unit_HRR_DeviceInfoRoundtrip:
     <<: *level_2
     tags: [capture, device, playback, roundtrip]
+  Unit_HRR_MetadataManifest:
+    <<: *level_2
+    tags: [capture, metadata]
   Unit_HRR_StreamAdvancedRoundtrip:
     <<: *level_2
     tags: [capture, stream, playback, roundtrip]

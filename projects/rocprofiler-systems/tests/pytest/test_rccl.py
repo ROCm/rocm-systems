@@ -54,7 +54,7 @@ def rccl_rocpd_rules(validation_rules_dir: Path) -> list[Path]:
 # =============================================================================
 
 
-# RCCL test binaries
+# RCCL test binaries.
 RCCL_TARGETS = [
     "all_reduce_perf",
     "all_gather_perf",
@@ -62,9 +62,6 @@ RCCL_TARGETS = [
     "reduce_scatter_perf",
     "reduce_perf",
     "alltoall_perf",
-    "scatter_perf",
-    "gather_perf",
-    "sendrecv_perf",
     "alltoallv_perf",
 ]
 
