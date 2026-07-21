@@ -847,6 +847,11 @@ hsa_status_t HSA_API rj_executable_iterate_agent_symbols(
     hsa_status_t (*callback)(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t, void *),
     void *data);
 
+/// @brief Wrap the deprecated agentless symbol iterator to record symbol names.
+hsa_status_t HSA_API rj_executable_iterate_symbols(
+    hsa_executable_t executable,
+    hsa_status_t (*callback)(hsa_executable_t, hsa_executable_symbol_t, void *), void *data);
+
 /// @brief Enumerate guest memory pools for public guest-agent discovery.
 hsa_status_t HSA_API rj_amd_agent_iterate_memory_pools(
     hsa_agent_t agent, hsa_status_t (*callback)(hsa_amd_memory_pool_t, void *), void *data);
@@ -1040,6 +1045,8 @@ void clear_virtual_lds_dispatch_queues();
     decltype(hsa_executable_agent_global_variable_define) *)                                       \
   X(executable_iterate_agent_symbols, core_, true, false, hsa_executable_iterate_agent_symbols_fn, \
     rj_executable_iterate_agent_symbols, decltype(hsa_executable_iterate_agent_symbols) *)         \
+  X(executable_iterate_symbols, core_, true, false, hsa_executable_iterate_symbols_fn,             \
+    rj_executable_iterate_symbols, decltype(hsa_executable_iterate_symbols) *)                     \
   X(create_from_file, core_, true, false, hsa_code_object_reader_create_from_file_fn,              \
     rj_code_object_reader_create_from_file, decltype(hsa_code_object_reader_create_from_file) *)   \
   X(create_from_memory, core_, true, false, hsa_code_object_reader_create_from_memory_fn,          \
@@ -2286,20 +2293,24 @@ public:
 
   /// @brief Release all tracked queues during HSA tool unload.
   void clear() {
-    // Stop and join the scanner under the dedicated lifecycle mutex, NOT the data
-    // mutex_. The scanner thread itself takes mutex_ in scan_ready_packets(), so
-    // joining while holding mutex_ would deadlock. Setting stopping_ here also
-    // prevents a concurrent record_queue() from resurrecting the thread mid-clear.
-    // The lifecycle mutex is released before mutex_ is taken below so the
-    // (mutex_ -> scanner_lifecycle_mutex_) order used by ensure_scanner_started_
-    // locked() cannot invert into a deadlock.
+    // Stop the scanner and hand its jthread to a local, then JOIN WITH NO LOCK
+    // HELD. The scanner thread takes mutex_ inside scan_ready_packets(), and a
+    // concurrent record_queue() holds mutex_ while it waits on
+    // scanner_lifecycle_mutex_ in ensure_scanner_started_locked(). Joining while
+    // holding either mutex_ or scanner_lifecycle_mutex_ would therefore close a
+    // deadlock cycle (clear waits for the scanner to exit, the scanner waits for
+    // mutex_, record_queue holds mutex_ and waits for the lifecycle mutex). Set
+    // stopping_ and request_stop under the lifecycle mutex so record_queue cannot
+    // resurrect the thread, move the handle out, release the lock, then join.
+    std::jthread scanner_to_join;
     {
       std::lock_guard lifecycle(scanner_lifecycle_mutex_);
       stopping_ = true;
       scanner_.request_stop();
-      if (scanner_.joinable())
-        scanner_.join();
+      scanner_to_join = std::move(scanner_);
     }
+    if (scanner_to_join.joinable())
+      scanner_to_join.join();
 
     std::lock_guard lock(mutex_);
     for (auto &[queue, state] : queues_by_ptr_) {
@@ -2497,7 +2508,13 @@ private:
       return;
 
     const uint32_t original_private = packet.private_segment_size;
-    publish_packet_header(packet, 0);
+    // Mark the slot not-ready (INVALID) while mutating the body, then republish
+    // the original header. Header 0 would be VENDOR_SPECIFIC — a processable
+    // type — so a consumer could act on a half-written packet; INVALID tells the
+    // consumer the producer has not finished. Route every transient header
+    // toggle through make_invalid_packet_header for consistency with the ring
+    // rewrite path.
+    publish_packet_header(packet, make_invalid_packet_header(header));
     packet.private_segment_size = descriptor_private;
     publish_packet_header(packet, header);
     trace_virtual_lds_dispatch(
@@ -3206,10 +3223,43 @@ hsa_status_t HSA_API rj_executable_iterate_agent_symbols(
     return HSA_STATUS_ERROR;
   hsa_agent_t mapped = ExecutableAgentRegistry::instance().map_agent(executable, agent);
   mapped = AgentMapper::instance().map(mapped);
-  if (mapped.handle == agent.handle)
-    return original(executable, mapped, callback, data);
+  // Always route through the recording callback, even when the agent mapping is
+  // identity. The wrapper records each symbol's name so the KERNEL_OBJECT hook can
+  // later resolve its virtual-LDS sidecar; skipping it on the identity path would
+  // let iterated symbols get a normal kernel object with no executable/name
+  // association, leaving an oversized virtual-LDS dispatch stuck on its normal
+  // descriptor. The client still sees the original agent it passed in.
   IterateAgentSymbolsData wrapped{callback, data, agent};
   return original(executable, mapped, rj_iterate_agent_symbols_callback, &wrapped);
+}
+
+struct IterateSymbolsData {
+  hsa_status_t (*callback)(hsa_executable_t, hsa_executable_symbol_t, void *) = nullptr;
+  void *data = nullptr;
+};
+
+/// @brief Deprecated agentless iterate-symbols callback that records each name.
+hsa_status_t HSA_API rj_iterate_symbols_callback(hsa_executable_t executable,
+                                                 hsa_executable_symbol_t symbol, void *data) {
+  auto *wrapped = static_cast<IterateSymbolsData *>(data);
+  if (auto symbol_name = query_executable_symbol_name(symbol)) {
+    // Same rationale as the agent-symbols wrapper: record the name before the
+    // client can query KERNEL_OBJECT so the virtual-LDS sidecar stays resolvable
+    // for symbols discovered through the legacy (deprecated) iterator too.
+    VirtualLdsRuntimeRegistry::instance().record_symbol(executable, *symbol_name, symbol);
+  }
+  return wrapped->callback(executable, symbol, wrapped->data);
+}
+
+/// @brief Wrap the deprecated agentless symbol iterator to record symbol names.
+hsa_status_t HSA_API rj_executable_iterate_symbols(
+    hsa_executable_t executable,
+    hsa_status_t (*callback)(hsa_executable_t, hsa_executable_symbol_t, void *), void *data) {
+  auto *original = layer().executable_iterate_symbols();
+  if (!original)
+    return HSA_STATUS_ERROR;
+  IterateSymbolsData wrapped{callback, data};
+  return original(executable, rj_iterate_symbols_callback, &wrapped);
 }
 
 hsa_status_t HSA_API rj_amd_agent_iterate_memory_pools(
@@ -3663,6 +3713,22 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     log_message(kLogInfo,
                 "source target %s arch %s already matches requested target; passing through",
                 elf_mach_name(source_target.mach), arch_name(source_target.arch));
+    // Parse and validate hook metadata BEFORE loading, so an unusable code object
+    // is rejected without first mutating executable state, and so the malformed-
+    // metadata policy matches the translated path (reject, not ignore).
+    auto hook_metadata = parse_virtual_lds_hook_metadata(std::span<const uint8_t>(bytes, size));
+    if (!hook_metadata) {
+      std::fprintf(stderr,
+                   "[rocjitsu-hooks] target code object has malformed virtual-LDS metadata\n");
+      return HSA_STATUS_ERROR;
+    }
+    if (auto bad = first_unsupportable_virtual_lds_kernel(*hook_metadata)) {
+      std::fprintf(stderr,
+                   "[rocjitsu-hooks] virtual-LDS kernel '%s' cannot be dispatched on this host "
+                   "(missing runtime-state ABI or inconsistent kernarg wrapper); failing load\n",
+                   bad->c_str());
+      return HSA_STATUS_ERROR;
+    }
     hsa_status_t status =
         original_load(executable, load_agent, code_object_reader, options, loaded_code_object);
     log_message(kLogVerbose, "load_agent_code_object already-target status=%d",
@@ -3670,23 +3736,10 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     if (status == HSA_STATUS_SUCCESS && guest_load)
       ExecutableAgentRegistry::instance().record(executable, agent, load_agent);
     if (status == HSA_STATUS_SUCCESS) {
-      auto hook_metadata = parse_virtual_lds_hook_metadata(std::span<const uint8_t>(bytes, size));
-      if (hook_metadata) {
-        if (auto bad = first_unsupportable_virtual_lds_kernel(*hook_metadata)) {
-          std::fprintf(
-              stderr,
-              "[rocjitsu-hooks] virtual-LDS kernel '%s' cannot be dispatched on this host "
-              "(missing runtime-state ABI or inconsistent kernarg wrapper); failing load\n",
-              bad->c_str());
-          return HSA_STATUS_ERROR;
-        }
-        const hsa_loaded_code_object_t loaded =
-            loaded_code_object != nullptr ? *loaded_code_object : hsa_loaded_code_object_t{};
-        VirtualLdsRuntimeRegistry::instance().record_load(executable, agent, load_agent, loaded,
-                                                          std::move(*hook_metadata));
-      } else {
-        log_message(kLogInfo, "target code object has malformed virtual-LDS metadata; ignoring");
-      }
+      const hsa_loaded_code_object_t loaded =
+          loaded_code_object != nullptr ? *loaded_code_object : hsa_loaded_code_object_t{};
+      VirtualLdsRuntimeRegistry::instance().record_load(executable, agent, load_agent, loaded,
+                                                        std::move(*hook_metadata));
     }
     return status;
   }
@@ -3717,6 +3770,25 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
   print_diagnostics(stderr, translated.diagnostics, config->log_level > kLogDisabled);
   if (translated.elf_bytes.empty() || has_error_diagnostic(translated.diagnostics)) {
     std::fprintf(stderr, "[rocjitsu-hooks] translation failed; refusing original code object\n");
+    return HSA_STATUS_ERROR;
+  }
+
+  // A skipped kernel is redirected to an s_trap; s_endpgm stub. Because a
+  // no-handler s_trap falls through (it is not a program terminator), dispatching
+  // that stub would run the s_endpgm and COMPLETE NORMALLY — the application would
+  // observe success with stale/garbage output instead of a failure. There is no
+  // safe way to let such a kernel be dispatched, so fail the whole code-object
+  // load rather than hand back an executable that can silently produce wrong
+  // results. (This trades the "keep the module loadable when an unused kernel
+  // fails to translate" behavior for correctness; a dispatched skipped kernel
+  // must never appear to succeed.)
+  const auto skipped = std::ranges::find_if(translated.diagnostics, [](const auto &diagnostic) {
+    return diagnostic.kind == DiagnosticKind::KernelSkipped;
+  });
+  if (skipped != translated.diagnostics.end()) {
+    std::fprintf(stderr,
+                 "[rocjitsu-hooks] code object contains a kernel that could not be translated and "
+                 "would silently complete if dispatched; refusing the load\n");
     return HSA_STATUS_ERROR;
   }
 

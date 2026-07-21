@@ -52,6 +52,20 @@ public:
   /// genuinely unsupported inputs.
   [[nodiscard]] bool has_relocations_within_text() const;
 
+  /// @brief True if any relocation references a non-kernel function symbol
+  /// defined in .text.
+  ///
+  /// @details DBT moves (and can duplicate) .text function blocks, but text-
+  /// defined STT_FUNC symbol values (st_value) are not remapped. A relocation
+  /// elsewhere (e.g. a function-pointer table in .data) that resolves against
+  /// such a symbol would therefore point at the function's stale pre-move PC.
+  /// Kernel entry points are dispatched through the descriptor's
+  /// kernel_code_entry_byte_offset (which DBT does update) and are not the target
+  /// of in-object relocations, so this rejects only genuinely address-taken text
+  /// helpers that cannot be relocated safely yet. BinaryTranslator uses it to fail
+  /// closed instead of resolving to a wrong address.
+  [[nodiscard]] bool has_relocation_to_text_function_symbol() const;
+
   void update_elf_flags(uint32_t new_flags);
 
   [[nodiscard]] bool patch_kernel_descriptor(uint64_t file_offset,

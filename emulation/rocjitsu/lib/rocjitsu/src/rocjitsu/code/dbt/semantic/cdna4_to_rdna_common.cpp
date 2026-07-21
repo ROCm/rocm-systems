@@ -50,7 +50,7 @@ namespace {
 }
 
 ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_arch,
-                                  const LivenessAnalysis &liveness) {
+                                  const LivenessAnalysis &liveness, TranslationContext &context) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() < 8)
     return ExpandResult::failed(std::string(inst.mnemonic()) +
@@ -78,6 +78,25 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
     return ExpandResult::failed(std::string(inst.mnemonic()) +
                                 " v_lshl_add_u64 lowering does not support a literal shift count");
 
+  // The 64-bit addend S2 is added as two 32-bit halves read from src2 and
+  // src2 + 1. That +1 high-half derivation is only valid when src2 names a real
+  // 64-bit register pair: a VGPR pair (256..511), an even SGPR pair (0..104), or
+  // VCC (106/107). For an inline constant (128..208, 240..247) the encodings are
+  // consecutive single values, so src2 + 1 would read the NEXT constant (e.g.
+  // addend 0 encoded as 128 -> high half reads 129 == constant 1), and a literal
+  // (254/255) has no second encoded dword. Reject those non-register addends
+  // rather than silently miscompiling; S0 is fed whole to v_lshlrev_b64 so it may
+  // be any 64-bit source form and needs no such guard.
+  constexpr uint16_t kVccLo = 106;
+  const bool src2_is_vgpr_pair = src2 >= 256 && src2 <= 511;
+  const bool src2_is_sgpr_pair = src2 <= 104 && (src2 % 2) == 0;
+  const bool src2_is_vcc = src2 == kVccLo;
+  if (!src2_is_vgpr_pair && !src2_is_sgpr_pair && !src2_is_vcc)
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " v_lshl_add_u64 lowering does not support a non-register 64-bit "
+                                "addend (inline constant or "
+                                "literal); the high-half derivation requires a register pair");
+
   // v_lshl_add_u64 computes D = (S0 << S1[5:0]) + S2, lowered as a shift into a
   // 64-bit temporary followed by a 64-bit carry-add of S2. The shift result must
   // not clobber the addend S2 before the add reads it. Choosing the shift
@@ -102,9 +121,12 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
           " v_lshl_add_u64 lowering needs a scratch VGPR pair when the destination overlaps the "
           "addend, but no dead pair is available");
     shift_dst = *scratch;
+    // find_free_run can return a dead pair above the source descriptor's VGPR
+    // allocation. Report the requirement so the target descriptor grows to cover
+    // the scratch pair; otherwise the emitted code names unallocated VGPRs.
+    context.require_vgprs(static_cast<uint32_t>(shift_dst) + 2u);
   }
 
-  constexpr uint16_t kVccLo = 106;
   // These generated opcodes currently match on RDNA3 and RDNA4. Keep the
   // architecture-specific selection explicit so an ISA XML change cannot
   // silently make this shared lowering emit the other target's opcode.
@@ -169,9 +191,9 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
 ExpandResult expand_cdna4_v_lshl_add_u64_for_rdna(const Instruction &inst, uint32_t host_arch,
                                                   uint64_t, std::span<const uint8_t>,
                                                   const LivenessAnalysis &liveness,
-                                                  TranslationContext &, const LaneLayout *,
+                                                  TranslationContext &context, const LaneLayout *,
                                                   const LaneLayout *) {
-  return lower_v_lshl_add_u64(inst, static_cast<rj_code_arch_t>(host_arch), liveness);
+  return lower_v_lshl_add_u64(inst, static_cast<rj_code_arch_t>(host_arch), liveness, context);
 }
 
 } // namespace rocjitsu

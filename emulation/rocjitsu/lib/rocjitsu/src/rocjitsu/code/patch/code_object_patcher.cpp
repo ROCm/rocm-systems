@@ -614,22 +614,25 @@ bool CodeObjectPatcher::has_relocations_within_text() const {
   if (!text_index)
     return false;
 
-  // ET_DYN relocation places are virtual addresses; ET_REL places are section
-  // offsets. .text uses sh_addr for the former and file offsets map through
-  // sh_offset for the latter, but AMDHSA .text is loaded 1:1 so its sh_addr and
-  // in-section range bound the place either way. Compare against the .text range
-  // in whichever coordinate the relocation records use.
+  // A relocation's place (r_offset) is interpreted differently by ELF type:
+  //   - ET_DYN/ET_EXEC: r_offset is a virtual address. An in-.text place is one
+  //     inside [text.sh_addr, text.sh_addr + size). The reloc section applies
+  //     across the whole image, so every record must be range-checked.
+  //   - ET_REL: r_offset is relative to the section the reloc section applies to,
+  //     named by the reloc section's sh_info. Only records whose sh_info is the
+  //     text section can land in .text, and there any r_offset < text.sh_size is
+  //     in-text. Comparing an ET_REL r_offset against a file offset (text.sh_offset)
+  //     is wrong and would miss e.g. an .rela.text record with r_offset == 0.
   const Elf64_Shdr &text = shdrs[*text_index];
-  const uint64_t text_lo = header.e_type == ET_REL ? text.sh_offset : text.sh_addr;
-  const uint64_t text_hi = text_lo + text_size_;
-
-  auto place_in_text = [&](uint64_t place) { return place >= text_lo && place < text_hi; };
+  const bool is_rel_object = header.e_type == ET_REL;
 
   for (const Elf64_Shdr &relocs : shdrs) {
     if (relocs.sh_type != SHT_RELA && relocs.sh_type != SHT_REL)
       continue;
     if (!image_contains_range(image_.size(), relocs.sh_offset, relocs.sh_size))
       continue;
+    if (is_rel_object && relocs.sh_info != *text_index)
+      continue; // ET_REL: only relocations that apply to .text matter.
     const bool is_rela = relocs.sh_type == SHT_RELA;
     const size_t entsize = is_rela ? sizeof(Elf64_Rela) : sizeof(Elf64_Rel);
     if (relocs.sh_entsize != entsize)
@@ -647,7 +650,69 @@ bool CodeObjectPatcher::has_relocations_within_text() const {
         std::memcpy(&rel, image_.data() + offset, sizeof(rel));
         r_offset = rel.r_offset;
       }
-      if (place_in_text(r_offset))
+      const bool in_text = is_rel_object
+                               ? r_offset < text_size_
+                               : (r_offset >= text.sh_addr && r_offset < text.sh_addr + text_size_);
+      if (in_text)
+        return true;
+    }
+  }
+  return false;
+}
+
+bool CodeObjectPatcher::has_relocation_to_text_function_symbol() const {
+  if (text_size_ == 0)
+    return false;
+
+  auto header = *reinterpret_cast<const Elf64_Ehdr *>(image_.data());
+  const auto shdrs = read_section_headers(image_, header);
+  const auto text_index = find_text_section(shdrs, text_offset_, text_size_);
+  if (!text_index)
+    return false;
+
+  // Return the symtab index referenced by a symbol index in the given symtab, and
+  // whether that symbol is an STT_FUNC defined in .text.
+  auto symbol_is_text_func = [&](const Elf64_Shdr &symtab, uint32_t sym_index) {
+    if (symtab.sh_entsize != sizeof(Elf64_Sym))
+      return false;
+    if (!image_contains_range(image_.size(), symtab.sh_offset, symtab.sh_size))
+      return false;
+    if (static_cast<uint64_t>(sym_index) * sizeof(Elf64_Sym) + sizeof(Elf64_Sym) > symtab.sh_size)
+      return false;
+    Elf64_Sym symbol{};
+    std::memcpy(&symbol, image_.data() + symtab.sh_offset + sym_index * sizeof(Elf64_Sym),
+                sizeof(symbol));
+    return symbol.st_shndx == *text_index && elf_symbol_type(symbol.st_info) == kElfSymbolTypeFunc;
+  };
+
+  for (const Elf64_Shdr &relocs : shdrs) {
+    if (relocs.sh_type != SHT_RELA && relocs.sh_type != SHT_REL)
+      continue;
+    if (!image_contains_range(image_.size(), relocs.sh_offset, relocs.sh_size))
+      continue;
+    // sh_link names the symbol table this relocation section indexes into.
+    if (relocs.sh_link >= shdrs.size())
+      continue;
+    const Elf64_Shdr &symtab = shdrs[relocs.sh_link];
+    const bool is_rela = relocs.sh_type == SHT_RELA;
+    const size_t entsize = is_rela ? sizeof(Elf64_Rela) : sizeof(Elf64_Rel);
+    if (relocs.sh_entsize != entsize)
+      continue;
+    const size_t count = relocs.sh_size / entsize;
+    for (size_t i = 0; i < count; ++i) {
+      const uint64_t offset = relocs.sh_offset + i * entsize;
+      uint64_t r_info = 0;
+      if (is_rela) {
+        Elf64_Rela rela{};
+        std::memcpy(&rela, image_.data() + offset, sizeof(rela));
+        r_info = rela.r_info;
+      } else {
+        Elf64_Rel rel{};
+        std::memcpy(&rel, image_.data() + offset, sizeof(rel));
+        r_info = rel.r_info;
+      }
+      const uint32_t sym_index = static_cast<uint32_t>(r_info >> 32); // ELF64_R_SYM
+      if (sym_index != 0 && symbol_is_text_func(symtab, sym_index))
         return true;
     }
   }

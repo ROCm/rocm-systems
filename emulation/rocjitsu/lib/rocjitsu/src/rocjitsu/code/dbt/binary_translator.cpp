@@ -803,13 +803,24 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // shifted. An in-.text relocation would therefore be applied to the wrong
   // translated bytes. Fail closed rather than silently miscompile. AMDHSA kernel
   // code objects do not carry such relocations, so this rejects only genuinely
-  // unsupported inputs. (Text-defined function *symbol* values are not remapped
-  // either, but kernel dispatch resolves through the descriptor's
-  // kernel_code_entry_byte_offset, which DBT does update, so those are benign.)
+  // unsupported inputs.
   if (patcher.has_relocations_within_text()) {
     append_error(result.diagnostics, DiagnosticKind::Legalization,
                  "code object has relocations targeting .text; relocating translated .text would "
                  "apply them to the wrong bytes and is not supported");
+    return leave_unchanged();
+  }
+
+  // Likewise, DBT moves (and can duplicate) .text function blocks but does not
+  // remap text-defined STT_FUNC symbol values. A relocation elsewhere (e.g. a
+  // function-pointer table in .data) that resolves against such a symbol would
+  // point at the function's stale pre-move PC. Kernel entries are dispatched via
+  // the descriptor (not address-taken through relocations), so this rejects only
+  // genuinely address-taken text helpers we cannot relocate yet.
+  if (patcher.has_relocation_to_text_function_symbol()) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization,
+                 "code object has a relocation referencing a function defined in .text; DBT does "
+                 "not remap text-defined function symbols and would resolve it to a stale address");
     return leave_unchanged();
   }
 

@@ -4186,6 +4186,27 @@ TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaHandlesDestinationAliasingAddend) {
       << "shift result must not overwrite the aliased addend v[2:3] before the add reads it";
 }
 
+TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaRejectsInlineConstantAddend) {
+  // v[4:5] = (v[0:1] << 2) + <inline constant 0>. The 64-bit addend is encoded as
+  // a single inline-constant operand (128), so the high half cannot be derived as
+  // src2 + 1 (129 == constant 1). The lowering must fail closed rather than
+  // silently add 1 to the high word.
+  constexpr uint16_t kInlineConstZero = 128;
+  const auto words = make_cdna4_v_lshl_add_u64_words(/*vdst=*/4, /*src0=*/256 + 0,
+                                                     /*src1=*/2, /*src2=*/kInlineConstZero);
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {words[0], words[1], 0xBF810000u});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  auto result = translator.translate(source);
+
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::ExpandFailed,
+                                             "non-register 64-bit addend"));
+}
+
 TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersDsReadB32ToFlatGlobalLoad) {
   constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
   const auto ds = make_cdna4_ds_read_b32_words();
