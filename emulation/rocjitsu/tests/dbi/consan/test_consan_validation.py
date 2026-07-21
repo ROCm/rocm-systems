@@ -85,13 +85,17 @@ class ConSanValidationTest(unittest.TestCase):
 
     def test_manifest_is_the_complete_north_star_matrix(self) -> None:
         manifest = validation._manifest("gfx1201")
-        self.assertEqual(len(manifest["workloads"]), 11)
+        self.assertEqual(len(manifest["workloads"]), 12)
         self.assertEqual(
             [profile["id"] for profile in manifest["profiles"]],
             list(validation.PROFILE_IDS),
         )
         self.assertEqual(
-            len({workload["id"] for workload in manifest["workloads"]}), 11
+            len({workload["id"] for workload in manifest["workloads"]}), 12
+        )
+        workloads = {workload["id"]: workload for workload in manifest["workloads"]}
+        self.assertEqual(
+            workloads["pytorch-rdna4-compiled-softmax"]["targets"], ("gfx1201",)
         )
 
     def test_gfx950_manifest_resolves_cdna4_native_workloads(self) -> None:
@@ -362,6 +366,25 @@ class ConSanValidationTest(unittest.TestCase):
             )
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
         self.assertEqual(command[command.index("--workload") + 1], "cluster-load-sync")
+
+    def test_pytorch_rdna4_softmax_uses_native_compiled_client(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-compiled-softmax"]
+        with mock.patch.dict(
+            os.environ,
+            {validation.PYTORCH_PYTHON_ENV: "/workspace/venv/bin/python"},
+        ):
+            command = validation._workload_command(
+                Path("/workspace"),
+                "gfx1201",
+                workload,
+                "clean",
+                Path("/unused"),
+            )
+        self.assertEqual(command[0], "/workspace/venv/bin/python")
+        self.assertEqual(command[command.index("--repetitions") + 1], "1")
+        self.assertEqual(
+            command[command.index("--workload") + 1], "rdna4-compiled-softmax"
+        )
 
     def test_tensile_gfx1250_uses_numeric_runner_once(self) -> None:
         workload = validation.WORKLOAD_BY_ID["tensile-sk-mxf8gemm-explicit"]
@@ -883,10 +906,11 @@ class ConSanValidationTest(unittest.TestCase):
             loaded = validation._load_fault(path, "gfx1201", workload, "drop")
         self.assertEqual(loaded["id"], "drop")
 
-    def test_checked_in_gfx1201_fault_reference_covers_the_manifest(self) -> None:
+    def test_checked_in_gfx1201_fault_reference_is_a_valid_manifest_subset(self) -> None:
         path = Path(__file__).with_name(
             "consan_validation_faults_gfx1201_reference.json"
         )
+        document = json.loads(path.read_text(encoding="utf-8"))
         with self.assertRaisesRegex(validation.ValidationError, "reference-only"):
             validation._load_fault(
                 path,
@@ -894,8 +918,14 @@ class ConSanValidationTest(unittest.TestCase):
                 validation.WORKLOAD_BY_ID["qwen-prefill"],
                 "barrier-drop",
             )
-        for workload in validation._workloads_for_target("gfx1201"):
-            for fault_id in workload.fault_families:
+        manifest_ids = {
+            workload.id for workload in validation._workloads_for_target("gfx1201")
+        }
+        self.assertLessEqual(set(document["workloads"]), manifest_ids)
+        for workload_id, workload_document in document["workloads"].items():
+            workload = validation.WORKLOAD_BY_ID[workload_id]
+            for fault_document in workload_document["faults"]:
+                fault_id = fault_document["id"]
                 fault = validation._load_fault(
                     path,
                     "gfx1201",

@@ -527,6 +527,47 @@ def _run_norm_softmax(
     }
 
 
+def _run_rdna4_compiled_softmax(repetitions: int) -> dict[str, object]:
+    """Runs a target-native Inductor/Triton softmax selected on gfx1201."""
+    rows = 128
+    columns = 256
+    host_input = (
+        (torch.arange(rows * columns, dtype=torch.float32) % 257) - 128
+    ).reshape(rows, columns) / 17.0
+    expected = torch.softmax(host_input, dim=1)
+    input_tensor = host_input.to(device="cuda")
+
+    # Keep this an ordinary PyTorch operation.  torch.compile, rather than a
+    # hand-written Triton kernel, is what makes the frozen validation client
+    # exercise the target-native kernel selected by the installed wheel.
+    compiled_softmax = torch.compile(
+        lambda value: torch.softmax(value, dim=1), fullgraph=True
+    )
+    elapsed_ms = []
+    actual = None
+    for _ in range(repetitions):
+        start = time.monotonic()
+        actual = compiled_softmax(input_tensor)
+        torch.cuda.synchronize()
+        elapsed_ms.append((time.monotonic() - start) * 1000.0)
+    assert actual is not None
+    host_actual = actual.cpu()
+    if not torch.allclose(host_actual, expected, rtol=1.0e-5, atol=1.0e-7):
+        maximum_error = torch.max(torch.abs(host_actual - expected)).item()
+        raise RuntimeError(
+            f"compiled-softmax oracle failed: maximum error {maximum_error}"
+        )
+    return {
+        "median_ms": statistics.median(elapsed_ms),
+        "repetitions": repetitions,
+        "oracle": "cpu-softmax-allclose",
+        "oracle_passed": True,
+        "shape": [rows, columns],
+        "dtype": str(host_input.dtype),
+        "compiler": "torch.compile-fullgraph",
+    }
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -542,6 +583,7 @@ def _parse_args() -> argparse.Namespace:
             "norm-softmax",
             "vector-norm",
             "softmax",
+            "rdna4-compiled-softmax",
         ),
         required=True,
     )
@@ -593,8 +635,14 @@ def main() -> int:
                     args.repetitions, run_softmax=False
                 )
             }
-        else:
+        elif args.workload == "softmax":
             result = {"softmax": _run_norm_softmax(args.repetitions, run_norm=False)}
+        else:
+            result = {
+                "rdna4-compiled-softmax": _run_rdna4_compiled_softmax(
+                    args.repetitions
+                )
+            }
     except Exception as exc:
         _write_oracle_result(
             "fail", {"workload": args.workload, "reason": str(exc)}
