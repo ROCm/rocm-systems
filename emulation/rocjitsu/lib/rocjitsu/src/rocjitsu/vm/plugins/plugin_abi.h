@@ -106,11 +106,7 @@ inline constexpr const char *kPluginDestroySymbol = "rocjitsu_plugin_destroy";
 } // namespace rocjitsu
 
 /// @brief Ensure ABI exports stay visible even under -fvisibility=hidden.
-#if defined(_WIN32)
-#define ROCJITSU_PLUGIN_EXPORT __declspec(dllexport)
-#else
-#define ROCJITSU_PLUGIN_EXPORT __attribute__((visibility("default")))
-#endif
+#define ROCJITSU_PLUGIN_EXPORT RJ_API_EXPORT
 
 /// @brief Emit the three required plugin ABI exports.
 ///
