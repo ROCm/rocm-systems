@@ -89,7 +89,7 @@ jobs:
         with:
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Configure CI
         id: configure
