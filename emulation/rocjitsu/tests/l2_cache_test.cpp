@@ -1220,6 +1220,182 @@ TEST(L2CacheBenchmark, Invalidate129Lines) {
   run_invalidate_range_benchmark("invalidate_129_lines", 129, 5'000);
 }
 
+TEST(L1VectorCacheTest, CoalescesContiguousLaneStores) {
+  GpuMemory memory("memory");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  L1VectorCache l1(&l2);
+  l1.set_memory(&memory);
+
+  constexpr uint32_t kLanes = 8;
+  constexpr uint32_t kElemSize = sizeof(uint32_t);
+  constexpr uint32_t kNumElems = 2;
+  constexpr uint32_t kStride = kElemSize * kNumElems;
+  constexpr uint64_t kBase = 0x400000;
+
+  std::array<uint64_t, 64> addrs{};
+  std::array<uint8_t, 64 * kStride> src{};
+  for (uint32_t lane = 0; lane < kLanes; ++lane) {
+    addrs[lane] = kBase + lane * kStride;
+    for (uint32_t elem = 0; elem < kNumElems; ++elem) {
+      uint32_t value = 0xabc00000u | (lane << 8) | elem;
+      std::memcpy(src.data() + lane * kStride + elem * kElemSize, &value, sizeof(value));
+    }
+  }
+
+  l1.store(addrs.data(), (1ULL << kLanes) - 1, kElemSize, kNumElems, src.data(), Mtype::RW, false,
+           /*wf_size=*/64);
+
+  EXPECT_EQ(l1.store_l2_writes(), 1u);
+  EXPECT_EQ(l2.write_count(), 1u);
+
+  std::array<uint8_t, kLanes * kStride> actual{};
+  memory.read_block(kBase, std::span<uint8_t>(actual));
+  EXPECT_TRUE(std::equal(actual.begin(), actual.end(), src.begin()));
+}
+
+TEST(L1VectorCacheTest, CoalescesContiguousLaneLoads) {
+  GpuMemory memory("memory");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  L1VectorCache l1(&l2);
+  l1.set_memory(&memory);
+
+  constexpr uint32_t kLanes = 8;
+  constexpr uint32_t kElemSize = sizeof(uint32_t);
+  constexpr uint32_t kNumElems = 4;
+  constexpr uint32_t kStride = kElemSize * kNumElems;
+  constexpr uint64_t kBase = 0x480000;
+
+  std::array<uint64_t, 64> addrs{};
+  std::array<uint8_t, kLanes * kStride> input{};
+  for (uint32_t lane = 0; lane < kLanes; ++lane) {
+    addrs[lane] = kBase + lane * kStride;
+    for (uint32_t elem = 0; elem < kNumElems; ++elem) {
+      uint32_t value = 0xf00d0000u | (lane << 8) | elem;
+      std::memcpy(input.data() + lane * kStride + elem * kElemSize, &value, sizeof(value));
+    }
+  }
+  memory.write_block(kBase, std::span<const uint8_t>(input));
+
+  std::array<uint8_t, 64 * kStride> output{};
+  l1.load(addrs.data(), (1ULL << kLanes) - 1, kElemSize, kNumElems, output.data(), Mtype::RW, false,
+          false, /*wf_size=*/64);
+
+  EXPECT_EQ(l1.read_count(), 1u);
+  EXPECT_TRUE(std::equal(input.begin(), input.end(), output.begin()));
+}
+
+TEST(L1VectorCacheTest, SameSetEvictionNeverAliasesPreviousLine) {
+  GpuMemory memory("memory");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  L1VectorCache l1(&l2);
+  l1.set_memory(&memory);
+
+  constexpr uint64_t kBase = 0x4c0000;
+  constexpr uint64_t kSetStride =
+      static_cast<uint64_t>(L1VectorCache::NUM_SETS) * L1VectorCache::LINE_SIZE;
+  std::array<uint64_t, 64> addrs{};
+  std::array<uint8_t, 64> output{};
+
+  auto load_byte = [&](uint64_t addr) {
+    addrs[0] = addr;
+    l1.load(addrs.data(), 1, 1, 1, output.data(), Mtype::RW, false, false,
+            /*wf_size=*/64);
+    return output[0];
+  };
+
+  for (uint32_t way = 0; way <= L1VectorCache::ASSOCIATIVITY; ++way)
+    memory.write8(kBase + way * kSetStride, static_cast<uint8_t>(0x40 + way));
+
+  EXPECT_EQ(load_byte(kBase), 0x40);
+  for (uint32_t way = 1; way <= L1VectorCache::ASSOCIATIVITY; ++way)
+    EXPECT_EQ(load_byte(kBase + way * kSetStride), 0x40 + way);
+  EXPECT_EQ(load_byte(kBase), 0x40);
+}
+
+TEST(L1VectorCacheTest, MaskGapsBreakContiguousLaneStoreRuns) {
+  GpuMemory memory("memory");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  L1VectorCache l1(&l2);
+  l1.set_memory(&memory);
+
+  constexpr uint32_t kElemSize = sizeof(uint32_t);
+  constexpr uint32_t kNumElems = 1;
+  constexpr uint32_t kStride = kElemSize * kNumElems;
+  constexpr uint64_t kBase = 0x500000;
+  constexpr uint64_t kMask = (1ULL << 0) | (1ULL << 2) | (1ULL << 3);
+
+  std::array<uint64_t, 64> addrs{};
+  addrs[0] = kBase;
+  addrs[2] = kBase + kStride;
+  addrs[3] = kBase + 2 * kStride;
+
+  std::array<uint8_t, 64 * kStride> src{};
+  uint32_t lane0 = 0x10101010;
+  uint32_t lane1_inactive = 0xdeadbeef;
+  uint32_t lane2 = 0x20202020;
+  uint32_t lane3 = 0x30303030;
+  std::memcpy(src.data() + 0 * kStride, &lane0, sizeof(lane0));
+  std::memcpy(src.data() + 1 * kStride, &lane1_inactive, sizeof(lane1_inactive));
+  std::memcpy(src.data() + 2 * kStride, &lane2, sizeof(lane2));
+  std::memcpy(src.data() + 3 * kStride, &lane3, sizeof(lane3));
+
+  l1.store(addrs.data(), kMask, kElemSize, kNumElems, src.data(), Mtype::RW, false,
+           /*wf_size=*/64);
+
+  EXPECT_EQ(l1.store_l2_writes(), 2u);
+  EXPECT_EQ(l2.write_count(), 2u);
+
+  std::array<uint32_t, 3> actual{};
+  memory.read_block(kBase, std::span<uint8_t>(reinterpret_cast<uint8_t *>(actual.data()),
+                                              actual.size() * sizeof(uint32_t)));
+  EXPECT_EQ(actual[0], lane0);
+  EXPECT_EQ(actual[1], lane2);
+  EXPECT_EQ(actual[2], lane3);
+}
+
+TEST(L1VectorCacheTest, MaskGapsBreakContiguousLaneLoadRuns) {
+  GpuMemory memory("memory");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  L1VectorCache l1(&l2);
+  l1.set_memory(&memory);
+
+  constexpr uint32_t kElemSize = sizeof(uint32_t);
+  constexpr uint32_t kNumElems = 1;
+  constexpr uint32_t kStride = kElemSize * kNumElems;
+  constexpr uint64_t kBase = 0x580000;
+  constexpr uint64_t kMask = (1ULL << 0) | (1ULL << 2) | (1ULL << 3);
+
+  std::array<uint64_t, 64> addrs{};
+  addrs[0] = kBase;
+  addrs[2] = kBase + kStride;
+  addrs[3] = kBase + 2 * kStride;
+
+  std::array<uint32_t, 3> input{0x10101010, 0x20202020, 0x30303030};
+  memory.write_block(kBase,
+                     std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(input.data()),
+                                              input.size() * sizeof(uint32_t)));
+
+  std::array<uint8_t, 64 * kStride> output{};
+  l1.load(addrs.data(), kMask, kElemSize, kNumElems, output.data(), Mtype::RW, false, false,
+          /*wf_size=*/64);
+
+  EXPECT_EQ(l1.read_count(), 2u);
+  uint32_t lane0 = 0;
+  uint32_t lane2 = 0;
+  uint32_t lane3 = 0;
+  std::memcpy(&lane0, output.data() + 0 * kStride, sizeof(lane0));
+  std::memcpy(&lane2, output.data() + 2 * kStride, sizeof(lane2));
+  std::memcpy(&lane3, output.data() + 3 * kStride, sizeof(lane3));
+  EXPECT_EQ(lane0, input[0]);
+  EXPECT_EQ(lane2, input[1]);
+  EXPECT_EQ(lane3, input[2]);
+}
+
 TEST(GpuMemoryTest, BlockAccessHandlesPageBoundaries) {
   GpuMemory memory("memory");
 

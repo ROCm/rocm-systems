@@ -22,6 +22,12 @@ class L2Cache;
 /// sharing the same L2 are properly merged at byte granularity.
 ///
 /// CDNA3 V$ geometry: 128B lines, 64 sets, 4-way = 32KB.
+///
+/// @par Thread safety
+/// This cache is mutable per-CU state and is not internally synchronized.
+/// Functional dispatch must preserve one-host-thread-per-CU ownership while a
+/// CU quantum runs. Different CUs may execute concurrently because each owns a
+/// separate L1VectorCache; their shared L2 provides its own synchronization.
 class L1VectorCache {
 public:
   static constexpr uint32_t LINE_SIZE_BITS = 7; // 128 bytes
@@ -56,6 +62,7 @@ public:
   uint64_t store_count() const { return store_count_; }
   uint64_t store_active_count() const { return store_active_count_; }
   uint64_t store_l2_writes() const { return store_l2_writes_; }
+  uint64_t read_count() const { return read_count_; }
 
 private:
   void invalidate_all_locked();
@@ -65,6 +72,11 @@ private:
   void write_bytes(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype, bool non_temporal,
                    uint32_t vmid);
   void ensure_line(uint64_t addr, uint32_t vmid);
+  const uint8_t *fetch_line(uint64_t addr, uint32_t vmid);
+  const uint8_t *line_data_for_read(uint64_t addr, uint32_t vmid) {
+    const uint8_t *line = cache_.line_data_for_read(addr, vmid);
+    return line ? line : fetch_line(addr, vmid);
+  }
 
   CacheStore cache_;
   L2Cache *l2_;
@@ -73,6 +85,7 @@ private:
   uint64_t store_count_ = 0;
   uint64_t store_active_count_ = 0;
   uint64_t store_l2_writes_ = 0;
+  uint64_t read_count_ = 0;
 };
 
 } // namespace amdgpu

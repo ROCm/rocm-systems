@@ -398,6 +398,7 @@ add_executable(
     vector_add_test.cpp
     gfx1250_sim_test.cpp
     l2_cache_test.cpp
+    lds_test.cpp
     sparse_memory_test.cpp
     cpu_dispatch_pool_test.cpp
     simdojo_sim_test.cpp
