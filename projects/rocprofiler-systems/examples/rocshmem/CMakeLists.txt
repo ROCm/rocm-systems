@@ -3,7 +3,7 @@
 
 cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
-project(rocprofiler-systems-rocshmem-demo LANGUAGES CXX)
+project(rocprofiler-systems-rocshmem LANGUAGES CXX)
 
 # Support standalone builds
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
@@ -20,7 +20,7 @@ endif()
 # HIP runtime is required for hipStream_t, hipStreamCreate/Synchronize/Destroy
 find_package(hip HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm QUIET)
 if(NOT hip_FOUND)
-    message(${_MSG_TYPE} "rocshmem-demo skipped: HIP not found.")
+    message(${_MSG_TYPE} "rocshmem skipped: HIP not found.")
     return()
 endif()
 
@@ -31,7 +31,7 @@ if(NOT TARGET roc::rocshmem)
     find_package(rocshmem HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm QUIET)
 endif()
 if(NOT TARGET roc::rocshmem)
-    message(${_MSG_TYPE} "rocshmem-demo skipped: rocSHMEM (roc::rocshmem) not found.")
+    message(${_MSG_TYPE} "rocshmem skipped: rocSHMEM (roc::rocshmem) not found.")
     return()
 endif()
 
@@ -42,17 +42,20 @@ find_package(MPI QUIET)
 
 enable_language(HIP)
 
-add_executable(rocshmem-demo rocshmem_demo.cpp)
-set_source_files_properties(rocshmem_demo.cpp PROPERTIES LANGUAGE HIP)
+add_executable(rocshmem rocshmem.cpp)
+set_source_files_properties(rocshmem.cpp PROPERTIES LANGUAGE HIP)
 
-set_target_properties(rocshmem-demo PROPERTIES
-    HIP_STANDARD          17
-    HIP_STANDARD_REQUIRED ON
-    CXX_STANDARD          17
-    CXX_STANDARD_REQUIRED ON
+set_target_properties(
+    rocshmem
+    PROPERTIES
+        HIP_STANDARD          17
+        HIP_STANDARD_REQUIRED ON
+        CXX_STANDARD          17
+        CXX_STANDARD_REQUIRED ON
 )
 
-target_link_libraries(rocshmem-demo
+target_link_libraries(
+    rocshmem
     PRIVATE
         roc::rocshmem
         hip::host
@@ -64,15 +67,16 @@ target_link_libraries(rocshmem-demo
 # rocprof-sys-rocshmem-tests.cmake) can locate the executable without
 # hard-coding a path.
 set(ROCPROFSYS_ROCSHMEM_DEMO_EXE
-    "$<TARGET_FILE:rocshmem-demo>"
-    CACHE INTERNAL "Path to rocshmem-demo executable"
+    "$<TARGET_FILE:rocshmem>"
+    CACHE INTERNAL
+    "Path to rocshmem executable"
 )
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)
     install(
-        TARGETS rocshmem-demo
+        TARGETS rocshmem
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
-        COMPONENT   rocprofiler-systems-examples
+        COMPONENT rocprofiler-systems-examples
         OPTIONAL
     )
 endif()

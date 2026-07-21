@@ -20,7 +20,7 @@ pytestmark = [
     pytest.mark.gpu,
 ]
 
-_ROCSHMEM_DEMO = "rocshmem-demo"
+_ROCSHMEM_DEMO = "rocshmem"
 
 EXPECTED_OPERATIONS = [
     "barrier_all_on_stream",
@@ -54,7 +54,7 @@ def rocshmem_env() -> dict[str, str]:
 
 @pytest.fixture(scope="session")
 def rocshmem_demo_available(rocprof_config) -> tuple[bool, str]:
-    """Return (True, "") if rocshmem-demo is present and functional on this
+    """Return (True, "") if rocshmem is present and functional on this
     system's GPU, else (False, reason).
 
     A probe subprocess run (without rocprofiler-systems instrumentation) is
@@ -84,11 +84,10 @@ def rocshmem_demo_available(rocprof_config) -> tuple[bool, str]:
             stderr = probe.stderr.decode(errors="replace").strip()
             return False, (
                 f"rocSHMEM runtime not supported on this system "
-                f"(probe exit {probe.returncode})"
-                + (f": {stderr}" if stderr else "")
+                f"(probe exit {probe.returncode})" + (f": {stderr}" if stderr else "")
             )
     except subprocess.TimeoutExpired:
-        return False, "rocshmem-demo probe timed out (rocSHMEM may hang on init)"
+        return False, "rocshmem probe timed out (rocSHMEM may hang on init)"
     except FileNotFoundError as exc:
         return False, f"mpirun not found: {exc}"
 
@@ -116,7 +115,7 @@ class TestRocSHMEMTracing(RocprofsysTest):
     ):
         available, reason = rocshmem_demo_available
         if not available:
-            pytest.skip(f"rocshmem-demo not found: {reason}")
+            pytest.skip(f"rocshmem not found: {reason}")
 
         result = self.run_test(
             mode,

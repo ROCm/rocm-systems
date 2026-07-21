@@ -38,8 +38,8 @@ The supported communication runtimes span multiple layers of the parallel comput
    * **MPI** (``ROCPROFSYS_USE_MPIP``): Enabled by default (``ON``). When using binary instrumentation, ROCm Systems Profiler automatically detects MPI symbols in the target application and enables MPI support.
    * **UCX** (``ROCPROFSYS_USE_UCX``): Disabled by default (``OFF``). Must be explicitly enabled to trace UCX operations. This is a runtime user-configurable option.
    * **RCCL** (``ROCPROFSYS_USE_RCCLP``): Disabled by default (``OFF``). Must be explicitly enabled to trace RCCL operations.
-   * **rocSHMEM** (``ROCPROFSYS_ROCM_DOMAINS=rocshmem_api``): Disabled by default. Must be included in ``ROCPROFSYS_ROCM_DOMAINS`` to trace rocSHMEM host-stream API calls. Requires rocprofiler-sdk ≥ 10.3.0.
-   * **SHMEM** (``ROCPROFSYS_USE_SHMEM``): Disabled by default (``OFF``). Must be explicitly enabled to trace OpenSHMEM operations.
+   * **rocSHMEM** (``ROCPROFSYS_ROCM_DOMAINS=rocshmem_api``): Disabled by default. Must be included in ``ROCPROFSYS_ROCM_DOMAINS`` to trace rocSHMEM host-stream API calls. Requires rocprofiler-sdk ≥ 1.3.4.
+   * **OpenSHMEM** (``ROCPROFSYS_USE_SHMEM``): Disabled by default (``OFF``). Must be explicitly enabled to trace OpenSHMEM operations.
 
    These settings can be controlled at runtime using their respective environment variables to enable or disable tracing as needed.
 
@@ -478,9 +478,9 @@ When enabled, rocprofiler-systems captures all nine rocSHMEM host-stream APIs:
 
 .. important::
 
-   rocSHMEM tracing is **disabled by default** and must be explicitly enabled by including ``rocshmem_api`` in ``ROCPROFSYS_ROCM_DOMAINS``. It requires rocprofiler-sdk ≥ 10.3.0 and a rocSHMEM build with ``USE_ROCPROFILER_REGISTER=ON`` (the default).
+   rocSHMEM tracing is **disabled by default** and must be explicitly enabled by including ``rocshmem_api`` in ``ROCPROFSYS_ROCM_DOMAINS``. It requires rocprofiler-sdk ≥ 1.3.4 and a rocSHMEM build with ``USE_ROCPROFILER_REGISTER=ON`` (the default).
 
-   rocSHMEM is an HPC library designed for AMD CDNA server GPUs (MI200, MI300 series). It is not supported on consumer RDNA GPUs.
+   rocSHMEM is an HPC library designed for AMD Instinct (CDNA) GPUs. It is not supported on consumer RDNA GPUs.
 
 Configuration
 -------------

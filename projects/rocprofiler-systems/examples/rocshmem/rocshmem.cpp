@@ -12,7 +12,7 @@
  *   putmem_signal_on_stream    signal_wait_until_on_stream
  *   broadcastmem_on_stream     alltoallmem_on_stream
  *
- * Launch with: mpirun -np 2 rocshmem-demo
+ * Launch with: mpirun -np 2 rocshmem
  */
 
 #include <cstdint>
@@ -34,10 +34,10 @@ check_hip(hipError_t err, const char* file, int line)
 }
 }  // namespace
 
-#define CHECK_HIP(cmd)                                  \
-    do {                                                \
-        if(!check_hip((cmd), __FILE__, __LINE__))       \
-            return 1;                                   \
+#define CHECK_HIP(cmd)                                                                   \
+    do                                                                                   \
+    {                                                                                    \
+        if(!check_hip((cmd), __FILE__, __LINE__)) return 1;                              \
     } while(0)
 
 int
@@ -48,15 +48,13 @@ main()
     // does not support it, rocshmem_init() may call abort(); this early check
     // provides a clean exit (code 2) that the test framework converts to a
     // skip rather than a failure.
-    int num_devices = 0;
+    int        num_devices = 0;
     hipError_t hip_dev_err = hipGetDeviceCount(&num_devices);
     if(hip_dev_err != hipSuccess || num_devices == 0)
     {
-        fprintf(stderr,
-                "rocshmem-demo: no GPU available (%s) — skipping\n",
-                hipGetErrorString(hip_dev_err != hipSuccess
-                                      ? hip_dev_err
-                                      : hipErrorNoDevice));
+        fprintf(stderr, "rocshmem: no GPU available (%s) — skipping\n",
+                hipGetErrorString(hip_dev_err != hipSuccess ? hip_dev_err
+                                                            : hipErrorNoDevice));
         return 2;
     }
 
@@ -87,8 +85,8 @@ main()
     auto* dst = static_cast<uint8_t*>(rocshmem_malloc(npes * DATA_BYTES));
     auto* sig = static_cast<uint64_t*>(rocshmem_malloc(sizeof(uint64_t)));
 
-    memset(src, me,  DATA_BYTES);
-    memset(dst, 0,   npes * DATA_BYTES);
+    memset(src, me, DATA_BYTES);
+    memset(dst, 0, npes * DATA_BYTES);
     *sig = 0;
 
     // ------------------------------------------------------------------
@@ -120,13 +118,11 @@ main()
     rocshmem_barrier_all_on_stream(stream);
     CHECK_HIP(hipStreamSynchronize(stream));
 
-    rocshmem_putmem_signal_on_stream(dst, src, DATA_BYTES,
-                                     sig, /*signal_value=*/1,
+    rocshmem_putmem_signal_on_stream(dst, src, DATA_BYTES, sig, /*signal_value=*/1,
                                      ROCSHMEM_SIGNAL_SET, peer, stream);
     CHECK_HIP(hipStreamSynchronize(stream));
 
-    rocshmem_signal_wait_until_on_stream(sig, ROCSHMEM_CMP_EQ, /*cmp_value=*/1,
-                                         stream);
+    rocshmem_signal_wait_until_on_stream(sig, ROCSHMEM_CMP_EQ, /*cmp_value=*/1, stream);
     CHECK_HIP(hipStreamSynchronize(stream));
 
     // 7. broadcastmem_on_stream — PE 0 broadcasts DATA_BYTES to all PEs
@@ -136,8 +132,7 @@ main()
 
     // 8. alltoallmem_on_stream — each PE contributes DATA_BYTES; dst must be
     //    at least npes * DATA_BYTES (allocated above)
-    rocshmem_alltoallmem_on_stream(ROCSHMEM_TEAM_WORLD, dst, src, DATA_BYTES,
-                                   stream);
+    rocshmem_alltoallmem_on_stream(ROCSHMEM_TEAM_WORLD, dst, src, DATA_BYTES, stream);
     CHECK_HIP(hipStreamSynchronize(stream));
 
     // 9. quiet_on_stream — ensure all outstanding remote operations are complete
@@ -145,8 +140,7 @@ main()
     CHECK_HIP(hipStreamSynchronize(stream));
     // ------------------------------------------------------------------
 
-    printf("[PE %d/%d] rocshmem-demo: all 9 host-stream APIs completed\n",
-           me, npes);
+    printf("[PE %d/%d] rocshmem: all 9 host-stream APIs completed\n", me, npes);
 
     rocshmem_free(src);
     rocshmem_free(dst);

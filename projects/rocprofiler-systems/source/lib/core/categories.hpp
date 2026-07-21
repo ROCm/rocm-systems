@@ -191,7 +191,7 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rocdecode_api),                      \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rocjpeg_api),                        \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rccl_api),                           \
-        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rocshmem_api),                    \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rocshmem_api),                       \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_ompt_api),                           \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_page_fault),                     \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_page_migrate),                   \

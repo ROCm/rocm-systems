@@ -100,7 +100,7 @@ set(ROCPROFSYS_EXAMPLE_DIRS
     shmem
     scratch-memory
     sdma-test
-    rocshmem-demo
+    rocshmem
     unified-memory
     minimal
 )
