@@ -503,4 +503,67 @@ __device__ void IPCContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
 
   sync_wave(team);
 }
+
+
+__device__ int IPCContext::fcollectmem_wave(rocshmem_team_t team, void *dst,
+                                            const void *src, int nelems) {
+  if (dst == nullptr || src == nullptr || team == ROCSHMEM_TEAM_INVALID)
+    return ROCSHMEM_ERROR;
+  
+  fcollectmem_linear_wave(team, dst, src, nelems);
+
+  return ROCSHMEM_SUCCESS;
+}
+
+__device__ void IPCContext::fcollectmem_linear_wave(rocshmem_team_t team, void *dst,
+                                            const void *src, int nelems) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+
+  int pe_start = team_obj->tinfo_wrt_world->pe_start;
+  int pe_size = team_obj->num_pes;
+  int stride = team_obj->tinfo_wrt_world->stride;
+  long *pSync = team_obj->alltoall_pSync;
+  int my_pe_in_team = team_obj->my_pe;
+
+  // Have each PE put their designated data to the other PEs
+  for (int j = 0; j < pe_size; j++) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+    putmem_nbi_wave(reinterpret_cast<char *>(dst) + my_pe_in_team * nelems, src, nelems, dest_pe);
+  }
+
+  if (is_thread_zero_in_block()) {
+    quiet();
+  }
+  // wait until everyone has obtained their designated data
+  internal_sync_wave(my_pe, pe_start, stride, pe_size, pSync);
+}
+
+__device__ void IPCContext::fcollectmem_wg(rocshmem_team_t team, void *dst,
+                                     const void *src, int nelems) {
+  fcollectmem_linear_wg(team, dst, src, nelems);
+}
+
+__device__ void IPCContext::fcollectmem_linear_wg(rocshmem_team_t team, void *dst,
+                                            const void *src, int nelems) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+
+  int pe_start = team_obj->tinfo_wrt_world->pe_start;
+  int pe_size = team_obj->num_pes;
+  int stride = team_obj->tinfo_wrt_world->stride;
+  long *pSync = team_obj->alltoall_pSync;
+  int my_pe_in_team = team_obj->my_pe;
+
+  // Have each PE put their designated data to the other PEs
+  for (int j = 0; j < pe_size; j++) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+    putmem_nbi_wg(reinterpret_cast<char *>(dst) + my_pe_in_team * nelems, src, nelems, dest_pe);
+  }
+
+  if (is_thread_zero_in_block()) {
+    quiet();
+  }
+  // wait until everyone has obtained their designated data
+  internal_sync_wg(my_pe, pe_start, stride, pe_size, pSync);
+}
+
 }  // namespace rocshmem

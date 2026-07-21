@@ -1,6 +1,33 @@
 name: TheRock Test Packages
 
 on:
+  workflow_dispatch:
+    inputs:
+      projects_to_test:
+        type: string
+        description: "Comma-separated list of projects to test"
+      test_type:
+        type: string
+        default: "standard"
+        description: "Test type (quick, standard, comprehensive, full)"
+      amdgpu_families:
+        type: string
+        description: "GPU family to test (e.g., gfx94X-dcgpu, gfx125X-dcgpu)"
+      test_runs_on:
+        type: string
+        description: "Runner label to use for tests"
+      platform:
+        type: string
+        default: "linux"
+        description: "Platform (linux or windows)"
+      artifact_run_id:
+        type: string
+        default: ""
+        description: "Run ID to fetch artifacts from (leave empty for current run)"
+      sanity_check_only_for_family:
+        type: boolean
+        default: false
+        description: "Run only sanity check for this family"
   workflow_call:
     inputs:
       projects_to_test:
@@ -53,7 +80,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: d8e27dff1d165462ffa5bd50057a075b943c97c5 # 2026-07-13
+          ref: 22004a6bc8a28393f8b772b7f6e2a3040f11cd8d # 2026-07-20
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

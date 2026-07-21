@@ -201,6 +201,79 @@ def generate_fcollect_api():
     for type_, tname_ in types:
         expanded_code += fcollect_api(type_, tname_)
 
+    expanded_code += """
+/**
+ * @name ROCSHMEM_CTX_FCOLLECTMEM_WG
+ * @brief Concatenates @p nelems bytes from each PE's @p source into every PE's
+ * @p dest buffer.
+ * Must be called as a work-group collective.
+ *
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+ *                         heap.
+ * @param[in] nelems       Number of bytes contributed by each PE.
+ *
+ * @return void
+ */
+__device__ ATTR_NO_INLINE void rocshmem_ctx_fcollectmem_wg(rocshmem_ctx_t
+    rocshmem_team_t team, void *dest, const void *source, int nelems);\n
+"""
+
+    return expanded_code
+
+
+def fcollect_wave_api(T, TNAME):
+    return (
+        f"__device__ ATTR_NO_INLINE int rocshmem_ctx_{TNAME}_fcollect_wave(\n"
+        f"    rocshmem_ctx_t ctx, rocshmem_team_t team, {T} *dest,\n"
+        f"    const {T} *source, int nelems);\n\n"
+    )
+
+
+def generate_fcollect_wave_api():
+    expanded_code = """
+/**
+ * @name ROCSHMEM_CTX_FCOLLECT_WAVE
+ * @brief Concatenates blocks of data from multiple PEs to an array in every
+ * PE participating in the collective routine.
+ *
+ * This function must be called as a wave-front collective.
+ *
+ * @param[in] ctx          The context associated with this operation.
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+ *                         heap.
+ * @param[in] nelems       Number of data elements contributed by each PE.
+ *
+ * @return int (Zero on successful local completion. Nonzero otherwise.)
+ */\n"""
+    for type_, tname_ in types:
+        expanded_code += fcollect_wave_api(type_, tname_)
+
+    expanded_code += """
+/**
+ * @name ROCSHMEM_CTX_FCOLLECTMEM_WAVE
+ * @brief Concatenates @p nelems bytes from each PE's @p source into every PE's
+ * @p dest buffer.
+ * Must be called as a wave-level collective.
+ *
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+ *                         heap.
+ * @param[in] nelems       Number of bytes contributed by each PE.
+ *
+ * @return int (Zero on successful local completion. Nonzero otherwise.)
+ */
+__device__ ATTR_NO_INLINE int rocshmem_ctx_fcollectmem_wave(rocshmem_ctx_t ctx,
+    rocshmem_team_t team, void *dest, const void *source, int nelems);\n
+"""
+
     return expanded_code
 
 
@@ -214,6 +287,61 @@ def reduction_api(T, TNAME, Op_API):
         f"    int nreduce);\n\n"
     )
 
+def reduction_wave_api(T, TNAME, Op_API):
+    return (
+        f"__device__ ATTR_NO_INLINE int rocshmem_ctx_{TNAME}_{Op_API}_reduce_wave(\n"
+        f"    rocshmem_ctx_t ctx, rocshmem_team_t team, {T} *dest, const {T} *source,\n"
+        f"    int nreduce);\n\n"
+    )
+
+def arith_reduction_wave_api(T, TNAME):
+    operations = ["sum", "min", "max", "prod"]
+    return "".join([reduction_wave_api(T, TNAME, op) for op in operations])
+
+def bitwise_reduction_wave_api(T, TNAME):
+    operations = ["or", "and", "xor"]
+    return "".join([reduction_wave_api(T, TNAME, op) for op in operations])
+
+def generate_reduction_wave_api():
+    expanded_code = """
+/**
+ * @name SHMEM_REDUCTIONS_WAVE
+ * @brief Perform an allreduce between PEs in the active set. The caller
+ * is blocked until the reduction completes.
+ *
+ * This function must be called as a wave-front collective.
+ *
+ * @param[in] ctx          The context associated with this operation.
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+ *                         heap.
+ * @param[in] nreduce      Size of the buffer to participate in the reduction.
+ *
+ * @return int (Zero on successful local completion. Nonzero otherwise.)
+ */\n"""
+
+    int_types = [
+        ("short", "short"),
+        ("int", "int"),
+        ("long", "long"),
+        ("long long", "longlong")
+    ]
+
+    float_types = [
+        ("float", "float"),
+        ("double", "double")
+    ]
+
+    for type_, tname_ in int_types:
+        expanded_code += arith_reduction_wave_api(type_, tname_)
+        expanded_code += bitwise_reduction_wave_api(type_, tname_)
+
+    for type_, tname_ in float_types:
+        expanded_code += arith_reduction_wave_api(type_, tname_)
+
+    return expanded_code
 
 def arith_reduction_api(T, TNAME):
     operations = ["sum", "min", "max", "prod"]
@@ -398,9 +526,11 @@ namespace rocshmem {
         generate_alltoall_wave_api() +
         generate_broadcast_api() +
         generate_fcollect_api() +
+        generate_fcollect_wave_api() +
         generate_reduction_api() +
         generate_reduce_on_stream_api() +
-        generate_broadcast_wave_api()
+        generate_broadcast_wave_api() +
+        generate_reduction_wave_api()
     )
 
     expanded_code += """

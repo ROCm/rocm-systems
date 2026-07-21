@@ -66,6 +66,7 @@ option(BUILD_FUNCTIONAL_TESTS "Build the functional tests (uses MPI if available
 option(BUILD_EXAMPLES "Build the examples" OFF)
 option(BUILD_UNIT_TESTS "Build the unit tests (Requires MPI)" OFF)
 option(BUILD_PYTHON_TESTS "Install rocshmem4py test assets (RO execution requires MPI launcher, Python, pip)" OFF)
+option(BUILD_PYTHON_BINDING "Build and install the rocshmem4py Python binding" OFF)
 option(BUILD_TESTS_ONLY "Build only tests. Used to link against rocSHMEM in a ROCm Release" OFF)
 option(BUILD_TOOLS "Build binary tools (e.g., rocshmem_info)" ON)
 option(BUILD_CTESTS "Register tests with CTest for tier-based execution" ON)
@@ -344,6 +345,28 @@ if (NOT BUILD_TESTS_ONLY)
 
   if (USE_SDMA)
     find_package(hsakmt REQUIRED)
+    # Workaround for RoCM 7.13/14
+    # hsakmtTargets.cmake contains paths baked in from the ROCm RHEL CI build:
+    #   /usr/lib64/libc.so      — bare libc path instead of -lc (always implicit)
+    #   -L/__w/rockrel/...      — hardcoded CI search path for libdrm/libdrm_amdgpu
+    # Strip both and inject the correct search path for libdrm.
+    get_target_property(_hsakmt_iface_libs hsakmt::hsakmt INTERFACE_LINK_LIBRARIES)
+    list(FILTER _hsakmt_iface_libs EXCLUDE REGEX "(/libc\\.so|/__w/)")
+    find_library(_DRM_LIB drm HINTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+    if(_DRM_LIB)
+      get_filename_component(_drm_dir "${_DRM_LIB}" DIRECTORY)
+      list(PREPEND _hsakmt_iface_libs "-L${_drm_dir}")
+      unset(_drm_dir)
+    endif()
+    set_target_properties(hsakmt::hsakmt PROPERTIES INTERFACE_LINK_LIBRARIES "${_hsakmt_iface_libs}")
+    unset(_hsakmt_iface_libs)
+  endif()
+
+  if(USE_ROCPROFILER_REGISTER)
+    find_package(rocprofiler-register QUIET)
+    if(NOT rocprofiler-register_FOUND)
+      message(STATUS "rocprofiler-register not found - rocSHMEM tracing disabled.")
+    endif()
   endif()
 
   if(USE_ROCPROFILER_REGISTER)
@@ -567,5 +590,17 @@ add_subdirectory(tests)
 
 if (BUILD_EXAMPLES)
   add_subdirectory(examples)
+endif()
+
+###############################################################################
+# PYTHON BINDING (rocshmem4py)
+#
+# Opt-in build of the rocshmem4py Python extension as a sub-project. Decoupled
+# from BUILD_PYTHON_TESTS so packagers (e.g. TheRock) can ship the binding
+# without test assets, and vice versa. python/CMakeLists.txt detects sub-
+# project mode and links against the in-tree `rocshmem` target directly.
+###############################################################################
+if (BUILD_PYTHON_BINDING AND NOT BUILD_TESTS_ONLY)
+  add_subdirectory(python)
 endif()
 

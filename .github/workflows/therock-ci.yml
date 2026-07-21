@@ -10,6 +10,7 @@ on:
       - opened
       - synchronize
       - reopened
+      - labeled
   workflow_dispatch:
     inputs:
       projects:
@@ -67,7 +68,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: d8e27dff1d165462ffa5bd50057a075b943c97c5 # 2026-07-13
+          ref: 22004a6bc8a28393f8b772b7f6e2a3040f11cd8d # 2026-07-20
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -97,6 +98,14 @@ jobs:
             --repo "${{ github.repository }}" \
             --pr "${{ github.event.pull_request.number }}" \
             --config ".github/repos-config.json"
+
+      - name: Set PR_LABELS variable with labels assigned to pull request
+        if: ${{ github.event.pull_request }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.number }}
+        run: |
+          echo "PR_LABELS=$(gh pr view ${PR_NUMBER} --json labels)" >> $GITHUB_ENV
 
       - name: Determine Linux projects to run
         id: linux_projects

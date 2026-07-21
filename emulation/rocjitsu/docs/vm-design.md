@@ -73,23 +73,33 @@ compute units in round-robin order.
 The CP is event-driven. During `startup()`, it schedules a doorbell event
 for any pre-loaded packets. Each doorbell event triggers `step()`, which
 processes one dispatch packet: for each workgroup, it calls `dispatch_wf()`
-on the next CU in round-robin order, then calls `activate()` on that CU.
+on the next CU in round-robin order. `dispatch_wf()` self-schedules the CU's
+tick via `schedule_work()`; there is no separate `activate()` call.
 
 - `enqueue(packet)` - pre-loads packets without triggering dispatch (used
   by config loader and tests)
 - `submit(packet)` - thread-safe; appends packet and schedules an async
   doorbell event via `schedule_event_now()`
-- `activate()` - registers the CP as a primary component and begins
-  processing doorbell events
 
-Each CU runs its dispatched wavefronts independently. In functional mode,
-a work event calls `advance()`, which executes up to `functional_quantum`
-instructions (or all remaining if quantum is 0) before yielding back to
-the event loop. A non-zero quantum allows CU events to interleave,
+Each CU runs its dispatched wavefronts independently. The CU is
+self-driving: `dispatch_wf()` calls `schedule_work()`, which schedules a
+tick event (only when the CU has runnable wavefronts) that calls
+`execute_quantum()`. A quantum executes up to `kFunctionalQuantum`
+instructions, but may yield early when a wavefront requests it (e.g.
+`s_sleep`, a vendor-dependency retry). The tick reschedules itself at
+`now + max(1, last_quantum_executed_)` — i.e. by the work actually
+executed, so an early yield resumes promptly instead of leaping a full
+quantum, while `max(1, ...)` keeps the event strictly in the future.
+Since functional mode is 1 CPI, ticks advance proportionally to
+instruction count. The quantum allows CU events to interleave,
 guaranteeing forward progress for inter-CU synchronization patterns such
-as spin-locks or semaphore acquire/release on global memory. When a CU
-becomes idle, it fires its `on_idle` callback. When all CUs are idle
-and no packets remain, the CP signals completion via
+as spin-locks or semaphore acquire/release on global memory.
+
+A wavefront that reaches `s_endpgm` halts: it frees its SGPR/VGPR
+resources immediately and notifies the CP of workgroup completion (there
+is no separate lazy retirement pass). When a CU has no resident
+wavefronts it stops scheduling and fires its `on_idle` callback. When all
+CUs are idle and no packets remain, the CP signals completion via
 `engine()->primary_release()`.
 
 ---
@@ -105,8 +115,7 @@ Config loader / Driver::submit()
                 cu->dispatch_wf(wg_id, pc, sgprs, vgprs)
                   └── find idle slot, allocate SGPR/VGPR blocks
                       initialize wavefront state (pc, wg_id)
-                cu->activate()
-                  └── schedule work event (functional) or resume clock (clocked)
+                      schedule_work() -> tick event (self-driving)
 ```
 
 A `DispatchPacket` specifies:
@@ -208,7 +217,7 @@ The SoC plugs into simdojo's `SimulationEngine` directly. The C API layer
    config and creates a `SoC` with engine configuration. The C API sets the
    SoC as the topology root via `engine.topology().set_root(std::move(soc))`.
 
-2. **`build()`** - Partitions topology, initializes all components, and
+2. **`create()`** - Partitions topology, initializes all components, and
    sets up the engine.
 
 3. **`run()`** - Starts all components and drains events continuously.
