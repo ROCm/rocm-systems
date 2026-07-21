@@ -6,7 +6,9 @@
 #include "rocjitsu/code/patch/error_report.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 
+#include <array>
 #include <cstring>
+#include <string>
 
 namespace rocjitsu {
 
@@ -204,21 +206,59 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, ProbeCallingConven
   RegisterSet target_pair_set;
   target_pair_set.expand(RegisterRef{RegClass::SGPR, *target_pair, 2});
 
-  // SCC temp: only needed when we preserve SCC across the call. It lives across
-  // the call (saved before materialization, restored after), so it must avoid
-  // the live set, the link/target pairs, AND the probe body clobbers. When SCC
-  // is not preserved we reserve nothing
+  // Registers unavailable for the whole call: the live set, link + target pairs,
+  // and the probe body clobbers (a temp lives across the call, so a probe clobber
+  // would corrupt its saved value). The SCC and special-state temps are drawn
+  // from this pool, each added back as it is picked so they never overlap.
   // TODO: allow for reuse of target_pair if unavailable
+  RegisterSet reserved = target_unavail | target_pair_set | probe_body_clobbers;
+
+  // SCC temp: one dead SGPR, only when preserving SCC.
   std::optional<uint16_t> scc_temp;
   if (plan.preserve_scc) {
-    const RegisterSet scc_unavail = target_unavail | target_pair_set | probe_body_clobbers;
-    scc_temp = find_free_sgpr(scc_unavail);
+    scc_temp = find_free_sgpr(reserved);
     if (!scc_temp) {
       report(error_out, "probe-call resource planning: no dead SGPR available for the SCC "
                         "preservation temp");
       return false;
     }
+    reserved.expand(RegisterRef{RegClass::SGPR, *scc_temp, 1});
   }
+
+  // Special-state temps: one dead SGPR (pair for the wave64 EXEC/VCC masks,
+  // single for M0) per register the probe clobbers. Shared reserve path so EXEC,
+  // VCC, and M0 differ only by their row below, not by a branch each.
+  std::vector<SpecialStateSlot> special_saves;
+  auto reserve_special = [&](bool requested, uint16_t operand, uint8_t width,
+                             const char *name) -> bool {
+    if (!requested)
+      return true;
+    const std::optional<uint16_t> temp =
+        width == 2 ? find_free_sgpr_pair(reserved) : find_free_sgpr(reserved);
+    if (!temp) {
+      report(error_out,
+             (std::string("probe-call resource planning: no dead SGPR available for the ") + name +
+              " preservation temp")
+                 .c_str());
+      return false;
+    }
+    reserved.expand(RegisterRef{RegClass::SGPR, *temp, width});
+    special_saves.push_back(SpecialStateSlot{operand, *temp, width});
+    return true;
+  };
+  // A spilled register is live at the anchor and clobbered by the probe (builder
+  // clobbers are dead, so never in the spill set). Spilling forces EXEC=-1 around
+  // the store/load, so EXEC must be saved even if the probe never touches it.
+  const bool will_spill = live_at_anchor.intersects(probe_body_clobbers);
+
+  // EXEC/VCC operand codes are arch-invariant; M0's is arch-specific, so resolve it
+  // only when preserving M0 (keeps plan_probe_call arch-agnostic, as the resource
+  // tests rely on). EXEC also rides this path when the site spills.
+  if (!reserve_special(plan.preserve_exec || will_spill, kScalarOperandExecLo, 2, "EXEC") ||
+      !reserve_special(plan.preserve_vcc, kScalarOperandVccLo, 2, "VCC") ||
+      !reserve_special(plan.preserve_m0, plan.preserve_m0 ? scalar_operand_m0(plan.arch) : 0, 1,
+                       "M0"))
+    return false;
 
   // Word count is derived from the resource decisions, not a fixed envelope size.
   // Each add/addc uses the 32-bit literal form (instruction + literal word) so the
@@ -229,17 +269,25 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, ProbeCallingConven
   before_words += 1;     // s_swappc_b64
   if (plan.preserve_scc)
     before_words += 2; // s_cselect_b32 (save) + s_cmp_lg_u32 (restore)
+  // Each special-state register adds one s_mov save + one s_mov restore.
+  before_words += static_cast<uint32_t>(special_saves.size()) * 2;
+  // Spilling adds s_mov_b64 exec, -1 before the store and before the load.
+  if (will_spill)
+    before_words += 2;
 
   plan.is_probe_call = true;
   plan.link_pair_base = kLinkPairBase;
   plan.target_pair_base = *target_pair;
   if (scc_temp)
     plan.scc_temp = *scc_temp;
+  plan.special_state_saves = std::move(special_saves);
   plan.before_word_count = before_words;
 
   plan.builder_clobbers = link_pair | target_pair_set;
   if (scc_temp)
     plan.builder_clobbers.expand(RegisterRef{RegClass::SGPR, *scc_temp, 1});
+  for (const SpecialStateSlot &s : plan.special_state_saves)
+    plan.builder_clobbers.expand(RegisterRef{RegClass::SGPR, s.temp_base, s.width});
   return true;
 }
 
@@ -261,8 +309,22 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
 
   std::vector<uint32_t> env;
 
-  // Spill saves: store each live+clobbered register before the call. Emitted
-  // first so the getpc index below accounts for these words.
+  // The site spills iff there is anything to spill; this drives the EXEC full-mask
+  // toggles only. EXEC save/restore is decided by special_state_saves membership.
+  const bool full_mask_exec = !plan.vgpr_spills.empty() || !plan.sgpr_spills.empty();
+
+  // Special-state saves: copy each preserved EXEC/VCC/M0 into its dead temp. Before
+  // the stores so EXEC is captured before we force it to -1. Plain s_mov, SCC-safe.
+  for (const SpecialStateSlot &s : plan.special_state_saves)
+    env.push_back(s.width == 2 ? build_s_mov_b64(s.temp_base, s.operand, plan.arch)
+                               : build_s_mov_b32(s.temp_base, s.operand, plan.arch));
+
+  // Full-mask the spill store so a probe that widens EXEC cannot leave inactive-
+  // lane copies unsaved. EXEC was just saved and is restored after the loads.
+  if (full_mask_exec)
+    env.push_back(build_s_mov_b64(kScalarOperandExecLo, kScalarInlineNegOne, plan.arch));
+
+  // Spill saves: store each live+clobbered register before the call.
   env.insert(env.end(), spill.prologue.begin(), spill.prologue.end());
 
   // SCC save (prologue): capture SCC into the temp without disturbing it. The
@@ -299,9 +361,19 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   if (plan.preserve_scc)
     env.push_back(build_s_cmp_lg_u32(plan.scc_temp, scalar_positive_inline_u32(0), plan.arch));
 
-  // Spill fills: reload each saved register after the call and wait for the loads
-  // before the relocated original consumes them.
+  // Full-mask the spill load to match the store (the probe may have changed EXEC).
+  if (full_mask_exec)
+    env.push_back(build_s_mov_b64(kScalarOperandExecLo, kScalarInlineNegOne, plan.arch));
+
+  // Spill fills: reload each saved register after the call and wait for the loads.
   env.insert(env.end(), spill.epilogue.begin(), spill.epilogue.end());
+
+  // Special-state restores: copy each temp back into its register. After the spill
+  // loads so EXEC is restored to its anchor mask only once the full-mask loads are
+  // done; all run before the relocated original.
+  for (const SpecialStateSlot &s : plan.special_state_saves)
+    env.push_back(s.width == 2 ? build_s_mov_b64(s.operand, s.temp_base, plan.arch)
+                               : build_s_mov_b32(s.operand, s.temp_base, plan.arch));
 
   // Plan/emit drift guard: the planner committed to this many envelope words and
   // the orchestrator sized the layout around it. A mismatch means the two
