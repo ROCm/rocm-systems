@@ -2585,22 +2585,28 @@ private:
   /// direct queue scanning. The returned buffers transfer to the delivery adapter,
   /// which publishes fields using the synchronization required by its packet source.
   /// A nullopt result means "dispatch the packet on its normal descriptor" and is
-  /// returned ONLY when the normal descriptor is safe: there is no virtual-LDS plan,
-  /// or the request is below threshold (KeepNormal). Once the plan selects a sidecar
-  /// (UseSidecar/Reject) the normal descriptor is oversized for this dispatch, so any
-  /// preparation failure past that point calls abort_virtual_lds_dispatch rather than
-  /// returning nullopt -- it never silently falls back to a host-faulting launch.
+  /// returned ONLY when the normal descriptor is safe: there is no virtual-LDS plan
+  /// and the packet fits the host LDS limit, or the request is below threshold
+  /// (KeepNormal). Any case where the normal descriptor would be oversized -- an
+  /// unregistered kernel whose group segment exceeds the host limit, or a plan that
+  /// selects a sidecar (UseSidecar/Reject) followed by a preparation failure --
+  /// calls abort_virtual_lds_dispatch rather than returning nullopt, so it never
+  /// silently falls back to a host-faulting launch.
   [[nodiscard]] static std::optional<PreparedVirtualLdsDispatch>
   prepare_virtual_lds_dispatch(QueueState &state, const hsa_kernel_dispatch_packet_t &packet,
                                uint64_t packet_id, const char *delivery) {
     auto resolved =
         VirtualLdsRuntimeRegistry::instance().find_by_kernel_object(packet.kernel_object);
     if (!resolved) {
+      // No virtual-LDS variant for this kernel object. If its packet group
+      // segment still exceeds the host LDS limit there is no sidecar to fall back
+      // to and the normal descriptor would fault the host, so fail closed rather
+      // than submit an oversized launch (consistent with the post-plan paths).
       if (exceeds_host_lds_limit(state, packet.group_segment_size)) {
-        trace_virtual_lds_dispatch(
-            "no virtual-LDS plan delivery=%s packet=%llu object=0x%llx packet_group=%u", delivery,
-            static_cast<unsigned long long>(packet_id),
-            static_cast<unsigned long long>(packet.kernel_object), packet.group_segment_size);
+        abort_virtual_lds_dispatch("kernel has no virtual-LDS variant but its group segment "
+                                   "exceeds the host LDS limit",
+                                   delivery, packet_id, "<unregistered>", packet.group_segment_size,
+                                   state.host_lds_bytes);
       }
       return std::nullopt;
     }

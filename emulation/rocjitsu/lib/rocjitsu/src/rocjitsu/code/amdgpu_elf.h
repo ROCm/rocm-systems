@@ -190,10 +190,11 @@ inline constexpr uint32_t elf_reloc_type(uint64_t info) {
   return static_cast<uint32_t>(info & 0xffffffffu);
 }
 
-// AMDGPU relocation types (subset). R_AMDGPU_RELATIVE64 uses symbol index 0 and
-// forms its value from the load bias plus r_addend, so its addend can name an
-// in-.text virtual address with no owning symbol.
-inline constexpr uint32_t R_AMDGPU_RELATIVE64 = 10;
+// AMDGPU relocation types (subset), values per the AMDGPU ELF ABI.
+// R_AMDGPU_RELATIVE64 uses symbol index 0 and forms its value from the load bias
+// plus r_addend, so its addend can name an in-.text virtual address with no
+// owning symbol.
+inline constexpr uint32_t R_AMDGPU_RELATIVE64 = 13;
 
 inline constexpr uint64_t SHF_WRITE = 1u << 0;
 inline constexpr uint64_t SHF_ALLOC = 1u << 1;

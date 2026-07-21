@@ -1831,13 +1831,21 @@ TEST(BinaryTranslatorE2E, RejectsRelocationToTextNotypeSymbol) {
                                              "symbol defined in .text"));
 }
 
+// Independently pin the AMDGPU ELF ABI value so the tests below cannot mask a
+// regression by constructing the same wrong relocation type the patcher checks
+// for. The fixtures use the production constant (so they never drift from it),
+// but this assertion anchors that constant to the authoritative ABI number.
+static_assert(rocjitsu::R_AMDGPU_RELATIVE64 == 13,
+              "R_AMDGPU_RELATIVE64 must be the AMDGPU ELF ABI value 13");
+
 // R_AMDGPU_RELATIVE64 carries symbol index 0, so the st_shndx-based text-symbol
 // check cannot see it; the loader forms the stored value from load_bias +
 // r_addend. An addend inside the source .text interval must be rejected (DBT
 // moves the text without remapping the addend), while an addend outside .text
 // (e.g. the .data vaddr) is safely shifted with its section and must be accepted.
 TEST(CodeObjectPatcher, DetectsRelative64AddendIntoText) {
-  constexpr uint32_t kRelative64 = 10;
+  // Reference the production ABI constant so the test can never drift from it.
+  constexpr uint32_t kRelative64 = rocjitsu::R_AMDGPU_RELATIVE64;
   constexpr int64_t kInTextAddend = 0x1100;    // == text_vaddr
   constexpr int64_t kOutOfTextAddend = 0x2108; // == data_vaddr
 
@@ -1860,7 +1868,7 @@ TEST(CodeObjectPatcher, DetectsRelative64AddendIntoText) {
 }
 
 TEST(BinaryTranslatorE2E, RejectsRelative64AddendIntoText) {
-  constexpr uint32_t kRelative64 = 10;
+  constexpr uint32_t kRelative64 = rocjitsu::R_AMDGPU_RELATIVE64;
   auto image = make_amdgpu_elf_with_relative_relocation(kRelative64, /*addend=*/0x1100);
   AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
