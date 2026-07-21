@@ -403,6 +403,55 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertFalse(doctor["runtimes"]["pytorch"]["ok"])
         self.assertIn("No module named torch", doctor["runtimes"]["pytorch"]["detail"])
         self.assertEqual(run.call_args.args[0][0], str(python))
+        environment = run.call_args.kwargs["env"]
+        self.assertEqual(environment["HSA_TOOLS_ROCPROFILER_V1_TOOLS"], "1")
+        self.assertEqual(
+            environment["RJ_CONSAN_TEST_KERNEL_FILTER"],
+            "__consan_pytorch_runtime_probe_never_matches__",
+        )
+
+    def test_pytorch_doctor_rejects_runtime_that_skips_consan_hook(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-compiled-softmax"]
+        with temporary_root() as workspace:
+            python = workspace / "consan-pytorch-venv" / "bin" / "python"
+            hook = (
+                workspace
+                / "rocjitsu-build/lib/rocjitsu/src/rocjitsu/hooks/"
+                "librocjitsu_dbi_hooks.so"
+            )
+            python.parent.mkdir(parents=True)
+            hook.parent.mkdir(parents=True)
+            python.touch()
+            hook.touch()
+            completed = subprocess.CompletedProcess(
+                [str(python)],
+                0,
+                stdout=json.dumps(
+                    {
+                        "torch": "test",
+                        "hip": "test",
+                        "triton": "test",
+                        "device": "test GPU",
+                        "arch": "gfx1201",
+                        "numeric_oracle": True,
+                        "hook_loaded": False,
+                    }
+                ),
+                stderr="",
+            )
+            with (
+                mock.patch.object(validation.shutil, "which", return_value="/tool"),
+                mock.patch.object(
+                    validation.subprocess, "run", return_value=completed
+                ),
+            ):
+                doctor = validation._doctor(workspace, "gfx1201", (workload.id,))
+        runtime = doctor["runtimes"]["pytorch"]
+        self.assertFalse(doctor["ok"])
+        self.assertFalse(runtime["ok"])
+        self.assertIn(
+            "PyTorch HSA runtime did not load the ConSan hook", runtime["reasons"]
+        )
 
     def test_pytorch_cluster_workload_runs_once(self) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-cluster-load-sync"]

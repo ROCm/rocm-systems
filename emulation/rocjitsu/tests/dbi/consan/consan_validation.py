@@ -1026,6 +1026,87 @@ def _pytorch_python(workspace: Path | None = None) -> Path:
     )
 
 
+def _pytorch_runtime_probe(
+    python: Path, hook: Path, target: str, workload: Workload
+) -> dict:
+    """Proves that PyTorch can dispatch and that its HSA runtime loads ConSan."""
+    probe_source = """
+import json
+import pathlib
+import sys
+
+import torch
+import triton
+
+value = torch.ones(1, device="cuda")
+torch.cuda.synchronize()
+properties = torch.cuda.get_device_properties(0)
+maps = pathlib.Path("/proc/self/maps").read_text(encoding="utf-8")
+print(json.dumps({
+    "torch": torch.__version__,
+    "hip": torch.version.hip,
+    "triton": triton.__version__,
+    "device": torch.cuda.get_device_name(0),
+    "arch": getattr(properties, "gcnArchName", None),
+    "numeric_oracle": value.item() == 1.0,
+    "hook_loaded": sys.argv[1] in maps,
+}))
+"""
+    environment = _clean_environment("supercollider", workload, hook, target)
+    # This is a runtime-linkage canary, not a coverage row.  Avoid spending
+    # preflight time on PyTorch's large bundled kernel object; the real rows
+    # run without this filter and enforce complete coverage independently.
+    environment.update(
+        {
+            "RJ_CONSAN_LOG": "0",
+            "RJ_CONSAN_REQUIRE_PATCH": "0",
+            "RJ_CONSAN_TEST_KERNEL_FILTER": (
+                "__consan_pytorch_runtime_probe_never_matches__"
+            ),
+        }
+    )
+    try:
+        probe = subprocess.run(
+            [str(python), "-c", probe_source, str(hook)],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT_SECONDS,
+            env=environment,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return {
+            "ok": False,
+            "python": str(python),
+            "detail": str(error),
+        }
+    try:
+        payload = json.loads(probe.stdout.strip())
+    except json.JSONDecodeError:
+        payload = None
+    reasons = []
+    if probe.returncode != 0:
+        reasons.append(f"probe exited with status {probe.returncode}")
+    if not isinstance(payload, dict):
+        reasons.append("probe did not emit its JSON result")
+    else:
+        arch = payload.get("arch")
+        if not isinstance(arch, str) or not arch.startswith(target):
+            reasons.append(f"device architecture is {arch!r}, expected {target!r}")
+        if not payload.get("numeric_oracle"):
+            reasons.append("GPU numeric oracle failed")
+        if not payload.get("hook_loaded"):
+            reasons.append("PyTorch HSA runtime did not load the ConSan hook")
+    if reasons and probe.stderr.strip():
+        reasons.append(probe.stderr.strip())
+    return {
+        "ok": not reasons,
+        "python": str(python),
+        "detail": payload if payload is not None else probe.stderr.strip(),
+        "reasons": reasons,
+    }
+
+
 def _tensile_python() -> Path:
     return Path(
         os.path.abspath(
@@ -1132,40 +1213,18 @@ def _doctor(
                 "present": path.is_file(),
             }
     runtimes = {}
-    if any(workload.kind == "pytorch" for workload in workloads):
+    pytorch_workloads = tuple(
+        workload for workload in workloads if workload.kind == "pytorch"
+    )
+    if pytorch_workloads:
         python = _pytorch_python(workspace)
         if python.is_file():
-            try:
-                probe = subprocess.run(
-                    [
-                        str(python),
-                        "-c",
-                        (
-                            "import json, torch, triton; "
-                            "print(json.dumps({'torch': torch.__version__, "
-                            "'hip': torch.version.hip, "
-                            "'triton': triton.__version__}))"
-                        ),
-                    ],
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    timeout=TIMEOUT_SECONDS,
-                )
-                detail = probe.stdout.strip()
-                runtimes["pytorch"] = {
-                    "ok": probe.returncode == 0,
-                    "python": str(python),
-                    "detail": (
-                        detail if probe.returncode == 0 else probe.stderr.strip()
-                    ),
-                }
-            except (OSError, subprocess.TimeoutExpired) as error:
-                runtimes["pytorch"] = {
-                    "ok": False,
-                    "python": str(python),
-                    "detail": str(error),
-                }
+            runtimes["pytorch"] = _pytorch_runtime_probe(
+                python,
+                _hook_path(workspace),
+                target,
+                pytorch_workloads[0],
+            )
         else:
             runtimes["pytorch"] = {
                 "ok": False,
@@ -3048,8 +3107,10 @@ def main(argv: list[str] | None = None) -> int:
                     state = "ok" if item["ok"] else "BROKEN"
                     print(
                         f"{state:7} {runtime} runtime {item['python']}: "
-                        f"{item['detail']}"
+                        f"{json.dumps(item['detail'], sort_keys=True)}"
                     )
+                    for reason in item.get("reasons", ()):
+                        print(f"        reason: {reason}")
             return 0 if result["ok"] else 1
         if args.command == "inventory":
             return _inventory(args)

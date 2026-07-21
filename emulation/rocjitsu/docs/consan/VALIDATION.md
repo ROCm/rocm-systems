@@ -74,8 +74,12 @@ path: the runner discovers
 `$CONSAN_VALIDATION_WORKSPACE_DIR/consan-pytorch-venv/bin/python`
 automatically.  Set `CONSAN_VALIDATION_PYTORCH_PYTHON` only to select a
 different prebuilt-wheel environment.  The doctor imports both `torch` and
-`triton` with the selected interpreter and records their versions, so an
-existing but unusable virtual environment fails before any GPU work.
+`triton`, performs a numeric GPU dispatch, checks the reported gfx target, and
+verifies from the process mappings that PyTorch's HSA runtime loaded the exact
+ConSan hook selected from the workspace.  It records the runtime versions and
+device identity.  Thus an existing but unusable environment, a wrong device,
+or a wheel runtime that silently skips `HSA_TOOLS_LIB` fails before a
+validation row is accepted.
 
 Freeze the exact wheel and bundled Triton versions in the campaign artifacts.
 The example index matches the current ROCm 7.1 validation stack; choose an
@@ -89,7 +93,11 @@ rocprofiler registration that runtime does not consult legacy
 The runner therefore sets and audits that variable automatically for
 instrumented PyTorch rows and removes it from baseline rows.  It is classified
 as `runtime-plumbing`, never as workload tuning; users should not have to
-discover or manually preserve it.
+discover or manually preserve it.  The doctor tests this behavior with a real
+dispatch.  Its linkage-only canary uses a deliberately nonmatching internal
+kernel filter to avoid instrumenting PyTorch's large bundled kernel object;
+that filter is never inherited by validation rows, whose ordinary environment
+and complete-coverage gates remain unchanged.
 
 Run the preflight before GPU work:
 
