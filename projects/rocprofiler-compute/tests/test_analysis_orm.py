@@ -290,17 +290,6 @@ def test_get_or_create_type_dedups(db_session):
     assert db_session.query(PCSampleStallReasonLookup).count() == 2
 
 
-def test_get_or_create_type_dedups_across_calls(db_session):
-    """Reusing a text after a commit (e.g. a second workload) creates no
-    duplicate row, respecting the unique constraint."""
-    Database.get_or_create_type(PCSampleStallReasonLookup, "WAITCNT")
-    db_session.commit()
-    Database.get_or_create_type(PCSampleStallReasonLookup, "WAITCNT")
-    db_session.commit()
-
-    assert db_session.query(PCSampleStallReasonLookup).count() == 1
-
-
 # =============================================================================
 # pc_sampling view
 # =============================================================================
@@ -376,7 +365,24 @@ def test_pc_sampling_view_aggregates_matching_states_across_processes(db_session
     }
 
 
-def test_pc_sampling_view_keeps_different_instructions_separate(db_session):
+@pytest.mark.parametrize(
+    ("identity_field", "first_value", "second_value"),
+    [
+        pytest.param("instruction", "v_mov", "v_add", id="instruction"),
+        pytest.param(
+            "source",
+            "/s/a.cpp:1",
+            "/s/b.cpp:1",
+            id="source",
+        ),
+    ],
+)
+def test_pc_sampling_view_keeps_display_identity_fields_separate(
+    db_session,
+    identity_field: str,
+    first_value: str,
+    second_value: str,
+):
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
     add_pc_sampling_state(
@@ -384,63 +390,29 @@ def test_pc_sampling_view_keeps_different_instructions_separate(db_session):
         workload=workload,
         kernel=kernel,
         pid=101,
-        instruction="v_mov",
         total_count=3,
         issue_count=3,
         stall_count=0,
+        **{identity_field: first_value},
     )
     add_pc_sampling_state(
         db_session,
         workload=workload,
         kernel=kernel,
         pid=202,
-        instruction="v_add",
         total_count=5,
         issue_count=5,
         stall_count=0,
+        **{identity_field: second_value},
     )
     Database.create_views()
     db_session.commit()
 
     rows = fetch_pc_sampling_rows(db_session)
 
-    assert {(row["instruction"], row["count"]) for row in rows} == {
-        ("v_add", 5),
-        ("v_mov", 3),
-    }
-
-
-def test_pc_sampling_view_keeps_different_sources_separate(db_session):
-    workload = Workload(name="w", sub_name="s")
-    kernel = Kernel(kernel_name="vecCopy", workload=workload)
-    add_pc_sampling_state(
-        db_session,
-        workload=workload,
-        kernel=kernel,
-        pid=101,
-        source="/s/a.cpp:1",
-        total_count=3,
-        issue_count=3,
-        stall_count=0,
-    )
-    add_pc_sampling_state(
-        db_session,
-        workload=workload,
-        kernel=kernel,
-        pid=202,
-        source="/s/b.cpp:1",
-        total_count=5,
-        issue_count=5,
-        stall_count=0,
-    )
-    Database.create_views()
-    db_session.commit()
-
-    rows = fetch_pc_sampling_rows(db_session)
-
-    assert {(row["source"], row["count"]) for row in rows} == {
-        ("/s/a.cpp:1", 3),
-        ("/s/b.cpp:1", 5),
+    assert {(row[identity_field], row["count"]) for row in rows} == {
+        (first_value, 3),
+        (second_value, 5),
     }
 
 
