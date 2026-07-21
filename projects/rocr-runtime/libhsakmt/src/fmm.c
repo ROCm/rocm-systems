@@ -1147,15 +1147,16 @@ static svm_api_range_t *svm_api_range_find(struct hsa_kfd_fmm_context *fmm_ctx,
 }
 
 /*
- * Add a new SVM-API range, or bump the refcount of an existing identical one.
+ * Add a new SVM-API range, or refcount an existing one sharing the page-aligned
+ * base.
  *
- * A registration can only be identified at deregister time by its base address
- * (the deregister path, hsaKmtDeregisterMemory, is keyed only by the base
- * pointer and gets no size). We therefore
- * require that a given base address is always (re-)registered with the same
- * size, and reject a re-registration of the same base with a different size -
- * otherwise deregister could not tell which extent to revoke. Repeated
- * registrations of the same (base, size) are refcounted.
+ * Several distinct registrations can share a page-aligned base - small buffers
+ * packed into one page, one of which may straddle into the next page and so
+ * round to a larger span. They are refcounted together on that base and the
+ * tracked extent grows to the largest span seen, so deregister revokes the full
+ * extent once the last owner is dropped. The exact sub-range to revoke is then
+ * computed by interval subtraction in svm_api_range_put (which subtracts the
+ * coverage of any surviving registration, at this base or a neighbouring one).
  */
 static HSAKMT_STATUS svm_api_range_get(struct hsa_kfd_fmm_context *fmm_ctx,
 				       void *aligned_addr, uint64_t aligned_size)
@@ -1165,13 +1166,18 @@ static HSAKMT_STATUS svm_api_range_get(struct hsa_kfd_fmm_context *fmm_ctx,
 	pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
 	r = svm_api_range_find(fmm_ctx, aligned_addr);
 	if (r) {
-		if (r->size != aligned_size) {
-			pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
-			pr_debug("SVM-API re-register of %p size 0x%" PRIx64 " != tracked 0x%" PRIx64 "; rejected\n",
-				 aligned_addr, aligned_size, r->size);
-			return HSAKMT_STATUS_INVALID_PARAMETER;
-		}
+		/* Distinct sub-page buffers can share a page-aligned base with
+		 * different page-aligned spans (e.g. small calloc'd buffers
+		 * packed into one page, one of which straddles into the next
+		 * page). They are independent registrations, so refcount them
+		 * together and grow the tracked extent to the largest span seen
+		 * at this base; deregister then revokes the full extent once the
+		 * last owner is gone, and overlap with other bases is resolved by
+		 * the interval subtraction in svm_api_range_put.
+		 */
 		++r->refcount;
+		if (aligned_size > r->size)
+			r->size = aligned_size;
 		pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
 		return HSAKMT_STATUS_SUCCESS;
 	}
@@ -4298,13 +4304,7 @@ HSAKMT_STATUS hsakmt_fmm_register_memory(HsaKFDContext *ctx,
 		/* Register a new user ptr */
 		if (ctx->hsakmt_is_svm_api_supported) {
 			ret = fmm_register_mem_svm_api(ctx, address, size_in_bytes, flags);
-			/* INVALID_PARAMETER is a deliberate rejection (e.g. a same
-			 * base re-registered with a different size); surface it
-			 * rather than silently falling back to a legacy userptr
-			 * registration.
-			 */
-			if (ret == HSAKMT_STATUS_SUCCESS ||
-			    ret == HSAKMT_STATUS_INVALID_PARAMETER)
+			if (ret == HSAKMT_STATUS_SUCCESS)
 				return ret;
 			pr_debug("SVM failed, falling back to old registration\n");
 		}
