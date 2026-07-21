@@ -37,6 +37,7 @@ concurrency:
 
 env:
   ROCM_VERSION: "7.2.0"
+  CONTAINER_ROCM_VERSION: "7.2"
 
 jobs:
   build-rhel:

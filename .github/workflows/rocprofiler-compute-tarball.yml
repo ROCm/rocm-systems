@@ -36,6 +36,7 @@ concurrency:
 
 env:
   ROCM_VERSION: "7.1.0"
+  CONTAINER_ROCM_VERSION: "7.1"
 
 jobs:
   distbuild:

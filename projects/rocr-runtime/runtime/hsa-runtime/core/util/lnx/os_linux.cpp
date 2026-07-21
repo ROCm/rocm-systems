@@ -58,6 +58,7 @@
 #include <atomic>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <semaphore.h>
 #include "core/inc/runtime.h"
@@ -344,7 +345,8 @@ static int callback(struct dl_phdr_info* info, size_t size, void* data) {
    */
 
   if ((info) && (info->dlpi_name) && (info->dlpi_name[0] != '\0')) {
-    if (std::string(info->dlpi_name).find("vdso.so") != std::string::npos) return 0;
+    std::string_view name(info->dlpi_name);
+    if (name.find("vdso64.so") != std::string_view::npos || name.find("vdso.so") != std::string_view::npos) return 0;
 
     /*
      * Iterate through the program headers of the loaded lib and check for PT_DYNAMIC program
