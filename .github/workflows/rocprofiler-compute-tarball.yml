@@ -40,6 +40,8 @@ env:
 jobs:
   distbuild:
     runs-on: ubuntu-latest
+    container:
+      image: ubuntu:24.04
     name: Create distribution tarball
     env:
       INSTALL_DIR: /tmp/foo1
