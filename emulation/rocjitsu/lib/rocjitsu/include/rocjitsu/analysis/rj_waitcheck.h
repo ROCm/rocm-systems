@@ -151,6 +151,52 @@ typedef struct rj_waitcheck_diagnostic_s {
 typedef void (*rj_waitcheck_diagnostic_callback_t)(const rj_waitcheck_diagnostic_t *diagnostic,
                                                    void *user_data);
 
+/// @brief Stable classification for emitted-wait counter-parity findings.
+typedef enum rj_waitcheck_counter_parity_kind_e {
+  ROCJITSU_WAITCHECK_COUNTER_PARITY_UNKNOWN = 0,
+  /// @brief Waitcheck modeled a dependency, but its required N was greater
+  /// than the compiler-emitted M.
+  ROCJITSU_WAITCHECK_COUNTER_PARITY_MODELED_UNDERACCOUNTING = 1,
+  /// @brief The compiler emitted a non-sentinel wait, but waitcheck modeled no
+  /// dependency for that counter before the guarded instruction.
+  ROCJITSU_WAITCHECK_COUNTER_PARITY_UNMODELED_EMITTED_WAIT = 2
+} rj_waitcheck_counter_parity_kind_t;
+
+/// @brief One compiler-emitted wait field stronger than waitcheck's requirement.
+///
+/// @details Lower counter values are stronger. Therefore required_count greater
+/// than emitted_count is a false-negative candidate. String pointers are
+/// borrowed and remain valid only for the duration of the callback.
+typedef struct rj_waitcheck_counter_parity_diagnostic_s {
+  size_t struct_size;
+  uint32_t abi_version;
+  rj_waitcheck_counter_parity_kind_t kind;
+  uint32_t has_kernel;
+  const char *kernel_name;
+  uint64_t kernel_entry_offset;
+  rj_waitcheck_counter_t counter;
+  uint32_t emitted_count;
+  uint32_t required_count;
+  uint32_t has_required_dependency;
+  rj_waitcheck_access_t access;
+  rj_waitcheck_register_t reg;
+  const char *section_name;
+  uint64_t wait_section_offset;
+  uint64_t wait_file_offset;
+  const char *wait_instruction;
+  uint64_t consumer_section_offset;
+  uint64_t consumer_file_offset;
+  const char *consumer_instruction;
+  uint64_t producer_section_offset;
+  uint64_t producer_file_offset;
+  const char *producer_instruction;
+  const char *message;
+} rj_waitcheck_counter_parity_diagnostic_t;
+
+/// @brief Receives one counter-parity finding during synchronous analysis.
+typedef void (*rj_waitcheck_counter_parity_callback_t)(
+    const rj_waitcheck_counter_parity_diagnostic_t *diagnostic, void *user_data);
+
 /// @brief Receives a human-readable explanation when analysis cannot complete.
 ///
 /// @details The message pointer is borrowed and remains valid only for the
@@ -173,8 +219,17 @@ typedef struct rj_waitcheck_options_s {
   rj_waitcheck_diagnostic_callback_t diagnostic_callback;
   /// @brief Optional receiver for an analysis-error explanation.
   rj_waitcheck_error_callback_t error_callback;
-  /// @brief Opaque value passed to both callbacks.
+  /// @brief Opaque value passed to all callbacks.
   void *user_data;
+  /// @brief Enable intact emitted-wait counter-parity auditing when nonzero.
+  ///
+  /// @details The initial implementation supports gfx950 legacy vmcnt,
+  /// lgkmcnt, and expcnt fields.
+  uint32_t check_counter_parity;
+  /// @brief Maximum counter-parity callbacks. Zero means unlimited.
+  size_t max_counter_parity_diagnostics;
+  /// @brief Optional receiver for counter-parity findings.
+  rj_waitcheck_counter_parity_callback_t counter_parity_callback;
 } rj_waitcheck_options_t;
 
 /// @brief Aggregate result of one successful waitcheck analysis.
@@ -199,6 +254,16 @@ typedef struct rj_waitcheck_result_s {
   uint32_t diagnostics_truncated;
   /// @brief Nonzero when stop_after_first_diagnostic ended analysis early.
   uint32_t stopped_early;
+  size_t counter_parity_wait_groups;
+  size_t counter_parity_fields_checked;
+  size_t counter_parity_exact;
+  size_t counter_underaccounting_observed;
+  size_t counter_unmodeled_wait_observed;
+  size_t counter_parity_indeterminate_groups;
+  /// @brief Number of times counter_parity_callback was invoked.
+  size_t counter_parity_diagnostics_reported;
+  /// @brief Nonzero when counter-parity detail callbacks were omitted or limited.
+  uint32_t counter_parity_diagnostics_truncated;
 } rj_waitcheck_result_t;
 
 /// @brief Initialize waitcheck options to their defaults.
@@ -239,6 +304,13 @@ RJ_API_EXPORT const char *rj_waitcheck_target_name(rj_waitcheck_target_t target)
 /// values return `"unknown"`. Copy it before unloading the library if it must
 /// outlive the call sequence.
 RJ_API_EXPORT const char *rj_waitcheck_diagnostic_code_name(rj_waitcheck_diagnostic_code_t code);
+
+/// @brief Return the stable lowercase spelling of a counter-parity kind.
+///
+/// @details The returned static string is owned by the library. Unknown enum
+/// values return `"unknown"`.
+RJ_API_EXPORT const char *
+rj_waitcheck_counter_parity_kind_name(rj_waitcheck_counter_parity_kind_t kind);
 
 /// @brief Synchronously analyze every kernel in an in-memory AMDGPU HSA code object.
 ///

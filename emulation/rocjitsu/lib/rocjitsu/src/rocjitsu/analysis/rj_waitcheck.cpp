@@ -209,8 +209,48 @@ void report_error(const rj_waitcheck_options_t &options, const char *message) no
   };
 }
 
+[[nodiscard]] rj_waitcheck_counter_parity_diagnostic_t
+public_counter_parity_diagnostic(const WaitcheckCounterUnderaccountingDiagnostic &diagnostic) {
+  return rj_waitcheck_counter_parity_diagnostic_t{
+      .struct_size = sizeof(rj_waitcheck_counter_parity_diagnostic_t),
+      .abi_version = ROCJITSU_WAITCHECK_ABI_VERSION,
+      .kind = diagnostic.has_required_dependency
+                  ? ROCJITSU_WAITCHECK_COUNTER_PARITY_MODELED_UNDERACCOUNTING
+                  : ROCJITSU_WAITCHECK_COUNTER_PARITY_UNMODELED_EMITTED_WAIT,
+      .has_kernel = diagnostic.has_kernel ? 1U : 0U,
+      .kernel_name = diagnostic.has_kernel ? diagnostic.kernel_name.c_str() : nullptr,
+      .kernel_entry_offset = diagnostic.kernel_entry_offset,
+      .counter = public_counter(diagnostic.counter),
+      .emitted_count = diagnostic.emitted_count,
+      .required_count = diagnostic.required_count,
+      .has_required_dependency = diagnostic.has_required_dependency ? 1U : 0U,
+      .access = diagnostic.has_required_dependency ? public_access(diagnostic.access)
+                                                   : ROCJITSU_WAITCHECK_ACCESS_INVALID,
+      .reg =
+          rj_waitcheck_register_t{
+              .register_class = diagnostic.has_required_dependency
+                                    ? public_register_class(diagnostic.reg.cls)
+                                    : ROCJITSU_WAITCHECK_REGISTER_INVALID,
+              .index = diagnostic.has_required_dependency ? diagnostic.reg.index : uint16_t{0},
+              .width = diagnostic.has_required_dependency ? diagnostic.reg.width : uint8_t{0},
+          },
+      .section_name = diagnostic.section_name.c_str(),
+      .wait_section_offset = diagnostic.wait_section_offset,
+      .wait_file_offset = diagnostic.wait_file_offset,
+      .wait_instruction = diagnostic.wait_instruction.c_str(),
+      .consumer_section_offset = diagnostic.consumer_section_offset,
+      .consumer_file_offset = diagnostic.consumer_file_offset,
+      .consumer_instruction = diagnostic.consumer_instruction.c_str(),
+      .producer_section_offset = diagnostic.producer_section_offset,
+      .producer_file_offset = diagnostic.producer_file_offset,
+      .producer_instruction =
+          diagnostic.has_required_dependency ? diagnostic.producer_instruction.c_str() : nullptr,
+      .message = diagnostic.message.c_str(),
+  };
+}
+
 void populate_result(const WaitcheckReport &report, size_t diagnostics_reported,
-                     rj_waitcheck_result_t &result) {
+                     size_t counter_parity_diagnostics_reported, rj_waitcheck_result_t &result) {
   result.instructions_analyzed = report.instructions_analyzed;
   result.memory_events_tracked = report.memory_events_tracked;
   result.kernels_discovered = report.kernels_discovered;
@@ -220,6 +260,15 @@ void populate_result(const WaitcheckReport &report, size_t diagnostics_reported,
   result.passed = report.passed() ? 1U : 0U;
   result.diagnostics_truncated = report.diagnostics_truncated ? 1U : 0U;
   result.stopped_early = report.stopped_early ? 1U : 0U;
+  result.counter_parity_wait_groups = report.counter_parity_wait_groups;
+  result.counter_parity_fields_checked = report.counter_parity_fields_checked;
+  result.counter_parity_exact = report.counter_parity_exact;
+  result.counter_underaccounting_observed = report.counter_underaccounting_observed;
+  result.counter_unmodeled_wait_observed = report.counter_unmodeled_wait_observed;
+  result.counter_parity_indeterminate_groups = report.counter_parity_indeterminate_groups;
+  result.counter_parity_diagnostics_reported = counter_parity_diagnostics_reported;
+  result.counter_parity_diagnostics_truncated =
+      report.counter_parity_diagnostics_truncated ? 1U : 0U;
 }
 
 } // namespace
@@ -287,6 +336,18 @@ const char *rj_waitcheck_diagnostic_code_name(rj_waitcheck_diagnostic_code_t cod
   return "unknown";
 }
 
+const char *rj_waitcheck_counter_parity_kind_name(rj_waitcheck_counter_parity_kind_t kind) {
+  switch (kind) {
+  case ROCJITSU_WAITCHECK_COUNTER_PARITY_MODELED_UNDERACCOUNTING:
+    return "modeled-counter-underaccounting";
+  case ROCJITSU_WAITCHECK_COUNTER_PARITY_UNMODELED_EMITTED_WAIT:
+    return "unmodeled-emitted-wait";
+  case ROCJITSU_WAITCHECK_COUNTER_PARITY_UNKNOWN:
+    break;
+  }
+  return "unknown";
+}
+
 namespace {
 
 [[nodiscard]] rj_status_t analyze(const void *code_object, size_t code_object_size,
@@ -332,12 +393,19 @@ namespace {
 
     WaitcheckOptions internal_options;
     internal_options.stop_after_first_diagnostic = local_options.stop_after_first_diagnostic != 0;
+    internal_options.check_counter_parity = local_options.check_counter_parity != 0;
     if (local_options.max_reachability_cache_bytes != 0)
       internal_options.max_reachability_cache_bytes = local_options.max_reachability_cache_bytes;
     if (!local_options.diagnostic_callback) {
       internal_options.max_diagnostics = 0;
     } else if (local_options.max_diagnostics != 0) {
       internal_options.max_diagnostics = local_options.max_diagnostics;
+    }
+    if (!local_options.counter_parity_callback) {
+      internal_options.max_counter_parity_diagnostics = 0;
+    } else if (local_options.max_counter_parity_diagnostics != 0) {
+      internal_options.max_counter_parity_diagnostics =
+          local_options.max_counter_parity_diagnostics;
     }
 
     WaitcheckReport report;
@@ -369,7 +437,17 @@ namespace {
         ++diagnostics_reported;
       }
     }
-    populate_result(report, diagnostics_reported, local_result);
+    size_t counter_parity_diagnostics_reported = 0;
+    if (local_options.counter_parity_callback) {
+      for (const auto &diagnostic : report.counter_underaccounting_diagnostics) {
+        const rj_waitcheck_counter_parity_diagnostic_t public_view =
+            public_counter_parity_diagnostic(diagnostic);
+        local_options.counter_parity_callback(&public_view, local_options.user_data);
+        ++counter_parity_diagnostics_reported;
+      }
+    }
+    populate_result(report, diagnostics_reported, counter_parity_diagnostics_reported,
+                    local_result);
     return finish(ROCJITSU_STATUS_SUCCESS);
   } catch (const std::bad_alloc &) {
     report_error(local_options, "waitcheck analysis ran out of memory");

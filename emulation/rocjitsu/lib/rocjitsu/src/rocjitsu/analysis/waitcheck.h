@@ -82,6 +82,38 @@ struct WaitcheckDiagnostic {
   std::string message;
 };
 
+/// @brief One emitted wait that is stronger than waitcheck's modeled requirement.
+///
+/// @details Lower counter values represent stronger waits. For LLVM-produced
+/// kernels, required_count > emitted_count is evidence that waitcheck may be
+/// under-accounting the dependency protected by the emitted wait.
+struct WaitcheckCounterUnderaccountingDiagnostic {
+  bool has_kernel = false;
+  std::string kernel_name;
+  uint64_t kernel_entry_offset = 0;
+  WaitCounterKind counter = WaitCounterKind::Load;
+  uint32_t emitted_count = 0;
+  uint32_t required_count = 0;
+  /// @brief Whether waitcheck found a modeled dependency requiring this counter.
+  ///
+  /// @details When false, required_count is the architecture's no-wait
+  /// sentinel for the counter.
+  bool has_required_dependency = false;
+  WaitcheckAccessKind access = WaitcheckAccessKind::Use;
+  RegisterRef reg{RegClass::VGPR, 0, 1};
+  std::string section_name;
+  uint64_t wait_section_offset = 0;
+  uint64_t wait_file_offset = 0;
+  std::string wait_instruction;
+  uint64_t consumer_section_offset = 0;
+  uint64_t consumer_file_offset = 0;
+  std::string consumer_instruction;
+  uint64_t producer_section_offset = 0;
+  uint64_t producer_file_offset = 0;
+  std::string producer_instruction;
+  std::string message;
+};
+
 /// @brief Controls for waitcheck analysis.
 struct WaitcheckOptions {
   /// @brief Maximum diagnostics to retain. Analysis still reports failure after
@@ -92,6 +124,14 @@ struct WaitcheckOptions {
   /// @details This is intended for large corpus sweeps where only hazard
   /// presence is needed. Report counts become lower bounds when enabled.
   bool stop_after_first_diagnostic = false;
+  /// @brief Compare intact emitted waits with waitcheck's pre-wait requirements.
+  ///
+  /// @details This opt-in analysis does not alter ordinary hazard diagnostics
+  /// or WaitcheckReport::passed(). The first implementation covers gfx950's
+  /// legacy vmcnt, lgkmcnt, and expcnt model.
+  bool check_counter_parity = false;
+  /// @brief Maximum counter-underaccounting diagnostics to retain.
+  size_t max_counter_parity_diagnostics = std::numeric_limits<size_t>::max();
   /// @brief Maximum combined bytes retained for forward and reverse CFG
   /// reachability memoization by one analyzer.
   ///
@@ -132,8 +172,16 @@ struct WaitcheckReport {
   size_t diagnostics_observed = 0;
   bool diagnostics_truncated = false;
   bool stopped_early = false;
+  size_t counter_parity_wait_groups = 0;
+  size_t counter_parity_fields_checked = 0;
+  size_t counter_parity_exact = 0;
+  size_t counter_underaccounting_observed = 0;
+  size_t counter_unmodeled_wait_observed = 0;
+  size_t counter_parity_indeterminate_groups = 0;
+  bool counter_parity_diagnostics_truncated = false;
   std::string analysis_error;
   std::vector<WaitcheckDiagnostic> diagnostics;
+  std::vector<WaitcheckCounterUnderaccountingDiagnostic> counter_underaccounting_diagnostics;
 
   [[nodiscard]] bool passed() const { return diagnostics_observed == 0; }
 };
