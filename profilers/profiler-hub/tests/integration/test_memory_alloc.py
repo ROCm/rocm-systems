@@ -16,6 +16,10 @@ from profiler_hub_db import ProfilerHubDb
 
 pytestmark = pytest.mark.timeout(120)
 
+# Values below are hand-transcribed from the record built by
+# examples/schema_v3/memory_alloc_writer.cpp (see its make_node/make_process/
+# make_thread/make_agent/make_queue/make_stream/make_alloc/make_env functions).
+# If that writer changes, update this dict to match.
 EXPECTED = {
     "type": "ALLOC",
     "level": "SCRATCH",

@@ -13,15 +13,36 @@ from typing import Any
 class ProfilerHubDb:
     """Small wrapper around the schema_v3 SQLite DB produced by examples."""
 
-    def __init__(self, db_path: Path, uuid: str = "integration") -> None:
+    DEFAULT_NODE_ID = 1
+    DEFAULT_PID = 1000
+    DEFAULT_TID = 100
+
+    def __init__(
+        self,
+        db_path: Path,
+        uuid: str = "integration",
+        node_id: int = DEFAULT_NODE_ID,
+        pid: int = DEFAULT_PID,
+        tid: int = DEFAULT_TID,
+    ) -> None:
         self.db_path = db_path
         self.uuid = uuid
+        self.node_id = node_id
+        self.pid = pid
+        self.tid = tid
         self._conn = sqlite3.connect(db_path)
         self._conn.row_factory = sqlite3.Row
 
     @classmethod
-    def open(cls, db_path: Path, uuid: str = "integration") -> "ProfilerHubDb":
-        return cls(db_path, uuid)
+    def open(
+        cls,
+        db_path: Path,
+        uuid: str = "integration",
+        node_id: int = DEFAULT_NODE_ID,
+        pid: int = DEFAULT_PID,
+        tid: int = DEFAULT_TID,
+    ) -> "ProfilerHubDb":
+        return cls(db_path, uuid, node_id=node_id, pid=pid, tid=tid)
 
     def close(self) -> None:
         self._conn.close()
@@ -462,7 +483,10 @@ class ProfilerHubDb:
         }
 
     def _read_common_metadata_info(self) -> dict[str, Any]:
-        node = self.row(f"select * from {self.table('rocpd_info_node')} where id = 1")
+        node = self.row(
+            f"select * from {self.table('rocpd_info_node')} where id = ?",
+            (self.node_id,),
+        )
         process = self.row(
             f"""
             select P.*, N.id as node_id
@@ -470,7 +494,7 @@ class ProfilerHubDb:
             join {self.table('rocpd_info_node')} N on P.nid = N.id
             where P.pid = ?
             """,
-            (1000,),
+            (self.pid,),
         )
         thread = self.row(
             f"""
@@ -479,7 +503,7 @@ class ProfilerHubDb:
             join {self.table('rocpd_info_process')} P on T.pid = P.id
             where T.tid = ?
             """,
-            (100,),
+            (self.tid,),
         )
         return {
             "node_info.node_id": node["id"],
