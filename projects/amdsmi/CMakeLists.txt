@@ -259,21 +259,38 @@ set(ROCM_SRC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/src")
 set(ROCM_INC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi")
 set(SHR_MUTEX_DIR "${PROJECT_SOURCE_DIR}/third_party/shared_mutex")
 if(ENABLE_ESMI_LIB)
-    # Pin to an immutable commit, not a mutable tag (ROCM-27024).
+    # Pin to an immutable commit hash so the sources can't be swapped by a moved tag.
     set(ESMI_GIT_HASH "d494a3194ceb4cc4dbb2debf9fcbe8773c6d3bef")
     set(ESMI_SOURCE_DIR "${PROJECT_SOURCE_DIR}/esmi_ib_library")
 
-    # Use existing sources if present (vendored/offline); only fetch when absent.
+    # Drop an existing checkout pinned to a different commit so a hash bump
+    # re-fetches instead of silently building stale sources.
+    if(EXISTS "${ESMI_SOURCE_DIR}/.git")
+        execute_process(
+            COMMAND git rev-parse HEAD
+            WORKING_DIRECTORY "${ESMI_SOURCE_DIR}"
+            OUTPUT_VARIABLE esmi_current_hash
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+        )
+        if(NOT esmi_current_hash STREQUAL ESMI_GIT_HASH)
+            message(STATUS "esmi_ib_library pin changed, re-fetching...")
+            file(REMOVE_RECURSE "${ESMI_SOURCE_DIR}")
+        endif()
+    endif()
+
+    # Reuse existing sources when present (offline-safe); only fetch when absent.
     if(NOT EXISTS "${ESMI_SOURCE_DIR}/src/e_smi.c")
         include(FetchContent)
         FetchContent_Declare(
             esmi_ib_library
             GIT_REPOSITORY https://github.com/amd/esmi_ib_library.git
             GIT_TAG ${ESMI_GIT_HASH}
+            # No GIT_SHALLOW: a shallow clone can't check out an arbitrary commit.
             SOURCE_DIR
             ${ESMI_SOURCE_DIR}
-            # Download-only: sources are compiled into amd_smi, not added as a
-            # subdir, so point SOURCE_SUBDIR at a dir with no CMakeLists.txt.
+            # Download only: point SOURCE_SUBDIR at a dir with no CMakeLists.txt
+            # so the sources are compiled into amd_smi, not add_subdirectory'd.
             SOURCE_SUBDIR
             __download_only__
         )
