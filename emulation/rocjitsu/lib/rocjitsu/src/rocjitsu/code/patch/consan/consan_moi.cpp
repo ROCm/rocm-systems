@@ -87,6 +87,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   ConSanOptions effective_options = options;
   result.flavor = ConSanFlavor::Moi;
   result.moi_engine = effective_options.moi_engine;
+  result.moi_report_dispatch_id = effective_options.moi_report_dispatch_id;
   result.modified = false;
   result.elf_bytes.clear();
   result.moi_candidates.clear();
@@ -212,7 +213,13 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
           "ConSan MOI inline shadow omitted unused access-only workgroup-filter state");
     }
   }
-  rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
+  // Register selection iterates as automatic persistent and transient state is
+  // chosen. The code bytes, decoded CFG, ownership scopes, and liveness facts
+  // do not change during those iterations; retain one analysis state instead
+  // of rebuilding the full instruction graph for every option refinement.
+  MoiResourcePlanningState resource_planning_state(code_object_bytes, arch, effective_options,
+                                                   result);
+  rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   effective_options.moi_dynamic_stack_spill =
       effective_options.moi_engine == ConSanMoiEngine::InlineShadow &&
       std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
@@ -224,16 +231,16 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
         });
       });
   if (configure_automatic_moi_owner_sgpr(effective_options, result, arch))
-    rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
+    rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   // Dispatch identity is persistent across every instrumented site, whereas
   // the larger EXEC/VCC/SCC save window is needed only while a probe runs and
   // can use CFG-proven dead registers. Reserve the persistent pair first so a
   // high referenced SGPR does not let the transient window consume the last
   // fresh registers and make dispatch identity spuriously impossible.
   if (configure_automatic_moi_dispatch_id_sgprs(effective_options, result, arch))
-    rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
+    rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   if (configure_automatic_moi_exec_save_sgprs(effective_options, result, code_object_bytes, arch))
-    rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
+    rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported ||
       !validate_moi_dispatch_id_sgprs(effective_options, result, arch) ||
       !validate_moi_ordinary_scalar_state(effective_options, result, arch)) {
@@ -248,7 +255,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   if (effective_options.moi_engine == ConSanMoiEngine::Sampled)
     append_moi_sync_site_dispositions(effective_options, result);
   if (configure_automatic_moi_persistent_vgprs(effective_options, result, code_object_bytes, arch))
-    rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
+    rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported) {
     finalize_moi_site_lowering_outcomes(result);
     summarize_moi_resource_plans(result);
@@ -440,11 +447,20 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
 
   size_t selected_candidate_count = 0;
   bool selected_flat_candidate = false;
+  bool selected_dynamic_lds_owner = false;
+  uint64_t selected_native_lds_extent = 0;
+  std::unordered_set<uint64_t> dynamic_lds_descriptors;
+  for (const ConSanKernelInfo &kernel : result.kernels) {
+    if (kernel.has_dynamic_lds)
+      dynamic_lds_descriptors.insert(kernel.descriptor_file_offset);
+  }
   const size_t selected_candidate_limit =
       options.max_patches_is_expert_limit ? options.max_patches : result.moi_candidates.size();
-  for (const ConSanMoiCandidate &candidate : result.moi_candidates) {
+  for (size_t candidate_index = 0; candidate_index < result.moi_candidates.size();
+       ++candidate_index) {
     if (selected_candidate_count >= selected_candidate_limit)
       break;
+    const ConSanMoiCandidate &candidate = result.moi_candidates[candidate_index];
     const bool supported =
         std::ranges::any_of(result.site_dispositions, [&](const ConSanSiteDispositionRecord &site) {
           return site.site_kind == ConSanResourceSiteKind::Access &&
@@ -460,6 +476,21 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     ++selected_candidate_count;
     selected_flat_candidate |= candidate.source == ConSanMoiCandidateSource::FlatGroup ||
                                candidate.source == ConSanMoiCandidateSource::FlatMaybeGroup;
+    selected_dynamic_lds_owner |=
+        std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+          return plan.site_kind == ConSanResourceSiteKind::Access &&
+                 plan.candidate_index == candidate_index &&
+                 std::ranges::any_of(plan.owner_descriptor_file_offsets, [&](uint64_t owner) {
+                   return dynamic_lds_descriptors.contains(owner);
+                 });
+        });
+    if (candidate.source == ConSanMoiCandidateSource::NativeLds) {
+      for (const ConSanMoiAccessRange &range : *ranges) {
+        selected_native_lds_extent =
+            std::max<uint64_t>(selected_native_lds_extent,
+                               static_cast<uint64_t>(range.static_byte_offset) + range.byte_count);
+      }
+    }
     inventory.access_range_count += ranges->size();
   }
 
@@ -503,13 +534,17 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
 
   if (options.moi_engine == ConSanMoiEngine::Sampled) {
     const uint64_t bank_count = options.moi_runtime_sample_stride > 1u ? 8u : 1u;
-    const uint64_t access_banks = inventory.access_range_count * bank_count;
+    const uint64_t access_banks =
+        inventory.access_range_count > std::numeric_limits<uint64_t>::max() / bank_count
+            ? std::numeric_limits<uint64_t>::max()
+            : inventory.access_range_count * bank_count;
     // Synchronization metadata is attached to an already selected access
     // window; atomics do not create independent sampled windows. Sizing from
     // atomic inventory alone otherwise provisions vacuous capacity for code
     // objects with no admissible LDS access.
     inventory.sampled_range_bank_count = access_banks;
     inventory.sampled_watchpoint_count = inventory.sampled_range_bank_count;
+    inventory.sampled_bank_count_adaptive = bank_count > 1u;
     if (options.moi_track_barriers) {
       inventory.barrier_event_count = 0;
       for (const ConSanSyncSequence &sequence : result.sync_sequences) {
@@ -540,17 +575,22 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     }
     // A native LDS instruction can name storage that is not reflected in the
     // kernel descriptor's fixed-LDS field (for example, target-managed tensor
-    // transfers). Such a descriptor cannot host a descriptor-grown local
-    // mirror, so provision the external full-aperture fallback just as we do
-    // for group-FLAT accesses.
+    // transfers or dynamically sized LDS). Such a descriptor cannot host a
+    // descriptor-grown local mirror. A nonzero field is not sufficient proof:
+    // some dynamic-LDS objects retain a one-byte placeholder even though a
+    // decoded access itself spans more bytes. Provision the external
+    // full-aperture fallback just as we do for group-FLAT accesses.
     const bool descriptor_opaque_lds = result.arch_name == "gfx1250" &&
                                        inventory.access_range_count != 0u &&
-                                       inventory.inline_lds_bytes == 0u;
-    if (selected_flat_candidate || descriptor_opaque_lds) {
-      inventory.inline_lds_bytes = std::max<uint64_t>(
-          inventory.inline_lds_bytes,
-          static_cast<uint64_t>(kConSanMoiInlineShadowConservativeExactShadowEntries) *
-              consan_moi_exact_shadow::granule_bytes);
+                                       inventory.inline_lds_bytes < selected_native_lds_extent;
+    if (selected_flat_candidate || selected_dynamic_lds_owner || descriptor_opaque_lds) {
+      const uint64_t external_lds_bytes =
+          result.arch_name == "gfx1250"
+              ? consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250)
+              : static_cast<uint64_t>(kConSanMoiInlineShadowConservativeExactShadowEntries) *
+                    consan_moi_exact_shadow::granule_bytes;
+      inventory.inline_lds_bytes =
+          std::max<uint64_t>(inventory.inline_lds_bytes, external_lds_bytes);
     }
     const uint64_t ordering_capacity = std::max<uint64_t>(
         inventory.atomic_event_count, kConSanMoiInlineShadowAtomicReleaseSlotCapacity);
@@ -561,7 +601,7 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     inventory.diagnostic_count = std::max<uint64_t>(
         inventory.diagnostic_count, kConSanMoiInlineShadowDefaultDiagnosticCapacity);
   }
-  return inventory;
+  return fit_consan_moi_sampled_auto_report_inventory(inventory);
 }
 
 } // namespace rocjitsu

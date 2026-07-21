@@ -102,7 +102,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     }
     const ConSanCandidateResourcePlan *existing_plan =
         resource_plan_for_site(result, ConSanResourceSiteKind::Atomic, site.text_offset);
-    const uint16_t scratch_count = inline_atomic_scratch_count(site, arch);
+    const uint16_t scratch_count = atomic_record_scratch_count(site, arch);
     ConSanCandidateResourcePlan plan =
         existing_plan
             ? *existing_plan
@@ -170,7 +170,6 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
   MoiLocalNopIslandAllocator indirect_allocator(old_text, result, arch,
                                                 kMoiLocalIndirectIslandWords);
   std::vector<ConSanPatchInfo> patches;
-  const uint32_t record_count = static_cast<uint32_t>(selected_candidates.size());
   uint32_t record_index = 0;
   for (const PlannedAtomicRecord &planned : selected_candidates) {
     const AtomicRecordCandidate &candidate = planned.candidate;
@@ -182,21 +181,26 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     uint32_t guest_instruction_offset = 0;
     auto cave_words = build_atomic_record_cave_words(
         active_bytes, candidate, planned.address_plan, candidate_options,
-        planned.spill ? &*planned.spill : nullptr, arch, record_index, record_count,
-        layout.atomic_records_offset, cave_text_offset, return_text_offset,
-        guest_instruction_offset, result.errors);
+        planned.spill ? &*planned.spill : nullptr, arch, record_index,
+        layout.atomic_record_capacity, layout.atomic_records_offset, cave_text_offset,
+        return_text_offset, guest_instruction_offset, result.errors);
     if (!cave_words)
       return;
 
     const bool direct_entry =
         compute_sopp_branch_simm16(site.text_offset, cave_text_offset).has_value();
-    const std::optional<uint64_t> indirect_entry_island =
-        direct_entry ? std::nullopt : indirect_allocator.claim_reachable(site.text_offset);
-    if (!direct_entry && !indirect_entry_island) {
-      result.warnings.emplace_back(
-          "ConSan MOI atomic record patch found no reachable indirect entry island in " +
-          candidate.container_name);
-      continue;
+    uint64_t indirect_entry_island = 0;
+    bool has_indirect_entry_island = false;
+    if (!direct_entry) {
+      const auto claimed_island = indirect_allocator.claim_reachable(site.text_offset);
+      if (!claimed_island) {
+        result.warnings.emplace_back(
+            "ConSan MOI atomic record patch found no reachable indirect entry island in " +
+            candidate.container_name);
+        continue;
+      }
+      indirect_entry_island = *claimed_island;
+      has_indirect_entry_island = true;
     }
     std::string placement_error;
     const auto placement = placement_planner.plan_indirect_appended(
@@ -210,7 +214,8 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
       return;
     }
 
-    const uint64_t entry_target = indirect_entry_island.value_or(placement->body_offset);
+    const uint64_t entry_target =
+        has_indirect_entry_island ? indirect_entry_island : placement->body_offset;
     const auto fwd = compute_sopp_branch_simm16(placement->anchor_offset, entry_target);
     if (!fwd) {
       result.errors.emplace_back("ConSan MOI atomic record forward branch is out of range");
@@ -229,9 +234,9 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     }
     std::memcpy(new_text.data() + site.text_offset, anchor_words.data(),
                 anchor_words.size() * sizeof(uint32_t));
-    if (indirect_entry_island &&
+    if (has_indirect_entry_island &&
         !emit_moi_local_indirect_entry_island(
-            new_text, *indirect_entry_island, placement->body_offset, site.text_offset, options,
+            new_text, indirect_entry_island, placement->body_offset, site.text_offset, options,
             planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
             "ConSan MOI atomic record patch")) {
       return;

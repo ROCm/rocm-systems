@@ -125,7 +125,8 @@ template <typename PlannedPatch>
   const size_t probe_prefix_words = probe_words.size() - trailing_guest_word_count;
   body.insert(body.end(), entry_prefix_words.begin(), entry_prefix_words.end());
   if (select_low_vgpr_bank)
-    body.push_back(*instrumentation::build_s_set_vgpr_msb(0u, ROCJITSU_CODE_ARCH_GFX1250));
+    body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+        static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), 0u, ROCJITSU_CODE_ARCH_GFX1250));
   if (planned_patch.spill)
     body.insert(body.end(), planned_patch.spill->save_words.begin(),
                 planned_patch.spill->save_words.end());
@@ -133,18 +134,19 @@ template <typename PlannedPatch>
   body.insert(body.end(), probe_words.begin(), probe_words.begin() + probe_prefix_words);
   body.insert(body.end(), scalar_restore_words.begin(), scalar_restore_words.end());
   if (select_low_vgpr_bank) {
-    body.push_back(
-        *instrumentation::build_s_set_vgpr_msb(*gfx1250_vgpr_msb_mode, ROCJITSU_CODE_ARCH_GFX1250));
+    body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+        0u, static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), ROCJITSU_CODE_ARCH_GFX1250));
   }
   body.insert(body.end(), probe_words.begin() + probe_prefix_words, probe_words.end());
   if (select_low_vgpr_bank && planned_patch.spill)
-    body.push_back(*instrumentation::build_s_set_vgpr_msb(0u, ROCJITSU_CODE_ARCH_GFX1250));
+    body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+        static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), 0u, ROCJITSU_CODE_ARCH_GFX1250));
   if (planned_patch.spill)
     body.insert(body.end(), planned_patch.spill->restore_words.begin(),
                 planned_patch.spill->restore_words.end());
   if (select_low_vgpr_bank && planned_patch.spill) {
-    body.push_back(
-        *instrumentation::build_s_set_vgpr_msb(*gfx1250_vgpr_msb_mode, ROCJITSU_CODE_ARCH_GFX1250));
+    body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+        0u, static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), ROCJITSU_CODE_ARCH_GFX1250));
   }
   body.insert(body.end(), planned_patch.displaced_tail_words.begin(),
               planned_patch.displaced_tail_words.end());

@@ -149,6 +149,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     std::optional<size_t> dense_call_group_index;
     std::optional<uint16_t> dense_call_return_sgpr;
     std::optional<uint16_t> dense_explicit_key;
+    std::optional<uint16_t> scalar_vcc_spill_vgpr;
+    bool branch_only_continuation = false;
+    std::vector<uint64_t> return_relay_offsets = {};
   };
 
   struct ScDenseCallGroup {
@@ -550,6 +553,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   std::vector<LdsCheckTrapCandidate> local_cave_candidates;
   std::vector<LdsCheckTrapCandidate> appended_cave_candidates;
   std::vector<LdsCheckTrapCandidate> generated_island_seed_candidates;
+  std::vector<LdsCheckTrapCandidate> branch_only_candidates;
   bool skipped_supported_site_for_excessive_delay = false;
   size_t supported_candidate_count = 0;
   size_t scratchable_candidate_count = 0;
@@ -618,14 +622,27 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         return;
       const uint32_t report_alignment_padding =
           options.report_buffer_address && arch == ROCJITSU_CODE_ARCH_CDNA4 ? 1u : 0u;
-      const uint32_t scratch_vgprs =
+      const Instruction *site_inst =
+          find_instruction_at_text_offset(kernel_scope, site.text_offset);
+      auto vcc_save = choose_vcc_save_sgpr(site_inst, kernel_liveness, min_preferred_vcc_save_sgpr);
+      const bool spill_vcc_save_to_vgpr = !vcc_save && arch == ROCJITSU_CODE_ARCH_GFX1250;
+      if (spill_vcc_save_to_vgpr)
+        vcc_save = 0u;
+      if (!vcc_save)
+        continue;
+      const uint32_t probe_scratch_vgprs =
           *required_vgprs + lds_check_trap_extra_scratch_vgprs(site) + report_alignment_padding +
           report_action_scratch_vgprs(options) + (lds_load_clobbers_address(site) ? 1u : 0u);
+      const uint32_t scratch_vgprs = probe_scratch_vgprs + (spill_vcc_save_to_vgpr ? 1u : 0u);
       uint64_t requested_words = (lds_load_clobbers_address(site) ? 1u : 0u) + 2u +
                                  lds_check_trap_predelay_setup_words(site) +
                                  static_cast<uint64_t>(*delay_words) + 2u + 1u +
                                  lds_check_trap_precompare_words(site) + 1u +
                                  (2u + *action_words) * *required_vgprs + 1u;
+      if (spill_vcc_save_to_vgpr)
+        requested_words += 2u;
+      if (spill_vcc_save_to_vgpr && gfx1250_vgpr_msb_mode.value_or(0u) != 0u)
+        requested_words += 2u;
       if (arch == ROCJITSU_CODE_ARCH_GFX1250 && site.kind == ConSanLdsAccessKind::Read &&
           site.dst_vgpr) {
         const uint32_t dst_bank =
@@ -639,8 +656,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         requested_words += 2u;
       if (gfx1250_vgpr_msb_mode.value_or(0u) != 0u && lds_load_clobbers_address(site))
         requested_words += 2u;
-      const Instruction *site_inst =
-          find_instruction_at_text_offset(kernel_scope, site.text_offset);
       auto scratch =
           choose_scratch_vgpr(site, options, site_inst, kernel_liveness, min_auto_scratch_vgpr,
                               max_auto_scratch_vgpr, scratch_vgprs);
@@ -662,8 +677,11 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           auto spill = build_vgpr_spill_sequence(manager->second, *scratch, scratch_vgprs, arch);
           if (spill) {
             requested_words += spill->save_words.size() + spill->restore_words.size();
-            if (gfx1250_vgpr_msb_mode.value_or(0u) != 0u)
+            if (gfx1250_vgpr_msb_mode.value_or(0u) != 0u) {
               requested_words += 2u;
+              if (spill_vcc_save_to_vgpr)
+                requested_words -= 2u;
+            }
             spill_sequences.insert_or_assign(&site, std::move(*spill));
           } else {
             scratch.reset();
@@ -686,9 +704,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       std::optional<uint16_t> descriptor_growth;
       if (max_auto_scratch_vgpr && *required_allocation > *max_auto_scratch_vgpr)
         descriptor_growth = *required_allocation;
-      auto vcc_save = choose_vcc_save_sgpr(site_inst, kernel_liveness, min_preferred_vcc_save_sgpr);
-      if (!vcc_save)
-        continue;
+      const std::optional<uint16_t> scalar_vcc_spill_vgpr =
+          spill_vcc_save_to_vgpr
+              ? std::optional<uint16_t>(static_cast<uint16_t>(*scratch + probe_scratch_vgprs))
+              : std::nullopt;
       ++scratchable_candidate_count;
       uint32_t observed_padding =
           count_nop_padding(original_bytes, site.file_offset + site.size, padding_words, arch);
@@ -729,7 +748,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                                             gfx1250_vgpr_msb_mode,
                                             std::nullopt,
                                             std::nullopt,
+                                            std::nullopt,
                                             std::nullopt};
+            candidate.scalar_vcc_spill_vgpr = scalar_vcc_spill_vgpr;
             appended_cave_candidates.push_back(candidate);
           }
         }
@@ -758,10 +779,12 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                                           gfx1250_vgpr_msb_mode,
                                           std::nullopt,
                                           std::nullopt,
+                                          std::nullopt,
                                           std::nullopt};
+          candidate.scalar_vcc_spill_vgpr = scalar_vcc_spill_vgpr;
           local_cave_candidates.push_back(candidate);
         }
-        if (appended_cave_offset != 0) {
+        if (appended_cave_offset != 0 && !spill_vcc_save_to_vgpr) {
           uint16_t indirect_vcc_save_sgpr = *vcc_save;
           auto indirect_pc_sgpr = choose_lds_check_trap_indirect_pc_sgpr(
               site_inst, kernel_liveness, indirect_vcc_save_sgpr,
@@ -792,8 +815,33 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
             }
           }
           if (!indirect_pc_sgpr || !indirect_scc_save_sgpr) {
-            if (!appended_cave_reachable)
+            if (!appended_cave_reachable) {
               ++indirect_pc_resource_failed_site_count;
+              LdsCheckTrapCandidate candidate{&site,
+                                              nullptr,
+                                              nullptr,
+                                              false,
+                                              kernel.entry_text_offset,
+                                              kernel.descriptor_file_offset,
+                                              appended_cave_offset,
+                                              *scratch,
+                                              *vcc_save,
+                                              std::nullopt,
+                                              std::nullopt,
+                                              requested_words,
+                                              false,
+                                              true,
+                                              descriptor_growth,
+                                              std::nullopt,
+                                              {},
+                                              gfx1250_vgpr_msb_mode,
+                                              std::nullopt,
+                                              std::nullopt,
+                                              std::nullopt,
+                                              scalar_vcc_spill_vgpr};
+              candidate.branch_only_continuation = true;
+              branch_only_candidates.push_back(std::move(candidate));
+            }
           } else {
             LdsCheckTrapCandidate generated_seed{&site,
                                                  nullptr,
@@ -813,6 +861,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                                                  std::nullopt,
                                                  {},
                                                  gfx1250_vgpr_msb_mode,
+                                                 std::nullopt,
                                                  std::nullopt,
                                                  std::nullopt,
                                                  std::nullopt};
@@ -846,6 +895,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                                                 gfx1250_vgpr_msb_mode,
                                                 std::nullopt,
                                                 std::nullopt,
+                                                std::nullopt,
                                                 std::nullopt};
                 appended_cave_candidates.push_back(candidate);
               }
@@ -855,6 +905,32 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                 ++indirect_island_unreachable_site_count;
             }
           }
+        } else if (appended_cave_offset != 0 && !appended_cave_reachable) {
+          ++indirect_pc_resource_failed_site_count;
+          LdsCheckTrapCandidate candidate{&site,
+                                          nullptr,
+                                          nullptr,
+                                          false,
+                                          kernel.entry_text_offset,
+                                          kernel.descriptor_file_offset,
+                                          appended_cave_offset,
+                                          *scratch,
+                                          *vcc_save,
+                                          std::nullopt,
+                                          std::nullopt,
+                                          requested_words,
+                                          false,
+                                          true,
+                                          descriptor_growth,
+                                          std::nullopt,
+                                          {},
+                                          gfx1250_vgpr_msb_mode,
+                                          std::nullopt,
+                                          std::nullopt,
+                                          std::nullopt,
+                                          scalar_vcc_spill_vgpr};
+          candidate.branch_only_continuation = true;
+          branch_only_candidates.push_back(std::move(candidate));
         }
         if (appended_cave_reachable)
           ++append_cave_reachable_candidate_count;
@@ -881,7 +957,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                                       gfx1250_vgpr_msb_mode,
                                       std::nullopt,
                                       std::nullopt,
+                                      std::nullopt,
                                       std::nullopt};
+      candidate.scalar_vcc_spill_vgpr = scalar_vcc_spill_vgpr;
       inline_candidates.push_back(candidate);
     }
   }
@@ -911,6 +989,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   std::ranges::sort(generated_island_seed_candidates, [](const auto &lhs, const auto &rhs) {
     return lhs.site->text_offset < rhs.site->text_offset;
   });
+  std::ranges::sort(branch_only_candidates, candidate_order);
 
   const size_t max_patches = options.max_patches_is_expert_limit
                                  ? std::max<uint32_t>(options.max_patches, 1u)
@@ -1881,7 +1960,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         min_rejected_source = std::min(min_rejected_source, source_offsets[rejected_index]);
         max_rejected_source = std::max(max_rejected_source, source_offsets[rejected_index]);
       }
-      for (const auto [from, to] : relay_plan.min_cut_hops) {
+      for (const auto &[from, to] : relay_plan.min_cut_hops) {
         min_cut_from = std::min(min_cut_from, from);
         max_cut_from = std::max(max_cut_from, from);
         min_cut_to = std::min(min_cut_to, to);
@@ -2072,6 +2151,96 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     }
   }
 
+  // A spill-backed VCC-save scalar solves the data-state problem at a
+  // full-pressure site, but intentionally supplies no indirect PC pair.  For
+  // far appended bodies, route both control-flow edges through capacity-one
+  // words in the unreachable second dword of already selected eight-byte
+  // anchors.  The two chains are disjoint, preserve every ordinary return at
+  // anchor+8, and never make a live guest scalar carry a continuation.
+  if (!branch_only_candidates.empty() && selected_candidates.size() < max_patches) {
+    std::vector<LdsCheckTrapCandidate> tentative_candidates;
+    DbiPatchPlacementPlanner tentative_planner = placement_planner;
+    std::ranges::sort(branch_only_candidates, [](const auto &lhs, const auto &rhs) {
+      return lhs.site->text_offset < rhs.site->text_offset;
+    });
+    for (LdsCheckTrapCandidate candidate : branch_only_candidates) {
+      if (selected_sites.contains(candidate.site) ||
+          selected_candidates.size() + tentative_candidates.size() >= max_patches)
+        continue;
+      auto placement = tentative_planner.plan_indirect_appended(
+          candidate.site->text_offset, candidate.site->size,
+          (candidate.requested_words + 1u) * sizeof(uint32_t));
+      if (!placement)
+        continue;
+      candidate.placement = *placement;
+      tentative_candidates.push_back(std::move(candidate));
+    }
+
+    std::vector<uint64_t> available_relays;
+    const auto offer_anchor_relay = [&](const LdsCheckTrapCandidate &candidate) {
+      if ((candidate.use_local_cave || candidate.use_appended_cave) &&
+          !candidate.dense_call_group_index && candidate.site->size == 2u * sizeof(uint32_t))
+        available_relays.push_back(candidate.site->text_offset + sizeof(uint32_t));
+    };
+    for (const LdsCheckTrapCandidate &candidate : selected_candidates)
+      offer_anchor_relay(candidate);
+    for (const LdsCheckTrapCandidate &candidate : tentative_candidates)
+      offer_anchor_relay(candidate);
+    std::ranges::sort(available_relays);
+    available_relays.erase(std::ranges::unique(available_relays).begin(), available_relays.end());
+    for (const LdsCheckTrapCandidate &candidate : selected_candidates) {
+      for (uint64_t used : candidate.entry_relay_offsets)
+        std::erase(available_relays, used);
+    }
+
+    const auto consume_routes = [&](bool forward) {
+      std::vector<uint64_t> sources;
+      std::vector<uint64_t> targets;
+      sources.reserve(tentative_candidates.size());
+      targets.reserve(tentative_candidates.size());
+      for (const LdsCheckTrapCandidate &candidate : tentative_candidates) {
+        sources.push_back(forward ? candidate.site->text_offset
+                                  : candidate.placement->body_offset +
+                                        candidate.requested_words * sizeof(uint32_t));
+        targets.push_back(forward ? candidate.placement->body_offset
+                                  : candidate.site->text_offset + candidate.site->size);
+      }
+      std::string route_error;
+      auto plan =
+          forward
+              ? plan_forward_sopp_branch_relays(sources, available_relays, targets, &route_error)
+              : plan_backward_sopp_branch_relays(sources, available_relays, targets, &route_error);
+      if (!plan || !plan->rejected_source_indices.empty() ||
+          plan->routes.size() != tentative_candidates.size())
+        return false;
+      for (SoppBranchRelayRoute &route : plan->routes) {
+        if (route.source_index >= tentative_candidates.size() ||
+            route.island_offset != targets[route.source_index])
+          return false;
+        std::vector<uint64_t> &route_out =
+            forward ? tentative_candidates[route.source_index].entry_relay_offsets
+                    : tentative_candidates[route.source_index].return_relay_offsets;
+        route_out = std::move(route.relay_offsets);
+        for (uint64_t used : route_out)
+          std::erase(available_relays, used);
+      }
+      return true;
+    };
+    const bool routes_complete = !tentative_candidates.empty() &&
+                                 consume_routes(/*forward=*/true) &&
+                                 consume_routes(/*forward=*/false);
+    if (routes_complete) {
+      placement_planner = std::move(tentative_planner);
+      for (LdsCheckTrapCandidate &candidate : tentative_candidates) {
+        selected_sites.insert(candidate.site);
+        selected_candidates.push_back(std::move(candidate));
+      }
+    } else if (!tentative_candidates.empty()) {
+      result.warnings.emplace_back(
+          "ConSan LDS check/trap branch-only continuation could not route all spill-backed sites");
+    }
+  }
+
   if (!selected_candidates.empty() && selected_candidates.size() < supported_candidate_count &&
       max_patches >= supported_candidate_count) {
     result.warnings.emplace_back(
@@ -2136,6 +2305,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     std::optional<uint16_t> required_vgpr_allocation_count;
     std::optional<DbiPatchPlacement> placement;
     std::vector<uint64_t> entry_relay_offsets = {};
+    std::vector<uint64_t> return_relay_offsets = {};
+    bool branch_only_continuation = false;
     std::vector<uint64_t> trailing_relay_offsets;
     std::optional<size_t> dense_call_group_index;
     std::optional<uint16_t> dense_call_return_sgpr;
@@ -2151,10 +2322,24 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     if (!words)
       return;
     const auto spill = spill_sequences.find(&site);
+    std::optional<uint32_t> scalar_vcc_save_word;
+    std::optional<uint32_t> scalar_vcc_restore_word;
+    if (candidate.scalar_vcc_spill_vgpr) {
+      scalar_vcc_save_word =
+          build_v_mov_b32_e32(*candidate.scalar_vcc_spill_vgpr, candidate.vcc_save_sgpr, arch);
+      scalar_vcc_restore_word = instrumentation::build_v_readfirstlane_b32(
+          candidate.vcc_save_sgpr, *candidate.scalar_vcc_spill_vgpr, arch);
+      if (!scalar_vcc_restore_word) {
+        result.errors.emplace_back(
+            "ConSan LDS check/trap could not encode its scalar VCC-save spill");
+        return;
+      }
+    }
     if (candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u) {
-      const auto select_low = instrumentation::build_s_set_vgpr_msb(0u, arch);
-      const auto restore_guest =
-          instrumentation::build_s_set_vgpr_msb(*candidate.gfx1250_vgpr_msb_mode, arch);
+      const auto select_low = instrumentation::build_s_set_vgpr_msb_transition(
+          static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), 0u, arch);
+      const auto restore_guest = instrumentation::build_s_set_vgpr_msb_transition(
+          0u, static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), arch);
       const size_t guest_prefix_words = lds_load_clobbers_address(site) ? 3u : 2u;
       if (!select_low || !restore_guest || words->size() < guest_prefix_words) {
         result.errors.emplace_back(
@@ -2163,13 +2348,18 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       }
       std::vector<uint32_t> wrapped;
       const bool has_spill = spill != spill_sequences.end();
-      wrapped.reserve(words->size() + (has_spill ? spill->second.save_words.size() +
-                                                       spill->second.restore_words.size() + 4u
-                                                 : 2u));
-      if (has_spill) {
+      wrapped.reserve(
+          words->size() +
+          (has_spill ? spill->second.save_words.size() + spill->second.restore_words.size() + 4u
+                     : 2u) +
+          (scalar_vcc_save_word ? 4u : 0u));
+      if (has_spill || scalar_vcc_save_word) {
         wrapped.push_back(*select_low);
-        wrapped.insert(wrapped.end(), spill->second.save_words.begin(),
-                       spill->second.save_words.end());
+        if (has_spill)
+          wrapped.insert(wrapped.end(), spill->second.save_words.begin(),
+                         spill->second.save_words.end());
+        if (scalar_vcc_save_word)
+          wrapped.push_back(*scalar_vcc_save_word);
         wrapped.push_back(*restore_guest);
       }
       if (lds_load_clobbers_address(site)) {
@@ -2182,6 +2372,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       }
       wrapped.push_back(*select_low);
       wrapped.insert(wrapped.end(), words->begin() + guest_prefix_words, words->end());
+      if (scalar_vcc_restore_word)
+        wrapped.push_back(*scalar_vcc_restore_word);
       if (has_spill)
         wrapped.insert(wrapped.end(), spill->second.restore_words.begin(),
                        spill->second.restore_words.end());
@@ -2190,12 +2382,23 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     } else if (spill != spill_sequences.end()) {
       std::vector<uint32_t> wrapped;
       wrapped.reserve(spill->second.save_words.size() + words->size() +
-                      spill->second.restore_words.size());
+                      spill->second.restore_words.size() + (scalar_vcc_save_word ? 2u : 0u));
       wrapped.insert(wrapped.end(), spill->second.save_words.begin(),
                      spill->second.save_words.end());
+      if (scalar_vcc_save_word)
+        wrapped.push_back(*scalar_vcc_save_word);
       wrapped.insert(wrapped.end(), words->begin(), words->end());
+      if (scalar_vcc_restore_word)
+        wrapped.push_back(*scalar_vcc_restore_word);
       wrapped.insert(wrapped.end(), spill->second.restore_words.begin(),
                      spill->second.restore_words.end());
+      words = std::move(wrapped);
+    } else if (scalar_vcc_save_word && scalar_vcc_restore_word) {
+      std::vector<uint32_t> wrapped;
+      wrapped.reserve(words->size() + 2u);
+      wrapped.push_back(*scalar_vcc_save_word);
+      wrapped.insert(wrapped.end(), words->begin(), words->end());
+      wrapped.push_back(*scalar_vcc_restore_word);
       words = std::move(wrapped);
     }
 
@@ -2210,6 +2413,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     planned.required_vgpr_allocation_count = candidate.required_vgpr_allocation_count;
     planned.placement = candidate.placement;
     planned.entry_relay_offsets = candidate.entry_relay_offsets;
+    planned.return_relay_offsets = candidate.return_relay_offsets;
+    planned.branch_only_continuation = candidate.branch_only_continuation;
     planned.dense_call_group_index = candidate.dense_call_group_index;
     planned.dense_call_return_sgpr = candidate.dense_call_return_sgpr;
     if (auto relay = direct_body_relay_slots.find(candidate.site);
@@ -2245,7 +2450,28 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       const uint64_t trampoline_text_offset = candidate.placement->body_offset;
       planned.cave_words = planned.words;
       uint64_t entry_target = candidate.placement->body_offset;
-      if (candidate.entry_island != nullptr || candidate.dense_call_group_index) {
+      if (candidate.branch_only_continuation) {
+        planned.cave_words.push_back(build_s_nop(0, arch));
+        entry_target = candidate.entry_relay_offsets.empty()
+                           ? candidate.placement->body_offset
+                           : candidate.entry_relay_offsets.front();
+        const uint64_t return_source =
+            candidate.placement->body_offset + planned.words.size() * sizeof(uint32_t);
+        const uint64_t return_target = candidate.return_relay_offsets.empty()
+                                           ? candidate.placement->return_target
+                                           : candidate.return_relay_offsets.front();
+        const auto ret = compute_sopp_branch_simm16(return_source, return_target);
+        if (!ret ||
+            planned.cave_words.size() * sizeof(uint32_t) != candidate.placement->body_size) {
+          result.errors.emplace_back(
+              "ConSan LDS check/trap could not encode its branch-only return");
+          return;
+        }
+        planned.cave_words.back() = build_s_branch(*ret, arch);
+        planned.info.sc_branch_only_continuation = true;
+        planned.info.sc_branch_only_entry_relay_offsets = candidate.entry_relay_offsets;
+        planned.info.sc_branch_only_return_relay_offsets = candidate.return_relay_offsets;
+      } else if (candidate.entry_island != nullptr || candidate.dense_call_group_index) {
         if (!candidate.indirect_pc_sgpr || !candidate.indirect_scc_save_sgpr) {
           result.errors.emplace_back(
               "ConSan LDS check/trap proof selected missing indirect SGPR scratch");
@@ -2436,12 +2662,32 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       }
       const uint64_t target = relay_index + 1u < planned.entry_relay_offsets.size()
                                   ? planned.entry_relay_offsets[relay_index + 1u]
+                              : planned.branch_only_continuation
+                                  ? planned.placement->body_offset
                                   : planned.entry_island->text_offset;
       const auto branch = compute_sopp_branch_simm16(relay_offset, target);
       if (!branch ||
           !entry_relay_words.emplace(relay_offset, build_s_branch(*branch, arch)).second) {
         result.errors.emplace_back(
             "ConSan LDS check/trap relay path is unreachable or overlapping");
+        return;
+      }
+    }
+    for (size_t relay_index = 0; relay_index < planned.return_relay_offsets.size(); ++relay_index) {
+      const uint64_t relay_offset = planned.return_relay_offsets[relay_index];
+      if (!selected_relay_slots.contains(relay_offset)) {
+        result.errors.emplace_back(
+            "ConSan LDS check/trap return relay belongs to an unselected anchor");
+        return;
+      }
+      const uint64_t target = relay_index + 1u < planned.return_relay_offsets.size()
+                                  ? planned.return_relay_offsets[relay_index + 1u]
+                                  : planned.site->text_offset + planned.site->size;
+      const auto branch = compute_sopp_branch_simm16(relay_offset, target);
+      if (!branch ||
+          !entry_relay_words.emplace(relay_offset, build_s_branch(*branch, arch)).second) {
+        result.errors.emplace_back(
+            "ConSan LDS check/trap return relay path is unreachable or overlapping");
         return;
       }
     }

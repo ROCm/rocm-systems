@@ -152,9 +152,8 @@ RJ_CONSAN_POLICY=strict
 
 Strict policy rejects unsupported or incomplete instrumentation, requires real
 patches and MOI evidence, and rejects overflow. It does not make race
-diagnostics fatal. The former `RJ_CONSAN_ENABLE`, `RJ_CONSAN_FLAVOR`,
-`RJ_CONSAN_MOI_ENGINE`, and `RJ_CONSAN_MOI_BACKEND` inputs remain deprecated
-transition aliases.
+diagnostics fatal. The former `RJ_CONSAN_FLAVOR`, `RJ_CONSAN_MOI_ENGINE`, and
+`RJ_CONSAN_MOI_BACKEND` inputs remain deprecated transition aliases.
 
 The public terminology is:
 

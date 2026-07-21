@@ -111,6 +111,10 @@ struct ConSanMoiAutoReportInventory {
   /// reserved per bank. Multi-cell ranges can require more watchpoints.
   uint64_t sampled_range_bank_count = 0;
   uint64_t sampled_watchpoint_count = 0;
+  /// Automatic runtime sampling may reduce the number of independent banks,
+  /// while retaining at least one bank for every logical access range, to fit
+  /// the frozen per-object report ceiling. Explicit inventories remain exact.
+  bool sampled_bank_count_adaptive = false;
 
   /// Maximum LDS span covered by an admitted Inline site. Native sites use the
   /// owning kernel's declared segment; generic-flat sites require the full
@@ -197,6 +201,12 @@ consan_moi_auto_report_plan_reason_name(ConSanMoiAutoReportPlanReason reason) {
 /// capacities for telemetry.
 [[nodiscard]] ConSanMoiAutoReportPlan
 plan_consan_moi_auto_report(const ConSanMoiAutoReportInventory &inventory);
+
+/// Reduces only an explicitly adaptive Sampled inventory by powers of two
+/// until its complete logical-range population fits the report ceiling or one
+/// bank per range remains. All other inventory dimensions remain exact.
+[[nodiscard]] ConSanMoiAutoReportInventory
+fit_consan_moi_sampled_auto_report_inventory(ConSanMoiAutoReportInventory inventory);
 
 /// Extracts the bounded ordinary report requirements from one completed
 /// inventory transform. This does not allocate and deliberately does not try

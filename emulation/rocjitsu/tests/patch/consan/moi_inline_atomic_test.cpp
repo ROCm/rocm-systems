@@ -1132,7 +1132,7 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
   site.width_bits = 32;
   site.addr_vgpr = 2;
   site.data_vgpr = 4;
-  site.raw_saddr = 0x7c;
+  site.raw_saddr = rdna4::OPR_SREG_NULL;
   site.raw_ioffset = 0;
   site.raw_scope = 2;
   site.raw_th = 0;
@@ -1235,8 +1235,8 @@ TEST(ConSanMoi, SharedAtomicAddressPlanAliasesFlatAndMaterializesVglobal) {
   EXPECT_EQ(global_plan.result_address_vgpr_count, 2u);
 
   ConSanAtomicSite vector_only_global = global_site;
-  vector_only_global.raw_saddr = 0x7cu;
-  vector_only_global.saddr_sgpr = 0x7cu;
+  vector_only_global.raw_saddr = rdna4::OPR_SREG_NULL;
+  vector_only_global.saddr_sgpr = rdna4::OPR_SREG_NULL;
   vector_only_global.addr_vgpr = 2u;
   vector_only_global.raw_vaddr = 2u;
   const ConSanMoiAtomicAddressPlan vector_only_plan = plan_consan_moi_atomic_address(
@@ -1418,7 +1418,7 @@ TEST(ConSanMoi, DisplacedVectorOnlyVglobalMaterializesGuestPairAndSignedOffset) 
   ASSERT_EQ(inventory.kernels.size(), 1u);
   ASSERT_EQ(inventory.kernels.front().atomic_sites.size(), 2u);
   const ConSanAtomicSite &site = inventory.kernels.front().atomic_sites[1];
-  ASSERT_EQ(site.raw_saddr, 0x7cu);
+  ASSERT_EQ(site.raw_saddr, rdna4::OPR_SREG_NULL);
   ASSERT_EQ(site.raw_ioffset, 20);
 
   const ConSanMoiAtomicAddressPlan plan = plan_consan_moi_atomic_address(
@@ -1522,7 +1522,7 @@ TEST(ConSanMoi, AtomicAddressPlanFailsClosedForUnsupportedShapesAndAliases) {
   changed.width_bits = 64u;
   EXPECT_EQ(classify(changed), ConSanMoiAtomicAddressSupport::UnsupportedWidth);
   changed = base;
-  changed.raw_saddr = 0x7cu;
+  changed.raw_saddr = rdna4::OPR_SREG_NULL;
   changed.saddr_sgpr.reset();
   EXPECT_EQ(classify(changed), ConSanMoiAtomicAddressSupport::UnsupportedScratchShape);
   changed = base;
@@ -1704,8 +1704,8 @@ TEST(ConSanMoi, AtomicRecordCapturesVglobalCasThroughSharedAddressPlan) {
     ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
     options.moi_track_atomics = true;
     options.scratch_vgpr = 8;
-    options.moi_owner_vgpr = 13;
-    options.moi_epoch_vgpr = 14;
+    options.moi_owner_vgpr = 15;
+    options.moi_epoch_vgpr = 16;
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -1721,7 +1721,7 @@ TEST(ConSanMoi, AtomicRecordCapturesVglobalCasThroughSharedAddressPlan) {
       return item.site_kind == ConSanResourceSiteKind::Atomic;
     });
     ASSERT_NE(plan, result.resource_plans.end());
-    EXPECT_EQ(plan->scratch_vgpr_count, vector_only_address ? 3u : 5u);
+    EXPECT_EQ(plan->scratch_vgpr_count, 7u);
 
     AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
     ASSERT_TRUE(patched.is_valid());
@@ -2108,7 +2108,7 @@ TEST(ConSanMoi, InlineShadowExactConflictRejectsLegacyPairScopedAcquireToken) {
   EXPECT_EQ(std::find(words.begin(), words.end(), *disable_legacy_token_authority), words.end())
       << "the stable full-token reader replaces unconditional legacy suppression disablement";
 
-  for (const auto [offset, destination] : std::array<std::pair<size_t, uint16_t>, 12>{
+  for (const auto &[offset, destination] : std::array<std::pair<size_t, uint16_t>, 12>{
            {{offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version), scratch + 7u},
             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, workgroup_key), temporary},
             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_owner_id), temporary},
@@ -2132,7 +2132,7 @@ TEST(ConSanMoi, InlineShadowExactConflictRejectsLegacyPairScopedAcquireToken) {
         << "missing acquired-token field at offset " << offset;
   }
 
-  for (const auto [offset, destination] : std::array<std::pair<size_t, uint16_t>, 7>{
+  for (const auto &[offset, destination] : std::array<std::pair<size_t, uint16_t>, 7>{
            {{offsetof(ConSanMoiInlineAtomicReleaseSlot, version), scratch + 16u},
             {offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address), temporary},
             {offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address) + sizeof(uint32_t),
@@ -2600,10 +2600,10 @@ TEST(ConSanMoi, InlineAtomicOrderingAutomaticallyPlansAllRegisterState) {
 }
 
 TEST(ConSanMoi, Gfx1250InlineAtomicOrdersReleaseAndAcquire) {
-  const auto release = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+  const auto release = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/false, /*scope=*/2,
       ROCJITSU_CODE_ARCH_GFX1250);
-  const auto acquire = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+  const auto acquire = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/4, /*vsrc=*/1, /*vdst=*/4, /*return_old_value=*/true, /*scope=*/2,
       ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_TRUE(release && acquire);

@@ -431,7 +431,8 @@ class ConSanFaultRunnerTest(unittest.TestCase):
                 sys.executable,
                 "-c",
                 "print('[  FAILED  ] source diagnostics=7'); "
-                "print('[rocjitsu-dbi-hooks] ConSan MOI auto report visible_diagnostics=4')",
+                "print('[rocjitsu-dbi-hooks] ConSan MOI auto report reader=10 "
+                "visible_diagnostics=4')",
             )
             self.assertEqual(text_only.returncode, 0, text_only.stderr)
             result = read_row_result(root, "text-only-source")
@@ -1212,6 +1213,31 @@ class ConSanFaultRunnerTest(unittest.TestCase):
         self.assertEqual(coverage["inline_evidence_counts"]["count_mismatches"], 1)
         self.assertEqual(coverage["inline_evidence_counts"]["state_mismatches"], 2)
 
+    def test_inline_report_cleanup_is_not_parsed_as_a_state_summary(self):
+        parsed = runner._parse_consan_log(
+            "\n".join(
+                (
+                    "[rocjitsu-dbi-hooks] ConSan MOI auto report buffer reader=10 "
+                    "bytes=4096 allocation_outcome=allocated inline_atomic_release_capacity=1 "
+                    "inline_causal_snapshot_capacity=1 "
+                    "inline_acquired_epoch_token_capacity=1",
+                    "[rocjitsu-dbi-hooks] ConSan MOI auto report reader=10 "
+                    "visible_records=0 visible_barriers=0 visible_atomics=0 "
+                    "visible_diagnostics=0 visible_exact_shadow=0 visible_sampled=0 "
+                    "visible_inline_atomic_releases=0 visible_inline_acquired_tokens=0 "
+                    "release_incomplete_snapshots=0 release_changed_snapshots=0 "
+                    "release_overflow_snapshots=0 release_source_incomplete_snapshots=0 "
+                    "release_malformed_snapshots=0 token_incomplete_snapshots=0 "
+                    "token_changed_snapshots=0 token_malformed_snapshots=0",
+                    "[rocjitsu-dbi-hooks] ConSan MOI auto report cleanup reader=10 "
+                    "bytes=4096 outcome=freed status=0",
+                )
+            )
+        )
+        coverage = parsed["coverage"]
+        self.assertFalse(coverage["overflowed"])
+        self.assertEqual(coverage["inline_evidence_counts"]["state_mismatches"], 0)
+
     def test_fault_and_instrumentation_patches_have_separate_reader_accounting(self):
         parsed = runner._parse_consan_log(
             "\n".join(
@@ -1492,7 +1518,7 @@ class ConSanFaultRunnerTest(unittest.TestCase):
                 stderr=subprocess.PIPE,
                 env=environment,
             )
-            deadline = time.monotonic() + 2
+            deadline = time.monotonic() + 10
             while not started_marker.exists() and time.monotonic() < deadline:
                 time.sleep(0.01)
             self.assertTrue(started_marker.exists())

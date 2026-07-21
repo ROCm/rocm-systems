@@ -955,8 +955,10 @@
     std::vector<uint32_t> &words, const ConSanOptions &options, rj_code_arch_t arch,
     uint16_t address_lo_vgpr, uint16_t current_low_vgpr, uint16_t old_value_vgpr,
     uint16_t publisher_exec_sgpr, uint16_t committed_exec_sgpr, bool retry_contention) {
-  if (!options.scratch_vgpr || !options.moi_exec_save_sgpr || !options.moi_dispatch_id_sgpr ||
-      !options.moi_report_buffer_address)
+  const bool literal_dispatch_id = arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+                                   !options.moi_track_atomics && !options.moi_dispatch_id_sgpr;
+  if (!options.scratch_vgpr || !options.moi_exec_save_sgpr ||
+      (!options.moi_dispatch_id_sgpr && !literal_dispatch_id) || !options.moi_report_buffer_address)
     return false;
 
   const uint16_t exec_base = *options.moi_exec_save_sgpr;
@@ -1246,10 +1248,22 @@
                                        saved_current_high_vgpr, arch)) {
     return false;
   }
-  words.push_back(build_v_mov_b32_e32(current_low_vgpr, *options.moi_dispatch_id_sgpr, arch));
-  words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(current_low_vgpr + 1u),
-                                      static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u),
-                                      arch));
+  if (options.moi_dispatch_id_sgpr) {
+    words.push_back(build_v_mov_b32_e32(current_low_vgpr, *options.moi_dispatch_id_sgpr, arch));
+    words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(current_low_vgpr + 1u),
+                                        static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u),
+                                        arch));
+  } else {
+    const auto low = instrumentation::build_v_mov_b32_literal(
+        current_low_vgpr, static_cast<uint32_t>(options.moi_report_dispatch_id), arch);
+    const auto high = instrumentation::build_v_mov_b32_literal(
+        static_cast<uint16_t>(current_low_vgpr + 1u),
+        static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u), arch);
+    if (!low || !high)
+      return false;
+    words.insert(words.end(), low->begin(), low->end());
+    words.insert(words.end(), high->begin(), high->end());
+  }
   if (!append_store_u32_vgpr_at_offset(words, address_lo_vgpr,
                                        offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id),
                                        current_low_vgpr, arch) ||
@@ -1338,14 +1352,37 @@
   words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(current_low_vgpr + 1u),
                                       vector_source_vgpr(saved_current_high_vgpr), arch));
 
-  const auto same_dispatch_low = instrumentation::build_v_cmp_eq_u32_vcc(
-      *options.moi_dispatch_id_sgpr, prior_dispatch_low_vgpr, arch);
-  const auto same_dispatch_high = instrumentation::build_v_cmp_eq_u32_vcc(
-      static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u), prior_dispatch_high_vgpr, arch);
-  if (!same_dispatch_low || !same_dispatch_high)
+  uint16_t dispatch_low_source = 0;
+  uint16_t dispatch_high_source = 0;
+  if (options.moi_dispatch_id_sgpr) {
+    dispatch_low_source = *options.moi_dispatch_id_sgpr;
+    dispatch_high_source = static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u);
+  } else {
+    const auto low = instrumentation::build_v_mov_b32_literal(
+        tmp_vgpr, static_cast<uint32_t>(options.moi_report_dispatch_id), arch);
+    if (!low)
+      return false;
+    words.insert(words.end(), low->begin(), low->end());
+    dispatch_low_source = vector_source_vgpr(tmp_vgpr);
+  }
+  const auto same_dispatch_low =
+      instrumentation::build_v_cmp_eq_u32_vcc(dispatch_low_source, prior_dispatch_low_vgpr, arch);
+  if (!same_dispatch_low)
     return false;
   words.push_back(*same_dispatch_low);
   if (!narrow_vcc())
+    return false;
+  if (!options.moi_dispatch_id_sgpr) {
+    const auto high = instrumentation::build_v_mov_b32_literal(
+        tmp_vgpr, static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u), arch);
+    if (!high)
+      return false;
+    words.insert(words.end(), high->begin(), high->end());
+    dispatch_high_source = vector_source_vgpr(tmp_vgpr);
+  }
+  const auto same_dispatch_high =
+      instrumentation::build_v_cmp_eq_u32_vcc(dispatch_high_source, prior_dispatch_high_vgpr, arch);
+  if (!same_dispatch_high)
     return false;
   words.push_back(*same_dispatch_high);
   return narrow_vcc();
@@ -2005,7 +2042,9 @@
     errors.emplace_back("ConSan MOI inline-shadow probe requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
   }
-  if (!options.moi_exec_save_sgpr || !options.moi_dispatch_id_sgpr) {
+  if (!options.moi_exec_save_sgpr ||
+      (!options.moi_dispatch_id_sgpr &&
+       !(arch == ROCJITSU_CODE_ARCH_GFX1250 && !options.moi_track_atomics))) {
     errors.emplace_back(
         "ConSan MOI versioned exact-shadow probe requires EXEC-save and dispatch-ID state");
     return std::nullopt;
@@ -2418,8 +2457,20 @@
           layout.exact_shadow_entry_capacity / kConSanMoiInlineExactDispatchBankCount;
       const uint32_t dispatch_bank_stride =
           entries_per_dispatch_bank * sizeof(ConSanMoiInlineExactShadowSlot);
-      const uint32_t copy_dispatch_id =
-          build_v_mov_b32_e32(tmp_vgpr, *options.moi_dispatch_id_sgpr, arch);
+      std::vector<uint32_t> copy_dispatch_id;
+      if (options.moi_dispatch_id_sgpr) {
+        copy_dispatch_id.push_back(
+            build_v_mov_b32_e32(tmp_vgpr, *options.moi_dispatch_id_sgpr, arch));
+      } else {
+        const auto literal = instrumentation::build_v_mov_b32_literal(
+            tmp_vgpr, static_cast<uint32_t>(options.moi_report_dispatch_id), arch);
+        if (!literal) {
+          errors.emplace_back(
+              "ConSan MOI inline-shadow probe could not encode literal dispatch ID");
+          return std::nullopt;
+        }
+        copy_dispatch_id = *literal;
+      }
       const auto mix_workgroup_key = instrumentation::build_v_xor_b32(
           tmp_vgpr,
           vector_source_vgpr(loop_external_cells ? saved_workgroup_key_vgpr : workgroup_key_vgpr),
@@ -2435,7 +2486,7 @@
         errors.emplace_back("ConSan MOI inline-shadow probe could not encode dispatch bank");
         return std::nullopt;
       }
-      words.push_back(copy_dispatch_id);
+      words.insert(words.end(), copy_dispatch_id.begin(), copy_dispatch_id.end());
       words.push_back(*mix_workgroup_key);
       words.insert(words.end(), select_dispatch_bank->begin(), select_dispatch_bank->end());
       words.insert(words.end(), scale_dispatch_bank->begin(), scale_dispatch_bank->end());

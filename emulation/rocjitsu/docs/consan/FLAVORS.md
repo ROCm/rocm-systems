@@ -86,6 +86,39 @@ replay is specific to Record/Replay and, in a lower-fidelity sampled form, to
 Sampled. SuperCollider and Inline Shadow still need substantial host setup and
 report collection even though their useful decision occurs on the GPU.
 
+### Current Sampled performance limitation (TODO)
+
+Sampled's runtime selector is active and honors
+`RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE` (whose ordinary default is 16,384), but
+the current implementation does not reduce execution overhead in proportion
+to that stride. Every eligible static site is still analyzed and patched, and
+every dynamic LDS access still enters the shared dispatcher, resolves its
+static site, enters the site's instrumentation cave, and computes the runtime
+sampling predicate. Only the subsequent watchpoint/evidence body is skipped
+for an unselected workgroup. Code-object transformation, report planning, and
+report allocation are likewise paid independently of the runtime sample rate.
+
+A controlled gfx1250 experiment showed essentially unchanged test time as the
+runtime stride increased from 1 to 16,384, even though retained evidence fell
+from nine visible events to zero. Record/Replay took approximately the same
+time. Thus this is not an accidental 100% sampling configuration: selection
+works, but fixed per-site and per-access costs currently dominate. Whole-process
+overhead measurements amplify the setup portion of this problem for short
+workloads.
+
+The gfx1250 fallback selector also currently combines workgroup coordinates
+with only the low bits of a code-object-reader identity, rather than a
+launch-varying dispatch identity. Repeated small dispatches can therefore keep
+selecting the same workgroup or select no workgroup at all instead of rotating
+coverage between launches.
+
+The intended follow-up is to compute a launch-varying sampling decision once
+per workgroup, retain a uniform selected/not-selected predicate, and test that
+predicate before the shared per-access dispatch path. Until then, Sampled
+should be chosen for its bounded retained evidence and statistical coverage,
+not on the assumption that a large runtime stride guarantees correspondingly
+lower execution overhead.
+
 ### Different meanings of a diagnostic
 
 - **SuperCollider** reports a changed redundant observation. It deliberately

@@ -221,6 +221,7 @@ struct ConSanMoiTransientSgprAssignment {
   std::optional<uint16_t> indirect_scc_sgpr;
   std::optional<uint16_t> dispatch_key_sgpr;
   std::optional<uint16_t> call_return_sgpr;
+  std::optional<uint16_t> visible_evidence_sgpr;
 
   auto operator<=>(const ConSanMoiTransientSgprAssignment &) const = default;
 };
@@ -386,6 +387,8 @@ struct ConSanOptions {
   std::optional<uint16_t> moi_exec_save_sgpr;
   /// Scalar state kept outside a spill-backed Inline transient window.
   std::optional<uint16_t> moi_inline_indirect_pc_sgpr;
+  std::optional<uint16_t> moi_inline_call_return_sgpr;
+  std::optional<uint16_t> moi_inline_dispatch_key_sgpr;
   std::optional<uint16_t> moi_inline_indirect_scc_sgpr;
   std::optional<uint16_t> moi_inline_visible_evidence_sgpr;
   std::optional<uint16_t> moi_record_replay_dispatch_key_sgpr;

@@ -1476,6 +1476,13 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
           kernel.name + "'");
       return;
     }
+    if (!options.moi_transient_sgpr_assignments.empty() &&
+        !apply_moi_transient_sgpr_assignment(kernel_options, kernel_owner)) {
+      result.errors.emplace_back(
+          "ConSan MOI owner/epoch prologue has no transient scalar assignment for kernel '" +
+          kernel.name + "'");
+      return;
+    }
     if (options.automatic_moi_persistent_sgprs) {
       const auto *scratch =
           find_moi_prologue_scratch_vgpr_assignment(options, kernel.descriptor_file_offset);
@@ -1754,7 +1761,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
         const size_t patch_count_before_entry_relay = patches.size();
         if (!emit_moi_local_indirect_kernel_entry_island(
                 new_text, kernel.entry_text_offset, prologue_text_offset, kernel.entry_text_offset,
-                options, std::span<const uint64_t>(&kernel.descriptor_file_offset, 1u), arch,
+                kernel_options, std::span<const uint64_t>(&kernel.descriptor_file_offset, 1u), arch,
                 patches, result.errors, "ConSan MOI dynamic-stack owner/epoch prologue")) {
           return;
         }

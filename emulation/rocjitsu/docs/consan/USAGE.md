@@ -136,10 +136,9 @@ a broad application that loads helper code objects with no admitted sites.
 | `RJ_CONSAN_FLAT_PROVENANCE=likely|strict` | `likely` | Admit proven `Group` plus heuristic `MaybeGroup` flat LDS sites, or only proven `Group` sites. |
 | `RJ_CONSAN_DUMP_DIR=PATH` | unset | Write original and transformed `.hsaco` objects for inspection. |
 
-For one transition, the old `RJ_CONSAN_ENABLE`, `RJ_CONSAN_FLAVOR`,
-`RJ_CONSAN_MOI_ENGINE`, and `RJ_CONSAN_MOI_BACKEND` variables remain accepted
-with deprecation warnings. Do not combine old selection variables with
-`RJ_CONSAN_MODE`. Deprecated `RJ_CONSAN_ENABLE=0` still keeps the hook inert.
+For one transition, the old `RJ_CONSAN_FLAVOR`, `RJ_CONSAN_MOI_ENGINE`, and
+`RJ_CONSAN_MOI_BACKEND` variables remain accepted with deprecation warnings.
+Do not combine old selection variables with `RJ_CONSAN_MODE`.
 
 ## SuperCollider controls
 

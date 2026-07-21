@@ -11,8 +11,8 @@ TEST(ConSanMoi, AtomicWrongAddressComposesWithReleaseLastRecordProbe) {
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 13;
-  options.moi_epoch_vgpr = 14;
+  options.moi_owner_vgpr = 15;
+  options.moi_epoch_vgpr = 16;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
   options.fault_atomic_wrong_address = true;

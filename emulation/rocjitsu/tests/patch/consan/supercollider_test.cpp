@@ -1087,7 +1087,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250VdsLoadInPlace) {
 
 TEST(ConSan, ProbeLdsCheckTrapModePreservesGfx1250GuestVgprBankMode) {
   constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
-  constexpr uint32_t kSelectLowVgprBank = 0xBF860000u;
+  constexpr uint32_t kSelectLowVgprBank = 0xBF860100u;
   constexpr uint32_t kSelectGuestVgprBank = 0xBF860001u;
   std::vector<uint32_t> text_words = {kSelectGuestVgprBank, load[0], load[1]};
   text_words.resize(32u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
@@ -1127,7 +1127,7 @@ TEST(ConSan, ProbeLdsCheckTrapModePreservesGfx1250GuestVgprBankMode) {
 
 TEST(ConSan, ProbeLdsCheckTrapModePreservesGfx1250LowBankAddressForHighBankLoad) {
   constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB128Vds, {.addr = 2, .vdst = 1});
-  constexpr uint32_t kSelectLowVgprBank = 0xBF860000u;
+  constexpr uint32_t kSelectLowVgprBank = 0xBF864000u;
   constexpr uint32_t kSelectGuestVgprBank = 0xBF860040u;
   std::vector<uint32_t> text_words = {kSelectGuestVgprBank, load[0], load[1]};
   text_words.resize(48u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
@@ -3160,6 +3160,99 @@ TEST(ConSan, Gfx1250DenseCheckTrapUsesExplicitKeysAtScalarLimit) {
   });
   ASSERT_NE(explicit_dispatcher, result.patches.end());
   EXPECT_FALSE(explicit_dispatcher->sc_dense_call_return_sgpr.has_value());
+}
+
+TEST(ConSan, Gfx1250CheckTrapSpillsLiveVccSaveScalarThroughVgpr) {
+  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  std::vector<uint32_t> text_words = {load[0], load[1]};
+  for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)
+    text_words.push_back(build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+
+  const std::vector<uint8_t> bytes =
+      make_gfx1250_code_object(text_words, "gfx1250_scalar_vcc_spill");
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.scratch_vgpr = 3;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.patches.size(), 1u);
+  const ConSanPatchInfo &patch = result.patches.front();
+  EXPECT_EQ(patch.kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
+  EXPECT_EQ(patch.scratch_vgpr, 3u);
+  EXPECT_FALSE(patch.indirect_pc_sgpr.has_value());
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  const auto text = patched.text_sections().front();
+  const uint32_t scalar_save =
+      build_v_mov_b32_e32(/*vdst=*/4, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto scalar_restore =
+      build_v_readfirstlane_b32(/*sdst=*/0, /*vsrc=*/4, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(scalar_restore);
+  std::vector<uint32_t> body(patch.trampoline_size / sizeof(uint32_t));
+  std::memcpy(body.data(), text->data() + patch.trampoline_offset, patch.trampoline_size);
+  EXPECT_NE(std::ranges::find(body, scalar_save), body.end());
+  EXPECT_NE(std::ranges::find(body, *scalar_restore), body.end());
+}
+
+TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {
+  constexpr size_t kTextWords = 33000u;
+  constexpr size_t kRelaySiteWord = 16000u;
+  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  std::vector<uint32_t> text_words(kTextWords,
+                                   build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_GFX1250));
+  text_words[0] = load[0];
+  text_words[1] = load[1];
+  for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)
+    text_words[2u + sgpr] = build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_GFX1250);
+  text_words[kRelaySiteWord] = load[0];
+  text_words[kRelaySiteWord + 1u] = load[1];
+  text_words[kRelaySiteWord + 2u] = load[0];
+  text_words[kRelaySiteWord + 3u] = load[1];
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+
+  const std::vector<uint8_t> bytes =
+      make_gfx1250_code_object(text_words, "gfx1250_branch_only_scalar_spill");
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.scratch_vgpr = 3;
+  options.max_patches = 3;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  const auto branch_only =
+      std::ranges::find(result.patches, true, &ConSanPatchInfo::sc_branch_only_continuation);
+  ASSERT_NE(branch_only, result.patches.end()) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(branch_only->anchor_offset, 0u);
+  EXPECT_FALSE(branch_only->indirect_pc_sgpr.has_value());
+  ASSERT_FALSE(branch_only->sc_branch_only_entry_relay_offsets.empty());
+  ASSERT_FALSE(branch_only->sc_branch_only_return_relay_offsets.empty());
+
+  ConSanResult corrupted = result;
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  const uint64_t text_file_offset = patched.text_sections().front()->sectionOffset();
+  const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250);
+  std::memcpy(corrupted.elf_bytes.data() + text_file_offset +
+                  branch_only->sc_branch_only_return_relay_offsets.front(),
+              &nop, sizeof(nop));
+  const auto corrupted_errors = validate_consan_modified_elf(bytes, corrupted);
+  EXPECT_TRUE(std::ranges::any_of(corrupted_errors, [](const std::string &error) {
+    return error.find("branch-only continuation proof found a stale, shared, or corrupted route") !=
+           std::string::npos;
+  }));
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeRoutesThroughRelocatedAnchorSecondWord) {

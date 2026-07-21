@@ -22,6 +22,11 @@ namespace rocjitsu::instrumentation {
 }
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>
+build_s_set_vgpr_msb_transition(uint8_t previous_mode, uint8_t new_mode, rj_code_arch_t arch) {
+  return build_gfx1250_s_set_vgpr_msb_transition(previous_mode, new_mode, arch);
+}
+
+[[nodiscard]] inline constexpr std::optional<uint32_t>
 build_s_call_i64(uint16_t sdst, int16_t simm16, rj_code_arch_t arch) {
   if (arch != ROCJITSU_CODE_ARCH_GFX1250)
     return std::nullopt;

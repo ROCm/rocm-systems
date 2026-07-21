@@ -271,10 +271,36 @@ struct MetadataCursor {
 }
 
 struct KernelMetadata {
+  bool has_dynamic_lds = false;
   std::optional<bool> uses_dynamic_stack;
   std::optional<uint16_t> sgpr_count;
   std::optional<std::array<uint32_t, 3>> required_workgroup_size;
 };
+
+[[nodiscard]] bool read_kernel_args_metadata(MetadataCursor &cursor, bool &has_dynamic_lds) {
+  uint32_t argument_count = 0;
+  if (!read_metadata_collection_count(cursor, /*map=*/false, argument_count))
+    return false;
+  for (uint32_t argument_index = 0; argument_index < argument_count; ++argument_index) {
+    uint32_t argument_entries = 0;
+    if (!read_metadata_collection_count(cursor, /*map=*/true, argument_entries))
+      return false;
+    for (uint32_t argument_entry = 0; argument_entry < argument_entries; ++argument_entry) {
+      std::string_view argument_key;
+      if (!read_metadata_string(cursor, argument_key))
+        return false;
+      if (argument_key == ".value_kind") {
+        std::string_view value_kind;
+        if (!read_metadata_string(cursor, value_kind))
+          return false;
+        has_dynamic_lds |= value_kind == "hidden_dynamic_lds_size";
+      } else if (!skip_metadata_value(cursor)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
 
 [[nodiscard]] std::unordered_map<std::string, KernelMetadata>
 parse_kernel_metadata(std::span<const uint8_t> payload) {
@@ -310,6 +336,9 @@ parse_kernel_metadata(std::span<const uint8_t> payload) {
           if (!read_metadata_string(root, parsed_name))
             return {};
           name = parsed_name;
+        } else if (kernel_key == ".args") {
+          if (!read_kernel_args_metadata(root, metadata.has_dynamic_lds))
+            return {};
         } else if (kernel_key == ".uses_dynamic_stack") {
           if (root.offset >= root.bytes.size())
             return {};
@@ -344,8 +373,8 @@ parse_kernel_metadata(std::span<const uint8_t> payload) {
           return {};
         }
       }
-      if (name &&
-          (metadata.uses_dynamic_stack || metadata.sgpr_count || metadata.required_workgroup_size))
+      if (name && (metadata.has_dynamic_lds || metadata.uses_dynamic_stack || metadata.sgpr_count ||
+                   metadata.required_workgroup_size))
         result[*name] = metadata;
     }
     break;
@@ -714,6 +743,7 @@ void AmdGpuCodeObject::load_sections() {
       kernel.has_text_range = false;
     }
     if (auto metadata_entry = metadata.find(kernel_name); metadata_entry != metadata.end()) {
+      kernel.has_dynamic_lds = metadata_entry->second.has_dynamic_lds;
       kernel.uses_dynamic_stack = metadata_entry->second.uses_dynamic_stack;
       kernel.sgpr_count = metadata_entry->second.sgpr_count;
       kernel.required_workgroup_size = metadata_entry->second.required_workgroup_size;

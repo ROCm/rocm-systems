@@ -10,6 +10,7 @@
 #include "rocjitsu/code/patch/cdna4_instrumentation_builder.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
+#include "rocjitsu/code/patch/gfx1250_instrumentation_builder.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/patch/rdna4_instrumentation_builder.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_sampled_sync.h"
@@ -554,7 +555,8 @@ std::vector<uint8_t> make_rdna4_lds_code_object(
 void append_kernel_metadata_note(
     std::vector<uint8_t> &image, std::string_view kernel_name, bool uses_dynamic_stack,
     uint8_t sgpr_count, std::optional<uint8_t> private_segment_fixed_size = std::nullopt,
-    std::optional<std::array<uint8_t, 3>> required_workgroup_size = std::nullopt) {
+    std::optional<std::array<uint8_t, 3>> required_workgroup_size = std::nullopt,
+    bool has_dynamic_lds = false) {
   const auto append_string = [](std::vector<uint8_t> &bytes, std::string_view value) {
     ASSERT_LE(value.size(), 255u);
     if (value.size() <= 31u) {
@@ -571,7 +573,8 @@ void append_kernel_metadata_note(
   append_string(payload, "amdhsa.kernels");
   payload.push_back(0x91u); // array(1)
   payload.push_back(static_cast<uint8_t>(0x80u + 3u + (private_segment_fixed_size ? 1u : 0u) +
-                                         (required_workgroup_size ? 1u : 0u)));
+                                         (required_workgroup_size ? 1u : 0u) +
+                                         (has_dynamic_lds ? 1u : 0u)));
   append_string(payload, ".name");
   append_string(payload, kernel_name);
   append_string(payload, ".uses_dynamic_stack");
@@ -586,6 +589,13 @@ void append_kernel_metadata_note(
     append_string(payload, ".reqd_workgroup_size");
     payload.push_back(0x93u); // array(3)
     payload.insert(payload.end(), required_workgroup_size->begin(), required_workgroup_size->end());
+  }
+  if (has_dynamic_lds) {
+    append_string(payload, ".args");
+    payload.push_back(0x91u); // array(1)
+    payload.push_back(0x81u); // map(1)
+    append_string(payload, ".value_kind");
+    append_string(payload, "hidden_dynamic_lds_size");
   }
 
   Elf64_Ehdr header{};
@@ -888,7 +898,8 @@ make_rdna4_two_kernel_shared_helper_code_object(const TwoKernelSharedFixtureOpti
     };
   } else if (options.helper_has_ordinary_memory) {
     helper = {
-        0xEE050004u, 7u | (2u << 18u) | (1u << 20u),
+        0xEE050004u,
+        7u | (2u << 18u) | (1u << 20u),
         10u | (0xfffff0u << 8u), // global_load_b32 v7, v10, s[4:5] offset:-16
     };
   } else if (options.helper_has_ordered_atomic) {
@@ -1155,7 +1166,8 @@ std::vector<uint8_t> make_rdna4_flat_memory_code_object() {
 
 std::vector<uint8_t> make_rdna4_global_atomic_code_object() {
   const std::array<uint32_t, 4> text_words = {
-      0xEE158004u, 0x00980000u,
+      0xEE158004u,
+      0x00980000u,
       0x00000002u, // global_atomic_add_f32 v0, v2, v1, s[4:5] th:return scope:device
       0xBFB00000u, // s_endpgm
   };
@@ -1200,7 +1212,8 @@ std::vector<uint8_t> make_rdna4_ordered_global_cas_code_object(bool return_old_v
     return {};
   // global_atomic_cmpswap_b32 v0, v2, v[4:5], s[4:5] (or v[2:3] with
   // saddr=off), th:return/no-return, scope:device.
-  const uint32_t first = 0xEE0D0000u | (vector_only_address ? 0x7cu : 4u);
+  const uint32_t first =
+      0xEE0D0000u | (vector_only_address ? static_cast<uint32_t>(rdna4::OPR_SREG_NULL) : 4u);
   const uint32_t second = return_old_value ? 0x02180000u : 0x02080000u;
   const std::array<uint32_t, 12> text_words = {
       0xEE0B0000u, 0x00000000u, 0x00000000u, // global_wb
@@ -1214,7 +1227,9 @@ std::vector<uint8_t> make_rdna4_ordered_global_cas_code_object(bool return_old_v
 std::vector<uint8_t> make_rdna4_buffer_atomic_code_object() {
   // buffer_atomic_add_u32 v1, v2, s[4:7], 0 th:return scope:device
   const std::array<uint32_t, 4> text_words = {
-      0xC40D4000u, 1u | (4u << 9u) | (2u << 18u) | (1u << 20u), 2u,
+      0xC40D4000u,
+      1u | (4u << 9u) | (2u << 18u) | (1u << 20u),
+      2u,
       0xBFB00000u, // s_endpgm
   };
   return make_rdna4_lds_code_object(text_words, "buffer_atomic_probe");
@@ -1245,7 +1260,9 @@ std::vector<uint8_t> make_rdna4_flat_atomic_code_object() {
   if (!atomic)
     return {};
   const std::array<uint32_t, 4> text_words = {
-      (*atomic)[0], (*atomic)[1], (*atomic)[2],
+      (*atomic)[0],
+      (*atomic)[1],
+      (*atomic)[2],
       0xBFB00000u, // s_endpgm
   };
   return make_rdna4_lds_code_object(text_words);

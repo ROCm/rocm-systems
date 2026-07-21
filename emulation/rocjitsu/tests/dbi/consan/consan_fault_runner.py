@@ -603,7 +603,7 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             report_allocation_failures += summary["allocation_failures"]
             report_capacity_failures += summary["capacity_failures"]
             report_cleanup_failures += summary["cleanup_failures"]
-        elif record.startswith("MOI auto report "):
+        elif record.startswith("MOI auto report reader="):
             required_inline_summary_fields = (
                 "visible_inline_atomic_releases",
                 "visible_inline_acquired_tokens",

@@ -52,22 +52,6 @@ namespace rocjitsu::consan_hook {
   return true;
 }
 
-[[nodiscard]] bool parse_optional_bool_env(const char *name, std::optional<bool> *out) {
-  const char *value = std::getenv(name);
-  if (value == nullptr || *value == '\0') {
-    out->reset();
-    return true;
-  }
-
-  auto parsed = parse_bool_value(value);
-  if (!parsed) {
-    std::fprintf(stderr, "[rocjitsu-dbi-hooks] invalid %s='%s'; expected boolean\n", name, value);
-    return false;
-  }
-  *out = *parsed;
-  return true;
-}
-
 [[nodiscard]] bool parse_u32_env(const char *name, uint32_t default_value, uint32_t *out) {
   const char *value = std::getenv(name);
   if (value == nullptr || *value == '\0') {
@@ -631,23 +615,6 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   if (!parse_log_level(&config.log_level))
     return std::nullopt;
 
-  std::optional<bool> explicit_enable;
-  if (!parse_optional_bool_env("RJ_CONSAN_ENABLE", &explicit_enable))
-    return std::nullopt;
-  if (explicit_enable) {
-    warn_deprecated_env("RJ_CONSAN_ENABLE", "loading the hook to enable ConSan");
-  }
-  if (explicit_enable == false) {
-    constexpr const char *kDisabledSelectionVariables[] = {
-        "RJ_CONSAN_MODE",       "RJ_CONSAN_POLICY",      "RJ_CONSAN_FLAVOR",
-        "RJ_CONSAN_MOI_ENGINE", "RJ_CONSAN_MOI_BACKEND",
-    };
-    for (const char *name : kDisabledSelectionVariables) {
-      if (env_has_value(name))
-        warn_ignored_env(name, "deprecated RJ_CONSAN_ENABLE=0 disables ConSan");
-    }
-    return config;
-  }
   if (!parse_mode_env(&config))
     return std::nullopt;
   if (!parse_policy_env(&config.policy))

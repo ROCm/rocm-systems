@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 #include <zstd.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <filesystem>

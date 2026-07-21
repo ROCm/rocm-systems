@@ -238,6 +238,15 @@ void append_fence_record_candidates(const ConSanResult &result,
              : 3u;
 }
 
+[[nodiscard]] uint16_t atomic_record_scratch_count(const ConSanAtomicSite &site,
+                                                   rj_code_arch_t arch) {
+  // Dynamic Record/Replay publication needs seven VGPRs for the slot,
+  // address, value, and preserved guest atomic address. Compare-exchange
+  // temporarily retains both halves of its success mask before the common
+  // emitter reuses its value temporary.
+  return std::max<uint16_t>(inline_atomic_scratch_count(site, arch), 7u);
+}
+
 [[nodiscard]] uint16_t inline_shadow_atomic_scratch_count(const ConSanAtomicSite &,
                                                           ConSanMoiAtomicEventKind event_kind,
                                                           rj_code_arch_t arch) {
