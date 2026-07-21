@@ -3301,6 +3301,41 @@ TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {
   }));
 }
 
+TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyThroughRelayReservoir) {
+  constexpr size_t kTextWords = 33010u;
+  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  std::vector<uint32_t> text_words(kTextWords,
+                                   build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_GFX1250));
+  text_words[0] = load[0];
+  text_words[1] = load[1];
+  for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)
+    text_words[2u + sgpr] = build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_GFX1250);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+
+  const std::vector<uint8_t> bytes =
+      make_gfx1250_code_object(text_words, "gfx1250_branch_only_relay_reservoir");
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.scratch_vgpr = 3;
+  options.max_patches = 1;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  const auto branch_only =
+      std::ranges::find(result.patches, true, &ConSanPatchInfo::sc_branch_only_continuation);
+  ASSERT_NE(branch_only, result.patches.end()) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(branch_only->anchor_offset, 0u);
+  EXPECT_FALSE(branch_only->sc_branch_only_entry_relay_offsets.empty());
+  EXPECT_FALSE(branch_only->sc_branch_only_return_relay_offsets.empty());
+  const auto reservoir = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineScRelayReservoir, &ConSanPatchInfo::kind);
+  ASSERT_NE(reservoir, result.patches.end());
+}
+
 TEST(ConSan, ProbeLdsCheckTrapModeRoutesThroughRelocatedAnchorSecondWord) {
   constexpr uint64_t kMaximumForwardHop = 4u + 32767u * sizeof(uint32_t);
   constexpr uint64_t kSecondAnchorOffset = kMaximumForwardHop - sizeof(uint32_t);

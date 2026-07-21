@@ -128,6 +128,7 @@ flowchart TD
     XP2H["XP2H DONE<br/>torch.topk Inline post-bank-fix retest;<br/>same execution signal excludes shared cause"]
     XP3["XP3 DONE<br/>top-k SC 88-site residual bounded;<br/>scalar-continuation subsystem required"]
     XP3A["XP3A DONE<br/>SuperCollider scalar spill plus bidirectional continuation<br/>synthetic exact; real relay capacity bounded"]
+    XP3D["XP3D ACTIVE<br/>SuperCollider branch-only routes through proven relay reservoirs;<br/>focused proof green, real top-k rerun pending"]
     XP3B["XP3B DONE<br/>torch.sort Sampled clean plus paired accepted;<br/>two reviewed selectors remain noncausal"]
     XP3C["XP3C DONE<br/>torch.sort Sampled clean, paired, inventory, and<br/>reviewed noncausal fault bundle green"]
     XP9["XP9 DONE<br/>norm plus softmax Record/Replay clean, paired,<br/>and reviewed-fault bundle green"]
@@ -325,7 +326,8 @@ flowchart TD
   XP9B --> XF
   XP9C --> XF
   XP10 --> XF
-  XP3A --> XF
+  XP3A --> XP3D
+  XP3D --> XF
   XP3B --> XF
   XT2C2 --> XF
   XT2C3 --> XF
@@ -365,6 +367,7 @@ flowchart TD
   class XT3L,XT3M,XT3N done
   class XP3B done
   class XP3A done
+  class XP3D active
   class XP5S,XP1A done
   class XP3C done
   class G0,V9,XP2D,XT2C2,XT2C3,XT3E,XT3I,XF,XG todo
@@ -415,6 +418,16 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP3D is ACTIVE/blue at a resumable implementation checkpoint.
+  SuperCollider branch-only entry and return chains can now materialize the
+  existing proven straight-line relay reservoirs when selected probe-anchor
+  words alone cannot span a far body.  Final validation accepts only the exact
+  recorded bidirectional edges.  The new reservoir-required regression, the
+  prior anchor-only regression, and all 79 check/trap tests pass.  A first
+  dirty-tree top-k discriminator preceded the final anchor-first adjustment
+  and covered one fewer site than the baseline, so it is not acceptance
+  evidence; a rebuilt-hook real-object rerun remains before any STATUS change.
 
 - 2026-07-21: XT2B's stale strict-capacity follow-up is DONE/green.  Current
   one-repetition Inline clean and paired artifacts select a legal external-

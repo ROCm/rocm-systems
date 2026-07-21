@@ -2191,88 +2191,210 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   // A spill-backed VCC-save scalar solves the data-state problem at a
   // full-pressure site, but intentionally supplies no indirect PC pair.  For
   // far appended bodies, route both control-flow edges through capacity-one
-  // words in the unreachable second dword of already selected eight-byte
-  // anchors.  The two chains are disjoint, preserve every ordinary return at
-  // anchor+8, and never make a live guest scalar carry a continuation.
+  // words in selected eight-byte anchors and, when those are insufficient,
+  // the same proven straight-line relay reservoirs used by ordinary entry
+  // islands.  The two chains are disjoint, preserve every ordinary return,
+  // and never make a live guest scalar carry a continuation.
   if (!branch_only_candidates.empty() && selected_candidates.size() < max_patches) {
-    std::vector<LdsCheckTrapCandidate> tentative_candidates;
-    DbiPatchPlacementPlanner tentative_planner = placement_planner;
     std::ranges::sort(branch_only_candidates, [](const auto &lhs, const auto &rhs) {
       return lhs.site->text_offset < rhs.site->text_offset;
     });
-    for (LdsCheckTrapCandidate candidate : branch_only_candidates) {
-      if (selected_sites.contains(candidate.site) ||
-          selected_candidates.size() + tentative_candidates.size() >= max_patches)
-        continue;
-      auto placement = tentative_planner.plan_indirect_appended(
-          candidate.site->text_offset, candidate.site->size,
-          (candidate.requested_words + 1u) * sizeof(uint32_t));
-      if (!placement)
-        continue;
-      candidate.placement = *placement;
-      tentative_candidates.push_back(std::move(candidate));
-    }
 
-    std::vector<uint64_t> available_relays;
-    const auto offer_anchor_relay = [&](const LdsCheckTrapCandidate &candidate) {
-      if ((candidate.use_local_cave || candidate.use_appended_cave) &&
-          !candidate.dense_call_group_index && candidate.site->size == 2u * sizeof(uint32_t))
-        available_relays.push_back(candidate.site->text_offset + sizeof(uint32_t));
-    };
-    for (const LdsCheckTrapCandidate &candidate : selected_candidates)
-      offer_anchor_relay(candidate);
-    for (const LdsCheckTrapCandidate &candidate : tentative_candidates)
-      offer_anchor_relay(candidate);
-    std::ranges::sort(available_relays);
-    available_relays.erase(std::ranges::unique(available_relays).begin(), available_relays.end());
-    for (const LdsCheckTrapCandidate &candidate : selected_candidates) {
-      for (uint64_t used : candidate.entry_relay_offsets)
-        std::erase(available_relays, used);
-    }
+    // Reservoir discovery emits overlapping suffixes of each admissible run.
+    // Keep one maximum-size, non-overlapping candidate at each frontier so an
+    // optimistic route cannot borrow two payload words whose ordinary
+    // sequences could not both be relocated.
+    std::vector<const ScRelayReservoirCandidate *> branch_reservoir_candidates;
+    branch_reservoir_candidates.reserve(relay_reservoir_candidates.size());
+    for (const ScRelayReservoirCandidate &candidate : relay_reservoir_candidates)
+      branch_reservoir_candidates.push_back(&candidate);
+    std::ranges::sort(branch_reservoir_candidates, [](const auto *lhs, const auto *rhs) {
+      if (lhs->anchor_offset != rhs->anchor_offset)
+        return lhs->anchor_offset < rhs->anchor_offset;
+      return lhs->original_size > rhs->original_size;
+    });
+    uint64_t reservoir_frontier = 0;
+    std::erase_if(branch_reservoir_candidates, [&](const auto *candidate) {
+      const bool overlaps_selected =
+          std::ranges::any_of(selected_relay_reservoirs, [&](const auto &selected) {
+            return candidate->anchor_offset < selected.anchor_offset + selected.original_size &&
+                   selected.anchor_offset < candidate->anchor_offset + candidate->original_size;
+          });
+      if (overlaps_selected || candidate->anchor_offset < reservoir_frontier)
+        return true;
+      reservoir_frontier = candidate->anchor_offset + candidate->original_size;
+      return false;
+    });
 
-    const auto consume_routes = [&](bool forward) {
-      std::vector<uint64_t> sources;
-      std::vector<uint64_t> targets;
-      sources.reserve(tentative_candidates.size());
-      targets.reserve(tentative_candidates.size());
-      for (const LdsCheckTrapCandidate &candidate : tentative_candidates) {
-        sources.push_back(forward ? candidate.site->text_offset
-                                  : candidate.placement->body_offset +
-                                        candidate.requested_words * sizeof(uint32_t));
-        targets.push_back(forward ? candidate.placement->body_offset
-                                  : candidate.site->text_offset + candidate.site->size);
+    DbiPatchPlacementPlanner branch_prefix_planner = placement_planner;
+    std::vector<ScRelayReservoir> branch_selected_reservoirs;
+    std::unordered_set<const ScRelayReservoirCandidate *> selected_branch_reservoir_candidates;
+    std::unordered_set<const ScRelayReservoirCandidate *> unavailable_branch_reservoir_candidates;
+    std::vector<LdsCheckTrapCandidate> accepted_candidates;
+    DbiPatchPlacementPlanner accepted_planner = placement_planner;
+    bool routes_complete = false;
+
+    // Route optimistically through every non-overlapping proven reservoir,
+    // then materialize exactly the reservoirs used by that route and replay.
+    // Relocating a reservoir moves the appended bodies, so the replay may
+    // expose one more frontier; convergence is bounded by the finite candidate
+    // set and the final route contains no optimistic-only word.
+    for (size_t iteration = 0; iteration <= branch_reservoir_candidates.size(); ++iteration) {
+      std::vector<LdsCheckTrapCandidate> tentative_candidates;
+      DbiPatchPlacementPlanner tentative_planner = branch_prefix_planner;
+      for (LdsCheckTrapCandidate candidate : branch_only_candidates) {
+        if (selected_sites.contains(candidate.site) ||
+            selected_candidates.size() + tentative_candidates.size() >= max_patches)
+          continue;
+        auto placement = tentative_planner.plan_indirect_appended(
+            candidate.site->text_offset, candidate.site->size,
+            (candidate.requested_words + 1u) * sizeof(uint32_t));
+        if (!placement)
+          continue;
+        candidate.placement = *placement;
+        tentative_candidates.push_back(std::move(candidate));
       }
-      std::string route_error;
-      auto plan =
-          forward
-              ? plan_forward_sopp_branch_relays(sources, available_relays, targets, &route_error)
-              : plan_backward_sopp_branch_relays(sources, available_relays, targets, &route_error);
-      if (!plan || !plan->rejected_source_indices.empty() ||
-          plan->routes.size() != tentative_candidates.size())
-        return false;
-      for (SoppBranchRelayRoute &route : plan->routes) {
-        if (route.source_index >= tentative_candidates.size() ||
-            route.island_offset != targets[route.source_index])
-          return false;
-        std::vector<uint64_t> &route_out =
-            forward ? tentative_candidates[route.source_index].entry_relay_offsets
-                    : tentative_candidates[route.source_index].return_relay_offsets;
-        route_out = std::move(route.relay_offsets);
-        for (uint64_t used : route_out)
+      if (tentative_candidates.empty())
+        break;
+
+      std::vector<uint64_t> available_relays;
+      const auto offer_anchor_relay = [&](const LdsCheckTrapCandidate &candidate) {
+        if ((candidate.use_local_cave || candidate.use_appended_cave) &&
+            !candidate.dense_call_group_index && candidate.site->size == 2u * sizeof(uint32_t))
+          available_relays.push_back(candidate.site->text_offset + sizeof(uint32_t));
+      };
+      for (const LdsCheckTrapCandidate &candidate : selected_candidates)
+        offer_anchor_relay(candidate);
+      for (const LdsCheckTrapCandidate &candidate : tentative_candidates)
+        offer_anchor_relay(candidate);
+      for (const ScWideCompositeBranchRelayDonor &donor : selected_wide_composite_relay_donors) {
+        available_relays.push_back(donor.anchor_offset + sizeof(uint32_t));
+        for (size_t word = 4u; word < donor.host_original_words.size(); ++word)
+          available_relays.push_back(donor.host_offset + word * sizeof(uint32_t));
+      }
+      for (const ScRelayReservoir &reservoir : selected_relay_reservoirs) {
+        const auto slots =
+            sc_relay_reservoir_slot_offsets(reservoir.anchor_offset, reservoir.original_size);
+        available_relays.insert(available_relays.end(), slots.begin(), slots.end());
+      }
+      for (const ScRelayReservoir &reservoir : branch_selected_reservoirs) {
+        const auto slots =
+            sc_relay_reservoir_slot_offsets(reservoir.anchor_offset, reservoir.original_size);
+        available_relays.insert(available_relays.end(), slots.begin(), slots.end());
+      }
+      for (size_t index = 0; index < generated_relay_bank_word_count; ++index)
+        available_relays.push_back(generated_relay_bank_offset + index * sizeof(uint32_t));
+
+      std::unordered_map<uint64_t, const ScRelayReservoirCandidate *> optimistic_relay_owner;
+      for (const ScRelayReservoirCandidate *candidate : branch_reservoir_candidates) {
+        if (iteration == 0 || selected_branch_reservoir_candidates.contains(candidate) ||
+            unavailable_branch_reservoir_candidates.contains(candidate))
+          continue;
+        const auto slots =
+            sc_relay_reservoir_slot_offsets(candidate->anchor_offset, candidate->original_size);
+        for (uint64_t slot : slots) {
+          available_relays.push_back(slot);
+          optimistic_relay_owner.emplace(slot, candidate);
+        }
+      }
+      std::ranges::sort(available_relays);
+      available_relays.erase(std::ranges::unique(available_relays).begin(), available_relays.end());
+      for (const LdsCheckTrapCandidate &candidate : selected_candidates) {
+        for (uint64_t used : candidate.entry_relay_offsets)
           std::erase(available_relays, used);
       }
-      return true;
+
+      std::unordered_set<const ScRelayReservoirCandidate *> used_optimistic_reservoirs;
+      const auto consume_routes = [&](bool forward) {
+        std::vector<uint64_t> sources;
+        std::vector<uint64_t> targets;
+        sources.reserve(tentative_candidates.size());
+        targets.reserve(tentative_candidates.size());
+        for (const LdsCheckTrapCandidate &candidate : tentative_candidates) {
+          sources.push_back(forward ? candidate.site->text_offset
+                                    : candidate.placement->body_offset +
+                                          candidate.requested_words * sizeof(uint32_t));
+          targets.push_back(forward ? candidate.placement->body_offset
+                                    : candidate.site->text_offset + candidate.site->size);
+        }
+        std::string route_error;
+        auto plan = forward ? plan_forward_sopp_branch_relays(sources, available_relays, targets,
+                                                              &route_error)
+                            : plan_backward_sopp_branch_relays(sources, available_relays, targets,
+                                                               &route_error);
+        if (!plan)
+          return false;
+        bool complete = plan->rejected_source_indices.empty() &&
+                        plan->routes.size() == tentative_candidates.size();
+        for (SoppBranchRelayRoute &route : plan->routes) {
+          if (route.source_index >= tentative_candidates.size() ||
+              route.island_offset != targets[route.source_index]) {
+            complete = false;
+            continue;
+          }
+          std::vector<uint64_t> &route_out =
+              forward ? tentative_candidates[route.source_index].entry_relay_offsets
+                      : tentative_candidates[route.source_index].return_relay_offsets;
+          route_out = std::move(route.relay_offsets);
+          for (uint64_t used : route_out) {
+            std::erase(available_relays, used);
+            if (const auto owner = optimistic_relay_owner.find(used);
+                owner != optimistic_relay_owner.end())
+              used_optimistic_reservoirs.insert(owner->second);
+          }
+        }
+        return complete;
+      };
+      const bool forward_complete = consume_routes(/*forward=*/true);
+      const bool backward_complete = consume_routes(/*forward=*/false);
+      if (forward_complete && backward_complete && used_optimistic_reservoirs.empty()) {
+        accepted_candidates = std::move(tentative_candidates);
+        accepted_planner = std::move(tentative_planner);
+        routes_complete = true;
+        break;
+      }
+      if (used_optimistic_reservoirs.empty() && iteration == 0)
+        continue;
+      if (used_optimistic_reservoirs.empty())
+        break;
+
+      std::vector<const ScRelayReservoirCandidate *> newly_used(used_optimistic_reservoirs.begin(),
+                                                                used_optimistic_reservoirs.end());
+      std::ranges::sort(newly_used, {}, &ScRelayReservoirCandidate::anchor_offset);
+      bool selected_any = false;
+      for (const ScRelayReservoirCandidate *candidate : newly_used) {
+        DbiPatchPlacementPlanner next_prefix = branch_prefix_planner;
+        auto placement = next_prefix.plan_indirect_appended(
+            candidate->anchor_offset, candidate->original_size,
+            candidate->original_size + kScRelayAppendedOverheadWords * sizeof(uint32_t));
+        if (!placement || placement->kind != DbiPatchPlacementKind::AppendedCave) {
+          unavailable_branch_reservoir_candidates.insert(candidate);
+          continue;
+        }
+        placement->return_target = candidate->anchor_offset + candidate->original_size -
+                                   kScRelayTailRestoreWords * sizeof(uint32_t);
+        branch_selected_reservoirs.push_back(
+            {candidate->anchor_offset, candidate->original_size, candidate->pc_sgpr_pair,
+             candidate->saved_vcc_sgpr, candidate->return_pc_sgpr_pair,
+             candidate->return_saved_vcc_sgpr, candidate->required_sgpr_count,
+             candidate->owner_descriptor_file_offsets, *placement});
+        selected_branch_reservoir_candidates.insert(candidate);
+        branch_prefix_planner = std::move(next_prefix);
+        selected_any = true;
+      }
+      if (!selected_any)
+        break;
     };
-    const bool routes_complete = !tentative_candidates.empty() &&
-                                 consume_routes(/*forward=*/true) &&
-                                 consume_routes(/*forward=*/false);
     if (routes_complete) {
-      placement_planner = std::move(tentative_planner);
-      for (LdsCheckTrapCandidate &candidate : tentative_candidates) {
+      placement_planner = std::move(accepted_planner);
+      selected_relay_reservoirs.insert(selected_relay_reservoirs.end(),
+                                       branch_selected_reservoirs.begin(),
+                                       branch_selected_reservoirs.end());
+      for (LdsCheckTrapCandidate &candidate : accepted_candidates) {
         selected_sites.insert(candidate.site);
         selected_candidates.push_back(std::move(candidate));
       }
-    } else if (!tentative_candidates.empty()) {
+    } else {
       result.warnings.emplace_back(
           "ConSan LDS check/trap branch-only continuation could not route all spill-backed sites");
     }

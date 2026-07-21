@@ -535,6 +535,26 @@ validate_sc_branch_only_continuation_semantics(const AmdGpuCodeObject &replaceme
          patch.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap) &&
         patch.original_size == 2u * sizeof(uint32_t))
       owned_relay_slots.insert(patch.anchor_offset + sizeof(uint32_t));
+    if (patch.kind == ConSanPatchKind::TrampolineScBranchRelayDonor) {
+      if (patch.original_size == 2u * sizeof(uint32_t))
+        owned_relay_slots.insert(patch.anchor_offset + sizeof(uint32_t));
+      if (patch.original_size >= 6u * sizeof(uint32_t)) {
+        for (uint64_t offset = patch.anchor_offset + 4u * sizeof(uint32_t);
+             offset < patch.anchor_offset + patch.original_size; offset += sizeof(uint32_t))
+          owned_relay_slots.insert(offset);
+      }
+    }
+    if (patch.kind == ConSanPatchKind::TrampolineScRelayReservoir) {
+      if (patch.original_size == 0) {
+        for (uint64_t offset = patch.trampoline_offset;
+             offset < patch.trampoline_offset + patch.trampoline_size; offset += sizeof(uint32_t))
+          owned_relay_slots.insert(offset);
+      } else {
+        const auto slots =
+            sc_relay_reservoir_slot_offsets(patch.anchor_offset, patch.original_size);
+        owned_relay_slots.insert(slots.begin(), slots.end());
+      }
+    }
   }
   std::unordered_set<uint64_t> used_relay_slots;
   const auto validate_hop = [&](uint64_t source, uint64_t target) {
@@ -1073,6 +1093,7 @@ validate_sc_relay_reservoir_semantics(const AmdGpuCodeObject &original,
 
   std::unordered_set<uint64_t> relay_vertices;
   std::unordered_set<uint64_t> island_vertices;
+  std::unordered_map<uint64_t, uint64_t> branch_only_relay_targets;
   for (const ConSanPatchInfo &patch : result.patches) {
     for (uint64_t offset : patch.branch_relay_offsets) {
       if (offset < patch.trampoline_offset ||
@@ -1108,7 +1129,34 @@ validate_sc_relay_reservoir_semantics(const AmdGpuCodeObject &original,
           relay_vertices.insert(offset);
       }
     }
+    if (patch.sc_branch_only_continuation) {
+      for (size_t index = 0; index < patch.sc_branch_only_entry_relay_offsets.size(); ++index) {
+        const uint64_t source = patch.sc_branch_only_entry_relay_offsets[index];
+        const uint64_t target = index + 1u < patch.sc_branch_only_entry_relay_offsets.size()
+                                    ? patch.sc_branch_only_entry_relay_offsets[index + 1u]
+                                    : patch.trampoline_offset;
+        branch_only_relay_targets.emplace(source, target);
+      }
+      for (size_t index = 0; index < patch.sc_branch_only_return_relay_offsets.size(); ++index) {
+        const uint64_t source = patch.sc_branch_only_return_relay_offsets[index];
+        const uint64_t target = index + 1u < patch.sc_branch_only_return_relay_offsets.size()
+                                    ? patch.sc_branch_only_return_relay_offsets[index + 1u]
+                                    : patch.anchor_offset + patch.original_size;
+        branch_only_relay_targets.emplace(source, target);
+      }
+    }
   }
+
+  const auto valid_relay_target = [&](uint64_t source, int64_t target) {
+    if (target < 0)
+      return false;
+    if (const auto branch_only = branch_only_relay_targets.find(source);
+        branch_only != branch_only_relay_targets.end())
+      return static_cast<uint64_t>(target) == branch_only->second;
+    return target > static_cast<int64_t>(source) &&
+           (relay_vertices.contains(static_cast<uint64_t>(target)) ||
+            island_vertices.contains(static_cast<uint64_t>(target)));
+  };
 
   for (const ConSanPatchInfo *patch : reservoirs) {
     if (patch->original_size == 0) {
@@ -1136,9 +1184,7 @@ validate_sc_relay_reservoir_semantics(const AmdGpuCodeObject &original,
         const int64_t target =
             static_cast<int64_t>(offset) + sizeof(uint32_t) +
             static_cast<int64_t>(static_cast<int16_t>(*word & 0xffffu)) * sizeof(uint32_t);
-        if (target <= static_cast<int64_t>(offset) || target < 0 ||
-            (!relay_vertices.contains(static_cast<uint64_t>(target)) &&
-             !island_vertices.contains(static_cast<uint64_t>(target)))) {
+        if (!valid_relay_target(offset, target)) {
           errors.emplace_back("ConSan relay reservoir proof found an invalid relay target from " +
                               std::to_string(offset) + " to " + std::to_string(target));
           return errors;
@@ -1267,9 +1313,7 @@ validate_sc_relay_reservoir_semantics(const AmdGpuCodeObject &original,
       const int64_t target =
           static_cast<int64_t>(offset) + sizeof(uint32_t) +
           static_cast<int64_t>(static_cast<int16_t>(*word & 0xffffu)) * sizeof(uint32_t);
-      if (target <= static_cast<int64_t>(offset) || target < 0 ||
-          (!relay_vertices.contains(static_cast<uint64_t>(target)) &&
-           !island_vertices.contains(static_cast<uint64_t>(target)))) {
+      if (!valid_relay_target(offset, target)) {
         errors.emplace_back("ConSan relay reservoir proof found an invalid relay target from " +
                             std::to_string(offset) + " to " + std::to_string(target));
         return errors;
