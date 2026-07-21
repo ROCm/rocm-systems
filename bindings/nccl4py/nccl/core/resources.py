@@ -321,9 +321,7 @@ class RegisteredWindowHandle(CommResource):
         ptr = _nccl_bindings.get_lsa_multimem_device_pointer(self.handle, offset)
         return ptr if ptr != 0 else None
 
-    def get_multimem_device_pointer(
-        self, multimem: MultimemHandle, offset: int = 0
-    ) -> int | None:
+    def get_multimem_device_pointer(self, multimem: MultimemHandle, offset: int = 0) -> int | None:
         """Returns the multicast device pointer for this window and ``multimem``.
 
         Unlike :meth:`get_lsa_multimem_device_pointer` (which uses the LSA
@@ -343,9 +341,7 @@ class RegisteredWindowHandle(CommResource):
             RuntimeError: If the window has been closed.
         """
         self._check_valid()
-        ptr = _nccl_bindings.get_multimem_device_pointer(
-            self.handle, offset, multimem._lowpp.ptr
-        )
+        ptr = _nccl_bindings.get_multimem_device_pointer(self.handle, offset, multimem._lowpp.ptr)
         return ptr if ptr != 0 else None
 
     def get_lsa_device_pointer(self, lsa_rank: int, offset: int = 0) -> int:
@@ -480,7 +476,13 @@ class DevCommResource(CommResource):
         comm_ptr: int,
         reqs_lowpp: _nccl_bindings.DevCommRequirements,
         team_multimem_lowpp: dict[NCCLTeam, _nccl_bindings.MultimemHandle] | None = None,
-        resource_handle_lowpps: tuple[_nccl_bindings.LsaBarrierHandle | _nccl_bindings.GinBarrierHandle | _nccl_bindings.LLA2AHandle, ...] | None = None,
+        resource_handle_lowpps: tuple[
+            _nccl_bindings.LsaBarrierHandle
+            | _nccl_bindings.GinBarrierHandle
+            | _nccl_bindings.LLA2AHandle,
+            ...,
+        ]
+        | None = None,
     ):
         """Creates a device communicator from an existing host communicator.
 
@@ -595,9 +597,7 @@ class DevCommResource(CommResource):
             elif isinstance(lowpp, _nccl_bindings.LLA2AHandle):
                 handles.append(LLA2AHandle._from_lowpp(lowpp))
             else:
-                raise NcclInvalid(
-                    f"unexpected resource handle lowpp: {type(lowpp).__name__}"
-                )
+                raise NcclInvalid(f"unexpected resource handle lowpp: {type(lowpp).__name__}")
 
         return tuple(handles)
 

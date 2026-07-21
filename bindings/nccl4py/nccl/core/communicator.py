@@ -228,15 +228,11 @@ class LLA2ARequirement:
     ) -> "LLA2ARequirement":
         """Build a requirement whose ``n_slots`` is sized to hold ``max_elements``
         elements of at most ``max_element_size`` bytes each."""
-        return cls(
-            n_blocks=n_blocks, n_slots=cls.calc_slots(max_elements, max_element_size)
-        )
+        return cls(n_blocks=n_blocks, n_slots=cls.calc_slots(max_elements, max_element_size))
 
 
 @dataclass(kw_only=True)
-class NCCLDevCommRequirements(
-    LowppSpec, lowpp_cls=_nccl_bindings.DevCommRequirements
-):
+class NCCLDevCommRequirements(LowppSpec, lowpp_cls=_nccl_bindings.DevCommRequirements):
     """NCCL device communicator requirements configuration.
 
     This is a reusable high-level Python request consumed by
@@ -315,9 +311,7 @@ class NCCLDevCommRequirements(
     multimem handle retrievable via
     :py:meth:`~nccl.core.resources.DevCommResource.multimem_handle`."""
 
-    resources: tuple[
-        LsaBarrierRequirement | GinBarrierRequirement | LLA2ARequirement, ...
-    ] = ()
+    resources: tuple[LsaBarrierRequirement | GinBarrierRequirement | LLA2ARequirement, ...] = ()
     """Device resource requirements (LSA/GIN barriers, low-latency all-to-all).
     Each entry yields, in order, a handle in
     :py:attr:`~nccl.core.resources.DevCommResource.resource_handles`. Entries are
@@ -374,7 +368,12 @@ def _materialize_resource_requirements(
     resources: tuple[LsaBarrierRequirement | GinBarrierRequirement | LLA2ARequirement, ...],
 ) -> tuple[
     tuple[_nccl_bindings.DevResourceRequirements, ...],
-    tuple[_nccl_bindings.LsaBarrierHandle | _nccl_bindings.GinBarrierHandle | _nccl_bindings.LLA2AHandle, ...],
+    tuple[
+        _nccl_bindings.LsaBarrierHandle
+        | _nccl_bindings.GinBarrierHandle
+        | _nccl_bindings.LLA2AHandle,
+        ...,
+    ],
 ]:
     """Builds the resource-requirements linked list and its output handles.
 
@@ -385,7 +384,11 @@ def _materialize_resource_requirements(
     ``ncclDevCommCreate`` returns (each node holds a raw pointer to the next).
     """
     resource_nodes: list[_nccl_bindings.DevResourceRequirements] = []
-    resource_handles: list[_nccl_bindings.LsaBarrierHandle | _nccl_bindings.GinBarrierHandle | _nccl_bindings.LLA2AHandle] = []
+    resource_handles: list[
+        _nccl_bindings.LsaBarrierHandle
+        | _nccl_bindings.GinBarrierHandle
+        | _nccl_bindings.LLA2AHandle
+    ] = []
     previous: _nccl_bindings.DevResourceRequirements | None = None
     for resource in resources:
         node = _nccl_bindings.DevResourceRequirements()
@@ -630,9 +633,7 @@ class Communicator:
         if self._comm != 0:
             raise NcclInvalid("Communicator is already initialized")
 
-        config_lowpp = (
-            None if config is None else config._to_lowpp()
-        )
+        config_lowpp = None if config is None else config._to_lowpp()
         cfg_ptr = 0 if config_lowpp is None else config_lowpp.ptr
         if isinstance(unique_id, UniqueId):
             unique_id = (unique_id,)
@@ -691,9 +692,7 @@ class Communicator:
 
         if color is None:
             color = -1  # NCCL_SPLIT_NOCOLOR from nccl.h
-        config_lowpp = (
-            None if config is None else config._to_lowpp()
-        )
+        config_lowpp = None if config is None else config._to_lowpp()
         cfg_ptr = 0 if config_lowpp is None else config_lowpp.ptr
         newcomm = type(self)()
         self._children_in_progress.append(newcomm)
@@ -746,9 +745,7 @@ class Communicator:
         """
         self._check_valid("shrink")
         ranks_to_exclude = list(exclude_ranks) if exclude_ranks is not None else []
-        config_lowpp = (
-            None if config is None else config._to_lowpp()
-        )
+        config_lowpp = None if config is None else config._to_lowpp()
         cfg_ptr = 0 if config_lowpp is None else config_lowpp.ptr
         newcomm = type(self)()
         _nccl_bindings.comm_shrink(
@@ -840,9 +837,7 @@ class Communicator:
 
         uid_ptr = 0 if unique_id is None else unique_id.ptr
         rank_val = -1 if rank is None else int(rank)
-        config_lowpp = (
-            None if config is None else config._to_lowpp()
-        )
+        config_lowpp = None if config is None else config._to_lowpp()
         cfg_ptr = 0 if config_lowpp is None else config_lowpp.ptr
         newcomm = type(self)()
         _nccl_bindings.comm_grow(
@@ -2068,16 +2063,22 @@ class Communicator:
 
         requirements = requirements or NCCLDevCommRequirements()
         multimem_handles: dict[NCCLTeam, _nccl_bindings.MultimemHandle] | None = None
-        resource_handles: tuple[_nccl_bindings.LsaBarrierHandle | _nccl_bindings.GinBarrierHandle | _nccl_bindings.LLA2AHandle, ...] | None = None
+        resource_handles: (
+            tuple[
+                _nccl_bindings.LsaBarrierHandle
+                | _nccl_bindings.GinBarrierHandle
+                | _nccl_bindings.LLA2AHandle,
+                ...,
+            ]
+            | None
+        ) = None
 
         reqs = requirements._to_lowpp()
-        if (requirements.teams):
-            team_nodes, multimem_handles = _materialize_team_requirements(
-                requirements.teams
-            )
+        if requirements.teams:
+            team_nodes, multimem_handles = _materialize_team_requirements(requirements.teams)
             reqs.team_requirements_list = team_nodes[0].ptr
 
-        if (requirements.resources):
+        if requirements.resources:
             resource_nodes, resource_handles = _materialize_resource_requirements(
                 self._comm, requirements.resources
             )
@@ -2086,9 +2087,7 @@ class Communicator:
         # team_nodes and resource_nodes keep the linked-list nodes alive through
         # the resource constructor's synchronous ncclDevCommCreate; the resource
         # nodes also point into the handle storage retained by the resource.
-        resource = DevCommResource(
-            self._comm, reqs, multimem_handles, resource_handles
-        )
+        resource = DevCommResource(self._comm, reqs, multimem_handles, resource_handles)
         self._resources.append(resource)
         return resource
 
