@@ -3400,6 +3400,15 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 
 	if (hsakmt_use_model || !ctx->hsakmt_is_primary_ctx)
 		fmm_ctx->svm.userptr_for_paged_mem = false;
+
+	/* DRM user-queue mode: route paged system memory through the GTT BO path
+	 * instead of userptr. amdgpu_create_bo_from_user_mem returns EPERM on the
+	 * reserved aperture VAs ROCr uses under DRM user queues, whereas a GTT BO
+	 * alloc + map works. Without this, executable/system allocations (e.g. the
+	 * AssembleShader code buffer) fail and abort runtime init in DRM mode. */
+	if (hsakmt_enable_drm)
+		fmm_ctx->svm.userptr_for_paged_mem = false;
+
 	/* If HSA_CHECK_USERPTR is set to a non-0 value, check all userptrs
 	 * when they are registered
 	 */
