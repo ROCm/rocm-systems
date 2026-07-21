@@ -41,9 +41,6 @@ RE_ARCHIVE_RECOVERED = re.compile(
 )
 RE_ARCHIVE_COMPLETE = re.compile(r"Complete:\s+(YES|NO)")
 RE_CAPTURE_MAF = RE_MAF
-RE_SUBALLOC_OOB = re.compile(
-    r"\[HRR\] SUBALLOC OOB: kernel arg\[(\d+)\] rec (0x[0-9a-fA-F]+)"
-)
 RE_D2H_SUMMARY = re.compile(r"D2H checks\s+: (\d+) pass.*?, (\d+) fail, (\d+) skipped")
 RE_KERNARG = re.compile(r"kernarg_address=(0x[0-9a-fA-F]+)")
 RE_GRID = re.compile(r"grid=\[([^\]]+)\], workgroup=\[([^\]]+)\]")
@@ -73,8 +70,6 @@ class Finding:
     d2h_pass: int | None = None
     d2h_fail: int | None = None
     d2h_attempted: int | None = None
-    suballoc_oob_count: int = 0
-    suballoc_oob_args: list[int] = field(default_factory=list)
     archive_events: int | None = None
     archive_kernels: int | None = None
     archive_complete: str | None = None
@@ -161,12 +156,6 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
         finding.notes.append(
             f"archive wire version {m.group(1)} does not match hrr-playback reader {m.group(2)}"
         )
-
-    oob_args: set[int] = set()
-    for m in RE_SUBALLOC_OOB.finditer(text):
-        finding.suballoc_oob_count += 1
-        oob_args.add(int(m.group(1)))
-    finding.suballoc_oob_args = sorted(oob_args)
 
     last_prog = None
     for m in RE_PROGRESS.finditer(text):
@@ -291,7 +280,6 @@ def render_markdown(f: Finding) -> str:
         f"- **Capture comgr**: `{f.capture_comgr_version or 'n/a'}`",
         f"- **Capture device count**: {f.capture_device_count if f.capture_device_count is not None else 'n/a'}",
         f"- **Capture GPU arch**: `{f.capture_gcn_arch or 'n/a'}`",
-        f"- **Suballoc OOB reports**: {f.suballoc_oob_count} (args: {f.suballoc_oob_args or []})",
         "",
         "## Sources",
     ]
