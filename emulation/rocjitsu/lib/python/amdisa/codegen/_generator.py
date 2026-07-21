@@ -36,7 +36,11 @@ from amdisa.gpuisa import (
     Operand,
     OperandNamePattern,
 )
-from amdisa.fieldless_policy import FieldlessCategory, fieldless_policy
+from amdisa.fieldless_policy import (
+    FieldlessCategory,
+    fieldless_policy,
+    operand_participates,
+)
 from amdisa.semantics import InstructionSemantics, SemanticsSpec
 
 from amdisa.codegen.config import CodegenConfig
@@ -753,12 +757,11 @@ class CodeGenerator:
         capability), which today is just the literal ``OPR_SIMM32``. Most
         fieldless operands are hardwired side effects still handled by the
         semantic emitters (VCC/EXEC/SCC/M0/PC) and stay out of the positional
-        execute lists. Derived from the shared fieldless operand policy table
-        so participation and runtime capability cannot drift apart.
+        execute lists. Shares one predicate with ``_operand_signature`` (via
+        ``operand_participates``) so the execute-visible set and the sharing
+        signature cannot drift apart.
         """
-        return (
-            not opnd.fieldless or fieldless_policy(opnd.operand_type).caps.reads_value
-        )
+        return operand_participates(opnd.fieldless, opnd.operand_type)
 
     @staticmethod
     def _fieldless_caps_stmt(opnd_name: str, operand_type: str) -> str:
@@ -6921,6 +6924,22 @@ class CodeGenerator:
                         }
                     )
                     ctor_body_parts = list(opnd_body)
+                    # src_operands_ and dst_operands_ are std::array of these
+                    # capacities in instruction.h; guard against fieldless
+                    # def/use operands (pushed positionally) silently writing
+                    # past the array end. Keep these in sync with instruction.h.
+                    _SRC_OPERANDS_CAPACITY = 6
+                    _DST_OPERANDS_CAPACITY = 3
+                    assert src_idx <= _SRC_OPERANDS_CAPACITY, (
+                        f'{inst.name}: {src_idx} src operands exceed '
+                        f'src_operands_ capacity {_SRC_OPERANDS_CAPACITY}; '
+                        f'grow the std::array in instruction.h.'
+                    )
+                    assert dst_idx <= _DST_OPERANDS_CAPACITY, (
+                        f'{inst.name}: {dst_idx} dst operands exceed '
+                        f'dst_operands_ capacity {_DST_OPERANDS_CAPACITY}; '
+                        f'grow the std::array in instruction.h.'
+                    )
                     ctor_body_parts.append(f'num_src_ = {src_idx};')
                     ctor_body_parts.append(f'num_dst_ = {dst_idx};')
                     ctor_body_parts.extend(conditional_src_body)

@@ -238,10 +238,14 @@ def test_has_implicit_operand():
 
 
 # ---------------------------------------------------------------------------
-# Cross-ISA signature must ignore fieldless operands (keeps execute_shared.h
-# partitioning stable when fieldless operands are added to the model).
+# Cross-ISA signature uses the same participation rule as execute generation:
+# inert fieldless operands are excluded (they don't change the body, so they
+# must not fragment a shared plan), but value-bearing fieldless OPR_SIMM32 is
+# included (it changes the body, so it must change the signature too).
 # ---------------------------------------------------------------------------
-def test_operand_signature_excludes_fieldless():
+def test_operand_signature_excludes_inert_fieldless():
+    # VCC carry-in/out are inert fieldless -> dropping them leaves the signature
+    # unchanged, so an ISA that models them still shares with one that doesn't.
     with_vcc = _v_add_co_ci_u32()
     without_fieldless = Instruction(
         'V_ADD_CO_CI_U32',
@@ -250,6 +254,97 @@ def test_operand_signature_excludes_fieldless():
         [op for op in with_vcc.operands if not op.fieldless],
     )
     assert _operand_signature(with_vcc) == _operand_signature(without_fieldless)
+
+
+def test_operand_signature_includes_value_bearing_simm32():
+    # A fieldless OPR_SIMM32 reads a value and appears in the execute body, so it
+    # MUST be in the signature -- otherwise two instructions differing only in
+    # the literal would look shareable while their bodies differ.
+    with_simm32 = Instruction(
+        'V_FMAMK_F32',
+        'ENC_VOP2',
+        0,
+        [
+            Operand('vdst', 32, 'OPR_VGPR', False, True, False, False, 1),
+            Operand('src0', 32, 'OPR_SRC', True, False, False, False, 2),
+            Operand(
+                'simm32',
+                32,
+                'OPR_SIMM32',
+                True,
+                False,
+                False,
+                False,
+                3,
+                fieldless=True,
+            ),
+            Operand('vsrc1', 32, 'OPR_VGPR', True, False, False, False, 4),
+        ],
+    )
+    without_simm32 = Instruction(
+        'V_FMAMK_F32',
+        'ENC_VOP2',
+        0,
+        [op for op in with_simm32.operands if op.operand_type != 'OPR_SIMM32'],
+    )
+    # The value-bearing fieldless literal is part of the signature.
+    assert _operand_signature(with_simm32) != _operand_signature(without_simm32)
+    assert any(entry[1] == 'OPR_SIMM32' for entry in _operand_signature(with_simm32))
+
+
+def _fmaak_f16(simm32_size):
+    # V_FMAAK_F16 shape (D = fma(s0, s1, K)); simm32 size varies across ISAs
+    # (16 on rdna1/rdna2, 32 on rdna3/rdna4) for the same instruction.
+    return Instruction(
+        'V_FMAAK_F16',
+        'ENC_VOP2',
+        0,
+        [
+            Operand('vdst', 16, 'OPR_VGPR', False, True, False, False, 1),
+            Operand('src0', 16, 'OPR_SRC', True, False, False, False, 2),
+            Operand('vsrc1', 16, 'OPR_VGPR', True, False, False, False, 3),
+            Operand(
+                'simm32',
+                simm32_size,
+                'OPR_SIMM32',
+                True,
+                False,
+                False,
+                False,
+                4,
+                fieldless=True,
+            ),
+        ],
+    )
+
+
+def test_operand_signature_canonicalizes_simm32_size():
+    # The literal is always a 32-bit encoding word; its declared size (the
+    # datatype width) is recorded inconsistently for the same instruction across
+    # ISAs. Canonicalizing it keeps identical instructions from fragmenting --
+    # this is what restores Identity DBT legalization for V_FMAAK_F16 across
+    # rdna generations. The size-16 and size-32 forms must share a signature.
+    assert _operand_signature(_fmaak_f16(16)) == _operand_signature(_fmaak_f16(32))
+
+
+def test_operand_signature_still_distinguishes_f16_from_f32_fma():
+    # Canonicalizing the literal must NOT merge f16 and f32 FMA-K: they stay
+    # distinct via their register operand sizes (16-bit vs 32-bit vdst/src0/
+    # vsrc1), so no false Identity/Substitute across the datatype boundary.
+    fmaak_f32 = Instruction(
+        'V_FMAAK_F32',
+        'ENC_VOP2',
+        0,
+        [
+            Operand('vdst', 32, 'OPR_VGPR', False, True, False, False, 1),
+            Operand('src0', 32, 'OPR_SRC', True, False, False, False, 2),
+            Operand('vsrc1', 32, 'OPR_VGPR', True, False, False, False, 3),
+            Operand(
+                'simm32', 32, 'OPR_SIMM32', True, False, False, False, 4, fieldless=True
+            ),
+        ],
+    )
+    assert _operand_signature(_fmaak_f16(32)) != _operand_signature(fmaak_f32)
 
 
 # ---------------------------------------------------------------------------

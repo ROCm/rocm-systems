@@ -176,6 +176,20 @@ def fieldless_policy(operand_type: str) -> FieldlessPolicy:
     return _FIELDLESS_POLICY.get(operand_type, _UNKNOWN_POLICY)
 
 
+def operand_participates(fieldless: bool, operand_type: str) -> bool:
+    """Whether an operand is visible to execute generation and the cross-ISA
+    sharing signature.
+
+    Field-bearing operands always participate. A fieldless operand participates
+    only if its policy says it does. This is the single predicate behind both
+    ``_execute_operand_participates`` (which operands the execute body sees) and
+    ``_operand_signature`` (which operands define shareability), so the two
+    cannot drift: an operand that changes the generated body is exactly one that
+    changes the sharing signature.
+    """
+    return not fieldless or fieldless_policy(operand_type).caps.reads_value
+
+
 def validate_fieldless_taxonomy(spec) -> None:
     """Fatally reject a parsed spec containing an unclassified fieldless type.
 
