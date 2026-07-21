@@ -196,7 +196,7 @@ RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(33554432)); // 32 
 // gfx950 uses the user-configurable rcclParamDdaThreshold().
 // gfx1250 uses the user-configurable rcclParamDdaThreshold().
 // All other architectures return false (threshold 0).
-static bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default, size_t gfx950Default = 0) {
+bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default, size_t gfx950Default) {
   if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) return false;
   size_t threshold;
   if (IsArchMatch(comm->archName, "gfx1250")) {
@@ -215,8 +215,8 @@ static bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx94
 }
 
 // Check if symmteric kernels is requested for this collective
-static bool isSymmetricKernelRequested(ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype,
-                                       size_t nElts, const void* sendbuff, void* recvbuff) {
+bool isSymmetricKernelRequested(ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype, size_t nElts,
+                                const void* sendbuff, void* recvbuff) {
   if (comm == nullptr || !comm->symmetricSupport) return false;
   if (ncclSymkInitOnce(comm) != ncclSuccess) return false;
   if (!ncclSymkAvailable(comm, coll, symkOp, datatype, nElts)) return false;
@@ -603,69 +603,48 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
 
   NCCLCHECK(Recorder::instance().record(rrAllReduce, info));
 
-  // Let the symmetric kernel take priority when the user registered these
-  // buffers as symmetric windows; otherwise fall through to CE / DDA.
-  bool symEligible = (op == ncclSum) && isSymmetricKernelRequested(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype,
-                                                                   count, sendbuff, recvbuff);
+  // Select the implementation once, in one place (rccl_wrap.cc). The returned
+  // decision drives dispatch here (CE 2-shot / DDA return early) and is carried
+  // into taskAppend() via info so the CE-vs-kernel choice and graph-capture state
+  // are never recomputed. rcclSelectAllReduce() also performs the CE graph-latch
+  // tick, matching the previous inline behavior. The same function backs the
+  // reporting path (rcclGetCollImplInfo) so rccl-tests attributes numbers to the
+  // backend that actually ran.
+  struct rcclCollDecision decision;
+  NCCLCHECK(rcclSelectAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream, /*query=*/false,
+                                /*graphCapturingHint=*/false, &decision));
+  info.decision = decision;
+  info.decisionValid = true;
 
-  // CE AllReduce
-  // Disable CE AllReduce while this comm has live graph-captured plans. Per-call
-  // capture checks are not enough because CE AR can still deadlock on eager
-  // calls sharing a graph-mode comm (e.g. rccl-tests warmup).
-  struct ncclCudaGraph ceGraph;
-  NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
-  bool ceCapturing = ncclCudaGraphValid(ceGraph);
-  rcclCeAllReduceGraphLatchTick(comm, ceCapturing);
-  bool ceArGraphAllowed = rcclCeAllReduceAllowed(comm);
-  if (!symEligible && ceArGraphAllowed && rcclUseCeAllReduce(comm, count, datatype, op) &&
-      comm->ceColl.ceARTmpBuf != NULL) {
+  switch (decision.algo) {
+  case RCCL_CE_2SHOT:
     if (count == 0) return ncclSuccess;
     INFO(NCCL_COLL, "CE 2-shot AllReduce: count=%zu datatype=%d op=%d rank=%d/%d", count, (int)datatype, (int)op,
          comm->rank, comm->nRanks);
     return ncclCeAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream);
+  case RCCL_DDA_FABRIC_LL:
+    INFO(NCCL_COLL, "AllReduce: taking DDA fabric LL path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+         comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
+    NCCLCHECK(ncclAllReduceDdaFabricLL(sendbuff, recvbuff, count, datatype, op, comm, stream));
+    return ncclSuccess;
+  case RCCL_DDA_FABRIC_LL128:
+    INFO(NCCL_COLL, "AllReduce: taking DDA fabric LL128 path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+         comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
+    NCCLCHECK(ncclAllReduceDdaFabricLL128(sendbuff, recvbuff, count, datatype, op, comm, stream));
+    return ncclSuccess;
+  case RCCL_DDA_FABRIC_VMM:
+    INFO(NCCL_COLL, "AllReduce: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+         comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
+    NCCLCHECK(ncclAllReduceDdaFabric(sendbuff, recvbuff, count, datatype, op, comm, stream));
+    return ncclSuccess;
+  case RCCL_DDA_IPC:
+    NCCLCHECK(ncclAllReduceDdaIpc(sendbuff, recvbuff, count, datatype, op, comm, stream));
+    return ncclSuccess;
+  default:
+    // RCCL_SYMMETRIC / RCCL_CE_REGISTERED / native kernel algorithms all go
+    // through the standard enqueue path; taskAppend() honors info->decision.
+    return ncclEnqueueCheck(&info);
   }
-  // Pass the decision to taskAppend() via info to avoid recomputing it.
-  info.ceCapturing = ceCapturing;
-  info.ceArGraphAllowed = ceArGraphAllowed;
-  info.ceGraphDecisionValid = true;
-  size_t msgBytes = count * ncclTypeSize(datatype);
-  // gfx1250 DDA fabric AR is bounded by rcclDdaEnabled (RCCL_DDA_THRESHOLD) and
-  // the per-tier thresholds, so it may claim the full range; the CE min-size cap
-  // only applies to the other arches' DDA paths.
-  const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
-  if (!symEligible && rcclDdaEnabled(comm, count * ncclTypeSize(datatype), 8388608) &&
-      (ddaFabricArch1250 || msgBytes < NCCL_CE_AR_MIN_MSG_BYTES)) {
-    if (IsArchMatch(comm->archName, "gfx1250")) {
-      // Small-message fast lane: LL protocol (no GPU barrier).
-      if (rcclParamDdaLL() && (count * ncclTypeSize(datatype)) <= (size_t)rcclParamDdaLLThreshold() &&
-          ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
-        INFO(NCCL_COLL, "AllReduce: taking DDA fabric LL path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
-             comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
-        NCCLCHECK(ncclAllReduceDdaFabricLL(sendbuff, recvbuff, count, datatype, op, comm, stream));
-        return ncclSuccess;
-      }
-      // Mid-size fast lane: LL128 protocol (128B lines, no GPU barrier).
-      if (rcclParamDdaLL128() && (count * ncclTypeSize(datatype)) <= (size_t)rcclParamDdaLL128Threshold() &&
-          ncclAllReduceDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype, op)) {
-        INFO(NCCL_COLL, "AllReduce: taking DDA fabric LL128 path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
-             comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
-        NCCLCHECK(ncclAllReduceDdaFabricLL128(sendbuff, recvbuff, count, datatype, op, comm, stream));
-        return ncclSuccess;
-      }
-      if (ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
-        INFO(NCCL_COLL, "AllReduce: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
-             comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
-        NCCLCHECK(ncclAllReduceDdaFabric(sendbuff, recvbuff, count, datatype, op, comm, stream));
-        return ncclSuccess;
-      }
-    } else {
-      if (ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
-        NCCLCHECK(ncclAllReduceDdaIpc(sendbuff, recvbuff, count, datatype, op, comm, stream));
-        return ncclSuccess;
-      }
-    }
-  }
-  return ncclEnqueueCheck(&info);
 }
 
 ncclResult_t ncclAllReduceWithBias_impl(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,

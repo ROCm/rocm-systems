@@ -3665,10 +3665,10 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // while the stream is capturing and fall through to the graph-safe
       // DDA/symmetric/kernel paths.
       bool ceCapturing, ceArGraphAllowed;
-      if (info->ceGraphDecisionValid) {
-        // Already computed by ncclAllReduce_impl() for this call.
-        ceCapturing = info->ceCapturing;
-        ceArGraphAllowed = info->ceArGraphAllowed;
+      if (info->decisionValid) {
+        // Already computed by ncclAllReduce_impl() via rcclSelectAllReduce().
+        ceCapturing = info->decision.ceCapturing;
+        ceArGraphAllowed = info->decision.ceArGraphAllowed;
       } else {
         struct ncclCudaGraph ceGraph;
         NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, info->stream, comm->config.graphUsageMode));
@@ -3715,7 +3715,21 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       bool CeScratchAvailable =
         !ceCapturing && ncclCeScratchAvailable(comm, info->coll, info->op, info->datatype, winRegType);
       size_t recvBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
-      if (rcclParamForceCe() && CeScratchAvailable && winRegType != ncclSymSendRegRecvReg &&
+      if (info->coll == ncclFuncAllReduce && info->decisionValid) {
+        // AllReduce's backend was already chosen once by rcclSelectAllReduce();
+        // honor it here instead of recomputing CE eligibility. The decision only
+        // reaches taskAppend() for the enqueue-bound cases, i.e. CE registered
+        // (Branch B) or the standard kernel (which may still be pulled onto the
+        // symmetric path downstream in scheduleCollTasksToPlan()).
+        if (info->decision.algo == RCCL_CE_REGISTERED) {
+          INFO(NCCL_INIT, "Taking CE collective path for AllReduce");
+          NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
+                                     opDev));
+        } else {
+          INFO(NCCL_INIT, "Taking kernel-based collective path");
+          NCCLCHECK(collTaskAppend(comm, info, opDev));
+        }
+      } else if (rcclParamForceCe() && CeScratchAvailable && winRegType != ncclSymSendRegRecvReg &&
           winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment && comm->ddaScratch != nullptr &&
           recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce) {
         INFO(NCCL_TUNING, "Using DDA scratch for CE collective, count=%zu, recvBytes=%zu", info->count, recvBytes);
