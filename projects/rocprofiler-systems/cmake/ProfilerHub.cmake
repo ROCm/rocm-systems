@@ -14,7 +14,7 @@ set(ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY
 )
 
 set(ROCPROFSYS_PROFILER_HUB_GIT_TAG
-    "users/adjordje-amd/profiler-hub-fix-fmt-export"
+    "develop"
     CACHE STRING
     "Git tag/branch for profiler-hub fallback sparse checkout"
 )
