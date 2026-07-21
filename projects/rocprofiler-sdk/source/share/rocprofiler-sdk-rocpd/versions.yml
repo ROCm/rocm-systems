@@ -9,6 +9,13 @@ rocprofiler-sdk-rocpd:
       rocpd_data_views: versions/3.0.0/data_views.sql
       rocpd_summary_views: versions/3.0.0/summary_views.sql
     - version: "3.0.1"
+      rocpd_metadata: versions/3.0.1/rocpd_metadata.sql
+      rocpd_tables: versions/3.0.1/rocpd_tables.sql
+      rocpd_views: versions/3.0.1/rocpd_views.sql
+      rocpd_indexes: versions/3.0.1/rocpd_indexes.sql
+      rocpd_data_views: versions/3.0.1/data_views.sql
+      rocpd_summary_views: versions/3.0.1/summary_views.sql
+    - version: "3.0.2"
       rocpd_metadata: rocpd_metadata.sql
       rocpd_tables: rocpd_tables.sql
       rocpd_views: rocpd_views.sql
@@ -24,3 +31,7 @@ rocprofiler-sdk-rocpd:
 # Version 3.0.1
 # - rocpd_info_pmc.target_arch added NIC type
 # - rocpd_info_agent.type added NIC type
+
+# Version 3.0.2
+# - Added graph_exec_id and graph_node_id columns to rocpd_kernel_dispatch and rocpd_memory_copy
+# - Added rocpd_graph_launch table for HIP graph launch summary records

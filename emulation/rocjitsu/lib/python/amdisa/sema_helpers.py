@@ -146,7 +146,7 @@ HELPER_REGISTRY: dict[str, tuple[HelperTreatment, str | None]] = {
     'isQuietNAN': (HelperTreatment.INLINE_CPP, 'util::is_quiet_nan'),
     'isSignalNAN': (HelperTreatment.INLINE_CPP, 'util::is_signal_nan'),
     'cvtToQuietNAN': (HelperTreatment.INLINE_CPP, 'util::cvt_to_quiet_nan'),
-    # --- Special ALU helpers (7) ---
+    # --- Special ALU helpers ---
     'ABSDIFF': (HelperTreatment.INLINE_CPP, 'util::absdiff'),
     'BYTE_PERMUTE': (HelperTreatment.INLINE_CPP, 'util::byte_permute'),
     'SAT4': (HelperTreatment.INLINE_CPP, 'util::sat4'),
@@ -155,6 +155,14 @@ HELPER_REGISTRY: dict[str, tuple[HelperTreatment, str | None]] = {
     'IsM0': (HelperTreatment.INLINE_CPP, 'util::is_m0'),
     'HwRegWriteMask': (HelperTreatment.INLINE_CPP, 'util::hwreg_write_mask'),
     'TanhCubicApproximation': (HelperTreatment.INLINE_CPP, 'util::tanh_cubic_approx'),
+    'signed_add_overflows': (
+        HelperTreatment.INLINE_CPP,
+        '::rocjitsu::amdgpu::signed_add_overflows',
+    ),
+    'signed_sub_overflows': (
+        HelperTreatment.INLINE_CPP,
+        '::rocjitsu::amdgpu::signed_sub_overflows',
+    ),
     # --- Type conversion: V_CVT helpers (2) ---
     'v_cvt_i16_f32': (HelperTreatment.INLINE_CPP, 'util::v_cvt_i16_f32'),
     'v_cvt_u16_f32': (HelperTreatment.INLINE_CPP, 'util::v_cvt_u16_f32'),

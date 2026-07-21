@@ -57,11 +57,18 @@ static const char* kKFDProcPathRoot = "/sys/class/kfd/kfd/proc";
 static const char* kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
 static const char* kKFDVramPrefix = "vram_";
 
-// Check whether a given PID has /dev/kfd open by scanning its fd links.
-static bool PidHasKfdOpen(const std::string& pid_str) {
+// Tri-state result of inspecting a PID's open file descriptors for /dev/kfd.
+// kInaccessible means we could not read /proc/<pid>/fd at all (the process
+// belongs to another user, or exited) — the outcome is unknown, not negative.
+enum class KfdOpenState { kHasKfd, kNoKfd, kInaccessible };
+
+// Inspect a PID's fd links to determine whether it has /dev/kfd open.
+static KfdOpenState PidKfdOpenState(const std::string& pid_str) {
   std::string fd_dir_path = "/proc/" + pid_str + "/fd";
   DIR* fd_dir = opendir(fd_dir_path.c_str());
-  if (!fd_dir) return false;
+  // EACCES/EPERM (another user's process) or ENOENT (process exited) leave the
+  // answer undetermined; callers must not treat this as "no KFD open".
+  if (!fd_dir) return KfdOpenState::kInaccessible;
 
   bool found = false;
   struct dirent* fd_entry;
@@ -79,20 +86,25 @@ static bool PidHasKfdOpen(const std::string& pid_str) {
     }
   }
   closedir(fd_dir);
-  return found;
+  return found ? KfdOpenState::kHasKfd : KfdOpenState::kNoKfd;
+}
+
+// Check whether a given PID definitively has /dev/kfd open.
+static bool PidHasKfdOpen(const std::string& pid_str) {
+  return PidKfdOpenState(pid_str) == KfdOpenState::kHasKfd;
 }
 
 // Detect whether KFD sysfs PIDs are in a different PID namespace from ours.
 // When running inside a container with PID namespace isolation, KFD sysfs
 // reports host PIDs that are not visible in the container's /proc. We detect
 // this by checking numeric entries under kKFDProcPathRoot against /proc.
-// For each KFD PID we check three cases:
-//   1. PID exists in /proc AND has /dev/kfd open → same namespace (not namespaced).
-//   2. PID exists in /proc but does NOT have /dev/kfd open → different namespace.
-//   3. PID does NOT exist in /proc → inconclusive (process may have exited);
-//      skip to the next entry to avoid a false positive from a short-lived process.
-// If all KFD entries are inconclusive (all exited), we conservatively assume
-// we are not namespaced (the KFD entries will be cleaned up shortly anyway).
+// For each numeric KFD PID: if it exists in /proc and has /dev/kfd open we
+// share its namespace; if it exists but lacks /dev/kfd, a container-local PID
+// reused the number (namespaced). A PID that is gone (exited) or whose fd dir
+// is unreadable (another user's process) is inconclusive and skipped, so a
+// permission error is never mistaken for namespace isolation.
+// If all KFD entries are inconclusive, we conservatively assume we are not
+// namespaced (the KFD entries will be cleaned up shortly anyway).
 // Result is cached for the lifetime of the process; PID namespace is assumed stable.
 static bool IsKfdPidNamespaced() {
   static std::atomic<int> cached{-1};
@@ -120,9 +132,16 @@ static bool IsKfdPidNamespaced() {
       continue;
     }
     // PID exists in /proc; check whether the same process has /dev/kfd open.
-    // If it does, we share the same PID namespace. If not, a different
-    // container-local process coincidentally has the same PID number.
-    if (!PidHasKfdOpen(name)) {
+    KfdOpenState state = PidKfdOpenState(name);
+    if (state == KfdOpenState::kInaccessible) {
+      // /proc/<pid>/fd unreadable (another user's process, e.g. a root-owned
+      // GPU job seen by a non-root caller). Cannot determine namespace from
+      // this entry, so skip it rather than falsely flagging namespaced.
+      continue;
+    }
+    // Absence of /dev/kfd here means a container-local process reused this host
+    // PID number, i.e. a different namespace.
+    if (state == KfdOpenState::kNoKfd) {
       namespaced = true;
     }
     determined = true;
@@ -130,7 +149,7 @@ static bool IsKfdPidNamespaced() {
   }
   closedir(kfd_dir);
 
-  // If every KFD entry was inconclusive (all processes exited), conservatively
+  // If every KFD entry was inconclusive (exited or unreadable), conservatively
   // assume we are not namespaced — the stale KFD entries will be reaped soon.
   if (!determined) {
     namespaced = false;
@@ -730,10 +749,34 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_set) {
     closedir(proc_root);
   }
 
-  // if no queues were present, fallback to grab KFD GPU IDs from parent dir names
-  int kfd_ret = GetKfdGpuIdsForPid(pid, gpu_set);
-  if (kfd_ret != 0) {
-    return kfd_ret;
+  // Active queues are the authoritative signal for GPUs a process is actively
+  // running work on. A process can also hold a VRAM allocation on a GPU without
+  // a live queue (e.g. memory staged before/after a kernel), so also attribute
+  // it to any GPU whose per-node vram_<gpuid> file reports a non-zero size.
+  // The stats/counters/sdma per-node files are deliberately not used: opening
+  // /dev/kfd creates them for the whole topology, so they exist (as zero) for
+  // every GPU and would attribute an idle process to all of them.
+  {
+    DIR* pd = opendir(proc_path.c_str());
+    if (pd) {
+      struct dirent* de;
+      while ((de = readdir(pd))) {
+        if (strncmp(de->d_name, kKFDVramPrefix, strlen(kKFDVramPrefix)) != 0) continue;
+        std::string gpu_id_str = de->d_name + strlen(kKFDVramPrefix);
+        if (gpu_id_str.empty() || !is_number(gpu_id_str)) continue;
+
+        std::string vram_bytes;
+        if (ReadSysfsStr(std::string(proc_path) + "/" + de->d_name, &vram_bytes) != 0) continue;
+        try {
+          if (std::stoull(vram_bytes) > 0) {
+            gpu_set->insert(strtoull(gpu_id_str.c_str(), nullptr, 10));
+          }
+        } catch (...) {
+          // Unreadable/garbage size: skip, treat as no allocation.
+        }
+      }
+      closedir(pd);
+    }
   }
 
   // PID namespace: fall back to discovering GPU IDs from KFD vram_* files.

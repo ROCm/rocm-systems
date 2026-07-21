@@ -492,5 +492,23 @@ generate_stats(const output_config& /* cfg*/,
     return stats_entry_t{};
 }
 
+stats_entry_t
+generate_stats(const output_config& /*cfg*/,
+               const metadata& /*tool_metadata*/,
+               const generator<rocprofiler_buffer_tracing_hip_graph_record_t>& data)
+{
+    auto graph_launch_stats = stats_map_t{};
+    for(auto ditr : data)
+    {
+        for(auto record : data.get(ditr))
+        {
+            graph_launch_stats["Graph Execution"] +=
+                (record.end_timestamp - record.start_timestamp);
+        }
+    }
+
+    return get_stats(graph_launch_stats);
+}
+
 }  // namespace tool
 }  // namespace rocprofiler

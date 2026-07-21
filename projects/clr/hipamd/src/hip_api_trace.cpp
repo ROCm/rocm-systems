@@ -9,6 +9,7 @@
 
 #include "hip_internal.hpp"
 
+#include <atomic>
 #include <cstdint>
 
 #if defined(HIP_ROCPROFILER_REGISTER) && HIP_ROCPROFILER_REGISTER > 0
@@ -934,6 +935,8 @@ hipError_t hipStreamGetDevResource(hipStream_t hStream, hipDevResource* resource
 hipError_t hipExecutionCtxRecordEvent(hipExecutionCtx_t ctx, hipEvent_t event);
 hipError_t hipExecutionCtxSynchronize(hipExecutionCtx_t ctx);
 hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event);
+hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
+                                   hipMemAllocationType type);
 }  // namespace hip
 
 namespace hip {
@@ -1517,6 +1520,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipExecutionCtxRecordEvent_fn = hip::hipExecutionCtxRecordEvent;
   ptrDispatchTable->hipExecutionCtxSynchronize_fn = hip::hipExecutionCtxSynchronize;
   ptrDispatchTable->hipExecutionCtxWaitEvent_fn = hip::hipExecutionCtxWaitEvent;
+  ptrDispatchTable->hipMemGetDefaultMemPool_fn = hip::hipMemGetDefaultMemPool;
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0
@@ -1557,18 +1561,25 @@ template <typename Tp> void ToolsInit(Tp* table) {
 #endif
 }
 
-template <typename Tp> Tp& GetDispatchTableImpl() {
+template <typename Tp> Tp* GetDispatchTableImpl(std::atomic<bool>& registered) {
   // using a static inside a function prevents static initialization fiascos
   static auto dispatch_table = Tp{};
-
-  // Change all the function pointers to point to the HIP runtime implementation functions
-  UpdateDispatchTable(&dispatch_table);
-
-  // Profiler Registration, may wrap the function pointers
-  ToolsInit(&dispatch_table);
-
-  return dispatch_table;
+  static auto* table = [] {
+    UpdateDispatchTable(&dispatch_table);
+    return &dispatch_table;
+  }();
+  if (!registered.load(std::memory_order_acquire)) {
+    bool expected = false;
+    if (registered.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+      ToolsInit(table);
+    }
+  }
+  return table;
 }
+
+std::atomic<bool> hip_dispatch_registered{false};
+std::atomic<bool> hip_compiler_dispatch_registered{false};
+std::atomic<bool> hip_tools_dispatch_registered{false};
 }  // namespace
 
 // At the -O3 optimization level, these functions are vectorized (gcc 11.4.1),
@@ -1582,16 +1593,13 @@ template <typename Tp> Tp& GetDispatchTableImpl() {
 #define NO_VECTORIZE
 #endif
 NO_VECTORIZE const HipDispatchTable* GetHipDispatchTable() {
-  static auto* _v = &GetDispatchTableImpl<HipDispatchTable>();
-  return _v;
+  return GetDispatchTableImpl<HipDispatchTable>(hip_dispatch_registered);
 }
 NO_VECTORIZE const HipCompilerDispatchTable* GetHipCompilerDispatchTable() {
-  static auto* _v = &GetDispatchTableImpl<HipCompilerDispatchTable>();
-  return _v;
+  return GetDispatchTableImpl<HipCompilerDispatchTable>(hip_compiler_dispatch_registered);
 }
 const HipToolsDispatchTable* GetHipToolsDispatchTable() {
-  static auto* _v = &GetDispatchTableImpl<HipToolsDispatchTable>();
-  return _v;
+  return GetDispatchTableImpl<HipToolsDispatchTable>(hip_tools_dispatch_registered);
 }
 }  // namespace hip
 
@@ -2246,16 +2254,17 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipMemDiscardBatchAsync_fn, 537);
 HIP_ENFORCE_ABI(HipDispatchTable, hipDrvMemDiscardBatchAsync_fn, 538);
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemDiscardAndPrefetchBatchAsync_fn, 539);
 HIP_ENFORCE_ABI(HipDispatchTable, hipDrvMemDiscardAndPrefetchBatchAsync_fn, 540);
-
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 31
+HIP_ENFORCE_ABI(HipDispatchTable, hipMemGetDefaultMemPool_fn, 541);
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 541)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 542)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 30,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 31,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

@@ -7,11 +7,12 @@
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
-#include "common/join.hpp"
+#include <spdlog/fmt/fmt.h>
 
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
+#include <filesystem>
 #include <fstream>
 #include <link.h>
 #include <linux/limits.h>
@@ -93,9 +94,8 @@ find_path(const std::string& _path, int _verbose,
 inline std::string
 dirname(const std::string& _fname) ROCPROFSYS_INTERNAL_API;
 
-inline std::string
-realpath(const std::string& _relpath,
-         std::string*       _resolved = nullptr) ROCPROFSYS_INTERNAL_API;
+[[nodiscard]] inline std::string
+realpath(const std::string& path) ROCPROFSYS_INTERNAL_API;
 
 inline bool
 is_text_file(const std::string& filename) ROCPROFSYS_INTERNAL_API;
@@ -176,8 +176,9 @@ template <typename RetT>
 RetT
 get_default_lib_search_paths()
 {
-    auto _paths = join(":", get_env(env_vars::PATH, ""), get_env("LD_LIBRARY_PATH", ""),
-                       get_env("LIBRARY_PATH", ""), get_env("PWD", ""), ".");
+    auto _paths = fmt::format("{}:{}:{}:{}:.", get_env(env_vars::PATH, ""),
+                              get_env("LD_LIBRARY_PATH", ""), get_env("LIBRARY_PATH", ""),
+                              get_env("PWD", ""));
     if constexpr(std::is_same<RetT, std::string>::value)
         return _paths;
     else
@@ -198,7 +199,7 @@ find_path(const std::string& _path, int _verbose, const std::string& _search_pat
     constexpr int _verbose_lvl = 2;
     for(const auto& itr : _paths)
     {
-        auto _f = join('/', itr, _path);
+        auto _f = fmt::format("{}/{}", itr, _path);
         ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl + 1,
                             "searching for '%s' in '%s' ...\n", _path.c_str(),
                             itr.c_str());
@@ -218,10 +219,10 @@ find_path(const std::string& _path, int _verbose, const std::string& _search_pat
         {
             for(const auto* sitr : { "lib", "lib64", "../lib", "../lib64" })
             {
-                auto _f = join('/', dirname(itr), sitr, _path);
+                auto _f = fmt::format("{}/{}/{}", dirname(itr), sitr, _path);
                 ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl + 1,
                                     "searching for '%s' in '%s' ...\n", _path.c_str(),
-                                    common::join('/', itr, sitr).c_str());
+                                    fmt::format("{}/{}", itr, sitr).c_str());
                 if(exists(_f))
                 {
                     ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl,
@@ -280,30 +281,12 @@ readlink(const std::string& _path)
     return _path;
 }
 
-std::string
-realpath(const std::string& _relpath, std::string* _resolved)
+[[nodiscard]] std::string
+realpath(const std::string& path)
 {
-    constexpr size_t MaxLen = PATH_MAX;
-    auto             _len   = std::min<size_t>(_relpath.length(), MaxLen);
-
-    char        _buffer[MaxLen] = { '\0' };
-    const char* _result         = _buffer;
-
-    if(::realpath(_relpath.c_str(), _buffer) == nullptr)
-    {
-        _result = _relpath.data();
-    }
-
-    if(_resolved)
-    {
-        _resolved->clear();
-        _len = strnlen(_result, MaxLen);
-        _resolved->resize(_len);
-        for(size_t i = 0; i < _len; ++i)
-            (*_resolved)[i] = _result[i];
-    }
-
-    return (_resolved) ? *_resolved : std::string{ _result };
+    std::error_code error;
+    auto            canon = std::filesystem::canonical(path, error);
+    return (error) ? path : canon.string();
 }
 
 bool
@@ -411,7 +394,7 @@ get_rocprofsys_root()
     auto _exe_rp  = realpath("/proc/self/exe");
     auto _exe_dir = dirname(_exe_rp);
     if(_exe_dir.empty()) _exe_dir = "./";
-    return rocprofsys::common::join('/', _exe_dir, "..");
+    return fmt::format("{}/{}", _exe_dir, "..");
 }
 
 std::string
@@ -420,23 +403,23 @@ get_internal_libpath(const std::string& _lib)
     auto _root = get_rocprofsys_root();
     for(const auto* libdir : { "lib", "lib64" })
     {
-        auto _candidate = rocprofsys::common::join('/', _root, libdir, _lib);
+        auto _candidate = fmt::format("{}/{}/{}", _root, libdir, _lib);
         if(exists(_candidate)) return _candidate;
     }
-    return rocprofsys::common::join('/', _root, "lib", _lib);
+    return fmt::format("{}/lib/{}", _root, _lib);
 }
 
 std::string
 get_internal_script_path()
 {
     auto _root = get_rocprofsys_root();
-    return rocprofsys::common::join('/', _root, "libexec", "rocprofiler-systems");
+    return _root + "/libexec/rocprofiler-systems";
 }
 
 std::string
 get_internal_libdir()
 {
-    return rocprofsys::common::join('/', get_rocprofsys_root(), "lib");
+    return get_rocprofsys_root() + "/lib";
 }
 
 }  // namespace path
