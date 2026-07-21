@@ -36,8 +36,8 @@ class SetValueCommands:
             core_msr_floor_limit (list, optional): Value override for args.core_msr_floor_limit. Defaults to None.
 
         Raises:
-            ValueError: Value error if no core value is provided
-            IndexError: Index error if core list is empty
+            AmdSmiRequiredCommandException: If no core target or subcommand argument is provided
+            PermissionError: If a set operation requires elevation (AMDSMI_STATUS_NO_PERM)
 
         Return:
             Nothing
@@ -52,7 +52,8 @@ class SetValueCommands:
             args.core_msr_floor_limit = core_msr_floor_limit
 
         if args.core == None:
-            raise ValueError("No Core provided, specific Core targets(S) are needed")
+            command = " ".join(sys.argv[1:])
+            raise AmdSmiRequiredCommandException(command, self.logger.format)
 
         # Handle multiple cores
         handled_multiple_cores, device_handle = self.helpers.handle_cores(
@@ -264,8 +265,8 @@ class SetValueCommands:
             cpu_sdps_limit (int, optional): Value override for args.cpu_sdps_limit. Defaults to None.
 
         Raises:
-            ValueError: Value error if no cpu value is provided
-            IndexError: Index error if cpu list is empty
+            AmdSmiRequiredCommandException: If no cpu target or subcommand argument is provided
+            PermissionError: If a set operation requires elevation (AMDSMI_STATUS_NO_PERM)
 
         Return:
             Nothing
@@ -312,7 +313,8 @@ class SetValueCommands:
             args.cpu_sdps_limit = cpu_sdps_limit
 
         if args.cpu == None:
-            raise ValueError("No CPU provided, specific CPU targets(S) are needed")
+            command = " ".join(sys.argv[1:])
+            raise AmdSmiRequiredCommandException(command, self.logger.format)
 
         # Handle multiple CPU's
         handled_multiple_cpus, device_handle = self.helpers.handle_cpus(
@@ -937,8 +939,9 @@ class SetValueCommands:
             ptl_format(string, optional): Value override for args.ptl_format. Defaults to None.
             compute_partition_mem_alloc_mode (str, optional): Value override for args.compute_partition_mem_alloc_mode. Defaults to None.
         Raises:
-            ValueError: Value error if no gpu value is provided
-            IndexError: Index error if gpu list is empty
+            AmdSmiRequiredCommandException: If no gpu subcommand argument is provided
+            AmdSmiInvalidParameterException: If mutually exclusive/invalid parameters are supplied
+            PermissionError: If a set operation requires elevation (AMDSMI_STATUS_NO_PERM)
 
         Return:
             Nothing
@@ -1521,10 +1524,6 @@ class SetValueCommands:
                     "get_clock_freq": f"Unable to retrieve {clk_type} frequency levels",
                     "set_clock": f"Unable to set {clk_type} perf level(s) to {perf_levels_str}",
                 }
-                if clk_type not in smi_clk_type_mapping:
-                    raise ValueError(
-                        f"Invalid clock type {clk_type}. Valid options are: {', '.join(smi_clk_type_mapping.keys())}"
-                    )
 
                 # Set perf level to manual if not already set
                 try:
@@ -1954,8 +1953,11 @@ class SetValueCommands:
         if args.mem_carveout is not None:
             # Validate single GPU (VRAM is per-GPU)
             if isinstance(args.gpu, list) and len(args.gpu) > 1:
-                raise ValueError(
-                    "VRAM carveout can only be set for a single GPU. Please specify --gpu <id>"
+                raise AmdSmiInvalidParameterException(
+                    "set",
+                    "--mem-carveout",
+                    self.logger.format,
+                    "VRAM carveout can only be set for a single GPU. Please specify --gpu <id>",
                 )
 
             try:
@@ -2167,8 +2169,9 @@ class SetValueCommands:
             xgmi_plpd (int, optional): Value override for args.xgmi_plpd. Defaults to None.
             process_isolation (int, optional): Value override for args.process_isolation. Defaults to None.
         Raises:
-            ValueError: Value error if no gpu value is provided
-            IndexError: Index error if gpu list is empty
+            AmdSmiRequiredCommandException: If no device target or argument is provided
+            AmdSmiInvalidParameterException: If GPU/CPU/CORE arguments are combined or --gtt is misused
+            PermissionError: If a set operation requires elevation (AMDSMI_STATUS_NO_PERM)
 
         Return:
             Nothing
@@ -2365,14 +2368,23 @@ class SetValueCommands:
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
 
         # Only allow one device's arguments to be set at a time
+        command = " ".join(sys.argv[1:])
         if not any([gpu_args_enabled, cpu_args_enabled, core_args_enabled]):
-            raise ValueError(
-                "No GPU, CPU, or CORE arguments provided, specific arguments are needed"
-            )
+            raise AmdSmiRequiredCommandException(command, self.logger.format)
         elif all([gpu_args_enabled, cpu_args_enabled, core_args_enabled]):
-            raise ValueError("Cannot set GPU, CPU, and CORE arguments at the same time")
+            raise AmdSmiInvalidParameterException(
+                "set",
+                "--gpu/--cpu/--core",
+                self.logger.format,
+                "Cannot set GPU, CPU, and CORE arguments at the same time",
+            )
         elif not (gpu_args_enabled ^ cpu_args_enabled ^ core_args_enabled):
-            raise ValueError("Cannot set GPU, CPU, or CORE arguments at the same time")
+            raise AmdSmiInvalidParameterException(
+                "set",
+                "--gpu/--cpu/--core",
+                self.logger.format,
+                "Cannot set GPU, CPU, or CORE arguments at the same time",
+            )
 
         if self.helpers.is_amdgpu_initialized() and gpu_args_enabled:
             if args.gpu == None:
@@ -2391,7 +2403,8 @@ class SetValueCommands:
             # Print out all CPU and all GPU static info only if no device was specified.
             # If a GPU or CPU argument is provided only print out the specified device.
             if args.cpu == None and args.gpu == None and args.core == None:
-                raise ValueError("No GPU, CPU, or CORE provided, specific target(s) are needed")
+                command = " ".join(sys.argv[1:])
+                raise AmdSmiRequiredCommandException(command, self.logger.format)
 
             if args.cpu:
                 self.set_cpu(
@@ -2454,7 +2467,8 @@ class SetValueCommands:
                 )
         elif self.helpers.is_amd_hsmp_initialized():  # Only CPU is initialized
             if args.cpu == None and args.core == None:
-                raise ValueError("No CPU or CORE provided, specific target(s) are needed")
+                command = " ".join(sys.argv[1:])
+                raise AmdSmiRequiredCommandException(command, self.logger.format)
             if args.cpu:
                 self.set_cpu(
                     args,
