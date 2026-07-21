@@ -32,7 +32,6 @@
 
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/xf86drm.h"
-#include "config/amd_smi_config.h"
 #include "impl/scoped_fd.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_main.h"
