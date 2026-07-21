@@ -28,8 +28,10 @@
 #include "snap_kernels.hpp"
 
 #include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/utils.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
@@ -37,6 +39,7 @@
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <hsa/hsa_ext_amd.h>
 
 #include <array>
 #include <cstdint>
@@ -369,4 +372,45 @@ TEST(kernel_replay_snapshot, disabled_tracking_records_nothing)
     // restore the gate before freeing (and for subsequent tests)
     ASSERT_EQ(mt::set_tracking_enabled(true), true);
     ASSERT_EQ(hipFree(d), hipSuccess);
+}
+
+// Snapshots must exclude kernarg (restoring it mid-kernel faults the GPU) and host/CPU memory.
+// query_alloc drops kernarg/fine-grained at record time; snap_inventory() scopes out other agents.
+TEST(kernel_replay_snapshot, pool_filter_excludes_kernarg_and_cpu)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    const auto agent = gpu_agent();
+    ASSERT_NE(agent.handle, 0U) << "no GPU agent found";
+
+    // device VRAM: trackable, lands in the snapshot.
+    float* dev = nullptr;
+    ASSERT_EQ(hipMalloc(&dev, 4096), hipSuccess);
+    ASSERT_NE(dev, nullptr);
+    EXPECT_TRUE(mt::query_alloc(dev).trackable) << "device VRAM should be snapshot-trackable";
+    EXPECT_TRUE(inventory_contains(dev, agent)) << "device VRAM missing from the agent snapshot";
+
+    // host memory: goes through interception, must not land in the GPU agent's snapshot.
+    float* host = nullptr;
+    ASSERT_EQ(hipHostMalloc(reinterpret_cast<void**>(&host), 4096), hipSuccess);
+    ASSERT_NE(host, nullptr);
+    EXPECT_FALSE(inventory_contains(host, agent)) << "host memory leaked into the agent snapshot";
+
+    // kernarg: nothing routes it through the tracker, so classify a real kernarg pointer directly.
+    auto cache = agent::get_agent_cache(agent);
+    ASSERT_TRUE(cache.has_value()) << "no agent cache for the GPU agent";
+    const auto kernarg_pool = cache->kernarg_pool();
+    ASSERT_NE(kernarg_pool.handle, 0U) << "GPU agent has no kernarg pool";
+
+    void* karg = nullptr;
+    ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, 256, 0, &karg), HSA_STATUS_SUCCESS);
+    ASSERT_NE(karg, nullptr);
+    EXPECT_FALSE(mt::query_alloc(karg).trackable)
+        << "kernarg memory must be excluded from snapshots (a stale restore faults the GPU)";
+    EXPECT_FALSE(inventory_contains(karg, agent))
+        << "kernarg pointer present in the agent snapshot";
+    EXPECT_EQ(hsa_amd_memory_pool_free(karg), HSA_STATUS_SUCCESS);
+
+    EXPECT_EQ(hipHostFree(host), hipSuccess);
+    ASSERT_EQ(hipFree(dev), hipSuccess);
 }
