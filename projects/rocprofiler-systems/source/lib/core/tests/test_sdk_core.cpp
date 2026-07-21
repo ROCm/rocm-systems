@@ -70,6 +70,7 @@ enum backend_tag : int
     buffered_domains_unified_memory = 94,
     buffered_domains_generic_lookup = 95,
     buffered_domains_invalid        = 96,
+    buffered_domains_page_migration = 97,
 };
 
 template <int Tag>
@@ -79,6 +80,21 @@ struct tagged_backend : ::rocprofsys::rocprofiler_sdk::backend
                             std::uint32_t* patch)
     {
         g_mock->get_version(major, minor, patch);
+    }
+};
+
+struct legacy_page_migration_backend : tagged_backend<buffered_domains_page_migration>
+{
+    static constexpr std::uint32_t       compile_time_version = 9999;
+    static constexpr buffer_tracing_kind BUFFER_TRACING_PAGE_MIGRATION =
+        static_cast<buffer_tracing_kind>(50);
+
+    static buffer_name_info_t get_buffer_tracing_names()
+    {
+        auto names =
+            tagged_backend<buffered_domains_page_migration>::get_buffer_tracing_names();
+        names.emplace(BUFFER_TRACING_PAGE_MIGRATION, "page_migration");
+        return names;
     }
 };
 
@@ -658,6 +674,26 @@ TEST_F(sdk_core_domains_test, get_buffered_domains_invalid_domain_throws)
         EXPECT_STREQ(error.what(),
                      "unsupported ROCPROFSYS_ROCM_DOMAINS value: invalid_domain");
     }
+}
+
+TEST_F(sdk_core_domains_test,
+       get_buffered_domains_legacy_page_migration_returns_page_migration)
+{
+    using sut = sdk_core<legacy_page_migration_backend, mock_sdk_externals>;
+
+    auto config = std::make_shared<fake_settings>();
+    sut::config_settings(config);
+
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{ "page_migration" }));
+    EXPECT_CALL(*g_mock_externals, get_settings)
+        .Times(1)
+        .WillOnce(gtest::Return(config.get()));
+
+    EXPECT_THAT(sut::get_buffered_domains(),
+                gtest::UnorderedElementsAre(
+                    legacy_page_migration_backend::BUFFER_TRACING_PAGE_MIGRATION));
 }
 
 // ─── get_operations ───────────────────────────────────────────────────────────
