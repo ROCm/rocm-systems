@@ -222,52 +222,129 @@ static void od_value_pair_str_to_range(std::string in_line, rsmi_range_t* rg) {
 }
 
 /**
+ * Map a bare power-profile name (e.g. "COMPUTE") to its preset mask.
+ * Returns RSMI_PWR_PROF_PRST_INVALID for names the API does not model
+ * (e.g. WINDOW_3D, which has no corresponding public mask).
+ */
+static rsmi_power_profile_preset_masks_t power_prof_name_to_mask(const std::string& mode) {
+  static const std::unordered_map<std::string, rsmi_power_profile_preset_masks_t> mode_map{
+      {"BOOTUP_DEFAULT", RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT},
+      {"3D_FULL_SCREEN", RSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK},
+      {"POWER_SAVING", RSMI_PWR_PROF_PRST_POWER_SAVING_MASK},
+      {"VIDEO", RSMI_PWR_PROF_PRST_VIDEO_MASK},
+      {"VR", RSMI_PWR_PROF_PRST_VR_MASK},
+      {"COMPUTE", RSMI_PWR_PROF_PRST_COMPUTE_MASK},
+      {"CUSTOM", RSMI_PWR_PROF_PRST_CUSTOM_MASK},
+  };
+  auto it = mode_map.find(mode);
+  return it == mode_map.end() ? RSMI_PWR_PROF_PRST_INVALID : it->second;
+}
+
+// Strip trailing '*', ':' and whitespace decorations from a profile token.
+static std::string strip_prof_decorations(std::string mode) {
+  size_t tmp;
+  while ((tmp = mode.find_last_of("* :")) != std::string::npos) {
+    mode = mode.substr(0, tmp);
+  }
+  return mode;
+}
+
+static bool str_is_all_digits(const std::string& s) {
+  if (s.empty()) {
+    return false;
+  }
+  for (char c : s) {
+    if (c < '0' || c > '9') {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Parse a string of the form "<int index> <mode name string> <|*>"
  */
 static rsmi_power_profile_preset_masks power_prof_string_to_int(std::string pow_prof_line,
                                                                 bool* is_curr, uint32_t* prof_ind) {
   std::istringstream fs(pow_prof_line);
   std::string mode;
-  size_t tmp;
 
   THROW_IF_NULLPTR_DEREF(prof_ind)
-
-  rsmi_power_profile_preset_masks_t ret = RSMI_PWR_PROF_PRST_INVALID;
 
   fs >> *prof_ind;
   fs >> mode;
 
-  while (true) {
-    tmp = mode.find_last_of("* :");
-    if (tmp == std::string::npos) {
-      break;
-    }
-    mode = mode.substr(0, tmp);
-  }
+  mode = strip_prof_decorations(mode);
 
   if (is_curr != nullptr) {
-    if (pow_prof_line.find('*') != std::string::npos) {
-      *is_curr = true;
-    } else {
-      *is_curr = false;
+    *is_curr = (pow_prof_line.find('*') != std::string::npos);
+  }
+
+  return power_prof_name_to_mask(mode);
+}
+
+/**
+ * Some ASICs (e.g. Navi3x / SMU13) expose pp_power_profile_mode in a
+ * transposed, columnar layout where the *header* row carries every profile
+ * name (and the '*' current-profile marker), followed by per-parameter rows:
+ *
+ *    0 BOOTUP_DEFAULT* 1 3D_FULL_SCREEN 2 POWER_SAVING ... 7 WINDOW_3D
+ *    Gfx_ActiveHystLimit   0  0  0 ...
+ *    ...
+ *
+ * The legacy layout instead lists one profile per row. Detect the columnar
+ * layout by checking whether the header row itself contains known profile
+ * names.
+ */
+static bool power_prof_header_has_names(const std::string& header) {
+  std::istringstream fs(header);
+  std::string tok;
+  while (fs >> tok) {
+    if (power_prof_name_to_mask(strip_prof_decorations(tok)) != RSMI_PWR_PROF_PRST_INVALID) {
+      return true;
     }
   }
+  return false;
+}
 
-  const std::unordered_map<std::string, std::function<void()>> mode_map{
-      {"BOOTUP_DEFAULT", [&]() { ret = RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT; }},
-      {"3D_FULL_SCREEN", [&]() { ret = RSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK; }},
-      {"POWER_SAVING", [&]() { ret = RSMI_PWR_PROF_PRST_POWER_SAVING_MASK; }},
-      {"VIDEO", [&]() { ret = RSMI_PWR_PROF_PRST_VIDEO_MASK; }},
-      {"VR", [&]() { ret = RSMI_PWR_PROF_PRST_VR_MASK; }},
-      {"COMPUTE", [&]() { ret = RSMI_PWR_PROF_PRST_COMPUTE_MASK; }},
-      {"CUSTOM", [&]() { ret = RSMI_PWR_PROF_PRST_CUSTOM_MASK; }},
-  };
-  auto mode_iter = mode_map.find(mode);
+// Parse the columnar header row "<idx NAME[*] idx NAME[*] ...>".
+// Populates available/current masks and the profile->index map.
+static void power_prof_parse_columnar(
+    const std::string& header, rsmi_power_profile_status_t* p,
+    std::map<rsmi_power_profile_preset_masks_t, uint32_t>* ind_map) {
+  std::istringstream fs(header);
+  std::string tok;
+  uint32_t last_ind = 0;
+  bool have_ind = false;
+  uint32_t num_profiles = 0;
 
-  if (mode_iter != mode_map.end()) {
-    mode_iter->second();
+  while (fs >> tok) {
+    // A bare integer token is the sysfs index for the name that follows it.
+    if (str_is_all_digits(tok)) {
+      last_ind = static_cast<uint32_t>(std::stoul(tok));
+      have_ind = true;
+      continue;
+    }
+
+    bool starred = tok.find('*') != std::string::npos;
+    rsmi_power_profile_preset_masks_t mask = power_prof_name_to_mask(strip_prof_decorations(tok));
+
+    // Count every named profile column (even API-unmodeled ones like
+    // WINDOW_3D) so num_profiles reflects what the ASIC exposes.
+    num_profiles++;
+
+    if (mask != RSMI_PWR_PROF_PRST_INVALID) {
+      p->available_profiles |= mask;
+      if (ind_map != nullptr && have_ind) {
+        (*ind_map)[mask] = last_ind;
+      }
+      if (starred) {
+        p->current = mask;
+      }
+    }
+    have_ind = false;
   }
-  return ret;
+  p->num_profiles = num_profiles;
 }
 
 static rsmi_status_t get_dev_value_str(amd::smi::DevInfoTypes type, uint32_t dv_ind,
@@ -1230,35 +1307,46 @@ static rsmi_status_t get_power_profiles(
   if (val_vec.size() > RSMI_MAX_NUM_POWER_PROFILES + 1 || val_vec.empty()) {
     return RSMI_STATUS_UNEXPECTED_SIZE;
   }
-  // -1 for the header line, below
-  p->num_profiles = static_cast<uint32_t>(val_vec.size() - 1);
+  p->num_profiles = 0;
   bool current = false;
   p->current = RSMI_PWR_PROF_PRST_INVALID;  // init to an invalid value
   p->available_profiles = 0;
 
-  rsmi_power_profile_preset_masks_t prof;
-  uint32_t prof_ind;
+  if (power_prof_header_has_names(val_vec[0])) {
+    // Columnar layout (Navi3x / SMU13 and newer): the header row itself
+    // carries every profile name plus the '*' current marker.
+    power_prof_parse_columnar(val_vec[0], p, ind_map);
+  } else {
+    // Legacy layout: one profile per row, header line skipped.
+    // -1 for the header line.
+    p->num_profiles = static_cast<uint32_t>(val_vec.size() - 1);
 
-  for (uint32_t i = 1; i < val_vec.size(); ++i) {
-    prof = power_prof_string_to_int(val_vec[i], &current, &prof_ind);
+    rsmi_power_profile_preset_masks_t prof;
+    uint32_t prof_ind;
 
-    if (prof == RSMI_PWR_PROF_PRST_INVALID) {
-      continue;
-    }
+    for (uint32_t i = 1; i < val_vec.size(); ++i) {
+      prof = power_prof_string_to_int(val_vec[i], &current, &prof_ind);
 
-    if (ind_map != nullptr) {
-      (*ind_map)[prof] = prof_ind;
-    }
+      if (prof == RSMI_PWR_PROF_PRST_INVALID) {
+        continue;
+      }
 
-    p->available_profiles |= prof;
-    if (current) {
-      // Should only be 1 current profile
-      assert(p->current == RSMI_PWR_PROF_PRST_INVALID);
-      p->current = prof;
+      if (ind_map != nullptr) {
+        (*ind_map)[prof] = prof_ind;
+      }
+
+      p->available_profiles |= prof;
+      if (current) {
+        p->current = prof;
+      }
     }
   }
 
-  assert(p->current != RSMI_PWR_PROF_PRST_INVALID);
+  // If no current profile could be identified, report unexpected data rather
+  // than aborting the caller's process (see ROCm/TheRock#6707).
+  if (p->current == RSMI_PWR_PROF_PRST_INVALID) {
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  }
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
