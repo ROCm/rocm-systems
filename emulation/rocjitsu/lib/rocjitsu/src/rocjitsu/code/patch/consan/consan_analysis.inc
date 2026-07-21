@@ -2226,9 +2226,14 @@ void preflight_kernel(ConSanKernelInfo &kernel, const ConSanOptions &options,
       count_reason("supported LDS reads", kernel.stats.lds_read_count));
   kernel.preflight_reasons.push_back(
       count_reason("supported LDS writes", kernel.stats.lds_write_count));
+  // SuperCollider checks non-atomic LDS accesses for conflicting writes by
+  // duplicating the access.  Replaying an atomic as an ordinary load/store
+  // would change program semantics, but the atomic is itself indivisible and
+  // is not a race candidate.  Keep it as a typed exclusion without rejecting
+  // co-resident ordinary LDS accesses under fail-closed policy.
   if (kernel.stats.lds_atomic_count > 0)
     kernel.preflight_reasons.push_back(
-        count_reason("non-instrumented DS atomics observed", kernel.stats.lds_atomic_count));
+        count_reason("atomic LDS accesses excluded", kernel.stats.lds_atomic_count));
   if (kernel.stats.barrier_count > 0)
     kernel.preflight_reasons.push_back(
         count_reason("barriers observed", kernel.stats.barrier_count));

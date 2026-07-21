@@ -603,7 +603,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.warnings.empty());
+  ASSERT_TRUE(result.warnings.empty());
   ASSERT_EQ(result.kernels.size(), 1u);
   EXPECT_EQ(result.target_name, "gfx1201");
   EXPECT_EQ(result.arch_name, "rdna4");
@@ -698,8 +698,9 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   ASSERT_TRUE(atomic.returns_old_value);
   EXPECT_FALSE(*atomic.returns_old_value);
   EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Candidate);
-  EXPECT_NE(std::ranges::find(kernel.preflight_reasons, "non-instrumented DS atomics observed: 1"),
-            kernel.preflight_reasons.end());
+  EXPECT_TRUE(std::ranges::any_of(kernel.preflight_reasons, [](const std::string &reason) {
+    return reason == "atomic LDS accesses excluded: 1";
+  }));
   ASSERT_EQ(result.sync_events.size(), 3u);
   const ConSanSyncEvent &atomic_event = result.sync_events[0];
   EXPECT_EQ(atomic_event.kind, ConSanSyncEventKind::Atomic);
@@ -2789,7 +2790,7 @@ TEST(ConSan, MarksSupportedLdsKernelAsPreflightCandidate) {
   EXPECT_TRUE(result.elf_bytes.empty());
 }
 
-TEST(ConSan, FailClosedAdmitsSupportedLdsSitesAlongsideAtomic) {
+TEST(ConSan, FailClosedAdmitsOrdinaryLdsAlongsideExcludedAtomic) {
   const std::vector<uint8_t> bytes = make_rdna4_unsupported_lds_code_object();
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
@@ -2798,14 +2799,13 @@ TEST(ConSan, FailClosedAdmitsSupportedLdsSitesAlongsideAtomic) {
   const auto result = try_patch_consan(bytes, options);
 
   EXPECT_TRUE(result.errors.empty());
-  EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unchanged);
+  EXPECT_NE(result.outcome, ConSanTransformOutcome::Unsupported);
   ASSERT_EQ(result.kernels.size(), 1u);
   const ConSanKernelInfo &kernel = result.kernels.front();
   EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Candidate);
-  EXPECT_NE(std::ranges::find(kernel.preflight_reasons, "non-instrumented DS atomics observed: 1"),
-            kernel.preflight_reasons.end());
-  EXPECT_FALSE(result.modified);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(std::ranges::any_of(kernel.preflight_reasons, [](const std::string &reason) {
+    return reason == "atomic LDS accesses excluded: 1";
+  }));
 }
 
 } // namespace

@@ -3583,14 +3583,8 @@ TEST(ConSan, ProbeLdsCheckTrapModeReportsExcessiveDelay) {
   EXPECT_TRUE(result.elf_bytes.empty());
 }
 
-TEST(ConSan, ProbeLdsEndpgmModeCanRewritePreflightSkippedKernel) {
-  const std::array<uint32_t, 7> text_words = {
-      0xD8340000u, 0x00000000u, // ds_store_b32
-      0xD8D80000u, 0x00000000u, // ds_load_b32
-      0xD8500000u, 0x00000000u, // ds_nop
-      0xBFB00000u,              // s_endpgm
-  };
-  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
+TEST(ConSan, ProbeLdsEndpgmModeCanRewriteCandidateWithExcludedAtomic) {
+  const std::vector<uint8_t> bytes = make_rdna4_unsupported_lds_code_object();
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   options.probe_lds_endpgm = true;
@@ -3599,7 +3593,7 @@ TEST(ConSan, ProbeLdsEndpgmModeCanRewritePreflightSkippedKernel) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.kernels.size(), 1u);
-  EXPECT_EQ(result.kernels.front().preflight_action, ConSanPreflightAction::Skip);
+  EXPECT_EQ(result.kernels.front().preflight_action, ConSanPreflightAction::Candidate);
   EXPECT_TRUE(result.modified);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsEndpgmRewrite);
