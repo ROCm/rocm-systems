@@ -25,6 +25,9 @@ on:
       notify_email:
         type: string
         default: ''
+      notify_webhook:
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -180,6 +183,7 @@ jobs:
       artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
       test_scope: ${{ inputs.test_scope }}
       notify_email: ${{ inputs.notify_email }}
+      notify_webhook: ${{ inputs.notify_webhook }}
 
   therock-test-jax-collective:
     name: "Test JAX collective (scheduled)"
@@ -192,6 +196,7 @@ jobs:
       test_runs_on: linux-gfx942-8gpu-ossci-rocm
       artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
       notify_email: ${{ inputs.notify_email }}
+      notify_webhook: ${{ inputs.notify_webhook }}
 
   therock-test-rocprof:
     name: "Test rocprofv3 smoke"
@@ -204,3 +209,4 @@ jobs:
       test_runs_on: linux-gfx942-8gpu-ossci-rocm
       artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
       notify_email: ${{ inputs.notify_email }}
+      notify_webhook: ${{ inputs.notify_webhook }}

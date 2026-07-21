@@ -17,6 +17,9 @@ on:
       notify_email:
         type: string
         default: ''
+      notify_webhook:
+        type: string
+        default: ''
   workflow_dispatch:
     inputs:
       amdgpu_families:
@@ -33,6 +36,10 @@ on:
         default: 'smoke'
       notify_email:
         description: 'Email address to send test summary report'
+        type: string
+        default: ''
+      notify_webhook:
+        description: 'Teams webhook URL for test summary notifications'
         type: string
         default: ''
 
@@ -111,7 +118,10 @@ jobs:
         run: |
           NOTIFY_ARGS=""
           if [ -n "${{ inputs.notify_email }}" ]; then
-            NOTIFY_ARGS="--notify-email ${{ inputs.notify_email }}"
+            NOTIFY_ARGS="$NOTIFY_ARGS --notify-email ${{ inputs.notify_email }}"
+          fi
+          if [ -n "${{ inputs.notify_webhook }}" ]; then
+            NOTIFY_ARGS="$NOTIFY_ARGS --notify-webhook ${{ inputs.notify_webhook }}"
           fi
           python rocm-systems/.github/scripts/test_pytorch_c10d.py \
             --artifact-dir ${{ env.OUTPUT_ARTIFACTS_DIR }} \
