@@ -902,7 +902,7 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
           std::ranges::any_of(plan.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
             return find_moi_transient_sgpr_assignment(options, descriptor_offset) != nullptr;
           });
-      if (plan.site_kind == ConSanResourceSiteKind::Access && has_owner_override) {
+      if (has_owner_override) {
         ConSanOptions owner_options = options;
         if (apply_moi_transient_sgpr_assignment(owner_options, plan.owner_descriptor_file_offsets))
           continue;

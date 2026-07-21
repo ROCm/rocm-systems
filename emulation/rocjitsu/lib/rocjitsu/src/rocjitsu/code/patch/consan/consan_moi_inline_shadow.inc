@@ -361,10 +361,19 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     const auto resources = resolve_moi_scratch(result, candidate, options, scratch_count);
     if (!resources)
       continue;
+    ConSanOptions candidate_options = options;
+    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+                                             resources->owner_descriptor_file_offsets))
+      continue;
 
     std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow;
     uint16_t workgroup_shadow_compact_token = 0u;
-    if (options.moi_inline_workgroup_shadow) {
+    const bool has_unspilled_component_override = std::ranges::any_of(
+        resources->owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
+          const auto *assignment = find_moi_transient_sgpr_assignment(options, descriptor_offset);
+          return assignment != nullptr && !assignment->spill_backed;
+        });
+    if (options.moi_inline_workgroup_shadow && !has_unspilled_component_override) {
       uint16_t next_compact_token = 0u;
       if (candidate.in_kernel && candidate.kernel_descriptor_file_offset) {
         uint16_t &next = next_compact_token_by_descriptor[*candidate.kernel_descriptor_file_offset];
@@ -444,15 +453,14 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         continue;
     }
     std::optional<InlineSgprSpillSequence> scalar_spill;
-    if (options.automatic_moi_inline_sgpr_spill) {
+    if (candidate_options.automatic_moi_inline_sgpr_spill) {
       scalar_spill = build_inline_sgpr_spill_sequence(
-          *resources, options, spill_managers, arch, result.warnings,
+          *resources, candidate_options, spill_managers, arch, result.warnings,
           private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt);
       if (!scalar_spill)
         continue;
     }
 
-    ConSanOptions candidate_options = options;
     if (!candidate_options.moi_persistent_vgpr_assignments.empty() &&
         !apply_moi_persistent_vgpr_assignment(candidate_options,
                                               resources->owner_descriptor_file_offsets)) {
@@ -646,7 +654,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   MoiDescriptorLdsRequirements lds_requirements;
   for (const PlannedInlineShadowPatch &planned_patch : planned_patches) {
     note_descriptor_requirements(descriptor_requirements, planned_patch.resources);
-    note_moi_sgpr_requirements(scalar_requirements, planned_patch.resources, options, arch);
+    ConSanOptions candidate_options = options;
+    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+                                             planned_patch.resources.owner_descriptor_file_offsets))
+      continue;
+    note_moi_sgpr_requirements(scalar_requirements, planned_patch.resources, candidate_options,
+                               arch);
     if (planned_patch.workgroup_shadow) {
       note_moi_lds_requirements(lds_requirements, planned_patch.resources,
                                 *planned_patch.workgroup_shadow);
@@ -697,17 +710,22 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         dense_groups[*planned_patch.dense_dispatcher_offset].push_back(&planned_patch);
     }
     for (const auto &[dispatcher_offset, group] : dense_groups) {
-      if (group.empty() || !options.moi_exec_save_sgpr || !group.front()->entry_island_offset)
+      if (group.empty() || !group.front()->entry_island_offset)
         continue;
-      const uint16_t base = *options.moi_exec_save_sgpr;
-      const uint16_t key_sgpr = options.automatic_moi_inline_sgpr_spill
-                                    ? *options.moi_inline_dispatch_key_sgpr
+      ConSanOptions group_options = options;
+      if (!apply_moi_transient_sgpr_assignment(
+              group_options, group.front()->resources.owner_descriptor_file_offsets) ||
+          !group_options.moi_exec_save_sgpr)
+        continue;
+      const uint16_t base = *group_options.moi_exec_save_sgpr;
+      const uint16_t key_sgpr = group_options.automatic_moi_inline_sgpr_spill
+                                    ? *group_options.moi_inline_dispatch_key_sgpr
                                     : static_cast<uint16_t>(base + 12u);
-      const uint16_t call_return_sgpr = options.automatic_moi_inline_sgpr_spill
-                                            ? *options.moi_inline_call_return_sgpr
+      const uint16_t call_return_sgpr = group_options.automatic_moi_inline_sgpr_spill
+                                            ? *group_options.moi_inline_call_return_sgpr
                                             : static_cast<uint16_t>(base + 28u);
       const uint64_t island_offset = *group.front()->entry_island_offset;
-      const MoiIndirectJumpSgprs jump_sgprs = *moi_indirect_jump_sgprs(options);
+      const MoiIndirectJumpSgprs jump_sgprs = *moi_indirect_jump_sgprs(group_options);
 
       std::vector<uint32_t> island_words;
       if (!append_moi_scc_preserving_indirect_jump(island_words, island_offset, dispatcher_offset,
@@ -898,6 +916,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     for (const PlannedInlineShadowPatch &planned_patch : planned_patches) {
       const ConSanMoiCandidate &candidate = *planned_patch.candidate;
       ConSanOptions candidate_options = options;
+      if (!apply_moi_transient_sgpr_assignment(
+              candidate_options, planned_patch.resources.owner_descriptor_file_offsets)) {
+        result.errors.emplace_back(
+            "ConSan MOI inline-shadow access lost its transient scalar assignment");
+        return;
+      }
       if (!candidate_options.moi_persistent_vgpr_assignments.empty() &&
           !apply_moi_persistent_vgpr_assignment(
               candidate_options, planned_patch.resources.owner_descriptor_file_offsets)) {
@@ -990,7 +1014,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           return;
 
         if (planned_patch.entry_island_offset && !planned_patch.dense_call_anchor) {
-          const auto jump_sgprs = moi_indirect_jump_sgprs(options);
+          const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options);
           if (!jump_sgprs) {
             result.errors.emplace_back(
                 "ConSan MOI inline-shadow probe has no indirect jump scalar state");
@@ -1055,12 +1079,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           cave_words->insert(cave_words->end(), displaced_tail_words.begin(),
                              displaced_tail_words.end());
           const uint16_t call_return_sgpr =
-              options.automatic_moi_inline_sgpr_spill
-                  ? *options.moi_inline_call_return_sgpr
-                  : static_cast<uint16_t>(*options.moi_exec_save_sgpr + 28u);
+              candidate_options.automatic_moi_inline_sgpr_spill
+                  ? *candidate_options.moi_inline_call_return_sgpr
+                  : static_cast<uint16_t>(*candidate_options.moi_exec_save_sgpr + 28u);
           cave_words->push_back(build_s_setpc_b64(call_return_sgpr, arch));
         } else if (planned_patch.entry_island_offset) {
-          const auto jump_sgprs = moi_indirect_jump_sgprs(options);
+          const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options);
           if (!jump_sgprs) {
             result.errors.emplace_back(
                 "ConSan MOI inline-shadow probe has no return jump scalar state");
@@ -1139,7 +1163,16 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           append_word_bytes(new_text, build_s_nop(0, arch));
         continue;
       }
-      const auto jump_sgprs = moi_indirect_jump_sgprs(options);
+      const auto &group = dense_groups.at(dispatcher);
+      ConSanOptions group_options = options;
+      if (group.empty() ||
+          !apply_moi_transient_sgpr_assignment(
+              group_options, group.front()->resources.owner_descriptor_file_offsets)) {
+        result.errors.emplace_back(
+            "ConSan MOI inline-shadow probe lost its dense host scalar assignment");
+        return;
+      }
+      const auto jump_sgprs = moi_indirect_jump_sgprs(group_options);
       std::vector<uint32_t> host_words = host.displaced_words;
       if (!jump_sgprs ||
           !append_moi_scc_preserving_indirect_jump(

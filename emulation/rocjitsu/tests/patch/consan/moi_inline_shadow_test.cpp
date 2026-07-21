@@ -2882,6 +2882,82 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersUseSpillBackedRouter) {
   }
 }
 
+TEST(ConSanMoi, Gfx1250InlineUsesComponentLocalScalarSpillForMixedPressureOwners) {
+  const auto make_owner = [](std::span<const uint16_t> live_sgprs) {
+    const uint16_t dead_destination = live_sgprs.size() > 3u ? 0u : 5u;
+    std::vector<uint32_t> words = {
+        0xD8340000u,
+        0x00000000u, // ds_store_b32 v0, v0
+    };
+    for (uint16_t sgpr : live_sgprs)
+      words.push_back(build_s_mov_b32(dead_destination, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
+    words.push_back(*build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_GFX1250));
+    words.push_back(*build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_GFX1250));
+    for (uint16_t sgpr : live_sgprs)
+      words.push_back(build_s_mov_b32(dead_destination, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
+    words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+    return words;
+  };
+
+  // The low-pressure owner admits the code-object-wide high window.  The
+  // second owner reaches s101 and has no dead 30-SGPR Inline window, while
+  // retaining a dead PC pair and SCC slot plus four fresh high registers for
+  // visible evidence, dispatch key, and call return.  The union fills those
+  // low holes, so only component-scoped spill can instrument both owners.
+  const std::array<uint16_t, 3> low_live = {0u, 1u, 4u};
+  std::vector<uint16_t> high_live;
+  for (uint16_t sgpr = 0; sgpr <= 101u; ++sgpr) {
+    if (sgpr != 0u && sgpr != 1u && sgpr != 4u)
+      high_live.push_back(sgpr);
+  }
+  const std::vector<uint8_t> bytes = make_gfx1250_code_object_with_local_function(
+      make_owner(low_live), make_owner(high_live), {}, kRdna4Wave64AllVgprsGranulated,
+      /*function_is_kernel=*/true);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.scratch_vgpr = 8;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_inline_workgroup_shadow = true;
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 8u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u)
+      << testing::PrintToString(result.warnings);
+  const ConSanMoiTransientSgprAssignment &assignment =
+      result.resolved_moi_transient_sgpr_assignments.front();
+  EXPECT_TRUE(assignment.spill_backed);
+  EXPECT_TRUE(assignment.visible_evidence_sgpr);
+  EXPECT_TRUE(assignment.indirect_pc_sgpr);
+  EXPECT_TRUE(assignment.indirect_scc_sgpr);
+  EXPECT_TRUE(assignment.dispatch_key_sgpr);
+  EXPECT_TRUE(assignment.call_return_sgpr);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
+                               &ConSanPatchInfo::kind),
+            2u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
+                               &ConSanPatchInfo::kind),
+            2u);
+  EXPECT_TRUE(std::ranges::all_of(result.resource_plans, [](const auto &plan) {
+    return (plan.site_kind != ConSanResourceSiteKind::Access &&
+            plan.site_kind != ConSanResourceSiteKind::Barrier) ||
+           plan.source != ConSanRegisterAllocationSource::Unsupported;
+  }));
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return (patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
+            patch.kind == ConSanPatchKind::TrampolineMoiInlineEpochBarrier) &&
+           patch.required_private_segment_size > 0u;
+  }));
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, InlineShadowPreservesTwoAddressLoadAddressAliasedBySecondResult) {
   const std::array<uint32_t, 3> text_words = {
       0xD9DC1D1Cu,

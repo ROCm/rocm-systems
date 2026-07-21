@@ -221,6 +221,7 @@ struct ConSanMoiTransientSgprAssignment {
   std::optional<uint16_t> indirect_scc_sgpr;
   std::optional<uint16_t> dispatch_key_sgpr;
   std::optional<uint16_t> call_return_sgpr;
+  std::optional<uint16_t> visible_evidence_sgpr;
 
   auto operator<=>(const ConSanMoiTransientSgprAssignment &) const = default;
 };

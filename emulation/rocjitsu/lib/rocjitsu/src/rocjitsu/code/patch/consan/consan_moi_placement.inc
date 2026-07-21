@@ -710,20 +710,35 @@ apply_moi_transient_sgpr_assignment(ConSanOptions &options,
                      selected->indirect_pc_sgpr != assignment->indirect_pc_sgpr ||
                      selected->indirect_scc_sgpr != assignment->indirect_scc_sgpr ||
                      selected->dispatch_key_sgpr != assignment->dispatch_key_sgpr ||
-                     selected->call_return_sgpr != assignment->call_return_sgpr))
+                     selected->call_return_sgpr != assignment->call_return_sgpr ||
+                     selected->visible_evidence_sgpr != assignment->visible_evidence_sgpr))
       return false;
     selected = assignment;
   }
-  if (!selected)
-    return options.moi_exec_save_sgpr.has_value();
+  if (!selected) {
+    return options.moi_exec_save_sgpr.has_value() ||
+           (options.moi_engine == ConSanMoiEngine::InlineShadow &&
+            options.automatic_moi_inline_sgpr_spill && options.moi_inline_indirect_pc_sgpr &&
+            options.moi_inline_indirect_scc_sgpr && options.moi_inline_dispatch_key_sgpr &&
+            options.moi_inline_call_return_sgpr);
+  }
   if (saw_unassigned_owner)
     return false;
   options.moi_exec_save_sgpr = selected->exec_save_sgpr;
-  options.automatic_moi_record_replay_sgpr_spill = selected->spill_backed;
   options.moi_inline_indirect_pc_sgpr = selected->indirect_pc_sgpr;
   options.moi_inline_indirect_scc_sgpr = selected->indirect_scc_sgpr;
-  options.moi_record_replay_dispatch_key_sgpr = selected->dispatch_key_sgpr;
-  options.moi_record_replay_call_return_sgpr = selected->call_return_sgpr;
+  if (options.moi_engine == ConSanMoiEngine::InlineShadow) {
+    options.automatic_moi_inline_sgpr_spill = selected->spill_backed;
+    options.automatic_moi_record_replay_sgpr_spill = false;
+    options.moi_inline_dispatch_key_sgpr = selected->dispatch_key_sgpr;
+    options.moi_inline_call_return_sgpr = selected->call_return_sgpr;
+    options.moi_inline_visible_evidence_sgpr = selected->visible_evidence_sgpr;
+  } else {
+    options.automatic_moi_inline_sgpr_spill = false;
+    options.automatic_moi_record_replay_sgpr_spill = selected->spill_backed;
+    options.moi_record_replay_dispatch_key_sgpr = selected->dispatch_key_sgpr;
+    options.moi_record_replay_call_return_sgpr = selected->call_return_sgpr;
+  }
   return true;
 }
 
@@ -1420,7 +1435,8 @@ moi_indirect_jump_sgprs(const ConSanOptions &options) {
 configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSanResult &result,
                                                    std::span<const uint8_t> bytes,
                                                    rj_code_arch_t arch) {
-  if (options.moi_engine != ConSanMoiEngine::RecordReplay ||
+  if ((options.moi_engine != ConSanMoiEngine::RecordReplay &&
+       options.moi_engine != ConSanMoiEngine::InlineShadow) ||
       !options.automatic_moi_partial_exec_save_sgprs || !options.moi_exec_save_sgpr)
     return false;
 
@@ -1525,30 +1541,130 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     std::optional<uint16_t> spill_call_return;
     std::optional<uint16_t> spill_scc;
     std::optional<uint16_t> spill_key;
-    for (uint32_t base = 0; base + count <= limit; base += 2u) {
-      const uint16_t candidate = static_cast<uint16_t>(base);
-      if (intersects(unavailable, candidate, count) ||
-          (options.moi_owner_sgpr &&
-           range_overlaps(candidate, count, *options.moi_owner_sgpr, 1u)) ||
-          (options.moi_dispatch_id_sgpr &&
-           range_overlaps(candidate, count, *options.moi_dispatch_id_sgpr,
-                          moi_dispatch_state_sgpr_count(options))) ||
-          (options.moi_dynamic_stack_spill &&
-           range_overlaps(candidate, count, /*stack top=*/32u, /*stack registers=*/2u)))
-        continue;
-      const bool overlaps_original_cdna4_vcc =
-          arch == ROCJITSU_CODE_ARCH_CDNA4 && std::ranges::any_of(owners, [&](uint64_t owner) {
-            const MoiKernelResourceContext *context = context_for_owner(owner);
-            return context != nullptr && context->current_sgpr_count >= 2u &&
-                   range_overlaps(candidate, count,
-                                  static_cast<uint16_t>(context->current_sgpr_count - 2u), 2u);
-          });
-      if (overlaps_original_cdna4_vcc)
-        continue;
-      selected = candidate;
-      break;
+    std::optional<uint16_t> spill_visible;
+    if (options.moi_engine == ConSanMoiEngine::RecordReplay) {
+      for (uint32_t base = 0; base + count <= limit; base += 2u) {
+        const uint16_t candidate = static_cast<uint16_t>(base);
+        if (intersects(unavailable, candidate, count) ||
+            (options.moi_owner_sgpr &&
+             range_overlaps(candidate, count, *options.moi_owner_sgpr, 1u)) ||
+            (options.moi_dispatch_id_sgpr &&
+             range_overlaps(candidate, count, *options.moi_dispatch_id_sgpr,
+                            moi_dispatch_state_sgpr_count(options))) ||
+            (options.moi_dynamic_stack_spill &&
+             range_overlaps(candidate, count, /*stack top=*/32u, /*stack registers=*/2u)))
+          continue;
+        const bool overlaps_original_cdna4_vcc =
+            arch == ROCJITSU_CODE_ARCH_CDNA4 && std::ranges::any_of(owners, [&](uint64_t owner) {
+              const MoiKernelResourceContext *context = context_for_owner(owner);
+              return context != nullptr && context->current_sgpr_count >= 2u &&
+                     range_overlaps(candidate, count,
+                                    static_cast<uint16_t>(context->current_sgpr_count - 2u), 2u);
+            });
+        if (overlaps_original_cdna4_vcc)
+          continue;
+        selected = candidate;
+        break;
+      }
     }
-    if (!selected && arch == ROCJITSU_CODE_ARCH_GFX1250 && !options.moi_dynamic_stack_spill &&
+    if (!selected && options.moi_engine == ConSanMoiEngine::InlineShadow &&
+        arch == ROCJITSU_CODE_ARCH_GFX1250 && !options.moi_dynamic_stack_spill &&
+        address_free_scratch_private_limit(arch)) {
+      const auto reserved = [&](uint16_t base, uint16_t width) {
+        return (options.moi_owner_sgpr &&
+                range_overlaps(base, width, *options.moi_owner_sgpr, 1u)) ||
+               (options.moi_dispatch_id_sgpr &&
+                range_overlaps(base, width, *options.moi_dispatch_id_sgpr,
+                               moi_dispatch_state_sgpr_count(options)));
+      };
+      uint32_t initialized_end = 0u;
+      uint32_t referenced_end = 0u;
+      for (uint64_t owner : owners) {
+        const MoiKernelResourceContext *context = context_for_owner(owner);
+        if (context)
+          referenced_end = std::max<uint32_t>(referenced_end, context->max_referenced_sgpr_count);
+        if (owner > bytes.size() || sizeof(KD) > bytes.size() - owner)
+          continue;
+        KD descriptor{};
+        std::memcpy(&descriptor, bytes.data() + owner, sizeof(descriptor));
+        initialized_end =
+            std::max<uint32_t>(initialized_end, moi_descriptor_user_sgpr_count(descriptor) +
+                                                    moi_descriptor_system_sgpr_count(descriptor));
+      }
+      const auto unavailable_or_reserved = [&](uint16_t base, uint16_t width, uint16_t spill_base) {
+        return range_overlaps(base, width, spill_base, count) || reserved(base, width) ||
+               intersects(unavailable, base, width);
+      };
+      for (uint32_t base = util::align_up(initialized_end, 2u); !selected && base + count <= limit;
+           base += 2u) {
+        const uint16_t spill_base = static_cast<uint16_t>(base);
+        if (reserved(spill_base, count))
+          continue;
+        for (uint32_t reg = referenced_end; reg < limit; ++reg) {
+          const uint16_t candidate = static_cast<uint16_t>(reg);
+          if (!range_overlaps(candidate, 1u, spill_base, count) && !reserved(candidate, 1u)) {
+            spill_visible = candidate;
+            break;
+          }
+        }
+        for (uint32_t pc = 0; spill_visible && pc + 2u <= limit; pc += 2u) {
+          const uint16_t candidate = static_cast<uint16_t>(pc);
+          if (!unavailable_or_reserved(candidate, 2u, spill_base) && candidate != *spill_visible &&
+              candidate + 1u != *spill_visible) {
+            spill_pc = candidate;
+            break;
+          }
+        }
+        for (uint32_t reg = 0; spill_pc && reg < limit; ++reg) {
+          const uint16_t candidate = static_cast<uint16_t>(reg);
+          if (!unavailable_or_reserved(candidate, 1u, spill_base) && candidate != *spill_visible &&
+              !range_overlaps(candidate, 1u, *spill_pc, 2u)) {
+            spill_scc = candidate;
+            break;
+          }
+        }
+        for (uint32_t reg = referenced_end; spill_scc && reg < limit; ++reg) {
+          const uint16_t candidate = static_cast<uint16_t>(reg);
+          if (!unavailable_or_reserved(candidate, 1u, spill_base) && candidate != *spill_visible &&
+              !range_overlaps(candidate, 1u, *spill_pc, 2u) && candidate != *spill_scc) {
+            spill_key = candidate;
+            break;
+          }
+        }
+        for (uint32_t call = util::align_up(referenced_end, 2u); spill_key && call + 2u <= limit;
+             call += 2u) {
+          const uint16_t candidate = static_cast<uint16_t>(call);
+          if (!unavailable_or_reserved(candidate, 2u, spill_base) &&
+              !range_overlaps(candidate, 2u, *spill_visible, 1u) &&
+              !range_overlaps(candidate, 2u, *spill_pc, 2u) &&
+              !range_overlaps(candidate, 2u, *spill_scc, 1u) &&
+              !range_overlaps(candidate, 2u, *spill_key, 1u)) {
+            spill_call_return = candidate;
+            break;
+          }
+        }
+        if (spill_call_return)
+          selected = spill_base;
+        else
+          spill_visible = spill_pc = spill_scc = spill_key = std::nullopt;
+      }
+      // If no complete spill router exists, an owner-local window that is
+      // dead at every instrumentation site remains useful for external-shadow
+      // probes.  It cannot carry the entry-to-probe visible-evidence latch;
+      // access selection therefore keeps such owners off the local LDS mirror.
+      if (!selected) {
+        for (uint32_t base = util::align_up(initialized_end, 2u); base + count <= limit;
+             base += 2u) {
+          const uint16_t candidate = static_cast<uint16_t>(base);
+          if (!reserved(candidate, count) && !intersects(unavailable, candidate, count)) {
+            selected = candidate;
+            break;
+          }
+        }
+      }
+    }
+    if (!selected && options.moi_engine == ConSanMoiEngine::RecordReplay &&
+        arch == ROCJITSU_CODE_ARCH_GFX1250 && !options.moi_dynamic_stack_spill &&
         address_free_scratch_private_limit(arch)) {
       const auto reserved = [&](uint16_t base, uint16_t width) {
         return (options.moi_owner_sgpr &&
@@ -1602,7 +1718,9 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     }
     if (!selected)
       continue;
-    const bool spill_backed = spill_pc && spill_scc && spill_key && spill_call_return;
+    const bool spill_backed =
+        spill_pc && spill_scc && spill_key && spill_call_return &&
+        (options.moi_engine != ConSanMoiEngine::InlineShadow || spill_visible);
     for (uint64_t owner : owners) {
       options.moi_transient_sgpr_assignments.push_back({.descriptor_file_offset = owner,
                                                         .exec_save_sgpr = *selected,
@@ -1610,7 +1728,8 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
                                                         .indirect_pc_sgpr = spill_pc,
                                                         .indirect_scc_sgpr = spill_scc,
                                                         .dispatch_key_sgpr = spill_key,
-                                                        .call_return_sgpr = spill_call_return});
+                                                        .call_return_sgpr = spill_call_return,
+                                                        .visible_evidence_sgpr = spill_visible});
     }
     assigned_any = true;
   }
@@ -1755,6 +1874,57 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
           "ConSan MOI automatically assigned liveness-dead EXEC-save SGPRs s" +
           std::to_string(base) + ":s" + std::to_string(base + count - 1u));
       return true;
+    }
+  }
+
+  // Prefer a high window for owners that already fit and component-scoped
+  // assignments for the independent owners that do not.  Trying this before
+  // the monolithic Inline spill fallback avoids spilling every kernel in a
+  // generated library merely because one component has high scalar pressure.
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250 && options.moi_engine == ConSanMoiEngine::InlineShadow) {
+    const int32_t last_base = static_cast<int32_t>((ordinary_sgpr_limit - count) & ~1u);
+    for (int32_t base = last_base; base >= 0; base -= 2) {
+      const uint16_t candidate = static_cast<uint16_t>(base);
+      if ((options.moi_owner_sgpr &&
+           range_overlaps(candidate, count, *options.moi_owner_sgpr, 1u)) ||
+          (options.moi_dispatch_id_sgpr &&
+           range_overlaps(candidate, count, *options.moi_dispatch_id_sgpr,
+                          moi_dispatch_state_sgpr_count(options))) ||
+          (options.moi_dynamic_stack_spill &&
+           range_overlaps(candidate, count, /*stack top=*/32u, /*stack registers=*/2u))) {
+        continue;
+      }
+      const bool admits_owner =
+          std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+            return plan.source != ConSanRegisterAllocationSource::Unsupported &&
+                   !plan.owner_descriptor_file_offsets.empty() &&
+                   plan.max_referenced_sgpr_count <= candidate;
+          });
+      const bool excludes_owner =
+          std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+            return !plan.owner_descriptor_file_offsets.empty() &&
+                   plan.max_referenced_sgpr_count > candidate;
+          });
+      if (!admits_owner || !excludes_owner)
+        continue;
+      options.moi_exec_save_sgpr = candidate;
+      options.automatic_moi_exec_save_sgprs = true;
+      options.automatic_moi_partial_exec_save_sgprs = true;
+      options.moi_exec_save_sgprs_persistent = true;
+      if (configure_automatic_moi_transient_sgpr_assignments(options, result, bytes, arch)) {
+        result.resolved_moi_exec_save_sgpr = options.moi_exec_save_sgpr;
+        result.moi_exec_save_sgprs_automatic = true;
+        result.warnings.emplace_back(
+            "ConSan MOI reserved a high EXEC-save SGPR window and assigned "
+            "component-local scalar state to incompatible owners");
+        return true;
+      }
+      options.moi_transient_sgpr_assignments.clear();
+      result.resolved_moi_transient_sgpr_assignments.clear();
+      options.moi_exec_save_sgpr.reset();
+      options.automatic_moi_exec_save_sgprs = false;
+      options.automatic_moi_partial_exec_save_sgprs = false;
+      options.moi_exec_save_sgprs_persistent = false;
     }
   }
 
@@ -1937,7 +2107,8 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   // which to seed the ordinary high-window fallback. Seed component planning
   // with a placeholder; every admitted owner must replace it with either a
   // liveness-dead window or the spill-backed Record/Replay layout.
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250 && options.moi_engine == ConSanMoiEngine::RecordReplay) {
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250 && (options.moi_engine == ConSanMoiEngine::RecordReplay ||
+                                             options.moi_engine == ConSanMoiEngine::InlineShadow)) {
     options.moi_exec_save_sgpr = 0u;
     options.automatic_moi_exec_save_sgprs = true;
     options.automatic_moi_partial_exec_save_sgprs = true;

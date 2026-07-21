@@ -122,7 +122,7 @@ flowchart TD
     XP3["XP3 TODO<br/>top-k SC oracle passes;<br/>current exact object has 88 bounded gaps"]
     XP9["XP9 DONE<br/>norm plus softmax Record/Replay clean, paired,<br/>and reviewed-fault bundle green"]
     XP9B["XP9B DONE<br/>norm plus softmax Sampled clean, paired,<br/>and reviewed-fault bundle green"]
-    XP9C["XP9C ACTIVE<br/>norm/softmax Inline residual;<br/>16--19 VGPR spill/resource investigation"]
+    XP9C["XP9C ACTIVE<br/>norm/softmax Inline residual;<br/>component-scoped EXEC-save SGPR spill"]
     XP10["XP10 DONE<br/>cluster Record/Replay clean, paired, and reviewed-fault<br/>bundle accepted at 23/23 accesses and 2/2 barriers"]
     XT0["XT0 DONE<br/>RocJITsu corpus runner, provenance,<br/>and one-repetition contract"]
     XT1["XT1 DONE<br/>both compact P0 kernels green<br/>in all four profiles"]
@@ -351,6 +351,25 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP9C advances within ACTIVE/blue.  Component-scoped Inline
+  scalar state now covers accesses, barriers, and owner-entry initialization;
+  local-LDS-shadow owners require a private-memory-backed 30-SGPR save while
+  external-shadow owners may use a proven site-dead window.  The new
+  mixed-pressure regression and the existing dense barrier regression pass,
+  as do 73/73 Record/Replay tests.  Dirty-tree artifact
+  `consan-green-expansion-20260721-norm-softmax-inline-component-spill-dirty-078`
+  passes the exact oracle with static/dynamic completeness, 4,756/4,756
+  accesses, and 2,352/2,352 barriers.  XP9C remains ACTIVE for a committed
+  clean rerun, paired overhead, and reviewed-fault gates.
+
+- 2026-07-21: XP9C's source-level diagnosis is corrected while its ACTIVE/blue
+  disposition remains unchanged.  The 474 access and 189 barrier
+  `forbidden_overlap` failures are scalar EXEC-save-window exclusions, not a
+  shortage of 16--19 temporary VGPRs.  Record/Replay already supports
+  component-scoped transient SGPR spill assignments; the active implementation
+  work is to generalize that path correctly to Inline access and barrier
+  lowering.  The separate 1,022 bounded publication-contention events remain.
 
 - 2026-07-21: XP9C becomes the sole ACTIVE/blue Mermaid box after the bounded
   XP2B rotation.  The next Inline Shadow target is the already-isolated
