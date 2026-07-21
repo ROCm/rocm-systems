@@ -146,21 +146,30 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
   const auto collision_label = sequence.make_label();
   const auto restore_label = sequence.make_label();
   const auto matched_window_label = sequence.make_label();
-  const bool select_guest_vgpr_bank =
-      arch == ROCJITSU_CODE_ARCH_GFX1250 && gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
-  if (select_guest_vgpr_bank)
-    words.push_back(*instrumentation::build_s_set_vgpr_msb(0u, arch));
+  const bool control_gfx1250_vgpr_bank = arch == ROCJITSU_CODE_ARCH_GFX1250;
+  const bool restore_guest_vgpr_bank =
+      control_gfx1250_vgpr_bank && gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
+  // A patched s_call_i64 can be immediately followed by the guest's next
+  // s_set_vgpr_msb.  That program-state update may take effect as control
+  // transfers, even when the replaced barrier itself ran in mode zero.  Make
+  // every gfx1250 cave establish its low-register invariant explicitly before
+  // touching scratch VGPRs.
+  if (control_gfx1250_vgpr_bank)
+    words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+        static_cast<uint8_t>(gfx1250_vgpr_msb_mode.value_or(0u)), 0u, arch));
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
-  if (select_guest_vgpr_bank)
-    words.push_back(*instrumentation::build_s_set_vgpr_msb(*gfx1250_vgpr_msb_mode, arch));
+  if (restore_guest_vgpr_bank)
+    words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+        0u, static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), arch));
   for (uint64_t offset = 0; offset < candidate.barrier.site.size; offset += sizeof(uint32_t)) {
     uint32_t word = 0;
     std::memcpy(&word, bytes.data() + candidate.barrier.site.file_offset + offset, sizeof(word));
     words.push_back(word);
   }
-  if (select_guest_vgpr_bank)
-    words.push_back(*instrumentation::build_s_set_vgpr_msb(0u, arch));
+  if (restore_guest_vgpr_bank)
+    words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+        static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), 0u, arch));
   if (private_epoch_offset) {
     if (!options.automatic_moi_private_epoch) {
       errors.emplace_back("ConSan MOI sampled barrier has an invalid private epoch plan");
@@ -550,8 +559,9 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
   }
   if (spill)
     words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
-  if (select_guest_vgpr_bank)
-    words.push_back(*instrumentation::build_s_set_vgpr_msb(*gfx1250_vgpr_msb_mode, arch));
+  if (restore_guest_vgpr_bank)
+    words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+        0u, static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), arch));
   const uint64_t branch_pc = cave_text_offset + words.size() * sizeof(uint32_t);
   const auto ret = compute_sopp_branch_simm16(branch_pc, return_text_offset);
   if (ret) {
@@ -1876,7 +1886,8 @@ build_fence_record_cave_words(std::span<const uint8_t> bytes, const FenceRecordC
                 (spill ? spill->save_words.size() + spill->restore_words.size() : 0u) +
                 (select_low_vgpr_bank ? 2u : 0u));
   if (select_low_vgpr_bank)
-    words.push_back(*instrumentation::build_s_set_vgpr_msb(0u, arch));
+    words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+        static_cast<uint8_t>(*vgpr_msb_mode), 0u, arch));
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
   if (address_plan.requires_materialization()) {
@@ -1950,7 +1961,8 @@ build_fence_record_cave_words(std::span<const uint8_t> bytes, const FenceRecordC
   if (spill)
     words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
   if (select_low_vgpr_bank)
-    words.push_back(*instrumentation::build_s_set_vgpr_msb(*vgpr_msb_mode, arch));
+    words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+        0u, static_cast<uint8_t>(*vgpr_msb_mode), arch));
   if (call_return_sgpr) {
     words.push_back(build_s_setpc_b64(*call_return_sgpr, arch));
   } else if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset,

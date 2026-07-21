@@ -1087,7 +1087,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250VdsLoadInPlace) {
 
 TEST(ConSan, ProbeLdsCheckTrapModePreservesGfx1250GuestVgprBankMode) {
   constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
-  constexpr uint32_t kSelectLowVgprBank = 0xBF860000u;
+  constexpr uint32_t kSelectLowVgprBank = 0xBF860100u;
   constexpr uint32_t kSelectGuestVgprBank = 0xBF860001u;
   std::vector<uint32_t> text_words = {kSelectGuestVgprBank, load[0], load[1]};
   text_words.resize(32u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
@@ -1127,7 +1127,7 @@ TEST(ConSan, ProbeLdsCheckTrapModePreservesGfx1250GuestVgprBankMode) {
 
 TEST(ConSan, ProbeLdsCheckTrapModePreservesGfx1250LowBankAddressForHighBankLoad) {
   constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB128Vds, {.addr = 2, .vdst = 1});
-  constexpr uint32_t kSelectLowVgprBank = 0xBF860000u;
+  constexpr uint32_t kSelectLowVgprBank = 0xBF864000u;
   constexpr uint32_t kSelectGuestVgprBank = 0xBF860040u;
   std::vector<uint32_t> text_words = {kSelectGuestVgprBank, load[0], load[1]};
   text_words.resize(48u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));

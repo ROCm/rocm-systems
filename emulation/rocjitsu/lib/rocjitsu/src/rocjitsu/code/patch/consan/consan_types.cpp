@@ -75,7 +75,9 @@ std::optional<uint16_t> consan_gfx1250_vgpr_msb_mode_at(std::span<const uint8_t>
     uint32_t word = 0;
     std::memcpy(&word, bytes.data() + offset, sizeof(word));
     if ((word & 0xFFFF0000u) == 0xBF860000u)
-      mode = static_cast<uint16_t>(word);
+      // The low byte is the mode established by this instruction.  The high
+      // byte records the previous mode and must not become persistent state.
+      mode = static_cast<uint16_t>(word & 0xFFu);
   }
   return mode;
 }

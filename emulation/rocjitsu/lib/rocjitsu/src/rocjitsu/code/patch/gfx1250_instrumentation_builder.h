@@ -15,12 +15,21 @@ namespace rocjitsu {
 ///
 /// Instrumentation uses this to select the low 256-register window while it
 /// executes its own vector instructions, then restores the guest's operand
-/// bank selection before executing displaced code.
+/// bank selection before executing displaced code.  The low byte selects the
+/// new layout and the high byte records the previous layout.
 [[nodiscard]] inline constexpr std::optional<uint32_t>
-build_gfx1250_s_set_vgpr_msb(uint16_t mode, rj_code_arch_t arch) {
+build_gfx1250_s_set_vgpr_msb(uint16_t packed_transition, rj_code_arch_t arch) {
   if (arch != ROCJITSU_CODE_ARCH_GFX1250)
     return std::nullopt;
-  return 0xBF860000u | mode;
+  return 0xBF860000u | packed_transition;
+}
+
+/// @brief Encode a gfx1250 VGPR-bank transition.
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+build_gfx1250_s_set_vgpr_msb_transition(uint8_t previous_mode, uint8_t new_mode,
+                                        rj_code_arch_t arch) {
+  return build_gfx1250_s_set_vgpr_msb(
+      static_cast<uint16_t>((static_cast<uint16_t>(previous_mode) << 8u) | new_mode), arch);
 }
 
 /// @brief Encode gfx1250 `s_call_i64 s[sdst:sdst+1], simm16`.

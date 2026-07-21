@@ -131,10 +131,10 @@ flowchart TD
     XT2C2["XT2C2 TODO<br/>004 Stream-K kernel 3/4;<br/>Inline long-bound completion remains"]
     XT2C3["XT2C3 TODO<br/>007 Stream-K kernel 3/4;<br/>Inline long-bound completion remains"]
     XT3A["XT3A TODO<br/>reduced SGEMM SC/RR/Sampled green;<br/>Inline backend-dependent and long"]
-    XT3B["XT3B TODO<br/>HGEMM reaches 136 exact rows at 300 seconds;<br/>F8 fault health also remains"]
+    XT3B["XT3B ACTIVE<br/>HGEMM reaches 136 exact rows at 300 seconds;<br/>F8 SuperCollider fault health under bounded review"]
     XT3D["XT3D DONE<br/>full SGEMM first problem complete;<br/>quadratic 115,776-event frontier isolated"]
     XT3E["XT3E TODO<br/>both emulator baselines prove intrinsic full-grid bound;<br/>substantially longer unrestricted RR run remains"]
-    XT3C["XT3C ACTIVE<br/>SPMM F8 Sampled fully patches second object;<br/>instrumentation-dependent execution assertion under triage"]
+    XT3C["XT3C DONE<br/>SPMM F8 Sampled exact client passes;<br/>19,960 accesses and 806 barrier members covered"]
     XT4A["XT4A DONE<br/>019 F16 clean, paired, and reviewed-fault bundle<br/>accepted at 31,265/31,265 accesses"]
     XT4["XT4 DONE<br/>decoded opcode union frozen over accepted rows,<br/>including complete 019 bundle"]
     XF["XF TODO<br/>fault, resource, and frozen-tip bundles<br/>for every expansion row"]
@@ -296,10 +296,10 @@ flowchart TD
   classDef todo fill:#e8e8e8,stroke:#666666,color:#111111,stroke-width:1px
   classDef blocked fill:#9e2a2b,stroke:#ffd0d0,color:#ffffff,stroke-width:3px
 
-  class R0,E0,D0,C0,V0,B0,B1,B2,B3,B4,B5,S0,S1,S2,S3,S4,S5,S6,A0,A1,A2,A3A,A4A,SC0,RR0,SA0,IS0,IS1,F0,Q0,V1,V2,V3,V8,V4A,V4B,V4C,V4D,V5A,V5B,V6A,V6B,V7,VT,VD,VP,VW,X0,XP0,XP1,XP2A,XP2C,XP4,XP5,XP6,XP7,XP8,XP9,XP10,XT1,XT2A,XT2B,XT2C1,XT3D,XT4A,XT4 done
+  class R0,E0,D0,C0,V0,B0,B1,B2,B3,B4,B5,S0,S1,S2,S3,S4,S5,S6,A0,A1,A2,A3A,A4A,SC0,RR0,SA0,IS0,IS1,F0,Q0,V1,V2,V3,V8,V4A,V4B,V4C,V4D,V5A,V5B,V6A,V6B,V7,VT,VD,VP,VW,X0,XP0,XP1,XP2A,XP2C,XP4,XP5,XP6,XP7,XP8,XP9,XP10,XT1,XT2A,XT2B,XT2C1,XT3C,XT3D,XT4A,XT4 done
   class XP9B done
-  class XT3C active
-  class G0,XP1B,XP2B,XP2D,XP3,XP9C,XT2C2,XT2C3,XT3A,XT3B,XT3E,XF,XG todo
+  class XT3B active
+  class G0,XP1B,XP2B,XP2D,XP3,XP9C,XT2C2,XT2C3,XT3A,XT3E,XF,XG todo
 ```
 
 Broader partial-EXEC, dynamic-stack, high-register, cache/fence-shape, and
@@ -347,6 +347,26 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XT3C is DONE and its Sampled matrix cell advances to blue.  The
+  former unrestricted assertion came from a mode-zero barrier cave entering
+  after a call adjacent to the guest's next VGPR-bank update.  Explicitly
+  establishing the low bank at every gfx1250 Sampled barrier-cave entry fixes
+  the exact client: three numeric passes, 19,960/19,960 accesses, and 806/806
+  barrier members complete without a cap or filter.  The focused 78-test slice
+  passes.  The Mermaid box is green; XT3B becomes the sole ACTIVE box for a
+  bounded SuperCollider quick-GEMM assessment before returning to Sampled's
+  remaining blue-to-green gates.
+
+- 2026-07-21: At an intermediate checkpoint, XT3C remained ACTIVE after
+  separating the first of two gfx1250 VGPR-bank preservation defects.  A
+  transition-aware encoder and corrected persistent-
+  mode parser fix the first: seven focused regressions pass, and the exact
+  Sampled SPMM client now accepts diagnostic caps through 1,024 probes.  The
+  unrestricted fully patched client still reaches a software-GPU vector-
+  source assertion.  Control-flow-aware bank-mode discovery was the next
+  hypothesis, but the later instruction-level audit and unrestricted passing
+  result above disproved and superseded it.
 
 - 2026-07-21: XT3C advances its Sampled assessment from static inventory to a
   concrete execution boundary.  One-repetition artifact

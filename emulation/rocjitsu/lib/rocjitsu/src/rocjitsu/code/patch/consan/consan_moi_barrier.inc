@@ -142,7 +142,8 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
   const bool select_low_vgpr_bank = vgpr_msb_mode.value_or(0u) != 0u;
   words.reserve(162 + (spill ? spill->save_words.size() + spill->restore_words.size() : 0u));
   if (select_low_vgpr_bank)
-    words.push_back(*instrumentation::build_s_set_vgpr_msb(0u, arch));
+    words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+        static_cast<uint8_t>(*vgpr_msb_mode), 0u, arch));
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
   if (!append_save_moi_special_state(words, options, arch)) {
@@ -249,7 +250,8 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
   if (spill)
     words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
   if (select_low_vgpr_bank)
-    words.push_back(*instrumentation::build_s_set_vgpr_msb(*vgpr_msb_mode, arch));
+    words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+        0u, static_cast<uint8_t>(*vgpr_msb_mode), arch));
   words.push_back(original_barrier_word);
 
   if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, options,
@@ -333,7 +335,8 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
     std::vector<uint32_t> words;
     words.reserve(48u + (spill ? spill->save_words.size() + spill->restore_words.size() : 0u));
     if (select_low_vgpr_bank)
-      words.push_back(*instrumentation::build_s_set_vgpr_msb(0u, arch));
+      words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+          static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), 0u, arch));
     if (spill)
       words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
     if (publish_visible_evidence) {
@@ -381,7 +384,8 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
     if (spill)
       words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
     if (select_low_vgpr_bank)
-      words.push_back(*instrumentation::build_s_set_vgpr_msb(*gfx1250_vgpr_msb_mode, arch));
+      words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+          0u, static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), arch));
     const uint64_t branch_pc =
         cave_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
     if (call_return_sgpr) {
@@ -420,7 +424,8 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
                 (select_low_vgpr_bank ? 2u : 0u));
   words.push_back(original_barrier_word);
   if (select_low_vgpr_bank)
-    words.push_back(*instrumentation::build_s_set_vgpr_msb(0u, arch));
+    words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+        static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), 0u, arch));
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
   if (publish_visible_evidence && !append_save_moi_special_state(words, options, arch)) {
@@ -437,7 +442,8 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
   if (spill)
     words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
   if (select_low_vgpr_bank)
-    words.push_back(*instrumentation::build_s_set_vgpr_msb(*gfx1250_vgpr_msb_mode, arch));
+    words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+        0u, static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), arch));
 
   const uint64_t branch_pc =
       cave_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
@@ -489,7 +495,8 @@ build_inline_shadow_private_epoch_barrier_cave_words(
                 (select_low_vgpr_bank ? 2u : 0u));
   words.push_back(original_barrier_word);
   if (select_low_vgpr_bank)
-    words.push_back(*instrumentation::build_s_set_vgpr_msb(0u, arch));
+    words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+        static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), 0u, arch));
   words.insert(words.end(), spill.save_words.begin(), spill.save_words.end());
   words.insert(words.end(), load_epoch->begin(), load_epoch->end());
   words.push_back(*wait_load);
@@ -499,7 +506,8 @@ build_inline_shadow_private_epoch_barrier_cave_words(
   words.push_back(*wait_store);
   words.insert(words.end(), spill.restore_words.begin(), spill.restore_words.end());
   if (select_low_vgpr_bank)
-    words.push_back(*instrumentation::build_s_set_vgpr_msb(*gfx1250_vgpr_msb_mode, arch));
+    words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+        0u, static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), arch));
 
   const uint64_t branch_pc =
       cave_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);

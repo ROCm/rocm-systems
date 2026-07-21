@@ -2353,6 +2353,7 @@ TEST(ConSanMoi, Gfx1250SampledQualifiedBarrierUsesSpill) {
   words[1] = store[1];
   words[400] = 0xBE804EC1u; // s_barrier_signal -1
   words[401] = 0xBF94FFFFu; // s_barrier_wait -1
+  words[402] = 0xBF860001u; // next block selects a nonzero VGPR bank
   words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
   ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
@@ -2374,6 +2375,12 @@ TEST(ConSanMoi, Gfx1250SampledQualifiedBarrierUsesSpill) {
   EXPECT_EQ(patch->spilled_vgpr_count, 7u);
   EXPECT_GT(patch->required_private_segment_size, 0u);
   EXPECT_TRUE(result.final_validation_passed);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> trampoline =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  ASSERT_FALSE(trampoline.empty());
+  EXPECT_EQ(trampoline.front(), 0xBF860000u);
 }
 
 TEST(ConSanMoi, Gfx1250SampledClusterBarrierPublishesClusterScope) {

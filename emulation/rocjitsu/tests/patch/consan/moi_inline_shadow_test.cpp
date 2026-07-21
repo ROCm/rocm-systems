@@ -2708,7 +2708,7 @@ TEST(ConSanMoi, Gfx1250InlineShadowDefersLoadBeforeAnchorIslandContinuation) {
 
 TEST(ConSanMoi, Gfx1250InlineShadowPreservesGuestVgprBankForDeferredLoad) {
   constexpr uint32_t kGuestMode = 0x40u;
-  constexpr uint32_t kSelectLow = 0xBF860000u;
+  constexpr uint32_t kSelectLow = 0xBF864000u;
   constexpr uint32_t kRestoreGuest = 0xBF860040u;
   constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB128Vds, {.addr = 4, .vdst = 8});
   std::vector<uint32_t> text_words = {0xBF860000u | kGuestMode, load[0], load[1]};

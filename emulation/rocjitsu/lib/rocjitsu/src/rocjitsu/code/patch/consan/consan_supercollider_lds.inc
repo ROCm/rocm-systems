@@ -2152,9 +2152,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       return;
     const auto spill = spill_sequences.find(&site);
     if (candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u) {
-      const auto select_low = instrumentation::build_s_set_vgpr_msb(0u, arch);
-      const auto restore_guest =
-          instrumentation::build_s_set_vgpr_msb(*candidate.gfx1250_vgpr_msb_mode, arch);
+      const auto select_low = instrumentation::build_s_set_vgpr_msb_transition(
+          static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), 0u, arch);
+      const auto restore_guest = instrumentation::build_s_set_vgpr_msb_transition(
+          0u, static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), arch);
       const size_t guest_prefix_words = lds_load_clobbers_address(site) ? 3u : 2u;
       if (!select_low || !restore_guest || words->size() < guest_prefix_words) {
         result.errors.emplace_back(

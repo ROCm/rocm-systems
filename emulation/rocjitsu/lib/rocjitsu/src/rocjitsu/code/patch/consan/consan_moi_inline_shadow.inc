@@ -1039,10 +1039,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                              deferred_guest_words.end());
           cave_words->insert(cave_words->end(), displaced_tail_words.begin(),
                              displaced_tail_words.end());
-          const uint16_t call_return_sgpr = options.automatic_moi_inline_sgpr_spill
-                                                ? *options.moi_inline_call_return_sgpr
-                                                : static_cast<uint16_t>(
-                                                      *options.moi_exec_save_sgpr + 28u);
+          const uint16_t call_return_sgpr =
+              options.automatic_moi_inline_sgpr_spill
+                  ? *options.moi_inline_call_return_sgpr
+                  : static_cast<uint16_t>(*options.moi_exec_save_sgpr + 28u);
           cave_words->push_back(build_s_setpc_b64(call_return_sgpr, arch));
         } else if (planned_patch.entry_island_offset) {
           const auto jump_sgprs = moi_indirect_jump_sgprs(options);
@@ -1604,8 +1604,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     const bool select_guest_vgpr_bank =
         arch == ROCJITSU_CODE_ARCH_GFX1250 && candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
     if (select_guest_vgpr_bank)
-      words.push_back(
-          *instrumentation::build_s_set_vgpr_msb(*candidate.gfx1250_vgpr_msb_mode, arch));
+      words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+          0u, static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), arch));
     for (uint64_t offset = 0; offset < candidate.size; offset += sizeof(uint32_t)) {
       uint32_t word = 0;
       std::memcpy(&word, bytes.data() + candidate.file_offset + offset, sizeof(word));
@@ -1614,7 +1614,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     if (!append_moi_lds_wait(words, arch))
       return std::nullopt;
     if (select_guest_vgpr_bank)
-      words.push_back(*instrumentation::build_s_set_vgpr_msb(0u, arch));
+      words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+          static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), 0u, arch));
   }
 
   const uint16_t original_exec_save_sgpr = *options.moi_exec_save_sgpr;
@@ -2091,7 +2092,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
   const bool select_guest_vgpr_bank =
       arch == ROCJITSU_CODE_ARCH_GFX1250 && candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
   if (select_guest_vgpr_bank)
-    words.push_back(*instrumentation::build_s_set_vgpr_msb(0u, arch));
+    words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+        static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), 0u, arch));
   if (private_epoch_offset) {
     if (!options.automatic_moi_private_epoch || !options.moi_epoch_vgpr) {
       errors.emplace_back("ConSan MOI sampled probe has an invalid private epoch plan");
@@ -2173,7 +2175,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     words.push_back(*wait);
   }
   if (select_guest_vgpr_bank)
-    words.push_back(*instrumentation::build_s_set_vgpr_msb(*candidate.gfx1250_vgpr_msb_mode, arch));
+    words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+        0u, static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), arch));
   return words;
 }
 

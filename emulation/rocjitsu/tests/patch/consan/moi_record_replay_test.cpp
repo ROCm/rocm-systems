@@ -2760,9 +2760,10 @@ TEST(ConSanMoi, Gfx1250FullVgprRecordReplayUsesScalarEpochCoalescing) {
 TEST(ConSanMoi, Gfx1250PrivateEpochBarrierPreservesGuestVgprMsbMode) {
   constexpr uint32_t kBarrierSignal = 0xBE804EC1u;
   constexpr uint32_t kBarrierWait = 0xBF94FFFFu;
-  constexpr uint16_t kGuestVgprMsbMode = 0x4004u;
+  constexpr uint16_t kGuestVgprMsbTransition = 0x4004u;
+  constexpr uint8_t kGuestVgprMsbMode = 0x04u;
   std::vector<uint32_t> text_words = {
-      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, ROCJITSU_CODE_ARCH_GFX1250),
+      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbTransition, ROCJITSU_CODE_ARCH_GFX1250),
       0xD8340000u,
       0x00000000u, // ds_store_b32 v0, v0
       kBarrierSignal,
@@ -2797,9 +2798,10 @@ TEST(ConSanMoi, Gfx1250PrivateEpochBarrierPreservesGuestVgprMsbMode) {
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> words =
       text_words_at_offset(patched, barrier->trampoline_offset, barrier->trampoline_size);
-  const uint32_t select_low = *build_gfx1250_s_set_vgpr_msb(0u, ROCJITSU_CODE_ARCH_GFX1250);
+  const uint32_t select_low =
+      *build_gfx1250_s_set_vgpr_msb_transition(kGuestVgprMsbMode, 0u, ROCJITSU_CODE_ARCH_GFX1250);
   const uint32_t restore_guest =
-      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, ROCJITSU_CODE_ARCH_GFX1250);
+      *build_gfx1250_s_set_vgpr_msb_transition(0u, kGuestVgprMsbMode, ROCJITSU_CODE_ARCH_GFX1250);
   EXPECT_EQ(std::ranges::count(words, select_low), 1u);
   EXPECT_EQ(std::ranges::count(words, restore_guest), 1u);
   EXPECT_LT(std::ranges::find(words, select_low), std::ranges::find(words, restore_guest));
@@ -3228,11 +3230,12 @@ TEST(ConSanMoi, Gfx1250DenseAccessesUseRelocatableHostPastKernelEntry) {
 
 TEST(ConSanMoi, Gfx1250DenseAccessesPreserveGuestVgprMsbMode) {
   constexpr uint32_t kAccessCount = 9u;
-  constexpr uint16_t kGuestVgprMsbMode = 0x4004u;
+  constexpr uint16_t kGuestVgprMsbTransition = 0x4004u;
+  constexpr uint8_t kGuestVgprMsbMode = 0x04u;
   std::vector<uint32_t> text_words(
       8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250));
   text_words.push_back(
-      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, ROCJITSU_CODE_ARCH_GFX1250));
+      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbTransition, ROCJITSU_CODE_ARCH_GFX1250));
   for (uint32_t index = 0; index < kAccessCount; ++index) {
     text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
     text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
@@ -3263,9 +3266,10 @@ TEST(ConSanMoi, Gfx1250DenseAccessesPreserveGuestVgprMsbMode) {
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
-  const uint32_t select_low = *build_gfx1250_s_set_vgpr_msb(0u, ROCJITSU_CODE_ARCH_GFX1250);
+  const uint32_t select_low =
+      *build_gfx1250_s_set_vgpr_msb_transition(kGuestVgprMsbMode, 0u, ROCJITSU_CODE_ARCH_GFX1250);
   const uint32_t restore_guest =
-      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, ROCJITSU_CODE_ARCH_GFX1250);
+      *build_gfx1250_s_set_vgpr_msb_transition(0u, kGuestVgprMsbMode, ROCJITSU_CODE_ARCH_GFX1250);
   uint32_t checked = 0;
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiAccessRecordStore)
@@ -3278,6 +3282,25 @@ TEST(ConSanMoi, Gfx1250DenseAccessesPreserveGuestVgprMsbMode) {
     ++checked;
   }
   EXPECT_EQ(checked, kAccessCount);
+}
+
+TEST(ConSanMoi, Gfx1250DenseAccessesIgnorePreviousGuestVgprMsbMode) {
+  constexpr uint16_t kPreviousOnlyTransition = 0x4400u;
+  std::vector<uint32_t> text_words(
+      8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(
+      *build_gfx1250_s_set_vgpr_msb(kPreviousOnlyTransition, ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(0xD8340000u);
+  text_words.push_back(0x00000000u); // ds_store_b32 v0, v0
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+
+  const ConSanResult result =
+      try_patch_consan(make_gfx1250_code_object(text_words, "gfx1250_previous_vgpr_msb_mode"),
+                       moi_options(ConSanMoiEngine::RecordReplay));
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.moi_candidates.size(), 1u);
+  EXPECT_EQ(result.moi_candidates.front().gfx1250_vgpr_msb_mode, 0u);
 }
 
 TEST(ConSanMoi, AtomicRecordUsesLocalIndirectIslandForFarAppendedHelper) {
