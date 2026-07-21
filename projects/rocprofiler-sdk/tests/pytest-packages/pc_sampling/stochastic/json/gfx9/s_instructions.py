@@ -147,7 +147,7 @@ def validate_scalar_instructions(sample_records):
         if record["wave_issued"] == 1:
             assert (
                 record["inst_type"] == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_SCALAR"
-            ), f"issued s_ instruction {record['inst']!r} has non-SCALAR inst_type {record['inst_type']!r}"
+            ), "Invalid scalar instruction type"
             assert (
                 snapshot["arb_state_issue_scalar"] == 1
             ), "Arbiter must have issued scalar instruction"
