@@ -15,8 +15,10 @@ inline constexpr uint32_t kMaxSgprs = 106;
 inline constexpr uint16_t kGfx12HwRegHwId1 = 23;
 inline constexpr uint16_t kGfx12HwIdOwnerBits = 10;
 inline constexpr uint8_t kRdna4ScopeDevice = 2;
-inline constexpr uint32_t kRdna4VectorFlatNoSaddr = 0x7c;
-inline constexpr uint32_t kGfx1250VectorFlatNoSaddr = 0x7f;
+inline constexpr uint32_t kRdna4VectorFlatNoSaddr =
+    static_cast<uint32_t>(rdna4::OPR_SREG_NULL);
+inline constexpr uint32_t kGfx1250VectorFlatNoSaddr =
+    static_cast<uint32_t>(gfx1250::OPR_SREG_NULL);
 
 [[nodiscard]] constexpr uint32_t vector_flat_no_saddr(rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA4)

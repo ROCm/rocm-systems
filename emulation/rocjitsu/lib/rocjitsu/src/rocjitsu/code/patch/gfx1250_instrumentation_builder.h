@@ -11,10 +11,9 @@
 
 namespace rocjitsu {
 
-// VFLAT encodes its no-SADDR form as 0x7f. The decoder normalizes that raw
-// field to the semantic OPR_SREG_NULL operand (0x7c), so encoders must not use
-// the semantic value when packing the machine instruction.
-inline constexpr uint8_t kGfx1250FlatNoSaddrEncoding = 0x7f;
+// Keep the packed no-SADDR field tied to the generated ISA metadata. This is
+// both the semantic null selector and the encoding accepted by LLVM/RocJITsu.
+inline constexpr uint8_t kGfx1250FlatNoSaddrEncoding = static_cast<uint8_t>(gfx1250::OPR_SREG_NULL);
 
 /// @brief Encode gfx1250 `s_set_vgpr_msb simm16`.
 ///

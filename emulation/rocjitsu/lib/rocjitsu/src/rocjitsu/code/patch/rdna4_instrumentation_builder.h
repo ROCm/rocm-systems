@@ -7,14 +7,16 @@
 #pragma once
 
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/operand_types.h"
 
 namespace rocjitsu {
 
-// RDNA4 VFLAT/VGLOBAL encodes its no-SADDR form as OPR_SREG_NULL (0x7c),
-// while gfx1250 uses the distinct raw 0x7f encoding.
-inline constexpr uint32_t kRdna4FlatNoSaddrEncoding = 0x7c;
-inline constexpr uint32_t kFlatNoSaddrGfx1250Encoding = 0x7f;
+// The generated operand metadata is the authority for each target's packed
+// VFLAT/VGLOBAL no-SADDR selector.
+inline constexpr uint32_t kRdna4FlatNoSaddrEncoding = static_cast<uint32_t>(rdna4::OPR_SREG_NULL);
+inline constexpr uint32_t kFlatNoSaddrGfx1250Encoding =
+    static_cast<uint32_t>(gfx1250::OPR_SREG_NULL);
 
 [[nodiscard]] inline constexpr uint32_t flat_no_saddr_encoding(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_GFX1250 ? kFlatNoSaddrGfx1250Encoding

@@ -1132,7 +1132,7 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
   site.width_bits = 32;
   site.addr_vgpr = 2;
   site.data_vgpr = 4;
-  site.raw_saddr = 0x7f;
+  site.raw_saddr = 0x7c;
   site.raw_ioffset = 0;
   site.raw_scope = 2;
   site.raw_th = 0;
@@ -2629,7 +2629,8 @@ TEST(ConSanMoi, Gfx1250InlineAtomicOrdersReleaseAndAcquire) {
   ASSERT_EQ(result.kernels.front().atomic_sites.size(), 2u);
   EXPECT_TRUE(
       std::ranges::all_of(result.kernels.front().atomic_sites, [](const ConSanAtomicSite &site) {
-        return site.raw_saddr == 0x7fu && site.raw_scope == 2u && site.raw_ioffset == 0;
+        return site.raw_saddr == static_cast<uint32_t>(gfx1250::OPR_SREG_NULL) &&
+               site.raw_scope == 2u && site.raw_ioffset == 0;
       }));
   EXPECT_TRUE(std::ranges::any_of(result.resource_plans, [](const auto &plan) {
     return plan.site_kind == ConSanResourceSiteKind::Atomic && plan.scratch_vgpr_count == 24u;

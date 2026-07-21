@@ -10,6 +10,7 @@
 /// expectation for that ISA.
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/vop3.h"
@@ -487,6 +488,70 @@ TEST(Gfx1250MemoryExecutionHarness, ExecutesRepresentativeValidAddressStores) {
   EXPECT_EQ(gpu_mem.read32(kBufferAddr + 16), 0x22000000u);
   EXPECT_EQ(gpu_mem.read32(kBufferAddr + 32), 0u);
   EXPECT_EQ(gpu_mem.read32(kBufferAddr + 48), 0x22000001u);
+
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(Gfx1250MemoryExecutionHarness, ExecutesInstrumentedNoSaddrFlatOperations) {
+  amdgpu::GpuMemory gpu_mem("gfx1250_instrumentation_memory_harness_mem");
+  amdgpu::L2Cache l2("gfx1250_instrumentation_memory_harness_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  Gfx1250MemoryTestCu cu("gfx1250_instrumentation", cfg, &gpu_mem, &l2);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x1u);
+
+  constexpr uint64_t kAddress = 0x4000;
+  constexpr uint32_t kStoredValue = 0x12345678u;
+  constexpr uint32_t kAddend = 7u;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  gpu_mem.write32(kAddress, 0u);
+  cu.write_vgpr(vb + 0, 0, static_cast<uint32_t>(kAddress));
+  cu.write_vgpr(vb + 1, 0, static_cast<uint32_t>(kAddress >> 32));
+  cu.write_vgpr(vb + 2, 0, kStoredValue);
+
+  auto execute = [&](const std::vector<uint32_t> &words, std::string_view mnemonic) {
+    ASSERT_EQ(words.size(), 3u);
+    EXPECT_EQ(words.front() & 0x7fu, static_cast<uint32_t>(gfx1250::OPR_SREG_NULL));
+    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);
+    cu.execute_and_route(inst.release(), *wf);
+  };
+
+  const auto store = instrumentation::build_flat_store_b32(
+      /*vaddr=*/0, /*vsrc=*/2, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(store);
+  execute(*store, "flat_store_b32");
+  cu.flush_all();
+  EXPECT_EQ(gpu_mem.read32(kAddress), kStoredValue);
+
+  const auto load = instrumentation::build_flat_load_b32(
+      /*vaddr=*/0, /*vdst=*/3, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(load);
+  execute(*load, "flat_load_b32");
+  EXPECT_EQ(cu.read_vgpr(vb + 3, 0), kStoredValue);
+
+  cu.write_vgpr(vb + 4, 0, kAddend);
+  const auto atomic = instrumentation::build_flat_atomic_add_u32(
+      /*vaddr=*/0, /*vsrc=*/4, /*vdst=*/5, /*return_old_value=*/true,
+      /*scope=*/2, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(atomic);
+  execute(*atomic, "flat_atomic_add_u32");
+  cu.flush_all();
+  EXPECT_EQ(cu.read_vgpr(vb + 5, 0), kStoredValue);
+  EXPECT_EQ(gpu_mem.read32(kAddress), kStoredValue + kAddend);
 
   if (!wf->is_halted())
     wf->halt();

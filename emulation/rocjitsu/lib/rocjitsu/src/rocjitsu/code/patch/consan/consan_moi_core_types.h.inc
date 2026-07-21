@@ -272,7 +272,7 @@ classify_consan_moi_inline_atomic_support(const ConSanAtomicSite &site,
     return ConSanMoiInlineAtomicSupport::UnsupportedWidth;
   const bool vector_flat_encoding =
       is_flat && site.size == 3u * sizeof(uint32_t) && site.raw_saddr &&
-      (*site.raw_saddr == 0x7cu || *site.raw_saddr == 0x7fu);
+      *site.raw_saddr == 0x7cu;
   const bool cdna4_flat_encoding =
       is_flat && site.size == 2u * sizeof(uint32_t) && site.raw_saddr && *site.raw_saddr == 0u;
   const bool vglobal_encoding = is_vglobal && site.size == 3u * sizeof(uint32_t);

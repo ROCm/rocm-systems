@@ -355,7 +355,7 @@ TEST(ConSan, PropagatesGfx1250SharedPointerThroughExactScratchSlot) {
       0xED054021u,
       0x00000003u,
       0x00061400u, // scratch_load_b64 v[3:4], off, s33
-      0xEC05007Fu,
+      0xEC05007Cu,
       0x00000005u,
       0x00000003u, // flat_load_b32 v5, v[3:4]
       build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
@@ -382,7 +382,7 @@ TEST(ConSan, PropagatesGfx1250SharedHighHalfThroughVectorAddU64) {
       0xBE830001u, // s_mov_b32 s3, s1
       0xD5280000u,
       0x02020002u, // v_add_nc_u64_e64 v[0:1], s[2:3], v[0:1]
-      0xEC05007Fu,
+      0xEC05007Cu,
       0x00000004u,
       0x00000000u, // flat_load_b32 v4, v[0:1]
       build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
@@ -535,7 +535,7 @@ TEST(ConSan, PropagatesGfx1250SharedPointerThroughScalarLaneReservoir) {
       0x02010328u, // v_readlane_b32 s3, v40, 1
       0x7E000202u, // v_mov_b32_e32 v0, s2
       0x7E020203u, // v_mov_b32_e32 v1, s3
-      0xEC05007Fu,
+      0xEC05007Cu,
       0x00000004u,
       0x00000000u, // flat_load_b32 v4, v[0:1]
       build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
@@ -1813,7 +1813,7 @@ TEST(ConSan, Gfx1250AtomicInventoryPreservesAddressAndOrderingFields) {
       /*vaddr=*/2, /*vsrc=*/4, /*vdst=*/2, /*return_old_value=*/true, /*scope=*/2,
       ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_TRUE(atomic);
-  EXPECT_EQ(*atomic, (std::array<uint32_t, 3>{0xEC0D407Fu, 0x02180002u, 0x00000002u}));
+  EXPECT_EQ(*atomic, (std::array<uint32_t, 3>{0xEC0D407Cu, 0x02180002u, 0x00000002u}));
   const std::array<uint32_t, 4> text_words = {
       (*atomic)[0], (*atomic)[1], (*atomic)[2],
       0xBFB00000u, // s_endpgm
@@ -1833,7 +1833,7 @@ TEST(ConSan, Gfx1250AtomicInventoryPreservesAddressAndOrderingFields) {
   EXPECT_EQ(site.addr_vgpr, 2u);
   EXPECT_EQ(site.data_vgpr, 4u);
   EXPECT_EQ(site.dst_vgpr, 2u);
-  EXPECT_EQ(site.raw_saddr, 0x7fu);
+  EXPECT_EQ(site.raw_saddr, static_cast<uint32_t>(gfx1250::OPR_SREG_NULL));
   EXPECT_EQ(site.raw_vaddr, 2u);
   EXPECT_EQ(site.raw_vsrc, 4u);
   EXPECT_EQ(site.raw_vdst, 2u);

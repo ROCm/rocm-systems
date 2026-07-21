@@ -2200,9 +2200,8 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
   if (!site.addr_vgpr || !site.data_vgpr || *site.raw_vaddr != *site.addr_vgpr)
     return reject(ConSanMoiAtomicAddressSupport::MissingAddressOperands);
 
-  const uint32_t flat_no_saddr = arch == ROCJITSU_CODE_ARCH_CDNA4     ? 0u
-                                 : arch == ROCJITSU_CODE_ARCH_GFX1250 ? 0x7fu
-                                                                      : 0x7cu;
+  const uint32_t flat_no_saddr =
+      arch == ROCJITSU_CODE_ARCH_CDNA4 ? 0u : flat_no_saddr_encoding(arch);
   constexpr int32_t kSigned24Min = -(1 << 23);
   constexpr int32_t kSigned24Max = (1 << 23) - 1;
   const bool is_compare_exchange = site.mnemonic.find("cmpswap") != std::string::npos ||

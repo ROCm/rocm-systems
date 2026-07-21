@@ -494,10 +494,10 @@ TEST(InstructionBuilder, BuildGfx1250MoiBarrierRecordRecipeEncodings) {
   EXPECT_EQ(*cmp_eq, 0x7C941A80u);
   EXPECT_EQ(*cmp_gt, 0x7C981484u);
   EXPECT_EQ(*mov_literal, (std::array<uint32_t, 3>{0xD581000Du, 0x000000FFu, 0x12345678u}));
-  EXPECT_EQ(*flat_store, (std::array<uint32_t, 3>{0xEC06807Fu, 0x05000000u, 0x00000008u}));
+  EXPECT_EQ(*flat_store, (std::array<uint32_t, 3>{0xEC06807Cu, 0x05000000u, 0x00000008u}));
   EXPECT_EQ(*store_wait, 0xBFC10000u);
   EXPECT_EQ(*load_wait, 0xBFC00000u);
-  EXPECT_EQ(*atomic_add, (std::array<uint32_t, 3>{0xEC0D407Fu, 0x0518000Au, 0x00000008u}));
+  EXPECT_EQ(*atomic_add, (std::array<uint32_t, 3>{0xEC0D407Cu, 0x0518000Au, 0x00000008u}));
   EXPECT_EQ(*save_exec, 0xBE9E216Au);
   EXPECT_EQ(*restore_exec, 0xBEFE011Eu);
   EXPECT_EQ(*save_scc, 0x98148081u);
@@ -608,7 +608,7 @@ TEST(InstructionBuilder, BuildGfx1250FlatLoadB32) {
       build_flat_load_b32_vaddr_vdst(/*vaddr=*/8, /*vdst=*/10, ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_TRUE(words);
 
-  EXPECT_EQ(*words, (std::array<uint32_t, 3>{0xEC05007Fu, 0x0000000Au, 0x00000008u}));
+  EXPECT_EQ(*words, (std::array<uint32_t, 3>{0xEC05007Cu, 0x0000000Au, 0x00000008u}));
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decoder->decode(words->data()));
@@ -618,15 +618,27 @@ TEST(InstructionBuilder, BuildGfx1250FlatLoadB32) {
 }
 
 TEST(InstructionBuilder, BuildGfx1250SampledPublicationOperations) {
-  constexpr auto expected_cmpswap =
-      gfx1250::build_vflat(gfx1250::kFlatAtomicCmpswapB32Vflat,
-                           {.saddr = 127, .vdst = 10, .scope = 2, .th = 1, .vsrc = 10, .vaddr = 8});
-  constexpr auto expected_swap =
-      gfx1250::build_vflat(gfx1250::kFlatAtomicSwapB64Vflat,
-                           {.saddr = 127, .vdst = 10, .scope = 2, .th = 1, .vsrc = 10, .vaddr = 8});
-  constexpr auto expected_add =
-      gfx1250::build_vflat(gfx1250::kFlatAtomicAddU64Vflat,
-                           {.saddr = 127, .vdst = 10, .scope = 2, .th = 1, .vsrc = 10, .vaddr = 8});
+  constexpr auto expected_cmpswap = gfx1250::build_vflat(
+      gfx1250::kFlatAtomicCmpswapB32Vflat, {.saddr = static_cast<uint8_t>(gfx1250::OPR_SREG_NULL),
+                                            .vdst = 10,
+                                            .scope = 2,
+                                            .th = 1,
+                                            .vsrc = 10,
+                                            .vaddr = 8});
+  constexpr auto expected_swap = gfx1250::build_vflat(
+      gfx1250::kFlatAtomicSwapB64Vflat, {.saddr = static_cast<uint8_t>(gfx1250::OPR_SREG_NULL),
+                                         .vdst = 10,
+                                         .scope = 2,
+                                         .th = 1,
+                                         .vsrc = 10,
+                                         .vaddr = 8});
+  constexpr auto expected_add = gfx1250::build_vflat(
+      gfx1250::kFlatAtomicAddU64Vflat, {.saddr = static_cast<uint8_t>(gfx1250::OPR_SREG_NULL),
+                                        .vdst = 10,
+                                        .scope = 2,
+                                        .th = 1,
+                                        .vsrc = 10,
+                                        .vaddr = 8});
 
   EXPECT_EQ(
       build_flat_atomic_cmpswap_b32_vaddr_vsrc_vdst(8, 10, 10, true, 2, ROCJITSU_CODE_ARCH_GFX1250),
