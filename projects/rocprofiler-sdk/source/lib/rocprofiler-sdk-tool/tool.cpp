@@ -3598,8 +3598,7 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
     generate_output(counters_output, outdata, contributions, cleanups, skip_output);
     generate_output(scratch_memory_output, outdata, contributions, cleanups, skip_output);
     generate_output(rocdecode_output, outdata, contributions, cleanups, skip_output);
-    generate_output(
-        pc_sampling_host_trap_output, outdata, contributions, cleanups, skip_output);
+    generate_output(pc_sampling_host_trap_output, outdata, contributions, cleanups, skip_output);
     generate_output(rocjpeg_output, outdata, contributions, cleanups, skip_output);
     generate_output(pc_sampling_stochastic_output, outdata, contributions, cleanups, skip_output);
     generate_output(spm_counters_output, outdata, contributions, cleanups, skip_output);
