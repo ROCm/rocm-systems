@@ -136,7 +136,7 @@ support results and not gray instrumentation cells.
 | **D0** `llama.cpp` noncontiguous batched-matmul and hazard metadata | 🩶 Collection pending | 🩶 Collection pending | 🩶 Collection pending | 🩶 Collection pending | Resolve why the correct and hazardous gfx1201 variants are absent from the current collection, then determine whether the hazard is a concurrency oracle or an unrelated layout bug. |
 | **D1** Three collected IREE direct-tile matmuls: F16, FP8, and I8 | — Not admitted | — Not admitted | — Not admitted | — Not admitted | The three gfx1201 compilations pass, but their corpus records explicitly set `compile_only=true`; they dispatch no workload and provide no runtime oracle. Normalize a calls/support-module wrapper before reconsidering them. |
 | **D1** IREE `argmax`, strided extract, and map-load/map-store cases | — Not admitted | — Not admitted | — Not admitted | — Not admitted | All four exact baselines pass. Record/Replay inventory in `.pytest-artifacts-rdna4-iree-inventory` reports zero supported accesses, barriers, atomics, and fences for every executed code object, so these global-only shapes add no ConSan coverage. |
-| **D2** RDNA4 WMMA/SWMMAC, wave32/wave64, atomic, and lane/DS CTS families | 🩶 Survey pending | 🩶 Survey pending | 🩶 Survey pending | 🩶 Survey pending | Use as engine-specific prerequisites or compact reproducers, not as substitutes for end-to-end workload cells. |
+| **D2** RDNA4 WMMA/SWMMAC, wave32/wave64, atomic, and lane/DS CTS families | — Not admitted | — Not admitted | — Not admitted | — Not admitted | Seven exact baseline cases pass, but the arithmetic and lane-operation cases add no admitted ConSan synchronization traffic. The bundled atomic case is useful as an unsupported-transform stress object, not as a compact or nonredundant acceptance workload. Retain this family as an engine-specific reproducer pool. |
 | **D3** Remaining 105-case corpus inventory | 🩶 Survey pending | 🩶 Survey pending | 🩶 Survey pending | 🩶 Survey pending | Cluster by executed event families, code-object shape, and engine applicability before selecting a small nonredundant set. |
 
 Each selected case must be added to `consan_validation.py` with its exact
@@ -149,6 +149,19 @@ package required by the vendored llama.cpp build.  Both llama rows therefore
 remain unassessed; this is a local build-prerequisite gap, not an observed
 ConSan or workload failure.  Continue with another gray row instead of building
 a larger SDK solely for these two candidates.
+
+The D2 CTS survey ran serially with a 30-second per-case bound.  Exact
+baselines pass for the atomic, gfx12 WMMA and SWMMAC wave32/wave64, and DS
+swizzle wave32/wave64 cases.  The two DS-permute variants do not compile with
+the current SDK because `__builtin_amdgcn_wave_shuffle` is unavailable.  A
+Record/Replay inventory confirms that the admitted arithmetic and swizzle
+executions do not provide the LDS-memory or ordering coverage sought here.
+The atomic executable instead bundles a large object with 2,560 atomic
+capacity sites and reaches an unsupported transform/Waitcheck path.  That is
+valuable focused-debugging evidence, but admitting it would duplicate stronger
+atomic workload rows while weakening the exact-oracle acceptance standard.
+The retained external artifacts are `.pytest-artifacts-rdna4-cts-sync` and
+`.pytest-artifacts-rdna4-cts-inventory` in the `rocjitsu-test-corpus` checkout.
 
 ## Native gfx1201 PyTorch discovery
 
