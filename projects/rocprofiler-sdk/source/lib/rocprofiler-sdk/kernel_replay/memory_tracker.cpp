@@ -24,6 +24,7 @@
 
 #include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/utils.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <hsa/hsa.h>
@@ -77,37 +78,6 @@ decltype(AmdExtTable{}.hsa_amd_memory_pool_allocate_fn) next_pool_allocate   = n
 decltype(AmdExtTable{}.hsa_amd_memory_pool_free_fn)     next_pool_free       = nullptr;
 decltype(CoreApiTable{}.hsa_memory_allocate_fn)         next_memory_allocate = nullptr;
 decltype(CoreApiTable{}.hsa_memory_free_fn)             next_memory_free     = nullptr;
-decltype(AmdExtTable{}.hsa_amd_pointer_info_fn)         next_pointer_info    = nullptr;
-
-// Per-allocation properties resolved from a single hsa_amd_pointer_info query.
-struct alloc_query_t
-{
-    hsa_agent_t agent = {.handle = 0};  // owning (preferred-access) agent, for per-agent scoping
-    bool        trackable = false;      // coarse-grained device VRAM, excluding kernarg
-};
-
-// Classify a freshly-allocated pointer. We snapshot only coarse-grained device (VRAM) memory:
-//  - kernarg is excluded because it holds kernel pointer arguments; a torn/stale restore of it
-//    faults the GPU -- this is the primary reason snap/restore must not touch it.
-//  - fine-grained / host memory is out of scope (and precarious to restore).
-// agentOwner additionally lets snapshots be scoped to the replaying agent.
-alloc_query_t
-query_alloc(void* ptr)
-{
-    alloc_query_t q = {};
-    if(next_pointer_info == nullptr || ptr == nullptr) return q;
-
-    hsa_amd_pointer_info_t info = {};
-    info.size                   = sizeof(info);
-    if(next_pointer_info(ptr, &info, nullptr, nullptr, nullptr) != HSA_STATUS_SUCCESS) return q;
-
-    q.agent               = info.agentOwner;
-    const bool is_kernarg = (info.global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT) != 0;
-    const bool is_coarse =
-        (info.global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED) != 0;
-    q.trackable = is_coarse && !is_kernarg;
-    return q;
-}
 
 hsa_status_t
 pool_allocate_wrapper(hsa_amd_memory_pool_t pool, size_t size, uint32_t flags, void** ptr)
@@ -209,7 +179,6 @@ update_table(hsa::hsa_amd_ext_table_t* table)
 
     next_pool_allocate                     = table->hsa_amd_memory_pool_allocate_fn;
     next_pool_free                         = table->hsa_amd_memory_pool_free_fn;
-    next_pointer_info                      = table->hsa_amd_pointer_info_fn;
     table->hsa_amd_memory_pool_allocate_fn = pool_allocate_wrapper;
     table->hsa_amd_memory_pool_free_fn     = pool_free_wrapper;
 }
