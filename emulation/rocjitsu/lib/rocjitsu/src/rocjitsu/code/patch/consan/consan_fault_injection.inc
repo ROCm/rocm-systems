@@ -1992,11 +1992,11 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
     return false;
   if (site.kind == ConSanLdsAccessKind::Read) {
     if (site.mnemonic != "ds_load_i8" && site.mnemonic != "ds_load_u8" &&
-        site.mnemonic != "ds_load_b32" && site.mnemonic != "ds_load_b64" &&
-        site.mnemonic != "ds_load_b96" && site.mnemonic != "ds_load_b128" &&
-        site.mnemonic != "ds_load_tr8_b64" && site.mnemonic != "ds_load_tr16_b128" &&
-        site.mnemonic != "ds_load_2addr_b32" && site.mnemonic != "ds_load_2addr_b64" &&
-        site.mnemonic != "ds_load_2addr_stride64_b32" &&
+        site.mnemonic != "ds_load_i16" && site.mnemonic != "ds_load_b32" &&
+        site.mnemonic != "ds_load_b64" && site.mnemonic != "ds_load_b96" &&
+        site.mnemonic != "ds_load_b128" && site.mnemonic != "ds_load_tr8_b64" &&
+        site.mnemonic != "ds_load_tr16_b128" && site.mnemonic != "ds_load_2addr_b32" &&
+        site.mnemonic != "ds_load_2addr_b64" && site.mnemonic != "ds_load_2addr_stride64_b32" &&
         site.mnemonic != "ds_load_2addr_stride64_b64" && site.mnemonic != "ds_load_u16" &&
         site.mnemonic != "ds_load_u16_d16" && site.mnemonic != "ds_load_u16_d16_hi" &&
         site.mnemonic != "ds_read_b32" && site.mnemonic != "ds_read_b64" &&
@@ -2013,8 +2013,9 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
     if (site.mnemonic != "ds_store_b8" && site.mnemonic != "ds_store_b8_d16_hi" &&
         site.mnemonic != "ds_store_b16" && site.mnemonic != "ds_store_b16_d16_hi" &&
         site.mnemonic != "ds_store_b32" && site.mnemonic != "ds_store_b64" &&
-        site.mnemonic != "ds_store_b128" && site.mnemonic != "ds_store_2addr_b32" &&
-        site.mnemonic != "ds_store_2addr_b64" && site.mnemonic != "ds_store_2addr_stride64_b32" &&
+        site.mnemonic != "ds_store_b96" && site.mnemonic != "ds_store_b128" &&
+        site.mnemonic != "ds_store_2addr_b32" && site.mnemonic != "ds_store_2addr_b64" &&
+        site.mnemonic != "ds_store_2addr_stride64_b32" &&
         site.mnemonic != "ds_store_2addr_stride64_b64" && site.mnemonic != "ds_write_b32" &&
         site.mnemonic != "ds_write_b64" && site.mnemonic != "ds_write_b128" &&
         site.mnemonic != "ds_write2_b32" && site.mnemonic != "ds_write2st64_b32" &&

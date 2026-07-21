@@ -14,7 +14,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     result.warnings.emplace_back("ConSan LDS check/trap proof found no supported "
                                  "ds_load_b{32,64,128}, ds_load_tr{8_b64,16_b128}, "
                                  "ds_load_2addr_b{32,64}, "
-                                 "ds_load_u16(_d16(_hi)), ds_store_b{32,64,128}, or "
+                                 "ds_load_{i,u}{8,16}, ds_load_u16_d16(_hi), "
+                                 "ds_store_b{32,64,96,128}, or "
                                  "ds_store_2addr_b{32,64} site");
     return;
   }
@@ -852,33 +853,32 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
             }
           }
           if (!indirect_pc_sgpr || !indirect_scc_save_sgpr) {
-            if (!appended_cave_reachable) {
+            if (!appended_cave_reachable)
               ++indirect_pc_resource_failed_site_count;
-              LdsCheckTrapCandidate candidate{&site,
-                                              nullptr,
-                                              nullptr,
-                                              false,
-                                              kernel.entry_text_offset,
-                                              kernel.descriptor_file_offset,
-                                              appended_cave_offset,
-                                              *scratch,
-                                              *vcc_save,
-                                              std::nullopt,
-                                              std::nullopt,
-                                              requested_words,
-                                              false,
-                                              true,
-                                              descriptor_growth,
-                                              std::nullopt,
-                                              {},
-                                              gfx1250_vgpr_msb_mode,
-                                              std::nullopt,
-                                              std::nullopt,
-                                              std::nullopt,
-                                              scalar_vcc_spill_vgpr};
-              candidate.branch_only_continuation = true;
-              branch_only_candidates.push_back(std::move(candidate));
-            }
+            LdsCheckTrapCandidate candidate{&site,
+                                            nullptr,
+                                            nullptr,
+                                            false,
+                                            kernel.entry_text_offset,
+                                            kernel.descriptor_file_offset,
+                                            appended_cave_offset,
+                                            *scratch,
+                                            *vcc_save,
+                                            std::nullopt,
+                                            std::nullopt,
+                                            requested_words,
+                                            false,
+                                            true,
+                                            descriptor_growth,
+                                            std::nullopt,
+                                            {},
+                                            gfx1250_vgpr_msb_mode,
+                                            std::nullopt,
+                                            std::nullopt,
+                                            std::nullopt,
+                                            scalar_vcc_spill_vgpr};
+            candidate.branch_only_continuation = true;
+            branch_only_candidates.push_back(std::move(candidate));
           } else {
             LdsCheckTrapCandidate generated_seed{&site,
                                                  nullptr,
@@ -2535,8 +2535,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     result.warnings.emplace_back(
         "ConSan LDS check/trap proof found no padded or local-cave-reachable "
         "ds_load_b{32,64,128}, ds_load_tr{8_b64,16_b128}, ds_load_2addr_b{32,64}, "
-        "ds_load_u16(_d16(_hi)), or "
-        "ds_store_b{32,64,128}, or ds_store_2addr_b{32,64} site; supported_candidates=" +
+        "ds_load_{i,u}{8,16}, ds_load_u16_d16(_hi), or "
+        "ds_store_b{32,64,96,128}, or ds_store_2addr_b{32,64} site; supported_candidates=" +
         std::to_string(supported_candidate_count) +
         " scratchable_candidates=" + std::to_string(scratchable_candidate_count) +
         " max_observed_padding_words=" + std::to_string(max_observed_padding_words) +

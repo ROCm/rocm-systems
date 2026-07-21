@@ -341,6 +341,8 @@ apply_descriptor_vgpr_growths_to_patcher(CodeObjectPatcher &patcher,
     return mnemonic == "ds_store_b16" || mnemonic == "ds_store_b16_d16_hi";
   if (kind == ConSanLdsAccessKind::Read && width_bits == 96)
     return mnemonic == "ds_load_b96";
+  if (kind == ConSanLdsAccessKind::Write && width_bits == 96)
+    return mnemonic == "ds_store_b96";
   return width_bits == 32 || width_bits == 64 || width_bits == 128;
 }
 

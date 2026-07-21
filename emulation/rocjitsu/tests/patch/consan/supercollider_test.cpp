@@ -1295,6 +1295,32 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250U16VdsLoadInPlace) {
   EXPECT_EQ(rewritten_words[5], duplicate[1]);
 }
 
+TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250I16VdsLoadInPlace) {
+  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadI16Vds, {.addr = 2, .vdst = 1});
+  std::vector<uint32_t> text_words = {load[0], load[1]};
+  text_words.insert(text_words.end(), 10u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  const std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "gfx1250_vds_load_i16");
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.scratch_vgpr = 3;
+  options.delay_nops = 2;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
+  EXPECT_TRUE(result.final_validation_passed);
+
+  const auto rewritten_words = patched_words_at_file_offset<6>(result, 0x100);
+  const auto duplicate = gfx1250::build_vds(gfx1250::kDsLoadI16Vds, {.addr = 2, .vdst = 3});
+  EXPECT_EQ(rewritten_words[4], duplicate[0]);
+  EXPECT_EQ(rewritten_words[5], duplicate[1]);
+}
+
 TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250U8VdsLoadInPlace) {
   constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadU8Vds, {.addr = 2, .vdst = 1});
   std::vector<uint32_t> text_words = {load[0], load[1]};
@@ -1458,6 +1484,32 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250VdsStoreInPlace) {
   EXPECT_EQ(rewritten_words[0], store[0]);
   EXPECT_EQ(rewritten_words[1], store[1]);
   constexpr auto readback = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 3});
+  EXPECT_EQ(rewritten_words[4], readback[0]);
+  EXPECT_EQ(rewritten_words[5], readback[1]);
+}
+
+TEST(ConSan, ProbeLdsCheckTrapModeReadsBackGfx1250B96VdsStore) {
+  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB96Vds, {.addr = 10, .data0 = 1});
+  std::vector<uint32_t> text_words = {store[0], store[1]};
+  text_words.insert(text_words.end(), 32u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  const std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "gfx1250_vds_store_b96");
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.scratch_vgpr = 4;
+  options.delay_nops = 2;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsStoreCheckTrap);
+  EXPECT_TRUE(result.final_validation_passed);
+
+  const auto rewritten_words = patched_words_at_file_offset<6>(result, 0x100);
+  constexpr auto readback = gfx1250::build_vds(gfx1250::kDsLoadB96Vds, {.addr = 10, .vdst = 4});
   EXPECT_EQ(rewritten_words[4], readback[0]);
   EXPECT_EQ(rewritten_words[5], readback[1]);
 }
@@ -3526,6 +3578,47 @@ TEST(ConSan, ProbeLdsCheckTrapModePreplansIslandsBeforeAppendedCursorDriftsOutOf
   EXPECT_FALSE(compute_sopp_branch_simm16(last_body->trampoline_offset, last_body->anchor_offset));
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
+}
+
+TEST(ConSan, Gfx1250CheckTrapPreplansBranchFallbackBeforeReachableBodiesDrift) {
+  constexpr size_t kSiteCount = 40u;
+  constexpr size_t kTextWords = 32000u;
+  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  std::vector<uint32_t> text_words(kTextWords,
+                                   build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_GFX1250));
+  for (size_t i = 0; i < kSiteCount; ++i) {
+    const size_t word = i * 780u;
+    text_words[word] = load[0];
+    text_words[word + 1u] = load[1];
+  }
+  // Leave one scalar word available for saving VCC, but not the three
+  // additional words required by an indirect PC/SCC continuation.
+  for (uint16_t sgpr = 1; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr) {
+    const size_t word = kTextWords - REGISTER_SET_ALLOCATABLE_SGPRS + sgpr - 1u;
+    text_words[word] = build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_GFX1250);
+  }
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+
+  const std::vector<uint8_t> bytes =
+      make_gfx1250_code_object(text_words, "gfx1250_branch_fallback_preplan");
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.max_patches = kSiteCount;
+  options.scratch_vgpr = 3;
+  options.delay_nops = 200;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::LocalCaveLdsLoadCheckTrap,
+                               &ConSanPatchInfo::kind),
+            kSiteCount);
+  EXPECT_NE(std::ranges::find(result.patches, true, &ConSanPatchInfo::sc_branch_only_continuation),
+            result.patches.end());
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeReservesMultipleAppendedTextCaves) {

@@ -129,7 +129,8 @@ flowchart TD
     XP3["XP3 DONE<br/>top-k SC 88-site residual bounded;<br/>scalar-continuation subsystem required"]
     XP3A["XP3A DONE<br/>SuperCollider scalar spill plus bidirectional continuation<br/>synthetic exact; real relay capacity bounded"]
     XP3D["XP3D DONE<br/>SuperCollider site-paired spill continuations recover<br/>all 85 rejected top-k accesses end to end"]
-    XP3E["XP3E ACTIVE<br/>classify final 12-access top-k SC residual;<br/>large object is 112,612/112,616"]
+    XP3E["XP3E DONE<br/>top-k SC complete clean acceptance;<br/>160,956/160,956 accesses"]
+    XP3F["XP3F ACTIVE<br/>top-k SC paired and reviewed-fault refresh<br/>at frozen revision"]
     XP3B["XP3B DONE<br/>torch.sort Sampled clean plus paired accepted;<br/>two reviewed selectors remain noncausal"]
     XP3C["XP3C DONE<br/>torch.sort Sampled clean, paired, inventory, and<br/>reviewed noncausal fault bundle green"]
     XP9["XP9 DONE<br/>norm plus softmax Record/Replay clean, paired,<br/>and reviewed-fault bundle green"]
@@ -329,7 +330,8 @@ flowchart TD
   XP10 --> XF
   XP3A --> XP3D
   XP3D --> XP3E
-  XP3E --> XF
+  XP3E --> XP3F
+  XP3F --> XF
   XP3B --> XF
   XT2C2 --> XF
   XT2C3 --> XF
@@ -370,7 +372,8 @@ flowchart TD
   class XP3B done
   class XP3A done
   class XP3D done
-  class XP3E active
+  class XP3E done
+  class XP3F active
   class XP5S,XP1A done
   class XP3C done
   class G0,V9,XP2D,XT2C2,XT2C3,XT3E,XT3I,XF,XG todo
@@ -421,6 +424,15 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP3E is DONE/green and XP3F is ACTIVE/blue.  One-repetition
+  artifact `consan-green-expansion-20260721-pytorch-topk-sc-all-supported-177`
+  passes both exact top-k oracles with complete static and dynamic analysis at
+  160,956/160,956 accesses.  Branch-only fallback closes four placement gaps,
+  signed 16-bit load admission closes eight gaps, and 96-bit store readback
+  admits and patches all 108 formerly unsupported sites.  XP3F now refreshes
+  paired-overhead and reviewed-fault evidence before the status cell turns
+  green.
 
 - 2026-07-21: XP3D is DONE/green and XP3E is ACTIVE/blue.  The
   one-repetition top-k SuperCollider artifact

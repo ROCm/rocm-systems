@@ -432,6 +432,9 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
     case 64:
       base = 0xD9D80000u;
       break;
+    case 96:
+      base = 0xDBF80000u;
+      break;
     case 128:
       base = 0xDBFC0000u;
       break;
@@ -509,11 +512,11 @@ two_address_lds_element_width_bits(const ConSanLdsSite &site) {
       site.mnemonic == "ds_read2st64_b64";
   const bool is_two_addr_store = is_two_address_lds_store(site);
   if (site.mnemonic == "ds_load_i8" || site.mnemonic == "ds_load_u8" ||
-      site.mnemonic == "ds_load_u16" || site.mnemonic == "ds_load_u16_d16" ||
-      site.mnemonic == "ds_load_u16_d16_hi" || site.mnemonic == "ds_read_i16" ||
-      site.mnemonic == "ds_read_u16" || site.mnemonic == "ds_store_b8" ||
-      site.mnemonic == "ds_store_b8_d16_hi" || site.mnemonic == "ds_store_b16" ||
-      site.mnemonic == "ds_store_b16_d16_hi")
+      site.mnemonic == "ds_load_i16" || site.mnemonic == "ds_load_u16" ||
+      site.mnemonic == "ds_load_u16_d16" || site.mnemonic == "ds_load_u16_d16_hi" ||
+      site.mnemonic == "ds_read_i16" || site.mnemonic == "ds_read_u16" ||
+      site.mnemonic == "ds_store_b8" || site.mnemonic == "ds_store_b8_d16_hi" ||
+      site.mnemonic == "ds_store_b16" || site.mnemonic == "ds_store_b16_d16_hi")
     return 1;
   if (is_two_addr_load || is_two_addr_store) {
     const auto element_width = two_address_lds_element_width_bits(site);
