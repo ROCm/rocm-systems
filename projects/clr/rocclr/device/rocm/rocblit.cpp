@@ -3118,13 +3118,26 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
 }
 
 // ================================================================================================
-bool KernelBlitManager::useShaderSwapPath(const Memory& src, const Memory& dst, size_t size,
+// SDMA swap requires both effective addresses to be 64-byte aligned. 64 is
+// hardcoded (conservative). Address-only; no size constraint.
+static inline bool sdmaSwapAlignmentOk(uint64_t a, uint64_t b) {
+  constexpr uint64_t kSdmaSwapAlignment = 64;
+  return (a % kSdmaSwapAlignment == 0) && (b % kSdmaSwapAlignment == 0);
+}
+
+bool KernelBlitManager::useShaderSwapPath(const Memory& src, const Memory& dst, size_t srcOffset,
+                                          size_t dstOffset, size_t size,
                                           const amd::CopyMetadata& metadata) const {
   const bool isSdmaPref =
       metadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA;
   const bool isBlitPref =
       metadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::BLIT;
   if (!dev().settings().sdma_swap_supported_) return true;  // no HW swap -> shader
+  // Unaligned swaps physically cannot use SDMA, so this check overrides the
+  // engine preference and runs first.
+  const uint64_t srcAddr = src.virtualAddress() + srcOffset;
+  const uint64_t dstAddr = dst.virtualAddress() + dstOffset;
+  if (!sdmaSwapAlignmentOk(srcAddr, dstAddr)) return true;  // unaligned -> shader
   if (isSdmaPref) return false;                             // explicit CE  -> SDMA
   if (isBlitPref) return true;                              // explicit BLIT -> shader
   return size <= dev().settings().sdmaSwapThreshold_;        // else size-based
@@ -3135,19 +3148,49 @@ bool KernelBlitManager::ShaderSwapBufferBatch(
     const std::vector<amd::BatchCopyOp>& copy_operations) const {
   std::scoped_lock transfer_operations_lock(lockXferOps_);
 
-  constexpr uint32_t kMaxAlignment = 2 * sizeof(uint64_t);
+  constexpr uint32_t kMaxOpSize = 2 * sizeof(uint64_t);  // ulong2 == 16 bytes
   constexpr uint32_t kLocalWorkSize = 512;
-  const uint32_t max_workgroups_per_copy = std::max<uint32_t>(
-      dev().settings().limit_blit_wg_ / copy_operations.size(), 1);
-  const size_t descriptor_bytes =
-      copy_operations.size() * sizeof(CopyBufferBatchDescriptor);
-  void* descriptor_buffer = gpu().allocKernArg(descriptor_bytes, kCBAlignment);
-  CopyBufferBatchDescriptor* descriptors =
-      static_cast<CopyBufferBatchDescriptor*>(descriptor_buffer);
-  size_t descriptor_index = 0;
-  uint64_t max_aligned_element_count = 0;
+  const size_t n_batches = copy_operations.size();
+
+  // floor_pow2(v): largest power of two <= v (v > 0).
+  auto floor_pow2 = [](uint64_t v) -> uint64_t {
+    uint64_t p = 1;
+    while ((p << 1) <= v) {
+      p <<= 1;
+    }
+    return p;
+  };
+  // largest_pow2_dividing(d): largest power of two (capped at kMaxOpSize) that
+  // divides d. When d == 0 every power of two divides it, so return the cap.
+  auto largest_pow2_dividing = [](uint64_t d) -> uint64_t {
+    if (d == 0) {
+      return kMaxOpSize;
+    }
+    uint64_t p = d & (~d + 1);  // isolate lowest set bit (2^k dividing d)
+    return std::min<uint64_t>(p, kMaxOpSize);
+  };
+
+  // SoA kernel-argument buffers. srcs/dsts/body_prefix are uint64 arrays
+  // (body_prefix length n+1); op_size/head_size/tail_size are uint8 length n.
+  void* srcs_buffer = gpu().allocKernArg(n_batches * sizeof(uint64_t), kCBAlignment);
+  void* dsts_buffer = gpu().allocKernArg(n_batches * sizeof(uint64_t), kCBAlignment);
+  void* body_prefix_buffer =
+      gpu().allocKernArg((n_batches + 1) * sizeof(uint64_t), kCBAlignment);
+  void* op_size_buffer = gpu().allocKernArg(n_batches * sizeof(uint8_t), kCBAlignment);
+  void* head_size_buffer = gpu().allocKernArg(n_batches * sizeof(uint8_t), kCBAlignment);
+  void* tail_size_buffer = gpu().allocKernArg(n_batches * sizeof(uint8_t), kCBAlignment);
+
+  uint64_t* srcs = static_cast<uint64_t*>(srcs_buffer);
+  uint64_t* dsts = static_cast<uint64_t*>(dsts_buffer);
+  uint64_t* body_prefix = static_cast<uint64_t*>(body_prefix_buffer);
+  uint8_t* op_size = static_cast<uint8_t*>(op_size_buffer);
+  uint8_t* head_size = static_cast<uint8_t*>(head_size_buffer);
+  uint8_t* tail_size = static_cast<uint8_t*>(tail_size_buffer);
+
   bool needs_system_scope = false;
   bool attach_signal = false;
+  size_t index = 0;
+  body_prefix[0] = 0;
 
   for (const auto& copy_operation : copy_operations) {
     device::Memory* source_device_memory =
@@ -3161,56 +3204,83 @@ bool KernelBlitManager::ShaderSwapBufferBatch(
         source_device_memory->virtualAddress() + copy_operation.srcOffset;
     const uint64_t destination_address =
         destination_device_memory->virtualAddress() + copy_operation.dstOffset;
+    const uint64_t size = copy_operation.size;
 
     // Overlapping src/dst within one swap op is UB (same contract as the SDMA swap).
-    assert((source_address + copy_operation.size <= destination_address ||
-            destination_address + copy_operation.size <= source_address) &&
+    assert((source_address + size <= destination_address ||
+            destination_address + size <= source_address) &&
            "ShaderSwapBufferBatch: src and dst ranges must not overlap");
 
     const bool source_svm_atomics =
         (source_device_memory->owner()->getMemFlags() & CL_MEM_SVM_ATOMICS) != 0;
     const bool destination_svm_atomics =
         (destination_device_memory->owner()->getMemFlags() & CL_MEM_SVM_ATOMICS) != 0;
+    // A swap writes both endpoints, so OR the system-scope requirement over both.
     needs_system_scope |=
         (!source_svm_atomics && source_device_memory->isHostMemDirectAccess()) ||
         (!destination_svm_atomics && destination_device_memory->isHostMemDirectAccess()) ||
         !copy_operation.metadata.isAsync_;
     attach_signal |= !copy_operation.metadata.isAsync_;
-    const bool addresses_aligned = ((source_address % kMaxAlignment) == 0) &&
-                                   ((destination_address % kMaxAlignment) == 0);
-    const uint32_t aligned_element_size =
-        (addresses_aligned) ? kMaxAlignment : sizeof(uint32_t);
-    const uint64_t aligned_element_count =
-        copy_operation.size / aligned_element_size;
-    const uint32_t trailing_byte_count =
-        copy_operation.size % aligned_element_size;
-    max_aligned_element_count =
-        std::max(max_aligned_element_count, aligned_element_count);
 
-    descriptors[descriptor_index++] = {
-        source_address, destination_address, aligned_element_count,
-        aligned_element_size, trailing_byte_count};
+    // Per-copy op-size algorithm. A valid N-byte vectorized swap requires
+    // src+head and dst+head both N-aligned, which implies (dst-src) % N == 0.
+    uint64_t op_width;
+    uint64_t head;
+    uint64_t tail;
+    uint64_t body;
+    if (size < kMaxOpSize) {
+      // Tiny copies are handled entirely by the byte-wise body path.
+      op_width = 1;
+      head = 0;
+      tail = 0;
+      body = size;
+    } else {
+      const uint64_t d = (destination_address > source_address)
+                             ? (destination_address - source_address)
+                             : (source_address - destination_address);
+      op_width = std::min<uint64_t>(largest_pow2_dividing(d), floor_pow2(size));
+      head = (op_width - (source_address % op_width)) % op_width;
+      tail = (size - head) % op_width;
+      body = (size - head - tail) / op_width;
+    }
+
+    srcs[index] = source_address;
+    dsts[index] = destination_address;
+    op_size[index] = static_cast<uint8_t>(op_width);
+    head_size[index] = static_cast<uint8_t>(head);
+    tail_size[index] = static_cast<uint8_t>(tail);
+    body_prefix[index + 1] = body_prefix[index] + body;
+    ++index;
   }
 
-  uint32_t workgroup_count = static_cast<uint32_t>(
-      std::min<uint64_t>(max_workgroups_per_copy,
-                         amd::alignUp(max_aligned_element_count,
-                                      static_cast<uint64_t>(kLocalWorkSize)) /
-                             kLocalWorkSize));
-  workgroup_count = std::max<uint32_t>(workgroup_count, 1);
+  const uint64_t total_ops = body_prefix[n_batches];
+
+  // Grid: 1D. wg_count grows with total_ops up to the CU count (limit_blit_wg_).
+  // Always launch at least one workgroup so the first workgroup's head/tail loop
+  // runs even when the body op space is empty.
+  uint32_t workgroup_count = static_cast<uint32_t>(std::clamp<uint64_t>(
+      amd::alignUp(total_ops, static_cast<uint64_t>(kLocalWorkSize)) / kLocalWorkSize,
+      static_cast<uint64_t>(1),
+      static_cast<uint64_t>(dev().settings().limit_blit_wg_)));
   const uint32_t copy_stride = workgroup_count * kLocalWorkSize;
+  size_t global_work_size = std::max<size_t>(copy_stride, kLocalWorkSize);
+  size_t local_work_size = kLocalWorkSize;
 
   amd::Kernel* const kernel = kernels_[BlitSwapBufferBatch];
   constexpr bool kDirectVa = true;
-  setArgument(kernel, 0, sizeof(cl_mem), descriptor_buffer, 0, nullptr,
-              kDirectVa);
+  const uint64_t n_batches_arg = n_batches;
+  const uint64_t copy_stride_arg = copy_stride;
+  setArgument(kernel, 0, sizeof(cl_mem), srcs_buffer, 0, nullptr, kDirectVa);
+  setArgument(kernel, 1, sizeof(cl_mem), dsts_buffer, 0, nullptr, kDirectVa);
+  setArgument(kernel, 2, sizeof(cl_mem), body_prefix_buffer, 0, nullptr, kDirectVa);
+  setArgument(kernel, 3, sizeof(cl_mem), op_size_buffer, 0, nullptr, kDirectVa);
+  setArgument(kernel, 4, sizeof(cl_mem), head_size_buffer, 0, nullptr, kDirectVa);
+  setArgument(kernel, 5, sizeof(cl_mem), tail_size_buffer, 0, nullptr, kDirectVa);
+  setArgument(kernel, 6, sizeof(n_batches_arg), &n_batches_arg);
+  setArgument(kernel, 7, sizeof(total_ops), &total_ops);
+  setArgument(kernel, 8, sizeof(copy_stride_arg), &copy_stride_arg);
 
-  setArgument(kernel, 1, sizeof(kLocalWorkSize), &kLocalWorkSize);
-  setArgument(kernel, 2, sizeof(copy_stride), &copy_stride);
-
-  size_t global_work_size[2] = {copy_stride, copy_operations.size()};
-  size_t local_work_size[2] = {kLocalWorkSize, 1};
-  amd::NDRangeContainer nd_range(2, nullptr, global_work_size, local_work_size);
+  amd::NDRangeContainer nd_range(1, nullptr, &global_work_size, &local_work_size);
 
   address parameters = captureArguments(kernel);
   if (needs_system_scope) {
@@ -3260,7 +3330,8 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
     bool isSwapOp = op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpSwap;
     bool isLinearOp = op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpLinear;
 
-    if (isSwapOp && useShaderSwapPath(srcMem, dstMem, op.size, op.metadata)) {
+    if (isSwapOp &&
+        useShaderSwapPath(srcMem, dstMem, op.srcOffset, op.dstOffset, op.size, op.metadata)) {
       swapShaderOps.push_back(op);
     } else if (isLinearOp && useShaderCopyBufferPath(srcMem, dstMem, op.size, op.metadata)) {
       d2dCopyOps.push_back(op);

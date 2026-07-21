@@ -1498,12 +1498,10 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_AlignmentCoverage) {
  *   bytes OUTSIDE the transfer region (the padding) must be UNCHANGED (host
  *   padding still 0xAA, device padding still 0xBB).
  *
- *   Tagged [!shouldfail]: on the unmodified runtime the sub-word / mismatched
- *   offsets (shader path) and the large unaligned case (routed to SDMA which
- *   cannot handle non-64B-aligned offsets) produce wrong data, so the overall
- *   test fails.  [!shouldfail] makes Catch2 report the test as passing at this
- *   baseline; a later commit removes the tag once the kernel rewrite makes every
- *   case pass.
+ *   After the swap-kernel rewrite every combination is serviced by the shader
+ *   swap path (large unaligned swaps are routed away from SDMA by the alignment
+ *   gate), so all cases pass.  This test was tagged [!shouldfail] in the
+ *   test-first baseline commit; the tag was removed once the rewrite landed.
  *
  * Test source
  * ------------------------
@@ -1677,8 +1675,9 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_ImbalancedBatch) {
  *   0xBB, device holds 0xAA) and the padding OUTSIDE the transfer region must be
  *   UNCHANGED (host still 0xAA, device still 0xBB).
  *
- *   Tagged [!shouldfail]: the baseline SDMA route fails this case.  The tag is
- *   removed once the routing gate sends non-64B-aligned swaps to the shader.
+ *   After the rewrite the alignment gate routes this non-64B-aligned swap to the
+ *   shader path, so it passes.  This test was tagged [!shouldfail] in the
+ *   test-first baseline commit; the tag was removed once the rewrite landed.
  *
  * Test source
  * ------------------------

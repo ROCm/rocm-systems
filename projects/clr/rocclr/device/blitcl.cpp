@@ -176,48 +176,109 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
       }
     }
 
+    // Single unified 1D swap dispatch (SoA arguments). Work is distributed
+    // globally across all copies proportional to each copy's body-op count.
+    // body_prefix[] is a dense exclusive prefix sum of per-copy body-op counts
+    // with length n_batches+1; body_prefix[n_batches] == total_ops.
     __kernel void __amd_rocclr_swapBufferBatch(
-        __global const CopyBufferBatchDescriptor *descriptors,
-        uint workgroup_size,
-        uint copy_stride) {
-      uint work_item_id = __builtin_amdgcn_workitem_id_x();
-      uint group_ordinal = __builtin_amdgcn_workgroup_id_x();
-      uint descriptor_index = __builtin_amdgcn_workgroup_id_y();
+        __global const ulong *srcs,        // base src address per copy
+        __global const ulong *dsts,        // base dst address per copy
+        __global const ulong *body_prefix, // exclusive prefix of body-op counts
+        __global const uchar *op_size,     // per-copy transfer width: 1,2,4,8,16
+        __global const uchar *head_size,   // leading bytes to reach body alignment
+        __global const uchar *tail_size,   // trailing bytes after body
+        ulong n_batches,
+        ulong total_ops,                   // == body_prefix[n_batches]
+        ulong copy_stride) {
+      ulong gid = get_global_id(0);
 
-      CopyBufferBatchDescriptor descriptor = descriptors[descriptor_index];
-      __global uchar *source = (__global uchar *)descriptor.source_address;
-      __global uchar *destination =
-          (__global uchar *)descriptor.destination_address;
-      ulong copy_index = ((ulong)group_ordinal * workgroup_size) + work_item_id;
-
-      if (descriptor.aligned_element_size == sizeof(ulong2)) {
-        __global ulong2 *source_data = (__global ulong2 *)(source);
-        __global ulong2 *destination_data = (__global ulong2 *)(destination);
-        while (copy_index < descriptor.aligned_element_count) {
-          ulong2 tmp = source_data[copy_index];
-          source_data[copy_index] = destination_data[copy_index];
-          destination_data[copy_index] = tmp;
-          copy_index += copy_stride;
+      // Body loop: strided walk over the global body-op index space. Each global
+      // op index g maps to (copy c, local element) via a binary search over the
+      // prefix-sum array, with the last-found copy index cached across strides.
+      ulong c = 0;
+      for (ulong g = gid; g < total_ops; g += copy_stride) {
+        // Resolve copy index c = largest index with body_prefix[c] <= g.
+        if (!(g >= body_prefix[c] && g < body_prefix[c + 1])) {
+          ulong lo = 0;
+          ulong hi = n_batches;  // upper_bound over body_prefix[0..n_batches]
+          while (lo < hi) {
+            ulong mid = lo + ((hi - lo) >> 1);
+            if (body_prefix[mid] <= g) {
+              lo = mid + 1;
+            } else {
+              hi = mid;
+            }
+          }
+          c = lo - 1;  // upper_bound - 1
         }
-      } else {
-        __global uint *source_data = (__global uint *)(source);
-        __global uint *destination_data = (__global uint *)(destination);
-        while (copy_index < descriptor.aligned_element_count) {
-          uint tmp = source_data[copy_index];
-          source_data[copy_index] = destination_data[copy_index];
-          destination_data[copy_index] = tmp;
-          copy_index += copy_stride;
+
+        ulong elem = g - body_prefix[c];
+        uchar s = op_size[c];
+        __global uchar *sp =
+            (__global uchar *)(srcs[c] + head_size[c]) + elem * (ulong)s;
+        __global uchar *dp =
+            (__global uchar *)(dsts[c] + head_size[c]) + elem * (ulong)s;
+
+        // Swap one element of width s. Addresses are aligned to s by the CPU
+        // side head computation.
+        if (s == 16) {
+          __global ulong2 *a = (__global ulong2 *)sp;
+          __global ulong2 *b = (__global ulong2 *)dp;
+          ulong2 tmp = *a;
+          *a = *b;
+          *b = tmp;
+        } else if (s == 8) {
+          __global ulong *a = (__global ulong *)sp;
+          __global ulong *b = (__global ulong *)dp;
+          ulong tmp = *a;
+          *a = *b;
+          *b = tmp;
+        } else if (s == 4) {
+          __global uint *a = (__global uint *)sp;
+          __global uint *b = (__global uint *)dp;
+          uint tmp = *a;
+          *a = *b;
+          *b = tmp;
+        } else if (s == 2) {
+          __global ushort *a = (__global ushort *)sp;
+          __global ushort *b = (__global ushort *)dp;
+          ushort tmp = *a;
+          *a = *b;
+          *b = tmp;
+        } else {
+          uchar tmp = *sp;
+          *sp = *dp;
+          *dp = tmp;
         }
       }
-      if ((descriptor.trailing_byte_count != 0) && (group_ordinal == 0) &&
-          (work_item_id == 0)) {
-        ulong tail_start =
-            descriptor.aligned_element_count * descriptor.aligned_element_size;
-        ulong tail_end = tail_start + descriptor.trailing_byte_count;
-        for (ulong i = tail_start; i < tail_end; ++i) {
-          uchar t = source[i];
-          source[i] = destination[i];
-          destination[i] = t;
+
+      // Head / tail: handled only by the first workgroup. Thread t owns copies
+      // t, t+blockDim, ... and swaps their leading head_size bytes and trailing
+      // tail_size bytes. Regions are disjoint from the body and from each other.
+      if (get_group_id(0) == 0) {
+        ulong t = get_local_id(0);
+        ulong block_dim = get_local_size(0);
+        for (ulong ci = t; ci < n_batches; ci += block_dim) {
+          __global uchar *src_base = (__global uchar *)srcs[ci];
+          __global uchar *dst_base = (__global uchar *)dsts[ci];
+          uchar head = head_size[ci];
+          uchar tail = tail_size[ci];
+
+          // Head bytes: [0, head).
+          for (ulong i = 0; i < head; ++i) {
+            uchar tmp = src_base[i];
+            src_base[i] = dst_base[i];
+            dst_base[i] = tmp;
+          }
+
+          // Tail bytes: [tail_start, tail_start + tail), after head + body.
+          ulong body_count = body_prefix[ci + 1] - body_prefix[ci];
+          ulong tail_start = (ulong)head + body_count * (ulong)op_size[ci];
+          for (ulong i = 0; i < tail; ++i) {
+            uchar tmp = src_base[tail_start + i];
+            src_base[tail_start + i] = dst_base[tail_start + i];
+            dst_base[tail_start + i] = tmp;
+          }
         }
       }
     }

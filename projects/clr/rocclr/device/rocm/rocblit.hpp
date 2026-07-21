@@ -636,7 +636,8 @@ class KernelBlitManager : public DmaBlitManager {
   bool ShaderCopyBufferBatchRaw(const std::vector<BatchRawCopyOp>& copy_ops) const;
 
   //! Returns true if a batch swap should use the shader path.
-  bool useShaderSwapPath(const Memory& src, const Memory& dst, size_t size,
+  bool useShaderSwapPath(const Memory& src, const Memory& dst, size_t srcOffset,
+                         size_t dstOffset, size_t size,
                          const amd::CopyMetadata& metadata) const;
 
   //! Swaps a batch of buffer pairs using a single/multiple shader dispatch
