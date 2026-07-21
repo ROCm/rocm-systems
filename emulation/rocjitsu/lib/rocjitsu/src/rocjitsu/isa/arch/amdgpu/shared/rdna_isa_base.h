@@ -29,12 +29,12 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_RDNA_ISA_BASE_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_RDNA_ISA_BASE_H_
 
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-
 #include <cstdint>
 
 namespace rocjitsu {
 namespace amdgpu {
+
+class Wavefront;
 
 /// @brief Shared ISA base struct for all RDNA ISAs (GFX10/11/12 family, Wave32 default).
 ///

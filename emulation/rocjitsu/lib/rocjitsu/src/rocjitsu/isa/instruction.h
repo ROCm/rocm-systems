@@ -117,7 +117,8 @@ public:
   /// @brief Direct execute dispatch.  Callers invoke as:
   ///   ``inst->execute(*inst, &ctx)``
   /// Each derived instruction class sets this to a trampoline that calls
-  /// its ``execute_impl()`` method.  No virtual dispatch.
+  /// its ``execute_impl()`` method. In a model-only DBT image this is nullptr
+  /// and must not be called. No virtual dispatch.
   const ExecuteFn execute;
 
   /// @brief Access the attached dynamic state, or nullptr if none.
@@ -317,6 +318,39 @@ public:
     return [](Instruction &self, void *ctx) {
       static_cast<Derived &>(self).execute_impl(*static_cast<typename Isa::Context *>(ctx));
     };
+  }
+
+  /// @brief Return the execution callback installed by an optional execution
+  /// translation unit.
+  ///
+  /// @details Model and execution objects must be co-linked into the same
+  /// image. The slot is image-local C++ state, not a registration ABI between
+  /// independently loaded shared libraries. Execution translation units
+  /// register their callbacks during static initialization, before any
+  /// instruction is decoded. Model-only images omit those translation units
+  /// and intentionally observe a null callback.
+  /// @tparam Derived Concrete generated instruction type.
+  /// @returns The registered execution trampoline, or null in a model-only
+  /// image.
+  template <typename Derived> static ExecuteFn registered_exec_fn() {
+    return exec_fn_slot<Derived>();
+  }
+
+  /// @brief Install a concrete instruction's execution trampoline.
+  /// @tparam Derived Concrete generated instruction type.
+  /// @returns True so the helper can initialize a namespace-scope registrar.
+  template <typename Derived> static bool register_exec_fn() {
+    exec_fn_slot<Derived>() = make_exec_fn<Derived>();
+    return true;
+  }
+
+private:
+  /// @brief Return the image-local dispatch slot for one instruction type.
+  /// @tparam Derived Concrete generated instruction type.
+  /// @returns Mutable slot populated during execution-TU static initialization.
+  template <typename Derived> static ExecuteFn &exec_fn_slot() {
+    static ExecuteFn fn = nullptr;
+    return fn;
   }
 };
 

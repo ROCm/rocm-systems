@@ -7,8 +7,8 @@
 #ifndef ROCJITSU_ISA_OPERAND_H_
 #define ROCJITSU_ISA_OPERAND_H_
 
+#include "rocjitsu/isa/arch/amdgpu/vgpr_msb.h"
 #include "rocjitsu/isa/register_set.h"
-#include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 
 #include <cstdint>
 #include <optional>

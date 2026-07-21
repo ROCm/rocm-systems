@@ -192,6 +192,10 @@ add_executable(unit_tests_logging rdna_logging_test.cpp)
 target_include_directories(unit_tests_logging PRIVATE ${SRC_DIR} ${INC_DIR})
 target_link_libraries(unit_tests_logging PRIVATE rocprof-trace-decoder-static GTest::gtest_main GTest::gmock_main)
 
+add_executable(api_lifetime_test api_lifetime_test.cpp)
+target_include_directories(api_lifetime_test PRIVATE ${SRC_DIR} ${INC_DIR})
+target_link_libraries(api_lifetime_test PRIVATE rocprof-trace-decoder-static)
+
 if(BUILD_MARKERS)
     find_package(LLVM REQUIRED CONFIG)
 
@@ -243,6 +247,9 @@ gtest_discover_tests(
     unit_tests_logging
     PROPERTIES LABELS "unit-tests;regular;logging" ENVIRONMENT "SQTT_LOGGING=1"
     TEST_PREFIX "logging/")
+
+add_test(NAME api-lifetime COMMAND api_lifetime_test)
+set_tests_properties(api-lifetime PROPERTIES LABELS "unit-tests;regular;lifetime")
 
 if(BUILD_MARKERS)
     gtest_discover_tests(

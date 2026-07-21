@@ -29,6 +29,7 @@ target_link_libraries(
         rocjitsu_code
         rocjitsu_dbt_config
         rocjitsu_isa
+        rocjitsu_isa_registry
         rocjitsu_isa_cdna1
         rocjitsu_isa_cdna2
         rocjitsu_isa_cdna3

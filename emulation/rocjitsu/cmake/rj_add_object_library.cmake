@@ -5,15 +5,14 @@
 # rocjitsu sub-components. ROCJITSU_INCLUDE_DIR and ROCJITSU_SRC_DIR
 # must be set before including this module.
 #
-# Usage: rj_add_object_library(<name> <sources...>)
-function(rj_add_object_library name)
-    add_library(${name} OBJECT ${ARGN})
+# Apply the common include paths and warnings to one rocjitsu object library.
+function(_rj_configure_object_library name)
     set_target_properties(${name} PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_include_directories(
         ${name}
         PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR} ${HSA_INCLUDE_DIR}
     )
-    target_link_libraries(${name} PRIVATE util simdojo)
+    target_link_libraries(${name} PRIVATE ${ARGN})
     if(MSVC)
         target_compile_options(${name} PRIVATE /W4 /WX)
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
@@ -22,4 +21,10 @@ function(rj_add_object_library name)
             PRIVATE -Wall -Wextra -Wpedantic -Werror -fvisibility=hidden
         )
     endif()
+endfunction()
+
+# Usage: rj_add_object_library(<name> <sources...>)
+function(rj_add_object_library name)
+    add_library(${name} OBJECT ${ARGN})
+    _rj_configure_object_library(${name} util simdojo_headers)
 endfunction()

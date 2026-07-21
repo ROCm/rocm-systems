@@ -375,7 +375,9 @@ class Command : public Event {
   }
   bool getPktCapturingState() const { return packetCapturing_; }
 
-  //! Sets AQL capture state, aql packet to capture and where to copy kernArgs
+  //! Sets AQL capture state, aql packet to capture and where to copy kernArgs.
+  //! |metadataPacket|, when non-null, also enables capturing the metadata-prefetch
+  //! packet that parallels each captured AQL packet.
   void setPktCapturingState(bool state, std::vector<uint8_t*>* packet,
                             amd::GraphKernelArgManager* graphKernArgMgr,
                             const std::string** capturedKernelName,
