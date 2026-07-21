@@ -230,6 +230,7 @@ class ConSanValidationTest(unittest.TestCase):
                 "RJ_CONSAN_MAX_PATCHES": "1",
                 "RJ_CONSAN_TMP_VGPR": "99",
                 "HSA_TOOLS_LIB": "/stale/hook.so",
+                "HSA_TOOLS_ROCPROFILER_V1_TOOLS": "0",
             },
             clear=False,
         ):
@@ -239,6 +240,7 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertNotIn("RJ_CONSAN_MAX_PATCHES", environment)
         self.assertNotIn("RJ_CONSAN_TMP_VGPR", environment)
         self.assertEqual(environment["HSA_TOOLS_LIB"], "/new/hook.so")
+        self.assertNotIn("HSA_TOOLS_ROCPROFILER_V1_TOOLS", environment)
         self.assertEqual(environment["RJ_CONSAN_MODE"], "record-replay")
         self.assertEqual(environment["RJ_CONSAN_POLICY"], "strict")
         self.assertNotIn("RJ_CONSAN_FLAVOR", environment)
@@ -252,6 +254,30 @@ class ConSanValidationTest(unittest.TestCase):
                 "RJ_CONSAN_MOI_TRACK_ATOMICS": "1",
             },
         )
+
+    def test_pytorch_profile_enables_environment_hsa_tool_loading(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-torch-histc"]
+        with mock.patch.dict(
+            os.environ,
+            {"HSA_TOOLS_ROCPROFILER_V1_TOOLS": "0"},
+            clear=False,
+        ):
+            baseline = validation._clean_environment(
+                None, workload, Path("/hook.so")
+            )
+            environment = validation._clean_environment(
+                "record-replay", workload, Path("/hook.so")
+            )
+        self.assertNotIn("HSA_TOOLS_ROCPROFILER_V1_TOOLS", baseline)
+        self.assertEqual(environment["HSA_TOOLS_ROCPROFILER_V1_TOOLS"], "1")
+        setting = validation._audited_settings(environment)
+        v1_tool = next(
+            item
+            for item in setting
+            if item["name"] == "HSA_TOOLS_ROCPROFILER_V1_TOOLS"
+        )
+        self.assertEqual(v1_tool["category"], "runtime-plumbing")
+        self.assertFalse(v1_tool["usability_exception"])
 
     def test_supercollider_does_not_receive_moi_tracking_controls(self) -> None:
         workload = validation.WORKLOAD_BY_ID["streamk-arrival"]

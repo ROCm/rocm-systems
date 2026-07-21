@@ -41,6 +41,10 @@ TIMEOUT_SECONDS = 30
 QWEN_OVERHEAD_REPETITIONS = {"gfx1250": 1}
 CONTROLLED_ENV_PREFIX = "RJ_CONSAN_"
 TOOLS = ("iree-run-module", "iree-benchmark-module", "rocminfo")
+HSA_TOOL_ENVIRONMENT = {
+    "HSA_TOOLS_LIB",
+    "HSA_TOOLS_ROCPROFILER_V1_TOOLS",
+}
 
 
 SETTING_CATEGORIES = {
@@ -1146,7 +1150,7 @@ def _clean_environment(
         key: value
         for key, value in os.environ.items()
         if not key.startswith(CONTROLLED_ENV_PREFIX)
-        and key not in {"HSA_TOOLS_LIB", "HIP_TARGET"}
+        and key not in HSA_TOOL_ENVIRONMENT | {"HIP_TARGET"}
     }
     if target is not None:
         environment["HIP_TARGET"] = target
@@ -1160,6 +1164,11 @@ def _clean_environment(
             "RJ_CONSAN_LOG": "1",
         }
     )
+    if workload.kind == "pytorch":
+        # PyTorch wheels bundle a modern HSA runtime which returns after
+        # successful rocprofiler registration unless legacy environment tools
+        # are explicitly requested.  ConSan is currently such a tool.
+        environment["HSA_TOOLS_ROCPROFILER_V1_TOOLS"] = "1"
     if not workload.moi_record_evidence_expected:
         environment["RJ_CONSAN_MOI_REQUIRE_RECORDS"] = "0"
     if workload.id == "qwen-prefill" and profile == "sampled":
@@ -1170,6 +1179,7 @@ def _clean_environment(
 def _controlled_environment(environment: dict[str, str]) -> dict[str, str]:
     runtime_names = {
         "HSA_TOOLS_LIB",
+        "HSA_TOOLS_ROCPROFILER_V1_TOOLS",
         "CTEST_PARALLEL_LEVEL",
         "HIP_PATH",
         "HIP_TARGET",
@@ -1187,7 +1197,7 @@ def _controlled_environment(environment: dict[str, str]) -> dict[str, str]:
 
 
 def _setting_metadata(name: str) -> dict:
-    if name in {"HSA_TOOLS_LIB", "HIP_TARGET"}:
+    if name in HSA_TOOL_ENVIRONMENT | {"HIP_TARGET"}:
         category = "runtime-plumbing"
     elif name == "CTEST_PARALLEL_LEVEL":
         category = "fault-containment"
@@ -1236,7 +1246,7 @@ def _audited_settings(environment: dict[str, str]) -> list[dict]:
         name
         for name in environment
         if name.startswith(CONTROLLED_ENV_PREFIX)
-        or name in {"HSA_TOOLS_LIB", "HIP_TARGET", "CTEST_PARALLEL_LEVEL"}
+        or name in HSA_TOOL_ENVIRONMENT | {"HIP_TARGET", "CTEST_PARALLEL_LEVEL"}
     )
     return [
         {"name": name, "value": environment[name], **_setting_metadata(name)}
