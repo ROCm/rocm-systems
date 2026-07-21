@@ -509,11 +509,14 @@ def _report_stacks(
     workload_stack: dict[str, list[Path]],
 ) -> None:
     """Log the resolved profiler and workload ROCm stacks."""
-    lines = ["Profiler ROCm stack:"]
+    lines = [
+        "ROCm libraries found in the profiler tool and in the workload:",
+        "Profiler tool:",
+    ]
     for stem in _STACK_LIB_STEMS:
         tool_lib = tool_stack.get(stem)
         lines.append(f"  {stem} : {tool_lib if tool_lib is not None else 'not found'}")
-    lines.append("Workload ROCm stack:")
+    lines.append("Workload:")
     for stem in _STACK_LIB_STEMS:
         workload_libs = workload_stack.get(stem, [])
         value = (
@@ -780,10 +783,10 @@ def plan_rocprofv3(resolution: StackResolution) -> Rocprofv3Launch:
             )
         rocprofv3 = _workload_stack_rocprofv3(workload_sdk)
         if rocprofv3 is not None:
-            console_log(
+            console_warning(
                 "stack",
-                "Dual ROCm stack detected; profiling with the workload's own "
-                f"rocprofv3: {rocprofv3}",
+                "Two ROCm stacks detected. To stay on a single stack, profiling "
+                f"will use the workload's own rocprofv3: {rocprofv3}",
             )
             return Rocprofv3Launch(rocprofv3=str(rocprofv3))
         raise IncompatibleRocmStackError(

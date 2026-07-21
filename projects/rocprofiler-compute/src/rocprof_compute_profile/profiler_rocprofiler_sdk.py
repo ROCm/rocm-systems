@@ -9,7 +9,13 @@ from typing import Optional, Union
 
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils.logger import console_debug, console_error, console_log, demarcate
+from utils.logger import (
+    console_debug,
+    console_error,
+    console_log,
+    console_warning,
+    demarcate,
+)
 from utils.rocm_stack_preflight import comgr_to_force
 from utils.utils_common import (
     PROFILE_OUTPUT_FORMAT,
@@ -37,9 +43,10 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
 
         forced_comgr = self._forced_comgr
         if forced_comgr is not None:
-            console_log(
+            console_warning(
                 "comgr",
-                f"Forcing single comgr via LD_PRELOAD: {forced_comgr}",
+                "Two ROCm stacks detected. Forcing a single 'libamd_comgr' via "
+                f"LD_PRELOAD: {forced_comgr}",
             )
 
         # Build LD_PRELOAD: preserve user's existing, then append our libs

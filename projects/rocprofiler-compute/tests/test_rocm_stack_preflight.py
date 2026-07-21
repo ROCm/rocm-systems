@@ -323,7 +323,7 @@ class TestDoubleComgrIntegration:
         )
         assert "inconsistency in registered CommandLine options" not in combined
         if "Double comgr detected" in combined:
-            assert "Forcing single comgr via LD_PRELOAD" in combined
+            assert "Forcing a single 'libamd_comgr' via LD_PRELOAD" in combined
 
     def test_torch_workload_runs_without_double_comgr(
         self, binary_handler_profile_rocprof_compute, tmp_path: Path
