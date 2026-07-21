@@ -31,7 +31,7 @@ protected:
   void reallocate(std::size_t new_capacity);
 
 private:
-  std::size_t current_size;
+  std::size_t current_size_;
 };
 ```
 
@@ -39,17 +39,20 @@ private:
 
 - Prefix global constants with `k` (e.g. `kMaxThreads`).
 - Use CamelCase for data types and snake_case for methods and members.
+- Suffix non-public data members (private and protected) with a trailing
+  underscore (e.g. `current_size_`); public members (such as POD `struct` fields)
+  take no suffix.
 - Use clear, descriptive names. No single-letter variables.
 
 ```cpp
 constexpr int kMaxThreads = 64;
 
-class ThreadPool {         // CamelCase type
+class ThreadPool {          // CamelCase type
 public:
-  void submit_task();      // snake_case method
+  void submit_task();       // snake_case method
 
 private:
-  int active_thread_count; // snake_case member
+  int active_thread_count_; // snake_case member, trailing _
 };
 ```
 
