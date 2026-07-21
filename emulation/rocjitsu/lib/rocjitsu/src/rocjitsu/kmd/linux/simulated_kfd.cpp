@@ -371,6 +371,7 @@ int SimulatedKfd::open() {
   for (auto &g : gpus_) {
     if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
       mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_);
+      mem->set_process_client_pid(pid, proc->client_pid());
       if (!daemon_mode_)
         mem->set_passthrough(true);
     }

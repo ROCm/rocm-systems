@@ -94,6 +94,29 @@ TEST_F(SimulatedKfdTest, OpenAndClose) {
   EXPECT_EQ(ret, 0);
 }
 
+TEST_F(SimulatedKfdTest, LocalOpenRegistersClientPidForMemoryFallback) {
+  auto t = create_test_vm();
+  ASSERT_NE(t.driver(), nullptr);
+  auto *vm = dynamic_cast<rocjitsu::VirtualMachine *>(t.engine->topology().root());
+  ASSERT_NE(vm, nullptr);
+  auto *memory = vm->memory();
+  ASSERT_NE(memory, nullptr);
+
+  int fd = t.driver()->open();
+  ASSERT_GE(fd, 0);
+  uint32_t process_id = t.driver()->local_process_id();
+  ASSERT_NE(process_id, 0u);
+
+  uint32_t host_value = 0x12345678u;
+  uint64_t host_va = reinterpret_cast<uint64_t>(&host_value);
+  EXPECT_EQ(memory->read32(host_va, process_id), host_value);
+
+  memory->write32(host_va, 0xA5A55A5Au, process_id);
+  EXPECT_EQ(host_value, 0xA5A55A5Au);
+
+  EXPECT_EQ(t.driver()->close(), 0);
+}
+
 TEST_F(SimulatedKfdTest, GuestDiscoveryOpenIsReleasedOnLastClose) {
   rj_vm_t *raw_vm = nullptr;
   ASSERT_EQ(rj_vm_create(CONFIG_PATH.c_str(), RJ_VM_MODE_LOCAL, &raw_vm), ROCJITSU_STATUS_SUCCESS);
