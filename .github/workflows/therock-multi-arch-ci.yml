@@ -128,6 +128,8 @@ jobs:
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
+      # Enable automatic stage reuse for external repos
+      stage_reuse_mode: reuse-stage
       # Pass changed_projects so TheRock can compute affected_stages
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
