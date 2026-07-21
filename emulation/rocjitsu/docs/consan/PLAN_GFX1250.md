@@ -141,7 +141,7 @@ flowchart TD
     XT1["XT1 DONE<br/>both compact P0 kernels green<br/>in all four profiles"]
     XT2A["XT2A DONE<br/>four-client transpose/TDM P1 row green<br/>in all four profiles"]
     XT2B["XT2B DONE<br/>broad multi-type transpose/TDM P1 green<br/>in all four profiles at strict capacity"]
-    XT2C1["XT2C1 ACTIVE<br/>001 Stream-K Inline post-merge<br/>paired and fault refresh"]
+    XT2C1["XT2C1 DONE<br/>001 Stream-K Inline post-merge<br/>paired and reviewed-fault bundle green"]
     XT2C2["XT2C2 TODO<br/>004 Stream-K kernel 3/4;<br/>Inline long-bound completion remains"]
     XT2C3["XT2C3 TODO<br/>007 Stream-K kernel 3/4;<br/>Inline long-bound completion remains"]
     XT3A["XT3A DONE<br/>reduced SGEMM Inline clean and paired pass;<br/>two reviewed faults expose detection gap"]
@@ -374,7 +374,7 @@ flowchart TD
   class XP3D done
   class XP3E done
   class XP3F done
-  class XT2C1 active
+  class XT2C1 done
   class XP5S,XP1A done
   class XP3C done
   class G0,V9,XP2D,XT2C2,XT2C3,XT3E,XT3I,XF,XG todo
@@ -425,6 +425,17 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XT2C1 is DONE/green.  At clean revision `9b9b12fc8c`, current
+  inventory `...-current-inventory-188` retains the selected tensor-pipeline
+  pairs; reviewed artifact `...-current-fault-pass-189` applies exactly one
+  fresh precommitted barrier drop, matches its pass-oracle/no-diagnosis
+  contract, retains complete surviving evidence, and passes health before and
+  after.  Paired artifact `...-current-paired-190` accepts both controls and
+  the complete exact instrumented run, measuring 13.38x with 768/768 accesses
+  and 102/102 barriers.  The two dense-host composition defects exposed by
+  the first selector have focused regressions and the full 687-test ConSan
+  slice passes.
 
 - 2026-07-21: XT2C1 is ACTIVE/blue for the post-merge Inline Shadow
   exception.  A retained one-repetition run already proves that the formerly
