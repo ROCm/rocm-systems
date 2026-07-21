@@ -1025,10 +1025,8 @@ int Device::writeDevInfo(DevInfoTypes type, uint64_t val) {
       break;
 
     case kDevPtlStatus:
-      // The sysfs node accepts the strings "enabled"/"disabled" (and reports
-      // the same on read); writing "1"/"0" is silently ignored by the driver,
-      // leaving the state unchanged. Pass returnWriteErr=true so a rejected
-      // write surfaces the real errno instead of a generic status.
+      // The sysfs node only accepts "enabled"/"disabled"; writing "1"/"0" is
+      // silently ignored. returnWriteErr=true surfaces errno on a rejected write.
       return writeDevInfoStr(type, val ? "enabled" : "disabled", true);
       break;
 

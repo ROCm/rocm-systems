@@ -58,6 +58,7 @@ class TestGpuPtl(unittest.TestCase):
         self.common.print_func_name("")
 
         mismatches = []
+        tested = 0
         for i, gpu in enumerate(self.common.processors):
             self.common.print_device_header(i)
 
@@ -73,6 +74,8 @@ class TestGpuPtl(unittest.TestCase):
                     self.raise_exception = e
                 continue
 
+            tested += 1
+
             # Drive each state and confirm the read-back matches what was set.
             for desired in (True, False):
                 set_msg = f"\t### amdsmi_set_gpu_ptl_state(gpu={i}, enable={desired}):"
@@ -87,22 +90,28 @@ class TestGpuPtl(unittest.TestCase):
 
                 read_back = amdsmi.amdsmi_get_gpu_ptl_state(gpu)
                 self.common.print(f"\t### amdsmi_get_gpu_ptl_state(gpu={i}) after set:", read_back)
+                self.common.check_ret("", "", self.common.PASS)
                 if read_back != desired:
                     mismatches.append(
                         f"gpu({i}): set PTL state to {desired} but read back {read_back}"
                     )
 
-            # Best-effort restore of the original state.
+            # Restore the original state; a genuine failure (not merely
+            # not-supported) fails the test instead of being swallowed.
+            restore_msg = f"\t### restore amdsmi_set_gpu_ptl_state(gpu={i}):"
             try:
                 amdsmi.amdsmi_set_gpu_ptl_state(gpu, int(original))
+                self.common.check_ret("", "", self.common.PASS)
             except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                self.common.print(f"\t### restore amdsmi_set_gpu_ptl_state(gpu={i}) failed:", e)
+                if self.common.check_ret(restore_msg, e, self.common.PASS):
+                    self.raise_exception = e
 
-        if mismatches:
-            self.fail("PTL set did not take effect:\n  " + "\n  ".join(mismatches))
         if self.raise_exception:
             raise self.raise_exception
-        return
+        if mismatches:
+            self.fail("PTL set did not take effect:\n  " + "\n  ".join(mismatches))
+        if tested == 0:
+            self.skipTest("No PTL-capable GPUs found")
 
 
 if __name__ == "__main__":
