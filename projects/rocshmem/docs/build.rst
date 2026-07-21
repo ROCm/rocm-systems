@@ -83,11 +83,11 @@ rocSHMEM requires ROCm-Aware Open MPI and UCX for the RO backend.
 MPI is optional with the IPC and GDA backends.
 Other MPI implementations, such as MPICH, have not been fully tested.
 
-To build and configure ROCm-Aware UCX 1.17.0 or later, run:
+UCX version 1.21.1 or newer is recommended for the RO backend. To build and configure ROCm-Aware UCX, run:
 
 .. code-block:: bash
 
-  git clone https://github.com/ROCm/ucx.git -b v1.17.x
+  git clone https://github.com/ROCm/ucx.git -b v1.21.x
   cd ucx
   ./autogen.sh
   ./configure --prefix=<prefix_dir> --with-rocm=<rocm_path> --enable-mt
