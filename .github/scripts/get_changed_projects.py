@@ -76,10 +76,11 @@ def get_changed_projects(base_ref: str) -> ChangedProjectsResult:
         )
 
     # If CI workflow/script files changed, run all tests
-    if should_run_all_tests(modified_paths):
-        return ChangedProjectsResult(
-            changed_projects="", run_all_tests=True, skip_tests=False
-        )
+    # TODO(geomin12): Uncomment after testing stage reuse
+    # if should_run_all_tests(modified_paths):
+    #     return ChangedProjectsResult(
+    #         changed_projects="", run_all_tests=True, skip_tests=False
+    #     )
 
     # If only skippable files changed, skip tests
     if not check_for_non_skippable_path(modified_paths):
