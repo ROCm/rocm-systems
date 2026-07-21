@@ -242,6 +242,16 @@ make_gfx1200_code_object(const std::vector<uint32_t> &text_words) {
   return make_gfx_code_object(text_words, EF_AMDGPU_MACH_AMDGCN_GFX1200);
 }
 
+[[nodiscard]] inline std::vector<uint8_t>
+make_gfx1201_code_object(const std::vector<uint32_t> &text_words) {
+  return make_gfx_code_object(text_words, EF_AMDGPU_MACH_AMDGCN_GFX1201);
+}
+
+[[nodiscard]] inline std::vector<uint8_t> make_gfx1201_multi_kernel_code_object(
+    const std::vector<std::pair<std::string, std::vector<uint32_t>>> &kernels) {
+  return make_gfx_multi_kernel_code_object(kernels, EF_AMDGPU_MACH_AMDGCN_GFX1201);
+}
+
 [[nodiscard]] inline std::vector<uint8_t> make_relocatable_code_object(std::vector<uint8_t> image) {
   Elf64_Ehdr ehdr{};
   std::memcpy(&ehdr, image.data(), sizeof(ehdr));
@@ -304,6 +314,18 @@ make_gfx1250_code_object(const std::vector<uint32_t> &text_words) {
   append_inst(text_words, s_wait_loadcnt(0));
   append_inst(text_words, v_mov_b32(1, 0));
   return make_gfx1200_code_object(text_words);
+}
+
+[[nodiscard]] inline std::vector<uint8_t> make_gfx1201_correct_wait_code_object() {
+  std::vector<uint32_t> text_words;
+  append_inst(text_words, global_load_b32(0));
+  append_inst(text_words, s_wait_loadcnt(0));
+  append_inst(text_words, v_mov_b32(1, 0));
+  return make_gfx1201_code_object(text_words);
+}
+
+[[nodiscard]] inline std::vector<uint8_t> make_gfx1201_invalid_instruction_code_object() {
+  return make_gfx1201_code_object({0x00800000U});
 }
 
 [[nodiscard]] inline std::vector<uint8_t> make_gfx1200_invalid_instruction_code_object() {

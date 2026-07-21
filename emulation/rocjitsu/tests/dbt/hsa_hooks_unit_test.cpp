@@ -28,6 +28,7 @@
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_replay_provenance.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_sampled_sync.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "waitcheck_fixture.h"
 
 extern "C" bool OnLoad(HsaApiTable *table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char *const *failed_tool_names);
@@ -1016,6 +1017,118 @@ TEST(HsaHooksUnitTest, ConSanLoaderHonorsAllTypedOutcomesAcrossAllProfiles) {
     run_hook_load_case(profile, false, corrupt, HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u);
     run_hook_load_case(profile, true, corrupt, HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u);
   }
+}
+
+TEST(HsaHooksUnitTest, ConSanWaitcheckReportsHazardBeforeTransformRegardlessOfWaitcheckEnv) {
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  ScopedEnvVar waitcheck_enable("ROCJITSU_WAITCHECK", "0");
+  ScopedEnvVar waitcheck_mode("ROCJITSU_WAITCHECK_MODE", "dispatch");
+  ScopedEnvVar waitcheck_fail("ROCJITSU_WAITCHECK_FAIL", "0");
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+
+  std::vector<uint32_t> clean_kernel;
+  rocjitsu::waitcheck_test::append_inst(clean_kernel, rocjitsu::waitcheck_test::global_load_b32(0));
+  rocjitsu::waitcheck_test::append_inst(clean_kernel, rocjitsu::waitcheck_test::s_wait_loadcnt(0));
+  rocjitsu::waitcheck_test::append_inst(clean_kernel, rocjitsu::waitcheck_test::v_mov_b32(1, 0));
+  std::vector<uint32_t> hazardous_kernel;
+  rocjitsu::waitcheck_test::append_inst(hazardous_kernel,
+                                        rocjitsu::waitcheck_test::global_load_b32(0));
+  rocjitsu::waitcheck_test::append_inst(hazardous_kernel,
+                                        rocjitsu::waitcheck_test::v_mov_b32(1, 0));
+  const std::vector<uint8_t> original =
+      rocjitsu::waitcheck_test::make_gfx1201_multi_kernel_code_object(
+          {{"clean_kernel", clean_kernel}, {"hazardous_kernel", hazardous_kernel}});
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &reader),
+            HSA_STATUS_SUCCESS);
+
+  testing::internal::CaptureStderr();
+  const hsa_status_t status = api.core.hsa_executable_load_agent_code_object_fn(
+      hsa_executable_t{7}, kHostAgent, reader, nullptr, nullptr);
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+  expect_transform_profile(kConSanHookProfiles[1]);
+  EXPECT_EQ(g_loaded_code_object_readers, std::vector<uint64_t>{101u});
+  const size_t waitcheck_pos = log.find("ConSan preflight reported reader=101 target=gfx1201 "
+                                        "reason=wait-hazard diagnostics=1");
+  const size_t consan_pos = log.find("ConSan patch begin reader=101");
+  EXPECT_NE(waitcheck_pos, std::string::npos) << log;
+  EXPECT_NE(consan_pos, std::string::npos) << log;
+  EXPECT_LT(waitcheck_pos, consan_pos) << log;
+}
+
+TEST(HsaHooksUnitTest, ConSanWaitcheckReportsAnalysisFailureBeforeTransform) {
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+
+  const std::vector<uint8_t> original =
+      rocjitsu::waitcheck_test::make_gfx1201_invalid_instruction_code_object();
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &reader),
+            HSA_STATUS_SUCCESS);
+
+  testing::internal::CaptureStderr();
+  const hsa_status_t status = api.core.hsa_executable_load_agent_code_object_fn(
+      hsa_executable_t{7}, kHostAgent, reader, nullptr, nullptr);
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+  expect_transform_profile(kConSanHookProfiles[1]);
+  EXPECT_EQ(g_loaded_code_object_readers, std::vector<uint64_t>{101u});
+  const size_t waitcheck_pos = log.find("ConSan preflight reported reader=101 target=gfx1201 "
+                                        "reason=analysis-failed");
+  const size_t consan_pos = log.find("ConSan patch begin reader=101");
+  EXPECT_NE(waitcheck_pos, std::string::npos) << log;
+  EXPECT_NE(consan_pos, std::string::npos) << log;
+  EXPECT_LT(waitcheck_pos, consan_pos) << log;
+}
+
+TEST(HsaHooksUnitTest, ConSanWaitcheckPassesBeforeTransformForCleanCodeObject) {
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+
+  const std::vector<uint8_t> original =
+      rocjitsu::waitcheck_test::make_gfx1201_correct_wait_code_object();
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &reader),
+            HSA_STATUS_SUCCESS);
+
+  testing::internal::CaptureStderr();
+  const hsa_status_t status = api.core.hsa_executable_load_agent_code_object_fn(
+      hsa_executable_t{7}, kHostAgent, reader, nullptr, nullptr);
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+  expect_transform_profile(kConSanHookProfiles[1]);
+  EXPECT_EQ(g_loaded_code_object_readers, std::vector<uint64_t>{101u});
+  const size_t waitcheck_pos = log.find("waitcheck preflight reader=101 target=gfx1201 "
+                                        "outcome=passed");
+  const size_t consan_pos = log.find("ConSan patch begin reader=101");
+  EXPECT_NE(waitcheck_pos, std::string::npos) << log;
+  EXPECT_NE(consan_pos, std::string::npos) << log;
+  EXPECT_LT(waitcheck_pos, consan_pos) << log;
 }
 
 TEST(HsaHooksUnitTest, ConSanRequirePatchRejectsPrologueOnlyMoiMutation) {

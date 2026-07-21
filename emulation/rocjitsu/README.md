@@ -105,6 +105,7 @@ See [docs/building.md](docs/building.md) for container setup with PyTorch.
 | Document | Description |
 |---|---|
 | [Building](docs/building.md) | Build options, sanitizers, container setup |
+| [Waitcheck and ConSan](docs/sanitizers.md) | Build and run both sanitizers through one HSA-tools hook |
 | [Configuration](docs/configuration.md) | JSON config format and topology |
 | [CLI & Transport](docs/rocjitsu-cli.md) | CLI modes, daemon RPC protocol |
 | [Race Detector](docs/race-detector.md) | Race detection tutorial and internals |

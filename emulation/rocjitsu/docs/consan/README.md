@@ -44,6 +44,12 @@ freedom.
 Loading the hook without `RJ_CONSAN_ENABLE=1` remains inert. Flavor and engine
 variables select the analysis but do not enable ConSan by themselves.
 
+When enabled, the same hook always runs waitcheck over each supported original
+code object before ConSan DBI. It reports missing waits or analysis failures,
+then continues into ConSan so suspect kernels are still instrumented. No
+separate waitcheck HSA tool or waitcheck environment settings are needed for a
+ConSan run.
+
 For a focused program known to contain supported sites, the self-checks
 `RJ_CONSAN_FAIL_CLOSED=1`, `RJ_CONSAN_REQUIRE_PATCH=1`, and
 `RJ_CONSAN_MOI_REQUIRE_RECORDS=1` prevent ineffective instrumentation from

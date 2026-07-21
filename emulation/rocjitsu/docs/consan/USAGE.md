@@ -37,6 +37,15 @@ env \
 Record/Replay. Loading the hook without it remains inert. Flavor and engine
 variables select the analysis but do not enable it.
 
+Every valid code object on a waitcheck-supported target is checked for missing
+AMDGPU waits at load time before ConSan allocates runtime state or runs its DBI
+transform. Hazards and analysis failures are reported first, then ConSan still
+instruments the suspect code so it can diagnose its memory-ordering behavior.
+This preflight is part of the ConSan hook and is not controlled by
+`ROCJITSU_WAITCHECK`, `ROCJITSU_WAITCHECK_MODE`, or
+`ROCJITSU_WAITCHECK_FAIL`; ordinary ConSan runs do not load the separate
+waitcheck HSA tool.
+
 ## Ordinary flavors and engines
 
 ConSan exposes two top-level flavors. MOI contains three engines:

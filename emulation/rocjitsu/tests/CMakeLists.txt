@@ -915,6 +915,7 @@ target_include_directories(
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
         ${CMAKE_SOURCE_DIR}/lib/util/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools
         ${GENERATED_DIR}
 )
 target_include_directories(

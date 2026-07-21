@@ -12,6 +12,8 @@
 #include "hsa/hsa_api_trace_minimal.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_hook_internal.h"
 
+#include "rocjitsu/analysis/waitcheck.h"
+#include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_replay_provenance.h"
@@ -29,6 +31,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -65,6 +68,8 @@ static_assert(sizeof(AmdLoaderExtTable103) == 56);
 std::atomic<int> g_log_level{kLogDisabled};
 std::atomic<uint64_t> g_dump_sequence{0};
 
+std::mutex &log_mutex();
+
 using ConSanTransformOverride = rocjitsu::ConSanResult (*)(std::span<const uint8_t>,
                                                            const rocjitsu::ConSanOptions &);
 std::atomic<ConSanTransformOverride> g_test_consan_transform_override{nullptr};
@@ -75,6 +80,144 @@ rocjitsu::ConSanResult run_consan_transform(std::span<const uint8_t> bytes,
           g_test_consan_transform_override.load(std::memory_order_acquire))
     return override(bytes, options);
   return rocjitsu::try_patch_consan(bytes, options);
+}
+
+enum class WaitcheckPreflightOutcome { NotApplicable, Passed, HazardReported, AnalysisFailed };
+
+[[nodiscard]] const char *waitcheck_target_name(rj_code_target_id_t target) {
+  switch (target) {
+  case ROCJITSU_CODE_TARGET_GFX942:
+    return "gfx942";
+  case ROCJITSU_CODE_TARGET_GFX950:
+    return "gfx950";
+  case ROCJITSU_CODE_TARGET_GFX1100:
+    return "gfx1100";
+  case ROCJITSU_CODE_TARGET_GFX1150:
+    return "gfx1150";
+  case ROCJITSU_CODE_TARGET_GFX1151:
+    return "gfx1151";
+  case ROCJITSU_CODE_TARGET_GFX1200:
+    return "gfx1200";
+  case ROCJITSU_CODE_TARGET_GFX1201:
+    return "gfx1201";
+  case ROCJITSU_CODE_TARGET_GFX1250:
+    return "gfx1250";
+  default:
+    return "unsupported";
+  }
+}
+
+void print_waitcheck_issue(uint64_t reader, const rocjitsu::AmdGpuCodeObject &code_object,
+                           const rocjitsu::WaitcheckReport &report) {
+  std::lock_guard lock(log_mutex());
+  if (!report.supported) {
+    std::fprintf(stderr,
+                 "rocjitsu-waitcheck: ConSan preflight reported reader=%llu target=%s "
+                 "reason=analysis-failed action=continue",
+                 static_cast<unsigned long long>(reader),
+                 waitcheck_target_name(code_object.target_id()));
+    if (!report.analysis_error.empty())
+      std::fprintf(stderr, ": %s", report.analysis_error.c_str());
+    std::fprintf(stderr, "\n");
+    return;
+  }
+
+  std::fprintf(stderr,
+               "rocjitsu-waitcheck: ConSan preflight reported reader=%llu target=%s "
+               "reason=wait-hazard diagnostics=%zu action=continue\n",
+               static_cast<unsigned long long>(reader),
+               waitcheck_target_name(code_object.target_id()), report.diagnostics_observed);
+  constexpr size_t kMaxDiagnostics = 32;
+  const size_t limit = std::min(kMaxDiagnostics, report.diagnostics.size());
+  for (size_t i = 0; i < limit; ++i) {
+    const rocjitsu::WaitcheckDiagnostic &diagnostic = report.diagnostics[i];
+    std::fprintf(stderr, "rocjitsu-waitcheck: %s+0x%llx: %s; producer %s+0x%llx: %s\n",
+                 diagnostic.section_name.c_str(),
+                 static_cast<unsigned long long>(diagnostic.section_offset),
+                 diagnostic.message.c_str(), diagnostic.section_name.c_str(),
+                 static_cast<unsigned long long>(diagnostic.producer_section_offset),
+                 diagnostic.producer_instruction.c_str());
+    std::fprintf(stderr, "rocjitsu-waitcheck:   consumer: %s\n", diagnostic.instruction.c_str());
+  }
+  if (report.diagnostics.size() > limit) {
+    std::fprintf(stderr, "rocjitsu-waitcheck: omitted %zu additional diagnostic(s)\n",
+                 report.diagnostics.size() - limit);
+  } else if (report.diagnostics_truncated) {
+    std::fprintf(stderr, "rocjitsu-waitcheck: omitted additional diagnostic(s) after limit\n");
+  }
+}
+
+void print_waitcheck_exception(uint64_t reader, const std::exception *error) {
+  std::lock_guard lock(log_mutex());
+  std::fprintf(stderr,
+               "rocjitsu-waitcheck: ConSan preflight reported reader=%llu "
+               "reason=analysis-failed action=continue",
+               static_cast<unsigned long long>(reader));
+  if (error != nullptr)
+    std::fprintf(stderr, ": %s", error->what());
+  std::fprintf(stderr, "\n");
+}
+
+[[nodiscard]] WaitcheckPreflightOutcome run_waitcheck_preflight(std::span<const uint8_t> bytes,
+                                                                uint64_t reader) {
+  bool recognized_code_object = false;
+  try {
+    rocjitsu::AmdGpuCodeObject code_object(bytes.data(), bytes.size());
+    if (!code_object.is_valid()) {
+      log_message(kLogVerbose,
+                  "waitcheck preflight reader=%llu outcome=not-applicable reason=invalid-object",
+                  static_cast<unsigned long long>(reader));
+      return WaitcheckPreflightOutcome::NotApplicable;
+    }
+
+    recognized_code_object = true;
+    const rj_code_arch_t arch = rocjitsu::waitcheck_arch_for_target(code_object.target_id());
+    if (arch == ROCJITSU_CODE_ARCH_INVALID) {
+      log_message(kLogVerbose,
+                  "waitcheck preflight reader=%llu target=%s outcome=not-applicable "
+                  "reason=unsupported-target",
+                  static_cast<unsigned long long>(reader),
+                  waitcheck_target_name(code_object.target_id()));
+      return WaitcheckPreflightOutcome::NotApplicable;
+    }
+
+    rocjitsu::WaitcheckOptions options;
+    options.max_diagnostics = 32;
+    const rocjitsu::WaitcheckReport report = rocjitsu::analyze_waitcnts(code_object, arch, options);
+    if (!report.supported) {
+      print_waitcheck_issue(reader, code_object, report);
+      return WaitcheckPreflightOutcome::AnalysisFailed;
+    }
+    if (!report.passed()) {
+      print_waitcheck_issue(reader, code_object, report);
+      return WaitcheckPreflightOutcome::HazardReported;
+    }
+
+    log_message(kLogInfo,
+                "waitcheck preflight reader=%llu target=%s outcome=passed instructions=%zu "
+                "memory_events=%zu kernels=%zu/%zu",
+                static_cast<unsigned long long>(reader),
+                waitcheck_target_name(code_object.target_id()), report.instructions_analyzed,
+                report.memory_events_tracked, report.kernels_analyzed, report.kernels_discovered);
+    return WaitcheckPreflightOutcome::Passed;
+  } catch (const std::exception &error) {
+    if (!recognized_code_object) {
+      log_message(kLogVerbose,
+                  "waitcheck preflight reader=%llu outcome=not-applicable reason=parse-failed",
+                  static_cast<unsigned long long>(reader));
+      return WaitcheckPreflightOutcome::NotApplicable;
+    }
+    print_waitcheck_exception(reader, &error);
+  } catch (...) {
+    if (!recognized_code_object) {
+      log_message(kLogVerbose,
+                  "waitcheck preflight reader=%llu outcome=not-applicable reason=parse-failed",
+                  static_cast<unsigned long long>(reader));
+      return WaitcheckPreflightOutcome::NotApplicable;
+    }
+    print_waitcheck_exception(reader, nullptr);
+  }
+  return WaitcheckPreflightOutcome::AnalysisFailed;
 }
 
 [[nodiscard]] bool is_supported_require_patch_flat_site(const rocjitsu::ConSanFlatSite &site) {
@@ -1849,7 +1992,7 @@ hsa_status_t HSA_API rj_dbi_code_object_reader_create_from_memory(
 
 std::shared_ptr<const std::vector<uint8_t>>
 snapshot_code_object_file_range(hsa_file_t file, size_t offset, size_t size) {
-  struct stat file_stat{};
+  struct stat file_stat {};
   if (fstat(file, &file_stat) != 0 || file_stat.st_size <= 0 || size == 0 ||
       static_cast<uintmax_t>(file_stat.st_size) > std::numeric_limits<size_t>::max() ||
       offset > static_cast<size_t>(file_stat.st_size) ||
@@ -1879,7 +2022,7 @@ snapshot_code_object_file_range(hsa_file_t file, size_t offset, size_t size) {
 }
 
 std::shared_ptr<const std::vector<uint8_t>> snapshot_code_object_file(hsa_file_t file) {
-  struct stat file_stat{};
+  struct stat file_stat {};
   if (fstat(file, &file_stat) != 0 || file_stat.st_size <= 0 ||
       static_cast<uintmax_t>(file_stat.st_size) > std::numeric_limits<size_t>::max())
     return {};
@@ -2164,6 +2307,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     const uint64_t dump_id = config->dump_dir.empty() ? 0 : load_id;
     dump_code_object_bytes(*config, dump_id, code_object_reader.handle, "original",
                            std::span<const uint8_t>(bytes, size));
+
+    (void)run_waitcheck_preflight(std::span<const uint8_t>(bytes, size), code_object_reader.handle);
 
     rocjitsu::ConSanOptions patch_options;
     patch_options.flavor = config->flavor.value_or(rocjitsu::ConSanFlavor::None);

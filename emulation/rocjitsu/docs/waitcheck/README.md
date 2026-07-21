@@ -457,6 +457,12 @@ rj_waitcheck libtorch_hip.so --target gfx950 --code-object-index 76 \
 
 ## Runtime HSA Tool
 
+ConSan users do not need this standalone tool: enabling
+`librocjitsu_dbi_hooks.so` runs an exhaustive waitcheck preflight on the
+original supported code object before ConSan DBI. That combined path always
+reports wait hazards and analysis failures before continuing to ConSan, and it
+ignores the standalone `ROCJITSU_WAITCHECK*` controls below.
+
 Load the checker through ROCR's HSA tools interface:
 
 ```sh
