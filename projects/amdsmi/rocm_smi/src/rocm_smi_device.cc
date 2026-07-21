@@ -1021,8 +1021,15 @@ int Device::writeDevInfo(DevInfoTypes type, uint64_t val) {
     case kDevOverDriveLevel:  // integer between 0 and 20
     case kDevPowerODVoltage:
     case kDevPowerProfileMode:
-    case kDevPtlStatus:
       return writeDevInfoStr(type, std::to_string(val));
+      break;
+
+    case kDevPtlStatus:
+      // The sysfs node accepts the strings "enabled"/"disabled" (and reports
+      // the same on read); writing "1"/"0" is silently ignored by the driver,
+      // leaving the state unchanged. Pass returnWriteErr=true so a rejected
+      // write surfaces the real errno instead of a generic status.
+      return writeDevInfoStr(type, val ? "enabled" : "disabled", true);
       break;
 
     case kDevPerfLevel:  // string: "auto", "low", "high", "manual", ...
