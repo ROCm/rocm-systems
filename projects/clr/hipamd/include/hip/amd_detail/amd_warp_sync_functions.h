@@ -86,14 +86,13 @@ template <typename T> __device__ inline T __hip_readfirstlane(T val) {
   u.d = val;
   // NOTE: The builtin returns int, so we first cast it to unsigned int and only
   // then extend it to 64 bits.
-  unsigned long long lower = (unsigned)(
-      __builtin_amdgcn_is_invocable(__builtin_amdgcn_readfirstlane)
-          ? __builtin_amdgcn_readfirstlane(u.l)
-          : 0);
-  unsigned long long upper = (unsigned)(
-      __builtin_amdgcn_is_invocable(__builtin_amdgcn_readfirstlane)
-          ? __builtin_amdgcn_readfirstlane(u.l >> 32)
-          : 0);
+  unsigned long long lower, upper;
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_readfirstlane)) {
+    lower = (unsigned)__builtin_amdgcn_readfirstlane(u.l);
+    upper = (unsigned)__builtin_amdgcn_readfirstlane(u.l >> 32);
+  } else {
+    __builtin_trap();
+  }
   u.l = (upper << 32) | lower;
   return u.d;
 }
@@ -167,10 +166,16 @@ template <typename T> __device__ inline T __hip_readfirstlane(T val) {
 __device__ inline void __syncwarp() {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
+  else
+    __atomic_thread_fence(__ATOMIC_RELEASE);
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_wave_barrier))
     __builtin_amdgcn_wave_barrier();
+  else
+    __builtin_trap();
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
+  else
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
 }
 
 template <typename MaskT> __device__ inline void __syncwarp(MaskT mask) {

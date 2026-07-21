@@ -24,10 +24,12 @@ __device__ static inline unsigned __hip_ds_bpermute(int index, unsigned src) {
     float f;
   } tmp;
   tmp.u = src;
-  tmp.i = __builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_bpermute)
-              ? __builtin_amdgcn_ds_bpermute(index, tmp.i)
-              : 0;
-  return tmp.u;
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_bpermute)) {
+    tmp.i = __builtin_amdgcn_ds_bpermute(index, tmp.i);
+    return tmp.u;
+  }
+  __builtin_trap();
+  return 0;
 }
 
 __device__ static inline float __hip_ds_bpermutef(int index, float src) {
@@ -37,10 +39,12 @@ __device__ static inline float __hip_ds_bpermutef(int index, float src) {
     float f;
   } tmp;
   tmp.f = src;
-  tmp.i = __builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_bpermute)
-              ? __builtin_amdgcn_ds_bpermute(index, tmp.i)
-              : 0;
-  return tmp.f;
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_bpermute)) {
+    tmp.i = __builtin_amdgcn_ds_bpermute(index, tmp.i);
+    return tmp.f;
+  }
+  __builtin_trap();
+  return 0.0f;
 }
 
 __device__ static inline unsigned __hip_ds_permute(int index, unsigned src) {
@@ -50,10 +54,12 @@ __device__ static inline unsigned __hip_ds_permute(int index, unsigned src) {
     float f;
   } tmp;
   tmp.u = src;
-  tmp.i = __builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_permute)
-              ? __builtin_amdgcn_ds_permute(index, tmp.i)
-              : 0;
-  return tmp.u;
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_permute)) {
+    tmp.i = __builtin_amdgcn_ds_permute(index, tmp.i);
+    return tmp.u;
+  }
+  __builtin_trap();
+  return 0;
 }
 
 __device__ static inline float __hip_ds_permutef(int index, float src) {
@@ -63,10 +69,12 @@ __device__ static inline float __hip_ds_permutef(int index, float src) {
     float f;
   } tmp;
   tmp.f = src;
-  tmp.i = __builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_permute)
-              ? __builtin_amdgcn_ds_permute(index, tmp.i)
-              : 0;
-  return tmp.f;
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_permute)) {
+    tmp.i = __builtin_amdgcn_ds_permute(index, tmp.i);
+    return tmp.f;
+  }
+  __builtin_trap();
+  return 0.0f;
 }
 
 #define __hip_ds_swizzle(src, pattern) __hip_ds_swizzle_N<(pattern)>((src))
@@ -79,10 +87,12 @@ template <int pattern> __device__ static inline unsigned __hip_ds_swizzle_N(unsi
     float f;
   } tmp;
   tmp.u = src;
-  tmp.i = __builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_swizzle)
-              ? __builtin_amdgcn_ds_swizzle(tmp.i, pattern)
-              : 0;
-  return tmp.u;
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_swizzle)) {
+    tmp.i = __builtin_amdgcn_ds_swizzle(tmp.i, pattern);
+    return tmp.u;
+  }
+  __builtin_trap();
+  return 0;
 }
 
 template <int pattern> __device__ static inline float __hip_ds_swizzlef_N(float src) {
@@ -92,10 +102,12 @@ template <int pattern> __device__ static inline float __hip_ds_swizzlef_N(float 
     float f;
   } tmp;
   tmp.f = src;
-  tmp.i = __builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_swizzle)
-              ? __builtin_amdgcn_ds_swizzle(tmp.i, pattern)
-              : 0;
-  return tmp.f;
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_swizzle)) {
+    tmp.i = __builtin_amdgcn_ds_swizzle(tmp.i, pattern);
+    return tmp.f;
+  }
+  __builtin_trap();
+  return 0.0f;
 }
 
 #define __hip_move_dpp(src, dpp_ctrl, row_mask, bank_mask, bound_ctrl)                             \

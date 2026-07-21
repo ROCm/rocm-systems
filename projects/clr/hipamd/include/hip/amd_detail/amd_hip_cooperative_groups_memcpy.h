@@ -41,6 +41,8 @@ __CG_STATIC_QUALIFIER__ void accelerated_memcpy_global_to_lds(TyElem* __restrict
         __builtin_amdgcn_global_load_async_to_lds_b128(
             (__attribute__((address_space(1))) vint4*)c_src,
             (__attribute__((address_space(3))) vint4*)c_dst, 0 /* offset */, 0 /* cache policy */);
+      else
+        __builtin_trap();
       bytes_left -= 16;
       c_src += 16;
       c_dst += 16;
@@ -49,6 +51,8 @@ __CG_STATIC_QUALIFIER__ void accelerated_memcpy_global_to_lds(TyElem* __restrict
         __builtin_amdgcn_global_load_async_to_lds_b64(
             (__attribute__((address_space(1))) vint2*)c_src,
             (__attribute__((address_space(3))) vint2*)c_dst, 0 /* offset */, 0 /* cache policy */);
+      else
+        __builtin_trap();
       bytes_left -= 8;
       c_src += 8;
       c_dst += 8;
@@ -57,6 +61,8 @@ __CG_STATIC_QUALIFIER__ void accelerated_memcpy_global_to_lds(TyElem* __restrict
         __builtin_amdgcn_global_load_async_to_lds_b32(
             (__attribute__((address_space(1))) int*)c_src,
             (__attribute__((address_space(3))) int*)c_dst, 0 /* offset */, 0 /* cache policy */);
+      else
+        __builtin_trap();
       bytes_left -= 4;
       c_src += 4;
       c_dst += 4;
@@ -65,6 +71,8 @@ __CG_STATIC_QUALIFIER__ void accelerated_memcpy_global_to_lds(TyElem* __restrict
         __builtin_amdgcn_global_load_async_to_lds_b8(
             (__attribute__((address_space(1))) char*)c_src,
             (__attribute__((address_space(3))) char*)c_dst, 0 /* offset */, 0 /* cache policy */);
+      else
+        __builtin_trap();
       bytes_left--;
       c_src++;
       c_dst++;
@@ -90,6 +98,8 @@ __CG_STATIC_QUALIFIER__ void accelerated_memcpy_lds_to_global(TyElem* __restrict
         __builtin_amdgcn_global_store_async_from_lds_b128(
             (__attribute__((address_space(1))) vint4*)c_dst,
             (__attribute__((address_space(3))) vint4*)c_src, 0 /* offset */, 0 /* cache policy */);
+      else
+        __builtin_trap();
       bytes_left -= 16;
       c_src += 16;
       c_dst += 16;
@@ -98,6 +108,8 @@ __CG_STATIC_QUALIFIER__ void accelerated_memcpy_lds_to_global(TyElem* __restrict
         __builtin_amdgcn_global_store_async_from_lds_b64(
             (__attribute__((address_space(1))) vint2*)c_dst,
             (__attribute__((address_space(3))) vint2*)c_src, 0 /* offset */, 0 /* cache policy */);
+      else
+        __builtin_trap();
       bytes_left -= 8;
       c_src += 8;
       c_dst += 8;
@@ -106,6 +118,8 @@ __CG_STATIC_QUALIFIER__ void accelerated_memcpy_lds_to_global(TyElem* __restrict
         __builtin_amdgcn_global_store_async_from_lds_b32(
             (__attribute__((address_space(1))) int*)c_dst,
             (__attribute__((address_space(3))) int*)c_src, 0 /* offset */, 0 /* cache policy */);
+      else
+        __builtin_trap();
       bytes_left -= 4;
       c_src += 4;
       c_dst += 4;
@@ -114,6 +128,8 @@ __CG_STATIC_QUALIFIER__ void accelerated_memcpy_lds_to_global(TyElem* __restrict
         __builtin_amdgcn_global_store_async_from_lds_b8(
             (__attribute__((address_space(1))) char*)c_dst,
             (__attribute__((address_space(3))) char*)c_src, 0 /* offset */, 0 /* cache policy */);
+      else
+        __builtin_trap();
       bytes_left--;
       c_src++;
       c_dst++;

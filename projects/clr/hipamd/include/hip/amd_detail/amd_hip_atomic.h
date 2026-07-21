@@ -599,13 +599,27 @@ __device__ inline double atomicMax_system(double* addr, double val) {
 __device__ inline unsigned int atomicInc(unsigned int* address, unsigned int val) {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_atomic_inc32))
     return __builtin_amdgcn_atomic_inc32(address, val, __ATOMIC_RELAXED, "agent");
-  return 0;
+
+  unsigned int old = __hip_atomic_load(address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+  unsigned int newval;
+  do {
+    newval = (old >= val) ? 0 : (old + 1);
+  } while (!__hip_atomic_compare_exchange_weak(address, &old, newval,
+           __ATOMIC_RELAXED, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT));
+  return old;
 }
 
 __device__ inline unsigned int atomicDec(unsigned int* address, unsigned int val) {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_atomic_dec32))
     return __builtin_amdgcn_atomic_dec32(address, val, __ATOMIC_RELAXED, "agent");
-  return 0;
+
+  unsigned int old = __hip_atomic_load(address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+  unsigned int newval;
+  do {
+    newval = (old == 0 || old > val) ? val : (old - 1);
+  } while (!__hip_atomic_compare_exchange_weak(address, &old, newval,
+           __ATOMIC_RELAXED, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT));
+  return old;
 }
 
 __device__ inline int atomicAnd(int* address, int val) {

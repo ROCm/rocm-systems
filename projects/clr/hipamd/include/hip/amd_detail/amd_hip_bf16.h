@@ -1941,10 +1941,11 @@ __BF16_DEVICE_STATIC__ __hip_bfloat162 unsafeAtomicAdd(__hip_bfloat162* address,
     __hip_bfloat162_raw bf162_raw;
     vec_short2 vs2;
   } u{static_cast<__hip_bfloat162_raw>(value)};
-  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_v2bf16))
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_v2bf16)) {
     u.vs2 = __builtin_amdgcn_flat_atomic_fadd_v2bf16((vec_short2*)address, u.vs2);
-  return static_cast<__hip_bfloat162>(u.bf162_raw);
-#else
+    return static_cast<__hip_bfloat162>(u.bf162_raw);
+  }
+#endif
   static_assert(sizeof(unsigned int) == sizeof(__hip_bfloat162_raw));
   union u_hold {
     __hip_bfloat162_raw h2r;
@@ -1959,7 +1960,6 @@ __BF16_DEVICE_STATIC__ __hip_bfloat162 unsafeAtomicAdd(__hip_bfloat162* address,
                                                  __ATOMIC_RELAXED, __ATOMIC_RELAXED,
                                                  __HIP_MEMORY_SCOPE_AGENT));
   return old_val.h2r;
-#endif
 }
 __BF16_DEVICE_STATIC__ __hip_bfloat16 unsafeAtomicAdd(__hip_bfloat16* address,
                                                       __hip_bfloat16 value) {

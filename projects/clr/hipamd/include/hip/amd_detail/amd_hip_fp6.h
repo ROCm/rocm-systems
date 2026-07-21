@@ -49,9 +49,13 @@ __FP6_HOST_DEVICE_STATIC__ __hip_fp6_storage_t __hip_cvt_bfloat16raw_to_fp6(
   if (fp6_interpretation == __HIP_E2M3) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_fp6_bf16))
       out = __builtin_amdgcn_cvt_scalef32_pk32_fp6_bf16(in, 1.0f /* scale */);
+    else
+      __builtin_trap();
   } else if (fp6_interpretation == __HIP_E3M2) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf6_bf16))
       out = __builtin_amdgcn_cvt_scalef32_pk32_bf6_bf16(in, 1.0f /* scale */);
+    else
+      __builtin_trap();
   }
   u.ui32 = out[0];
   return u.fp6[0];
@@ -93,9 +97,13 @@ __FP6_HOST_DEVICE_STATIC__ __hip_fp6x2_storage_t __hip_cvt_bfloat16raw2_to_fp6x2
   if (fp6_interpretation == __HIP_E2M3) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_fp6_bf16))
       out = __builtin_amdgcn_cvt_scalef32_pk32_fp6_bf16(in, 1.0f /* scale */);
+    else
+      __builtin_trap();
   } else if (fp6_interpretation == __HIP_E3M2) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf6_bf16))
       out = __builtin_amdgcn_cvt_scalef32_pk32_bf6_bf16(in, 1.0f /* scale */);
+    else
+      __builtin_trap();
   }
   u.ui32 = out[0];
   return u.fp6x2[0];
@@ -144,9 +152,13 @@ __hip_cvt_double_to_fp6(const double x, const __hip_fp6_interpretation_t fp6_int
   if (fp6_interpretation_t == __HIP_E2M3) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32))
       out = __builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32(in1, in2, 1.0f /* scale */);
+    else
+      __builtin_trap();
   } else if (fp6_interpretation_t == __HIP_E3M2) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32))
       out = __builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32(in1, in2, 1.0f /* scale */);
+    else
+      __builtin_trap();
   }
   u.ui32 = out[0];
   return u.fp6[0];
@@ -188,9 +200,13 @@ __hip_cvt_double2_to_fp6x2(const double2 x, const __hip_fp6_interpretation_t fp6
   if (fp6_interpretation_t == __HIP_E2M3) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32))
       out = __builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32(in1, in2, 1.0f /* scale */);
+    else
+      __builtin_trap();
   } else if (fp6_interpretation_t == __HIP_E3M2) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32))
       out = __builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32(in1, in2, 1.0f /* scale */);
+    else
+      __builtin_trap();
   }
   u.ui32 = out[0] & 0x3Fu;
   u.ui32 |= ((out[0] & 0xFC0u) << 2);
@@ -239,9 +255,13 @@ __hip_cvt_float_to_fp6(const float x, const __hip_fp6_interpretation_t fp6_inter
   if (fp6_interpretation_t == __HIP_E2M3) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32))
       out = __builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32(in1, in2, 1.0f /* scale */);
+    else
+      __builtin_trap();
   } else if (fp6_interpretation_t == __HIP_E3M2) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32))
       out = __builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32(in1, in2, 1.0f /* scale */);
+    else
+      __builtin_trap();
   }
   u.ui32 = out[0];
   return u.fp6[0];
@@ -282,9 +302,13 @@ __hip_cvt_float2_to_fp6x2(const float2 x, const __hip_fp6_interpretation_t fp6_i
   if (fp6_interpretation_t == __HIP_E2M3) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32))
       out = __builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32(in1, in2, 1.0f /* scale */);
+    else
+      __builtin_trap();
   } else if (fp6_interpretation_t == __HIP_E3M2) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32))
       out = __builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32(in1, in2, 1.0f /* scale */);
+    else
+      __builtin_trap();
   }
   u.ui32 = out[0] & 0x3Fu;
   u.ui32 |= ((out[0] & 0xFC0u) << 2);
@@ -327,9 +351,13 @@ __FP6_HOST_DEVICE_STATIC__ __half_raw __hip_cvt_fp6_to_halfraw(
   if (fp6_interpretation_t == __HIP_E2M3) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f16_fp6))
       out = __builtin_amdgcn_cvt_scalef32_pk32_f16_fp6(in, 1.0f);
+    else
+      __builtin_trap();
   } else if (fp6_interpretation_t == __HIP_E3M2) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f16_bf6))
       out = __builtin_amdgcn_cvt_scalef32_pk32_f16_bf6(in, 1.0f);
+    else
+      __builtin_trap();
   }
   ret.data = out[0];
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
@@ -365,9 +393,13 @@ __FP6_HOST_DEVICE_STATIC__ __half2_raw __hip_cvt_fp6x2_to_halfraw2(
   if (fp6_interpretation_t == __HIP_E2M3) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f16_fp6))
       out = __builtin_amdgcn_cvt_scalef32_pk32_f16_fp6(in, 1.0f);
+    else
+      __builtin_trap();
   } else if (fp6_interpretation_t == __HIP_E3M2) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f16_bf6))
       out = __builtin_amdgcn_cvt_scalef32_pk32_f16_bf6(in, 1.0f);
+    else
+      __builtin_trap();
   }
   ret.data = {out[0], out[1]};
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
@@ -411,9 +443,13 @@ __hip_cvt_halfraw_to_fp6(const __half_raw x, const __hip_fp6_interpretation_t fp
   if (fp6_interpretation_t == __HIP_E2M3) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_fp6_f16))
       out = __builtin_amdgcn_cvt_scalef32_pk32_fp6_f16(in, 1.0f);
+    else
+      __builtin_trap();
   } else if (fp6_interpretation_t == __HIP_E3M2) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf6_f16))
       out = __builtin_amdgcn_cvt_scalef32_pk32_bf6_f16(in, 1.0f);
+    else
+      __builtin_trap();
   }
   u.ui32 = out[0];
   return u.fp6[0];
@@ -456,9 +492,13 @@ __FP6_HOST_DEVICE_STATIC__ __hip_fp6x2_storage_t __hip_cvt_halfraw2_to_fp6x2(
   if (fp6_interpretation_t == __HIP_E2M3) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_fp6_f16))
       out = __builtin_amdgcn_cvt_scalef32_pk32_fp6_f16(in, 1.0f);
+    else
+      __builtin_trap();
   } else if (fp6_interpretation_t == __HIP_E3M2) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf6_f16))
       out = __builtin_amdgcn_cvt_scalef32_pk32_bf6_f16(in, 1.0f);
+    else
+      __builtin_trap();
   }
   u.ui32 = out[0] & 0x3Fu;
   u.ui32 |= ((out[0] & 0xFC0u) << 2);
@@ -541,6 +581,8 @@ struct __hip_fp6_e2m3 {
     in[0] = (uint32_t)__x;
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf16_fp6))
       out = __builtin_amdgcn_cvt_scalef32_pk32_bf16_fp6(in, 1.0f /* scale */);
+    else
+      __builtin_trap();
     u.bf16 = out[0];
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
     __amd_fp6x16_storage_t in{};
@@ -562,6 +604,8 @@ struct __hip_fp6_e2m3 {
     in[0] = (uint32_t)__x;
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f32_fp6))
       out = __builtin_amdgcn_cvt_scalef32_pk32_f32_fp6(in, 1.0f /* scale */);
+    else
+      __builtin_trap();
     auto ret = out[0];
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
     __amd_fp6x16_storage_t in{};
@@ -626,6 +670,8 @@ struct __hip_fp6_e3m2 {
     in[0] = (uint32_t)__x;
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf16_bf6))
       out = __builtin_amdgcn_cvt_scalef32_pk32_bf16_bf6(in, 1.0f /* scale */);
+    else
+      __builtin_trap();
     u.bf16 = out[0];
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
     __amd_fp6x16_storage_t in{};
@@ -647,6 +693,8 @@ struct __hip_fp6_e3m2 {
     in[0] = (uint32_t)__x;
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f32_bf6))
       out = __builtin_amdgcn_cvt_scalef32_pk32_f32_bf6(in, 1.0f /* scale */);
+    else
+      __builtin_trap();
     auto ret = out[0];
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
     __amd_fp6x16_storage_t in{};
@@ -695,6 +743,8 @@ struct __hip_fp6x2_e2m3 {
     in[0] |= (__x & 0x3F00u) >> 2;  // next 6 bits
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf16_fp6))
       out = __builtin_amdgcn_cvt_scalef32_pk32_bf16_fp6(in, 1.0f /* scale */);
+    else
+      __builtin_trap();
     u.bf16x2 = {out[0], out[1]};
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
     __amd_fp6x16_storage_t in{};
@@ -720,6 +770,8 @@ struct __hip_fp6x2_e2m3 {
     in[0] |= (__x & 0x3F00u) >> 2;  // next 6 bits
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f32_fp6))
       out = __builtin_amdgcn_cvt_scalef32_pk32_f32_fp6(in, 1.0f /* scale */);
+    else
+      __builtin_trap();
     __amd_floatx2_storage_t fp32x2 = {out[0], out[1]};
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
     __amd_fp6x16_storage_t in{};
@@ -773,6 +825,8 @@ struct __hip_fp6x2_e3m2 {
     in[0] |= (__x & 0x3F00u) >> 2;  // next 6 bits
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf16_bf6))
       out = __builtin_amdgcn_cvt_scalef32_pk32_bf16_bf6(in, 1.0f /* scale */);
+    else
+      __builtin_trap();
     u.bf16x2 = {out[0], out[1]};
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
     __amd_fp6x16_storage_t in{};
@@ -798,6 +852,8 @@ struct __hip_fp6x2_e3m2 {
     in[0] |= (__x & 0x3F00u) >> 2;  // next 6 bits
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f32_bf6))
       out = __builtin_amdgcn_cvt_scalef32_pk32_f32_bf6(in, 1.0f /* scale */);
+    else
+      __builtin_trap();
     __amd_floatx2_storage_t fp32x2 = {out[0], out[1]};
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
     __amd_fp6x16_storage_t in{};
@@ -850,6 +906,8 @@ struct __hip_fp6x4_e2m3 {
     in[0] |= ((__x >> 24) & 0x3Fu) << 18;
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f32_fp6))
       out = __builtin_amdgcn_cvt_scalef32_pk32_f32_fp6(in, 1.0f /* scale */);
+    else
+      __builtin_trap();
     __amd_floatx2_storage_t fp32x2_1 = {out[0], out[1]};
     __amd_floatx2_storage_t fp32x2_2 = {out[2], out[3]};
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
@@ -910,6 +968,8 @@ struct __hip_fp6x4_e3m2 {
     in[0] |= ((__x >> 24) & 0x3Fu) << 18;
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f32_bf6))
       out = __builtin_amdgcn_cvt_scalef32_pk32_f32_bf6(in, 1.0f /* scale */);
+    else
+      __builtin_trap();
     __amd_floatx2_storage_t fp32x2_1 = {out[0], out[1]};
     __amd_floatx2_storage_t fp32x2_2 = {out[2], out[3]};
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS

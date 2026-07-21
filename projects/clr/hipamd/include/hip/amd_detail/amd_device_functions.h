@@ -652,7 +652,10 @@ __device__ inline __attribute__((always_inline)) long long int clock() { return 
 
 // hip.amdgcn.bc - named sync
 __device__ inline void __named_sync() {
-  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier)) __builtin_amdgcn_s_barrier();
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier))
+    __builtin_amdgcn_s_barrier();
+  else
+    __builtin_trap();
 }
 
 #endif  // __HIP_DEVICE_COMPILE__
@@ -683,16 +686,22 @@ __device__ inline __hip_uint64_t __lanemask_eq() {
 __device__ inline static void __threadfence() {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "agent");
+  else
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
 }
 
 __device__ inline static void __threadfence_block() {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "workgroup");
+  else
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
 }
 
 __device__ inline static void __threadfence_system() {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "");
+  else
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
 }
 __device__ inline static void __work_group_barrier(__cl_mem_fence_flags flags) {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence) &&
@@ -712,6 +721,8 @@ __device__ inline static void __work_group_barrier(__cl_mem_fence_flags flags) {
     } else {
       __builtin_amdgcn_s_barrier();
     }
+  } else {
+    __builtin_trap();
   }
 }
 

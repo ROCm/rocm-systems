@@ -230,6 +230,8 @@ __CG_STATIC_QUALIFIER__ dim3 block_dim() {
 __CG_STATIC_QUALIFIER__ void barrier_arrive() {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+  else
+    __atomic_thread_fence(__ATOMIC_RELEASE);
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_signal))
     __builtin_amdgcn_s_barrier_signal(-1);  // -1 is workgroup barriers
 }
@@ -239,8 +241,12 @@ __CG_STATIC_QUALIFIER__ void barrier_wait() {
     __builtin_amdgcn_s_barrier_wait(-1);
   else if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier))
     __builtin_amdgcn_s_barrier();
+  else
+    __builtin_trap();
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
+  else
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
 }
 }  // namespace workgroup
 
@@ -250,6 +256,8 @@ namespace tiled_group {
 __CG_STATIC_QUALIFIER__ void sync() {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "wavefront");
+  else
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
 }
 
 }  // namespace tiled_group
@@ -260,6 +268,8 @@ namespace coalesced_group {
 __CG_STATIC_QUALIFIER__ void sync() {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "wavefront");
+  else
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
 }
 
 // Masked bit count
@@ -289,18 +299,26 @@ namespace cluster {
 __CG_STATIC_QUALIFIER__ void sync() {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "cluster");
+  else
+    __atomic_thread_fence(__ATOMIC_RELEASE);
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_cluster_barrier))
     // Generates a signal + wait combination for cluster barrier
     __builtin_amdgcn_s_cluster_barrier();
   else if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier))
     __builtin_amdgcn_s_barrier();  // fallback to s_barrier if device does not support clusters
+  else
+    __builtin_trap();
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "cluster");
+  else
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
 }
 
 __CG_STATIC_QUALIFIER__ void barrier_arrive() {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "cluster");
+  else
+    __atomic_thread_fence(__ATOMIC_RELEASE);
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_signal) &&
       __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_wait)) {
     bool isfirst = __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_signal_isfirst)
@@ -312,6 +330,8 @@ __CG_STATIC_QUALIFIER__ void barrier_arrive() {
       // Signal the cluster barrier, -3 means user cluster barrier
       __builtin_amdgcn_s_barrier_signal(-3);
     }
+  } else {
+    __builtin_trap();
   }
 }
 
@@ -321,8 +341,12 @@ __CG_STATIC_QUALIFIER__ void barrier_wait() {
     __builtin_amdgcn_s_barrier_wait(-3);
   else if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier))
     __builtin_amdgcn_s_barrier();  // Fall back to s_barrier
+  else
+    __builtin_trap();
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "cluster");
+  else
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
 }
 
 __CG_STATIC_QUALIFIER__ dim3 block_index() {
