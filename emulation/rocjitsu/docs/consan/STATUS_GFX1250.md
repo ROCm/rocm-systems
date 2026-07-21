@@ -154,6 +154,7 @@ regressions introduced by the shared-branch rebase.
 |---|---|---|---|---|
 | `torch.mode` | 🟥 Signals after replacement, before oracle | 🟧 Exact oracle and 28,939/28,939 accesses plus 4,446/4,446 barriers, but 0/2 newly inventoried atomics patched | 🟧 Exact oracle and complete access/barrier coverage, but two newly inventoried atomics are unsupported and analysis is incomplete | 🟩 Exact oracle; 28,939/28,939 accesses and 4,446/4,446 barriers |
 | `torch.histc` | 🟥 Signals after replacement, before oracle | 🟩 Exact oracle; 175/175 accesses and 84/84 barriers | 🟩 Exact oracle; 175/175 accesses and 168/168 barriers | 🟩 Exact oracle; 175/175 accesses and 84/84 barriers |
+| `006_sk_hgemm_quick` | 🟧 Existing bounded result retained | 🟧 Exact numeric rows and complete 8,162/8,162 access, 292/292 barrier, and 80/80 fence coverage, but replay emits four conflicts and marks analysis dynamically incomplete | 🟩 Exact oracle; 8,162/8,162 accesses and 544/544 barriers | 🟧 Existing bounded result retained |
 
 The initial PyTorch agent-discovery and baseline-copy failures were setup
 issues rather than ConSan regressions.  Staging the matching runtime first in
