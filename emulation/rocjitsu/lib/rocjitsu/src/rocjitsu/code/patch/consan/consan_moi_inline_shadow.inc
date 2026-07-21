@@ -153,6 +153,19 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   const bool has_function_candidate = std::ranges::any_of(
       candidates, [](const ConSanMoiCandidate *candidate) { return !candidate->in_kernel; });
   std::unordered_map<uint64_t, size_t> candidate_count_by_descriptor;
+  std::unordered_set<uint64_t> dynamic_lds_descriptors;
+  for (const AmdGpuKernelInfo &kernel : code_object.kernels()) {
+    if (kernel.has_dynamic_lds)
+      dynamic_lds_descriptors.insert(kernel.descriptor_file_offset);
+  }
+  std::unordered_map<uint64_t, std::optional<ConSanOptions>> direct_options_by_descriptor;
+  std::unordered_map<uint64_t, std::optional<ConSanMoiWorkgroupShadowLayout>>
+      direct_workgroup_shadow_by_descriptor;
+  std::unordered_map<uint64_t, std::optional<MoiPrivateEpochLayout>>
+      direct_private_layout_by_descriptor;
+  std::unordered_map<uint64_t, std::optional<uint16_t>> direct_owner_shift_by_descriptor;
+  std::unordered_map<uint64_t, std::optional<ConSanMoiWorkgroupSources>>
+      direct_workgroup_sources_by_descriptor;
   bool warned_dynamic_lds_external_shadow = false;
   for (const ConSanMoiCandidate *candidate : candidates) {
     // Direct-kernel compact tokens live in descriptor-local domains. Shared
@@ -380,10 +393,41 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     const auto resources = resolve_moi_scratch(result, candidate, options, scratch_count);
     if (!resources)
       continue;
-    ConSanOptions candidate_options = options;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options,
-                                             resources->owner_descriptor_file_offsets))
-      continue;
+    const std::optional<uint64_t> direct_descriptor =
+        resources->owner_descriptor_file_offsets.size() == 1u
+            ? std::optional<uint64_t>(resources->owner_descriptor_file_offsets.front())
+            : std::nullopt;
+    ConSanOptions candidate_options;
+    bool persistent_assignment_applied = false;
+    if (direct_descriptor) {
+      auto [cached, inserted] =
+          direct_options_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
+      if (inserted) {
+        ConSanOptions resolved = options;
+        if (apply_moi_transient_sgpr_assignment(resolved,
+                                                resources->owner_descriptor_file_offsets) &&
+            (resolved.moi_persistent_vgpr_assignments.empty() ||
+             apply_moi_persistent_vgpr_assignment(resolved,
+                                                  resources->owner_descriptor_file_offsets))) {
+          // The descriptor-specific scalar and persistent choices are now in
+          // the scalar option fields.  Dropping the object-wide assignment
+          // vectors keeps the per-site copy constant-size in dense objects.
+          resolved.moi_transient_sgpr_assignments.clear();
+          resolved.moi_persistent_vgpr_assignments.clear();
+          resolved.moi_prologue_scratch_vgpr_assignments.clear();
+          cached->second = std::move(resolved);
+        }
+      }
+      if (!cached->second)
+        continue;
+      candidate_options = *cached->second;
+      persistent_assignment_applied = true;
+    } else {
+      candidate_options = options;
+      if (!apply_moi_transient_sgpr_assignment(candidate_options,
+                                               resources->owner_descriptor_file_offsets))
+        continue;
+    }
 
     std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow;
     uint16_t workgroup_shadow_compact_token = 0u;
@@ -401,21 +445,27 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         next_compact_token = next;
       }
       const bool compact_token_available =
-          next_compact_token != 0u &&
+          direct_descriptor && next_compact_token != 0u &&
           next_compact_token <= consan_moi_exact_shadow::max_compact_token &&
-          candidate_count_by_descriptor[*candidate.kernel_descriptor_file_offset] <=
+          candidate_count_by_descriptor[*direct_descriptor] <=
               consan_moi_exact_shadow::max_compact_token;
       const bool has_dynamic_lds_owner = std::ranges::any_of(
           resources->owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
-            const auto kernel =
-                std::ranges::find_if(code_object.kernels(), [&](const AmdGpuKernelInfo &item) {
-                  return item.descriptor_file_offset == descriptor_offset;
-                });
-            return kernel != code_object.kernels().end() && kernel->has_dynamic_lds;
+            return dynamic_lds_descriptors.contains(descriptor_offset);
           });
       if (!has_dynamic_lds_owner) {
-        workgroup_shadow = common_moi_workgroup_shadow_layout(
-            bytes, *resources, arch, result.warnings, compact_token_available);
+        if (direct_descriptor) {
+          auto [cached, inserted] =
+              direct_workgroup_shadow_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
+          if (inserted) {
+            cached->second = common_moi_workgroup_shadow_layout(
+                bytes, *resources, arch, result.warnings, compact_token_available);
+          }
+          workgroup_shadow = cached->second;
+        } else {
+          workgroup_shadow = common_moi_workgroup_shadow_layout(
+              bytes, *resources, arch, result.warnings, compact_token_available);
+        }
       }
       if (has_dynamic_lds_owner && !warned_dynamic_lds_external_shadow) {
         result.warnings.emplace_back(
@@ -434,20 +484,41 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     if (options.automatic_moi_private_epoch) {
       const bool persist_workitem_owner =
           options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId;
-      private_layout = build_moi_private_epoch_layout(
-          result, *resources, arch, result.warnings,
-          /*include_sample_sequence=*/false, persist_workitem_owner,
-          /*include_workgroup_key=*/arch == ROCJITSU_CODE_ARCH_CDNA4 && !workgroup_shadow);
+      if (direct_descriptor) {
+        auto [cached, inserted] =
+            direct_private_layout_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
+        if (inserted) {
+          cached->second = build_moi_private_epoch_layout(
+              result, *resources, arch, result.warnings,
+              /*include_sample_sequence=*/false, persist_workitem_owner,
+              /*include_workgroup_key=*/arch == ROCJITSU_CODE_ARCH_CDNA4 && !workgroup_shadow);
+        }
+        private_layout = cached->second;
+      } else {
+        private_layout = build_moi_private_epoch_layout(
+            result, *resources, arch, result.warnings,
+            /*include_sample_sequence=*/false, persist_workitem_owner,
+            /*include_workgroup_key=*/arch == ROCJITSU_CODE_ARCH_CDNA4 && !workgroup_shadow);
+      }
       if (!private_layout)
         continue;
       if (options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
-        private_owner_shift = common_moi_private_owner_shift(bytes, *resources, result.warnings);
+        if (direct_descriptor) {
+          auto [cached, inserted] =
+              direct_owner_shift_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
+          if (inserted) {
+            cached->second = common_moi_private_owner_shift(bytes, *resources, result.warnings);
+          }
+          private_owner_shift = cached->second;
+        } else {
+          private_owner_shift = common_moi_private_owner_shift(bytes, *resources, result.warnings);
+        }
         if (!private_owner_shift)
           continue;
       }
     }
 
-    std::optional<uint64_t> workgroup_descriptor = candidate.kernel_descriptor_file_offset;
+    std::optional<uint64_t> workgroup_descriptor = direct_descriptor;
     if (!workgroup_descriptor) {
       workgroup_descriptor =
           common_moi_record_owner_descriptor(bytes, *resources, arch, result.warnings);
@@ -455,8 +526,19 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     if (!workgroup_descriptor)
       continue;
     std::vector<std::string> workgroup_errors;
-    const auto workgroup_sources =
-        moi_descriptor_workgroup_sources(bytes, *workgroup_descriptor, arch, workgroup_errors);
+    std::optional<ConSanMoiWorkgroupSources> workgroup_sources;
+    if (direct_descriptor) {
+      auto [cached, inserted] =
+          direct_workgroup_sources_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
+      if (inserted) {
+        cached->second =
+            moi_descriptor_workgroup_sources(bytes, *direct_descriptor, arch, workgroup_errors);
+      }
+      workgroup_sources = cached->second;
+    } else {
+      workgroup_sources =
+          moi_descriptor_workgroup_sources(bytes, *workgroup_descriptor, arch, workgroup_errors);
+    }
     if (!workgroup_sources) {
       result.warnings.insert(result.warnings.end(), workgroup_errors.begin(),
                              workgroup_errors.end());
@@ -480,7 +562,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         continue;
     }
 
-    if (!candidate_options.moi_persistent_vgpr_assignments.empty() &&
+    if (!persistent_assignment_applied &&
+        !candidate_options.moi_persistent_vgpr_assignments.empty() &&
         !apply_moi_persistent_vgpr_assignment(candidate_options,
                                               resources->owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
