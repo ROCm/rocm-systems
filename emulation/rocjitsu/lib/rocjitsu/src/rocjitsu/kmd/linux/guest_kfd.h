@@ -28,26 +28,31 @@ namespace rocjitsu {
 
 /// @brief KFD driver that exposes a guest GPU for DBT while forwarding host GPU work.
 ///
-/// @details KFD emulation ends at discovery: this class appends one guest GPU
-/// to KFD topology and process apertures, but does not execute guest queues.
-/// Host-GPU ioctls are forwarded to the real /dev/kfd. If an execution ioctl
-/// still targets the guest GPU, the driver returns an error so the missing HSA
-/// forwarding path is visible.
+/// @details This class appends one guest GPU to KFD topology and process
+/// apertures, but does not execute guest queues itself. With the hardware
+/// backend, host-GPU operations are forwarded to real /dev/kfd. With the
+/// simulator backend, they are delegated to the supplied simulated KFD. If an
+/// execution ioctl still targets the guest GPU, the driver returns an error so
+/// the missing HSA forwarding path is visible.
 class GuestKfd : public LinuxKfd {
 public:
   /// @brief Construct a guest discovery driver from parsed DBT configuration.
-  explicit GuestKfd(config::DbtGuestConfig config);
+  /// @param execution_driver Optional simulated host KFD. When null, host
+  ///        execution is forwarded to the real `/dev/kfd`. When provided,
+  ///        GuestKfd adopts its bootstrap open reference (or opens it lazily)
+  ///        and releases that reference on the last application close.
+  explicit GuestKfd(config::DbtGuestConfig config, LinuxKfd *execution_driver = nullptr);
 
-  /// @brief Close the real KFD fd and remove generated overlay state.
+  /// @brief Close the execution KFD and remove generated overlay state.
   ~GuestKfd() override;
 
-  /// @brief Open the real /dev/kfd fd and lazily prepare guest discovery.
+  /// @brief Open the execution KFD and lazily prepare guest discovery.
   int open() override;
 
   /// @brief Handle close for the /dev/kfd fd represented by this driver.
   int close() override;
 
-  /// @brief Route guest discovery ioctls locally and host ioctls to real KFD.
+  /// @brief Route guest discovery ioctls locally and host ioctls to the execution KFD.
   int ioctl(unsigned long request, void *arg) override;
 
   /// @brief Map host-backed KFD offsets and reject unsupported guest doorbells.
@@ -56,7 +61,7 @@ public:
   /// @brief Forward unmaps for mappings created through this driver.
   int munmap(void *addr, size_t length) override;
 
-  /// @brief Return the real /dev/kfd fd.
+  /// @brief Return the underlying hardware or simulated KFD fd.
   [[nodiscard]] int fd() const override;
 
   /// @brief Return true when @p fd is an internal rocjitsu-owned fd.
@@ -77,8 +82,8 @@ public:
   /// @brief Return the generated KFD topology root.
   [[nodiscard]] std::string topology_path() const override;
 
-  /// @brief Return an empty DRM root because host DRM paths stay real.
-  [[nodiscard]] std::string drm_path() const override { return {}; }
+  /// @brief Return the simulated host DRM root, or empty for hardware execution.
+  [[nodiscard]] std::string drm_path() const override;
 
   /// @brief Detach inherited child-process state before destroying this copy.
   void reset_after_fork() override;
@@ -99,8 +104,10 @@ public:
   /// close are not routed to whatever now occupies the number. The real fd is NOT
   /// counted in open_refs_ (only app-facing dups are), so a match returns
   /// kClearedKeepRefs — the interposer must clear the classification WITHOUT
-  /// dropping an open reference. Returns kNotPrimary if @p fd is not the current
-  /// hidden real fd.
+  /// dropping an open reference. For simulator execution, the separately owned
+  /// backend open also stays pinned until the final app-facing close; a later
+  /// primary-fd re-mint is balanced so it does not add another backend reference.
+  /// Returns kNotPrimary if @p fd is not the current hidden real fd.
   [[nodiscard]] PrimaryInvalidation invalidate_primary_fd(int fd) override;
 
 private:
@@ -108,6 +115,9 @@ private:
 
   /// @brief Open real KFD, generate topology, and select the host GPU.
   bool ensure_ready();
+
+  /// @brief Prepare guest discovery while mutex_ is already held.
+  bool ensure_ready_locked();
 
   /// @brief Open the process's real /dev/kfd fd while mutex_ is held.
   bool ensure_real_kfd_locked();
@@ -155,11 +165,14 @@ private:
   kfd_process_device_apertures guest_apertures() const;
 
   config::DbtGuestConfig config_;
+  /// @brief Non-owning simulated execution driver owned by the local VM.
+  LinuxKfd *execution_driver_ = nullptr;
   Sysfs::GpuInfo guest_{};
   std::unique_ptr<TopologyOverlay> overlay_;
   mutable std::mutex mutex_;
   std::atomic<int> real_kfd_fd_{-1};
   uint32_t open_refs_ = 0;
+  bool owns_execution_driver_open_ = false;
   uint32_t host_gpu_id_ = 0;
   static constexpr uint64_t kSyntheticHandleBase = 1ULL << 63;
   uint64_t next_synthetic_handle_ = kSyntheticHandleBase;

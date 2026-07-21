@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "link_map.hpp"
+#include "common/path.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
 #include "core/timemory.hpp"
@@ -49,7 +50,7 @@ get_linked_path(const char* _name, open_modes_vec_t&& _open_modes)
         dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
         if(_link_map != nullptr && !std::string_view{ _link_map->l_name }.empty())
         {
-            return filepath::realpath(_link_map->l_name, nullptr, false);
+            return path::realpath(_link_map->l_name);
         }
         if(_noload == false) dlclose(_handle);
     }
@@ -155,7 +156,7 @@ link_file::base() const
 std::string
 link_file::real() const
 {
-    return filepath::realpath(name, nullptr, false);
+    return path::realpath(name);
 }
 }  // namespace binary
 }  // namespace rocprofsys

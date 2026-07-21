@@ -137,6 +137,8 @@ const char *LinuxKfd::ioctl_name(unsigned long request) {
     return "SET_SCRATCH_VA";
   case AMDKFD_IOC_SET_TRAP_HANDLER:
     return "SET_TRAP_HANDLER";
+  case AMDKFD_IOC_DBG_TRAP:
+    return "DBG_TRAP";
   case AMDKFD_IOC_SET_XNACK_MODE:
     return "SET_XNACK";
   case AMDKFD_IOC_SET_MEMORY_POLICY:

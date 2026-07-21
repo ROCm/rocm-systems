@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/sopk.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -28,6 +29,10 @@ constexpr uint32_t HW_REG_GPR_ALLOC = 6;
 constexpr uint32_t HW_REG_VGPR_ALLOC = 7;
 constexpr uint32_t HW_REG_WAVE_SCHED_MODE = 26;
 constexpr uint32_t HW_REG_IB_STS2 = 28;
+constexpr uint32_t HW_REG_IB_STS2_CLUSTER_ID_SHIFT = 6;
+constexpr uint32_t HW_REG_IB_STS2_CLUSTER_ID_MASK = 0xFu;
+constexpr uint32_t HW_REG_IB_STS2_WG_IN_CLUSTER_SHIFT = 21;
+constexpr uint32_t HW_REG_IB_STS2_WG_IN_CLUSTER_MASK = 0xFu;
 
 [[maybe_unused]] uint32_t insert_hwreg_field(uint32_t reg_val, uint32_t src, uint32_t offset,
                                              uint32_t mask) {
@@ -58,7 +63,10 @@ constexpr uint32_t HW_REG_IB_STS2 = 28;
     reg_val = wf.wave_sched_mode_raw();
     return true;
   case HW_REG_IB_STS2:
-    reg_val = 0;
+    reg_val = (((wf.cluster_size() > 1 ? 1u : 0u) & HW_REG_IB_STS2_CLUSTER_ID_MASK)
+               << HW_REG_IB_STS2_CLUSTER_ID_SHIFT) |
+              ((wf.cluster_rank() & HW_REG_IB_STS2_WG_IN_CLUSTER_MASK)
+               << HW_REG_IB_STS2_WG_IN_CLUSTER_SHIFT);
     return true;
   default:
     return false;
@@ -115,9 +123,10 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
            make_exec_fn<SCmovkI32Sopk>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_[0] = &sdst;
   dst_operands_[0] = &sdst;
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
+  src_operands_[1] = &simm16;
+  num_src_ = 2;
   num_dst_ = 1;
   flags_ |= PREDICATED_DEF;
 }
@@ -131,29 +140,33 @@ SAddkCoI32Sopk::SAddkCoI32Sopk(const MachineInst *inst)
            make_exec_fn<SAddkCoI32Sopk>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_[0] = &sdst;
   dst_operands_[0] = &sdst;
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
+  src_operands_[1] = &simm16;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
 void SAddkCoI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t s0 = sdst.read_scalar(wf);
-  uint32_t imm =
-      static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(simm16.encoding_value_)));
-  uint64_t wide = static_cast<uint64_t>(s0) + static_cast<uint64_t>(imm);
-  uint32_t result = static_cast<uint32_t>(wide);
-  sdst.write_scalar(wf, result);
-  wf.write_scc(wide > 0xFFFFFFFFu);
+  wf.write_scc(::rocjitsu::amdgpu::signed_add_overflows(
+      amdgpu::RegisterAccess(wf).read_scalar(sdst),
+      static_cast<uint32_t>(static_cast<int32_t>(
+          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(simm16) << 16) >> 16))));
+  amdgpu::RegisterAccess(wf).write_scalar(
+      sdst,
+      (amdgpu::RegisterAccess(wf).read_scalar(sdst) +
+       static_cast<uint32_t>(static_cast<int32_t>(
+           static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(simm16) << 16) >> 16))));
 }
 
 SMulkI32Sopk::SMulkI32Sopk(const MachineInst *inst)
     : Sopk("s_mulk_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SMulkI32Sopk>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_[0] = &sdst;
   dst_operands_[0] = &sdst;
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
+  src_operands_[1] = &simm16;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -183,7 +196,7 @@ void SGetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   if (offset + size > 32)
     size = 32 - offset;
   uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
-  sdst.write_scalar(wf, (reg_val >> offset) & mask);
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, (reg_val >> offset) & mask);
 }
 
 SSetregB32Sopk::SSetregB32Sopk(const MachineInst *inst)
@@ -211,7 +224,7 @@ void SSetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   if (offset + size > 32)
     size = 32 - offset;
   uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
-  uint32_t src = sdst.read_scalar(wf);
+  uint32_t src = amdgpu::RegisterAccess(wf).read_scalar(sdst);
   if (!write_hwreg(wf, reg_id, offset, mask, src))
     util::Logger::warn("s_setreg_b32: unhandled hwreg id=", reg_id);
 }
@@ -263,7 +276,7 @@ std::optional<int64_t> SCallI64Sopk::branch_offset_bytes() const {
 }
 
 void SCallI64Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  sdst.write_scalar64(wf, wf.pc + size_);
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, wf.pc + size_);
   int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
   wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
 }

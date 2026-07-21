@@ -10,6 +10,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 namespace hrr_cap {
 namespace writer {
@@ -20,6 +21,10 @@ bool open(const char* output_dir);
 
 // Returns true if open() has been called successfully.
 bool is_open();
+
+// Cache process-level metadata JSON for manifest writers. The emergency
+// finalizer only raw-writes this cached byte buffer; it never collects metadata.
+void set_capture_metadata_json(const std::string& metadata_json);
 
 // Flush events.bin, append the clean-shutdown trailer (hrr_eof_record), fsync,
 // and write manifest.json with "complete": true. Safe to call multiple times

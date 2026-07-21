@@ -467,6 +467,14 @@ inline native<float> f16_to_f32_simd(native<uint32_t> v) {
   return std::bit_cast<native<float>>(bits);
 }
 
+/// Vectorized, bit-exact port of `bf16_to_f32` (util/data_types.h). BF16 shares
+/// the f32 exponent width, so widening is just a 16-bit left shift of the low
+/// half — no exponent rebias or denormal handling, and NaN/Inf survive
+/// unchanged. The high 16 bits of each input lane are ignored.
+inline native<float> bf16_to_f32_simd(native<uint32_t> v) {
+  return std::bit_cast<native<float>>((v & 0xFFFFu) << 16);
+}
+
 /// Vectorized, bit-exact port of `f32_to_f16` (util/data_types.h). Returns the
 /// f16 bits in the low 16 bits of each lane (high bits zero). All conditions
 /// are expressed as unsigned comparisons on the biased f32 exponent `fe`, so
