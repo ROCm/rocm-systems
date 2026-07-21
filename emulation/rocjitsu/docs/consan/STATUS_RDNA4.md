@@ -9,8 +9,9 @@ The last complete gfx1201 certificate was produced on 2026-07-16 at executable
 commit `640e575da2`, with hook SHA-256
 `c45aa0fece5a9aa7ef8b3ad24bcbb2077e477586df6b4eecf12990f7fafa693d`.  It is
 retained below as historical evidence, but it does not qualify the current
-branch.  This document was audited on 2026-07-21 at branch tip `6a1c4d93d1f3`.
-No current-tip gfx1201 execution evidence has yet replaced that certificate.
+branch.  This document was audited on 2026-07-21 at branch tip `c91323fc27`.
+Current-tip qualification is in progress; cells below name the retained artifact
+when execution evidence has replaced the initial gray state.
 
 The executable authority is
 [`consan_validation.py`](../../tests/dbi/consan/consan_validation.py), with the
@@ -91,12 +92,12 @@ tip; a successful smoke or an old artifact is insufficient.
 | **P1 Sharktank TP1 decode/combined** | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | Exact decode and combined oracles across repeated calls before fault qualification |
 | **P2 Sharktank TP2 family** | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | Establish an untuned current baseline, then retain all-mode clean completeness and paired timing |
 | **P3 CLIP BF16** | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | Confirm the baseline remains practical on hardware; inventory both barrier-drop and barrier-move identities anew |
-| **P4 hip-moi D128 block attention** | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | Exact host-reference oracle, complete coverage, paired timing, and contained barrier drop |
-| **P4 hip-moi D128 pressure attention** | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | Exercise full-pressure spill/resource paths as well as the ordinary clean/fault contract |
-| **P4 hip-moi WMMA attention** | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | Re-establish RDNA4 WMMA encoding, coverage, exact oracle, overhead, and fault containment |
-| **P4 hip-moi Stream-K arrival** | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | Complete accesses, barriers, atomics, and fences; reinventory order- and scope-weakening faults |
-| **P4 hip-moi tree atomic-OR** | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | Complete accesses, barriers, atomics, and fences; reinventory order- and scope-weakening faults |
-| **P4 Jakub attention variants** | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | Preserve all variants and dynamic-stack spill coverage without filters or patch caps |
+| **P4 hip-moi D128 block attention** | 🟥 Clean patching crashes after `flat check/trap proof could not encode readback` | 🟧 Both exact host-reference tests pass and 12/12 accesses + 4/4 barriers patch; static analysis remains incomplete after wait-hazard preflight | 🟥 Clean patching crashes because sampled barrier sync cannot use its reserved entry island | 🟧 Both exact host-reference tests pass with complete 12/12 accesses + 4/4 barriers, but a false-positive diagnostic rejects the clean workload | `rdna4-c91323fc27-clean-001`; fix or qualify each distinct failure, then paired timing and contained barrier drop |
+| **P4 hip-moi D128 pressure attention** | 🟥 Clean patching crashes | 🟧 Oracle passes and 12/12 accesses + 4/4 barriers patch; static analysis incomplete | 🟥 Clean patching crashes | 🟨 Clean accepted with complete 12/12 accesses + 4/4 barriers | `rdna4-c91323fc27-clean-p4-002`; retain spill/resource proof, then timing and fault |
+| **P4 hip-moi WMMA attention** | 🟥 Clean patching crashes | 🟧 Oracle passes and 12/12 accesses + 4/4 barriers patch; static analysis incomplete | 🟥 Clean patching crashes | 🟧 Complete 12/12 accesses + 4/4 barriers, but a clean diagnostic rejects execution | `rdna4-c91323fc27-clean-p4-002`; then timing and fault |
+| **P4 hip-moi Stream-K arrival** | 🟨 Clean accepted with complete 4/4 applicable accesses | 🟧 Oracle passes and 4/4 accesses + 4/4 barriers + 15/15 atomics + 16/16 fences patch; static analysis incomplete | 🟥 Clean patching crashes | 🟧 Complete 4/4 accesses + 4/4 barriers + 15/15 atomics, but a clean diagnostic rejects execution | `rdna4-c91323fc27-clean-p4-002`; then timing and atomic fault inventory |
+| **P4 hip-moi tree atomic-OR** | 🟨 Clean accepted with complete 4/4 applicable accesses | 🟧 All 4/4 accesses + 4/4 barriers + 15/15 atomics + 16/16 fences patch, but static incompleteness and a clean diagnostic reject execution | 🟥 Clean patching crashes | 🟧 Complete 4/4 accesses + 4/4 barriers + 15/15 atomics, but a clean diagnostic rejects execution | `rdna4-c91323fc27-clean-p4-002`; then timing and atomic fault inventory |
+| **P4 Jakub attention variants** | 🟨 Clean accepted with complete 31/31 applicable accesses | 🟧 Oracle passes and 31/31 accesses + 4/4 barriers patch; static analysis incomplete | 🟥 Clean patching crashes | 🟨 Clean accepted with complete 31/31 accesses + 4/4 barriers | `rdna4-c91323fc27-clean-p4-002`; retain dynamic-stack spill proof, then timing and fault |
 
 ## Native gfx1201 corpus discovery
 
