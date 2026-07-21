@@ -21,14 +21,13 @@ rj_status_t rj_code_translate(const rj_code_object_t *source, const rj_code_dbt_
   if (result.elf_bytes.empty() || !result.dispatchable())
     return ROCJITSU_STATUS_ERROR;
 
-  auto owned = std::make_unique<rocjitsu::AmdGpuCodeObject>(result.elf_bytes.data(),
+  auto owned = std::make_shared<rocjitsu::AmdGpuCodeObject>(result.elf_bytes.data(),
                                                             result.elf_bytes.size());
   if (!owned->is_valid())
     return ROCJITSU_STATUS_ERROR;
 
   auto *obj = new rj_code_object_t{};
-  obj->co = owned.get();
-  obj->owned_co = std::move(owned);
+  obj->co = std::move(owned);
   *translated = obj;
   return ROCJITSU_STATUS_SUCCESS;
 }

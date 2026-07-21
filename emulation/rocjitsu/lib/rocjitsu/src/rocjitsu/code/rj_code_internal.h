@@ -16,12 +16,11 @@
 #include <vector>
 
 struct rj_code_executable_t : rocjitsu::RefCounted {
-  std::unique_ptr<rocjitsu::Executable> exec;
+  std::shared_ptr<rocjitsu::Executable> exec;
 };
 
 struct rj_code_object_t : rocjitsu::RefCounted {
-  rocjitsu::AmdGpuCodeObject *co = nullptr;
-  std::unique_ptr<rocjitsu::AmdGpuCodeObject> owned_co;
+  std::shared_ptr<rocjitsu::AmdGpuCodeObject> co;
 };
 
 struct rj_code_inst_list_t : rocjitsu::RefCounted {
@@ -30,9 +29,10 @@ struct rj_code_inst_list_t : rocjitsu::RefCounted {
 };
 
 struct rj_code_basic_block_list_t : rocjitsu::RefCounted {
-  std::vector<std::unique_ptr<rocjitsu::BasicBlock>> blocks;
+  using Storage = std::vector<std::unique_ptr<rocjitsu::BasicBlock>>;
+  std::shared_ptr<Storage> blocks;
 };
 
 struct rj_code_basic_block_t : rocjitsu::RefCounted {
-  rocjitsu::BasicBlock *block = nullptr;
+  std::shared_ptr<rocjitsu::BasicBlock> block;
 };

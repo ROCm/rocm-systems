@@ -73,7 +73,7 @@ rj_status_t rj_code_executable_create(const char *path, rj_code_executable_t **e
   if (!path || !exec)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  auto executable = std::make_unique<Executable>(path);
+  auto executable = std::make_shared<Executable>(path);
   if (!executable->is_valid())
     return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
 
@@ -114,12 +114,12 @@ rj_status_t rj_code_executable_get_code_object(const rj_code_executable_t *exec,
   if (!exec || !exec->exec || !obj)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  auto *co = const_cast<Executable *>(exec->exec.get())->code_object(target, index);
+  auto *co = exec->exec->code_object(target, index);
   if (!co)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
   *obj = new rj_code_object_t{};
-  (*obj)->co = co;
+  (*obj)->co = std::shared_ptr<AmdGpuCodeObject>(exec->exec, co);
   (*obj)->retain();
   return ROCJITSU_STATUS_SUCCESS;
 }
@@ -208,7 +208,8 @@ rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_targe
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
   auto owned = std::make_unique<rj_code_basic_block_list_t>();
-  owned->blocks = BasicBlock::build(*obj->co, *decoder, arch);
+  owned->blocks = std::make_shared<rj_code_basic_block_list_t::Storage>(
+      BasicBlock::build(*obj->co, *decoder, arch));
 
   *list = owned.release();
   return ROCJITSU_STATUS_SUCCESS;
@@ -234,18 +235,18 @@ void rj_code_basic_block_list_destroy(rj_code_basic_block_list_t *list) {
 }
 
 uint32_t rj_code_basic_block_list_size(const rj_code_basic_block_list_t *list) {
-  if (!list)
+  if (!list || !list->blocks)
     return 0;
-  return static_cast<uint32_t>(list->blocks.size());
+  return static_cast<uint32_t>(list->blocks->size());
 }
 
 rj_status_t rj_code_basic_block_list_get(const rj_code_basic_block_list_t *list, uint32_t index,
                                          rj_code_basic_block_t **block) {
-  if (!list || !block || index >= list->blocks.size())
+  if (!list || !list->blocks || !block || index >= list->blocks->size())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
   *block = new rj_code_basic_block_t{};
-  (*block)->block = list->blocks[index].get();
+  (*block)->block = std::shared_ptr<BasicBlock>(list->blocks, (*list->blocks)[index].get());
   (*block)->retain();
   return ROCJITSU_STATUS_SUCCESS;
 }
