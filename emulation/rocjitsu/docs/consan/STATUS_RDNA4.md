@@ -125,13 +125,17 @@ Do not copy, retarget, or author lookalike versions of those configurations
 merely to make the ledgers symmetric.  Search the native IREE, kernel, and CTS
 suites for workloads that exercise the same broad difficulty classes.
 
+A discovery row uses `— Not admitted` after target-native evidence rules it out
+of the validation denominator.  These are resolved selection decisions, not
+support results and not gray instrumentation cells.
+
 | Discovery order and native gfx1201 source | SuperCollider | Record/Replay | Sampled | Inline Shadow | Admission decision still needed |
 |---|---|---|---|---|---|
 | **D0** `kernels.gfx1201.llama.cpp.llama_mul_mat_vec_q.default` | 🩶 Inventory pending | 🩶 Inventory pending | 🩶 Inventory pending | 🩶 Inventory pending | Real LLM quantized matvec with an existing validation result.  Inventory executed LDS, barriers, atomics, pressure, and dispatch count; admit only if it adds meaningful coverage beyond Qwen. |
 | **D0** `kernels.gfx1201.llama.cpp.llama_rms_norm.default` | 🩶 Inventory pending | 🩶 Inventory pending | 🩶 Inventory pending | 🩶 Inventory pending | Real LLM normalization with an existing numeric path.  Measure synchronization relevance and choose a useful native shape without turning it into synthetic stress. |
 | **D0** `llama.cpp` noncontiguous batched-matmul and hazard metadata | 🩶 Collection pending | 🩶 Collection pending | 🩶 Collection pending | 🩶 Collection pending | Resolve why the correct and hazardous gfx1201 variants are absent from the current collection, then determine whether the hazard is a concurrency oracle or an unrelated layout bug. |
-| **D1** Three collected IREE direct-tile matmuls: F16, FP8, and I8 | 🩶 Inventory pending | 🩶 Inventory pending | 🩶 Inventory pending | 🩶 Inventory pending | Inventory final code objects and retain only distinct access/synchronization shapes with their exact output files. |
-| **D1** IREE `argmax`, strided extract, and map-load/map-store cases | 🩶 Inventory pending | 🩶 Inventory pending | 🩶 Inventory pending | 🩶 Inventory pending | Prefer exact-output cases with actual LDS/barrier/atomic traffic; reject trivial global-only cases from the ConSan ledger. |
+| **D1** Three collected IREE direct-tile matmuls: F16, FP8, and I8 | — Not admitted | — Not admitted | — Not admitted | — Not admitted | The three gfx1201 compilations pass, but their corpus records explicitly set `compile_only=true`; they dispatch no workload and provide no runtime oracle. Normalize a calls/support-module wrapper before reconsidering them. |
+| **D1** IREE `argmax`, strided extract, and map-load/map-store cases | — Not admitted | — Not admitted | — Not admitted | — Not admitted | All four exact baselines pass. Record/Replay inventory in `.pytest-artifacts-rdna4-iree-inventory` reports zero supported accesses, barriers, atomics, and fences for every executed code object, so these global-only shapes add no ConSan coverage. |
 | **D2** RDNA4 WMMA/SWMMAC, wave32/wave64, atomic, and lane/DS CTS families | 🩶 Survey pending | 🩶 Survey pending | 🩶 Survey pending | 🩶 Survey pending | Use as engine-specific prerequisites or compact reproducers, not as substitutes for end-to-end workload cells. |
 | **D3** Remaining 105-case corpus inventory | 🩶 Survey pending | 🩶 Survey pending | 🩶 Survey pending | 🩶 Survey pending | Cluster by executed event families, code-object shape, and engine applicability before selecting a small nonredundant set. |
 
