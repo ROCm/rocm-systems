@@ -112,35 +112,36 @@ thread_trace_parameter_pack::are_params_valid() const
     // so we can fail early with a descriptive message.
     if(shader_cb_fn == nullptr)
     {
-        ROCP_WARNING << "Thread trace shader callback cannot be null";
+        ROCP_CI_LOG(WARNING) << "Thread trace shader callback cannot be null";
         return false;
     }
 
     if(shader_engine_mask == 0)
     {
-        ROCP_WARNING << "Invalid thread trace shader engine mask: 0 (must be non-zero)";
+        ROCP_CI_LOG(WARNING) << "Invalid thread trace shader engine mask: 0 (must be non-zero)";
         return false;
     }
 
     if(buffer_size < MIN_BUFFER_SIZE)
     {
-        ROCP_WARNING << "Invalid thread trace buffer size: " << buffer_size << " (minimum is "
-                     << MIN_BUFFER_SIZE << " bytes / 1 MB)";
+        ROCP_CI_LOG(WARNING) << "Invalid thread trace buffer size: " << buffer_size
+                             << " (minimum is " << MIN_BUFFER_SIZE << " bytes / 1 MB)";
         return false;
     }
 
     // Only 16 CUs (0x0-0xF) and 4 SIMDs (0x0-0xF) are addressable.
     if(target_cu > 0xF)
     {
-        ROCP_WARNING << "Invalid thread trace target CU: " << static_cast<uint32_t>(target_cu)
-                     << " (valid range is 0-15 / 0x0-0xF)";
+        ROCP_CI_LOG(WARNING) << "Invalid thread trace target CU: "
+                             << static_cast<uint32_t>(target_cu)
+                             << " (valid range is 0-15 / 0x0-0xF)";
         return false;
     }
 
     if(simd_select > 0xF)
     {
-        ROCP_WARNING << "Invalid thread trace SIMD select mask: "
-                     << static_cast<uint32_t>(simd_select) << " (valid range is 0x0-0xF)";
+        ROCP_CI_LOG(WARNING) << "Invalid thread trace SIMD select mask: "
+                             << static_cast<uint32_t>(simd_select) << " (valid range is 0x0-0xF)";
         return false;
     }
 
