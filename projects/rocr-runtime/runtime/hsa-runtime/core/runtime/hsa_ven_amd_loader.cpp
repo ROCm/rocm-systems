@@ -353,8 +353,8 @@ hsa_status_t hsa_ven_amd_loader_code_object_reader_prepare(
     }
 
     // Transfer ownership of the prepared artifact into a shared backing whose
-    // deleter (heap free or mmap release, captured in the OwnedElfBuffer) runs
-    // when the prepared reader is destroyed.
+    // deleter (the heap free captured in the OwnedElfBuffer) runs when the
+    // prepared reader is destroyed.
     void* payload = prepared_bytes.get();
     auto deleter = prepared_bytes.get_deleter();
     std::shared_ptr<void> backing(prepared_bytes.release(), std::move(deleter));

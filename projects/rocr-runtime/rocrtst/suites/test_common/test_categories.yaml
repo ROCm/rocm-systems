@@ -32,6 +32,8 @@ test_categories:
       - "rocrtstFunc.AgentPropertiesTests"
       - "HotswapRewrite.RetargetCacheServesSecondLoadFromCache"
       - "HotswapRewrite.RetargetCacheClearResetsCacheSize"
+      - "HotswapPrepare.PreparesEligibleObject"
+      - "HotswapPrepare.SecondPrepareServedFromCache"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     exclude_windows: []
@@ -113,6 +115,8 @@ test_categories:
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_Interrupt"
       - "HotswapRewrite.RetargetCacheServesSecondLoadFromCache"
       - "HotswapRewrite.RetargetCacheClearResetsCacheSize"
+      - "HotswapPrepare.PreparesEligibleObject"
+      - "HotswapPrepare.SecondPrepareServedFromCache"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     labels:
@@ -204,6 +208,8 @@ test_categories:
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_Interrupt"
       - "HotswapRewrite.RetargetCacheServesSecondLoadFromCache"
       - "HotswapRewrite.RetargetCacheClearResetsCacheSize"
+      - "HotswapPrepare.PreparesEligibleObject"
+      - "HotswapPrepare.SecondPrepareServedFromCache"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     labels:
@@ -297,6 +303,8 @@ test_categories:
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_Interrupt"
       - "HotswapRewrite.RetargetCacheServesSecondLoadFromCache"
       - "HotswapRewrite.RetargetCacheClearResetsCacheSize"
+      - "HotswapPrepare.PreparesEligibleObject"
+      - "HotswapPrepare.SecondPrepareServedFromCache"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     labels:
