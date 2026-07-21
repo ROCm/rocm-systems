@@ -63,7 +63,7 @@ endif()
 
 # RCCL project
 #==================================================================================================
-project(rccl CXX)
+project(rccl C CXX)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(NCCL_OS_WINDOWS ON)
@@ -84,7 +84,7 @@ option(BUILD_BFD                               "Enable custom backtrace (if bfd.
 option(BUILD_LOCAL_GPU_TARGET_ONLY             "Build only for GPUs detected on this machine"  OFF)
 option(BUILD_SHARED_LIBS                       "Build as shared library"                       ON)
 option(BUILD_TESTS                             "Build unit test programs"                      OFF)
-option(BUILD_EXT_EXAMPLES                      "Build ext-{net,tuner,profiler} example plugins" OFF)
+option(BUILD_EXT_EXAMPLES                      "Build ext-{net,tuner,profiler,env} example plugins" OFF)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
@@ -755,6 +755,8 @@ if(BUILD_TESTS)
     add_subdirectory(plugins/tuner/example)
     add_subdirectory(plugins/profiler/example)
     add_subdirectory(plugins/profiler/proxytrace)
+    add_subdirectory(plugins/env/example)
+    add_subdirectory(plugins/env/json)
   endif()
   add_subdirectory(test)
 
