@@ -64,7 +64,10 @@ message(STATUS "Device Linker: GPU targets = ${DL_GPU_TARGETS}")
 if(CMAKE_BUILD_TYPE MATCHES "Debug")
   set(DL_OPT_FLAGS -O1 -g)
 else()
-  set(DL_OPT_FLAGS -O3)
+  # -DNDEBUG matches the host Release build: device asserts otherwise force the
+  # compiler to preserve live registers around every __assert_fail call, which
+  # inflates the private (scratch) segment on register-heavy reduce kernels.
+  set(DL_OPT_FLAGS -O3 -DNDEBUG)
 endif()
 
 # ---------------------------------------------------------------------------

@@ -23,6 +23,7 @@ THE SOFTWARE.
 #define RCCL_COMMON_H_
 #include "nccl_common.h"
 #include "nccl.h"
+#include "nccl_tuner.h" // NCCL_NUM_ALGORITHMS / NCCL_NUM_PROTOCOLS
 #include "param.h"
 #include "core.h"
 

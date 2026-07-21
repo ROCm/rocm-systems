@@ -18,6 +18,7 @@
 #include "profiler.h"
 #include "transport.h"
 #include "shm.h"
+#include <map>
 #include <assert.h>
 #include "graph.h"
 #include "graph/topo.h"
