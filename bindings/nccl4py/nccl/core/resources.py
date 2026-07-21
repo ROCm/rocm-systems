@@ -321,6 +321,33 @@ class RegisteredWindowHandle(CommResource):
         ptr = _nccl_bindings.get_lsa_multimem_device_pointer(self.handle, offset)
         return ptr if ptr != 0 else None
 
+    def get_multimem_device_pointer(
+        self, multimem: MultimemHandle, offset: int = 0
+    ) -> int | None:
+        """Returns the multicast device pointer for this window and ``multimem``.
+
+        Unlike :meth:`get_lsa_multimem_device_pointer` (which uses the LSA
+        team's multimem), this resolves the pointer for an explicit multimem
+        handle produced during device communicator creation.
+
+        Args:
+            multimem: A :class:`MultimemHandle` returned by
+                :py:meth:`DevCommResource.multimem_handle` or
+                :py:attr:`DevCommResource.lsa_multimem`.
+            offset: Byte offset within the window buffer. Defaults to 0.
+
+        Returns:
+            Device pointer as int, or ``None`` if multimem is not supported.
+
+        Raises:
+            RuntimeError: If the window has been closed.
+        """
+        self._check_valid()
+        ptr = _nccl_bindings.get_multimem_device_pointer(
+            self.handle, offset, multimem._lowpp.ptr
+        )
+        return ptr if ptr != 0 else None
+
     def get_lsa_device_pointer(self, lsa_rank: int, offset: int = 0) -> int:
         """Returns the LSA device pointer for a peer within the LSA team.
 
@@ -532,9 +559,11 @@ class DevCommResource(CommResource):
         backed by the resource until the device communicator is closed.
 
         Raises:
+            RuntimeError: If the device communicator has been closed.
             KeyError: If ``team`` was not requested with ``multimem=True`` in
                 the requirements used to create this device communicator.
         """
+        self._check_valid()
         try:
             lowpp = self._team_multimem_lowpp[team]
         except KeyError:

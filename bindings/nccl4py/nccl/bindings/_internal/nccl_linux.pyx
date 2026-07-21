@@ -137,6 +137,7 @@ cdef void* __ncclDevCommCreate = NULL
 cdef void* __ncclDevCommDestroy = NULL
 cdef void* __ncclGetLsaMultimemDevicePointer = NULL
 cdef void* __ncclGetLsaDevicePointer = NULL
+cdef void* __ncclGetMultimemDevicePointer = NULL
 cdef void* __ncclGetPeerDevicePointer = NULL
 cdef void* __ncclTeamWorld = NULL
 cdef void* __ncclTeamLsa = NULL
@@ -144,6 +145,7 @@ cdef void* __ncclTeamRail = NULL
 cdef void* __ncclLsaBarrierCreateRequirement = NULL
 cdef void* __ncclGinBarrierCreateRequirement = NULL
 cdef void* __ncclLLA2ACreateRequirement = NULL
+cdef void* __ncclLLA2ACalcSlots = NULL
 
 
 cdef void* load_library() except* with gil:
@@ -640,6 +642,13 @@ cdef int _check_or_init_nccl() except -1 nogil:
                 handle = load_library()
             __ncclGetLsaDevicePointer = dlsym(handle, 'ncclGetLsaDevicePointer')
 
+        global __ncclGetMultimemDevicePointer
+        __ncclGetMultimemDevicePointer = dlsym(RTLD_DEFAULT, 'ncclGetMultimemDevicePointer')
+        if __ncclGetMultimemDevicePointer == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclGetMultimemDevicePointer = dlsym(handle, 'ncclGetMultimemDevicePointer')
+
         global __ncclGetPeerDevicePointer
         __ncclGetPeerDevicePointer = dlsym(RTLD_DEFAULT, 'ncclGetPeerDevicePointer')
         if __ncclGetPeerDevicePointer == NULL:
@@ -688,6 +697,13 @@ cdef int _check_or_init_nccl() except -1 nogil:
             if handle == NULL:
                 handle = load_library()
             __ncclLLA2ACreateRequirement = dlsym(handle, 'ncclLLA2ACreateRequirement')
+
+        global __ncclLLA2ACalcSlots
+        __ncclLLA2ACalcSlots = dlsym(RTLD_DEFAULT, 'ncclLLA2ACalcSlots')
+        if __ncclLLA2ACalcSlots == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclLLA2ACalcSlots = dlsym(handle, 'ncclLLA2ACalcSlots')
         __py_nccl_init = True
         return 0
 
@@ -907,6 +923,9 @@ cpdef dict _inspect_function_pointers():
     global __ncclGetLsaDevicePointer
     data["__ncclGetLsaDevicePointer"] = <intptr_t>__ncclGetLsaDevicePointer
 
+    global __ncclGetMultimemDevicePointer
+    data["__ncclGetMultimemDevicePointer"] = <intptr_t>__ncclGetMultimemDevicePointer
+
     global __ncclGetPeerDevicePointer
     data["__ncclGetPeerDevicePointer"] = <intptr_t>__ncclGetPeerDevicePointer
 
@@ -927,6 +946,9 @@ cpdef dict _inspect_function_pointers():
 
     global __ncclLLA2ACreateRequirement
     data["__ncclLLA2ACreateRequirement"] = <intptr_t>__ncclLLA2ACreateRequirement
+
+    global __ncclLLA2ACalcSlots
+    data["__ncclLLA2ACalcSlots"] = <intptr_t>__ncclLLA2ACalcSlots
 
     func_ptrs = data
     return data
@@ -1650,6 +1672,16 @@ cdef ncclResult_t _ncclGetLsaDevicePointer(ncclWindow_t window, size_t offset, i
         window, offset, lsaRank, outPtr)
 
 
+cdef ncclResult_t _ncclGetMultimemDevicePointer(ncclWindow_t window, size_t offset, ncclMultimemHandle_t multimem, void** outPtr) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclGetMultimemDevicePointer
+    _check_or_init_nccl()
+    if __ncclGetMultimemDevicePointer == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclGetMultimemDevicePointer is not found")
+    return (<ncclResult_t (*)(ncclWindow_t, size_t, ncclMultimemHandle_t, void**) noexcept nogil>__ncclGetMultimemDevicePointer)(
+        window, offset, multimem, outPtr)
+
+
 cdef ncclResult_t _ncclGetPeerDevicePointer(ncclWindow_t window, size_t offset, int peer, void** outPtr) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
     global __ncclGetPeerDevicePointer
     _check_or_init_nccl()
@@ -1718,3 +1750,13 @@ cdef ncclResult_t _ncclLLA2ACreateRequirement(int nBlocks, int nSlots, ncclLLA2A
             raise FunctionNotFoundError("function ncclLLA2ACreateRequirement is not found")
     return (<ncclResult_t (*)(int, int, ncclLLA2AHandle_t*, ncclDevResourceRequirements_t*) noexcept nogil>__ncclLLA2ACreateRequirement)(
         nBlocks, nSlots, outHandle, outReq)
+
+
+cdef int _ncclLLA2ACalcSlots(int maxElts, int maxEltSize) except?-42 nogil:
+    global __ncclLLA2ACalcSlots
+    _check_or_init_nccl()
+    if __ncclLLA2ACalcSlots == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclLLA2ACalcSlots is not found")
+    return (<int (*)(int, int) noexcept nogil>__ncclLLA2ACalcSlots)(
+        maxElts, maxEltSize)

@@ -3907,6 +3907,8 @@ cpdef ll_a2a_create_requirement(int n_blocks, int n_slots, intptr_t out_handle, 
         __status__ = ncclLLA2ACreateRequirement(n_blocks, n_slots, <ncclLLA2AHandle_t*>out_handle, <ncclDevResourceRequirements_t*>out_req)
     check_status(__status__)
 
+
+
 # Hand-written: cybind cannot emit by-value struct returns (ncclTeam_t).
 
 cpdef object team_world(intptr_t comm):
@@ -3953,6 +3955,24 @@ cpdef gin_barrier_create_requirement(intptr_t comm, intptr_t team, int n_barrier
             <Comm>comm, (<ncclTeam_t*>team)[0], n_barriers,
             <ncclGinBarrierHandle_t*>out_handle, <ncclDevResourceRequirements_t*>out_req)
     check_status(__status__)
+
+# Hand-written: ncclLLA2ACalcSlots returns int (not ncclResult_t).
+cpdef int lla2a_calc_slots(int max_elts, int max_elt_size):
+    cdef int result
+    with nogil:
+        result = ncclLLA2ACalcSlots(max_elts, max_elt_size)
+    return result
+
+# Hand-written: ncclGetMultimemDevicePointer takes ncclMultimemHandle_t by value
+# (SKIP_LOWPP in nccl.cybind.yaml). ``multimem`` is a pointer to a MultimemHandle
+# lowpp, dereferenced here.
+cpdef intptr_t get_multimem_device_pointer(intptr_t window, size_t offset, intptr_t multimem) except? 0:
+    cdef void* out_ptr
+    with nogil:
+        __status__ = ncclGetMultimemDevicePointer(
+            <Window>window, offset, (<ncclMultimemHandle_t*>multimem)[0], &out_ptr)
+    check_status(__status__)
+    return <intptr_t>out_ptr
 
 cpdef object get_library_path():
     from ._internal.nccl import _inspect_loaded_library_path

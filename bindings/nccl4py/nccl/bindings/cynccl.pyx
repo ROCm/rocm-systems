@@ -283,6 +283,10 @@ cdef ncclResult_t ncclGetLsaDevicePointer(ncclWindow_t window, size_t offset, in
     return _nccl._ncclGetLsaDevicePointer(window, offset, lsaRank, outPtr)
 
 
+cdef ncclResult_t ncclGetMultimemDevicePointer(ncclWindow_t window, size_t offset, ncclMultimemHandle_t multimem, void** outPtr) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclGetMultimemDevicePointer(window, offset, multimem, outPtr)
+
+
 cdef ncclResult_t ncclGetPeerDevicePointer(ncclWindow_t window, size_t offset, int peer, void** outPtr) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
     return _nccl._ncclGetPeerDevicePointer(window, offset, peer, outPtr)
 
@@ -309,3 +313,7 @@ cdef ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t comm, ncclTeam_t te
 
 cdef ncclResult_t ncclLLA2ACreateRequirement(int nBlocks, int nSlots, ncclLLA2AHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
     return _nccl._ncclLLA2ACreateRequirement(nBlocks, nSlots, outHandle, outReq)
+
+
+cdef int ncclLLA2ACalcSlots(int maxElts, int maxEltSize) except?-42 nogil:
+    return _nccl._ncclLLA2ACalcSlots(maxElts, maxEltSize)
