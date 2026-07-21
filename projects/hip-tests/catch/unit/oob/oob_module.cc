@@ -1,7 +1,6 @@
 #include <hip_test_common.hh>
 #include <hip/hiprtc.h>
 #include "hip_test_filesystem.hh"
-#include <unistd.h>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -55,23 +54,29 @@ void Wr32(Bytes& b, size_t o, uint32_t v) { std::memcpy(b.data() + o, &v, sizeof
 void Wr64(Bytes& b, size_t o, uint64_t v) { std::memcpy(b.data() + o, &v, sizeof(v)); }
 
 // Extract the first AMDGPU ELF from a clang offload bundle (pass a raw ELF through).
-// Keeps arch aligned with whatever oob_kernel.co was just compiled for.
+// Keeps arch aligned with whatever oob_kernel.code was just compiled for.
 Bytes ExtractElf(const Bytes& data) {
   if (data.size() >= 4 && std::memcmp(data.data(), kElfMagic, 4) == 0) {
     return data;
   }
   static constexpr char kBundleMagic[] = "__CLANG_OFFLOAD_BUNDLE__";
-  REQUIRE(data.size() >= 24);
+  // Magic (24) + entry count (8) must be present before any header read.
+  REQUIRE(data.size() >= 32);
   REQUIRE(std::memcmp(data.data(), kBundleMagic, 24) == 0);
+  const uint64_t total = data.size();
   size_t off = 24;
   uint64_t num = Rd64(data, off);
   off += 8;
   for (uint64_t i = 0; i < num; ++i) {
+    // Each entry header is 24 bytes (offset, size, id_len) + a variable id.
+    REQUIRE(off + 24 <= total);
     uint64_t entry_off = Rd64(data, off);
     uint64_t entry_size = Rd64(data, off + 8);
     uint64_t id_len = Rd64(data, off + 16);
+    REQUIRE(id_len <= total - (off + 24));
     off += 24 + id_len;
-    if (entry_size > 0 && entry_off + 4 <= data.size() &&
+    // Reject an entry whose payload range overflows or spills past the buffer.
+    if (entry_size >= 4 && entry_off <= total && entry_size <= total - entry_off &&
         std::memcmp(data.data() + entry_off, kElfMagic, 4) == 0) {
       return Bytes(data.begin() + entry_off, data.begin() + entry_off + entry_size);
     }
@@ -115,13 +120,16 @@ Bytes MakeShOverflow(const Bytes& elf) {
   return b;
 }
 
-// Writes a byte buffer to a uniquely-named temp .co and removes it on scope exit,
-// so the file-backed loader path (hipModuleLoad) sees an exact on-disk file size.
+// Writes a byte buffer to a uniquely-named temp .code file and removes it on scope
+// exit, so the file-backed loader path (hipModuleLoad) sees an exact file size.
 class TempCodeObject {
  public:
   TempCodeObject(std::string_view name, const Bytes& data) {
-    path_ = fs::temp_directory_path() / (std::string("oob_") + std::string(name) + "_" +
-                                         std::to_string(::getpid()) + ".co");
+    // Address of the source buffer gives a unique-enough name per run without an
+    // OS-specific call (getpid), matching the pattern in hrr_workload_test.cc.
+    path_ = fs::temp_directory_path() /
+            (std::string("oob_") + std::string(name) + "_" +
+             std::to_string(reinterpret_cast<uintptr_t>(data.data())) + ".code");
     std::ofstream f(path_, std::ios::binary);
     f.write(data.data(), static_cast<std::streamsize>(data.size()));
     f.close();
