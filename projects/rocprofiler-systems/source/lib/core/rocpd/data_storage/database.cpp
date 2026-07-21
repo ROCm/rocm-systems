@@ -3,6 +3,7 @@
 
 #include "database.hpp"
 #include "common/md5sum.hpp"
+#include "common/path.hpp"
 #include "node_info.hpp"
 #include <cstdint>
 
@@ -59,10 +60,10 @@ namespace
 void
 create_directory_for_database_file(const std::string& db_file)
 {
-    auto _db_dirname = tim::filepath::dirname(db_file);
-    if(!tim::filepath::direxists(_db_dirname))
+    auto db_dirname = rocprofsys::path::parent_path(db_file);
+    if(!tim::filepath::direxists(db_dirname))
     {
-        tim::filepath::makedir(_db_dirname);
+        tim::filepath::makedir(db_dirname);
     }
 }
 
