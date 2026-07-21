@@ -14,48 +14,38 @@ the MM path silently returns without reading anything, leaving the
 discovery binary buffer as all zeros. The signature check then fails
 with "get invalid ip discovery binary signature".
 
-Fix: use RREG32_NO_KIQ/WREG32_NO_KIQ directly in
-amdgpu_device_mm_access() without the drm_dev_enter() guard. The
-drm_dev_enter() check exists to prevent access after device teardown
-(e.g. during hotunplug), not during early initialization. At probe time
-the device cannot be in teardown, so skipping the guard is safe.
+Fix: remove the drm_dev_enter()/drm_dev_exit() guard from
+amdgpu_device_mm_access(). The guard exists to prevent access after
+device teardown (e.g. during hotunplug), not during early
+initialization. At probe time the device cannot be in teardown, so
+skipping the guard is safe.
 
 This is required for rocjitsu vfio-user GPU emulation where the
 aperture path is not available during discovery because aper_base_kaddr
 is only set during GMC init, which runs after IP discovery.
 
-Applies to: amdgpu-dkms 6.19.4-2337710.24.04
+Applies to: ROCm amdgpu roc-7.2.x
 Tested on:  kernel 6.17.0-35-generic, Ubuntu 24.04 Noble
 
 --- a/amd/amdgpu/amdgpu_device.c
 +++ b/amd/amdgpu/amdgpu_device.c
-@@ -715,19 +715,13 @@ void amdgpu_device_mm_access(struct amdgpu_device *adev, loff_t pos,
- 	unsigned long flags;
+@@ -585,11 +585,6 @@
  	uint32_t hi = ~0, tmp = 0;
  	uint32_t *data = buf;
  	uint64_t last;
 -	int idx;
-
+-
 -	if (!drm_dev_enter(adev_to_drm(adev), &idx))
 -		return;
 -
  	BUG_ON(!IS_ALIGNED(pos, 4) || !IS_ALIGNED(size, 4));
-
+ 
  	spin_lock_irqsave(&adev->mmio_idx_lock, flags);
- 	for (last = pos + size; pos < last; pos += 4) {
- 		tmp = pos >> 31;
-
- 		WREG32_NO_KIQ(mmMM_INDEX, ((uint32_t)pos) | 0x80000000);
- 		if (tmp != hi) {
- 			WREG32_NO_KIQ(mmMM_INDEX_HI, tmp);
- 			hi = tmp;
- 		}
- 		if (write)
- 			WREG32_NO_KIQ(mmMM_DATA, *data++);
- 		else
- 			*data++ = RREG32_NO_KIQ(mmMM_DATA);
+@@ -608,7 +603,6 @@
  	}
-
+ 
  	spin_unlock_irqrestore(&adev->mmio_idx_lock, flags);
 -	drm_dev_exit(idx);
  }
+ 
+ /**
