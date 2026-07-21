@@ -1954,6 +1954,9 @@ TEST(ConSanMoi, SampledBarrierQualificationAcceptsCompleteStaticOwnedSequence) {
   sequence.in_cyclic_cfg_component = true;
   EXPECT_TRUE(consan_moi_sampled_qualifies_barrier_sequence(sequence));
   sequence.in_cyclic_cfg_component = false;
+  sequence.barrier_scope = ConSanBarrierSite::Scope::Cluster;
+  EXPECT_TRUE(consan_moi_sampled_qualifies_barrier_sequence(sequence));
+  sequence.barrier_scope = ConSanBarrierSite::Scope::Workgroup;
   rejects([](auto &item) { item.inside_scalar_clause = true; });
   rejects([](auto &item) { item.execution_owners.clear(); });
   ConSanSyncSequence callable = sequence;
@@ -1980,6 +1983,20 @@ TEST(ConSanMoi, SampledBarrierSnapshotMustStartAtPairedSelectedEpoch) {
                 {encoded.packed.descriptor, encoded.packed, encoded.packed.descriptor}, 6)
                 .classification,
             ConSanMoiSampledSyncClassification::UnsupportedSequence);
+}
+
+TEST(ConSanMoi, SampledClusterBarrierMetadataRoundTrips) {
+  const auto encoded = encode_consan_moi_sampled_sync_metadata({
+      .kind = ConSanMoiSampledSyncKind::Barrier,
+      .role = ConSanMoiSampledSyncRole::AcquireRelease,
+      .scope = ConSanMoiSampledSyncScope::Cluster,
+      .epoch_before = 7,
+      .epoch_after = 8,
+  });
+  ASSERT_EQ(encoded.classification, ConSanMoiSampledSyncClassification::Valid);
+  const auto decoded = decode_consan_moi_sampled_sync_metadata(encoded.packed);
+  EXPECT_EQ(decoded.classification, ConSanMoiSampledSyncClassification::Valid);
+  EXPECT_EQ(decoded.metadata.scope, ConSanMoiSampledSyncScope::Cluster);
 }
 
 TEST(ConSanMoi, SampledQualifiedBarrierPublishesSelectedEpochTransition) {
@@ -2327,6 +2344,58 @@ TEST(ConSanMoi, Gfx1250SampledQualifiedBarrierUsesSpill) {
   EXPECT_EQ(patch->spilled_vgpr_count, 7u);
   EXPECT_GT(patch->required_private_segment_size, 0u);
   EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSanMoi, Gfx1250SampledClusterBarrierPublishesClusterScope) {
+  std::vector<uint32_t> words(540, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
+  words[0] = store[0];
+  words[1] = store[1];
+  const auto bypass_signal = build_s_cbranch_scc1(/*offset_dwords=*/1, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(bypass_signal);
+  words[400] = *bypass_signal;
+  words[401] = 0xBE804EC3u; // s_barrier_signal -3
+  words[402] = 0x3600009Fu; // v_and_b32_e32 v0, 31, v0
+  words[403] = 0xBF048475u; // s_cmp_lt_i32 ttmp9, 4
+  words[404] = 0xBF94FFFDu; // s_barrier_wait -3
+  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_track_barriers = true;
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_owner_vgpr = 20;
+  options.moi_epoch_vgpr = 21;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2);
+  options.max_patches = 3;
+
+  const ConSanResult result =
+      try_patch_consan(make_gfx1250_code_object(words, "gfx1250_sampled_cluster_barrier"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
+    return item.kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata &&
+           item.anchor_offset == 404u * sizeof(uint32_t);
+  });
+  ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(patch->covered_sync_event_count, 2u);
+  EXPECT_EQ(result.sampled_barrier_applicable_event_count, 2u);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> trampoline =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  const auto descriptor = encode_consan_moi_sampled_sync_metadata({
+      .kind = ConSanMoiSampledSyncKind::Barrier,
+      .role = ConSanMoiSampledSyncRole::AcquireRelease,
+      .scope = ConSanMoiSampledSyncScope::Cluster,
+      .epoch_before = 0,
+      .epoch_after = 1,
+  });
+  ASSERT_EQ(descriptor.classification, ConSanMoiSampledSyncClassification::Valid);
+  const auto descriptor_literal = build_v_mov_b32_e64_literal(
+      /*vdst=*/10, descriptor.packed.descriptor, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(descriptor_literal);
+  EXPECT_TRUE(contains_subsequence(trampoline, *descriptor_literal));
 }
 
 TEST(ConSanMoi, SampledQualifiedBarrierUsesSpillBackedPersistentEpoch) {

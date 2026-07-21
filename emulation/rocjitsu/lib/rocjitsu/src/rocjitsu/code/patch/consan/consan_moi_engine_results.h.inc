@@ -145,6 +145,7 @@ enum class ConSanMoiSampledSyncScope : uint8_t {
   Workgroup = 2,
   Agent = 3,
   System = 4,
+  Cluster = 5,
 };
 
 enum class ConSanMoiSampledSyncOutcome : uint8_t {

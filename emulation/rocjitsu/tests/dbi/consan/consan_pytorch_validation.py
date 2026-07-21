@@ -107,11 +107,23 @@ def _cluster_load_kernel(
 
 
 @gluon.jit
-def _cluster_barrier_kernel(output_pointer, output_elements: ttgl.constexpr):
+def _cluster_barrier_kernel(
+    output_pointer,
+    output_elements: ttgl.constexpr,
+    blocked_layout: ttgl.constexpr,
+    shared_layout: ttgl.constexpr,
+):
+    offsets = ttgl.arange(0, output_elements, layout=blocked_layout)
+    program = ttgl.program_id(axis=0)
+    values = program * output_elements + offsets
+    shared = ttgl.allocate_shared_memory(
+        ttgl.int32, [output_elements], shared_layout
+    )
+    shared.store(values)
     ttgl.amd.gfx1250.cluster.arrive()
     ttgl.amd.gfx1250.cluster.wait()
-    program = ttgl.program_id(axis=0)
-    ttgl.store(output_pointer + program, program + 17, program < output_elements)
+    restored = shared.load(blocked_layout)
+    ttgl.store(output_pointer + program * output_elements + offsets, restored)
 
 
 def _run_cluster_load_sync(repetitions: int) -> dict[str, object]:
@@ -133,14 +145,33 @@ def _run_cluster_load_sync(repetitions: int) -> dict[str, object]:
     # Clustered launch geometry changes physical CTA grouping without
     # multiplying the logical program-id domain exposed to the kernel.
     cluster_programs = 4
-    expected_barrier = torch.arange(cluster_programs, dtype=torch.int32) + 17
+    barrier_elements = 256
+    barrier_blocked_layout = ttgl.BlockedLayout(
+        size_per_thread=[1],
+        threads_per_warp=[32],
+        warps_per_cta=[8],
+        order=[0],
+        cga_layout=[[1]],
+    )
+    barrier_shared_layout = ttgl.PaddedSharedLayout.with_identity_for(
+        interval_padding_pairs=[[128, 1]],
+        shape=[barrier_elements],
+        order=[0],
+        cga_layout=[[1]],
+    )
+    expected_barrier = torch.arange(
+        cluster_programs * barrier_elements, dtype=torch.int32
+    ).reshape(cluster_programs, barrier_elements)
     elapsed_ms = []
     output = None
     barrier_output = None
     for _ in range(repetitions):
         output = torch.full_like(input_tensor, float("nan"))
         barrier_output = torch.full(
-            (cluster_programs,), -1, dtype=torch.int32, device="cuda"
+            (cluster_programs, barrier_elements),
+            -1,
+            dtype=torch.int32,
+            device="cuda",
         )
         start = time.monotonic()
         _cluster_load_kernel[grid](
@@ -156,7 +187,9 @@ def _run_cluster_load_sync(repetitions: int) -> dict[str, object]:
         )
         _cluster_barrier_kernel[(4,)](
             barrier_output,
-            cluster_programs,
+            barrier_elements,
+            barrier_blocked_layout,
+            barrier_shared_layout,
             num_warps=8,
             num_ctas=cluster_ctas,
         )
@@ -179,6 +212,7 @@ def _run_cluster_load_sync(repetitions: int) -> dict[str, object]:
         "cluster_ctas": cluster_ctas,
         "cluster_load_shape": [rows, columns],
         "barrier_programs": cluster_programs,
+        "barrier_lds_elements_per_program": barrier_elements,
     }
 
 

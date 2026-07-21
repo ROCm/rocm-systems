@@ -118,7 +118,9 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
   const auto encoded = encode_consan_moi_sampled_sync_metadata({
       .kind = ConSanMoiSampledSyncKind::Barrier,
       .role = ConSanMoiSampledSyncRole::AcquireRelease,
-      .scope = ConSanMoiSampledSyncScope::Workgroup,
+      .scope = candidate.sequence->barrier_scope == ConSanBarrierSite::Scope::Cluster
+                   ? ConSanMoiSampledSyncScope::Cluster
+                   : ConSanMoiSampledSyncScope::Workgroup,
       .outcome = ConSanMoiSampledSyncOutcome::NotApplicable,
       .epoch_before = 0,
       .epoch_after = 1,
