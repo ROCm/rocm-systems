@@ -12,6 +12,8 @@ cleanup) with a single ``services`` helper that:
   and terminates the service.
 """
 
+from __future__ import annotations
+
 import argparse
 import logging
 import os

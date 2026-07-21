@@ -11,6 +11,8 @@ expects AMDSMI headers/libraries under
   third-party staging dir and the gpu-agent runtime ``lib`` directory.
 """
 
+from __future__ import annotations
+
 import argparse
 import logging
 import shutil

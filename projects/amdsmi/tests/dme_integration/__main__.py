@@ -14,6 +14,8 @@ Usage from a workflow step::
 Each subcommand simply forwards to the matching module's ``main``.
 """
 
+from __future__ import annotations
+
 import sys
 
 from . import build_env, gpp_wrapper, metrics, services, submodules

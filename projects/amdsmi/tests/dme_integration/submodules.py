@@ -15,6 +15,8 @@ Replaces the inline bash in ``amdsmi-dme-ci.yml`` Phase 2:
   build-libs`` requires it.
 """
 
+from __future__ import annotations
+
 import argparse
 import logging
 import re

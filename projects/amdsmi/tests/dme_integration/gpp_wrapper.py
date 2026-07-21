@@ -14,6 +14,8 @@ and gives us a single place to delete it once upstream gpu-agent is
 fixed.
 """
 
+from __future__ import annotations
+
 import argparse
 import sys
 import tempfile

@@ -18,6 +18,8 @@ disappears once gpu-agent is rebased and stays alive, at which point the check
 gates for real.
 """
 
+from __future__ import annotations
+
 import argparse
 import logging
 import re

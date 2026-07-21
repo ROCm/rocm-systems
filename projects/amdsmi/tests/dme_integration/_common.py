@@ -2,6 +2,8 @@
 # Copyright (C) Advanced Micro Devices. All rights reserved.
 """Shared utilities for DME integration CI helpers."""
 
+from __future__ import annotations
+
 import logging
 import os
 import shlex
