@@ -16,42 +16,69 @@ accumulated.
 
 ## Which Release Does an Entry Belong To?
 
-**Never assume the topmost heading is correct for a new entry.** A ROCm release
-is cut at a specific `rocm-systems` commit (the "release point"). Anything merged
-**after** that commit belongs to the **next** release, even if the current top
-heading still names the released version.
+**A release's changelog is the diff between two consecutive ROCm release
+points.** Everything merged after release `N`'s point and up to release `N+1`'s
+point belongs to `N+1` — regardless of which heading currently sits at the top
+of the file. Never assume the topmost heading is correct for a new entry.
 
-The release point is not a tag in `rocm-systems` — it is the `rocm-systems`
+A release point is not a tag in `rocm-systems`; it is the `rocm-systems`
 submodule commit that [ROCm/TheRock](https://github.com/ROCm/TheRock/releases)
-pins for that release. Resolve it like this:
+pins for that release (the `therock-<ver>` tags map 1:1 to ROCm releases).
+
+Resolve the two bracketing pins dynamically — do not hard-code versions:
 
 ```bash
-# 1. Find the rocm-systems submodule commit pinned by the TheRock release tag.
-#    (therock-<ver> tags map 1:1 to ROCm releases.)
-PIN=$(gh api repos/ROCm/TheRock/git/trees/therock-7.14 \
-  | python3 -c "import sys,json;print(next(t['sha'] for t in json.load(sys.stdin)['tree'] if t['path']=='rocm-systems'))")
+# PREV = the last shipped release, CURR = the one being accumulated.
+# List tags with: gh release list --repo ROCm/TheRock
+PREV_TAG=therock-<prev>     # e.g. the newest tag that is already released
+CURR_TAG=therock-<curr>     # the next tag, if it exists yet
 
-# 2. Make sure the pin is fetched locally.
-git fetch origin "$PIN"
+pin() {  # resolve the rocm-systems submodule commit pinned by a TheRock tag
+  gh api "repos/ROCm/TheRock/git/trees/$1" \
+    | python3 -c "import sys,json;print(next(t['sha'] for t in json.load(sys.stdin)['tree'] if t['path']=='rocm-systems'))"
+}
 
-# 3. A commit belongs to 7.14 iff it is an ancestor of the pin; otherwise it
-#    belongs to the next release (7.15).
-git merge-base --is-ancestor <commit> "$PIN" && echo "7.14" || echo "7.15+"
+PREV_PIN=$(pin "$PREV_TAG")
+git fetch origin "$PREV_PIN"
+# If CURR_TAG is not tagged yet, the current release is still open: use HEAD
+# (origin/develop) as its upper bound instead of a pin.
+CURR_PIN=$(pin "$CURR_TAG" 2>/dev/null || echo origin/develop)
+git fetch origin "$CURR_PIN" 2>/dev/null || true
 ```
 
-To audit an entire section, blame its lines and classify each contributing
-commit against the pin:
+The set of commits that belong to the release being accumulated is exactly the
+range `PREV_PIN..CURR_PIN`:
+
+```bash
+git log --oneline "$PREV_PIN..$CURR_PIN"     # everything that must be documented
+```
+
+## Verifying an Entry Lands in the Right Release
+
+Once the bracketing pins are known, classify any commit with
+`git merge-base --is-ancestor` — the same check the PR-history walk uses:
+
+```bash
+# Ancestor of PREV_PIN  -> already shipped, belongs to a PRIOR release
+# Otherwise             -> belongs to the release currently being accumulated
+git merge-base --is-ancestor <commit> "$PREV_PIN" && echo "prior release" || echo "current release"
+```
+
+To audit an entire changelog section, blame its lines and flag any contributing
+commit that is *not* newer than the previous release point (i.e. was already
+shipped and is filed under the wrong heading):
 
 ```bash
 git blame -L <start>,<end> -s CHANGELOG.md | awk '{print $1}' | sort -u \
   | while read h; do h=${h#^};
-      git merge-base --is-ancestor "$h" "$PIN" 2>/dev/null \
-        || echo "AFTER-PIN (move to next release): $h"; done
+      git merge-base --is-ancestor "$h" "$PREV_PIN" 2>/dev/null \
+        && echo "ALREADY-SHIPPED (belongs to a prior release): $h"; done
 ```
 
-Any `AFTER-PIN` commit's entry must move to a new `## amd_smi_lib for ROCm
-<next-version>` section at the top of the file. Keep the same section headings
-(Added / Changed / Removed / Resolved Issues) in the new release block.
+Any flagged commit's entry must move to the correct
+`## amd_smi_lib for ROCm <version>` section (creating a new top section when the
+entry actually belongs to the next, not-yet-tagged release). Keep the same
+section headings in whichever release block the entry moves to.
 
 ## When a Changelog Entry is Required
 
