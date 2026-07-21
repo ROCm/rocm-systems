@@ -580,8 +580,7 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     // some dynamic-LDS objects retain a one-byte placeholder even though a
     // decoded access itself spans more bytes. Provision the external
     // full-aperture fallback just as we do for group-FLAT accesses.
-    const bool descriptor_opaque_lds = result.arch_name == "gfx1250" &&
-                                       inventory.access_range_count != 0u &&
+    const bool descriptor_opaque_lds = inventory.access_range_count != 0u &&
                                        inventory.inline_lds_bytes < selected_native_lds_extent;
     if (selected_flat_candidate || selected_dynamic_lds_owner || descriptor_opaque_lds) {
       const uint64_t external_lds_bytes =

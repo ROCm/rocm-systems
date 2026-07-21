@@ -1164,6 +1164,8 @@ TEST(ConSanMoi, AutoReportInventoryCountsAdmittedLogicalRangesBeforeAllocation) 
       EXPECT_EQ(inventory.sampled_range_bank_count, 16u);
       EXPECT_EQ(inventory.sampled_watchpoint_count, 16u);
     } else if (engine == ConSanMoiEngine::InlineShadow) {
+      EXPECT_EQ(inventory.inline_lds_bytes, kConSanMoiInlineShadowConservativeExactShadowEntries *
+                                                consan_moi_exact_shadow::granule_bytes);
       EXPECT_EQ(inventory.inline_atomic_release_count,
                 kConSanMoiInlineShadowAtomicReleaseSlotCapacity);
       EXPECT_EQ(inventory.inline_causal_snapshot_count,
