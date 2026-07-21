@@ -226,7 +226,7 @@ TEST_F(sdk_core_test, get_version_formatted_equals_major_10000_minor_100_patch)
             *pat = 0;
         });
 
-    EXPECT_EQ(sut::get_version().formatted, (1u * 10000u) + (1u * 100u) + 0u);
+    EXPECT_EQ(sut::get_version().formatted(), (1u * 10000u) + (1u * 100u) + 0u);
 }
 
 TEST_F(sdk_core_test, get_version_caches_result_calling_backend_exactly_once)
@@ -247,7 +247,7 @@ TEST_F(sdk_core_test, get_version_caches_result_calling_backend_exactly_once)
 
     EXPECT_EQ(&ver1, &ver2);  // Same cached object
     EXPECT_EQ(&ver2, &ver3);
-    EXPECT_EQ(ver1.formatted, 20000u);
+    EXPECT_EQ(ver1.formatted(), 20000u);
 }
 
 // ─── throw on unregistered kind ───────────────────────────────────────────────

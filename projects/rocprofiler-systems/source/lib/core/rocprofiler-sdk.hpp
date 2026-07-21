@@ -12,6 +12,7 @@
 #include "logger/debug.hpp"
 
 #include <cctype>
+#include <cstddef>
 #include <initializer_list>
 #include <spdlog/fmt/ranges.h>
 
@@ -91,6 +92,8 @@ struct default_sdk_externals
 
     using StateType = State;
 
+    constexpr static StateType StateFinalized = State::Finalized;
+
     static void set_state(StateType state) { ::rocprofsys::set_state(state); }
 };
 
@@ -156,23 +159,6 @@ private:
                                       std::string include, std::string exclude,
                                       std::string backtrace);
 
-    struct operation_options
-    {
-        std::string operations_include            = {};
-        std::string operations_exclude            = {};
-        std::string operations_annotate_backtrace = {};
-    };
-
-    static std::unordered_map<typename Wrapper::callback_tracing_kind, operation_options>
-        callback_operation_option_names;
-    static std::unordered_map<typename Wrapper::buffer_tracing_kind, operation_options>
-        buffered_operation_option_names;
-
-    static version_info s_version;
-
-    static std::optional<typename Wrapper::callback_name_info_t> s_callback_names;
-    static std::optional<typename Wrapper::buffer_name_info_t>   s_buffer_names;
-
     template <typename TracingKind>
         requires tracing_kind_for<Wrapper, TracingKind>
     static std::unordered_set<std::int32_t> get_operations_impl(
@@ -193,6 +179,23 @@ private:
         LoadTracingNamesFn&&             load_tracing_names);
 
     static void finalize_and_throw(std::string_view message_for_exception);
+
+    struct operation_options
+    {
+        std::string operations_include            = {};
+        std::string operations_exclude            = {};
+        std::string operations_annotate_backtrace = {};
+    };
+
+    static std::unordered_map<typename Wrapper::callback_tracing_kind, operation_options>
+        s_callback_operation_option_names;
+    static std::unordered_map<typename Wrapper::buffer_tracing_kind, operation_options>
+        s_buffered_operation_option_names;
+
+    static version_info s_version;
+
+    static std::optional<typename Wrapper::callback_name_info_t> s_callback_names;
+    static std::optional<typename Wrapper::buffer_name_info_t>   s_buffer_names;
 };
 
 using core_sdk = sdk_core<backend>;
@@ -244,8 +247,8 @@ sdk_core<Wrapper, Externals>::set_operation_options(
     typename Wrapper::callback_tracing_kind kind, std::string include,
     std::string exclude, std::string backtrace)
 {
-    callback_operation_option_names[kind] = { std::move(include), std::move(exclude),
-                                              std::move(backtrace) };
+    s_callback_operation_option_names[kind] = { std::move(include), std::move(exclude),
+                                                std::move(backtrace) };
 }
 
 template <typename Wrapper, typename Externals>
@@ -254,8 +257,8 @@ sdk_core<Wrapper, Externals>::set_operation_options(
     typename Wrapper::buffer_tracing_kind kind, std::string include, std::string exclude,
     std::string backtrace)
 {
-    buffered_operation_option_names[kind] = { std::move(include), std::move(exclude),
-                                              std::move(backtrace) };
+    s_buffered_operation_option_names[kind] = { std::move(include), std::move(exclude),
+                                                std::move(backtrace) };
 }
 
 // ─── Static data members ─────────────────────────────────────────────────────
@@ -263,12 +266,12 @@ sdk_core<Wrapper, Externals>::set_operation_options(
 template <typename Wrapper, typename Externals>
 std::unordered_map<typename Wrapper::callback_tracing_kind,
                    typename sdk_core<Wrapper, Externals>::operation_options>
-    sdk_core<Wrapper, Externals>::callback_operation_option_names{};
+    sdk_core<Wrapper, Externals>::s_callback_operation_option_names{};
 
 template <typename Wrapper, typename Externals>
 std::unordered_map<typename Wrapper::buffer_tracing_kind,
                    typename sdk_core<Wrapper, Externals>::operation_options>
-    sdk_core<Wrapper, Externals>::buffered_operation_option_names{};
+    sdk_core<Wrapper, Externals>::s_buffered_operation_option_names{};
 
 template <typename Wrapper, typename Externals>
 std::optional<typename Wrapper::callback_name_info_t>
@@ -285,7 +288,7 @@ template <typename Wrapper, typename Externals>
 void
 sdk_core<Wrapper, Externals>::finalize_and_throw(std::string_view message_for_exception)
 {
-    Externals::set_state(Externals::State::Finalized);
+    Externals::set_state(Externals::StateFinalized);
     throw std::runtime_error(std::string{ message_for_exception });
 }
 
@@ -393,10 +396,11 @@ sdk_core<Wrapper, Externals>::filter_operations(
     const std::unordered_set<std::int32_t>& to_include,
     const std::unordered_set<std::int32_t>& to_exclude)
 {
-    auto convert_to_vector = [](const auto& set_to_convert) {
+    auto convert_to_vector = [](const std::unordered_set<std::int32_t> set_to_convert) {
         auto result_vector = std::vector<std::int32_t>{};
         result_vector.reserve(set_to_convert.size());
-        result_vector.insert(set_to_convert.begin(), set_to_convert.end());
+        result_vector.insert(result_vector.end(), set_to_convert.begin(),
+                             set_to_convert.end());
         std::ranges::sort(result_vector);
         return result_vector;
     };
@@ -501,7 +505,8 @@ sdk_core<Wrapper, Externals>::config_settings(
             fmt::format("ROCPROFSYS_ROCM_{}_OPERATIONS_ANNOTATE_BACKTRACE", domain_name);
 
         auto operation_choices = std::vector<std::string>{};
-        operation_choices.insert(_domain.operations.begin(), _domain.operations.end());
+        operation_choices.insert(operation_choices.end(), _domain.operations.begin(),
+                                 _domain.operations.end());
 
         if(operation_choices.empty())
         {
@@ -603,16 +608,16 @@ sdk_core<Wrapper, Externals>::config_settings(
 
     add_operation_settings_f(
         "MARKER_API", callback_tracing_info[Wrapper::CALLBACK_TRACING_MARKER_CORE_API],
-        callback_operation_option_names);
+        s_callback_operation_option_names);
 
     for(const auto& itr : callback_tracing_info)
     {
-        add_operation_settings_f(itr.name, itr, callback_operation_option_names);
+        add_operation_settings_f(itr.name, itr, s_callback_operation_option_names);
     }
 
     for(const auto& itr : buffered_tracing_info)
     {
-        add_operation_settings_f(itr.name, itr, buffered_operation_option_names);
+        add_operation_settings_f(itr.name, itr, s_buffered_operation_option_names);
     }
 
     // Add the ROCPROFSYS_ROCM_GROUP_BY_QUEUE setting if the hip_stream domain is present
@@ -789,8 +794,8 @@ sdk_core<Wrapper, Externals>::get_buffered_domains()
         kfd_supported_by_runtime = (Wrapper::compile_time_version >= kfd_min_version);
     }
 
-    auto _data    = std::unordered_set<kind_t>{};
-    auto _domains = rocprofsys::delimit(Externals::get_rocm_domains(), " ,;:\t\n");
+    auto data    = std::unordered_set<kind_t>{};
+    auto domains = rocprofsys::delimit(Externals::get_rocm_domains(), " ,;:\t\n");
     // Check that the domains are valid
     const auto valid_choices = Externals::get_settings()
                                    ->at(std::string{ env_vars::ROCM_DOMAINS })
@@ -800,7 +805,7 @@ sdk_core<Wrapper, Externals>::get_buffered_domains()
             valid_choices, [&domainv](const auto& choice) { return choice == domainv; });
     };
 
-    for(const auto& itr : _domains)
+    for(const auto& itr : domains)
     {
         if(invalid_domain(itr))
         {
@@ -810,30 +815,36 @@ sdk_core<Wrapper, Externals>::get_buffered_domains()
 
         if(itr == "hsa_api")
         {
-            for(auto eitr : { Wrapper::BUFFER_TRACING_HSA_CORE_API,
-                              Wrapper::BUFFER_TRACING_HSA_AMD_EXT_API,
-                              Wrapper::BUFFER_TRACING_HSA_IMAGE_EXT_API,
-                              Wrapper::BUFFER_TRACING_HSA_FINALIZE_EXT_API })
-                _data.emplace(eitr);
+            for(const auto& eitr : { Wrapper::BUFFER_TRACING_HSA_CORE_API,
+                                     Wrapper::BUFFER_TRACING_HSA_AMD_EXT_API,
+                                     Wrapper::BUFFER_TRACING_HSA_IMAGE_EXT_API,
+                                     Wrapper::BUFFER_TRACING_HSA_FINALIZE_EXT_API })
+            {
+                data.emplace(eitr);
+            }
         }
         else if(itr == "hip_api")
         {
-            for(auto eitr : { Wrapper::BUFFER_TRACING_HIP_COMPILER_API,
-                              Wrapper::BUFFER_TRACING_HIP_RUNTIME_API })
-                _data.emplace(eitr);
+            for(const auto& eitr : { Wrapper::BUFFER_TRACING_HIP_COMPILER_API,
+                                     Wrapper::BUFFER_TRACING_HIP_RUNTIME_API })
+            {
+                data.emplace(eitr);
+            }
         }
         else if(itr == "marker_api" || itr == "roctx")
         {
-            _data.emplace(Wrapper::BUFFER_TRACING_MARKER_CORE_API);
+            data.emplace(Wrapper::BUFFER_TRACING_MARKER_CORE_API);
         }
         else if(itr == "memory_allocation")
         {
             if constexpr(Wrapper::compile_time_version >= 600)
-                _data.emplace(Wrapper::BUFFER_TRACING_MEMORY_ALLOCATION);
+            {
+                data.emplace(Wrapper::BUFFER_TRACING_MEMORY_ALLOCATION);
+            }
         }
         else if(itr == "memory_copy")
         {
-            _data.emplace(Wrapper::BUFFER_TRACING_MEMORY_COPY);
+            data.emplace(Wrapper::BUFFER_TRACING_MEMORY_COPY);
         }
         else if(itr == "kfd_events" || itr == "kfd_page_fault" ||
                 itr == "kfd_page_migrate" || itr == "kfd_queue" ||
@@ -844,15 +855,15 @@ sdk_core<Wrapper, Externals>::get_buffered_domains()
             {
                 if(!kfd_supported_by_runtime)
                 {
-                    static bool _warned = false;
-                    if(!_warned)
+                    static bool warned = false;
+                    if(!warned)
                     {
                         LOG_WARNING(
                             "KFD tracing domain '{}' disabled: rocprofiler-sdk "
                             "{}.{}.{} has a bug with undefined KFD node IDs (fixed in "
                             ">= 1.2.2)",
                             itr, kfd_version.major, kfd_version.minor, kfd_version.patch);
-                        _warned = true;
+                        warned = true;
                     }
                     continue;
                 }
@@ -864,20 +875,35 @@ sdk_core<Wrapper, Externals>::get_buffered_domains()
                                       Wrapper::BUFFER_TRACING_KFD_EVENT_QUEUE,
                                       Wrapper::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
                                       Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS })
-                        _data.emplace(eitr);
+
+                    {
+                        data.emplace(eitr);
+                    }
                 }
                 else if(itr == "kfd_page_fault")
-                    _data.emplace(Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT);
+                {
+                    data.emplace(Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT);
+                }
                 else if(itr == "kfd_page_migrate")
-                    _data.emplace(Wrapper::BUFFER_TRACING_KFD_PAGE_MIGRATE);
+                {
+                    data.emplace(Wrapper::BUFFER_TRACING_KFD_PAGE_MIGRATE);
+                }
                 else if(itr == "kfd_queue")
-                    _data.emplace(Wrapper::BUFFER_TRACING_KFD_QUEUE);
+                {
+                    data.emplace(Wrapper::BUFFER_TRACING_KFD_QUEUE);
+                }
                 else if(itr == "kfd_event_queue")
-                    _data.emplace(Wrapper::BUFFER_TRACING_KFD_EVENT_QUEUE);
+                {
+                    data.emplace(Wrapper::BUFFER_TRACING_KFD_EVENT_QUEUE);
+                }
                 else if(itr == "kfd_event_unmap_from_gpu")
-                    _data.emplace(Wrapper::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU);
+                {
+                    data.emplace(Wrapper::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU);
+                }
                 else if(itr == "kfd_event_dropped_events")
-                    _data.emplace(Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS);
+                {
+                    data.emplace(Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS);
+                }
             }
         }
         else
@@ -888,7 +914,7 @@ sdk_core<Wrapper, Externals>::get_buffered_domains()
                 auto        dval = static_cast<kind_t>(idx);
                 if(itr == to_lower(ditr.name) && supported.count(dval) > 0)
                 {
-                    _data.emplace(dval);
+                    data.emplace(dval);
                     break;
                 }
             }
@@ -905,8 +931,8 @@ sdk_core<Wrapper, Externals>::get_buffered_domains()
                 LOG_INFO(
                     "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON: implicitly enabling "
                     "KFD page_fault and page_migrate buffered tracing domains");
-                _data.emplace(Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT);
-                _data.emplace(Wrapper::BUFFER_TRACING_KFD_PAGE_MIGRATE);
+                data.emplace(Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT);
+                data.emplace(Wrapper::BUFFER_TRACING_KFD_PAGE_MIGRATE);
             }
             else
             {
@@ -918,7 +944,7 @@ sdk_core<Wrapper, Externals>::get_buffered_domains()
         }
     }
 
-    return _data;
+    return data;
 }
 
 template <typename Wrapper, typename Externals>
@@ -930,96 +956,105 @@ sdk_core<Wrapper, Externals>::get_rocm_events()
 
 template <typename Wrapper, typename Externals>
 std::vector<std::int32_t>
-sdk_core<Wrapper, Externals>::get_operations(
-    typename Wrapper::callback_tracing_kind kindv)
+sdk_core<Wrapper, Externals>::get_operations(typename Wrapper::callback_tracing_kind kind)
 {
-    if(callback_operation_option_names.count(kindv) == 0)
+    if(s_callback_operation_option_names.count(kind) == 0)
     {
         finalize_and_throw(
             fmt::format("sdk_core::get_operations: no options registered for "
                         "callback tracing kind {}",
-                        static_cast<int>(kindv)));
+                        static_cast<int>(kind)));
     }
 
-    auto complete_set = get_operations_impl(kindv);
+    const auto complete_set = get_operations_impl(kind);
 
-    const auto& opts = callback_operation_option_names.at(kindv);
+    const auto& opts = s_callback_operation_option_names.at(kind);
     // Empty option string means "no filter" — produce an empty set so the
     // three-argument overload falls through to the complete set / removes nothing.
-    auto include_operations = opts.operations_include.empty()
-                                  ? std::unordered_set<std::int32_t>{}
-                                  : get_operations_impl(kindv, opts.operations_include);
-    auto exclude_operations = opts.operations_exclude.empty()
-                                  ? std::unordered_set<std::int32_t>{}
-                                  : get_operations_impl(kindv, opts.operations_exclude);
+    const auto include_operations =
+        opts.operations_include.empty()
+            ? std::unordered_set<std::int32_t>{}
+            : get_operations_impl(kind, opts.operations_include);
+    const auto exclude_operations =
+        opts.operations_exclude.empty()
+            ? std::unordered_set<std::int32_t>{}
+            : get_operations_impl(kind, opts.operations_exclude);
 
     return filter_operations(complete_set, include_operations, exclude_operations);
 }
 
 template <typename Wrapper, typename Externals>
 std::vector<std::int32_t>
-sdk_core<Wrapper, Externals>::get_operations(typename Wrapper::buffer_tracing_kind kindv)
+sdk_core<Wrapper, Externals>::get_operations(typename Wrapper::buffer_tracing_kind kind)
 {
-    if(buffered_operation_option_names.count(kindv) == 0)
+    if(s_buffered_operation_option_names.count(kind) == 0)
     {
         finalize_and_throw(
             fmt::format("sdk_core::get_operations: no options registered for "
                         "buffer tracing kind {}",
-                        static_cast<int>(kindv)));
+                        static_cast<int>(kind)));
     }
 
-    const auto& opts      = buffered_operation_option_names.at(kindv);
-    auto        _complete = get_operations_impl(kindv);
-    auto        _include  = opts.operations_include.empty()
-                                ? std::unordered_set<std::int32_t>{}
-                                : get_operations_impl(kindv, opts.operations_include);
-    auto        _exclude  = opts.operations_exclude.empty()
-                                ? std::unordered_set<std::int32_t>{}
-                                : get_operations_impl(kindv, opts.operations_exclude);
+    const auto& opts         = s_buffered_operation_option_names.at(kind);
+    const auto  complete_set = get_operations_impl(kind);
+    const auto  include_operations =
+        opts.operations_include.empty()
+             ? std::unordered_set<std::int32_t>{}
+             : get_operations_impl(kind, opts.operations_include);
+    const auto exclude_operations =
+        opts.operations_exclude.empty()
+            ? std::unordered_set<std::int32_t>{}
+            : get_operations_impl(kind, opts.operations_exclude);
 
-    return filter_operations(_complete, _include, _exclude);
+    return filter_operations(complete_set, include_operations, exclude_operations);
 }
 
 template <typename Wrapper, typename Externals>
 std::unordered_set<std::int32_t>
 sdk_core<Wrapper, Externals>::get_backtrace_operations(
-    typename Wrapper::callback_tracing_kind kindv)
+    typename Wrapper::callback_tracing_kind kind)
 {
-    if(callback_operation_option_names.count(kindv) == 0)
+    if(s_callback_operation_option_names.count(kind) == 0)
     {
         finalize_and_throw(
             fmt::format("sdk_core::get_backtrace_operations: no options registered for "
                         "callback tracing kind {}",
-                        static_cast<int>(kindv)));
+                        static_cast<int>(kind)));
     }
 
-    const auto& bt =
-        callback_operation_option_names.at(kindv).operations_annotate_backtrace;
-    if(bt.empty()) return {};
+    const auto& annotate_backtrace_operations =
+        s_callback_operation_option_names.at(kind).operations_annotate_backtrace;
+    if(annotate_backtrace_operations.empty())
+    {
+        return {};
+    }
 
-    auto _vec = get_operations_impl(kindv, bt);
-    return { _vec.begin(), _vec.end() };
+    const auto result = get_operations_impl(kind, annotate_backtrace_operations);
+    return { result.begin(), result.end() };
 }
 
 template <typename Wrapper, typename Externals>
 std::unordered_set<std::int32_t>
 sdk_core<Wrapper, Externals>::get_backtrace_operations(
-    typename Wrapper::buffer_tracing_kind kindv)
+    typename Wrapper::buffer_tracing_kind kind)
 {
-    if(buffered_operation_option_names.count(kindv) == 0)
+    if(s_buffered_operation_option_names.count(kind) == 0)
     {
         finalize_and_throw(
             fmt::format("sdk_core::get_backtrace_operations: no options registered for "
                         "buffer tracing kind {}",
-                        static_cast<int>(kindv)));
+                        static_cast<int>(kind)));
     }
 
-    const auto& bt =
-        buffered_operation_option_names.at(kindv).operations_annotate_backtrace;
-    if(bt.empty()) return {};
+    const auto& annotate_backtrace_operations =
+        s_buffered_operation_option_names.at(kind).operations_annotate_backtrace;
+    if(annotate_backtrace_operations.empty())
+    {
+        return {};
+    }
 
-    auto _vec = get_operations_impl(kindv, bt);
-    return { _vec.begin(), _vec.end() };
+    const auto result = get_operations_impl(kind, annotate_backtrace_operations);
+    return { result.begin(), result.end() };
 }
 
 }  // namespace rocprofsys::rocprofiler_sdk

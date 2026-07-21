@@ -2474,7 +2474,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     auto _buffered_domain  = rocprofiler_sdk::core_sdk::get_buffered_domains();
     auto _counter_events   = rocprofiler_sdk::core_sdk::get_rocm_events();
     auto _version          = rocprofiler_sdk::core_sdk::get_version();
-    if(_version.formatted == 0)
+    if(_version.formatted() == 0)
     {
         LOG_WARNING("rocprofiler-sdk version not initialized");
     }
