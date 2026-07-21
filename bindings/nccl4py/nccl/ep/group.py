@@ -7,10 +7,10 @@
 
 from __future__ import annotations
 
-from dataclasses import field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from nccl._binding_helpers import binding_dataclass
+from nccl._binding_helpers import Field, LowppSpec, PassBy
 
 from nccl.core.typing import NcclInvalid
 
@@ -30,8 +30,8 @@ if TYPE_CHECKING:
 __all__ = ["Group", "GroupConfig"]
 
 
-@binding_dataclass(_ep_bindings.GroupConfig)
-class GroupConfig:
+@dataclass(kw_only=True)
+class GroupConfig(LowppSpec, lowpp_cls=_ep_bindings.GroupConfig):
     """Pythonic configuration for :py:meth:`Group.create`.
 
     Mirrors :c:struct:`ncclEpGroupConfig_t`. Fields left at their
@@ -84,7 +84,7 @@ class GroupConfig:
     num_qp_per_rank: int = 0
     num_channels: int = 0
     max_num_sms: int = 0
-    alloc: AllocConfig = field(default_factory=AllocConfig)
+    alloc: AllocConfig = Field(default_factory=AllocConfig, pass_by=PassBy.VALUE)
     enable_mask: bool = False
     timeout_ns: int = 0
 
@@ -116,7 +116,8 @@ class Group:
         See Also:
             :meth:`destroy`.
         """
-        ptr = _ep_bindings.create_group(comm.ptr, config._lowpp.ptr)  # type: ignore[attr-defined]
+        config_lowpp = config._to_lowpp()
+        ptr = _ep_bindings.create_group(comm.ptr, config_lowpp.ptr)
         return cls(ptr)
 
     def _check_valid(self, operation: str) -> None:
@@ -159,12 +160,14 @@ class Group:
             stream: CUDA stream for the launch.
         """
         self._check_valid("create_handle")
+        layout_info_lowpp = None if layout_info is None else layout_info._to_lowpp()
+        config_lowpp = None if config is None else config._to_lowpp()
         ptr = _ep_bindings.create_handle(
             self._ptr,
             int(layout),
             topk_idx.ptr,
-            layout_info._lowpp.ptr if layout_info is not None else 0,  # type: ignore[attr-defined]
-            config._lowpp.ptr if config is not None else 0,  # type: ignore[attr-defined]
+            0 if layout_info_lowpp is None else layout_info_lowpp.ptr,
+            0 if config_lowpp is None else config_lowpp.ptr,
             get_stream_ptr(stream),
         )
         return Handle(ptr)

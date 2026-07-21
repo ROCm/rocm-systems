@@ -13,13 +13,14 @@ entry points: :class:`HandleConfig`, :class:`DispatchConfig`,
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from nccl.core.cuda import get_stream_ptr
 from nccl.core.typing import NcclInvalid, NcclStreamSpec
 
 
-from nccl._binding_helpers import binding_dataclass
+from nccl._binding_helpers import Field, LowppSpec, PassBy
 from nccl.bindings import nccl_ep as _ep_bindings
 from nccl.ep.enums import PassDir
 
@@ -40,8 +41,8 @@ __all__ = [
 ]
 
 
-@binding_dataclass(_ep_bindings.HandleConfig)
-class HandleConfig:
+@dataclass(kw_only=True)
+class HandleConfig(LowppSpec, lowpp_cls=_ep_bindings.HandleConfig):
     """Pythonic configuration for :py:meth:`Group.create_handle`.
 
     Mirrors :c:struct:`ncclEpHandleConfig_t`. All fields default to 0;
@@ -61,8 +62,8 @@ class HandleConfig:
     dispatch_output_per_expert_alignment: int = 0
 
 
-@binding_dataclass(_ep_bindings.DispatchConfig)
-class DispatchConfig:
+@dataclass(kw_only=True)
+class DispatchConfig(LowppSpec, lowpp_cls=_ep_bindings.DispatchConfig):
     """Pythonic configuration for :py:meth:`Handle.dispatch`.
 
     Mirrors :c:struct:`ncclEpDispatchConfig_t`. All fields default to 0;
@@ -84,8 +85,8 @@ class DispatchConfig:
     pass_direction: PassDir = PassDir.FWD
 
 
-@binding_dataclass(_ep_bindings.CombineConfig)
-class CombineConfig:
+@dataclass(kw_only=True)
+class CombineConfig(LowppSpec, lowpp_cls=_ep_bindings.CombineConfig):
     """Pythonic configuration for :py:meth:`Handle.combine`.
 
     Mirrors :c:struct:`ncclEpCombineConfig_t`.
@@ -102,8 +103,8 @@ class CombineConfig:
     pass_direction: PassDir = PassDir.FWD
 
 
-@binding_dataclass(_ep_bindings.LayoutInfo)
-class LayoutInfo:
+@dataclass(kw_only=True)
+class LayoutInfo(LowppSpec, lowpp_cls=_ep_bindings.LayoutInfo):
     """Named local tensors carried alongside dispatch / create_handle.
 
     Mirrors :c:struct:`ncclEpLayoutInfo_t`. All fields are optional;
@@ -125,14 +126,14 @@ class LayoutInfo:
             received-token count.
     """
 
-    expert_counters: Tensor | None = None
-    src_rank_counters: Tensor | None = None
-    expert_offsets: Tensor | None = None
-    recv_total_counter: Tensor | None = None
+    expert_counters: Tensor | None = Field(default=None, pass_by=PassBy.POINTER)
+    src_rank_counters: Tensor | None = Field(default=None, pass_by=PassBy.POINTER)
+    expert_offsets: Tensor | None = Field(default=None, pass_by=PassBy.POINTER)
+    recv_total_counter: Tensor | None = Field(default=None, pass_by=PassBy.POINTER)
 
 
-@binding_dataclass(_ep_bindings.DispatchInputs)
-class DispatchInputs:
+@dataclass(kw_only=True)
+class DispatchInputs(LowppSpec, lowpp_cls=_ep_bindings.DispatchInputs):
     """Input tensor bundle for :py:meth:`Handle.dispatch`.
 
     Mirrors :c:struct:`ncclEpDispatchInputs_t`. ``tokens`` is required;
@@ -145,13 +146,13 @@ class DispatchInputs:
         scales: 2D ``[num_tokens, hidden/128]`` float32. HT FP8 only.
     """
 
-    tokens: Tensor | None = None
-    topk_weights: Tensor | None = None
-    scales: Tensor | None = None
+    tokens: Tensor | None = Field(default=None, pass_by=PassBy.POINTER)
+    topk_weights: Tensor | None = Field(default=None, pass_by=PassBy.POINTER)
+    scales: Tensor | None = Field(default=None, pass_by=PassBy.POINTER)
 
 
-@binding_dataclass(_ep_bindings.DispatchOutputs)
-class DispatchOutputs:
+@dataclass(kw_only=True)
+class DispatchOutputs(LowppSpec, lowpp_cls=_ep_bindings.DispatchOutputs):
     """Output tensor bundle for :py:meth:`Handle.dispatch`.
 
     Mirrors :c:struct:`ncclEpDispatchOutputs_t`. ``tokens`` is required;
@@ -167,14 +168,14 @@ class DispatchOutputs:
         topk_idx: LL rank-major or HT: received top-k expert indices.
     """
 
-    tokens: Tensor | None = None
-    topk_weights: Tensor | None = None
-    scales: Tensor | None = None
-    topk_idx: Tensor | None = None
+    tokens: Tensor | None = Field(default=None, pass_by=PassBy.POINTER)
+    topk_weights: Tensor | None = Field(default=None, pass_by=PassBy.POINTER)
+    scales: Tensor | None = Field(default=None, pass_by=PassBy.POINTER)
+    topk_idx: Tensor | None = Field(default=None, pass_by=PassBy.POINTER)
 
 
-@binding_dataclass(_ep_bindings.CombineInputs)
-class CombineInputs:
+@dataclass(kw_only=True)
+class CombineInputs(LowppSpec, lowpp_cls=_ep_bindings.CombineInputs):
     """Input tensor bundle for :py:meth:`Handle.combine`.
 
     Mirrors :c:struct:`ncclEpCombineInputs_t`. ``tokens`` is required;
@@ -187,12 +188,12 @@ class CombineInputs:
             backward combine only.
     """
 
-    tokens: Tensor | None = None
-    topk_weights: Tensor | None = None
+    tokens: Tensor | None = Field(default=None, pass_by=PassBy.POINTER)
+    topk_weights: Tensor | None = Field(default=None, pass_by=PassBy.POINTER)
 
 
-@binding_dataclass(_ep_bindings.CombineOutputs)
-class CombineOutputs:
+@dataclass(kw_only=True)
+class CombineOutputs(LowppSpec, lowpp_cls=_ep_bindings.CombineOutputs):
     """Output tensor bundle for :py:meth:`Handle.combine`.
 
     Mirrors :c:struct:`ncclEpCombineOutputs_t`. ``tokens`` is required;
@@ -208,8 +209,8 @@ class CombineOutputs:
             * HT backward: combined routing weights output.
     """
 
-    tokens: Tensor | None = None
-    topk_weights: Tensor | None = None
+    tokens: Tensor | None = Field(default=None, pass_by=PassBy.POINTER)
+    topk_weights: Tensor | None = Field(default=None, pass_by=PassBy.POINTER)
 
 
 class Handle:
@@ -253,10 +254,11 @@ class Handle:
             :meth:`dispatch`.
         """
         self._check_valid("update")
+        layout_info_lowpp = None if layout_info is None else layout_info._to_lowpp()
         _ep_bindings.update_handle(
             self._ptr,
             topk_idx.ptr,
-            layout_info._lowpp.ptr if layout_info is not None else 0,  # type: ignore[attr-defined]
+            0 if layout_info_lowpp is None else layout_info_lowpp.ptr,
             get_stream_ptr(stream),
         )
 
@@ -292,12 +294,16 @@ class Handle:
             :meth:`combine`, :meth:`complete`.
         """
         self._check_valid("dispatch")
+        inputs_lowpp = inputs._to_lowpp()
+        outputs_lowpp = outputs._to_lowpp()
+        layout_info_lowpp = None if layout_info is None else layout_info._to_lowpp()
+        config_lowpp = None if config is None else config._to_lowpp()
         _ep_bindings.dispatch(
             self._ptr,
-            inputs._lowpp.ptr,  # type: ignore[attr-defined]
-            outputs._lowpp.ptr,  # type: ignore[attr-defined]
-            layout_info._lowpp.ptr if layout_info is not None else 0,  # type: ignore[attr-defined]
-            config._lowpp.ptr if config is not None else 0,  # type: ignore[attr-defined]
+            inputs_lowpp.ptr,
+            outputs_lowpp.ptr,
+            0 if layout_info_lowpp is None else layout_info_lowpp.ptr,
+            0 if config_lowpp is None else config_lowpp.ptr,
             get_stream_ptr(stream),
         )
 
@@ -329,11 +335,14 @@ class Handle:
             :meth:`dispatch`, :meth:`complete`.
         """
         self._check_valid("combine")
+        inputs_lowpp = inputs._to_lowpp()
+        outputs_lowpp = outputs._to_lowpp()
+        config_lowpp = None if config is None else config._to_lowpp()
         _ep_bindings.combine(
             self._ptr,
-            inputs._lowpp.ptr,  # type: ignore[attr-defined]
-            outputs._lowpp.ptr,  # type: ignore[attr-defined]
-            config._lowpp.ptr if config is not None else 0,  # type: ignore[attr-defined]
+            inputs_lowpp.ptr,
+            outputs_lowpp.ptr,
+            0 if config_lowpp is None else config_lowpp.ptr,
             get_stream_ptr(stream),
         )
 

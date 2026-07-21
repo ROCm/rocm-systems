@@ -66,9 +66,10 @@ handle — the loaded library object then anchors the lifetime instead::
 from __future__ import annotations
 
 import ctypes
+from dataclasses import dataclass
 
 from nccl.bindings import nccl_ep as _ep_bindings
-from nccl._binding_helpers import binding_dataclass
+from nccl._binding_helpers import LowppSpec
 
 
 __all__ = ["AllocConfig", "AllocFn", "FreeFn"]
@@ -90,8 +91,8 @@ FreeFn = ctypes.CFUNCTYPE(
 """C-callable type: ``cudaError_t (*)(void* ptr, void* context)``."""
 
 
-@binding_dataclass(_ep_bindings.AllocConfig)
-class AllocConfig:
+@dataclass(kw_only=True)
+class AllocConfig(LowppSpec, lowpp_cls=_ep_bindings.AllocConfig):
     """Allocator hooks for :py:attr:`GroupConfig.alloc`.
 
     Mirrors :c:struct:`ncclEpAllocConfig_t`. Leaving every field at 0

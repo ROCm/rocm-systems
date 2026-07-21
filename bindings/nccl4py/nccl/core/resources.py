@@ -17,17 +17,34 @@ from abc import ABC, abstractmethod
 
 from nccl.bindings import nccl as _nccl_bindings
 
+from nccl._binding_helpers import LowppView
 from nccl.core.constants import WindowFlag
 from nccl.core.typing import NcclDataType, NcclInvalid
 
 _PointerBox = _nccl_bindings.PointerBox
 
 __all__ = [
+    "MultimemHandle",
     "RegisteredBufferHandle",
     "RegisteredWindowHandle",
     "CustomRedOp",
     "DevCommResource",
 ]
+
+
+class MultimemHandle(LowppView, lowpp_cls=_nccl_bindings.MultimemHandle):
+    """Read-only, live view of ``ncclMultimemHandle_t``.
+
+    Multimem handles are produced by NCCL during device communicator creation.
+    Users should pass returned handles back to NCCL APIs rather than
+    constructing them directly. Fields read the underlying struct directly, so
+    values NCCL writes after a non-blocking call are always current.
+    """
+
+    @property
+    def mc_base_pointer(self) -> int:
+        """Multicast base pointer written by NCCL; ``0`` means none was provided."""
+        return self._lowpp.mc_base_ptr
 
 
 class CommResource(ABC):

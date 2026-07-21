@@ -13,7 +13,7 @@ registration, custom reduction operators, and resource management.
 """
 
 from __future__ import annotations
-from dataclasses import field
+from dataclasses import dataclass
 from typing import Any, Sequence
 
 import numpy as _np
@@ -23,7 +23,7 @@ from cuda.core import system
 
 from nccl.bindings import nccl as _nccl_bindings
 
-from nccl._binding_helpers import binding_dataclass
+from nccl._binding_helpers import LowppSpec, Field
 from nccl.core.buffer import NcclBuffer
 from nccl.core.constants import (
     CTAPolicy,
@@ -32,6 +32,7 @@ from nccl.core.constants import (
     WindowFlag,
 )
 from nccl.core.cuda import get_stream_ptr
+from nccl.core.team import NCCLTeam
 from nccl.core.resources import (
     CommResource,
     RegisteredBufferHandle,
@@ -59,14 +60,13 @@ _Result = _nccl_bindings.Result
 __all__ = [
     "NCCLConfig",
     "WaitSignalDesc",
-    "NCCLTeam",
     "NCCLDevCommRequirements",
     "Communicator",
 ]
 
 
-@binding_dataclass(_nccl_bindings.Config)
-class NCCLConfig:
+@dataclass(kw_only=True)
+class NCCLConfig(LowppSpec, lowpp_cls=_nccl_bindings.Config):
     """NCCL configuration for communicator initialization.
 
     Provides configuration options for NCCL communicators, allowing
@@ -133,8 +133,8 @@ class NCCLConfig:
     """Whether NCCL preserves stream-ordering semantics for collectives captured into CUDA graphs. Supported values are 0 (disabled) or 1 (enabled). Cannot be combined with ``graph_usage_mode=2``. Also controllable via the ``NCCL_GRAPH_STREAM_ORDERING`` environment variable. If unset, NCCL uses 1."""
 
 
-@binding_dataclass(_nccl_bindings.WaitSignalDesc, kw_only=False, frozen=True)
-class WaitSignalDesc:
+@dataclass(frozen=True)
+class WaitSignalDesc(LowppSpec, lowpp_cls=_nccl_bindings.WaitSignalDesc):
     """Descriptor for a wait-signal operation.
 
     Describes a single signal-wait operation for use with
@@ -146,35 +146,20 @@ class WaitSignalDesc:
     peer: int
     """Target peer rank to wait for signals from."""
 
-    op_count: int = field(default=1, metadata={"lowpp": "op_cnt"})
+    op_count: int = Field(default=1, lowpp_name="op_cnt")
     """Number of signal operations to wait for from the peer. Defaults to 1."""
 
-    signal_index: int = field(default=0, metadata={"lowpp": "sig_idx"})
+    signal_index: int = Field(default=0, lowpp_name="sig_idx")
     """Signal index identifier. Currently must be 0. Defaults to 0."""
 
-    context: int = field(default=0, metadata={"lowpp": "ctx"})
+    context: int = Field(default=0, lowpp_name="ctx")
     """Context identifier. Currently must be 0. Defaults to 0."""
 
 
-@binding_dataclass(_nccl_bindings.Team, kw_only=False, frozen=True)
-class NCCLTeam:
-    """A NCCL team: ``(n_ranks, rank, stride)`` view over a communicator.
-
-    Instances are produced by :py:attr:`Communicator.team_world`,
-    :py:attr:`Communicator.team_lsa`, :py:attr:`Communicator.team_rail`, or
-    constructed directly for hand-built teams. ``@binding_dataclass`` pairs
-    the value with the low-level ``Team`` POD via ``self._lowpp``, so
-    downstream APIs (e.g. ``team_requirements`` on
-    ``NCCLDevCommRequirements``) extract the POD automatically.
-    """
-
-    n_ranks: int
-    rank: int
-    stride: int
-
-
-@binding_dataclass(_nccl_bindings.DevCommRequirements)
-class NCCLDevCommRequirements:
+@dataclass(kw_only=True)
+class NCCLDevCommRequirements(
+    LowppSpec, lowpp_cls=_nccl_bindings.DevCommRequirements
+):
     """NCCL device communicator requirements configuration.
 
     Provides configuration for device communicator creation, allowing
@@ -225,6 +210,9 @@ class NCCLDevCommRequirements:
 
     gin_queue_depth: int | None = None
     """GIN queue depth. If unset, NCCL uses 0."""
+
+    gin_traffic_class: int | None = None
+    """GIN traffic class. If unset, NCCL uses its internal default."""
 
     world_gin_barrier_count: int | None = None
     """Number of world GIN barriers. If unset, NCCL uses 0."""
@@ -449,7 +437,10 @@ class Communicator:
         if self._comm != 0:
             raise NcclInvalid("Communicator is already initialized")
 
-        cfg_ptr = 0 if config is None else config._lowpp.ptr  # type: ignore[attr-defined]
+        config_lowpp = (
+            None if config is None else config._to_lowpp()
+        )
+        cfg_ptr = 0 if config_lowpp is None else config_lowpp.ptr
         if isinstance(unique_id, UniqueId):
             unique_id = (unique_id,)
         elif not isinstance(unique_id, (list, tuple)):
@@ -507,7 +498,10 @@ class Communicator:
 
         if color is None:
             color = -1  # NCCL_SPLIT_NOCOLOR from nccl.h
-        cfg_ptr = 0 if config is None else config._lowpp.ptr  # type: ignore[attr-defined]
+        config_lowpp = (
+            None if config is None else config._to_lowpp()
+        )
+        cfg_ptr = 0 if config_lowpp is None else config_lowpp.ptr
         newcomm = type(self)()
         self._children_in_progress.append(newcomm)
         _nccl_bindings.comm_split(
@@ -559,7 +553,10 @@ class Communicator:
         """
         self._check_valid("shrink")
         ranks_to_exclude = list(exclude_ranks) if exclude_ranks is not None else []
-        cfg_ptr = 0 if config is None else config._lowpp.ptr  # type: ignore[attr-defined]
+        config_lowpp = (
+            None if config is None else config._to_lowpp()
+        )
+        cfg_ptr = 0 if config_lowpp is None else config_lowpp.ptr
         newcomm = type(self)()
         _nccl_bindings.comm_shrink(
             self._comm,
@@ -650,7 +647,10 @@ class Communicator:
 
         uid_ptr = 0 if unique_id is None else unique_id.ptr
         rank_val = -1 if rank is None else int(rank)
-        cfg_ptr = 0 if config is None else config._lowpp.ptr  # type: ignore[attr-defined]
+        config_lowpp = (
+            None if config is None else config._to_lowpp()
+        )
+        cfg_ptr = 0 if config_lowpp is None else config_lowpp.ptr
         newcomm = type(self)()
         _nccl_bindings.comm_grow(
             self._comm, int(nranks), uid_ptr, rank_val, newcomm._comm_box.address, cfg_ptr
@@ -1066,7 +1066,8 @@ class Communicator:
         if isinstance(descs, WaitSignalDesc):
             descs = (descs,)
 
-        buf = bytearray().join(bytes(d._lowpp) for d in descs)  # type: ignore[attr-defined]
+        lowpp_descs = [d._to_lowpp() for d in descs]
+        buf = bytearray().join(bytes(d) for d in lowpp_descs)
         _nccl_bindings.wait_signal(len(descs), buf, int(self._comm), get_stream_ptr(stream))
 
     def signal(
@@ -1876,7 +1877,10 @@ class Communicator:
         if requirements is None:
             requirements = NCCLDevCommRequirements()
 
-        resource = DevCommResource(self._comm, requirements._lowpp.ptr)  # type: ignore[attr-defined]
+        # Hold the materialized lowpp alive across DevCommResource construction,
+        # which reads the struct synchronously in dev_comm_create.
+        requirements_lowpp = requirements._to_lowpp()
+        resource = DevCommResource(self._comm, requirements_lowpp.ptr)
         self._resources.append(resource)
         return resource
 

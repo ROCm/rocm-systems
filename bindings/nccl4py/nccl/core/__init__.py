@@ -14,6 +14,9 @@ from nccl.core.typing import *
 # Constants
 from nccl.core.constants import *
 
+# Team values and operations
+from nccl.core.team import *
+
 # Communicator and configuration
 from nccl.core.communicator import *
 
@@ -81,9 +84,11 @@ __all__ = [
     "NCCLConfig",
     "WaitSignalDesc",
     "NCCLDevCommRequirements",
-    "NCCLTeam",
     "Communicator",
+    # Team
+    "NCCLTeam",
     # Resources
+    "MultimemHandle",
     "RegisteredBufferHandle",
     "RegisteredWindowHandle",
     "CustomRedOp",
