@@ -38,6 +38,28 @@ rocm/vllm:rocm7.13.0_gfx950-dcgpu_ubuntu24.04_py3.13_pytorch_2.10.0_vllm_0.19.1
 
 `auto` picks docker when `HRR_DOCKER_IMAGE` is set, else native. `--no-replay` for metadata-only.
 
+## Install / smoke test
+
+Copy `SKILL.md` and `scripts/` (exclude `__pycache__`). Validate:
+
+```bash
+python3 scripts/test_analyze_replay_finding.py
+python3 scripts/test_check_replay_compat.py
+scripts/triage_archive.sh --help
+scripts/replay_docker.sh --help
+```
+
+Metadata-only smoke (no GPU):
+
+```bash
+HRR_TRIAGE_WORKDIR=/tmp/hrr-skill-smoke \
+  scripts/triage_archive.sh --archive <pid-dir> --no-replay
+```
+
+A finding note like `archive wire version N does not match hrr-playback reader M` comes
+from `hrr-playback --info` when the installed reader differs from the archive; it is
+informational and does not block `--no-replay`.
+
 ## Hard constraints
 
 - **No source edits.** One `ensure_playback.sh --build` attempt max; on failure stop (or `--no-replay`).
