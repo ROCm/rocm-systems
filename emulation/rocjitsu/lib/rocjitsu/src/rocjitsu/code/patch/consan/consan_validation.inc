@@ -3193,8 +3193,14 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
   for (std::string &error : errors)
     error = "ConSan final validation: " + error;
 
-  if (replacement.target_id() != original.target_id())
+  if (replacement.target_id() != original.target_id()) {
     errors.emplace_back("ConSan final validation changed the AMDGPU target identity");
+    // Every remaining proof decodes or synthesizes instructions for the
+    // replacement target. A corrupted target ID is already a conclusive
+    // validation failure and must not escape as an instruction-builder
+    // exception while validating an untrusted replacement image.
+    return errors;
+  }
   if (sorted_entity_names<AmdGpuKernelInfo>(replacement.kernels()) !=
       sorted_entity_names<AmdGpuKernelInfo>(original.kernels())) {
     errors.emplace_back("ConSan final validation changed the kernel symbol identity set");

@@ -504,6 +504,15 @@ void prepend_env_path(const char *name, const std::string &value) {
 // translated reader through the earlier tool before ROCR loads it.
 void append_hsa_tool(const std::string &value) {
   if (const char *old_value = std::getenv("HSA_TOOLS_LIB"); old_value && *old_value) {
+    // Both waitcheck and DBT can own an AMD queue interceptor. When they are
+    // stacked, run waitcheck eagerly in the inner load wrapper instead: it then
+    // checks the final reader produced by the outer DBT wrapper without either
+    // tool bypassing the other's queue callback. Preserve an explicit user
+    // choice, including dispatch mode, for debugging.
+    if (std::strstr(old_value, "rocjitsu_waitcheck_hooks") != nullptr &&
+        std::getenv("ROCJITSU_WAITCHECK_MODE") == nullptr) {
+      setenv("ROCJITSU_WAITCHECK_MODE", "eager", 1);
+    }
     std::string combined = std::string(old_value) + " " + value;
     setenv("HSA_TOOLS_LIB", combined.c_str(), 1);
     return;

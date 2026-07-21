@@ -60,6 +60,7 @@ std::optional<uint32_t> SpillManager::allocate_slot(RegisterRef reg) {
   if (reg.index >= per_class_max(reg.cls)) {
     return std::nullopt;
   }
+  // Overflow-safe equivalent of `next_offset_ + kSlotBytes > limit_`.
   auto offset = slots_.allocate(kSlotBytes, kSlotBytes, limit_);
   if (!offset)
     return std::nullopt;

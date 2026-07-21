@@ -608,7 +608,7 @@ def test_rdna4_s_waitcnt_compat_uses_gfx11_layout():
     assert 'uint8_t vm = (imm >> 10) & 0x3F;' in body
 
 
-def test_s_trap_execute_is_unimplemented():
+def test_s_trap_executes_as_nop_without_a_trap_handler():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
         arch_name='rdna4',
@@ -626,7 +626,7 @@ def test_s_trap_execute_is_unimplemented():
 
     body = codegen._gen_execute_body(inst, sem, 'ENC_SOPP')
 
-    assert 'throw util::UnimplementedInst(mnemonic());' in body
+    assert body == '  (void)wf;'
 
 
 def test_rdna4_s_waitcnt_compat_formats_with_gfx11_layout():
@@ -1239,6 +1239,85 @@ def test_packed_16bit_source_gate_is_limited_to_e32_16bit_sources():
     assert codegen._operand_uses_packed_16bit_dst('ENC_VOP1', dst)
     assert codegen._operand_uses_packed_16bit_dst('ENC_VOP2', dst)
     assert not codegen._operand_uses_packed_16bit_dst('ENC_VOP3', dst)
+
+
+def test_output_operand_read_facts_cover_liveness_sensitive_families():
+    codegen = object.__new__(CodeGenerator)
+    codegen.semantics = SimpleNamespace(
+        instructions={
+            'V_WRITELANE_B32': InstructionSemantics(
+                'V_WRITELANE_B32', 'vector_writelane'
+            ),
+            'V_SWAP_B32': InstructionSemantics('V_SWAP_B32', 'vector_swap'),
+            'BUFFER_ATOMIC_ADD': InstructionSemantics(
+                'BUFFER_ATOMIC_ADD', 'buffer_atomic'
+            ),
+            'S_ADDK_I32': InstructionSemantics('S_ADDK_I32', 'scalar_addk'),
+            'S_CMOVK_I32': InstructionSemantics('S_CMOVK_I32', 'scalar_cmovk'),
+        }
+    )
+
+    vdst = Operand('vdst', 32, 'OPR_VGPR', False, True, False, False, 0)
+    swap_src0 = Operand('src0', 32, 'OPR_SRC_VGPR', False, True, False, False, 1)
+    vdata = Operand('vdata', 32, 'OPR_VGPR', False, True, False, False, 0)
+    sdst = Operand('sdst', 32, 'OPR_SDST', False, True, False, False, 0)
+    true16_vdst = Operand('vdst', 16, 'OPR_VGPR', False, True, False, False, 0)
+
+    assert codegen._output_operand_is_also_source(
+        Instruction('V_WRITELANE_B32', 'ENC_VOP3', 0, [vdst]), vdst
+    )
+    assert codegen._output_operand_is_also_source(
+        Instruction('V_SWAP_B32', 'ENC_VOP3', 0, [vdst, swap_src0]), vdst
+    )
+    assert codegen._output_operand_is_also_source(
+        Instruction('V_SWAP_B32', 'ENC_VOP3', 0, [vdst, swap_src0]), swap_src0
+    )
+    assert codegen._output_operand_is_also_source(
+        Instruction('BUFFER_ATOMIC_ADD', 'ENC_MUBUF', 0, [vdata]), vdata
+    )
+    assert codegen._output_operand_is_also_source(
+        Instruction('S_ADDK_I32', 'ENC_SOPK', 0, [sdst]), sdst
+    )
+    assert codegen._output_operand_is_also_source(
+        Instruction('S_CMOVK_I32', 'ENC_SOPK', 0, [sdst]), sdst
+    )
+    # A sub-dword (true16) destination is a partial def: the old lane value
+    # survives, so it is a read too. That read is surfaced through an
+    # implicit_uses() override (see _partial_def_outputs), NOT by appending the
+    # destination to src_operands_ — appending it would print the destination a
+    # second time in disassembly and misrepresent the architectural sources.
+    # _output_operand_is_also_source therefore returns False for this case.
+    assert not codegen._output_operand_is_also_source(
+        Instruction('V_ADD_F16', 'ENC_VOP3', 0, [true16_vdst]), true16_vdst
+    )
+
+
+def test_mnemonic_fallbacks_cover_unmodeled_read_write_outputs():
+    codegen = object.__new__(CodeGenerator)
+    codegen.semantics = SimpleNamespace(instructions={})
+
+    vdst = Operand('vdst', 32, 'OPR_VGPR', False, True, False, False, 0)
+    vdata = Operand('vdata', 32, 'OPR_VGPR', False, True, False, False, 0)
+    sdata = Operand('sdata', 32, 'OPR_SREG', False, True, False, False, 0)
+
+    for name in (
+        'V_CVT_PKACCUM_U8_F32',
+        'V_PK_FMAC_F16',
+        'V_SMFMAC_F32_16X16X32_BF16',
+        'V_DOT2C_F32_BF16',
+    ):
+        assert codegen._output_operand_is_also_source(
+            Instruction(name, 'ENC_VOP3', 0, [vdst]), vdst
+        )
+
+    for name, opnd in (
+        ('BUFFER_ATOMIC_ADD', vdata),
+        ('S_ATOMIC_ADD', sdata),
+        ('S_BUFFER_ATOMIC_ADD', sdata),
+    ):
+        assert codegen._output_operand_is_also_source(
+            Instruction(name, 'ENC_UNKNOWN', 0, [opnd]), opnd
+        )
 
 
 def test_gfx1250_generated_operand_merges_packed_16bit_destinations(
@@ -2107,6 +2186,10 @@ def test_gfx1250_helper_blocks_emit_hwreg_and_scaled_wmma_hooks():
     assert 'wf.set_wave_sched_mode_raw' in hwreg
     assert '[[maybe_unused]] bool read_hwreg' in hwreg
     assert '[[maybe_unused]] bool write_hwreg' in hwreg
+    assert 'HW_REG_IB_STS2_CLUSTER_ID_SHIFT = 6' in hwreg
+    assert 'wf.cluster_size() > 1 ? 1u : 0u' in hwreg
+    assert 'HW_REG_IB_STS2_WG_IN_CLUSTER_SHIFT = 21' in hwreg
+    assert 'wf.cluster_rank() & HW_REG_IB_STS2_WG_IN_CLUSTER_MASK' in hwreg
 
     assert codegen._supports_gfx1250_scaled_wmma_vop3px2()
     assert 'VWmmaScaleF32Vop3px2' in (codegen._emit_gfx1250_scaled_wmma_vop3px2_class())

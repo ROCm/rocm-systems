@@ -1,7 +1,13 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-add_library(rocjitsu_hooks SHARED rj_hsa_dbt_hooks.cpp)
+add_library(
+    rocjitsu_hooks
+    SHARED
+    rj_hsa_dbt_hooks.cpp
+    sidecar_registry.cpp
+    virtual_lds.cpp
+)
 add_library(rocjitsu_waitcheck_hooks SHARED rj_hsa_waitcheck_hooks.cpp)
 
 set_target_properties(rocjitsu_hooks PROPERTIES OUTPUT_NAME rocjitsu_hooks)
@@ -12,7 +18,11 @@ set_target_properties(
 
 target_include_directories(
     rocjitsu_hooks
-    PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR} ${GENERATED_DIR}
+    PRIVATE
+        ${ROCJITSU_INCLUDE_DIR}
+        ${ROCJITSU_SRC_DIR}
+        ${GENERATED_DIR}
+        ${RJ_VERSION_INCLUDE_DIR}
 )
 target_include_directories(rocjitsu_hooks SYSTEM PRIVATE ${HSA_INCLUDE_DIR})
 
@@ -49,6 +59,7 @@ target_link_libraries(
         flatbuffers
         simdojo
         Threads::Threads
+        ${CMAKE_DL_LIBS}
 )
 
 target_link_libraries(

@@ -2312,21 +2312,49 @@ class CodeGenerator:
             return f'inst_.{field}'
         return 'inst_.op_sel_hi_2'
 
-    # Semantic operations/classes where the destination register is also read.
-    # The CDNA4 XML marks these destinations as output-only, but the execute
-    # body reads the old value (accumulate, swap, partial write, bitfield set).
+    # Semantic operations/classes where the primary destination register is also
+    # read. Several CDNA4 XML operands are marked output-only even though the
+    # execute body consumes the old register value. This matters outside the
+    # emulator: liveness and DBT scratch allocation are built from the generated
+    # ``src_operands_``/``dst_operands_`` tables, so read/write operands must be
+    # reflected there even when the XML direction bits are incomplete.
     _READS_DST_OPS = frozenset({'fmac', 'bitset0', 'bitset1'})
     _READS_DST_CLASSES = frozenset(
         {
             'vector_dot',
-            'vector_swap',
+            'vector_writelane',
             'scalar_addk',
             'scalar_mulk',
+            'scalar_cmov',
+            'scalar_cmovk',
             'mad_mixlo_f16',
             'mad_mixhi_f16',
             'mad_mixlo_bf16',
             'mad_mixhi_bf16',
         }
+    )
+    _READS_ALL_OUTPUT_CLASSES = frozenset(
+        {
+            'vector_swap',
+            'vector_permlane16_swap',
+            'vector_permlane32_swap',
+        }
+    )
+    _READS_DST_MNEMONICS = frozenset(
+        {
+            # These forms currently use special/stub execute paths, so their
+            # semantic class alone is not enough to recover the accumulator.
+            'V_CVT_PKACCUM_U8_F32',
+            'V_PK_FMAC_F16',
+        }
+    )
+    _READS_DST_PREFIXES = ('V_SMFMAC_',)
+    _READS_DATA_OUTPUT_PREFIXES = ('BUFFER_ATOMIC_', 'S_ATOMIC_', 'S_BUFFER_ATOMIC_')
+    _READS_DST_DOT_PREFIXES = (
+        'V_DOT2ACC_',
+        'V_DOT2C_',
+        'V_DOT4C_',
+        'V_DOT8C_',
     )
 
     def _dst_is_also_source(self, inst: Instruction) -> bool:
@@ -2338,14 +2366,23 @@ class CodeGenerator:
         identifies such instructions via their semantics so the constructor
         can register the destination in both src_operands_ and dst_operands_.
         """
-        if not self.semantics:
-            return False
-        sem = self.semantics.instructions.get(inst.name)
-        if not sem:
-            return False
+        sem = self.semantics.instructions.get(inst.name) if self.semantics else None
+        return self._instruction_reads_primary_dst(inst, sem)
+
+    def _instruction_reads_primary_dst(
+        self, inst: Instruction, sem: InstructionSemantics | None
+    ) -> bool:
+        """Return True when an instruction reads its first destination operand."""
+        name = inst.name.upper()
         return (
-            sem.operation in self._READS_DST_OPS
-            or sem.semantic_class in self._READS_DST_CLASSES
+            (sem is not None and sem.operation in self._READS_DST_OPS)
+            or (sem is not None and sem.semantic_class in self._READS_DST_CLASSES)
+            or (
+                sem is not None and sem.semantic_class in self._READS_ALL_OUTPUT_CLASSES
+            )
+            or name in self._READS_DST_MNEMONICS
+            or name.startswith(self._READS_DST_PREFIXES)
+            or name.startswith(self._READS_DST_DOT_PREFIXES)
         )
 
     def _operand_size_override(
@@ -2393,6 +2430,45 @@ class CodeGenerator:
             ):
                 return str(self.isa_spec.profile.vop3_carry_mask_size_bits)
         return None
+
+    def _output_operand_is_also_source(self, inst: Instruction, opnd: Operand) -> bool:
+        """Return True if a generated output operand must also be a source.
+
+        The predicate is intentionally operand-specific. Some instructions
+        preserve/consume only the primary destination (FMAC, writelane), while
+        swap-style instructions read every output operand and atomics read their
+        data operand even when it is also the return register.
+        """
+        if not opnd.is_output:
+            return False
+
+        sem = self.semantics.instructions.get(inst.name) if self.semantics else None
+        name = inst.name.upper()
+
+        if opnd.name in ('vdata', 'sdata') and (
+            (sem is not None and sem.semantic_class == 'buffer_atomic')
+            or name.startswith(self._READS_DATA_OUTPUT_PREFIXES)
+        ):
+            return True
+
+        if sem is not None and sem.semantic_class in self._READS_ALL_OUTPUT_CLASSES:
+            return True
+
+        if opnd.name in ('vdst', 'sdst') and self._instruction_reads_primary_dst(
+            inst, sem
+        ):
+            return True
+
+        # A sub-dword (true16/byte) vector destination writes only part of its
+        # 32-bit register lane, so the old value is a real input. That partial-def
+        # read is surfaced separately as an implicit_uses() override (see
+        # _partial_def_outputs), so it must NOT also be appended to src_operands_:
+        # doing so would print the destination a second time in disassembly and
+        # (for the architectural operand list) misrepresent the instruction's
+        # sources. Liveness/DBT already pick up the read via InstDefUse merging
+        # implicit_uses, so returning False here keeps the operand tables faithful
+        # to the ISA without losing the dependency.
+        return False
 
     _VGPR_MSB_SRC_ROLES = ('Src0', 'Src1', 'Src2')
 
@@ -2875,6 +2951,14 @@ class CodeGenerator:
             )
         if ib_sts2_id is not None:
             constexprs.append(f'constexpr uint32_t HW_REG_IB_STS2 = {ib_sts2_id};')
+            constexprs.extend(
+                [
+                    'constexpr uint32_t HW_REG_IB_STS2_CLUSTER_ID_SHIFT = 6;',
+                    'constexpr uint32_t HW_REG_IB_STS2_CLUSTER_ID_MASK = 0xFu;',
+                    'constexpr uint32_t HW_REG_IB_STS2_WG_IN_CLUSTER_SHIFT = 21;',
+                    'constexpr uint32_t HW_REG_IB_STS2_WG_IN_CLUSTER_MASK = 0xFu;',
+                ]
+            )
 
         read_cases = []
         if mode_id is not None:
@@ -2910,7 +2994,13 @@ class CodeGenerator:
             )
         if ib_sts2_id is not None:
             read_cases.append(
-                '  case HW_REG_IB_STS2:\n' '    reg_val = 0;\n' '    return true;'
+                '  case HW_REG_IB_STS2:\n'
+                '    reg_val =\n'
+                '        (((wf.cluster_size() > 1 ? 1u : 0u) & HW_REG_IB_STS2_CLUSTER_ID_MASK)\n'
+                '         << HW_REG_IB_STS2_CLUSTER_ID_SHIFT) |\n'
+                '        ((wf.cluster_rank() & HW_REG_IB_STS2_WG_IN_CLUSTER_MASK)\n'
+                '         << HW_REG_IB_STS2_WG_IN_CLUSTER_SHIFT);\n'
+                '    return true;'
             )
 
         write_cases = []
@@ -3586,12 +3676,13 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'trap':
-            # S_TRAP is an exceptional control-flow terminator for CFG and DBT
-            # purposes, but rocjitsu does not currently model trap-handler
-            # execution in the wavefront simulator. Make dynamic execution fail
-            # explicitly while the generated PROGRAM_TERMINATOR flag carries the
-            # static-control-flow meaning for CFG construction.
-            return '  (void)wf;\n  throw util::UnimplementedInst(mnemonic());'
+            # S_TRAP transfers to the trap handler and RETURNS to the following
+            # instruction. This simulator does not configure a trap handler
+            # (STATUS.TRAP_EN == 0), the state in which AMD hardware executes
+            # S_TRAP as a NOP. Either way the fallthrough is reachable, so S_TRAP
+            # is NOT a PROGRAM_TERMINATOR (see the flag-assignment site) and
+            # execution simply continues.
+            return '  (void)wf;'
 
         if cls == 'waitcnt':
             L.append(
@@ -6190,6 +6281,25 @@ class CodeGenerator:
                     opnd_body = []
                     conditional_src_body = []
                     conditional_dst_body = []
+                    # DPP/SDWA helpers index the architectural input operands
+                    # from the front of src_operands_. On those encodings a
+                    # read/write output listed before src0 in the XML would
+                    # displace src0, so DPP would permute the old destination
+                    # instead. Defer read/write outputs to the end there. On
+                    # encodings without DPP/SDWA (e.g. SOPK) there is no such
+                    # positional dependency, so keep the read/write output at its
+                    # XML operand position to preserve the architectural source
+                    # order (e.g. s_addk_i32/s_mulk_i32 read sdst as src0).
+                    _enc_upper_for_defer = enc.enc_name.upper()
+                    defer_readwrite_outputs = _enc_upper_for_defer in (
+                        'ENC_VOP1',
+                        'ENC_VOP2',
+                    ) or (
+                        _enc_upper_for_defer
+                        in ('ENC_VOP3', 'ENC_VOP3P', 'VOP3_SDST_ENC')
+                        and self._supports_vop_dpp_encoding(_enc_upper_for_defer)
+                    )
+                    readwrite_output_sources = []
                     vgpr_msb_role_body = []
                     src_idx = 0
                     dst_idx = 0
@@ -6252,15 +6362,23 @@ class CodeGenerator:
                                 f'if (inst_.saddr != {self._saddr_null_expr(enc.enc_name)}) '
                                 'src_operands_[num_src_++] = &saddr;'
                             )
-                        elif (
-                            reads_dst
-                            and opnd.is_output
-                            and opnd.name in ('vdst', 'sdst')
-                        ):
-                            opnd_body.append(
-                                f'src_operands_[{src_idx}] = &{opnd.name};'
-                            )
-                            src_idx += 1
+                        elif self._output_operand_is_also_source(inst, opnd):
+                            # Read/write outputs (FMAC/dot/swap accumulators,
+                            # sub-dword partial-def destinations, etc.) are also
+                            # sources. On DPP/SDWA-capable encodings, defer them
+                            # until every explicit input is registered so the
+                            # DPP/SDWA helpers that index src_operands_[0] are not
+                            # displaced by an output listed before src0. On other
+                            # encodings there is no such positional dependency, so
+                            # register the read/write output at its XML position to
+                            # preserve architectural source order.
+                            if defer_readwrite_outputs:
+                                readwrite_output_sources.append(opnd.name)
+                            else:
+                                opnd_body.append(
+                                    f'src_operands_[{src_idx}] = &{opnd.name};'
+                                )
+                                src_idx += 1
                         _is_optional_atomic_return = (
                             opnd.is_output
                             and inst_sem is not None
@@ -6388,6 +6506,10 @@ class CodeGenerator:
                                 f'{opnd.name}({opnd.size}, '
                                 f'OperandType::{opnd.operand_type}, 0)'
                             )
+                    for opnd_name in readwrite_output_sources:
+                        opnd_body.append(f'src_operands_[{src_idx}] = &{opnd_name};')
+                        src_idx += 1
+
                     # For flat encodings with a seg field, add saddr as an
                     # optional operand. Declared and initialized LAST among
                     # operands to avoid reorder warnings with data/addr.
@@ -6765,11 +6887,18 @@ class CodeGenerator:
                         ctor_body_parts.append('flags_ |= BRANCH;')
                     if _mem_sem and _mem_sem.semantic_class == 'cbranch':
                         ctor_body_parts.append('flags_ |= COND_BRANCH;')
-                    if _mem_sem and _mem_sem.semantic_class in ('endpgm', 'trap'):
-                        # BasicBlock splitting treats PROGRAM_TERMINATOR as a
-                        # hard stop. S_TRAP needs the same metadata as S_ENDPGM:
-                        # without it, CFG recovery can add a bogus fallthrough
-                        # edge into padding or a following ELF FUNC symbol.
+                    if _mem_sem and _mem_sem.semantic_class == 'endpgm':
+                        # BasicBlock splitting treats PROGRAM_TERMINATOR as a hard
+                        # stop with no fallthrough successor. Only S_ENDPGM ends the
+                        # wave. S_TRAP is NOT a terminator: on hardware it transfers
+                        # to the trap handler and RETURNS to the next instruction,
+                        # and with no handler configured (STATUS.TRAP_EN == 0, the
+                        # state this simulator models) it executes as a NOP that
+                        # falls through. Marking it PROGRAM_TERMINATOR made the CFG
+                        # drop that reachable fallthrough while the executor (a NOP)
+                        # kept going, so translated code could run off the end of a
+                        # block. Skipped-kernel stubs still halt because they emit an
+                        # explicit S_ENDPGM after the trap.
                         ctor_body_parts.append('flags_ |= PROGRAM_TERMINATOR;')
                     if _mem_sem and _mem_sem.semantic_class in (
                         'scalar_setpc',
@@ -7057,14 +7186,37 @@ class CodeGenerator:
                                         f'        sdwa_old_dst_[ln] = {_old_dst_read};\n'
                                         '  }\n'
                                     )
-                            if _dpp_struct and _supports_dpp_encoding:
+                            # apply_dpp/apply_dpp8 modify the architectural src0,
+                            # which the emitted code addresses as src_operands_[0].
+                            # That index only holds src0 when src0 is the first
+                            # registered source. Swap-style ops (vector_swap /
+                            # permlane*_swap) read every output, so a read/write
+                            # output (vdst) is registered at src_operands_[0] and
+                            # src0 moves later — applying DPP to [0] would shuffle
+                            # the destination instead of src0. DPP on a lane-
+                            # crossing swap is not a modeled/legal combination, so
+                            # fail loudly instead of silently permuting the wrong
+                            # operand.
+                            _reads_all_outputs = (
+                                sem is not None
+                                and sem.semantic_class in self._READS_ALL_OUTPUT_CLASSES
+                            )
+                            if _reads_all_outputs and (
+                                _supports_dpp_encoding or _dpp8_struct
+                            ):
+                                _dpp_preamble += (
+                                    '  if (inst_.src0 == amdgpu::SRC_DPP ||\n'
+                                    '      amdgpu::dpp::is_src_dpp8(inst_.src0))\n'
+                                    '    throw util::UnimplementedInst(mnemonic());\n'
+                                )
+                            elif _dpp_struct and _supports_dpp_encoding:
                                 _dpp_preamble += (
                                     '  if (inst_.src0 == amdgpu::SRC_DPP)\n'
                                     '    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_,\n'
                                     '        dpp_row_mask_, dpp_bank_mask_, dpp_bound_ctrl_, dpp_fi_,\n'
                                     '        dpp_src0_, wf);\n'
                                 )
-                            if _dpp8_struct:
+                            if not _reads_all_outputs and _dpp8_struct:
                                 _dpp_preamble += (
                                     '  if (amdgpu::dpp::is_src_dpp8(inst_.src0))\n'
                                     '    amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_,\n'
