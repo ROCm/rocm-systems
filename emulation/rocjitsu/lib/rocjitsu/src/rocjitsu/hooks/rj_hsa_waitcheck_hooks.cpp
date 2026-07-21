@@ -634,6 +634,10 @@ hsa_status_t HSA_API waitcheck_queue_create(hsa_agent_t agent, uint32_t size,
                                             void (*callback)(hsa_status_t, hsa_queue_t *, void *),
                                             void *data, uint32_t private_segment_size,
                                             uint32_t group_segment_size, hsa_queue_t **queue);
+hsa_status_t HSA_API waitcheck_amd_queue_intercept_create(
+    hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
+    void (*callback)(hsa_status_t, hsa_queue_t *, void *), void *data,
+    uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t **queue);
 hsa_status_t HSA_API waitcheck_reader_create_from_file_with_offset_size(
     hsa_file_t file, size_t offset, size_t size, hsa_code_object_reader_t *reader);
 
@@ -649,6 +653,7 @@ public:
       return false;
 
     core_ = table->core_;
+    amd_ext_ = table->amd_ext_;
     original_get_extension_table_ = core_->hsa_system_get_extension_table_fn;
     original_get_major_extension_table_ = core_->hsa_system_get_major_extension_table_fn;
     original_create_from_file_ = core_->hsa_code_object_reader_create_from_file_fn;
@@ -699,6 +704,7 @@ public:
       core_->hsa_executable_freeze_fn = waitcheck_executable_freeze;
       core_->hsa_executable_destroy_fn = waitcheck_executable_destroy;
       core_->hsa_queue_create_fn = waitcheck_queue_create;
+      amd_ext_->hsa_amd_queue_intercept_create_fn = waitcheck_amd_queue_intercept_create;
     }
     active_ = true;
     g_stats.reset();
@@ -738,6 +744,10 @@ public:
           core_->hsa_executable_destroy_fn = original_executable_destroy_;
         if (core_->hsa_queue_create_fn == waitcheck_queue_create)
           core_->hsa_queue_create_fn = original_queue_create_;
+        if (amd_ext_ != nullptr &&
+            amd_ext_->hsa_amd_queue_intercept_create_fn == waitcheck_amd_queue_intercept_create) {
+          amd_ext_->hsa_amd_queue_intercept_create_fn = original_intercept_create_;
+        }
       }
       active_ = false;
     }
@@ -838,6 +848,7 @@ private:
   void clear_unlocked() {
     active_ = false;
     core_ = nullptr;
+    amd_ext_ = nullptr;
     original_get_extension_table_ = nullptr;
     original_get_major_extension_table_ = nullptr;
     original_create_from_file_ = nullptr;
@@ -858,6 +869,7 @@ private:
   mutable std::mutex mutex_;
   bool active_ = false;
   CoreApiTable *core_ = nullptr;
+  AmdExtTable *amd_ext_ = nullptr;
   decltype(hsa_system_get_extension_table) *original_get_extension_table_ = nullptr;
   decltype(hsa_system_get_major_extension_table) *original_get_major_extension_table_ = nullptr;
   decltype(hsa_code_object_reader_create_from_file) *original_create_from_file_ = nullptr;
@@ -1133,6 +1145,14 @@ hsa_status_t HSA_API waitcheck_queue_create(hsa_agent_t agent, uint32_t size,
     (void)destroy(*queue);
   *queue = nullptr;
   return register_status;
+}
+
+hsa_status_t HSA_API waitcheck_amd_queue_intercept_create(
+    hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
+    void (*callback)(hsa_status_t, hsa_queue_t *, void *), void *data,
+    uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t **queue) {
+  return waitcheck_queue_create(agent, size, type, callback, data, private_segment_size,
+                                group_segment_size, queue);
 }
 
 } // namespace

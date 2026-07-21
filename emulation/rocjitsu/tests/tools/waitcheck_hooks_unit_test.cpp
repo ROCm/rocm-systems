@@ -352,6 +352,7 @@ protected:
   }
 
   CoreApiTable core_{};
+  AmdExtTable amd_ext_{};
   HsaApiTable table_{};
   bool loaded_ = false;
 };
@@ -503,8 +504,8 @@ TEST_F(WaitcheckHooksTest, DispatchModeChecksOnlySelectedKernelAndCachesIt) {
   setenv("ROCJITSU_WAITCHECK_FAIL", "0", 1);
 
   core_ = make_core_table();
-  AmdExtTable amd_ext = make_amd_ext_table();
-  table_ = make_api_table(&core_, &amd_ext);
+  amd_ext_ = make_amd_ext_table();
+  table_ = make_api_table(&core_, &amd_ext_);
   ASSERT_TRUE(OnLoad(&table_, 1, 0, nullptr));
   loaded_ = true;
 
@@ -567,6 +568,30 @@ TEST_F(WaitcheckHooksTest, DispatchModeChecksOnlySelectedKernelAndCachesIt) {
   EXPECT_EQ(g_writer_calls, 3);
   EXPECT_EQ(core_.hsa_executable_destroy_fn(executable), HSA_STATUS_SUCCESS);
   EXPECT_EQ(core_.hsa_code_object_reader_destroy_fn(reader), HSA_STATUS_SUCCESS);
+}
+
+TEST_F(WaitcheckHooksTest, DispatchModeWrapsDirectInterceptQueueCreationAndRestoresIt) {
+  OnUnload();
+  loaded_ = false;
+  setenv("ROCJITSU_WAITCHECK_MODE", "dispatch", 1);
+
+  core_ = make_core_table();
+  amd_ext_ = make_amd_ext_table();
+  table_ = make_api_table(&core_, &amd_ext_);
+  ASSERT_TRUE(OnLoad(&table_, 1, 0, nullptr));
+  loaded_ = true;
+
+  ASSERT_NE(amd_ext_.hsa_amd_queue_intercept_create_fn, fake_queue_intercept_create);
+  hsa_queue_t *queue = nullptr;
+  ASSERT_EQ(amd_ext_.hsa_amd_queue_intercept_create_fn({}, 64, HSA_QUEUE_TYPE_MULTI, nullptr,
+                                                       nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(queue, &g_intercept_queue);
+  EXPECT_NE(g_intercept_handler, nullptr);
+
+  OnUnload();
+  loaded_ = false;
+  EXPECT_EQ(amd_ext_.hsa_amd_queue_intercept_create_fn, fake_queue_intercept_create);
 }
 
 TEST(WaitcheckHooksValidationTest, RejectsTruncatedCoreTable) {
