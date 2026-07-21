@@ -185,6 +185,7 @@ SCodeEndSopp::SCodeEndSopp(const MachineInst *inst)
     : Sopp("s_code_end", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SCodeEndSopp>()) {
   num_src_ = 0;
   num_dst_ = 0;
+  flags_ |= PROGRAM_TERMINATOR;
 }
 
 void SCodeEndSopp::execute_impl(amdgpu::Wavefront &wf) {

@@ -58,6 +58,7 @@ using namespace rocjitsu;
 constexpr uint32_t S_NOP = 0xBF800000u;          ///< s_nop    (SOPP op=0,  simm16=0)
 constexpr uint32_t S_ENDPGM_GFX9 = 0xBF810000u;  ///< s_endpgm (SOPP op=1,  simm16=0): CDNA/RDNA1/2
 constexpr uint32_t S_ENDPGM_GFX11 = 0xBFB00000u; ///< s_endpgm (SOPP op=48, simm16=0): RDNA3/3.5/4
+constexpr uint32_t S_CODE_END = 0xBF9F0000u;     ///< s_code_end: RDNA1+ code-region terminator
 
 constexpr uint32_t make_sopp(uint32_t op, uint32_t simm16) {
   return (0x17Fu << 23) | ((op & 0x7Fu) << 16) | (simm16 & 0xFFFFu);
@@ -131,6 +132,22 @@ INSTANTIATE_TEST_SUITE_P(
       name += info.param.expected_mnemonic;
       return name;
     });
+
+TEST(DecoderSmokeTest, CodeEndIsCfgTerminator) {
+  constexpr std::array arches{
+      ROCJITSU_CODE_ARCH_RDNA1,   ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
+      ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250,
+  };
+  for (const rj_code_arch_t arch : arches) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    std::unique_ptr<Instruction> inst(decoder->decode(&S_CODE_END));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->mnemonic(), "s_code_end");
+    EXPECT_NE(inst->flags() & PROGRAM_TERMINATOR, 0u);
+  }
+}
 
 TEST(Rdna4WaitcntDecodeSmokeTest, FormatsCompatWaitcntWithGfx11Layout) {
   constexpr uint32_t s_waitcnt_vmcnt1 = make_sopp(/*op=*/9, /*simm16=*/1u << 10);

@@ -6900,6 +6900,13 @@ class CodeGenerator:
                         # block. Skipped-kernel stubs still halt because they emit an
                         # explicit S_ENDPGM after the trap.
                         ctor_body_parts.append('flags_ |= PROGRAM_TERMINATOR;')
+                    if inst.name == 'S_CODE_END':
+                        # LLVM models S_CODE_END as an isReturn instruction and
+                        # emits it as padding after the end of a code region. It
+                        # does not end a wave in the simulator, but it is a hard
+                        # CFG stop: allowing fallthrough makes reachable decoding
+                        # walk past the padding into unrelated data or zero-fill.
+                        ctor_body_parts.append('flags_ |= PROGRAM_TERMINATOR;')
                     if _mem_sem and _mem_sem.semantic_class in (
                         'scalar_setpc',
                         'scalar_addpc',
