@@ -62,7 +62,6 @@ jobs:
             enable_asan: 0
             enable_ubsan: 0
             enable_tsan: 0
-            enable_msan: 0
             enable_expensive_checks: 0
             sanitizer_runtime: STATIC
           - name: asan-ubsan
@@ -72,7 +71,6 @@ jobs:
             enable_asan: 1
             enable_ubsan: 1
             enable_tsan: 0
-            enable_msan: 0
             enable_expensive_checks: 1
             sanitizer_runtime: SHARED
           - name: tsan
@@ -82,7 +80,6 @@ jobs:
             enable_asan: 0
             enable_ubsan: 0
             enable_tsan: 1
-            enable_msan: 0
             enable_expensive_checks: 1
             sanitizer_runtime: SHARED
           - name: asan-ubsan-gcc
@@ -92,7 +89,6 @@ jobs:
             enable_asan: 1
             enable_ubsan: 1
             enable_tsan: 0
-            enable_msan: 0
             enable_expensive_checks: 1
             sanitizer_runtime: SHARED
             c_compiler: gcc
@@ -107,7 +103,6 @@ jobs:
             enable_asan: 0
             enable_ubsan: 0
             enable_tsan: 1
-            enable_msan: 0
             sanitizer_runtime: STATIC
 
     steps:
@@ -223,7 +218,6 @@ jobs:
             -DRJ_ENABLE_ASAN=${{ matrix.enable_asan }} \
             -DRJ_ENABLE_UBSAN=${{ matrix.enable_ubsan }} \
             -DRJ_ENABLE_TSAN=${{ matrix.enable_tsan }} \
-            -DRJ_ENABLE_MSAN=${{ matrix.enable_msan }} \
             -DRJ_ENABLE_EXPENSIVE_CHECKS=${{ matrix.enable_expensive_checks }} \
             -DRJ_SANITIZER_RUNTIME=${{ matrix.sanitizer_runtime }}
 
