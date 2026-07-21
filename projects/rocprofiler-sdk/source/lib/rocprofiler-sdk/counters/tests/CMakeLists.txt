@@ -82,7 +82,7 @@ target_link_libraries(
             GTest::gtest_main)
 
 set(_ROCPROFILER_SHARE_DIR
-    "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}")
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}")
 
 # unstable counter collection test: Generates HW exception leading to GPU hang or memory
 # access fault

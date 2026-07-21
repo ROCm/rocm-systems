@@ -337,6 +337,8 @@ if(BUILD_TESTS)
     set(TEST_FIXTURE_DEBUG_SOURCE_FILES
       AllocTests.cpp
       ParamTests.cpp
+      ParameterApiTests.cpp
+      EnvPluginTests.cpp
       ArgCheckTests.cpp
       BootstrapBidirTests.cpp
       DdaAlltoAllThresholdTests.cpp

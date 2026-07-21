@@ -20,6 +20,15 @@ endif()
 find_package(rocdecode)
 find_package(rocjpeg)
 
+# rocSHMEM's installed config references both MPI::MPI_CXX and
+# rocprofiler-register::rocprofiler-register in the roc::rocshmem link interface, so both
+# must be located first or the find_package call will fail to define the imported target.
+find_package(MPI COMPONENTS CXX)
+find_package(rocprofiler-register CONFIG PATHS ${ROCM_PATH} /opt/rocm)
+if(MPI_CXX_FOUND AND rocprofiler-register_FOUND)
+    find_package(rocshmem CONFIG PATHS ${ROCM_PATH} /opt/rocm)
+endif()
+
 # applications used by integration tests which DO link to rocprofiler-sdk-roctx
 add_subdirectory(reproducible-runtime)
 add_subdirectory(reproducible-dispatch-count)
@@ -46,6 +55,13 @@ if(rocdecode_FOUND AND rocdecode_VERSION VERSION_GREATER 0.8.0)
 endif()
 if(rocjpeg_FOUND AND rocjpeg_VERSION VERSION_GREATER 0.6.0)
     add_subdirectory(rocjpeg)
+endif()
+if(rocshmem_FOUND AND rocshmem_VERSION VERSION_GREATER_EQUAL 3.3.0)
+    # rocshmem >= 3.3.0 introduced the full host-stream API set that rocshmem-demo
+    # exercises (quiet/sync_all/alltoallmem/broadcastmem/getmem/putmem/putmem_signal/
+    # signal_wait_until on_stream). Skip the subdir on older installs so the build does
+    # not break.
+    add_subdirectory(rocshmem)
 endif()
 add_subdirectory(hsa-code-object)
 add_subdirectory(hip-streams)
