@@ -374,6 +374,20 @@ TEST(RegisterSetAnalysis, GeneratedCdna4OperandsMapTrackedRegisterRefs) {
   EXPECT_FALSE(imm32.to_register_ref().has_value());
 }
 
+TEST(RegisterSetAnalysis, Cdna4WritelaneDestinationIsUseAndDef) {
+  constexpr std::array<uint32_t, 2> kWritelaneV141S4Lane2 = {0xd28a008du, 0x00010404u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+
+  std::unique_ptr<Instruction> inst(decoder->decode(kWritelaneV141S4Lane2.data()));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_writelane_b32");
+
+  InstDefUse du(*inst);
+  EXPECT_TRUE(du.defs.contains({RegClass::VGPR, 141, 1}));
+  EXPECT_TRUE(du.uses.contains({RegClass::VGPR, 141, 1}));
+  EXPECT_TRUE(du.uses.contains({RegClass::SGPR, 4, 1}));
+}
+
 TEST(CfgAnalysis, LoopBackEdgeLinksPredecessor) {
   auto blocks = build_test_blocks({TestOpcode::Nop, TestOpcode::BranchBackToStart});
 
@@ -768,6 +782,20 @@ TEST(LivenessAnalysis, FreeVgprAllocationHonorsDestinationLimit) {
   gfx1250_options.max_free_vgpr = 1024;
   LivenessAnalysis gfx1250(KernelBlockScope(scope), gfx1250_options);
   EXPECT_EQ(gfx1250.find_free_run(&use, 1), 256);
+}
+
+TEST(LivenessAnalysis, FindFreeRunHonorsBaseAlignment) {
+  auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.min_free_vgpr = 93;
+
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  const Instruction &use = *blocks[0]->instructions().begin();
+  EXPECT_EQ(liveness.find_free_run(&use, 4, 0, 2), 94);
+  EXPECT_EQ(liveness.find_free_run(&use, 4, 94, 4), 96);
 }
 
 TEST(LivenessAnalysis, ReadWriteSameRegisterIsLiveBeforeInstruction) {
