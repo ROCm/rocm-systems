@@ -4,7 +4,7 @@
 """
 Tests for the transpose example.
 Equivalent to rocprof-sys-rocm-tests.cmake
-    Note: MPI is not yet supported
+    Note: MPI multi-process execution is exercised if built with MPI support.
 
 This module tests the transpose HIP example with various instrumentation modes:
 - Baseline execution (no instrumentation)

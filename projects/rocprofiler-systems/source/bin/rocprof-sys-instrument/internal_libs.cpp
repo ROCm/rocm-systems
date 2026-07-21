@@ -11,6 +11,7 @@
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
+#include "common/path.hpp"
 #include "core/demangler.hpp"
 #include "core/utility.hpp"
 #include "fwd.hpp"
@@ -42,7 +43,7 @@ using open_modes_vec_t = std::vector<int>;
 auto
 get_exe_realpath()
 {
-    return filepath::realpath("/proc/self/exe", nullptr, false);
+    return rocprofsys::path::realpath("/proc/self/exe");
 }
 
 auto&
@@ -122,7 +123,7 @@ get_linked_path(const char*        _name,
         dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
         if(_link_map != nullptr && !std::string_view{ _link_map->l_name }.empty())
         {
-            return filepath::realpath(_link_map->l_name, nullptr, false);
+            return rocprofsys::path::realpath(_link_map->l_name);
         }
     }
 
@@ -153,7 +154,7 @@ get_link_map(const std::string& _lib,
             if(!std::string_view{ _next->l_name }.empty() &&
                std::string_view{ _next->l_name } != _lib)
             {
-                _chain.emplace(filepath::realpath(_next->l_name, nullptr, false));
+                _chain.emplace(rocprofsys::path::realpath(_next->l_name));
             }
             _next = _next->l_next;
         }
@@ -413,8 +414,8 @@ get_internal_libs_data_impl()
     auto _libs   = std::vector<std::string>{};
     _libs.assign(_libs_v.begin(), _libs_v.end());
 
-    auto _rocprofsys_base_path = filepath::dirname(
-        filepath::dirname(filepath::realpath("/proc/self/exe", nullptr, false)));
+    auto _rocprofsys_base_path =
+        rocprofsys::path::parent_path(rocprofsys::path::realpath("/proc/self/exe"), 2);
     auto _rocprofsys_lib_path = std::string{};
 
     for(const auto* itr : { "lib", "lib64" })
@@ -425,7 +426,7 @@ get_internal_libs_data_impl()
             auto _libpath = fmt::format("{}/{}/{}", _rocprofsys_base_path, itr, litr);
             if(filepath::exists(_libpath))
             {
-                _libs.emplace_back(filepath::realpath(_libpath, nullptr, false));
+                _libs.emplace_back(rocprofsys::path::realpath(_libpath));
             }
         }
     }
@@ -436,7 +437,7 @@ get_internal_libs_data_impl()
     auto _data = library_module_map_t{};
     for(const auto& itr : _libs)
     {
-        auto _fpath = filepath::realpath(itr, nullptr, false);
+        auto _fpath = rocprofsys::path::realpath(itr);
         // allow the user to request this library be considered for instrumentation
         if(check_regex_restrictions(strvec_t{ itr, _fpath }, file_internal_include))
             continue;

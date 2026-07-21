@@ -60,9 +60,16 @@ class PrintfDbg;
 
 class ProfilingSignal : public amd::ReferenceCountedObject {
  public:
+  //! Sentinel for queue_index_ when the owning stream is unknown.
+  static constexpr uint32_t kInvalidQueueIndex = std::numeric_limits<uint32_t>::max();
+
   hsa_signal_t signal_;   //!< HSA signal to track profiling information
   Timestamp* ts_;         //!< Timestamp object associated with the signal
   HwQueueEngine engine_;  //!< Engine used with this signal
+  //! vGPU (queue) index of the stream this signal was dispatched on. Graphs span
+  //! multiple streams under one command, so profiling reads this per-signal to
+  //! attribute each kernel to the queue it actually ran on.
+  uint32_t queue_index_ = kInvalidQueueIndex;
   std::recursive_mutex lock_;  //!< Signal lock for update
 
   typedef union {
@@ -89,6 +96,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
     signal_.handle = 0;
     flags_.data_ = 0;
     flags_.done_ = true;
+    queue_index_ = kInvalidQueueIndex;
   }
 
   virtual ~ProfilingSignal();
@@ -103,6 +111,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
     cached_timing_.start_ = 0;
     cached_timing_.end_ = 0;
     cached_timing_.valid_ = false;
+    queue_index_ = kInvalidQueueIndex;
   }
 
   //! Check if timing is already cached

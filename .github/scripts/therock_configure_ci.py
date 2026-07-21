@@ -20,7 +20,7 @@ from therock_matrix import (
     windows_only_subtrees,
 )
 import time
-from typing import Mapping, Optional, Iterable
+from typing import List, Mapping, Optional, Iterable
 import os
 
 # Add TheRock's github_actions to path for shared utilities
@@ -168,6 +168,15 @@ def check_for_non_skippable_path(paths: Optional[Iterable[str]]) -> bool:
     return any(not is_path_skippable(p) for p in paths)
 
 
+def get_pr_labels(args) -> List[str]:
+    """Gets a list of labels applied to a pull request."""
+    data = json.loads(args.get("pr_labels", "{}"))
+    labels = []
+    for label in data.get("labels", []):
+        labels.append(label["name"])
+    return labels
+
+
 def check_rccl_changes(modified_paths: Optional[Iterable[str]]) -> bool:
     """Returns true if any files under projects/rccl/ were modified."""
     if modified_paths is None:
@@ -273,6 +282,13 @@ def retrieve_projects(args):
         if not check_for_non_skippable_path(modified_paths):
             logging.info("Only skippable paths were modified, skipping CI")
             return [], test_type
+
+        # Check for ci:skip label on PRs
+        if args.get("is_pull_request"):
+            pr_labels = get_pr_labels(args)
+            if "ci:skip" in pr_labels:
+                logging.info("`ci:skip` label was added, skipping CI")
+                return [], test_type
 
     # Push event → check which subtrees were modified
     if args.get("is_push"):
@@ -498,6 +514,8 @@ if __name__ == "__main__":
 
     input_projects = os.getenv("PROJECTS", "")
     args["input_projects"] = input_projects
+
+    args["pr_labels"] = os.environ.get("PR_LABELS", '{"labels": []}')
 
     input_platform = os.getenv("PLATFORM")
     args["platform"] = input_platform
