@@ -101,7 +101,7 @@ flowchart TD
     VW["VW DONE<br/>WMMA attention frozen clean, fault, resource,<br/>and provenance bundle accepted"]
     V6B["V6B DONE<br/>remaining rows' resource and timing gates"]
     V7["V7 DONE<br/>one committed tip reruns all 40<br/>non-omitted gfx1250 cells"]
-    G0["G0 DONE<br/>STATUS_GFX1250 completely green"]
+    G0["G0 TODO<br/>current STATUS_GFX1250 matrix<br/>simultaneously green"]
   end
 
   subgraph X[PyTorch and RocJITsu test-corpus expansion]
@@ -115,9 +115,9 @@ flowchart TD
     XP7["XP7 DONE<br/>histogram Sampled paired and fault bundle<br/>green at 175-access denominator"]
     XP8["XP8 DONE<br/>scatter all four profiles green;<br/>inapplicable fault families recorded as typed N/A"]
     XP2A["XP2A DONE<br/>torch.topk exact oracles and dense Record/Replay<br/>106/106 diagnostic vertical"]
-    XP2B["XP2B TODO<br/>torch.topk Sampled/Inline spend bounds<br/>inside full-object patch planning"]
+    XP2B["XP2B TODO<br/>torch.topk Sampled report now fits;<br/>full-object construction exceeds 300 seconds"]
     XP2C["XP2C DONE<br/>torch.topk unrestricted Record/Replay exact/dynamic;<br/>113,760/160,848 accesses, all barriers"]
-    XP2D["XP2D TODO<br/>torch.topk reaches 160,345/161,136 accesses and all barriers;<br/>site/subgroup transient assignment remains"]
+    XP2D["XP2D ACTIVE<br/>torch.topk Record/Replay at 160,345/161,136 accesses;<br/>791 forbidden-overlap sites remain"]
     XP3["XP3 TODO<br/>top-k SC at 160,752/160,848;<br/>96 remain after rotation"]
     XP9["XP9 DONE<br/>norm plus softmax Record/Replay clean, paired,<br/>and reviewed-fault bundle green"]
     XP10["XP10 DONE<br/>cluster Record/Replay clean, paired, and reviewed-fault<br/>bundle accepted at 23/23 accesses and 2/2 barriers"]
@@ -290,8 +290,9 @@ flowchart TD
   classDef todo fill:#e8e8e8,stroke:#666666,color:#111111,stroke-width:1px
   classDef blocked fill:#9e2a2b,stroke:#ffd0d0,color:#ffffff,stroke-width:3px
 
-  class R0,E0,D0,C0,V0,B0,B1,B2,B3,B4,B5,S0,S1,S2,S3,S4,S5,S6,A0,A1,A2,A3A,A4A,SC0,RR0,SA0,IS0,IS1,F0,Q0,V1,V2,V3,V8,V4A,V4B,V4C,V4D,V5A,V5B,V6A,V6B,V7,G0,VT,VD,VP,VW,X0,XP0,XP1,XP2A,XP2C,XP4,XP5,XP6,XP7,XP8,XP9,XP10,XT1,XT2A,XT2B,XT2C1,XT3D,XT4A,XT4 done
-  class XP1B,XP2B,XP2D,XP3,XT2C2,XT2C3,XT3A,XT3B,XT3E,XT3C,XF,XG todo
+  class R0,E0,D0,C0,V0,B0,B1,B2,B3,B4,B5,S0,S1,S2,S3,S4,S5,S6,A0,A1,A2,A3A,A4A,SC0,RR0,SA0,IS0,IS1,F0,Q0,V1,V2,V3,V8,V4A,V4B,V4C,V4D,V5A,V5B,V6A,V6B,V7,VT,VD,VP,VW,X0,XP0,XP1,XP2A,XP2C,XP4,XP5,XP6,XP7,XP8,XP9,XP10,XT1,XT2A,XT2B,XT2C1,XT3D,XT4A,XT4 done
+  class XP2D active
+  class G0,XP1B,XP2B,XP3,XT2C2,XT2C3,XT3A,XT3B,XT3E,XT3C,XF,XG todo
 ```
 
 Broader partial-EXEC, dynamic-stack, high-register, cache/fence-shape, and
@@ -339,6 +340,16 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP2B rotates to TODO after current-tip Sampled top-k stops
+  rebuilding immutable CFG/liveness state, fits all 135,610 logical ranges in
+  a 93.3 MB four-bank report, and reaches full-object patch construction.  That
+  construction remains active through the fixed 300-second bound, so another
+  timeout increase is not useful.  XP2D becomes the sole ACTIVE/blue box for
+  the next Record/Replay rotation: its exact-oracle run is dynamically complete
+  and misses only 791 of 161,136 accesses, all typed `forbidden_overlap` across
+  eight `gatherTopK` containers.  G0 returns to TODO/light gray because the
+  current authoritative matrix is not simultaneously green.
 
 - 2026-07-20: XT4A and XT4 are DONE/green after F16 reviewed artifact `377`
   accepts exact-one barrier-pair mutation, its frozen pass-oracle/no-diagnosis
