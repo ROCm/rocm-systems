@@ -162,6 +162,7 @@ struct InventoryRange {
   ByteRange bytes;
   ConSanPatchPhase phase = ConSanPatchPhase::Instrumentation;
   ConSanPatchKind kind = ConSanPatchKind::InlineNopRewrite;
+  bool must_be_original = false;
   bool is_trampoline = false;
 };
 
@@ -194,51 +195,7 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
       errors.emplace_back("ConSan final validation found a stale or unaligned patch range");
       return;
     }
-    const ByteRange next{begin, begin + size};
-    const bool nested_in_mutation =
-        std::ranges::any_of(ranges, [&](const InventoryRange &existing) {
-          return existing.phase == ConSanPatchPhase::Mutation &&
-                 existing.bytes.begin <= next.begin && next.end <= existing.bytes.end;
-        });
-    if (must_be_original &&
-        (begin > original_bytes.size() || size > original_bytes.size() - begin) &&
-        !nested_in_mutation) {
-      errors.emplace_back("ConSan final validation found a stale or unaligned patch range");
-      return;
-    }
-    for (const InventoryRange &existing : ranges) {
-      if (!ranges_overlap(existing.bytes, next))
-        continue;
-      const bool exact_alias = existing.bytes.begin == next.begin && existing.bytes.end == next.end;
-      const bool nested_cross_phase =
-          existing.phase != phase &&
-          ((existing.bytes.begin <= next.begin && next.end <= existing.bytes.end) ||
-           (next.begin <= existing.bytes.begin && existing.bytes.end <= next.end));
-      const bool nested_sc_relay_donor =
-          existing.kind == ConSanPatchKind::TrampolineScBranchRelayDonor &&
-          kind == ConSanPatchKind::TrampolineScBranchRelayDonor &&
-          ((existing.is_trampoline &&
-            existing.bytes.end - existing.bytes.begin == 3u * sizeof(uint32_t) && !is_trampoline &&
-            size >= 6u * sizeof(uint32_t) &&
-            existing.bytes.begin == next.begin + sizeof(uint32_t) &&
-            existing.bytes.end == next.begin + 4u * sizeof(uint32_t)) ||
-           (is_trampoline && size == 3u * sizeof(uint32_t) && !existing.is_trampoline &&
-            existing.bytes.end - existing.bytes.begin >= 6u * sizeof(uint32_t) &&
-            next.begin == existing.bytes.begin + sizeof(uint32_t) &&
-            next.end == existing.bytes.begin + 4u * sizeof(uint32_t)));
-      if (!exact_alias && !nested_cross_phase && !nested_sc_relay_donor) {
-        errors.emplace_back(
-            "ConSan final validation found partially overlapping patch ranges: existing=" +
-            std::to_string(existing.bytes.begin) + "-" + std::to_string(existing.bytes.end) +
-            " kind=" + std::to_string(static_cast<unsigned>(existing.kind)) +
-            " next=" + std::to_string(next.begin) + "-" + std::to_string(next.end) +
-            " kind=" + std::to_string(static_cast<unsigned>(kind)));
-        return;
-      }
-    }
-    ranges.push_back({next, phase, kind, is_trampoline});
-    std::fill(accounted.begin() + static_cast<ptrdiff_t>(begin),
-              accounted.begin() + static_cast<ptrdiff_t>(begin + size), true);
+    ranges.push_back({{begin, begin + size}, phase, kind, must_be_original, is_trampoline});
   };
 
   for (const ConSanPatchInfo &patch : result.patches) {
@@ -249,6 +206,66 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
   }
   if (!errors.empty())
     return errors;
+
+  std::ranges::sort(ranges, [](const InventoryRange &lhs, const InventoryRange &rhs) {
+    if (lhs.bytes.begin != rhs.bytes.begin)
+      return lhs.bytes.begin < rhs.bytes.begin;
+    if (lhs.bytes.end != rhs.bytes.end)
+      return lhs.bytes.end > rhs.bytes.end;
+    return lhs.phase == ConSanPatchPhase::Mutation && rhs.phase != ConSanPatchPhase::Mutation;
+  });
+  std::vector<const InventoryRange *> active;
+  for (const InventoryRange &next : ranges) {
+    std::erase_if(active, [&](const InventoryRange *existing) {
+      return existing->bytes.end <= next.bytes.begin;
+    });
+    const bool nested_in_mutation = std::ranges::any_of(active, [&](const auto *existing) {
+      return existing->phase == ConSanPatchPhase::Mutation &&
+             existing->bytes.begin <= next.bytes.begin && next.bytes.end <= existing->bytes.end;
+    });
+    const uint64_t size = next.bytes.end - next.bytes.begin;
+    if (next.must_be_original &&
+        (next.bytes.begin > original_bytes.size() ||
+         size > original_bytes.size() - next.bytes.begin) &&
+        !nested_in_mutation) {
+      errors.emplace_back("ConSan final validation found a stale or unaligned patch range");
+      return errors;
+    }
+    for (const InventoryRange *existing : active) {
+      if (!ranges_overlap(existing->bytes, next.bytes))
+        continue;
+      const bool exact_alias =
+          existing->bytes.begin == next.bytes.begin && existing->bytes.end == next.bytes.end;
+      const bool nested_cross_phase =
+          existing->phase != next.phase &&
+          ((existing->bytes.begin <= next.bytes.begin && next.bytes.end <= existing->bytes.end) ||
+           (next.bytes.begin <= existing->bytes.begin && existing->bytes.end <= next.bytes.end));
+      const bool nested_sc_relay_donor =
+          existing->kind == ConSanPatchKind::TrampolineScBranchRelayDonor &&
+          next.kind == ConSanPatchKind::TrampolineScBranchRelayDonor &&
+          ((existing->is_trampoline &&
+            existing->bytes.end - existing->bytes.begin == 3u * sizeof(uint32_t) &&
+            !next.is_trampoline && size >= 6u * sizeof(uint32_t) &&
+            existing->bytes.begin == next.bytes.begin + sizeof(uint32_t) &&
+            existing->bytes.end == next.bytes.begin + 4u * sizeof(uint32_t)) ||
+           (next.is_trampoline && size == 3u * sizeof(uint32_t) && !existing->is_trampoline &&
+            existing->bytes.end - existing->bytes.begin >= 6u * sizeof(uint32_t) &&
+            next.bytes.begin == existing->bytes.begin + sizeof(uint32_t) &&
+            next.bytes.end == existing->bytes.begin + 4u * sizeof(uint32_t)));
+      if (!exact_alias && !nested_cross_phase && !nested_sc_relay_donor) {
+        errors.emplace_back(
+            "ConSan final validation found partially overlapping patch ranges: existing=" +
+            std::to_string(existing->bytes.begin) + "-" + std::to_string(existing->bytes.end) +
+            " kind=" + std::to_string(static_cast<unsigned>(existing->kind)) +
+            " next=" + std::to_string(next.bytes.begin) + "-" + std::to_string(next.bytes.end) +
+            " kind=" + std::to_string(static_cast<unsigned>(next.kind)));
+        return errors;
+      }
+    }
+    active.push_back(&next);
+    std::fill(accounted.begin() + static_cast<ptrdiff_t>(next.bytes.begin),
+              accounted.begin() + static_cast<ptrdiff_t>(next.bytes.end), true);
+  }
 
   const size_t common_size = std::min(original_bytes.size(), replacement_bytes.size());
   for (size_t i = 0; i < common_size; ++i) {
@@ -1300,9 +1317,10 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       if (!decodes_as_barrier(original_text, patch.anchor_offset, *decoder) ||
           replacement_word != nop) {
         errors.emplace_back(
-            "ConSan mutation proof did not replace the selected barrier at text offset " +
+            "ConSan mutation proof did not replace the selected barrier with s_nop 0 at text "
+            "offset " +
             std::to_string(patch.anchor_offset) +
-            " with s_nop 0 (replacement=" + std::to_string(replacement_word) + ")");
+            " (replacement=" + std::to_string(replacement_word) + ")");
       }
       continue;
     }

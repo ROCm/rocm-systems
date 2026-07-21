@@ -635,21 +635,25 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     uint32_t bank_count = 1;
   };
   std::vector<SelectedWindow> selected_windows;
+  selected_windows.reserve(result.patches.size());
+  std::unordered_map<uint64_t, const ConSanMoiCandidate *> access_by_offset;
+  access_by_offset.reserve(result.moi_candidates.size());
+  for (const ConSanMoiCandidate &candidate : result.moi_candidates) {
+    if (candidate.kind == ConSanLdsAccessKind::Read || candidate.kind == ConSanLdsAccessKind::Write)
+      access_by_offset.try_emplace(candidate.text_offset, &candidate);
+  }
   bool has_multi_range_window = false;
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::InlineMoiSampledWatchpointStore &&
         patch.kind != ConSanPatchKind::TrampolineMoiSampledWatchpointStore)
       continue;
-    const auto access = std::ranges::find_if(result.moi_candidates, [&](const auto &item) {
-      return item.text_offset == patch.anchor_offset &&
-             (item.kind == ConSanLdsAccessKind::Read || item.kind == ConSanLdsAccessKind::Write);
-    });
-    if (access == result.moi_candidates.end())
+    const auto access = access_by_offset.find(patch.anchor_offset);
+    if (access == access_by_offset.end())
       continue;
-    const auto ranges = candidate_access_ranges(bytes, *access);
+    const auto ranges = candidate_access_ranges(bytes, *access->second);
     if (!ranges || ranges->empty())
       continue;
-    selected_windows.push_back({&patch, &*access, patch.sampled_first_slot,
+    selected_windows.push_back({&patch, access->second, patch.sampled_first_slot,
                                 std::max(patch.sampled_window_bank_count, 1u)});
     has_multi_range_window |= ranges->size() > 1u;
   }
@@ -668,6 +672,30 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     result.warnings.emplace_back("ConSan MOI sampled barrier sync lacks a complete kernel CFG");
     return;
   }
+  std::unordered_map<uint64_t, const MoiKernelResourceContext *> context_by_descriptor;
+  context_by_descriptor.reserve(resource_state.contexts.size());
+  for (const MoiKernelResourceContext &context : resource_state.contexts) {
+    if (context.kernel != nullptr)
+      context_by_descriptor.try_emplace(context.kernel->descriptor_file_offset, &context);
+  }
+  std::unordered_map<uint64_t, std::vector<const SelectedWindow *>> windows_by_descriptor;
+  for (const SelectedWindow &window : selected_windows) {
+    if (!window.patch->owner_descriptor_file_offsets.empty()) {
+      for (uint64_t descriptor : window.patch->owner_descriptor_file_offsets)
+        windows_by_descriptor[descriptor].push_back(&window);
+    } else if (window.access->kernel_descriptor_file_offset) {
+      windows_by_descriptor[*window.access->kernel_descriptor_file_offset].push_back(&window);
+    }
+  }
+
+  std::unordered_map<std::string_view, const ConSanKernelInfo *> kernel_by_name;
+  kernel_by_name.reserve(result.kernels.size());
+  for (const ConSanKernelInfo &kernel : result.kernels)
+    kernel_by_name.try_emplace(kernel.name, &kernel);
+  std::unordered_map<std::string_view, const ConSanFunctionInfo *> function_by_name;
+  function_by_name.reserve(result.functions.size());
+  for (const ConSanFunctionInfo &function : result.functions)
+    function_by_name.try_emplace(function.name, &function);
 
   std::vector<SampledBarrierCandidate> candidates;
   for (const ConSanSyncSequence &sequence : result.sync_sequences) {
@@ -677,21 +705,19 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     uint64_t container_entry_text_offset = 0;
     uint64_t container_text_file_offset = 0;
     if (sequence.in_kernel) {
-      const auto kernel =
-          std::ranges::find(result.kernels, sequence.container_name, &ConSanKernelInfo::name);
-      if (kernel == result.kernels.end())
+      const auto found = kernel_by_name.find(sequence.container_name);
+      if (found == kernel_by_name.end())
         continue;
-      barrier_sites = &kernel->barrier_sites;
-      container_entry_text_offset = kernel->entry_text_offset;
-      container_text_file_offset = kernel->text_file_offset;
+      barrier_sites = &found->second->barrier_sites;
+      container_entry_text_offset = found->second->entry_text_offset;
+      container_text_file_offset = found->second->text_file_offset;
     } else {
-      const auto function =
-          std::ranges::find(result.functions, sequence.container_name, &ConSanFunctionInfo::name);
-      if (function == result.functions.end())
+      const auto found = function_by_name.find(sequence.container_name);
+      if (found == function_by_name.end())
         continue;
-      barrier_sites = &function->barrier_sites;
-      container_entry_text_offset = function->entry_text_offset;
-      container_text_file_offset = function->text_file_offset;
+      barrier_sites = &found->second->barrier_sites;
+      container_entry_text_offset = found->second->entry_text_offset;
+      container_text_file_offset = found->second->text_file_offset;
     }
     std::vector<ConSanBarrierSite> completing_sites;
     std::ranges::copy_if(*barrier_sites, std::back_inserter(completing_sites),
@@ -711,21 +737,17 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     std::optional<ConSanMoiWorkgroupSources> common_workgroup_sources;
     std::optional<uint16_t> common_owner_shift;
     for (const ConSanExecutionOwner &owner : sequence.execution_owners) {
-      const auto context =
-          std::ranges::find_if(resource_state.contexts, [&](const auto &candidate) {
-            return candidate.kernel != nullptr &&
-                   candidate.kernel->descriptor_file_offset == owner.descriptor_file_offset;
-          });
-      if (context == resource_state.contexts.end() || context->kernel == nullptr) {
+      const auto context = context_by_descriptor.find(owner.descriptor_file_offset);
+      if (context == context_by_descriptor.end() || context->second->kernel == nullptr) {
         every_owner_has_window = false;
         break;
       }
       if (!first_owner &&
-          uses_cluster_workgroup_id != context->kernel->uses_gfx1250_cluster_workgroup_id) {
+          uses_cluster_workgroup_id != context->second->kernel->uses_gfx1250_cluster_workgroup_id) {
         every_owner_has_window = false;
         break;
       }
-      uses_cluster_workgroup_id = context->kernel->uses_gfx1250_cluster_workgroup_id;
+      uses_cluster_workgroup_id = context->second->kernel->uses_gfx1250_cluster_workgroup_id;
       first_owner = false;
       const auto workgroup_sources = moi_descriptor_workgroup_sources(
           bytes, owner.descriptor_file_offset, arch, result.errors, uses_cluster_workgroup_id);
@@ -742,23 +764,28 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       common_workgroup_sources = *workgroup_sources;
       common_owner_shift = *owner_shift;
       const auto distance_index = build_sampled_cfg_forward_distance_index(
-          resource_state, *context, sequence.begin_text_offset);
+          resource_state, *context->second, sequence.begin_text_offset);
       if (!distance_index) {
+        every_owner_has_window = false;
+        break;
+      }
+      const auto owner_windows = windows_by_descriptor.find(owner.descriptor_file_offset);
+      if (owner_windows == windows_by_descriptor.end()) {
         every_owner_has_window = false;
         break;
       }
       std::optional<SampledBarrierWindow> selected_window;
       std::optional<SampledCfgDistance> closest;
-      for (const SelectedWindow &window : selected_windows) {
-        const ConSanPatchInfo &patch = *window.patch;
-        if (!window.access || !kernel_owns_patch(*context->kernel, patch))
+      for (const SelectedWindow *window : owner_windows->second) {
+        const ConSanPatchInfo &patch = *window->patch;
+        if (!window->access || !kernel_owns_patch(*context->second->kernel, patch))
           continue;
         const auto distance =
             sampled_cfg_forward_distance(resource_state, *distance_index, patch.anchor_offset);
         if (!distance || (closest && *closest <= *distance))
           continue;
         closest = *distance;
-        selected_window = SampledBarrierWindow{window.first_slot, window.bank_count};
+        selected_window = SampledBarrierWindow{window->first_slot, window->bank_count};
       }
       if (!selected_window) {
         every_owner_has_window = false;
@@ -860,28 +887,56 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;
   MoiDescriptorPrivateRequirements private_requirements;
+  std::vector<std::pair<uint64_t, uint64_t>> patch_claims;
+  patch_claims.reserve(result.patches.size());
+  for (const ConSanPatchInfo &patch : result.patches) {
+    const uint64_t size = std::max<uint32_t>(patch.original_size, 1u);
+    patch_claims.emplace_back(patch.anchor_offset, patch.anchor_offset + size);
+  }
+  std::ranges::sort(patch_claims);
+  size_t merged_patch_claim_count = 0u;
+  for (const auto &claim : patch_claims) {
+    if (merged_patch_claim_count != 0u &&
+        patch_claims[merged_patch_claim_count - 1u].second >= claim.first) {
+      patch_claims[merged_patch_claim_count - 1u].second =
+          std::max(patch_claims[merged_patch_claim_count - 1u].second, claim.second);
+    } else {
+      patch_claims[merged_patch_claim_count++] = claim;
+    }
+  }
+  patch_claims.resize(merged_patch_claim_count);
+  const auto overlaps_patch = [&](uint64_t begin, uint64_t end) {
+    const auto after = std::ranges::lower_bound(patch_claims, end, {},
+                                                [](const auto &range) { return range.first; });
+    return after != patch_claims.begin() && std::prev(after)->second > begin;
+  };
+  std::unordered_map<uint64_t, size_t> barrier_plan_by_offset;
+  barrier_plan_by_offset.reserve(result.resource_plans.size());
+  for (size_t index = 0; index < result.resource_plans.size(); ++index) {
+    const ConSanCandidateResourcePlan &plan = result.resource_plans[index];
+    if (plan.site_kind == ConSanResourceSiteKind::Barrier)
+      barrier_plan_by_offset.try_emplace(plan.text_offset, index);
+  }
   for (size_t index = 0; index < candidates.size(); ++index) {
     SampledBarrierCandidate candidate = candidates[index];
     const ConSanBarrierSite &site = candidate.barrier.site;
     if (site.size == 0 || site.size % sizeof(uint32_t) != 0 || site.text_offset > old_text.size() ||
         site.size > old_text.size() - site.text_offset)
       continue;
-    const bool overlap = std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
-      const uint64_t end = patch.anchor_offset + std::max<uint32_t>(patch.original_size, 1u);
-      return site.text_offset < end && patch.anchor_offset < site.text_offset + site.size;
-    });
-    if (overlap)
+    if (overlaps_patch(site.text_offset, site.text_offset + site.size))
       continue;
-    const ConSanCandidateResourcePlan *existing =
-        resource_plan_for_site(result, ConSanResourceSiteKind::Barrier, site.text_offset);
-    ConSanCandidateResourcePlan plan =
-        existing ? *existing
-                 : plan_moi_resource_site(resource_state, options, ConSanResourceSiteKind::Barrier,
-                                          index, site.text_offset,
-                                          candidate.barrier.kernel_descriptor_file_offset,
-                                          options.automatic_moi_private_epoch ? 9u : 7u);
-    if (!existing)
+    const auto existing = barrier_plan_by_offset.find(site.text_offset);
+    ConSanCandidateResourcePlan plan;
+    if (existing != barrier_plan_by_offset.end()) {
+      plan = result.resource_plans[existing->second];
+    } else {
+      plan =
+          plan_moi_resource_site(resource_state, options, ConSanResourceSiteKind::Barrier, index,
+                                 site.text_offset, candidate.barrier.kernel_descriptor_file_offset,
+                                 options.automatic_moi_private_epoch ? 9u : 7u);
       result.resource_plans.push_back(plan);
+      barrier_plan_by_offset.emplace(site.text_offset, result.resource_plans.size() - 1u);
+    }
     const uint16_t scratch_count = options.automatic_moi_private_epoch ? 9u : 7u;
     const auto resources = resolve_moi_scratch_plan(plan, options, scratch_count);
     if (!resources)
@@ -1055,13 +1110,18 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       std::optional<uint64_t> host_offset;
       std::vector<uint32_t> displaced_words;
       uint64_t best_max_distance = std::numeric_limits<uint64_t>::max();
-      for (const std::unique_ptr<BasicBlock> &block : blocks) {
-        if (block->start_offset() < container_begin || block->end_offset() > container_end ||
-            block->size() < kHostBytes)
+      auto block =
+          std::lower_bound(blocks.begin(), blocks.end(), container_begin,
+                           [](const std::unique_ptr<BasicBlock> &candidate, uint64_t entry) {
+                             return candidate->end_offset() <= entry;
+                           });
+      for (; block != blocks.end() && (*block)->start_offset() < container_end; ++block) {
+        if ((*block)->start_offset() < container_begin || (*block)->end_offset() > container_end ||
+            (*block)->size() < kHostBytes)
           continue;
-        for (const Instruction &instruction : block->instructions()) {
+        for (const Instruction &instruction : (*block)->instructions()) {
           const uint64_t candidate_host = instruction.src_loc();
-          if (candidate_host + kHostBytes > block->end_offset() ||
+          if (candidate_host + kHostBytes > (*block)->end_offset() ||
               overlaps_existing(candidate_host, candidate_host + kHostBytes))
             continue;
           const uint64_t relay_offset = candidate_host + sizeof(uint32_t);
