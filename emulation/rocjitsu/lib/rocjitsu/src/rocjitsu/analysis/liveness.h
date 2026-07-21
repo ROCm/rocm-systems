@@ -14,9 +14,12 @@
 
 #pragma once
 
+#include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/register_set.h"
+#include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <unordered_map>
@@ -25,6 +28,7 @@
 namespace rocjitsu {
 
 class BasicBlock;
+class Gfx1250VgprMsbAnalysis;
 class Instruction;
 
 /// @brief The basic blocks reachable from one kernel entry.
@@ -57,6 +61,16 @@ struct BlockLiveness {
 
 /// @brief Optional controls for liveness construction.
 struct LivenessAnalysisOptions {
+  /// @brief Architecture whose register semantics should be analyzed.
+  ///
+  /// @details INVALID preserves the legacy ISA-independent behavior. DBT sets
+  /// this to gfx1250 together with entry_block so VGPR_MSB state can resolve
+  /// encoded vector operands to physical VGPRs.
+  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
+
+  /// @brief Kernel entry block where architectural VGPR_MSB state is zero.
+  BasicBlock *entry_block = nullptr;
+
   /// @brief Lowest VGPR index that find_free_run() may return.
   ///
   /// @details This is a debug-oriented allocation floor, not a dataflow fact.
@@ -112,6 +126,12 @@ public:
   /// @param blocks Blocks in one kernel CFG scope.
   LivenessAnalysis(KernelBlockScope blocks, LivenessAnalysisOptions options = {},
                    std::span<const ScopedCfgEdge> extra_edges = {});
+  ~LivenessAnalysis();
+
+  LivenessAnalysis(const LivenessAnalysis &) = delete;
+  LivenessAnalysis &operator=(const LivenessAnalysis &) = delete;
+  LivenessAnalysis(LivenessAnalysis &&) noexcept;
+  LivenessAnalysis &operator=(LivenessAnalysis &&) noexcept;
 
   /// @brief Block liveness by block object.
   [[nodiscard]] const BlockLiveness &block_liveness(const BasicBlock &block) const;
@@ -121,6 +141,11 @@ public:
 
   /// @brief Convenience predicate for one register reference.
   [[nodiscard]] bool is_live_before(const Instruction &inst, RegisterRef ref) const;
+
+  /// @brief gfx1250 VGPR bank selected for @p role before @p inst.
+  /// @returns nullopt when this is not a gfx1250 analysis or the state is ambiguous.
+  [[nodiscard]] std::optional<uint8_t> vgpr_msb_bank_before(const Instruction &inst,
+                                                            amdgpu::VgprMsbRole role) const;
 
   /// @brief Find N consecutive dead VGPRs immediately before an instruction.
   ///
@@ -152,6 +177,7 @@ private:
 
   uint16_t min_free_vgpr_ = 0;
   uint16_t max_free_vgpr_ = 0;
+  std::unique_ptr<Gfx1250VgprMsbAnalysis> gfx1250_vgpr_msb_;
   std::vector<BlockLiveness> liveness_;
   std::unordered_map<const BasicBlock *, size_t> block_index_;
   std::unordered_map<const Instruction *, RegisterSet> live_before_;

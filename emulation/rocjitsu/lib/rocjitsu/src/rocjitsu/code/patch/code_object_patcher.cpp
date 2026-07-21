@@ -24,6 +24,7 @@ RJ_DIAGNOSTIC_POP
 #include <optional>
 #include <span>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -293,10 +294,10 @@ void apply_kernel_descriptor_resource_translation(KD &desc, const KdTranslation 
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT,
                   enable_private_segment);
   if (translation.skipped) {
-    // Skipped kernels are target-ISA trap stubs. Do not preserve the
+    // Skipped kernels are target-ISA no-op stubs. Do not preserve the
     // failed guest kernel's descriptor ABI inputs: ROCR validates the resource
     // request before the stub can run, and stale kernarg/LDS/private settings
-    // can turn an intentional trap into an earlier invalid-allocation failure.
+    // can prevent the stub from being loaded because resource validation fails.
     //
     // Keep the same non-resource defaults that amdclang emits for an empty
     // gfx942 kernel: IEEE/DX10 mode with both FP denorm modes enabled, plus
@@ -423,6 +424,176 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
       std::memcpy(image.data() + symbol_offset, &symbol, sizeof(symbol));
     }
   }
+}
+
+[[nodiscard]] bool relocate_text_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
+                                         std::span<const Elf64_Shdr> shdrs, size_t text_index,
+                                         uint64_t old_text_size, uint64_t new_text_size,
+                                         std::span<const TextOffsetRelocation> relocations) {
+  if (relocations.empty())
+    return true;
+
+  std::unordered_map<uint64_t, uint64_t> target_by_source;
+  target_by_source.reserve(relocations.size());
+  for (const TextOffsetRelocation &relocation : relocations) {
+    if (relocation.source_offset > old_text_size || relocation.target_offset > new_text_size)
+      return false;
+    // A helper block can be copied into more than one kernel-local body. ELF
+    // has only one value for its local label, so retain the first deterministic
+    // placement. Control-flow fixups remain kernel-local and do not depend on
+    // this tooling/debug symbol choice.
+    target_by_source.try_emplace(relocation.source_offset, relocation.target_offset);
+  }
+
+  const Elf64_Shdr &text = shdrs[text_index];
+  // Only referenced symbols are correctness-critical. Debug and tooling symbol
+  // tables may contain labels in padding or unreachable bytes that DBT does not
+  // emit, so requiring an offset-map entry for every text symbol would reject
+  // otherwise translatable code objects. Index referenced symbols once here to
+  // avoid an O(symbols * relocations) search below.
+  std::unordered_map<size_t, std::unordered_set<uint32_t>> referenced_by_symtab;
+  for (const Elf64_Shdr &relocs : shdrs) {
+    if (relocs.sh_type != SHT_RELA || relocs.sh_entsize != sizeof(Elf64_Rela) ||
+        relocs.sh_link >= shdrs.size() ||
+        !image_contains_range(image.size(), relocs.sh_offset, relocs.sh_size)) {
+      continue;
+    }
+    const Elf64_Shdr &symtab = shdrs[relocs.sh_link];
+    if (symtab.sh_entsize != sizeof(Elf64_Sym) ||
+        !image_contains_range(image.size(), symtab.sh_offset, symtab.sh_size)) {
+      continue;
+    }
+    const size_t count = relocs.sh_size / sizeof(Elf64_Rela);
+    for (size_t i = 0; i < count; ++i) {
+      Elf64_Rela rela{};
+      std::memcpy(&rela, image.data() + relocs.sh_offset + i * sizeof(rela), sizeof(rela));
+      const uint32_t symbol_index = elf64_relocation_symbol(rela.r_info);
+      if (symbol_index == 0 ||
+          static_cast<uint64_t>(symbol_index) * sizeof(Elf64_Sym) + sizeof(Elf64_Sym) >
+              symtab.sh_size) {
+        continue;
+      }
+      Elf64_Sym symbol{};
+      std::memcpy(&symbol, image.data() + symtab.sh_offset + symbol_index * sizeof(symbol),
+                  sizeof(symbol));
+      if (symbol.st_shndx == text_index &&
+          elf_symbol_type(symbol.st_info) != kElfSymbolTypeSection) {
+        referenced_by_symtab[relocs.sh_link].insert(symbol_index);
+      }
+    }
+  }
+
+  for (size_t symtab_index = 0; symtab_index < shdrs.size(); ++symtab_index) {
+    const Elf64_Shdr &symtab = shdrs[symtab_index];
+    if (symtab.sh_type != SHT_SYMTAB && symtab.sh_type != SHT_DYNSYM)
+      continue;
+    if (symtab.sh_entsize != sizeof(Elf64_Sym) ||
+        !image_contains_range(image.size(), symtab.sh_offset, symtab.sh_size))
+      continue;
+
+    const size_t count = symtab.sh_size / sizeof(Elf64_Sym);
+    for (size_t i = 0; i < count; ++i) {
+      const uint64_t symbol_offset = symtab.sh_offset + i * sizeof(Elf64_Sym);
+      Elf64_Sym symbol{};
+      std::memcpy(&symbol, image.data() + symbol_offset, sizeof(symbol));
+      if (symbol.st_shndx != text_index || elf_symbol_type(symbol.st_info) == kElfSymbolTypeSection)
+        continue;
+
+      const auto referenced = referenced_by_symtab.find(symtab_index);
+      const bool must_relocate =
+          referenced != referenced_by_symtab.end() && referenced->second.contains(i);
+
+      uint64_t source_text_offset = symbol.st_value;
+      if (ehdr.e_type != ET_REL) {
+        if (symbol.st_value < text.sh_addr) {
+          if (must_relocate)
+            return false;
+          continue;
+        }
+        source_text_offset = symbol.st_value - text.sh_addr;
+      }
+      if (source_text_offset > old_text_size) {
+        if (must_relocate)
+          return false;
+        continue;
+      }
+      const auto relocated_start = target_by_source.find(source_text_offset);
+      if (relocated_start == target_by_source.end()) {
+        if (must_relocate)
+          return false;
+        continue;
+      }
+
+      const uint64_t old_size = symbol.st_size;
+      if (old_size <= old_text_size - source_text_offset) {
+        const auto relocated_end = target_by_source.find(source_text_offset + old_size);
+        if (relocated_end != target_by_source.end() &&
+            relocated_end->second >= relocated_start->second) {
+          symbol.st_size = relocated_end->second - relocated_start->second;
+        }
+      }
+      symbol.st_value =
+          ehdr.e_type == ET_REL ? relocated_start->second : text.sh_addr + relocated_start->second;
+      std::memcpy(image.data() + symbol_offset, &symbol, sizeof(symbol));
+    }
+  }
+  return true;
+}
+
+[[nodiscard]] bool
+relocate_relative_text_addends(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
+                               std::span<const Elf64_Shdr> shdrs, size_t text_index,
+                               uint64_t old_text_size, uint64_t new_text_size,
+                               std::span<const TextOffsetRelocation> relocations) {
+  if (relocations.empty() || ehdr.e_type != ET_DYN)
+    return true;
+
+  std::unordered_map<uint64_t, uint64_t> target_by_source;
+  target_by_source.reserve(relocations.size());
+  for (const TextOffsetRelocation &relocation : relocations) {
+    if (relocation.source_offset > old_text_size || relocation.target_offset > new_text_size)
+      return false;
+    target_by_source.try_emplace(relocation.source_offset, relocation.target_offset);
+  }
+
+  const Elf64_Shdr &text = shdrs[text_index];
+  for (const Elf64_Shdr &relocs : shdrs) {
+    if (relocs.sh_type != SHT_RELA || relocs.sh_entsize != sizeof(Elf64_Rela) ||
+        !image_contains_range(image.size(), relocs.sh_offset, relocs.sh_size)) {
+      continue;
+    }
+
+    const size_t count = relocs.sh_size / sizeof(Elf64_Rela);
+    for (size_t i = 0; i < count; ++i) {
+      const uint64_t rela_offset = relocs.sh_offset + i * sizeof(Elf64_Rela);
+      Elf64_Rela rela{};
+      std::memcpy(&rela, image.data() + rela_offset, sizeof(rela));
+      if (elf64_relocation_type(rela.r_info) != R_AMDGPU_RELATIVE64 || rela.r_addend < 0)
+        continue;
+
+      const uint64_t addend = static_cast<uint64_t>(rela.r_addend);
+      if (addend < text.sh_addr)
+        continue;
+      const uint64_t source_offset = addend - text.sh_addr;
+      if (source_offset >= old_text_size)
+        continue;
+
+      const auto relocated = target_by_source.find(source_offset);
+      // Leaving an in-text addend unchanged would silently preserve a stale PC.
+      // Compatibility was established from the relocation form, but final
+      // materialization must also prove that this exact target was emitted.
+      if (relocated == target_by_source.end())
+        return false;
+      if (relocated->second > std::numeric_limits<uint64_t>::max() - text.sh_addr)
+        return false;
+      const uint64_t target_addend = text.sh_addr + relocated->second;
+      if (target_addend > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+        return false;
+      rela.r_addend = static_cast<int64_t>(target_addend);
+      std::memcpy(image.data() + rela_offset, &rela, sizeof(rela));
+    }
+  }
+  return true;
 }
 
 [[nodiscard]] bool relocation_place_was_moved(uint64_t place, std::span<const Elf64_Shdr> shdrs,
@@ -662,7 +833,7 @@ bool CodeObjectPatcher::has_relocations_within_text() const {
   return false;
 }
 
-bool CodeObjectPatcher::has_relocation_to_text_symbol() const {
+bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
   if (text_size_ == 0)
     return false;
   if (image_.size() < sizeof(Elf64_Ehdr))
@@ -674,31 +845,29 @@ bool CodeObjectPatcher::has_relocation_to_text_symbol() const {
   if (!text_index)
     return false;
 
-  // The virtual-address interval of the source .text, used to catch symbol-less
-  // relocations whose addend names an in-.text address (see the RELATIVE64 check
-  // below). find_text_section only guarantees offset/size, so read sh_addr here.
+  // The virtual-address interval identifies symbol-less RELATIVE64 addends that
+  // refer to translated code. Those references are supported because
+  // replace_text() rewrites the explicit addend through the final offset map.
   const Elf64_Shdr &text = shdrs[*text_index];
   const uint64_t text_addr_lo = text.sh_addr;
   const uint64_t text_addr_hi = text.sh_addr + text_size_;
 
-  // True if the referenced symbol is *defined in .text*, regardless of type. DBT
-  // does not remap text-defined st_value, so any such reference resolves to a
-  // stale pre-move PC. This deliberately matches all types: STT_FUNC helpers,
-  // STT_NOTYPE labels, and an STT_SECTION symbol for .text (whose reloc addend
-  // names an in-.text offset) all alias moved code. Keying on st_shndx (not the
-  // symbol type) is what makes the section-symbol and untyped-label cases fail
-  // closed. STN_UNDEF (index 0) has st_shndx == SHN_UNDEF, so it never matches.
-  auto symbol_is_defined_in_text = [&](const Elf64_Shdr &symtab, uint32_t sym_index) {
+  // Return the referenced symbol only when it is defined in .text. Keeping the
+  // complete symbol is necessary because ordinary named symbols and STT_SECTION
+  // symbols require different relocation strategies.
+  auto text_symbol = [&](const Elf64_Shdr &symtab, uint32_t sym_index) -> std::optional<Elf64_Sym> {
     if (symtab.sh_entsize != sizeof(Elf64_Sym))
-      return false;
+      return std::nullopt;
     if (!image_contains_range(image_.size(), symtab.sh_offset, symtab.sh_size))
-      return false;
+      return std::nullopt;
     if (static_cast<uint64_t>(sym_index) * sizeof(Elf64_Sym) + sizeof(Elf64_Sym) > symtab.sh_size)
-      return false;
+      return std::nullopt;
     Elf64_Sym symbol{};
     std::memcpy(&symbol, image_.data() + symtab.sh_offset + sym_index * sizeof(Elf64_Sym),
                 sizeof(symbol));
-    return symbol.st_shndx == *text_index;
+    if (symbol.st_shndx != *text_index)
+      return std::nullopt;
+    return symbol;
   };
 
   for (const Elf64_Shdr &relocs : shdrs) {
@@ -731,26 +900,39 @@ bool CodeObjectPatcher::has_relocation_to_text_symbol() const {
       }
       const uint32_t sym_index = elf_reloc_sym(r_info);
       if (sym_index != 0) {
-        if (symbol_is_defined_in_text(symtab, sym_index))
+        const auto symbol = text_symbol(symtab, sym_index);
+        if (!symbol)
+          continue;
+
+        // A zero-addend RELA reference to an ordinary text symbol follows the
+        // relocated symbol value written by relocate_text_symbols(). A section
+        // symbol leaves the source offset in the addend, while REL keeps an
+        // implicit addend at the relocation place; neither form can be repaired
+        // safely without interpreting the individual relocation type.
+        if (!is_rela || elf_symbol_type(symbol->st_info) == kElfSymbolTypeSection ||
+            r_addend != 0) {
           return true;
+        }
         continue;
       }
-      // Symbol index 0: no owning symbol, so the st_shndx check above cannot see
-      // it. R_AMDGPU_RELATIVE64 forms its stored value from the load bias plus
-      // r_addend, so an addend inside the source .text virtual-address interval
-      // aliases code DBT moves without remapping the addend. Fail closed on that
-      // form; other symbol-zero types have no addend->text derivation to check.
+
+      // Symbol index 0 has no st_value to update. RELATIVE64 is the one form for
+      // which the target can be derived generically: load bias plus r_addend.
+      // replace_text() remaps an in-text addend exactly. Other symbol-zero forms
+      // provide no generic way to identify a .text target here.
       if (is_rela && elf_reloc_type(r_info) == R_AMDGPU_RELATIVE64) {
         const uint64_t target = static_cast<uint64_t>(r_addend);
         if (target >= text_addr_lo && target < text_addr_hi)
-          return true;
+          continue;
       }
     }
   }
   return false;
 }
 
-bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text) {
+bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
+                                     std::span<const TextOffsetRelocation> text_relocations,
+                                     std::span<const PcRelativeDataRelocation> data_relocations) {
   // Keep fail-closed behavior for callers that assume word-aligned executable
   // sections; accepting a non-word-aligned replacement can break downstream
   // PC-relative patching and branch-distance checks.
@@ -762,6 +944,8 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text) {
   if (new_text.size() < text_size_)
     return false;
   if (!image_contains_range(image_.size(), text_offset_, text_size_))
+    return false;
+  if (!text_relocations.empty() && has_unsupported_relocation_to_text())
     return false;
 
   auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image_.data());
@@ -776,6 +960,32 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text) {
   }
 
   const auto text_header = shdrs[*text_index];
+  struct ResolvedDataRelocation {
+    PcRelativeDataRelocation relocation;
+    size_t target_section = 0;
+    uint64_t target_section_offset = 0;
+  };
+  std::vector<ResolvedDataRelocation> resolved_data_relocations;
+  resolved_data_relocations.reserve(data_relocations.size());
+  for (const PcRelativeDataRelocation &relocation : data_relocations) {
+    if (relocation.target_getpc_offset > new_text.size() ||
+        sizeof(uint32_t) > new_text.size() - relocation.target_getpc_offset ||
+        relocation.target_literal_offset > new_text.size() ||
+        sizeof(uint64_t) > new_text.size() - relocation.target_literal_offset) {
+      return false;
+    }
+    const auto section = std::ranges::find_if(shdrs, [&](const Elf64_Shdr &candidate) {
+      return (candidate.sh_flags & SHF_ALLOC) != 0 && (candidate.sh_flags & SHF_EXECINSTR) == 0 &&
+             relocation.source_target_vaddr >= candidate.sh_addr &&
+             relocation.source_target_vaddr - candidate.sh_addr < candidate.sh_size;
+    });
+    if (section == shdrs.end())
+      return false;
+    resolved_data_relocations.push_back(
+        {.relocation = relocation,
+         .target_section = static_cast<size_t>(section - shdrs.begin()),
+         .target_section_offset = relocation.source_target_vaddr - section->sh_addr});
+  }
   const uint64_t old_text_end_file = text_offset_ + text_size_;
   const uint64_t old_text_end_vaddr = text_header.sh_addr + text_size_;
   const uint64_t growth = new_text.size() - text_size_;
@@ -836,8 +1046,39 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text) {
   }
 
   std::memcpy(image_.data() + text_offset_, new_text.data(), new_text.size());
+  for (const ResolvedDataRelocation &resolved : resolved_data_relocations) {
+    if (resolved.target_section >= shdrs.size() ||
+        resolved.target_section_offset >= shdrs[resolved.target_section].sh_size) {
+      return false;
+    }
+    const uint64_t target_vaddr =
+        shdrs[resolved.target_section].sh_addr + resolved.target_section_offset;
+    if (text_header.sh_addr >
+            std::numeric_limits<uint64_t>::max() - resolved.relocation.target_getpc_offset ||
+        text_header.sh_addr + resolved.relocation.target_getpc_offset >
+            std::numeric_limits<uint64_t>::max() - sizeof(uint32_t)) {
+      return false;
+    }
+    const uint64_t getpc_result =
+        text_header.sh_addr + resolved.relocation.target_getpc_offset + sizeof(uint32_t);
+    const uint64_t delta = target_vaddr - getpc_result;
+    std::memcpy(image_.data() + text_offset_ + resolved.relocation.target_literal_offset, &delta,
+                sizeof(delta));
+  }
   shdrs[*text_index].sh_size = new_text.size();
-  grow_text_function_symbols(image_, header, shdrs, *text_index, text_size_, new_text.size());
+  if (!relocate_text_symbols(image_, header, shdrs, *text_index, text_size_, new_text.size(),
+                             text_relocations)) {
+    return false;
+  }
+  if (!relocate_relative_text_addends(image_, header, shdrs, *text_index, text_size_,
+                                      new_text.size(), text_relocations)) {
+    return false;
+  }
+  // Instrumentation appends a cave without relocating the original body and
+  // therefore supplies no offset map. Preserve its historical function-range
+  // growth. DBT supplies exact starts/ends and gets precise relocated sizes.
+  if (text_relocations.empty())
+    grow_text_function_symbols(image_, header, shdrs, *text_index, text_size_, new_text.size());
   text_size_ = new_text.size();
 
   for (const Elf64_Phdr &phdr : phdrs) {

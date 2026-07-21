@@ -68,6 +68,8 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
@@ -157,7 +159,6 @@ constexpr size_t kKernelDescriptorSize = sizeof(TestKernelDescriptor);
 constexpr size_t kKernelDescriptorEntryOffset =
     offsetof(TestKernelDescriptor, kernel_code_entry_byte_offset);
 constexpr uint64_t kKernargPreloadSkipBytes = 256;
-constexpr uint16_t kSkippedKernelTrapId = 0x52;
 
 void write_kernel_descriptor_entry_offset(void *descriptor, int64_t entry_offset) {
   auto *bytes = static_cast<uint8_t *>(descriptor);
@@ -790,12 +791,11 @@ make_minimal_amdgpu_elf_with_relocation_after_text(bool place_reloc_in_text = fa
 }
 
 // Build an ET_DYN object whose .data relocation resolves against a symbol of a
-// chosen type, defined either in .text or .data. Used to prove the text-symbol
-// relocation guard keys on the defining section (st_shndx) rather than the symbol
-// type: STT_FUNC, STT_NOTYPE, and STT_SECTION symbols in .text must all be
-// rejected, while an equivalent symbol in .data must be accepted.
-std::vector<uint8_t> make_amdgpu_elf_with_symbol_relocation(uint8_t sym_type,
-                                                            bool defined_in_text) {
+// chosen type, defined either in .text or .data. Ordinary zero-addend text
+// symbols can follow their relocated st_value; section symbols and nonzero
+// addends need relocation-specific reconstruction and remain unsupported.
+std::vector<uint8_t> make_amdgpu_elf_with_symbol_relocation(uint8_t sym_type, bool defined_in_text,
+                                                            int64_t addend = 0) {
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_vaddr = 0x1100;
   constexpr uint64_t text_size = 8;
@@ -883,7 +883,8 @@ std::vector<uint8_t> make_amdgpu_elf_with_symbol_relocation(uint8_t sym_type,
 
   Elf64_Rela rela{};
   rela.r_offset = data_vaddr; // place in .data, safely shifted with the section
-  rela.r_info = (static_cast<uint64_t>(1) << 32);
+  rela.r_info = (static_cast<uint64_t>(1) << 32) | R_AMDGPU_ABS64;
+  rela.r_addend = addend;
   std::memcpy(image.data() + rela_offset, &rela, sizeof(rela));
 
   std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
@@ -1669,6 +1670,34 @@ TEST(CodeObjectPatcher, ReplaceTextPreservesLoadSegmentAlignment) {
       << "function symbols spanning old .text must cover appended translated cave code";
 }
 
+TEST(CodeObjectPatcher, ReplaceTextRelocatesTextSymbolsWithExactOffsetMap) {
+  auto image = make_minimal_amdgpu_elf_with_load_segments();
+  AmdGpuCodeObject co(image.data(), image.size());
+  ASSERT_TRUE(co.is_valid());
+
+  CodeObjectPatcher patcher(co);
+  const std::array<uint32_t, 4> text_words = {0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u};
+  const auto *text_bytes = reinterpret_cast<const uint8_t *>(text_words.data());
+  constexpr std::array<TextOffsetRelocation, 2> relocations = {
+      TextOffsetRelocation{.source_offset = 0, .target_offset = 4},
+      TextOffsetRelocation{.source_offset = 8, .target_offset = 16},
+  };
+  ASSERT_TRUE(patcher.replace_text({text_bytes, sizeof(text_words)}, relocations));
+
+  const auto patched_bytes = patcher.emit();
+  const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(patched_bytes, 0);
+  const auto shdrs = read_elf_array_for_test<Elf64_Shdr>(patched_bytes, ehdr.e_shoff, ehdr.e_shnum);
+  const auto symtab = std::find_if(shdrs.begin(), shdrs.end(), [](const Elf64_Shdr &shdr) {
+    return shdr.sh_type == SHT_SYMTAB;
+  });
+  ASSERT_NE(symtab, shdrs.end());
+  const auto symbols = read_elf_array_for_test<Elf64_Sym>(patched_bytes, symtab->sh_offset,
+                                                          symtab->sh_size / symtab->sh_entsize);
+  ASSERT_GE(symbols.size(), 3u);
+  EXPECT_EQ(symbols[2].st_value, 0x1104u);
+  EXPECT_EQ(symbols[2].st_size, 12u);
+}
+
 TEST(CodeObjectPatcher, AppendsNonAllocSectionWithoutMovingLoadableSegments) {
   auto image = make_minimal_amdgpu_elf_with_load_segments();
   AmdGpuCodeObject co(image.data(), image.size());
@@ -1799,37 +1828,118 @@ TEST(BinaryTranslatorE2E, RejectsRelocationTargetingText) {
 
   EXPECT_EQ(result.elf_bytes, image);
   EXPECT_TRUE(rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
-                                             "relocations targeting .text"));
+                                             "relocation place inside .text"));
 }
 
-// The text-symbol relocation guard must key on the defining section, not the
-// symbol type: a relocation resolving against any symbol defined in .text aliases
-// code DBT moves without remapping st_value. STT_FUNC, STT_NOTYPE, and
-// STT_SECTION(.text)+addend all point at stale post-move offsets.
-TEST(CodeObjectPatcher, DetectsRelocationToTextSymbolRegardlessOfType) {
-  for (uint8_t sym_type :
-       {kElfSymbolTypeFunc, kElfSymbolTypeNone, kElfSymbolTypeObject, kElfSymbolTypeSection}) {
+TEST(CodeObjectPatcher, ClassifiesTextSymbolRelocationCompatibility) {
+  for (uint8_t sym_type : {kElfSymbolTypeFunc, kElfSymbolTypeNone, kElfSymbolTypeObject}) {
     auto text_image = make_amdgpu_elf_with_symbol_relocation(sym_type, /*defined_in_text=*/true);
     AmdGpuCodeObject text_co(text_image.data(), text_image.size());
     ASSERT_TRUE(text_co.is_valid()) << "sym_type=" << static_cast<int>(sym_type);
     CodeObjectPatcher text_patcher(text_co);
-    EXPECT_TRUE(text_patcher.has_relocation_to_text_symbol())
-        << "text-defined sym_type=" << static_cast<int>(sym_type) << " must be rejected";
+    EXPECT_FALSE(text_patcher.has_unsupported_relocation_to_text())
+        << "zero-addend ordinary text sym_type=" << static_cast<int>(sym_type)
+        << " can follow its relocated st_value";
 
     auto data_image = make_amdgpu_elf_with_symbol_relocation(sym_type, /*defined_in_text=*/false);
     AmdGpuCodeObject data_co(data_image.data(), data_image.size());
     ASSERT_TRUE(data_co.is_valid()) << "sym_type=" << static_cast<int>(sym_type);
     CodeObjectPatcher data_patcher(data_co);
-    EXPECT_FALSE(data_patcher.has_relocation_to_text_symbol())
+    EXPECT_FALSE(data_patcher.has_unsupported_relocation_to_text())
         << "data-defined sym_type=" << static_cast<int>(sym_type) << " must be accepted";
   }
+
+  auto section_image =
+      make_amdgpu_elf_with_symbol_relocation(kElfSymbolTypeSection, /*defined_in_text=*/true);
+  AmdGpuCodeObject section_co(section_image.data(), section_image.size());
+  ASSERT_TRUE(section_co.is_valid());
+  CodeObjectPatcher section_patcher(section_co);
+  EXPECT_TRUE(section_patcher.has_unsupported_relocation_to_text())
+      << "STT_SECTION keeps its in-text offset in the relocation addend";
+
+  auto addend_image = make_amdgpu_elf_with_symbol_relocation(
+      kElfSymbolTypeFunc, /*defined_in_text=*/true, /*addend=*/4);
+  AmdGpuCodeObject addend_co(addend_image.data(), addend_image.size());
+  ASSERT_TRUE(addend_co.is_valid());
+  CodeObjectPatcher addend_patcher(addend_co);
+  EXPECT_TRUE(addend_patcher.has_unsupported_relocation_to_text())
+      << "a named symbol plus addend can target an independently moved instruction";
+
+  // Convert the fixture's explicit-addend RELA record into an implicit-addend
+  // REL record. Without relocation-type-specific decoding, DBT cannot prove
+  // what source text offset is stored at the relocation place.
+  auto rel_image =
+      make_amdgpu_elf_with_symbol_relocation(kElfSymbolTypeFunc, /*defined_in_text=*/true);
+  const auto rel_ehdr = read_elf_struct_for_test<Elf64_Ehdr>(rel_image, 0);
+  auto rel_shdrs =
+      read_elf_array_for_test<Elf64_Shdr>(rel_image, rel_ehdr.e_shoff, rel_ehdr.e_shnum);
+  const auto rela = std::ranges::find_if(
+      rel_shdrs, [](const Elf64_Shdr &section) { return section.sh_type == SHT_RELA; });
+  ASSERT_NE(rela, rel_shdrs.end());
+  const size_t rela_index = static_cast<size_t>(rela - rel_shdrs.begin());
+  const auto rela_record = read_elf_struct_for_test<Elf64_Rela>(rel_image, rela->sh_offset);
+  const Elf64_Rel rel_record{.r_offset = rela_record.r_offset, .r_info = rela_record.r_info};
+  std::memcpy(rel_image.data() + rela->sh_offset, &rel_record, sizeof(rel_record));
+  rel_shdrs[rela_index].sh_type = SHT_REL;
+  rel_shdrs[rela_index].sh_size = sizeof(Elf64_Rel);
+  rel_shdrs[rela_index].sh_entsize = sizeof(Elf64_Rel);
+  std::memcpy(rel_image.data() + rel_ehdr.e_shoff, rel_shdrs.data(),
+              rel_shdrs.size() * sizeof(Elf64_Shdr));
+
+  AmdGpuCodeObject rel_co(rel_image.data(), rel_image.size());
+  ASSERT_TRUE(rel_co.is_valid());
+  CodeObjectPatcher rel_patcher(rel_co);
+  EXPECT_TRUE(rel_patcher.has_unsupported_relocation_to_text())
+      << "REL keeps an implicit addend that generic text-symbol remapping cannot inspect";
 }
 
-TEST(BinaryTranslatorE2E, RejectsRelocationToTextNotypeSymbol) {
-  // A STT_NOTYPE label defined in .text is address-taken by a .data relocation.
-  // The pre-move guard only recognized STT_FUNC; this proves the broadened guard
-  // rejects untyped text labels too, leaving the object unchanged.
-  auto image = make_amdgpu_elf_with_symbol_relocation(kElfSymbolTypeNone, /*defined_in_text=*/true);
+TEST(CodeObjectPatcher, RelocatesReferencedTextSymbolWithExactOffsetMap) {
+  auto image = make_amdgpu_elf_with_symbol_relocation(kElfSymbolTypeFunc, /*defined_in_text=*/true);
+  AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  CodeObjectPatcher patcher(object);
+
+  const std::array<uint32_t, 4> expanded_text = {0xBF800000u, 0xBF800000u, 0xBF800000u,
+                                                 0xBF800000u};
+  constexpr std::array<TextOffsetRelocation, 2> mappings = {
+      TextOffsetRelocation{.source_offset = 0, .target_offset = 4},
+      TextOffsetRelocation{.source_offset = 8, .target_offset = 16},
+  };
+  const auto bytes = std::span<const uint8_t>(
+      reinterpret_cast<const uint8_t *>(expanded_text.data()), sizeof(expanded_text));
+  ASSERT_TRUE(patcher.replace_text(bytes, mappings));
+
+  const auto patched = patcher.emit();
+  const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(patched, 0);
+  const auto shdrs = read_elf_array_for_test<Elf64_Shdr>(patched, ehdr.e_shoff, ehdr.e_shnum);
+  const auto symtab = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &section) { return section.sh_type == SHT_SYMTAB; });
+  ASSERT_NE(symtab, shdrs.end());
+  const auto symbols = read_elf_array_for_test<Elf64_Sym>(patched, symtab->sh_offset,
+                                                          symtab->sh_size / sizeof(Elf64_Sym));
+  ASSERT_GE(symbols.size(), 2u);
+  EXPECT_EQ(symbols[1].st_value, 0x1104u);
+  EXPECT_EQ(symbols[1].st_size, 12u);
+}
+
+TEST(CodeObjectPatcher, RejectsReferencedTextSymbolWithoutExactOffsetMap) {
+  auto image = make_amdgpu_elf_with_symbol_relocation(kElfSymbolTypeFunc, /*defined_in_text=*/true);
+  AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  CodeObjectPatcher patcher(object);
+
+  const std::array<uint32_t, 3> expanded_text = {0xBF800000u, 0xBF800000u, 0xBF800000u};
+  constexpr std::array<TextOffsetRelocation, 1> incomplete_mapping = {
+      TextOffsetRelocation{.source_offset = 4, .target_offset = 8},
+  };
+  const auto bytes = std::span<const uint8_t>(
+      reinterpret_cast<const uint8_t *>(expanded_text.data()), sizeof(expanded_text));
+  EXPECT_FALSE(patcher.replace_text(bytes, incomplete_mapping));
+}
+
+TEST(BinaryTranslatorE2E, RejectsRelocationToTextSectionSymbol) {
+  auto image =
+      make_amdgpu_elf_with_symbol_relocation(kElfSymbolTypeSection, /*defined_in_text=*/true);
   AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
 
@@ -1838,7 +1948,7 @@ TEST(BinaryTranslatorE2E, RejectsRelocationToTextNotypeSymbol) {
 
   EXPECT_EQ(result.elf_bytes, image);
   EXPECT_TRUE(rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
-                                             "symbol defined in .text"));
+                                             "unsupported relocation referencing .text"));
 }
 
 // Independently pin the AMDGPU ELF ABI value so the tests below cannot mask a
@@ -1848,12 +1958,9 @@ TEST(BinaryTranslatorE2E, RejectsRelocationToTextNotypeSymbol) {
 static_assert(rocjitsu::R_AMDGPU_RELATIVE64 == 13,
               "R_AMDGPU_RELATIVE64 must be the AMDGPU ELF ABI value 13");
 
-// R_AMDGPU_RELATIVE64 carries symbol index 0, so the st_shndx-based text-symbol
-// check cannot see it; the loader forms the stored value from load_bias +
-// r_addend. An addend inside the source .text interval must be rejected (DBT
-// moves the text without remapping the addend), while an addend outside .text
-// (e.g. the .data vaddr) is safely shifted with its section and must be accepted.
-TEST(CodeObjectPatcher, DetectsRelative64AddendIntoText) {
+// R_AMDGPU_RELATIVE64 carries symbol index 0, so the target is entirely in the
+// explicit addend. DBT can remap an in-text addend through its exact offset map.
+TEST(CodeObjectPatcher, SupportsRelative64AddendIntoText) {
   // Reference the production ABI constant so the test can never drift from it.
   constexpr uint32_t kRelative64 = rocjitsu::R_AMDGPU_RELATIVE64;
   constexpr int64_t kInTextAddend = 0x1100;    // == text_vaddr
@@ -1863,8 +1970,8 @@ TEST(CodeObjectPatcher, DetectsRelative64AddendIntoText) {
   AmdGpuCodeObject in_text_co(in_text.data(), in_text.size());
   ASSERT_TRUE(in_text_co.is_valid());
   CodeObjectPatcher in_text_patcher(in_text_co);
-  EXPECT_TRUE(in_text_patcher.has_relocation_to_text_symbol())
-      << "RELATIVE64 addend inside .text must be rejected";
+  EXPECT_FALSE(in_text_patcher.has_unsupported_relocation_to_text())
+      << "RELATIVE64 addend inside .text has explicit remapping semantics";
   // The addend place is in .data, so the in-text-place guard must NOT be what
   // catches it -- the symbol-zero addend check is the code path under test.
   EXPECT_FALSE(in_text_patcher.has_relocations_within_text());
@@ -1873,22 +1980,8 @@ TEST(CodeObjectPatcher, DetectsRelative64AddendIntoText) {
   AmdGpuCodeObject out_co(out_of_text.data(), out_of_text.size());
   ASSERT_TRUE(out_co.is_valid());
   CodeObjectPatcher out_patcher(out_co);
-  EXPECT_FALSE(out_patcher.has_relocation_to_text_symbol())
+  EXPECT_FALSE(out_patcher.has_unsupported_relocation_to_text())
       << "RELATIVE64 addend outside .text must be accepted";
-}
-
-TEST(BinaryTranslatorE2E, RejectsRelative64AddendIntoText) {
-  constexpr uint32_t kRelative64 = rocjitsu::R_AMDGPU_RELATIVE64;
-  auto image = make_amdgpu_elf_with_relative_relocation(kRelative64, /*addend=*/0x1100);
-  AmdGpuCodeObject source(image.data(), image.size());
-  ASSERT_TRUE(source.is_valid());
-
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
-  auto result = translator.translate(source);
-
-  EXPECT_EQ(result.elf_bytes, image);
-  EXPECT_TRUE(rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
-                                             "symbol defined in .text"));
 }
 
 TEST(BinaryTranslator, InlineExpansionAvoidsCaveBranchOverflow) {
@@ -2138,7 +2231,19 @@ TEST(InstructionBuilder, PatchPcrelBranchOffsetRejectsMisalignedDelta) {
 
 namespace cdna3 = rocjitsu::cdna3;
 namespace cdna4 = rocjitsu::cdna4;
+namespace gfx1250 = rocjitsu::gfx1250;
 namespace rdna4 = rocjitsu::rdna4;
+
+/// @brief Build explicit gfx1250 revision options without partial aggregate
+/// initializers, which are rejected by the test suite's warning policy.
+rocjitsu::BinaryTranslatorOptions
+gfx1250_revision_options(rocjitsu::ProcessorRevision input_revision,
+                         rocjitsu::ProcessorRevision output_revision) {
+  rocjitsu::BinaryTranslatorOptions options;
+  options.input_revision = input_revision;
+  options.output_revision = output_revision;
+  return options;
+}
 
 constexpr uint16_t kAnyExpectedField = 0xffff;
 
@@ -3941,7 +4046,7 @@ TEST(BinaryTranslatorE2E, SkipFailedKernelKeepsIndependentKernelTranslating) {
   ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
                                                           : result.diagnostics.front().message);
   // A skipped kernel is only a warning, so ok() stays true, but the artifact is
-  // NOT dispatchable: its trap stub would silently complete if dispatched. Code
+  // NOT dispatchable: its s_endpgm stub would silently complete if dispatched. Code
   // object output paths (CLI, API consumers) must gate on dispatchable().
   EXPECT_FALSE(result.dispatchable());
   ASSERT_FALSE(result.elf_bytes.empty());
@@ -3959,11 +4064,10 @@ TEST(BinaryTranslatorE2E, SkipFailedKernelKeepsIndependentKernelTranslating) {
   ASSERT_FALSE(translated.text_sections().empty());
   const auto *translated_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
-  EXPECT_EQ(translated_words[0],
-            rocjitsu::build_s_trap(ROCJITSU_CODE_ARCH_CDNA3, rocjitsu::kSkippedKernelTrapId))
-      << "the failed kernel body traps if it is dispatched";
-  EXPECT_EQ(translated_words[1], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3))
-      << "the skipped-kernel stub keeps a defensive endpgm after the trap";
+  EXPECT_EQ(translated_words[0], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3))
+      << "the failed kernel body exits safely if it is dispatched";
+  EXPECT_NE(skipped->message.find("S_ENDPGM"), std::string::npos);
+  EXPECT_NE(skipped->message.find("INVALID OUTPUTS"), std::string::npos);
 
   rocjitsu::KernelDescriptorTranslator parser(ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA3);
   const auto infos = parser.translate_image(
@@ -3976,7 +4080,8 @@ TEST(BinaryTranslatorE2E, SkipFailedKernelKeepsIndependentKernelTranslating) {
   std::ranges::sort(entries);
   ASSERT_EQ(entries.size(), 2u);
   EXPECT_EQ(entries[0], 0u);
-  ASSERT_GT(entries[1], sizeof(uint32_t));
+  EXPECT_EQ(entries[1], sizeof(uint32_t))
+      << "the independent kernel follows the one-instruction skipped body";
   ASSERT_EQ(entries[1] % sizeof(uint32_t), 0u);
   ASSERT_LT(entries[1], translated.text_sections()[0]->size());
   EXPECT_EQ(translated_words[entries[1] / sizeof(uint32_t)],
@@ -4302,7 +4407,7 @@ TEST(BinaryTranslatorE2E, DirectBranchRelocationUsesLongBranchWindowWhenExpanded
   std::vector<uint32_t> words;
   words.reserve(kTargetWord + 1);
   words.push_back(
-      rocjitsu::pack_sopp(cdna3::kSCbranchScc1Sopp, static_cast<uint16_t>(kTargetWord - 1)));
+      rocjitsu::pack_sopp(cdna3::kSCbranchExecnzSopp, static_cast<uint16_t>(kTargetWord - 1)));
   for (size_t i = 1; i < kTargetWord; ++i)
     words.push_back(rocjitsu::pack_sopp(cdna3::kSCbranchScc0Sopp, 0));
   words.push_back(kCdna4SEndpgm);
@@ -4325,13 +4430,61 @@ TEST(BinaryTranslatorE2E, DirectBranchRelocationUsesLongBranchWindowWhenExpanded
 
   // The source branch is in range, but reserving branch windows for the many
   // intervening branches pushes the relocated target outside the SOPP simm16
-  // range. DBT inverts the condition to skip over the long transfer when SCC0
-  // is true, then rebuilds the target PC in a descriptor-backed SGPR pair.
-  EXPECT_EQ(target_words[0], rocjitsu::pack_sopp(cdna3::kSCbranchScc0Sopp,
+  // range. DBT inverts the condition to skip over the long transfer when EXEC
+  // is zero, then rebuilds the target PC in a descriptor-backed SGPR pair. This
+  // specifically guards the highest adjacent conditional pair: opcode 38 must
+  // invert to 37, not invalid opcode 39.
+  EXPECT_EQ(target_words[0], rocjitsu::pack_sopp(cdna3::kSCbranchExeczSopp,
                                                  rocjitsu::kMaxDirectBranchTransferWords - 1));
   EXPECT_EQ(target_words[1], build_s_getpc_b64(kLongBranchScratchSgpr, ROCJITSU_CODE_ARCH_CDNA3));
   EXPECT_EQ(target_words[5], build_s_setpc_b64(kLongBranchScratchSgpr, ROCJITSU_CODE_ARCH_CDNA3));
   EXPECT_EQ(target_words[6], rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250LongBranchInvertsExecNzToExecZ) {
+  constexpr size_t kTargetWord = 20000;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+
+  std::vector<uint32_t> words;
+  words.reserve(kTargetWord + 1);
+  words.push_back(
+      rocjitsu::pack_sopp(gfx1250::kSCbranchExecnzSopp, static_cast<uint16_t>(kTargetWord - 1)));
+  for (size_t i = 1; i < kTargetWord; ++i)
+    words.push_back(rocjitsu::pack_sopp(gfx1250::kSCbranchScc0Sopp, 0));
+  words.push_back(kGfx1250SEndpgm);
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[0], rocjitsu::pack_sopp(gfx1250::kSCbranchExeczSopp,
+                                                 rocjitsu::kMaxDirectBranchTransferWords - 1));
+}
+
+TEST(BinaryTranslatorE2E, DirectBranchWindowKeepsSevenKibibyteBranchesCompact) {
+  const uint32_t branch_word = rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto branch = rocjitsu::decode_one(branch_word, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(branch, nullptr);
+
+  constexpr uint64_t kCompactDistance = 7 * 1024;
+  EXPECT_EQ(rocjitsu::direct_branch_patch_window_bytes(*branch, 0, kCompactDistance, true),
+            sizeof(uint32_t));
+  EXPECT_EQ(rocjitsu::direct_branch_patch_window_bytes(*branch, 0,
+                                                       kCompactDistance + sizeof(uint32_t), true),
+            rocjitsu::kMaxDirectBranchTransferWords * sizeof(uint32_t));
 }
 
 TEST(BinaryTranslatorE2E, DirectBranchRelocationUsesIslandsWhenSgprsAreFull) {
@@ -6523,10 +6676,6 @@ TEST(BinaryTranslatorE2E, SkipFailedVirtualLdsSidecarKeepsNormalDescriptor) {
   // translated hardware-LDS body, not at the skipped-kernel stub appended for
   // the sidecar variant.
   EXPECT_EQ(*normal_entry_file_offset, translated_text->sectionOffset());
-  const auto *entry_words =
-      reinterpret_cast<const uint32_t *>(result.elf_bytes.data() + *normal_entry_file_offset);
-  EXPECT_NE(entry_words[0],
-            rocjitsu::build_s_trap(ROCJITSU_CODE_ARCH_CDNA3, rocjitsu::kSkippedKernelTrapId));
   EXPECT_EQ(rocjitsu::find_section(translated, rocjitsu::kVirtualLdsMetadataSectionName), nullptr);
 }
 
@@ -6587,12 +6736,11 @@ TEST(BinaryTranslatorE2E, SkipFailedVirtualLdsSidecarStubsOversizedNormalDescrip
 
   // The normal descriptor's advertised static LDS (105600) exceeds the CDNA3
   // host limit, so it could only ever launch via the failed sidecar. Its entry
-  // must now point at the skipped-kernel trap stub, and the descriptor must
+  // must now point at the skipped-kernel endpgm stub, and the descriptor must
   // advertise no fixed LDS so a launch attempt cannot fault the host.
   const auto *entry_words =
       reinterpret_cast<const uint32_t *>(result.elf_bytes.data() + *normal_entry_file_offset);
-  EXPECT_EQ(entry_words[0],
-            rocjitsu::build_s_trap(ROCJITSU_CODE_ARCH_CDNA3, rocjitsu::kSkippedKernelTrapId));
+  EXPECT_EQ(entry_words[0], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
   EXPECT_EQ(normal_kd.group_segment_fixed_size, 0u);
   EXPECT_EQ(rocjitsu::find_section(translated, rocjitsu::kVirtualLdsMetadataSectionName), nullptr);
 }
@@ -7372,8 +7520,7 @@ TEST(BinaryTranslatorE2E, EndpgmAfterTrapTerminatesCfgBeforeFollowingFunction) {
   // S_TRAP is NOT a CFG terminator: on hardware it transfers to the trap handler
   // and returns to the next instruction, and with no handler configured (the
   // state this emulator models) it executes as a NOP that falls through. A real
-  // terminator (S_ENDPGM) must follow it to end the block. This mirrors the
-  // skipped-kernel stub layout (trap; endpgm). The S_ENDPGM terminates the CFG so
+  // terminator (S_ENDPGM) must follow it to end the block. The S_ENDPGM terminates the CFG so
   // the following ELF function bytes stay unreachable and the unrecovered
   // S_SETPC_B64 below is never decoded into the CFG.
   const std::vector<uint32_t> words = {
@@ -7580,6 +7727,1229 @@ TEST(BinaryTranslatorE2E, DebugContinueAfterFailureCollectsMultipleExpandDiagnos
   EXPECT_EQ(expand_offsets, (std::vector<uint64_t>{0, 8}));
 }
 
+TEST(BinaryTranslatorE2E, Gfx1250CopiesUnaffectedInstructionsForB0ToA0) {
+  constexpr uint32_t kGfx1250SNop = 0xBF800000u;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({kGfx1250SNop, kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+
+  EXPECT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  EXPECT_EQ(result.host_arch, ROCJITSU_CODE_ARCH_GFX1250);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250ReplacesSClauseWithNopForB0ToA0) {
+  constexpr auto source_clause = gfx1250::build_sopp(gfx1250::kSClauseSopp, {.simm16 = 4});
+  constexpr auto source_end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp, {.simm16 = 0});
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {source_clause[0], source_end[0]});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[0], gfx1250::build_sopp(gfx1250::kSNopSopp, {.simm16 = 0})[0]);
+  EXPECT_EQ(target_words[1], source_end[0]);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250PreservesSClauseOutsideB0ToA0) {
+  constexpr auto source_clause = gfx1250::build_sopp(gfx1250::kSClauseSopp, {.simm16 = 4});
+  constexpr auto source_end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp, {.simm16 = 0});
+
+  for (const rocjitsu::ProcessorRevision revision : {
+           rocjitsu::ProcessorRevision::Gfx1250A0,
+           rocjitsu::ProcessorRevision::Gfx1250B0,
+       }) {
+    auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+        {source_clause[0], source_end[0]});
+    rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+
+    rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+                                          gfx1250_revision_options(revision, revision));
+    auto result = translator.translate(source);
+
+    ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                            : result.diagnostics.front().message);
+    rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_FALSE(translated.text_sections().empty());
+    const auto *target_words =
+        reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+    EXPECT_EQ(target_words[0], source_clause[0]);
+    EXPECT_EQ(target_words[1], source_end[0]);
+  }
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250RelocatesDirectCallForB0ToA0) {
+  constexpr uint16_t kReturnSreg = 30;
+  const std::vector<uint32_t> words = {
+      rocjitsu::build_s_branch(2, ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_call_b64(kReturnSreg, 2, ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_GFX1250),
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[0], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_EQ(target_words[1],
+            rocjitsu::build_s_call_b64(kReturnSreg, 1, ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_EQ(target_words[2], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_EQ(target_words[3], rocjitsu::build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_GFX1250));
+
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_GE(decoded.size(), 4u);
+  EXPECT_EQ(decoded[1]->mnemonic(), "s_call_i64");
+  ASSERT_TRUE(decoded[1]->branch_offset_bytes().has_value());
+  EXPECT_EQ(*decoded[1]->branch_offset_bytes(), 4);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250KernargPreloadUsesSingleDescriptorEntry) {
+  constexpr uint32_t kGfx1250SNop = 0xBF800000u;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({kGfx1250SNop, kGfx1250SEndpgm});
+
+  rocjitsu::AmdGpuCodeObject source_layout(image.data(), image.size());
+  ASSERT_TRUE(source_layout.is_valid());
+  const auto *source_rodata = rocjitsu::find_section(source_layout, ".rodata");
+  ASSERT_NE(source_rodata, nullptr);
+  auto source_kd =
+      rocjitsu::read_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_OFFSET, 2);
+  rocjitsu::write_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset(),
+                                             source_kd);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto *target_rodata = rocjitsu::find_section(translated, ".rodata");
+  ASSERT_NE(target_rodata, nullptr);
+  const auto target_kd = rocjitsu::read_kernel_descriptor_for_test(translated.image_data() +
+                                                                   target_rodata->sectionOffset());
+  EXPECT_EQ(target_kd.kernarg_preload, source_kd.kernarg_preload)
+      << "gfx1250 preload fields remain active while DBT uses the descriptor's single entry";
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250CopiesUnaffectedLiteralOperandsForB0ToA0) {
+  constexpr uint32_t kVMovB32Literal = 0x7E0202FFu;
+  constexpr uint32_t kLiteral = 0x11223344u;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {kVMovB32Literal, kLiteral, kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[0], kVMovB32Literal);
+  EXPECT_EQ(target_words[1], kLiteral);
+  EXPECT_EQ(target_words[2], kGfx1250SEndpgm);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250CopiesCvtPkFp8F32WhenClampIsClear) {
+  constexpr auto source_cvt = gfx1250::build_vop3(
+      gfx1250::kVCvtPkFp8F32Vop3, {.vdst = 30, .clamp = 0, .src0 = 256 + 22, .src1 = 256 + 2});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {source_cvt[0], source_cvt[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[0], source_cvt[0]);
+  EXPECT_EQ(target_words[1], source_cvt[1]);
+  EXPECT_EQ(target_words[2], kGfx1250SEndpgm);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250CvtPkFp8F32ClampSetStillFailsClosed) {
+  constexpr auto source_cvt = gfx1250::build_vop3(
+      gfx1250::kVCvtPkFp8F32Vop3, {.vdst = 30, .clamp = 1, .src0 = 256 + 22, .src1 = 256 + 2});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {source_cvt[0], source_cvt[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  const auto diagnostic = std::ranges::find_if(result.diagnostics, [](const auto &item) {
+    return item.severity == rocjitsu::DiagnosticSeverity::Error &&
+           item.kind == rocjitsu::DiagnosticKind::ExpandMissing;
+  });
+  ASSERT_NE(diagnostic, result.diagnostics.end());
+  EXPECT_EQ(diagnostic->mnemonic, "v_cvt_pk_fp8_f32");
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250LiteralCvtPkFp8F32ClampSetFailsClosed) {
+  constexpr auto source_cvt = gfx1250::build_vop3(
+      gfx1250::kVCvtPkFp8F32Vop3, {.vdst = 30, .clamp = 1, .src0 = 255, .src1 = 256 + 2});
+  constexpr uint32_t kLiteral = 0x3F800000u;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {source_cvt[0], source_cvt[1], kLiteral, kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  const auto diagnostic = std::ranges::find_if(result.diagnostics, [](const auto &item) {
+    return item.severity == rocjitsu::DiagnosticSeverity::Error &&
+           item.kind == rocjitsu::DiagnosticKind::ExpandMissing;
+  });
+  ASSERT_NE(diagnostic, result.diagnostics.end());
+  EXPECT_EQ(diagnostic->mnemonic, "v_cvt_pk_fp8_f32");
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250CopiesLiteralCvtF32Fp8E32WithoutClampEmulation) {
+  constexpr auto conversion =
+      gfx1250::build_vop1(gfx1250::kVCvtF32Fp8Vop1, {.src0 = 255, .vdst = 30});
+  constexpr uint32_t kLiteral = 0x3F800000u;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {conversion[0], kLiteral, kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[0], conversion[0]);
+  EXPECT_EQ(target_words[1], kLiteral);
+  EXPECT_EQ(target_words[2], kGfx1250SEndpgm);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250EmulatesCvtF32Fp8E5m3ForA0) {
+  constexpr auto conversion = gfx1250::build_vop3(
+      gfx1250::kVCvtF32Fp8Vop3, {.vdst = 30, .opsel = 2, .clamp = 1, .src0 = 256 + 22});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {conversion[0], conversion[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  EXPECT_EQ(std::ranges::count_if(
+                decoded, [](const auto &inst) { return inst->mnemonic() == "v_cvt_f32_fp8"; }),
+            0);
+  EXPECT_EQ(std::ranges::count_if(
+                decoded, [](const auto &inst) { return inst->mnemonic() == "v_cndmask_b32"; }),
+            2);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250CopiesWmmaWithoutAnA0SpecificWorkaround) {
+  constexpr auto source_wmma = gfx1250::build_vop3p(
+      gfx1250::kVWmmaF3216x16x32Bf16Vop3p, {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {source_wmma[0], source_wmma[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[0], source_wmma[0]);
+  EXPECT_EQ(target_words[1], source_wmma[1]);
+  EXPECT_EQ(target_words[2], kGfx1250SEndpgm);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250EqualRevisionsDoNotApplyA0Errata) {
+  constexpr auto source_ds2 = gfx1250::build_vds(
+      gfx1250::kDsLoad2addrB32Vds, {.offset0 = 1, .offset1 = 3, .addr = 7, .vdst = 9});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {source_ds2[0], source_ds2[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  for (const rocjitsu::ProcessorRevision revision :
+       {rocjitsu::ProcessorRevision::Gfx1250A0, rocjitsu::ProcessorRevision::Gfx1250B0}) {
+    SCOPED_TRACE(revision == rocjitsu::ProcessorRevision::Gfx1250A0 ? "A0-to-A0" : "B0-to-B0");
+    rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+                                          gfx1250_revision_options(revision, revision));
+    auto result = translator.translate(source);
+    ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                            : result.diagnostics.front().message);
+
+    rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_FALSE(translated.text_sections().empty());
+    const auto *target_words =
+        reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+    EXPECT_EQ(target_words[0], source_ds2[0]);
+    EXPECT_EQ(target_words[1], source_ds2[1]);
+    EXPECT_EQ(target_words[2], kGfx1250SEndpgm);
+  }
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250RejectsA0ToB0Translation) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250A0,
+                               rocjitsu::ProcessorRevision::Gfx1250B0));
+  auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
+                                             "A0-to-B0 translation is not supported"));
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250ExpandsEveryDs2VariantForA0) {
+  struct Ds2Case {
+    const char *name;
+    uint16_t source_opcode;
+    uint16_t target_opcode;
+    uint8_t element_dwords;
+    bool stride64;
+  };
+  constexpr std::array cases = {
+      Ds2Case{"store_b32", gfx1250::kDsStore2addrB32Vds, gfx1250::kDsStoreB32Vds, 1, false},
+      Ds2Case{"store_stride64_b32", gfx1250::kDsStore2addrStride64B32Vds, gfx1250::kDsStoreB32Vds,
+              1, true},
+      Ds2Case{"storexchg_b32", gfx1250::kDsStorexchg2addrRtnB32Vds, gfx1250::kDsStorexchgRtnB32Vds,
+              1, false},
+      Ds2Case{"storexchg_stride64_b32", gfx1250::kDsStorexchg2addrStride64RtnB32Vds,
+              gfx1250::kDsStorexchgRtnB32Vds, 1, true},
+      Ds2Case{"load_b32", gfx1250::kDsLoad2addrB32Vds, gfx1250::kDsLoadB32Vds, 1, false},
+      Ds2Case{"load_stride64_b32", gfx1250::kDsLoad2addrStride64B32Vds, gfx1250::kDsLoadB32Vds, 1,
+              true},
+      Ds2Case{"store_b64", gfx1250::kDsStore2addrB64Vds, gfx1250::kDsStoreB64Vds, 2, false},
+      Ds2Case{"store_stride64_b64", gfx1250::kDsStore2addrStride64B64Vds, gfx1250::kDsStoreB64Vds,
+              2, true},
+      Ds2Case{"storexchg_b64", gfx1250::kDsStorexchg2addrRtnB64Vds, gfx1250::kDsStorexchgRtnB64Vds,
+              2, false},
+      Ds2Case{"storexchg_stride64_b64", gfx1250::kDsStorexchg2addrStride64RtnB64Vds,
+              gfx1250::kDsStorexchgRtnB64Vds, 2, true},
+      Ds2Case{"load_b64", gfx1250::kDsLoad2addrB64Vds, gfx1250::kDsLoadB64Vds, 2, false},
+      Ds2Case{"load_stride64_b64", gfx1250::kDsLoad2addrStride64B64Vds, gfx1250::kDsLoadB64Vds, 2,
+              true},
+  };
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr gfx1250::VdsBuilderFields source_fields{
+      .offset0 = 3, .offset1 = 5, .addr = 20, .data0 = 30, .data1 = 40, .vdst = 50};
+
+  for (const Ds2Case &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    const auto source_ds2 = gfx1250::build_vds(test_case.source_opcode, source_fields);
+    auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+        {source_ds2[0], source_ds2[1], kGfx1250SEndpgm});
+    rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+
+    rocjitsu::BinaryTranslator translator(
+        ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+        gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                 rocjitsu::ProcessorRevision::Gfx1250A0));
+    auto result = translator.translate(source);
+    ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                            : result.diagnostics.front().message);
+
+    rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(translated.is_valid());
+    ASSERT_FALSE(translated.text_sections().empty());
+    const auto *target_words =
+        reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+    ASSERT_GE(translated.text_sections()[0]->size(), 6 * sizeof(uint32_t));
+
+    const uint16_t scale = static_cast<uint16_t>(test_case.element_dwords * sizeof(uint32_t) *
+                                                 (test_case.stride64 ? 64 : 1));
+    const bool plain_store = test_case.target_opcode == gfx1250::kDsStoreB32Vds ||
+                             test_case.target_opcode == gfx1250::kDsStoreB64Vds;
+    const auto first =
+        gfx1250::build_vds(test_case.target_opcode,
+                           {.offset0 = static_cast<uint8_t>((source_fields.offset0 * scale) & 0xff),
+                            .offset1 = static_cast<uint8_t>((source_fields.offset0 * scale) >> 8),
+                            .addr = source_fields.addr,
+                            .data0 = source_fields.data0,
+                            .vdst = static_cast<uint8_t>(plain_store ? 0 : source_fields.vdst)});
+    const auto second =
+        gfx1250::build_vds(test_case.target_opcode,
+                           {.offset0 = static_cast<uint8_t>((source_fields.offset1 * scale) & 0xff),
+                            .offset1 = static_cast<uint8_t>((source_fields.offset1 * scale) >> 8),
+                            .addr = source_fields.addr,
+                            .data0 = source_fields.data1,
+                            .vdst = static_cast<uint8_t>(
+                                plain_store ? 0 : source_fields.vdst + test_case.element_dwords)});
+    EXPECT_EQ(target_words[0], first[0]);
+    EXPECT_EQ(target_words[1], first[1]);
+    EXPECT_EQ(target_words[2], second[0]);
+    EXPECT_EQ(target_words[3], second[1]);
+    EXPECT_EQ(target_words[4], gfx1250::build_sopp(gfx1250::kSWaitDscntSopp, {.simm16 = 0})[0]);
+    EXPECT_EQ(target_words[5], kGfx1250SEndpgm);
+  }
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250Ds2LoadPreservesAliasedAddressUntilBothLoadsIssue) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  // ADDR=v7 aliases the first destination half v7. The second load must issue
+  // first, exactly matching the executable far-DS2 alias oracle.
+  constexpr gfx1250::VdsBuilderFields fields{.offset0 = 1, .offset1 = 3, .addr = 7, .vdst = 7};
+  constexpr auto source_ds2 = gfx1250::build_vds(gfx1250::kDsLoad2addrB32Vds, fields);
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {source_ds2[0], source_ds2[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+
+  constexpr auto second =
+      gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.offset0 = 12, .addr = fields.addr, .vdst = 8});
+  constexpr auto first =
+      gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.offset0 = 4, .addr = fields.addr, .vdst = 7});
+  EXPECT_EQ(target_words[0], second[0]);
+  EXPECT_EQ(target_words[1], second[1]);
+  EXPECT_EQ(target_words[2], first[0]);
+  EXPECT_EQ(target_words[3], first[1]);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250Ds2ExchangeCyclicOverlapFailsClosed) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  // First destination v10 aliases ADDR; second destination v11 aliases DATA0.
+  // Neither issue order preserves every compound source operand.
+  constexpr auto source_ds2 = gfx1250::build_vds(
+      gfx1250::kDsStorexchg2addrRtnB32Vds, {.addr = 10, .data0 = 11, .data1 = 20, .vdst = 10});
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {source_ds2[0], source_ds2[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  EXPECT_FALSE(result.ok());
+  const auto diagnostic = std::ranges::find_if(result.diagnostics, [](const auto &item) {
+    return item.kind == rocjitsu::DiagnosticKind::ExpandFailed;
+  });
+  ASSERT_NE(diagnostic, result.diagnostics.end());
+  EXPECT_NE(diagnostic->message.find("cyclic"), std::string::npos);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250Ds2OversizedStride64OffsetFailsClosed) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr auto source_ds2 = gfx1250::build_vds(gfx1250::kDsLoad2addrStride64B64Vds,
+                                                 {.offset1 = 255, .addr = 4, .vdst = 8});
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {source_ds2[0], source_ds2[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  EXPECT_FALSE(result.ok());
+  const auto diagnostic = std::ranges::find_if(result.diagnostics, [](const auto &item) {
+    return item.kind == rocjitsu::DiagnosticKind::ExpandFailed;
+  });
+  ASSERT_NE(diagnostic, result.diagnostics.end());
+  EXPECT_NE(diagnostic->message.find("16-bit"), std::string::npos);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250Ds2MovesData1VgprBankToSecondData0Role) {
+  constexpr auto set_vgpr_msb = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x10});
+  constexpr auto source_ds2 =
+      gfx1250::build_vds(gfx1250::kDsStore2addrB32Vds,
+                         {.offset0 = 1, .offset1 = 2, .addr = 4, .data0 = 8, .data1 = 12});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {set_vgpr_msb[0], source_ds2[0], source_ds2[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[0], set_vgpr_msb[0]);
+  EXPECT_EQ(target_words[3], gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x1014})[0]);
+  EXPECT_EQ(target_words[6], gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x1410})[0]);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250Ds2AdjustsDestinationBankForSecondLoad) {
+  constexpr auto source_ds2 = gfx1250::build_vds(
+      gfx1250::kDsLoad2addrB64Vds, {.offset0 = 1, .offset1 = 2, .addr = 4, .vdst = 254});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {source_ds2[0], source_ds2[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[2], gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x40})[0]);
+  EXPECT_EQ(target_words[5], gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x4000})[0]);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250SplitsEveryK128Fp8Bf8WmmaForA0) {
+  struct WmmaCase {
+    const char *name;
+    uint16_t source_opcode;
+    uint16_t target_opcode;
+  };
+  constexpr std::array cases = {
+      WmmaCase{"f32_fp8_fp8", gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p,
+               gfx1250::kVWmmaF3216x16x64Fp8Fp8Vop3p},
+      WmmaCase{"f32_fp8_bf8", gfx1250::kVWmmaF3216x16x128Fp8Bf8Vop3p,
+               gfx1250::kVWmmaF3216x16x64Fp8Bf8Vop3p},
+      WmmaCase{"f32_bf8_fp8", gfx1250::kVWmmaF3216x16x128Bf8Fp8Vop3p,
+               gfx1250::kVWmmaF3216x16x64Bf8Fp8Vop3p},
+      WmmaCase{"f32_bf8_bf8", gfx1250::kVWmmaF3216x16x128Bf8Bf8Vop3p,
+               gfx1250::kVWmmaF3216x16x64Bf8Bf8Vop3p},
+      WmmaCase{"f16_fp8_fp8", gfx1250::kVWmmaF1616x16x128Fp8Fp8Vop3p,
+               gfx1250::kVWmmaF1616x16x64Fp8Fp8Vop3p},
+      WmmaCase{"f16_fp8_bf8", gfx1250::kVWmmaF1616x16x128Fp8Bf8Vop3p,
+               gfx1250::kVWmmaF1616x16x64Fp8Bf8Vop3p},
+      WmmaCase{"f16_bf8_fp8", gfx1250::kVWmmaF1616x16x128Bf8Fp8Vop3p,
+               gfx1250::kVWmmaF1616x16x64Bf8Fp8Vop3p},
+      WmmaCase{"f16_bf8_bf8", gfx1250::kVWmmaF1616x16x128Bf8Bf8Vop3p,
+               gfx1250::kVWmmaF1616x16x64Bf8Bf8Vop3p},
+  };
+  constexpr gfx1250::Vop3pBuilderFields fields{
+      .vdst = 54, .src0 = 256 + 16, .src1 = 256 + 32, .src2 = 128};
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+
+  EXPECT_EQ(rocjitsu::semantic_expand_rules_gfx1250_b0_to_a0().size(), 37u);
+  for (const WmmaCase &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    const auto source_wmma = gfx1250::build_vop3p(test_case.source_opcode, fields);
+    auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+        {source_wmma[0], source_wmma[1], kGfx1250SEndpgm});
+    rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+    rocjitsu::BinaryTranslator translator(
+        ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+        gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                 rocjitsu::ProcessorRevision::Gfx1250A0));
+    auto result = translator.translate(source);
+    ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                            : result.diagnostics.front().message);
+    rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_FALSE(translated.text_sections().empty());
+    const auto *target_words =
+        reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+
+    const auto first = gfx1250::build_vop3p(test_case.target_opcode, fields);
+    const auto second = gfx1250::build_vop3p(test_case.target_opcode,
+                                             {.vdst = fields.vdst,
+                                              .src0 = static_cast<uint16_t>(fields.src0 + 8),
+                                              .src1 = static_cast<uint16_t>(fields.src1 + 8),
+                                              .src2 = static_cast<uint16_t>(256 + fields.vdst)});
+    EXPECT_EQ(target_words[0], first[0]);
+    EXPECT_EQ(target_words[1], first[1]);
+    EXPECT_EQ(target_words[2], second[0]);
+    EXPECT_EQ(target_words[3], second[1]);
+    EXPECT_EQ(target_words[4], kGfx1250SEndpgm);
+  }
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250DemotesOffFormClusterLoadForA0) {
+  constexpr auto cluster = gfx1250::build_vglobal(gfx1250::kClusterLoadB32Vglobal,
+                                                  {.saddr = 124, .vdst = 8, .vaddr = 12});
+  constexpr auto global = gfx1250::build_vglobal(gfx1250::kGlobalLoadB32Vglobal,
+                                                 {.saddr = 124, .vdst = 8, .vaddr = 12});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {cluster[0], cluster[1], cluster[2], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto *words = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(words[0], global[0]);
+  EXPECT_EQ(words[1], global[1]);
+  EXPECT_EQ(words[2], global[2]);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250MasksM0AroundSaddrClusterLoadForA0) {
+  constexpr auto cluster =
+      gfx1250::build_vglobal(gfx1250::kClusterLoadB64Vglobal, {.saddr = 4, .vdst = 8, .vaddr = 12});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {cluster[0], cluster[1], cluster[2], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  EXPECT_EQ(std::ranges::count_if(
+                decoded, [](const auto &inst) { return inst->mnemonic() == "cluster_load_b64"; }),
+            1);
+  EXPECT_EQ(std::ranges::count_if(
+                decoded, [](const auto &inst) { return inst->mnemonic() == "s_pack_hh_b32_b16"; }),
+            1);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250MaterializesDsAddtidAddressForA0) {
+  constexpr auto addtid = gfx1250::build_vds(gfx1250::kDsLoadAddtidB32Vds,
+                                             {.offset0 = 0x34, .offset1 = 0x12, .vdst = 8});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {addtid[0], addtid[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  EXPECT_EQ(std::ranges::count_if(
+                decoded, [](const auto &inst) { return inst->mnemonic() == "ds_load_addtid_b32"; }),
+            0);
+  EXPECT_EQ(std::ranges::count_if(
+                decoded, [](const auto &inst) { return inst->mnemonic() == "ds_load_b32"; }),
+            1);
+  EXPECT_EQ(std::ranges::count_if(decoded,
+                                  [](const auto &inst) {
+                                    return inst->mnemonic() == "v_mbcnt_lo_u32_b32" ||
+                                           inst->mnemonic() == "v_mbcnt_hi_u32_b32";
+                                  }),
+            2);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250GeneratedVgprMsbTransitionsCarryPreviousState) {
+  constexpr uint16_t kAllVgprMsbFieldsHwreg = 1u | (12u << 6) | (7u << 11);
+  constexpr auto original_mode =
+      gfx1250::build_sopk(gfx1250::kSSetregImm32B32Sopk, {.simm16 = kAllVgprMsbFieldsHwreg});
+  constexpr auto addtid =
+      gfx1250::build_vds(gfx1250::kDsStoreAddtidB32Vds, {.offset0 = 4, .data0 = 8});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {original_mode[0], 1u << 14, addtid[0], addtid[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_GE(decoded.size(), 4u);
+  EXPECT_EQ(decoded[0]->mnemonic(), "s_setreg_imm32_b32");
+  EXPECT_EQ(decoded[1]->mnemonic(), "s_nop");
+  EXPECT_EQ(decoded[2]->mnemonic(), "s_set_vgpr_msb");
+  ASSERT_NE(decoded[2]->raw_encoding(), nullptr);
+  EXPECT_EQ(decoded[2]->raw_encoding()[0] & 0xffffu, 0x0100u);
+
+  std::vector<uint16_t> generated_modes;
+  for (size_t index = 1; index < decoded.size(); ++index) {
+    if (decoded[index]->mnemonic() == "s_set_vgpr_msb") {
+      ASSERT_NE(decoded[index]->raw_encoding(), nullptr);
+      generated_modes.push_back(static_cast<uint16_t>(decoded[index]->raw_encoding()[0] & 0xffffu));
+    }
+  }
+  EXPECT_EQ(generated_modes, (std::vector<uint16_t>{0x0100, 0x0004, 0x0401}));
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250ConservativelyPadsIu8WmmaForA0) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const auto source_wmma =
+      gfx1250::build_vop3p(gfx1250::kVWmmaI3216x16x64Iu8Vop3p,
+                           {.vdst = 32, .src0 = 256 + 64, .src1 = 256 + 128, .src2 = 256 + 192});
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {source_wmma[0], source_wmma[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[0], source_wmma[0]);
+  EXPECT_EQ(target_words[1], source_wmma[1]);
+  const uint32_t v_nop = gfx1250::build_vop1(gfx1250::kVNopVop1)[0];
+  for (size_t slot = 0; slot < 8; ++slot)
+    EXPECT_EQ(target_words[2 + slot], v_nop);
+  EXPECT_EQ(target_words[10], kGfx1250SEndpgm);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250K128WmmaSplitClearsReuseAndSecondAccumulatorNegation) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto source_wmma = gfx1250::build_vop3p(
+      gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p,
+      {.vdst = 32, .neg_hi = 7, .src0 = 256, .src1 = 272, .src2 = 288, .neg = 7});
+  // Matrix reuse occupies audited WMMA-specific bits which the generic
+  // generated VOP3P builder does not name individually.
+  source_wmma[0] |= (uint32_t{1} << 13) | (uint32_t{1} << 14);
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {source_wmma[0], source_wmma[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+
+  EXPECT_EQ(target_words[0] & ((uint32_t{1} << 13) | (uint32_t{1} << 14)), 0u);
+  EXPECT_EQ(target_words[2] & ((uint32_t{1} << 13) | (uint32_t{1} << 14)), 0u);
+  EXPECT_EQ((target_words[0] >> 8) & 0x7, 0x7u);
+  EXPECT_EQ((target_words[1] >> 29) & 0x7, 0x7u);
+  EXPECT_EQ((target_words[2] >> 8) & 0x7, 0x3u);
+  EXPECT_EQ((target_words[3] >> 29) & 0x7, 0x3u);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250K128WmmaDestructiveUpperInputOverlapFailsClosed) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  // The first K64 writes v[8:15], while the second K64 still needs the upper
+  // A half v[8:15]. Emitting the ordinary two-instruction split would consume
+  // the intermediate result as matrix A.
+  constexpr auto source_wmma =
+      gfx1250::build_vop3p(gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p,
+                           {.vdst = 8, .src0 = 256, .src1 = 256 + 32, .src2 = 256 + 64});
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {source_wmma[0], source_wmma[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  const auto diagnostic = std::ranges::find_if(result.diagnostics, [](const auto &item) {
+    return item.kind == rocjitsu::DiagnosticKind::ExpandFailed;
+  });
+  ASSERT_NE(diagnostic, result.diagnostics.end());
+  EXPECT_NE(diagnostic->message.find("overlaps an upper input"), std::string::npos);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250K128WmmaSplitTemporarilyMatchesMismatchedVgprMsbBanks) {
+  // SRC2 selects bank 1 while VDST remains in bank 0. The first K64 must read
+  // the original accumulator from SRC2 bank 1; the second temporarily selects
+  // bank 0 so it reads the intermediate written through VDST, then restores
+  // the original mode.
+  constexpr auto set_vgpr_msb = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x10});
+  constexpr auto source_wmma = gfx1250::build_vop3p(
+      gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p, {.vdst = 32, .src0 = 256, .src1 = 272, .src2 = 128});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {set_vgpr_msb[0], source_wmma[0], source_wmma[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  constexpr auto select_vdst_bank_for_src2 =
+      gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x1000});
+
+  EXPECT_EQ(target_words[3], select_vdst_bank_for_src2[0]);
+  EXPECT_EQ(target_words[6], set_vgpr_msb[0]);
+  EXPECT_EQ(target_words[7], kGfx1250SEndpgm);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250K128WmmaSplitAllowsMatchingNonzeroVgprMsbBanks) {
+  // Both SRC2 and VDST select bank 1. Nonzero state is safe as long as the
+  // intermediate destination and accumulator source resolve identically.
+  constexpr auto set_vgpr_msb = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x50});
+  constexpr auto source_wmma = gfx1250::build_vop3p(
+      gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p, {.vdst = 32, .src0 = 256, .src1 = 272, .src2 = 128});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {set_vgpr_msb[0], source_wmma[0], source_wmma[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250K128WmmaSplitUsesLowEightSetVgprMsbBits) {
+  // Only the low byte changes the active bank. The upper byte carries the
+  // previous bank state for trap recovery and must not affect analysis.
+  constexpr auto set_vgpr_msb = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x100});
+  constexpr auto source_wmma = gfx1250::build_vop3p(
+      gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p, {.vdst = 32, .src0 = 256, .src1 = 272, .src2 = 128});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {set_vgpr_msb[0], source_wmma[0], source_wmma[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250K128WmmaSplitAdjustsModeForBankCrossingInput) {
+  // The original 16-register A tuple v[250:265] is legal because sequential
+  // tuple registers cross the v255/v256 boundary. The second K64 half must use
+  // encoded v2 under SRC0 bank 1, then restore the entry mode.
+  constexpr auto source_wmma =
+      gfx1250::build_vop3p(gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p,
+                           {.vdst = 32, .src0 = 256 + 250, .src1 = 256 + 114, .src2 = 128});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {source_wmma[0], source_wmma[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  constexpr auto set_src0_bank_one = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 1});
+  constexpr auto restore_mode = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x100});
+
+  EXPECT_EQ(target_words[2], set_src0_bank_one[0]);
+  EXPECT_EQ(target_words[4] & 0x1ffu, 256u + 2u);
+  EXPECT_EQ(target_words[5], restore_mode[0]);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250K128WmmaSplitCombinesInputCrossingAndAccumulatorBankMode) {
+  // SRC0's high half crosses into bank 1, while the original accumulator uses
+  // SRC2 bank 1 and VDST uses bank 0. The second K64 needs both adjustments in
+  // one temporary mode, followed by restoration of the original mode.
+  constexpr auto original_mode = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x10});
+  constexpr auto source_wmma =
+      gfx1250::build_vop3p(gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p,
+                           {.vdst = 32, .src0 = 256 + 250, .src1 = 256 + 114, .src2 = 128});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {original_mode[0], source_wmma[0], source_wmma[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  constexpr auto second_mode = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x1001});
+  constexpr auto restored_mode = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x110});
+
+  EXPECT_EQ(target_words[3], second_mode[0]);
+  EXPECT_EQ(target_words[5] & 0x1ffu, 256u + 2u);
+  EXPECT_EQ(target_words[6], restored_mode[0]);
+  EXPECT_EQ(target_words[7], kGfx1250SEndpgm);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250TensorLoadAlwaysClearsDynamicMulticastMask) {
+  // Multicast is selected dynamically by D# group-1 bits [15:0], not by an
+  // instruction bit. A0 must therefore clear the runtime mask for every tensor
+  // load and restore the descriptor word after the instruction.
+  constexpr auto source_tensor = gfx1250::build_vimage(
+      gfx1250::kTensorLoadToLdsVimage,
+      {.vaddr4 = 124, .vaddr0 = 8, .vaddr1 = 0, .vaddr2 = 124, .vaddr3 = 124});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {source_tensor[0], source_tensor[1], source_tensor[2], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  ASSERT_GE(translated.text_sections()[0]->size(), 7 * sizeof(uint32_t));
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  // D0 occupies s[8:11] and D1 occupies s[0:7], so the first dead ordinary
+  // scalar register is s12.
+  constexpr auto save_d1 = gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = 0, .sdst = 12});
+  constexpr auto clear_mask =
+      gfx1250::build_sop2(gfx1250::kSPackHhB32B16Sop2, {.ssrc0 = 128, .ssrc1 = 0, .sdst = 0});
+  constexpr auto restore_d1 = gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = 12, .sdst = 0});
+  EXPECT_EQ(target_words[0], save_d1[0]);
+  EXPECT_EQ(target_words[1], clear_mask[0]);
+  EXPECT_EQ(target_words[2], source_tensor[0]);
+  EXPECT_EQ(target_words[3], source_tensor[1]);
+  EXPECT_EQ(target_words[4], source_tensor[2]);
+  EXPECT_EQ(target_words[5], restore_d1[0]);
+  EXPECT_EQ(target_words[6], kGfx1250SEndpgm);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250RegularWmmaScaleEncodesUnusedSrc2AsVgpr) {
+  // Real VOP3PX2 encoding from the mxscale offline oracle. Bits [58:50] are
+  // zero in the B0 object even though SQ decodes that unused field as a scalar
+  // dependency. The A0 output must encode VGPR0 without changing other bits.
+  constexpr std::array<uint32_t, 4> source_scale = {0xCC350000u, 0x0202954Eu, 0xCC332042u,
+                                                    0x050A01CAu};
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {source_scale[0], source_scale[1], source_scale[2], source_scale[3], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  constexpr uint32_t kScaleSrc2Mask = 0x1ffu << 18;
+  EXPECT_EQ(target_words[0], source_scale[0]);
+  EXPECT_EQ(target_words[1], (source_scale[1] & ~kScaleSrc2Mask) | (0x100u << 18));
+  EXPECT_EQ(target_words[2], source_scale[2]);
+  EXPECT_EQ(target_words[3], source_scale[3]);
+  EXPECT_EQ(target_words[4], kGfx1250SEndpgm);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250Scale16Fp4CombinedMAndKSplitFailsClosed) {
+  // The 32x16 Scale16 form needs both an M split and an exact K split. Do not
+  // substitute a lossy scale reduction while the combined four-pass lowering
+  // is unavailable.
+  constexpr auto scale16 =
+      gfx1250::build_vop3p(0x3a, {.src0 = 256 + 64, .src1 = 256 + 66, .src2 = 256});
+  constexpr auto matrix =
+      gfx1250::build_vop3p(gfx1250::kVWmmaF3232x16x128F4Vop3p,
+                           {.vdst = 96, .src0 = 256 + 16, .src1 = 256 + 32, .src2 = 128});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {scale16[0], scale16[1], matrix[0], matrix[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  EXPECT_FALSE(result.ok());
+  ASSERT_FALSE(result.diagnostics.empty());
+  EXPECT_NE(result.diagnostics.front().message.find("combined M/K split"), std::string::npos);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250ConvertsScale16F8f6f4ToRegularScaleForA0) {
+  constexpr auto scale16 =
+      gfx1250::build_vop3p(0x3a, {.src0 = 256 + 64, .src1 = 256 + 66, .src2 = 256});
+  constexpr auto matrix =
+      gfx1250::build_vop3p(gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p,
+                           {.vdst = 96, .src0 = 256 + 16, .src1 = 256 + 32, .src2 = 128});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {scale16[0], scale16[1], matrix[0], matrix[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  EXPECT_EQ(std::ranges::count_if(decoded,
+                                  [](const auto &inst) {
+                                    return inst->mnemonic() == "v_wmma_scale_f32_16x16x128_f8f6f4";
+                                  }),
+            2);
+  EXPECT_EQ(std::ranges::count_if(decoded,
+                                  [](const auto &inst) {
+                                    return inst->mnemonic().starts_with("v_wmma_scale16_f32_");
+                                  }),
+            0);
+  EXPECT_EQ(std::ranges::count_if(decoded,
+                                  [](const auto &inst) { return inst->mnemonic() == "v_max_u32"; }),
+            0);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250SplitsStandalone32x16Fp4ForA0) {
+  constexpr auto matrix =
+      gfx1250::build_vop3p(gfx1250::kVWmmaF3232x16x128F4Vop3p,
+                           {.vdst = 96, .src0 = 256 + 16, .src1 = 256 + 40, .src2 = 256 + 64});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {matrix[0], matrix[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  EXPECT_EQ(std::ranges::count_if(
+                decoded,
+                [](const auto &inst) { return inst->mnemonic() == "v_wmma_f32_16x16x128_f8f6f4"; }),
+            2);
+  EXPECT_EQ(
+      std::ranges::count_if(
+          decoded, [](const auto &inst) { return inst->mnemonic() == "v_wmma_f32_32x16x128_f4"; }),
+      0);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250RecoversAddNcU64PcBuilder) {
+  constexpr uint16_t kPcSreg = 4;
+  constexpr uint16_t kGfx1250SAddNcU64Opcode = 83;
+  constexpr uint16_t kLiteralOperand = 255;
+  constexpr uint32_t kTargetOffset = 20;
+  constexpr uint32_t kGfx1250SNop = 0xBF800000u;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+
+  const std::vector<uint32_t> words = {
+      rocjitsu::build_s_getpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_sop2_encoding(ROCJITSU_CODE_ARCH_GFX1250, kGfx1250SAddNcU64Opcode, kPcSreg,
+                                    kPcSreg, kLiteralOperand),
+      kTargetOffset - sizeof(uint32_t),
+      rocjitsu::build_s_setpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_GFX1250),
+      kGfx1250SNop,
+      kGfx1250SEndpgm,
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+
+  EXPECT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250IgnoresUndecodablePaddingAfterTerminator) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {kGfx1250SEndpgm, 0, kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+
+  EXPECT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250RejectsReachableUndecodableFallthrough) {
+  constexpr uint32_t kGfx1250SNop = 0xBF800000u;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {kGfx1250SNop, 0, kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_TRUE(rocjitsu::has_error_containing(
+      result, rocjitsu::DiagnosticKind::Legalization,
+      "reachable kernel code falls through into undecodable .text bytes"));
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250AcceptsClangUnreachableKernelStub) {
+  // clang emits this one-instruction body for rocPRIM target-specialized
+  // trampolines whose source ends in __builtin_unreachable(). The following
+  // zero is alignment padding, not a second instruction.
+  constexpr uint32_t kSetReplayMode = 0xb9800641u;
+  constexpr uint32_t kLiteralOne = 1u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {kSetReplayMode, kLiteralOne, 0});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+
+  EXPECT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+}
+
 TEST(BinaryTranslatorE2E, MatchedSemanticExpandRuleFailureIsDiagnostic) {
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text();
   rocjitsu::AmdGpuCodeObject source_layout(image.data(), image.size());
@@ -7607,6 +8977,66 @@ TEST(BinaryTranslatorE2E, MatchedSemanticExpandRuleFailureIsDiagnostic) {
   EXPECT_EQ(diagnostic->severity, rocjitsu::DiagnosticSeverity::Error);
   EXPECT_EQ(diagnostic->guest_offset, std::optional<uint64_t>(0));
   EXPECT_FALSE(diagnostic->message.empty());
+}
+
+TEST(KernelDescriptorTranslator, Gfx1250UsesWave32SixteenVgprGranularity) {
+  using namespace rocr::llvm::amdhsa;
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text();
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  const auto *text = rocjitsu::find_section(layout, ".text");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_NE(text, nullptr);
+
+  auto descriptor = rocjitsu::read_kernel_descriptor_for_test(rodata->data());
+  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                  63);
+  // Leave ENABLE_WAVEFRONT_SIZE32 clear to verify that the Wave32-only gfx1250
+  // architecture does not misinterpret a legacy producer's missing bit.
+  rocjitsu::write_kernel_descriptor_for_test(image.data() + rodata->sectionOffset(), descriptor);
+
+  rocjitsu::KernelDescriptorTranslator translator(ROCJITSU_CODE_ARCH_GFX1250,
+                                                  ROCJITSU_CODE_ARCH_GFX1250);
+  const auto translations = translator.translate_image(
+      image, text->sectionOffset(), text->size(), rocjitsu::KernelDescriptorTranslationOptions{});
+
+  ASSERT_EQ(translations.size(), 1u);
+  EXPECT_TRUE(translations[0].supported);
+  EXPECT_EQ(translations[0].guest_wavefront_size, 32);
+  EXPECT_EQ(translations[0].target_wave_size, 32);
+  EXPECT_EQ(translations[0].guest_vgpr_count, 1024u);
+  EXPECT_EQ(translations[0].target_vgpr_count, 1024u);
+  EXPECT_EQ(translations[0].target_vgpr_granulated, 63u);
+}
+
+TEST(KernelDescriptorTranslator, Gfx1250AcceptsLdsAboveTcpPartitionSize) {
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text();
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  const auto *text = rocjitsu::find_section(layout, ".text");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_NE(text, nullptr);
+
+  // gfx1250's descriptor limit is 320 KiB per workgroup. A TCP may be
+  // configured with a smaller LDS/vector-cache partition, but that partition
+  // size is not the architectural descriptor validation limit.
+  constexpr uint32_t kStaticLdsBytes = 176128u;
+  rocjitsu::write_value_for_test<uint32_t>(
+      image,
+      rodata->sectionOffset() + offsetof(rocjitsu::TestKernelDescriptor, group_segment_fixed_size),
+      kStaticLdsBytes);
+
+  rocjitsu::KernelDescriptorTranslator translator(ROCJITSU_CODE_ARCH_GFX1250,
+                                                  ROCJITSU_CODE_ARCH_GFX1250);
+  const auto translations = translator.translate_image(
+      image, text->sectionOffset(), text->size(), rocjitsu::KernelDescriptorTranslationOptions{});
+
+  ASSERT_EQ(translations.size(), 1u);
+  EXPECT_TRUE(translations[0].supported);
+  EXPECT_EQ(translations[0].target_lds_size, kStaticLdsBytes);
 }
 
 TEST(KernelDescriptorTranslator, CdnaToCdnaRejectsOversizedLdsWithoutVirtualization) {

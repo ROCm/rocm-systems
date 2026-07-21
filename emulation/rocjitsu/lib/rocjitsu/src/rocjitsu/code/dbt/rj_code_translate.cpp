@@ -14,8 +14,8 @@ rj_status_t rj_code_translate(const rj_code_object_t *source, const rj_code_dbt_
   auto result = translator.translate(*source->co);
 
   // dispatchable() implies ok(): reject both error-diagnostic translations and
-  // non-dispatchable skipped-kernel artifacts (an s_trap; s_endpgm stub that
-  // completes normally without a trap handler) rather than handing back a code
+  // non-dispatchable skipped-kernel artifacts (an s_endpgm stub that completes
+  // normally without producing the kernel's outputs) rather than handing back a code
   // object that would silently produce wrong results if executed. This matches
   // the CLI and the HSA load hook, the other consumers of translate().
   if (result.elf_bytes.empty() || !result.dispatchable())

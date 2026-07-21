@@ -3851,10 +3851,9 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     return HSA_STATUS_ERROR;
   }
 
-  // A skipped kernel is redirected to an s_trap; s_endpgm stub. Because a
-  // no-handler s_trap falls through (it is not a program terminator), dispatching
-  // that stub would run the s_endpgm and COMPLETE NORMALLY — the application would
-  // observe success with stale/garbage output instead of a failure. There is no
+  // A skipped kernel is redirected to an s_endpgm stub. Dispatching that stub
+  // would COMPLETE NORMALLY without producing the kernel's outputs, so the application
+  // would observe success with stale/garbage output instead of a failure. There is no
   // safe way to let such a kernel be dispatched, so fail the whole code-object
   // load rather than hand back an executable that can silently produce wrong
   // results. (This trades the "keep the module loadable when an unused kernel

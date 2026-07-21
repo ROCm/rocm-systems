@@ -11,6 +11,8 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna3/mubuf.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vbuffer.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/mubuf.h"
 #include "rocjitsu/isa/decoder.h"
@@ -27,6 +29,7 @@
 #include <cstdint>
 #include <cstring>
 #include <initializer_list>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <span>
@@ -664,6 +667,113 @@ TEST(CfgAnalysis, RecoversSignedDeltaTemplateConsumers) {
   EXPECT_TRUE(has_successor_start(*add_consumer, target->start_offset()));
 }
 
+TEST(CfgAnalysis, Gfx1250RecoversSignedDeltaTemplateWithPrefetch) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kTmpSreg = 12;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+  constexpr uint32_t kInlineInt4 = 132;
+  constexpr uint32_t kSignedDeltaLiteral = 68;
+
+  // gfx1250 sometimes emits a prefetch setup move and s_prefetch_inst_pc_rel
+  // around the low/carry updates. Neither alters the PC pair, so both
+  // signed paths still resolve to the same target at 0x4c.
+  std::vector<uint32_t> words = {
+      gfx1250::build_sop1(gfx1250::kSGetPcI64Sop1,
+                          {.ssrc0 = 0, .sdst = kPcSreg})[0], // 0x00: s_get_pc_i64 s[8:9].
+      gfx1250::build_sop2(gfx1250::kSAddCoI32Sop2,
+                          {.ssrc0 = kLiteralOperand, .ssrc1 = kInlineInt4, .sdst = kTmpSreg})[0],
+      // 0x04: s_add_co_i32.
+      kSignedDeltaLiteral, // 0x08: literal.
+      gfx1250::build_sopc(gfx1250::kSCmpGeI32Sopc,
+                          {.ssrc0 = kTmpSreg, .ssrc1 = kInlineInt0})[0], // 0x0c: s_cmp_ge_i32.
+      gfx1250::build_sopp(gfx1250::kSCbranchScc1Sopp, {.simm16 = 7})[0],
+      // 0x10 -> add half at 0x30.
+      gfx1250::build_sop1(gfx1250::kSMovB32Sop1,
+                          {.ssrc0 = 159, .sdst = 14})[0], // 0x14: s_mov_b32 s14, 31.
+      0xF404A000u, 0x1C000000u,                           // 0x18: s_prefetch_inst_pc_rel.
+      gfx1250::build_sop1(gfx1250::kSAbsI32Sop1,
+                          {.ssrc0 = kTmpSreg, .sdst = kTmpSreg})[0], // 0x20: s_abs_i32.
+      gfx1250::build_sop2(gfx1250::kSSubCoU32Sop2,
+                          {.ssrc0 = kPcSreg, .ssrc1 = kTmpSreg, .sdst = kPcSreg})[0],
+      // 0x24: s_sub_co_u32.
+      gfx1250::build_sop2(gfx1250::kSSubCoCiU32Sop2,
+                          {.ssrc0 = kPcSreg + 1, .ssrc1 = kInlineInt0, .sdst = kPcSreg + 1})[0],
+      // 0x28: s_sub_co_ci_u32.
+      gfx1250::build_sop1(gfx1250::kSSetPcI64Sop1,
+                          {.ssrc0 = kPcSreg, .sdst = 0})[0], // 0x2c: s_set_pc_i64.
+      gfx1250::build_sop2(gfx1250::kSAddCoU32Sop2,
+                          {.ssrc0 = kPcSreg, .ssrc1 = kTmpSreg, .sdst = kPcSreg})[0],
+      // 0x30: s_add_co_u32.
+      gfx1250::build_sop1(gfx1250::kSMovB32Sop1,
+                          {.ssrc0 = 159, .sdst = 14})[0], // 0x34: s_mov_b32 s14, 31.
+      0xF404A000u, 0x1C000000u,                           // 0x38: s_prefetch_inst_pc_rel.
+      gfx1250::build_sop2(gfx1250::kSAddCoCiU32Sop2,
+                          {.ssrc0 = kPcSreg + 1, .ssrc1 = kInlineInt0, .sdst = kPcSreg + 1})[0],
+      // 0x40: s_add_co_ci_u32.
+      gfx1250::build_sop1(gfx1250::kSSetPcI64Sop1,
+                          {.ssrc0 = kPcSreg, .sdst = 0})[0], // 0x44: s_set_pc_i64.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),            // 0x48: not a target.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),            // 0x4c: shared target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+  auto *sub_consumer = block_starting_at(blocks, 44);
+  auto *add_consumer = block_starting_at(blocks, 68);
+  auto *target = block_starting_at(blocks, 76);
+  ASSERT_NE(sub_consumer, nullptr);
+  ASSERT_NE(add_consumer, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  ASSERT_EQ(sub_consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(sub_consumer->static_indirect_call_fixups()[0].source_target_offset, 76u);
+  EXPECT_TRUE(has_successor_start(*sub_consumer, target->start_offset()));
+
+  ASSERT_EQ(add_consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(add_consumer->static_indirect_call_fixups()[0].source_target_offset, 76u);
+  EXPECT_TRUE(has_successor_start(*add_consumer, target->start_offset()));
+}
+
+TEST(CfgAnalysis, Gfx1250RecoversPcStashedInVgprLanes) {
+  // s[0:1] builds target 0x38, is stashed in v44 lanes 0:1, then restored
+  // through v_readlane immediately before swappc. This is the finite static
+  // call idiom emitted in RCCL device functions.
+  std::vector<uint32_t> words = {
+      0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
+      0xA980FE00u,
+      52u,
+      0u, // 0x04: s_add_nc_u64 ..., lit64(52).
+      0xD761002Cu,
+      0x02010000u, // 0x10: v_writelane_b32 v44, s0, 0.
+      0xD761002Cu,
+      0x02010201u, // 0x18: v_writelane_b32 v44, s1, 1.
+      0xD7600000u,
+      0x0201012Cu, // 0x20: v_readlane_b32 s0, v44, 0.
+      0xD7600001u,
+      0x0201032Cu,                                // 0x28: v_readlane_b32 s1, v44, 1.
+      0xBE9E4900u,                                // 0x30: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x34: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x38: target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+  auto *consumer = block_starting_at(blocks, 48);
+  auto *target = block_starting_at(blocks, 56);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_NE(target, nullptr);
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 56u);
+  EXPECT_TRUE(has_successor_start(*consumer, target->start_offset()));
+}
+
 TEST(CfgAnalysis, ReversePostOrderStraightLine) {
   auto blocks =
       build_test_blocks({TestOpcode::DefVgpr0, TestOpcode::UseVgpr0, TestOpcode::UseSgpr4});
@@ -715,6 +825,261 @@ TEST(LivenessAnalysis, ExecMaskedVgprDefDoesNotKillInactiveLaneValue) {
   auto free_vgpr = liveness.find_free_run(&def, 1);
   ASSERT_TRUE(free_vgpr.has_value());
   EXPECT_NE(*free_vgpr, 0);
+}
+
+TEST(LivenessAnalysis, Gfx1250VgprMsbResolvesPhysicalRegisterBank) {
+  // src0=2 and dst=2 select physical VGPR bank 2. The VOP1 source encoding
+  // still contains v1, but liveness must identify the architectural register
+  // as v513 rather than aliasing it with low-bank v1.
+  // The upper byte records the previous state for trap recovery and must not
+  // affect the active bank selected by the low byte.
+  constexpr auto set_vgpr_msb = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x5a82});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({set_vgpr_msb[0], move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 2);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 2);
+  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1}));
+  EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1}));
+}
+
+TEST(LivenessAnalysis, Gfx1250DynamicModeWriteConservativelyUsesEveryBank) {
+  constexpr uint16_t kModeSrc0Hwreg = 1u | (14u << 6) | (1u << 11);
+  constexpr auto setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregB32Sopk, {.simm16 = kModeSrc0Hwreg, .sdst = 0});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({setreg[0], move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), std::nullopt);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src1), 0);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src2), 0);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 0);
+  for (uint16_t bank = 0; bank < 4; ++bank)
+    EXPECT_TRUE(liveness.is_live_before(
+        *instruction, {RegClass::VGPR, static_cast<uint16_t>(1 + bank * 256), 1}));
+}
+
+TEST(LivenessAnalysis, Gfx1250FullLiteralModeWriteRecoversKnownBank) {
+  constexpr uint16_t kModeSrc0Hwreg = 1u | (14u << 6) | (1u << 11);
+  constexpr auto dynamic_setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregB32Sopk, {.simm16 = kModeSrc0Hwreg, .sdst = 0});
+  constexpr auto literal_setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregImm32B32Sopk, {.simm16 = kModeSrc0Hwreg});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({dynamic_setreg[0], literal_setreg[0], 2u << 14, move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  std::advance(instruction, 2);
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(instruction.operator*().mnemonic(), "v_mov_b32_e32");
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 2);
+  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1}));
+  EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1}));
+}
+
+TEST(LivenessAnalysis, Gfx1250PartialLiteralModeWriteUsesUnmaskedVgprFields) {
+  constexpr auto set_bank_one = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 1});
+  constexpr uint16_t kModeSrc0HighBitHwreg = 1u | (15u << 6);
+  constexpr auto literal_setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregImm32B32Sopk, {.simm16 = kModeSrc0HighBitHwreg});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({set_bank_one[0], literal_setreg[0], 3u << 14, move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  std::advance(instruction, 2);
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(instruction.operator*().mnemonic(), "v_mov_b32_e32");
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 3);
+  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 769, 1}));
+}
+
+TEST(LivenessAnalysis, Gfx1250ImmediateModeWriteRecoversBanksOutsideRequestedSlice) {
+  constexpr uint16_t kModeSrc0Hwreg = 1u | (14u << 6) | (1u << 11);
+  constexpr auto dynamic_setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregB32Sopk, {.simm16 = kModeSrc0Hwreg, .sdst = 0});
+  // Request a write to MODE bit zero. The gfx1250 erratum nevertheless updates
+  // all VGPR-MSB fields from literal bits [19:12].
+  constexpr uint16_t kModeBitZeroHwreg = 1u;
+  constexpr auto literal_setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregImm32B32Sopk, {.simm16 = kModeBitZeroHwreg});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({dynamic_setreg[0], literal_setreg[0], 2u << 14, move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  std::advance(instruction, 2);
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 2);
+}
+
+TEST(LivenessAnalysis, Gfx1250LiteralModeWriteTracksEveryRole) {
+  constexpr uint16_t kAllVgprMsbFieldsHwreg = 1u | (12u << 6) | (7u << 11);
+  constexpr auto literal_setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregImm32B32Sopk, {.simm16 = kAllVgprMsbFieldsHwreg});
+  // MODE[19:12] is {src2=3, src1=2, src0=1, dst=0}.
+  constexpr uint32_t kModeFields = 0xe4u << 12;
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({literal_setreg[0], kModeFields, move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 1);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src1), 2);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src2), 3);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 0);
+}
+
+TEST(LivenessAnalysis, Gfx1250ImmediateNonModeWriteDoesNotChangeBanks) {
+  constexpr uint16_t kNonModeHwreg = 2u;
+  constexpr auto literal_setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregImm32B32Sopk, {.simm16 = kNonModeHwreg});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({literal_setreg[0], 0x000ff000u, move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 0);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src1), 0);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src2), 0);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 0);
+}
+
+TEST(LivenessAnalysis, Gfx1250VgprMsbCfgJoinRequiresPredecessorsToAgree) {
+  constexpr auto branch_to_else = gfx1250::build_sopp(gfx1250::kSCbranchScc0Sopp, {.simm16 = 2});
+  constexpr auto set_bank_two = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x82});
+  constexpr auto branch_to_join = gfx1250::build_sopp(gfx1250::kSBranchSopp, {.simm16 = 1});
+  constexpr auto set_bank_zero = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp);
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co(
+      {branch_to_else[0], set_bank_two[0], branch_to_join[0], set_bank_zero[0], move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto scope = block_scope(blocks);
+  BasicBlock *join = block_starting_at(blocks, 16);
+  ASSERT_NE(join, nullptr);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  const Instruction &joined_move = *join->instructions().begin();
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(joined_move, amdgpu::VgprMsbRole::Src0), std::nullopt);
+  for (uint16_t bank = 0; bank < 4; ++bank)
+    EXPECT_TRUE(liveness.is_live_before(
+        joined_move, {RegClass::VGPR, static_cast<uint16_t>(1 + bank * 256), 1}));
+}
+
+TEST(LivenessAnalysis, Gfx1250VgprMsbCfgJoinPreservesAgreeingBank) {
+  constexpr auto branch_to_else = gfx1250::build_sopp(gfx1250::kSCbranchScc0Sopp, {.simm16 = 2});
+  constexpr auto set_bank_two = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 2});
+  constexpr auto branch_to_join = gfx1250::build_sopp(gfx1250::kSBranchSopp, {.simm16 = 1});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co(
+      {branch_to_else[0], set_bank_two[0], branch_to_join[0], set_bank_two[0], move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto scope = block_scope(blocks);
+  BasicBlock *join = block_starting_at(blocks, 16);
+  ASSERT_NE(join, nullptr);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  const Instruction &joined_move = *join->instructions().begin();
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(joined_move, amdgpu::VgprMsbRole::Src0), 2);
+  EXPECT_TRUE(liveness.is_live_before(joined_move, {RegClass::VGPR, 513, 1}));
+  EXPECT_FALSE(liveness.is_live_before(joined_move, {RegClass::VGPR, 1, 1}));
 }
 
 TEST(LivenessAnalysis, FindsDeadSgprAfterLiveSgpr) {
@@ -966,6 +1331,24 @@ constexpr uint32_t kVop1MovWord0Sdwa = (0x3Fu << 25) | (5u << 17) | (1u << 9) | 
 std::unique_ptr<Instruction> decode_cdna4(const std::array<uint32_t, 2> &words) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   return std::unique_ptr<Instruction>(decoder ? decoder->decode(words.data()) : nullptr);
+}
+
+std::unique_ptr<Instruction> decode_gfx1250(const std::array<uint32_t, 2> &words) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  return std::unique_ptr<Instruction>(decoder ? decoder->decode(words.data()) : nullptr);
+}
+
+TEST(GeneratedInstDefUse, Gfx1250Vop3CompareDefinesOneSgpr) {
+  // v_cmp_eq_u32_e64 s53, 32, v4. gfx1250 is wave32-only, so the comparison
+  // mask occupies s53 and must not make liveness treat the adjacent s54 as
+  // clobbered.
+  auto inst = decode_gfx1250({0xD44A0035u, 0x020208A0u});
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "v_cmp_eq_u32");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 53, 1}));
+  EXPECT_FALSE(idu.defs.contains({RegClass::SGPR, 54, 1}));
 }
 
 // DPP word1 fields (CDNA4): vsrc0[7:0], dpp_ctrl[16:8], bound_ctrl[19],

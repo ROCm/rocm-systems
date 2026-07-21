@@ -32,6 +32,16 @@ inline constexpr size_t REGISTER_SET_MAX_SGPRS =
 inline constexpr size_t REGISTER_SET_MAX_VGPRS = MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF;
 inline constexpr size_t REGISTER_SET_MAX_ACC_VGPRS = REGISTER_SET_MAX_VGPRS;
 
+/// @brief VGPRs generic semantic scratch allocation may directly encode.
+///
+/// @details Tracking 1024 gfx1250 VGPRs does not by itself make a scratch
+/// operand above v255 safe: a lowering must also establish the appropriate
+/// VGPR_MSB field around every generated instruction. Keep allocation at the
+/// common directly-addressable range until a lowering explicitly manages that
+/// architectural state.
+inline constexpr size_t REGISTER_SET_ALLOCATABLE_VGPRS =
+    std::min<size_t>(amdgpu::CdnaIsaBase::MAX_VGPRS_PER_WF, amdgpu::RdnaIsaBase::MAX_VGPRS_PER_WF);
+
 /// @brief Normal SGPRs safe for scratch allocation across supported families.
 ///
 /// @details CDNA exposes 102 ordinary SGPRs per wavefront while RDNA exposes

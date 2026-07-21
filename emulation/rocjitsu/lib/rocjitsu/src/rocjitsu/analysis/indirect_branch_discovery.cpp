@@ -11,9 +11,11 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <bitset>
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <limits>
 #include <optional>
 #include <set>
 #include <string_view>
@@ -159,6 +161,7 @@ enum class ScalarSop2Op {
   AddI32,
   AddcU32,
   SubbU32,
+  AddNcU64,
 };
 
 /// @brief Concrete PC-builder value carried by one SGPR pair.
@@ -443,8 +446,8 @@ private:
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
-    return add_base(0x47);
   case ROCJITSU_CODE_ARCH_GFX1250:
+    return add_base(0x47);
   case ROCJITSU_CODE_ARCH_RV32I:
   case ROCJITSU_CODE_ARCH_RV64I:
   case ROCJITSU_CODE_ARCH_NUM_ARCHS:
@@ -464,6 +467,21 @@ private:
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
+    switch (op) {
+    case ScalarSop2Op::AddU32:
+      return 0;
+    case ScalarSop2Op::SubU32:
+      return 1;
+    case ScalarSop2Op::AddI32:
+      return 2;
+    case ScalarSop2Op::AddcU32:
+      return 4;
+    case ScalarSop2Op::SubbU32:
+      return 5;
+    case ScalarSop2Op::AddNcU64:
+      return std::nullopt;
+    }
+    return std::nullopt;
   case ROCJITSU_CODE_ARCH_GFX1250:
     switch (op) {
     case ScalarSop2Op::AddU32:
@@ -476,6 +494,8 @@ private:
       return 4;
     case ScalarSop2Op::SubbU32:
       return 5;
+    case ScalarSop2Op::AddNcU64:
+      return 83;
     }
     return std::nullopt;
   case ROCJITSU_CODE_ARCH_RV32I:
@@ -838,6 +858,55 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   return false;
 }
 
+[[nodiscard]] bool apply_gfx1250_add_nc_u64_update(const Instruction &inst, uint32_t word,
+                                                   std::span<const uint8_t> text,
+                                                   rj_code_arch_t arch, uint16_t pair_lo,
+                                                   PcValue &value) {
+  // gfx1250 compilers use one SCC-neutral 64-bit add instead of the legacy
+  // low-add/high-carry pair:
+  //
+  //   s_get_pc_i64  s[lo:lo+1]
+  //   s_add_nc_u64  s[lo:lo+1], s[lo:lo+1], literal
+  //   s_set_pc_i64  s[lo:lo+1]
+  //
+  // Match only the self-update literal forms. Register addends would require a
+  // separate constant-propagation proof and must continue to fail closed.
+  if (arch != ROCJITSU_CODE_ARCH_GFX1250 || inst.mnemonic() != "s_add_nc_u64" ||
+      inst.num_dst_operands() != 1 || inst.num_src_operands() != 2)
+    return false;
+
+  const Operand *dst = inst.dst_operand(0);
+  const Operand *src0 = inst.src_operand(0);
+  const Operand *src1 = inst.src_operand(1);
+  if (dst == nullptr || src0 == nullptr || src1 == nullptr)
+    return false;
+  const auto dst_ref = dst->to_register_ref();
+  const auto src0_ref = src0->to_register_ref();
+  if (!dst_ref || !src0_ref || dst_ref->cls != RegClass::SGPR || src0_ref->cls != RegClass::SGPR ||
+      dst_ref->index != pair_lo || src0_ref->index != pair_lo || dst_ref->width != 2 ||
+      src0_ref->width != 2)
+    return false;
+
+  uint64_t literal = 0;
+  if (auto literal64 = src1->literal64_value()) {
+    literal = *literal64;
+  } else {
+    constexpr uint16_t kLiteralOperand = 255;
+    if (inst.size() != 2 * sizeof(uint32_t) || ((word >> 8) & 0xffu) != kLiteralOperand)
+      return false;
+    literal = text_word_at(text, inst.src_loc() + sizeof(uint32_t));
+  }
+
+  // s_add_nc_u64 performs modulo-2^64 arithmetic. A valid local text target is
+  // representable as a non-negative int64 offset after the modulo addition.
+  const uint64_t updated = static_cast<uint64_t>(value.offset) + literal;
+  if (updated > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+    return false;
+  value.offset = static_cast<int64_t>(updated);
+  value.source_recovery_end_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+  return true;
+}
+
 [[nodiscard]] std::optional<IndirectCallFixup> fixup_for_value(const AnalysisContext &ctx,
                                                                size_t inst_index, uint16_t pair_lo,
                                                                const PcValue &value) {
@@ -955,6 +1024,8 @@ build_analysis_blocks(const AnalysisContext &ctx, std::span<const uint64_t> extr
   for (size_t i = 0; i < ctx.insts.size(); ++i) {
     const Instruction &inst = *ctx.insts[i];
     const uint64_t next_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+    if (i + 1 < ctx.insts.size() && ctx.insts[i + 1]->src_loc() != next_offset)
+      leaders[i + 1] = 1;
     if (is_block_terminator(inst) && next_offset < section_end) {
       // Splitting after terminators makes each setpc/swappc the last
       // instruction in its analysis block. That is important because the block
@@ -1124,20 +1195,46 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
     return std::nullopt;
 
   const Instruction &low_inst = *ctx.insts[block.first_index];
-  const Instruction &high_inst = *ctx.insts[block.first_index + 1];
-  const Instruction &setpc_inst = *ctx.insts[block.first_index + 2];
+  const auto is_gfx1250_padding = [&](size_t index) {
+    if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
+      return false;
+    const Instruction &inst = *ctx.insts[index];
+    if (inst.mnemonic() == "s_prefetch_inst_pc_rel")
+      return true;
+    // The compiler also emits a scalar immediate move to configure the
+    // prefetch.  It is safe to skip only when its destination is outside the
+    // getpc pair being proven.
+    if (inst.mnemonic() != "s_mov_b32" || inst.size() != sizeof(uint32_t))
+      return false;
+    const uint16_t dst = static_cast<uint16_t>((ctx.facts[index].word >> 16) & 0x7fu);
+    return dst != pair_lo && dst != static_cast<uint16_t>(pair_lo + 1u);
+  };
+
+  size_t high_index = block.first_index + 1;
+  while (high_index <= block.last_index && is_gfx1250_padding(high_index))
+    ++high_index;
+  if (high_index > block.last_index)
+    return std::nullopt;
+  const Instruction &high_inst = *ctx.insts[high_index];
+
+  size_t setpc_index = high_index + 1;
+  while (setpc_index <= block.last_index && is_gfx1250_padding(setpc_index))
+    ++setpc_index;
+  if (setpc_index > block.last_index)
+    return std::nullopt;
+  const Instruction &setpc_inst = *ctx.insts[setpc_index];
   if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[block.first_index].word, *add_u32_opcode,
                                 pair_lo, pair_lo, tmp_sreg))
     return std::nullopt;
-  if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[block.first_index + 1].word,
-                                     *addc_u32_opcode, static_cast<uint16_t>(pair_lo + 1),
+  if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[high_index].word, *addc_u32_opcode,
+                                     static_cast<uint16_t>(pair_lo + 1),
                                      static_cast<uint16_t>(pair_lo + 1)))
     return std::nullopt;
-  auto setpc_sreg = scalar_pc_sreg(ctx.arch, setpc_inst, ctx.facts[block.first_index + 2].word,
-                                   ScalarPcOp::SetPc64);
+  auto setpc_sreg =
+      scalar_pc_sreg(ctx.arch, setpc_inst, ctx.facts[setpc_index].word, ScalarPcOp::SetPc64);
   if (!setpc_sreg || *setpc_sreg != pair_lo)
     return std::nullopt;
-  return block.first_index + 2;
+  return setpc_index;
 }
 
 [[nodiscard]] std::optional<std::pair<size_t, uint64_t>>
@@ -1154,33 +1251,51 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
   // through this subtract half. Relocation rewrites that first range once; the
   // add-half fixup shares the range only so translation knows its setpc was
   // statically accounted for.
-  if (block.first_index + 3 > block.last_index)
-    return std::nullopt;
-
   const auto sub_u32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::SubU32);
   const auto subb_u32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::SubbU32);
   if (!sub_u32_opcode || !subb_u32_opcode)
     return std::nullopt;
 
-  const Instruction &abs_inst = *ctx.insts[block.first_index];
-  const Instruction &low_inst = *ctx.insts[block.first_index + 1];
-  const Instruction &high_inst = *ctx.insts[block.first_index + 2];
-  const Instruction &setpc_inst = *ctx.insts[block.first_index + 3];
-  if (!sop1_same_sreg(abs_inst, ctx.facts[block.first_index].word, "s_abs_i32", tmp_sreg))
+  const auto is_gfx1250_padding = [&](size_t index) {
+    if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
+      return false;
+    const Instruction &inst = *ctx.insts[index];
+    if (inst.mnemonic() == "s_prefetch_inst_pc_rel")
+      return true;
+    if (inst.mnemonic() != "s_mov_b32" || inst.size() != sizeof(uint32_t))
+      return false;
+    const uint16_t dst = static_cast<uint16_t>((ctx.facts[index].word >> 16) & 0x7fu);
+    return dst != pair_lo && dst != static_cast<uint16_t>(pair_lo + 1u);
+  };
+
+  size_t abs_index = block.first_index;
+  while (abs_index <= block.last_index && is_gfx1250_padding(abs_index))
+    ++abs_index;
+  if (abs_index + 3 > block.last_index)
     return std::nullopt;
-  if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[block.first_index + 1].word, *sub_u32_opcode,
-                                pair_lo, pair_lo, tmp_sreg))
+  const Instruction &abs_inst = *ctx.insts[abs_index];
+  const Instruction &low_inst = *ctx.insts[abs_index + 1];
+  const Instruction &high_inst = *ctx.insts[abs_index + 2];
+  size_t setpc_index = abs_index + 3;
+  while (setpc_index <= block.last_index && is_gfx1250_padding(setpc_index))
+    ++setpc_index;
+  if (setpc_index > block.last_index)
     return std::nullopt;
-  if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[block.first_index + 2].word,
-                                     *subb_u32_opcode, static_cast<uint16_t>(pair_lo + 1),
+  const Instruction &setpc_inst = *ctx.insts[setpc_index];
+  if (!sop1_same_sreg(abs_inst, ctx.facts[abs_index].word, "s_abs_i32", tmp_sreg))
+    return std::nullopt;
+  if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[abs_index + 1].word, *sub_u32_opcode, pair_lo,
+                                pair_lo, tmp_sreg))
+    return std::nullopt;
+  if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[abs_index + 2].word, *subb_u32_opcode,
+                                     static_cast<uint16_t>(pair_lo + 1),
                                      static_cast<uint16_t>(pair_lo + 1)))
     return std::nullopt;
-  auto setpc_sreg = scalar_pc_sreg(ctx.arch, setpc_inst, ctx.facts[block.first_index + 3].word,
-                                   ScalarPcOp::SetPc64);
+  auto setpc_sreg =
+      scalar_pc_sreg(ctx.arch, setpc_inst, ctx.facts[setpc_index].word, ScalarPcOp::SetPc64);
   if (!setpc_sreg || *setpc_sreg != pair_lo)
     return std::nullopt;
-  return std::pair{block.first_index + 3,
-                   high_inst.src_loc() + static_cast<uint64_t>(high_inst.size())};
+  return std::pair{setpc_index, high_inst.src_loc() + static_cast<uint64_t>(high_inst.size())};
 }
 
 bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state) {
@@ -1191,7 +1306,8 @@ bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state
     PcValue updated = *value;
     const Instruction &inst = *ctx.insts[index];
     const uint32_t word = ctx.facts[index].word;
-    if (!apply_low_literal_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
+    if (!apply_gfx1250_add_nc_u64_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
+        !apply_low_literal_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
         !apply_high_carry_update(inst, word, ctx.text, ctx.arch, pair_lo, updated))
       continue;
 
@@ -1310,24 +1426,6 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
   finalize_block_transfers(block, state);
 }
 
-[[nodiscard]] std::unordered_map<uint16_t, LatticeValue>
-compute_exit_facts(const std::unordered_map<uint16_t, LatticeValue> &entry,
-                   const AnalysisBlock &block) {
-  // Apply one block's transfer summary to an entry fact map. SET and KILL are
-  // strong updates for their pair; PASS is represented by absence from the
-  // transfer map, so the incoming entry value remains in `exit`.
-  std::unordered_map<uint16_t, LatticeValue> exit = entry;
-  for (const auto &[pair_lo, transfer] : block.transfers) {
-    if (transfer.kind == PairTransfer::Kind::Set) {
-      exit[pair_lo] =
-          LatticeValue{.values = {transfer.value}, .incomplete = false, .killed = false};
-    } else if (transfer.kind == PairTransfer::Kind::Kill) {
-      exit[pair_lo] = LatticeValue{.values = {}, .incomplete = true, .killed = true};
-    }
-  }
-  return exit;
-}
-
 [[nodiscard]] std::vector<std::unordered_map<uint16_t, LatticeValue>>
 run_block_dataflow(const std::vector<AnalysisBlock> &blocks) {
   // Phase 3: compute block-entry facts to a fixed point.
@@ -1345,6 +1443,11 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks) {
   }
 
   std::vector<std::unordered_map<uint16_t, LatticeValue>> entry_facts(blocks.size());
+  // Keep key presence separate from the node-based value maps. The dataflow
+  // join needs the union of predecessor keys on every worklist visit; caching
+  // that bounded set avoids repeatedly chasing every unordered_map node just
+  // to recover information that changes only when the corresponding map does.
+  std::vector<std::bitset<REGISTER_SET_MAX_SGPRS>> entry_pairs(blocks.size());
   std::deque<size_t> worklist;
   std::vector<bool> on_worklist(blocks.size(), false);
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
@@ -1358,28 +1461,57 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks) {
     on_worklist[block_index] = false;
 
     std::unordered_map<uint16_t, LatticeValue> new_entry;
+    std::bitset<REGISTER_SET_MAX_SGPRS> mentioned_pairs;
     if (!predecessors[block_index].empty()) {
-      std::vector<std::unordered_map<uint16_t, LatticeValue>> pred_exits;
-      pred_exits.reserve(predecessors[block_index].size());
-      std::set<uint16_t> mentioned_pairs;
+      // A predecessor exit is its sparse entry map with this block's SET/KILL
+      // summaries overlaid. The old implementation materialized that complete
+      // map for every predecessor on every worklist visit, then allocated a
+      // std::set to recover the union of keys. Large generated kernels spend
+      // most dataflow time allocating and freeing those short-lived nodes.
+      // Track the bounded SGPR-pair key union in fixed storage and evaluate each
+      // predecessor's exit value only for the pair currently being joined.
       for (size_t predecessor : predecessors[block_index]) {
-        pred_exits.push_back(compute_exit_facts(entry_facts[predecessor], blocks[predecessor]));
-        for (const auto &[pair_lo, _] : pred_exits.back())
-          mentioned_pairs.insert(pair_lo);
+        mentioned_pairs |= entry_pairs[predecessor];
+        for (const auto &[pair_lo, _] : blocks[predecessor].transfers)
+          mentioned_pairs.set(pair_lo);
       }
 
-      for (uint16_t pair_lo : mentioned_pairs) {
+      for (uint16_t pair_lo = 0; pair_lo < mentioned_pairs.size(); ++pair_lo) {
+        if (!mentioned_pairs[pair_lo])
+          continue;
+
         LatticeValue joined;
-        for (const auto &pred_exit : pred_exits) {
-          auto it = pred_exit.find(pair_lo);
-          if (it == pred_exit.end()) {
+        for (size_t predecessor : predecessors[block_index]) {
+          const AnalysisBlock &pred_block = blocks[predecessor];
+          const auto transfer = pred_block.transfers.find(pair_lo);
+          if (transfer != pred_block.transfers.end()) {
+            if (transfer->second.kind == PairTransfer::Kind::Set) {
+              append_lattice_value(joined, transfer->second.value);
+            } else if (transfer->second.kind == PairTransfer::Kind::Kill) {
+              joined.incomplete = true;
+              joined.killed = true;
+            } else {
+              // Pass is normally represented by absence from the sparse
+              // transfer map, but handle it explicitly to keep this lookup
+              // equivalent if a caller ever stores a Pass summary.
+              const auto entry = entry_facts[predecessor].find(pair_lo);
+              if (entry == entry_facts[predecessor].end())
+                joined.incomplete = true;
+              else
+                join_lattice_value(joined, entry->second);
+            }
+            continue;
+          }
+
+          const auto entry = entry_facts[predecessor].find(pair_lo);
+          if (entry == entry_facts[predecessor].end()) {
             // A missing predecessor fact means the pair is still at its
             // unconstrained kernel-entry value on that path. Joining a concrete
             // PC with an unconstrained value must not create a speculative CFG
             // edge, so the result becomes incomplete.
             joined.incomplete = true;
           } else {
-            join_lattice_value(joined, it->second);
+            join_lattice_value(joined, entry->second);
           }
         }
         new_entry.emplace(pair_lo, std::move(joined));
@@ -1390,6 +1522,7 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks) {
       continue;
 
     entry_facts[block_index] = std::move(new_entry);
+    entry_pairs[block_index] = mentioned_pairs;
     for (size_t successor : blocks[block_index].successors) {
       if (on_worklist[successor])
         continue;
@@ -1467,6 +1600,145 @@ void add_recovered_successors(const std::vector<IndirectCallFixup> &recovered,
     std::vector<size_t> &successors = blocks[source_it->second].successors;
     if (std::ranges::find(successors, target_it->second) == successors.end())
       successors.push_back(target_it->second);
+  }
+}
+
+struct VectorLaneSlot {
+  uint16_t vgpr = 0;
+  uint16_t lane = 0;
+
+  friend bool operator==(const VectorLaneSlot &, const VectorLaneSlot &) = default;
+};
+
+struct VectorLaneSlotHash {
+  size_t operator()(const VectorLaneSlot &slot) const {
+    return (static_cast<size_t>(slot.vgpr) << 16) | slot.lane;
+  }
+};
+
+struct StashedPcHalf {
+  PcValue value;
+  bool high = false;
+};
+
+[[nodiscard]] std::optional<uint16_t> inline_lane(const Operand *operand) {
+  if (operand == nullptr || operand->encoding_value() < kInlineInt0 ||
+      operand->encoding_value() >= kInlineInt0 + 32)
+    return std::nullopt;
+  return static_cast<uint16_t>(operand->encoding_value() - kInlineInt0);
+}
+
+[[nodiscard]] std::optional<RegisterRef> operand_register(const Operand *operand, RegClass cls) {
+  if (operand == nullptr)
+    return std::nullopt;
+  auto ref = operand->to_register_ref();
+  if (!ref || ref->cls != cls || ref->width != 1)
+    return std::nullopt;
+  return ref;
+}
+
+void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
+                                     std::vector<IndirectCallFixup> &recovered) {
+  // gfx1250 device functions sometimes keep a small static call set in one
+  // VGPR: getpc-built low/high halves are written to fixed lanes, then read
+  // back into an SGPR pair immediately before swappc. Track only fixed-lane
+  // writelane/readlane transport. Any ordinary write to the VGPR invalidates
+  // every recorded lane, and any SGPR write invalidates a reconstructed half.
+  if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
+    return;
+
+  BlockState builders;
+  std::unordered_map<VectorLaneSlot, StashedPcHalf, VectorLaneSlotHash> slots;
+  std::array<std::optional<StashedPcHalf>, REGISTER_SET_MAX_SGPRS> read_halves;
+  std::set<uint16_t> active_read_halves;
+
+  for (size_t index = 0; index < ctx.insts.size(); ++index) {
+    const Instruction &inst = *ctx.insts[index];
+    const InstructionFacts &facts = ctx.facts[index];
+    const std::string_view mnemonic = inst.mnemonic();
+
+    if (!active_read_halves.empty()) {
+      ensure_written_sgprs(ctx, index);
+      ctx.facts[index].written_sgprs.for_each([&](uint16_t sgpr) {
+        read_halves[sgpr].reset();
+        active_read_halves.erase(sgpr);
+      });
+    }
+
+    if (facts.getpc_sdst && *facts.getpc_sdst < kMaxTrackedSgprPair) {
+      const uint64_t next_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+      builders.set_builder(*facts.getpc_sdst, PcValue{.offset = static_cast<int64_t>(next_offset),
+                                                      .source_getpc_offset = inst.src_loc(),
+                                                      .source_recovery_begin_offset = next_offset,
+                                                      .source_recovery_end_offset = next_offset});
+      continue;
+    }
+    if (try_apply_pair_update(ctx, index, builders))
+      continue;
+
+    if (mnemonic == "v_writelane_b32") {
+      const auto dst = operand_register(inst.dst_operand(0), RegClass::VGPR);
+      const auto src = operand_register(inst.src_operand(0), RegClass::SGPR);
+      const auto lane = inline_lane(inst.src_operand(1));
+      if (dst && src && lane) {
+        const VectorLaneSlot written_slot{dst->index, *lane};
+        slots.erase(written_slot);
+        for (uint16_t pair_lo : builders.active_pairs()) {
+          const PcValue *value = builders.builder(pair_lo);
+          if (value == nullptr || (src->index != pair_lo && src->index != pair_lo + 1))
+            continue;
+          slots[written_slot] = StashedPcHalf{.value = *value, .high = src->index == pair_lo + 1};
+          break;
+        }
+      }
+      invalidate_written_sgprs(ctx, index, builders);
+      continue;
+    }
+
+    if (mnemonic == "v_readlane_b32") {
+      const auto dst = operand_register(inst.dst_operand(0), RegClass::SGPR);
+      const auto src = operand_register(inst.src_operand(0), RegClass::VGPR);
+      const auto lane = inline_lane(inst.src_operand(1));
+      invalidate_written_sgprs(ctx, index, builders);
+      if (dst && src && lane) {
+        auto slot = slots.find(VectorLaneSlot{src->index, *lane});
+        if (slot != slots.end()) {
+          read_halves[dst->index] = slot->second;
+          active_read_halves.insert(dst->index);
+        }
+      }
+      continue;
+    }
+
+    if (facts.swappc_ssrc && static_cast<size_t>(*facts.swappc_ssrc + 1) < read_halves.size()) {
+      const uint16_t pair_lo = *facts.swappc_ssrc;
+      const auto &lo = read_halves[pair_lo];
+      const auto &hi = read_halves[pair_lo + 1];
+      if (lo && hi && !lo->high && hi->high && lo->value == hi->value) {
+        if (auto fixup = fixup_for_value(ctx, index, pair_lo, lo->value))
+          append_unique(recovered, *fixup);
+      }
+    }
+
+    if (mnemonic != "v_writelane_b32") {
+      for (int dst_index = 0; dst_index < inst.num_dst_operands(); ++dst_index) {
+        const auto dst = operand_register(inst.dst_operand(dst_index), RegClass::VGPR);
+        if (!dst)
+          continue;
+        std::erase_if(slots, [&](const auto &item) { return item.first.vgpr == dst->index; });
+      }
+    }
+
+    if (!builders.active_pairs().empty())
+      invalidate_written_sgprs(ctx, index, builders);
+    if (is_block_terminator(inst)) {
+      builders = BlockState{};
+      read_halves.fill(std::nullopt);
+      active_read_halves.clear();
+    }
+    if (is_program_terminator(inst)) {
+      slots.clear();
+    }
   }
 }
 
@@ -1587,6 +1859,7 @@ discover_indirect_branch_edges(std::span<const Instruction *const> insts,
     return recovered;
 
   AnalysisContext ctx = build_context(insts, text, arch);
+  recover_vector_lane_stashed_pcs(ctx, recovered);
   std::vector<uint64_t> leaders(extra_leaders.begin(), extra_leaders.end());
 
   for (size_t iteration = 0; iteration < kMaxIndirectDiscoveryIterations; ++iteration) {
