@@ -1935,6 +1935,10 @@ bool KernelBlitManager::readImage(device::Memory& srcMemory, void* dstHost,
     // Get device memory for this virtual device
     Memory* dstMemory = dev().getRocMemory(amdMemory);
 
+    // Make the copy system-scoped so the pinned host buffer is CPU-visible
+    // when the blocking read returns, like readBuffer does.
+    gpu().addSystemScope();
+
     // Copy image to buffer
     result = copyImageToBuffer(srcMemory, *dstMemory, origin, dstOrigin, size, entire, rowPitch,
                                slicePitch, copyMetadata);
