@@ -50,15 +50,16 @@ NCCL_DEVICE_INLINE void ncclCftBarrierSession<Coop>::arrive(Coop, cuda::memory_o
     payload[0] = this->useMultimem() ? 1 : this->epoch + 1;
     for (int i = 1; i < ncclCftOpElemGran; i++) payload[i] = 0;
 
+    ncclCoopThread coop;
     __shared__ ncclCftSmem cftSmem;
-    ncclCft<ncclCoopThread> cft{ncclCoopThread{}, cftSmem};
+    ncclCft<ncclCoopThread> cft{coop, cftSmem};
 
-    ncclMemFence(ncclCoopThread{}, nccl::utility::releaseOrderOf(order), producer, consumer, ncclMemFenceScope::Sys);
+    ncclMemFence(coop, nccl::utility::releaseOrderOf(order), producer, consumer, ncclMemFenceScope::Sys);
 
     // Push generic proxy shared memory updates to point of consistency for fabric proxy access
     if (!(order == cuda::memory_order_release && producer == ncclMemProxyType::Generic &&
           consumer == ncclMemProxyType::Fabric)) {
-      ncclMemFence(ncclCoopThread{}, cuda::memory_order_release, ncclMemProxyType::Generic, ncclMemProxyType::Fabric,
+      ncclMemFence(coop, cuda::memory_order_release, ncclMemProxyType::Generic, ncclMemProxyType::Fabric,
                    ncclMemFenceScope::Cta);
     }
 
@@ -66,19 +67,19 @@ NCCL_DEVICE_INLINE void ncclCftBarrierSession<Coop>::arrive(Coop, cuda::memory_o
     size_t leOffset;
     if (this->useMultimem()) {
       this->mcInbox(&leId, &leOffset);
-      cft.redMultimem(ncclCoopThread{}, leId, leOffset, ncclCftOpAdd<uint32_t>{}, payload, ncclCftOpByteGran);
-      cft.submit(ncclCoopThread{});
-      cft.flush(ncclCoopThread{});
+      cft.redMultimem(coop, leId, leOffset, ncclCftOpAdd<uint32_t>{}, payload, ncclCftOpByteGran);
+      cft.submit(coop);
+      cft.flush(coop);
     } else {
       int nPeers = this->team.nRanks - 1;
       for (int i = 0; i < nPeers; i++) {
         int peer = i + (i < this->team.rank ? 0 : 1);
         this->ucInbox(peer, this->team.rank, &leId, &leOffset);
-        cft.put(ncclCoopThread{}, leId, leOffset, payload, ncclCftOpByteGran);
+        cft.put(coop, leId, leOffset, payload, ncclCftOpByteGran);
       }
       if (nPeers > 0) {
-        cft.submit(ncclCoopThread{});
-        cft.flush(ncclCoopThread{});
+        cft.submit(coop);
+        cft.flush(coop);
       }
     }
   }
