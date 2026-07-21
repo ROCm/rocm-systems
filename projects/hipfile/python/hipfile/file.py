@@ -12,10 +12,16 @@ from sys import stderr
 from typing import TYPE_CHECKING
 
 from hipfile._hipfile import (  # pylint: disable=E0401,E0611
+    AsyncIOHandle,
     hipFileHandleRegister,
     hipFileHandleDeregister,
     hipFileRead,
+    hipFileReadAsync,
+    hipFileStreamDeregister,
+    hipFileStreamRegister,
     hipFileWrite,
+    hipFileWriteAsync,
+    supports_async as _supports_async,
 )
 from hipfile.enums import FileHandleType
 from hipfile.error import HipFileException
@@ -269,3 +275,156 @@ class FileHandle:
             # Otherwise, extra_err is 0.
             raise HipFileException(-bytes_written, extra_err)
         return bytes_written
+
+    def read_async(
+        self,
+        buffer: Buffer,
+        size: int,
+        file_offset: int,
+        buffer_offset: int,
+        stream: int,
+    ) -> AsyncIOHandle:
+        """Submit an asynchronous read into a GPU buffer on *stream*.
+
+        The read is queued on the CUDA/HIP stream and this returns
+        immediately. The returned :class:`AsyncIOHandle` owns the in/out
+        slots the driver fills in when the I/O completes; the caller MUST
+        keep it alive until the stream has been synchronised (e.g. a
+        recorded ``Event`` the consumer waits on), then read
+        ``handle.bytes_done``.
+
+        The stream must have been registered first (see :class:`Stream`).
+
+        Parameters
+        ----------
+        buffer : Buffer
+            GPU buffer to read into.
+        size : int
+            Number of bytes to read.
+        file_offset : int
+            Byte offset within the file to start reading from.
+        buffer_offset : int
+            Byte offset within the GPU buffer to read into.
+        stream : int
+            Opaque CUDA/HIP stream handle (e.g.
+            ``torch.cuda.Stream.cuda_stream``).
+
+        Returns
+        -------
+        AsyncIOHandle
+            Keep alive past stream sync; then read ``bytes_done``.
+
+        Raises
+        ------
+        RuntimeError
+            If the file handle is not open.
+        OSError
+            On a system-level I/O error (wraps ``errno``).
+        HipFileException
+            On a hipFile or HIP driver error at submit time.
+        """
+        if self._handle is None:
+            raise RuntimeError("The FileHandle is not open.")
+        io = AsyncIOHandle(size, file_offset, buffer_offset)
+        err, extra_err = hipFileReadAsync(self._handle, buffer.ptr, io, stream)
+        if err == -1:
+            # POSIX/C error: extra_err is errno (matches read()).
+            raise OSError(extra_err, os.strerror(extra_err))
+        if err != 0:
+            # err is hipFileOpError_t; extra_err is hipError_t when err ==
+            # hipFileHipDriverError.
+            raise HipFileException(err, extra_err)
+        return io
+
+    def write_async(
+        self,
+        buffer: Buffer,
+        size: int,
+        file_offset: int,
+        buffer_offset: int,
+        stream: int,
+    ) -> AsyncIOHandle:
+        """Submit an asynchronous write from a GPU buffer on *stream*.
+
+        See :meth:`read_async` for argument lifetime and return
+        semantics.
+        """
+        if self._handle is None:
+            raise RuntimeError("The FileHandle is not open.")
+        io = AsyncIOHandle(size, file_offset, buffer_offset)
+        err, extra_err = hipFileWriteAsync(self._handle, buffer.ptr, io, stream)
+        if err == -1:
+            # POSIX/C error: extra_err is errno (matches write()).
+            raise OSError(extra_err, os.strerror(extra_err))
+        if err != 0:
+            raise HipFileException(err, extra_err)
+        return io
+
+
+class Stream:
+    """Register a CUDA/HIP stream with hipFile for asynchronous I/O.
+
+    A stream must be registered before any ``read_async`` / ``write_async``
+    targets it, and deregistered at shutdown. Supports the context-manager
+    protocol::
+
+        with Stream(torch_stream.cuda_stream) as st:
+            handle = fh.read_async(buf, size, 0, 0, st.handle)
+            event.record(torch_stream)
+            consumer_stream.wait_event(event)
+            # keep `handle` alive until the consumer has waited, then
+            # handle.bytes_done is valid.
+    """
+
+    def __init__(self, stream: int, flags: int = 0) -> None:
+        """Wrap an opaque CUDA/HIP stream handle (not yet registered)."""
+        self._stream = int(stream)
+        self._flags = int(flags)
+        self._registered = False
+
+    @property
+    def handle(self) -> int:
+        """The opaque stream handle."""
+        return self._stream
+
+    @property
+    def registered(self) -> bool:
+        """Whether the stream is currently registered."""
+        return self._registered
+
+    def register(self) -> None:
+        """Register the stream. Idempotent."""
+        if self._registered:
+            return
+        err, extra = hipFileStreamRegister(self._stream, self._flags)
+        if err != 0:
+            raise HipFileException(err, extra)
+        self._registered = True
+
+    def deregister(self) -> None:
+        """Deregister the stream. Idempotent."""
+        if not self._registered:
+            return
+        err, extra = hipFileStreamDeregister(self._stream)
+        if err != 0:
+            raise HipFileException(err, extra)
+        self._registered = False
+
+    def __enter__(self) -> Stream:
+        self.register()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.deregister()
+
+
+def supports_async() -> bool:
+    """Return ``True`` if the loaded hipFile library implements the
+    asynchronous stream I/O API, ``False`` if it is synchronous-only
+    (callers should then fall back to ``read`` / ``write``)."""
+    return bool(_supports_async())

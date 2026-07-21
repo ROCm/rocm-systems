@@ -138,17 +138,13 @@ void ReportActivity(const amd::Command& command) {
     auto timestamps = static_cast<const amd::AccumulateCommand&>(command).getTimestamps();
     const auto& kernel_names =
         static_cast<const amd::AccumulateCommand&>(command).getKernelNames();
-    // timestamps has one entry per HSA_PACKET_TYPE_KERNEL_DISPATCH packet only.
-    // kernel_names has one entry per AQL packet slot (nullptr for barriers and SDMA/copy nodes
-    // that don't generate timestamps). Walk kernel_names; for each non-null entry consume
-    // the next timestamp.
-    uint32_t ti = 0;
-    for (uint32_t ki = 0; ki < kernel_names.size() && ti < timestamps.size(); ki++) {
-      if (kernel_names[ki] == nullptr) continue;
-      auto it = timestamps[ti++];
+    // kernel_names and timestamps are both populated only when profiling is active
+    // at dispatch time. Walk the shorter of the two as a safety bound.
+    for (uint32_t i = 0; i < kernel_names.size() && i < timestamps.size(); i++) {
+      auto it = timestamps[i];
       record.begin_ns = it.first;
       record.end_ns = it.second;
-      record.kernel_name = kernel_names[ki]->c_str();
+      record.kernel_name = kernel_names[i];
       function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, &record);
     }
   } else {

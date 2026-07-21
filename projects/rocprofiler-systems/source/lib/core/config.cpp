@@ -4,8 +4,10 @@
 #include "config.hpp"
 #include "amd_smi.hpp"
 #include "common/defines.h"
+#include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
+#include "common/path.hpp"
 #include "common/static_object.hpp"
 #include "constraint.hpp"
 #include "gpu.hpp"
@@ -30,7 +32,6 @@
 #include <timemory/settings/types.hpp>
 #include <timemory/utility/argparse.hpp>
 #include <timemory/utility/declaration.hpp>
-#include <timemory/utility/delimit.hpp>
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/signals.hpp>
 #include <timemory/utility/types.hpp>
@@ -104,11 +105,10 @@ get_config()
 std::string
 get_setting_name(std::string _v)
 {
-    constexpr auto _prefix = tim::string_view_t{ "rocprofsys_" };
+    constexpr auto _prefix = std::string_view{ "rocprofsys_" };
     for(auto& itr : _v)
         itr = tolower(itr);
-    auto _pos = _v.find(_prefix);
-    if(_pos == 0) return _v.substr(_prefix.length());
+    if(_v.starts_with(_prefix)) return _v.substr(_prefix.length());
     return _v;
 }
 
@@ -793,9 +793,11 @@ configure_settings(bool _init)
                               "user time, and kernel time",
                               false, "process_sampling");
 
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_AINIC,
                               "Enable tracking for AI NIC metrics", false,
                               "process_sampling");
+#endif
 
     ROCPROFSYS_CONFIG_SETTING(
         double, env_vars::PROCESS_SAMPLING_FREQ,
@@ -824,12 +826,14 @@ configure_settings(bool _init)
         "user_time, kernel_time. Special: all, none",
         std::string{ "all" }, "process_sampling");
 
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::SAMPLING_AINICS,
                               "AI NICs to query when ROCPROFSYS_USE_AMD_SMI=ON. NIC "
                               "names should be separated by "
                               "commas, e.g. eno8303,enp7s0.",
                               std::string{ "none" }, "amd_smi", "rocm", "sampling",
                               "process_sampling");
+#endif
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, env_vars::SAMPLING_GPUS,
@@ -1367,9 +1371,9 @@ configure_settings(bool _init)
     // always initialize timemory because gotcha wrappers are always used
     auto _cmd     = tim::read_command_line(process::get_id());
     auto _cmd_env = rocprofsys::get_env<std::string>(env_vars::COMMAND_LINE, "");
-    if(!_cmd_env.empty()) _cmd = tim::delimit(_cmd_env, " ");
+    if(!_cmd_env.empty()) _cmd = rocprofsys::delimit(_cmd_env, " ");
     auto _exe          = (_cmd.empty()) ? "exe" : _cmd.front();
-    get_exe_realpath() = filepath::realpath(_exe, nullptr, false);
+    get_exe_realpath() = path::realpath(_exe);
     auto _pos          = _exe.find_last_of('/');
     if(_pos < _exe.length() - 1) _exe = _exe.substr(_pos + 1);
     get_exe_name() = _exe;
@@ -1387,7 +1391,7 @@ configure_settings(bool _init)
     auto _proc      = mproc::get_concurrent_processes(_ppid);
     bool _main_proc = (_proc.size() < 2 || *_proc.begin() == _pid);
 
-    for(auto&& filename : tim::delimit(
+    for(auto&& filename : rocprofsys::delimit(
             _config->get<std::string>(std::string{ env_vars::CONFIG_FILE }), ";:"))
     {
         if(_config->get_suppress_config()) continue;
@@ -2128,8 +2132,7 @@ get_exe_realpath()
 {
     static std::string _v = []() {
         auto _cmd_line = tim::read_command_line(process::get_id());
-        if(!_cmd_line.empty())
-            return filepath::realpath(_cmd_line.front(), nullptr, false);
+        if(!_cmd_line.empty()) return path::realpath(_cmd_line.front());
         return std::string{};
     }();
     return _v;
@@ -2300,8 +2303,22 @@ get_cpu_freq_enabled()
 std::string
 get_sampling_ainics()
 {
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     static auto _v = get_config()->find(std::string{ env_vars::SAMPLING_AINICS });
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+#else
+    return std::string{};
+#endif
+}
+
+bool
+get_ainic_supported()
+{
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+    return true;
+#else
+    return false;
+#endif
 }
 
 bool&
@@ -2356,7 +2373,7 @@ get_use_vaapi_tracing()
         return false;  // Setting not found
     }
     std::string domains = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-    auto        domain_list = tim::delimit(domains, " ,;:\t\n");
+    auto        domain_list = rocprofsys::delimit(domains, " ,;:\t\n");
     return std::find(domain_list.begin(), domain_list.end(), "rocdecode_api") !=
                domain_list.end() ||
            std::find(domain_list.begin(), domain_list.end(), "rocjpeg_api") !=
@@ -2477,7 +2494,7 @@ get_category_config()
         auto _avail = get_available_categories<strset_t>();
         auto _parse = [&_avail](const auto& _setting) {
             auto _ret = strset_t{};
-            for(auto itr : tim::delimit(
+            for(auto itr : rocprofsys::delimit(
                     static_cast<tim::tsettings<std::string>&>(*_setting->second).get(),
                     " ,;:\n\t"))
             {
@@ -3117,13 +3134,6 @@ get_rank_filter_logs()
     return static_cast<tim::tsettings<std::string>&>(*_v).get();
 }
 
-#if(defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0) ||            \
-    (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
-#    define ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED 1
-#else
-#    define ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED 0
-#endif
-
 #if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
 // Return the first env var in `env_var_options` that holds an unsigned integer.
 // `label` is used only for logging (e.g. "MPI rank", "MPI world size").
@@ -3180,10 +3190,34 @@ get_mpi_world_size_from_env()
 namespace output_filtering
 {
 #if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
-namespace
-{
-[[nodiscard]] bool
-is_rank_in_filter(std::string enabled_ranks_str)
+/**
+ * Decide whether the current MPI rank should produce output, given a filter.
+ *
+ * Pure decision core for rank-based output filtering: performs no environment
+ * access so it can be unit tested with explicit inputs. The public entry point
+ * is_rank_in_filter() wraps this, supplying the rank and world size from the
+ * environment.
+ *
+ * Policy is fail-open: every error or ambiguous condition disables filtering
+ * (returns true) so that a misconfiguration never silently suppresses all
+ * output. Specifically, true is returned when the filter is empty or "all",
+ * when the current rank is unknown, when the world size is reported as 0, when
+ * the current rank is outside [0, world_size-1], and when no valid filter
+ * entries remain after validation. "none" returns false; otherwise the result
+ * is whether the current rank is a member of the filter set.
+ *
+ * @param current_rank      Current MPI rank, or std::nullopt if undeterminable.
+ * @param world_size        Total MPI ranks, or std::nullopt if undeterminable.
+ *                          When present, filter entries and the current rank are
+ *                          validated against [0, world_size-1]; when absent, no
+ *                          range validation is performed.
+ * @param enabled_ranks_str Filter spec: "all"/empty, "none", or a numeric range
+ *                          (e.g. "0-3,8,10-15"), case-insensitive.
+ * @return true if the current rank should produce output.
+ */
+bool
+rank_passes_filter(std::optional<std::uint64_t> current_rank,
+                   std::optional<std::uint64_t> world_size, std::string enabled_ranks_str)
 {
     rocprofsys::utility::trim_str(enabled_ranks_str);
     for(auto& ch : enabled_ranks_str)
@@ -3192,7 +3226,6 @@ is_rank_in_filter(std::string enabled_ranks_str)
     if(enabled_ranks_str.empty() || enabled_ranks_str == "all") return true;
     if(enabled_ranks_str == "none") return false;
 
-    const auto current_rank = get_mpi_rank_from_env();
     if(!current_rank)
     {
         LOG_WARNING("MPI output filtering DISABLED: failed to get MPI rank");
@@ -3203,36 +3236,34 @@ is_rank_in_filter(std::string enabled_ranks_str)
         std::int64_t, std::unordered_set<std::int64_t>>(enabled_ranks_str, "ranks", 1L);
 
     // Check current_rank and enabled_ranks against total number of existing MPI ranks
-    const auto world_size = get_mpi_world_size_from_env();
     if(world_size.has_value())
     {
-        if(world_size.value() == 0)
+        if(*world_size == 0)
         {
             LOG_WARNING("MPI output filtering DISABLED: total number of MPI ranks (world "
                         "size) is 0");
             return true;
         }
 
-        for(auto it = enabled_ranks.begin(); it != enabled_ranks.end();)
-        {
-            if(*it < 0 || static_cast<std::uint64_t>(*it) >= world_size.value())
-            {
-                LOG_WARNING("MPI output filtering: requested MPI rank {} not in range of "
-                            "existing ranks [0-{}]. Ignoring",
-                            *it, world_size.value() - 1);
-                it = enabled_ranks.erase(it);
-            }
-            else
-            {
-                ++it;
-            }
-        }
+        const auto ws       = *world_size;
+        const auto max_rank = ws - 1;
+        const auto in_world = [ws](std::int64_t rank) {
+            return rank >= 0 && static_cast<std::uint64_t>(rank) < ws;
+        };
 
-        if(current_rank.value() >= world_size.value())
+        std::erase_if(enabled_ranks, [&](const std::int64_t rank) {
+            if(in_world(rank)) return false;
+            LOG_WARNING("MPI output filtering: requested MPI rank {} not in range of "
+                        "existing ranks [0-{}]. Ignoring",
+                        rank, max_rank);
+            return true;
+        });
+
+        if(*current_rank > max_rank)
         {
             LOG_WARNING("MPI output filtering DISABLED: MPI rank {} not in range of "
                         "existing ranks [0-{}]",
-                        current_rank.value(), world_size.value() - 1);
+                        *current_rank, max_rank);
             return true;
         }
     }
@@ -3244,10 +3275,19 @@ is_rank_in_filter(std::string enabled_ranks_str)
     }
 
     const auto is_enabled =
-        enabled_ranks.count(static_cast<std::int64_t>(current_rank.value())) != 0;
-    LOG_DEBUG("Output for MPI rank {} is {}", current_rank.value(),
+        enabled_ranks.count(static_cast<std::int64_t>(*current_rank)) != 0;
+    LOG_DEBUG("Output for MPI rank {} is {}", *current_rank,
               is_enabled ? "enabled" : "disabled");
     return is_enabled;
+}
+
+namespace
+{
+[[nodiscard]] bool
+is_rank_in_filter(std::string enabled_ranks_str)
+{
+    return rank_passes_filter(get_mpi_rank_from_env(), get_mpi_world_size_from_env(),
+                              std::move(enabled_ranks_str));
 }
 }  // namespace
 #endif
@@ -3605,8 +3645,8 @@ get_causal_binary_scope()
     auto&&      _config = get_config();
     static auto _v      = _config->find(std::string{ env_vars::CAUSAL_BINARY_SCOPE });
     return format_causal_scopes(
-        tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
-                     "\t\"';"),
+        rocprofsys::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
+                            "\t\"';"),
         _config->get_tag());
 }
 
@@ -3614,16 +3654,16 @@ std::vector<std::string>
 get_causal_source_scope()
 {
     static auto _v = get_config()->find(std::string{ env_vars::CAUSAL_SOURCE_SCOPE });
-    return tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
-                        "\t\"';");
+    return rocprofsys::delimit(
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "\t\"';");
 }
 
 std::vector<std::string>
 get_causal_function_scope()
 {
     static auto _v = get_config()->find(std::string{ env_vars::CAUSAL_FUNCTION_SCOPE });
-    return tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
-                        "\t\"';");
+    return rocprofsys::delimit(
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "\t\"';");
 }
 
 std::vector<std::string>
@@ -3632,8 +3672,8 @@ get_causal_binary_exclude()
     auto&&      _config = get_config();
     static auto _v      = _config->find(std::string{ env_vars::CAUSAL_BINARY_EXCLUDE });
     return format_causal_scopes(
-        tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
-                     "\t\"';"),
+        rocprofsys::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
+                            "\t\"';"),
         _config->get_tag());
 }
 
@@ -3641,16 +3681,16 @@ std::vector<std::string>
 get_causal_source_exclude()
 {
     static auto _v = get_config()->find(std::string{ env_vars::CAUSAL_SOURCE_EXCLUDE });
-    return tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
-                        "\t\"';");
+    return rocprofsys::delimit(
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "\t\"';");
 }
 
 std::vector<std::string>
 get_causal_function_exclude()
 {
     static auto _v = get_config()->find(std::string{ env_vars::CAUSAL_FUNCTION_EXCLUDE });
-    return tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
-                        "\t\"';");
+    return rocprofsys::delimit(
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "\t\"';");
 }
 }  // namespace config
 }  // namespace rocprofsys
