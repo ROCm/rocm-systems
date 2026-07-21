@@ -918,54 +918,79 @@ def test_load_pc_sampling_data_no_tool_data() -> None:
 
 
 @pytest.mark.parametrize("method", ["host_trap", "stochastic"])
-def test_pc_sampling_single_result_preserves_legacy_analysis_table(
+def test_load_pc_sampling_data_aggregates_rows_within_single_record(
     method: str,
 ) -> None:
-    """A one-record collection produces the unchanged legacy display table."""
+    """A single result record uses the same display aggregation as many records."""
     if method == "host_trap":
         samples = [
             make_host_trap_record(5, 0x10, 0, dispatch_id=0),
-            make_host_trap_record(6, 0x10, 1, dispatch_id=1),
+            make_host_trap_record(5, 0x10, 0, dispatch_id=0),
+            make_host_trap_record(7, 0x10, 0, dispatch_id=1),
+            make_host_trap_record(7, 0x10, 0, dispatch_id=1),
         ]
     else:
         samples = [
-            make_record(5, 0x10, 0, dispatch_id=0),
-            make_record(6, 0x10, 1, dispatch_id=1),
+            make_record(5, 0x10, 0, dispatch_id=0, wave_issued=True),
+            make_record(
+                5,
+                0x10,
+                0,
+                dispatch_id=0,
+                wave_issued=False,
+                stall_reason=f"{PREFIX}WAITCNT",
+            ),
+            make_record(
+                7,
+                0x10,
+                0,
+                dispatch_id=1,
+                wave_issued=False,
+                stall_reason=f"{PREFIX}ALU_DEPENDENCY",
+            ),
+            make_record(
+                7,
+                0x10,
+                0,
+                dispatch_id=1,
+                wave_issued=False,
+                stall_reason=f"{PREFIX}WAITCNT",
+            ),
         ]
     tool_data = make_tool_data(
         **{method: samples},
-        instructions=["v_mov", "v_add"],
-        comments=["/s/a.cpp:1", "/s/b.cpp:1"],
+        instructions=["v_mov"],
+        comments=["/src/shared.cpp:10"],
         kernel_symbols=[
             make_kernel_symbol(100, 5, "sharedKernel"),
-            make_kernel_symbol(101, 6, "sharedKernel"),
+            make_kernel_symbol(101, 7, "sharedKernel"),
         ],
         kernel_dispatch=[make_dispatch(0, 100), make_dispatch(1, 101)],
     )
-    expected = load_pc_sampling_data_per_kernel(
-        method,
-        tool_data,
-        "offset",
-    )
 
-    actual = load_pc_sampling_data(
+    df = load_pc_sampling_data(
         schema.Workload(),
         "ps_file",
         "offset",
         [tool_data],
     )
 
-    assert len(actual) == 2
+    assert len(df) == 1
     expected_columns = (
         HOST_TRAP_DISPLAY_COLUMNS
         if method == "host_trap"
         else STOCHASTIC_DISPLAY_COLUMNS
     )
-    assert list(actual.columns) == expected_columns
-    pd.testing.assert_frame_equal(
-        actual.reset_index(drop=True),
-        expected.reset_index(drop=True),
-    )
+    assert list(df.columns) == expected_columns
+    assert df.iloc[0]["code_object_id"] == 5
+    assert df.iloc[0]["count"] == 4
+    if method == "stochastic":
+        assert df.iloc[0]["count_issued"] == 1
+        assert df.iloc[0]["count_stalled"] == 3
+        assert df.iloc[0]["stall_reason"] == [
+            ("WAITCNT", 2),
+            ("ALU_DEPENDENCY", 1),
+        ]
 
 
 @pytest.mark.parametrize("method", ["stochastic", "host_trap"])
@@ -1113,7 +1138,7 @@ def test_load_pc_sampling_data_no_filter_instruction_out_of_range() -> None:
     )
     df = load_pc_sampling_data(schema.Workload(), "ps_file", "count", [tool_data])
     assert not df.empty
-    assert df.iloc[0]["instruction"] is None
+    assert pd.isna(df.iloc[0]["instruction"])
     assert df.iloc[0]["source_line"] == ".../a.cpp:2"
 
 
@@ -1368,6 +1393,40 @@ def test_load_pc_sampling_data_applies_top_n_after_global_aggregation() -> None:
         "ps_file",
         "count",
         [first_tool_data, second_tool_data],
+        num_rows=1,
+    )
+
+    assert len(df) == 1
+    assert df.iloc[0]["Kernel_Name"] == "sharedKernel"
+    assert df.iloc[0]["count"] == 6
+
+
+def test_load_pc_sampling_data_single_record_applies_top_n_after_aggregation() -> None:
+    tool_data = make_tool_data(
+        host_trap=[
+            *[make_host_trap_record(5, 0x10, 0, dispatch_id=0) for _ in range(3)],
+            *[make_host_trap_record(6, 0x20, 1, dispatch_id=1) for _ in range(5)],
+            *[make_host_trap_record(7, 0x10, 0, dispatch_id=2) for _ in range(3)],
+        ],
+        instructions=["shared", "leader"],
+        comments=["/src/shared.cpp:10", "/src/leader.cpp:20"],
+        kernel_symbols=[
+            make_kernel_symbol(100, 5, "sharedKernel"),
+            make_kernel_symbol(101, 6, "leader"),
+            make_kernel_symbol(102, 7, "sharedKernel"),
+        ],
+        kernel_dispatch=[
+            make_dispatch(0, 100),
+            make_dispatch(1, 101),
+            make_dispatch(2, 102),
+        ],
+    )
+
+    df = load_pc_sampling_data(
+        schema.Workload(),
+        "ps_file",
+        "count",
+        [tool_data],
         num_rows=1,
     )
 
