@@ -39,9 +39,10 @@ records a typed reason.
 ## Current matrix
 
 The historical final audit `consan-validation-gfx1250-final-audit-149` covered
-all 40 cells at commit `9acc4dd9b0`.  Current-tip paired revalidation is now
-replacing those values.  Successful process launch or focused unit coverage
-alone does not preserve the earlier green claim.
+all 40 cells at commit `9acc4dd9b0`.  Current-tip paired revalidation has
+replaced those values, with the latest shared-branch merge audit recorded
+below.  Successful process launch or focused unit coverage alone does not
+preserve an earlier green claim.
 
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
@@ -142,11 +143,41 @@ are PyTorch tensors.  It does not yet prove cluster-memory or inter-workgroup
 synchronization: the prototype contains no `cluster_load_*` instruction, so
 that remains a separate discovery target rather than an implied result.
 
+### Shared-branch merge revalidation closeout
+
+The 2026-07-21 revalidation is complete at source revision `949199f096` and
+hook SHA-256
+`2a599bb9ff2399a677fab0ca8aee4e96ba47cf02db7a49c6e601d7f2a688227e`.
+All eight local patches range-diff unchanged from the preserved pre-rebase
+stack onto `59bf98ccc9`.  A clean 648-action rebuild completed, the focused
+ConSan/MOI suite passed 726/726, and the shared waitcheck smoke suite passed
+20/20.
+
+Current-tip, one-repetition execution reconfirmed the green Qwen and TP1
+profiles, every compact attention and atomic-regression profile, every green
+selected Tensile profile, and the green PyTorch families.  In particular,
+Qwen SuperCollider and Record/Replay retain exact output oracles with
+1,000/1,000 accesses; Record/Replay also retains 46/46 barriers.  TP1 prefill
+retains all four profiles, while TP1 decode/combined retains its three green
+profiles.  Quick-F8 Record/Replay completed its long software-GPU run with
+1,772/1,772 accesses, 44/44 barriers, and 16/16 fences.
+
+One genuine merge-era behavioral regression was found: Record/Replay reused
+one atomic report slot for repeated executions of a static site, producing
+false conflicts in Stream-K arrival and tree atomic-OR.  Commit `4600166d3d`
+publishes bounded dynamic atomic events; both workloads now pass all four
+profiles at the rebased tip.  The apparent failures listed below reproduce
+with the preserved pre-rebase hook and are therefore stale historical claims
+or retained defects, not regressions introduced by the shared-branch merge.
+An initially rejected D128-pressure Sampled artifact was also transient: exact
+direct reruns with both hooks pass all four workload tests with 40/40 accesses,
+8/8 applicable barrier members, and complete analysis.
+
 ### Post-merge revalidation exceptions
 
 This small override ledger takes precedence over stale green cells in the
-larger table below while the current-tip audit is in progress.  Every entry is
-from a one-repetition run at `66586a47b2`.  The same failures were reproduced
+larger table below.  Every entry is from a one-repetition run at `66586a47b2`.
+The same failures were reproduced
 with the pre-rebase `58379f3c1a` hook, so they are current defects but not
 regressions introduced by the shared-branch rebase.
 
