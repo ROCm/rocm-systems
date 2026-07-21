@@ -38,6 +38,33 @@ def test_supports_wgp_mode(profile, expected):
 
 
 @pytest.mark.parametrize(
+    ('profile', 'uses_ttmp', 'uses_cluster_ttmp'),
+    [
+        (CdnaProfile(), False, False),
+        (Rdna4Profile(), True, False),
+        (Gfx1250Profile(), True, True),
+    ],
+)
+def test_ttmp_workgroup_id_properties(profile, uses_ttmp, uses_cluster_ttmp):
+    assert profile.uses_ttmp_workgroup_ids is uses_ttmp
+    assert profile.uses_cluster_ttmp_workgroup_ids is uses_cluster_ttmp
+
+
+@pytest.mark.parametrize(
+    ('profile', 'expected'),
+    [
+        (CdnaProfile(), True),
+        (Rdna1Profile(), False),
+        (Rdna3Profile(), False),
+        (Rdna4Profile(), False),
+        (Gfx1250Profile(), False),
+    ],
+)
+def test_descriptor_sgpr_count_encoded(profile, expected):
+    assert profile.descriptor_sgpr_count_encoded is expected
+
+
+@pytest.mark.parametrize(
     ('profile', 'expected'),
     [
         (CdnaProfile(), 256),
@@ -80,9 +107,36 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
 
     assert 'uint32_t max_addressable_vgprs_per_wf = 0;' in output
     assert 'MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;' in output
-    assert 'case ROCJITSU_CODE_ARCH_CDNA3:\n    return {false, 256};' in output
-    assert 'case ROCJITSU_CODE_ARCH_RDNA4:\n    return {true, 256};' in output
-    assert 'case ROCJITSU_CODE_ARCH_GFX1250:\n    return {false, 1024};' in output
+    assert (
+        'case ROCJITSU_CODE_ARCH_CDNA3:\n'
+        '    return {\n'
+        '        .supports_wgp_mode = false,\n'
+        '        .descriptor_sgpr_count_encoded = true,\n'
+        '        .uses_ttmp_workgroup_ids = false,\n'
+        '        .uses_cluster_ttmp_workgroup_ids = false,\n'
+        '        .max_addressable_vgprs_per_wf = 256,\n'
+        '    };'
+    ) in output
+    assert (
+        'case ROCJITSU_CODE_ARCH_RDNA4:\n'
+        '    return {\n'
+        '        .supports_wgp_mode = true,\n'
+        '        .descriptor_sgpr_count_encoded = false,\n'
+        '        .uses_ttmp_workgroup_ids = true,\n'
+        '        .uses_cluster_ttmp_workgroup_ids = false,\n'
+        '        .max_addressable_vgprs_per_wf = 256,\n'
+        '    };'
+    ) in output
+    assert (
+        'case ROCJITSU_CODE_ARCH_GFX1250:\n'
+        '    return {\n'
+        '        .supports_wgp_mode = false,\n'
+        '        .descriptor_sgpr_count_encoded = false,\n'
+        '        .uses_ttmp_workgroup_ids = true,\n'
+        '        .uses_cluster_ttmp_workgroup_ids = true,\n'
+        '        .max_addressable_vgprs_per_wf = 1024,\n'
+        '    };'
+    ) in output
 
 
 @pytest.mark.parametrize(

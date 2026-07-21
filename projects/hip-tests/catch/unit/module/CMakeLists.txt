@@ -441,6 +441,7 @@ set(TEST_SRC
   hipFuncGetAttributes.cc
   hipFuncSetSharedMemConfig.cc
   hipManagedKeywordBasic.cc
+  hipManagedKeywordDeferredInit.cc
   hipModule.cc
   hipModuleLoadMultProcessOnMultGPU.cc
 )
