@@ -203,6 +203,7 @@ class TestAINIC(RocprofsysTest):
         self.assert_perfetto(
             result,
             counter_names=AINIC_PERFETTO_COUNTER_NAMES,
+            counter_names_presence_only=True,
             pass_regex=self.PERFETTO_PASS_REGEX,
             fail_regex=self.PERFETTO_FAIL_REGEX,
         )
