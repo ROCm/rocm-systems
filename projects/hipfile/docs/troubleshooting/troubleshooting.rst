@@ -18,7 +18,7 @@ fallback path instead.
 hipFile's fastpath requires the following:
 
 * A Linux kernel with P2PDMA support enabled
-* ROCm 7.4 or later, including:
+* ROCm 7.14.0 or later, including:
 
   * the HIP runtime
   * ``amdgpu``
