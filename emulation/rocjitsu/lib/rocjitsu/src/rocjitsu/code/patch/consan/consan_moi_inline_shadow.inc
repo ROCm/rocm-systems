@@ -209,7 +209,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   }
   std::optional<MoiLocalNopIslandAllocator> local_entry_islands;
   if (use_indirect_appended && !original_text.empty())
-    local_entry_islands.emplace(original_text, result, arch, kIndirectIslandWords);
+    local_entry_islands.emplace(original_text, result, arch, kIndirectIslandWords,
+                                options.preapplied_reserved_ranges);
 
   std::unordered_map<const ConSanMoiCandidate *, uint64_t> dense_entry_islands;
   std::unordered_map<const ConSanMoiCandidate *, uint64_t> dense_dispatchers;
@@ -331,7 +332,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           const uint64_t kernel_end = kernel->entry_text_offset + kernel->code_size;
           std::vector<std::pair<uint64_t, uint64_t>> occupied_ranges;
           occupied_ranges.reserve(group.candidates.size() + kernel->barrier_sites.size() +
-                                  kernel->fence_sites.size() + kernel->atomic_sites.size());
+                                  kernel->fence_sites.size() + kernel->atomic_sites.size() +
+                                  options.preapplied_reserved_ranges.size());
           const auto append_occupied_range = [&](uint64_t begin, uint64_t size) {
             if (size != 0u)
               occupied_ranges.emplace_back(begin, begin + size);
@@ -344,6 +346,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             append_occupied_range(site.text_offset, site.size);
           for (const ConSanAtomicSite &site : kernel->atomic_sites)
             append_occupied_range(site.text_offset, site.size);
+          for (const ConSanPreappliedReservedRange &reserved : options.preapplied_reserved_ranges)
+            append_occupied_range(reserved.text_offset, reserved.size);
           std::ranges::sort(occupied_ranges);
           size_t merged_range_count = 0u;
           for (const auto &range : occupied_ranges) {

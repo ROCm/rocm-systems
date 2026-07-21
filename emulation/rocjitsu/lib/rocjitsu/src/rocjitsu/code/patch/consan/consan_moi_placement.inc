@@ -8,7 +8,8 @@ constexpr uint32_t kMoiLocalIndirectIslandWords = 8u;
 class MoiLocalNopIslandAllocator {
 public:
   MoiLocalNopIslandAllocator(std::span<const uint8_t> text, const ConSanResult &result,
-                             rj_code_arch_t arch, uint32_t island_words)
+                             rj_code_arch_t arch, uint32_t island_words,
+                             std::span<const ConSanPreappliedReservedRange> reserved_ranges = {})
       : text_(text), nop_(build_s_nop(0, arch)), island_words_(island_words) {
     if (island_words == 0)
       return;
@@ -41,7 +42,7 @@ public:
 
     const uint64_t island_bytes = static_cast<uint64_t>(island_words) * sizeof(uint32_t);
     std::vector<std::pair<uint64_t, uint64_t>> occupied_ranges;
-    occupied_ranges.reserve(result.patches.size() * 2u);
+    occupied_ranges.reserve(result.patches.size() * 2u + reserved_ranges.size());
     for (const ConSanPatchInfo &patch : result.patches) {
       occupied_ranges.emplace_back(
           patch.anchor_offset, patch.anchor_offset + std::max<uint32_t>(patch.original_size, 1u));
@@ -49,6 +50,10 @@ public:
         occupied_ranges.emplace_back(patch.trampoline_offset,
                                      patch.trampoline_offset + patch.trampoline_size);
       }
+    }
+    for (const ConSanPreappliedReservedRange &reserved : reserved_ranges) {
+      if (reserved.size != 0u)
+        occupied_ranges.emplace_back(reserved.text_offset, reserved.text_offset + reserved.size);
     }
     std::ranges::sort(occupied_ranges);
     std::vector<std::pair<uint64_t, uint64_t>> merged_occupied_ranges;

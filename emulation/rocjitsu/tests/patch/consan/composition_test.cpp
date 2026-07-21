@@ -265,5 +265,67 @@ TEST(ConSanMoi, FaultBarrierMarkerlessUncoveredLocalCaveComposesWithInlineShadow
   EXPECT_FALSE(validate_consan_modified_elf(bytes, corrupted).empty());
 }
 
+TEST(ConSanMoi, Gfx1250DenseInlineHostPreservesPreappliedBarrierDrop) {
+  constexpr uint32_t kAccessCount = 9u;
+  std::vector<uint32_t> text_words = {
+      *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_GFX1250),
+      *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_GFX1250),
+  };
+  text_words.resize(9u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250));
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
+    text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+  }
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  const std::vector<uint8_t> bytes =
+      make_gfx1250_code_object(text_words, "gfx1250_dense_inline_fault");
+
+  ConSanOptions inventory_options;
+  inventory_options.flavor = ConSanFlavor::SuperCollider;
+  inventory_options.fault_drop_barrier = true;
+  inventory_options.fault_dry_run = true;
+  const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
+  ASSERT_EQ(inventory.sync_sequences.size(), 1u);
+  ASSERT_EQ(inventory.fault_sites.size(), 2u);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.scratch_vgpr = 82;
+  options.moi_owner_vgpr = 80;
+  options.moi_epoch_vgpr = 81;
+  options.moi_exec_save_sgpr = 60;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 64;
+  options.fault_drop_barrier = true;
+  options.fault_require_exactly_one = true;
+  options.fault_site_identity = inventory.fault_sites.front().identity;
+  options.fault_barrier_sequence_identity = inventory.sync_sequences.front().identity;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+      << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.staged_composition_validated);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::InlineBarrierNopRewrite,
+                               &ConSanPatchInfo::kind),
+            2u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  std::array<uint32_t, 2> dropped{};
+  std::memcpy(dropped.data(), patched.text_sections().front()->data(), sizeof(dropped));
+  EXPECT_EQ(dropped[0], build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_EQ(dropped[1], build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+}
+
 } // namespace
 } // namespace rocjitsu
