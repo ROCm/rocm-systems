@@ -1198,23 +1198,8 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
 #ifdef ENABLE_WARP_SPEED
   channelMultiplier = comm->warpSpeedChannelMultiplier = wsEnabled ? rcclGetMaxWarpsPerBlock(comm) : 1;
   if (wsEnabled) {
-    // If user didn't override, use requested channels; otherwise keep capped max.
-    if (!userUpdatedMaxChannels) {
-      maxNchannels = nc * comm->nChannels * channelMultiplier;
-      // Cap the single-node count at MAXCHANNELS/2, the maximum WarpSpeed supports. Left unbounded it
-      // overruns the fixed comm->channels[MAXCHANNELS] array (for example nc reaches 1760 in CPX mode at 64 ranks).
-      nc = singleNode ? std::min(maxNchannels, MAXCHANNELS / 2) : std::min(maxNchannels, maxChannels);
-    } else {
-      nc = maxNchannels = std::min(adjustedMaxNchannels * channelMultiplier, MAXCHANNELS);
-    }
-
-    if (!userUpdatedMaxChannels && isGfx950 && singleNode && comm->nRanks == 8) {
-      // For gfx950 single-node, use half the channels since they are doubled on a single node
-      // Remove when all collectives have been optimized
-      nc /= 2;
-    }
-    INFO(NCCL_TUNING, "WarpSpeed enabled: warpSpeedChannelMultiplier %d, maxNchannels %d, nc %d", channelMultiplier,
-         maxNchannels, nc);
+    nc = rcclWarpSpeedComputeNChannels(comm, nc, channelMultiplier, maxChannels, adjustedMaxNchannels,
+                                       userUpdatedMaxChannels);
   } else {
     maxChannels = std::min(
       (singleNode ? (isGfx950 ? RCCL_MI3XX_MAX_SINGLE_NODE_CHANNELS * 2 : RCCL_MI3XX_MAX_SINGLE_NODE_CHANNELS) :
