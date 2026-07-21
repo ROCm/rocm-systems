@@ -46,14 +46,22 @@ struct ncclCftBarrierSession_internal {
   }
 
   NCCL_DEVICE_INLINE uint32_t* mcInbox() {
+#if CUDART_VERSION >= 13000
     void* state = ncclGetResourceBufferLocalPointer(comm, handle.bufHandle);
     return (uint32_t*)(reinterpret_cast<char (*)[NCCL_CFT_BARRIER_ALIGN]>(state) + (2 * handle.nBarriers + index));
+#else
+    return nullptr;
+#endif
   }
 
   NCCL_DEVICE_INLINE uint32_t* ucInbox(int peer) {
+#if CUDART_VERSION >= 13000
     void* state = ncclGetResourceBufferLocalPointer(comm, handle.bufHandle);
     return (uint32_t*)(reinterpret_cast<char (*)[NCCL_CFT_BARRIER_ALIGN]>(state) +
                        (3 * handle.nBarriers + index * team.nRanks + peer));
+#else
+    return nullptr;
+#endif
   }
 
   template <bool EnableTimeout>
