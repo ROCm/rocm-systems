@@ -263,14 +263,7 @@ def _vcc_init_expr(ctx: LoweringContext) -> str:
 
 
 def _write_vcc_mask_to_explicit_dst(dst: str) -> str:
-    # Keep this wave32/wave64 mask-width rule in sync with simd_glue.h and
-    # vector_cmp.py.
-    return (
-        f'if (wf.wf_size() <= 32)\n'
-        f'    amdgpu::RegisterAccess(wf).write_scalar({dst}, static_cast<uint32_t>(vcc));\n'
-        f'  else\n'
-        f'    amdgpu::RegisterAccess(wf).write_scalar64({dst}, vcc);'
-    )
+    return f'amdgpu::write_wave_mask_scalar({dst}, wf, vcc);'
 
 
 def _vcc_write_stmt(ctx: LoweringContext) -> str:

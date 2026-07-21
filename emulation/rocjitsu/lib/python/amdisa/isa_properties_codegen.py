@@ -27,15 +27,25 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         raise ValueError(f'unsupported ISA property entries: {sorted(unknown)}')
 
     cases = []
+    max_addressable_vgprs_per_wf = 0
     for name in _AMDGPU_ARCH_ORDER:
         profile = profiles.get(name)
         if profile is None:
             continue
         enum_name = name.upper()
         supports_wgp_mode = 'true' if profile.supports_wgp_mode else 'false'
+        uses_ttmp_workgroup_ids = 'true' if profile.uses_ttmp_workgroup_ids else 'false'
+        uses_cluster_ttmp_workgroup_ids = (
+            'true' if profile.uses_cluster_ttmp_workgroup_ids else 'false'
+        )
+        addressable_vgprs = profile.max_addressable_vgprs_per_wf
+        max_addressable_vgprs_per_wf = max(
+            max_addressable_vgprs_per_wf, addressable_vgprs
+        )
         cases += [
             f'  case ROCJITSU_CODE_ARCH_{enum_name}:',
-            f'    return {{{supports_wgp_mode}}};',
+            f'    return {{{supports_wgp_mode}, {uses_ttmp_workgroup_ids}, '
+            f'{uses_cluster_ttmp_workgroup_ids}, {addressable_vgprs}}};',
         ]
 
     lines = [
@@ -50,11 +60,19 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         '',
         '#include "rocjitsu/base/api.h"',
         '',
+        '#include <cstdint>',
+        '',
         'namespace rocjitsu {',
         '',
         'struct IsaProperties {',
         '  bool supports_wgp_mode = false;',
+        '  bool uses_ttmp_workgroup_ids = false;',
+        '  bool uses_cluster_ttmp_workgroup_ids = false;',
+        '  uint32_t max_addressable_vgprs_per_wf = 0;',
         '};',
+        '',
+        'inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = '
+        f'{max_addressable_vgprs_per_wf};',
         '',
         '[[nodiscard]] constexpr IsaProperties isa_properties(rj_code_arch_t arch) {',
         '  switch (arch) {',

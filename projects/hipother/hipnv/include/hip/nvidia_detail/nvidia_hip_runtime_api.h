@@ -4354,6 +4354,13 @@ inline static hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* lo
   CUmemAllocationType cu_allocation_type = cudaMemAllocationTypeToCUmemAllocationType(type);
   return hipCUResultTohipError(cuMemGetMemPool(pool, &cu_location, cu_allocation_type));
 }
+
+inline static hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
+                                                 hipMemAllocationType type) {
+  CUmemLocation cu_location = cudaMemLocationToCUmemLocation(location);
+  CUmemAllocationType cu_allocation_type = cudaMemAllocationTypeToCUmemAllocationType(type);
+  return hipCUResultTohipError(cuMemGetDefaultMemPool(memPool, &cu_location, cu_allocation_type));
+}
 #endif // CUDA_VERSION >= CUDA_13000
 
 #ifdef __cplusplus

@@ -516,7 +516,9 @@ VPermlane16SwapB32Vop3::VPermlane16SwapB32Vop3(const MachineInst *inst)
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   dst_operands_[1] = &src0;
-  num_src_ = 0;
+  src_operands_[0] = &vdst;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -558,21 +560,18 @@ void VPermlane16SwapB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       if (ex & (1ULL << ln))
         sdwa_old_dst_[ln] = amdgpu::RegisterAccess(wf).read_lane(vdst, ln);
   }
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
-                           dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
+    throw util::UnimplementedInst(mnemonic());
   uint32_t tmp_dst[64] = {}, tmp_src[64] = {};
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     tmp_dst[lane] = amdgpu::RegisterAccess(wf).read_lane(vdst, lane);
     tmp_src[lane] = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
   }
-  for (uint32_t lane = 0; lane < 16; ++lane) {
-    if (lane + 16 >= wf.wf_size())
-      break;
-    amdgpu::RegisterAccess(wf).write_lane(src0, lane, tmp_dst[lane + 16]);
-    amdgpu::RegisterAccess(wf).write_lane(vdst, lane + 16, tmp_src[lane]);
+  for (uint32_t base = 0; base + 16 < wf.wf_size(); base += 2u * 16) {
+    for (uint32_t i = 0; i < 16; ++i) {
+      amdgpu::RegisterAccess(wf).write_lane(src0, base + i, tmp_dst[base + 16 + i]);
+      amdgpu::RegisterAccess(wf).write_lane(vdst, base + 16 + i, tmp_src[base + i]);
+    }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
@@ -593,7 +592,7 @@ VCndmaskB32Vop3::VCndmaskB32Vop3(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src2(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -624,14 +623,14 @@ VCndmaskB32Vop3::VCndmaskB32Vop3(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
-        64, OperandType::OPR_SIMM32,
+        32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
     uint64_t literal64 =
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
@@ -1673,7 +1672,7 @@ VCndmaskB16Vop3::VCndmaskB16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src2(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -1712,14 +1711,14 @@ VCndmaskB16Vop3::VCndmaskB16Vop3(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
-        64, OperandType::OPR_SIMM32,
+        32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
     uint64_t literal64 =
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
@@ -1774,7 +1773,7 @@ void VCndmaskB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
-              ((amdgpu::RegisterAccess(wf).read_scalar64(src2) >> lane) & 1)
+              ((amdgpu::read_wave_mask_scalar(src2, wf) >> lane) & 1)
                   ? static_cast<uint16_t>(
                         ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))
                   : static_cast<uint16_t>(
@@ -2690,7 +2689,8 @@ VWritelaneB32Vop3::VWritelaneB32Vop3(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
