@@ -177,22 +177,7 @@ bool plan_cluster_workgroups(const DispatchEntry &entry, uint32_t cluster_base_l
 bool sgpr_count_is_descriptor_encoded(rj_code_arch_t arch, uint32_t sgpr_gran) {
   if (sgpr_gran != 0)
     return true;
-
-  /*
-   * \NPI new ISA family: classify the new arch for CP-visible behavior here \
-   * (RDNA-style encodings return false; CDNA-style fall through to the default).
-   */
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-  case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
-    return false;
-  default:
-    return true;
-  }
+  return isa_properties(arch).descriptor_sgpr_count_encoded;
 }
 
 } // namespace
@@ -309,7 +294,6 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     if (pkt.enable_wg_id_z)
       cu->write_sgpr(sbase + sys_idx++, wg_id_z);
   }
-
   const auto properties = isa_properties(cu->arch());
   if (properties.uses_ttmp_workgroup_ids) {
     // The simulator aliases TTMP scalar selectors into the wavefront SGPR
