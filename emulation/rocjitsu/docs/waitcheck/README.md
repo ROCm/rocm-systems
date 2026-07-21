@@ -518,10 +518,7 @@ HSA_TOOLS_LIB="$PWD/build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_waitcheck_
 ```
 
 The `rocjitsu` launcher preserves an existing space-separated tool list and
-appends `librocjitsu_hooks.so`. Because both tools can own the queue
-interceptor, the launcher automatically selects eager waitcheck unless
-`ROCJITSU_WAITCHECK_MODE` was explicitly set. The inner waitcheck load wrapper
-therefore analyzes the final reader produced by DBT, without another setting:
+appends `librocjitsu_hooks.so`, so the usual DBT invocation is:
 
 ```sh
 HSA_TOOLS_LIB="$PWD/build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_waitcheck_hooks.so" \

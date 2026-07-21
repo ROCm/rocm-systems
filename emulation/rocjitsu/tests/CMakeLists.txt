@@ -1483,7 +1483,7 @@ if(HSA_RUNTIME64)
                     "ROCJITSU_WAITCHECK_FAIL=1"
                     "ROCJITSU_WAITCHECK_SUMMARY=1"
                 PASS_REGULAR_EXPRESSION
-                    "rocjitsu-waitcheck: summary loads=[1-9][0-9]* dispatches=0 checked=[1-9][0-9]*"
+                    "rocjitsu-waitcheck: summary loads=[1-9][0-9]* dispatches=[1-9][0-9]* checked=[1-9][0-9]*"
                 INSTALL_COMMAND
                     "\${RJ_INSTALLED_BINDIR}/rocjitsu"
                     "--config"
