@@ -1612,9 +1612,11 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
     if name == 'V_ACCVGPR_WRITE':
         return InstructionSemantics(name, 'accvgpr_write')
 
-    # Additional dot product variants (RDNA3/4 naming)
+    # Additional dot product variants (RDNA3/4 naming). BF16 uses the same dot2
+    # structure as F16 but a different widening (8-bit exponent, no denormal
+    # renormalization), so it gets its own class rather than reusing f32_f16.
     if name == 'V_DOT2_F32_BF16':
-        return InstructionSemantics(name, 'dot2_f32_f16')  # BF16 uses same dot2 pattern
+        return InstructionSemantics(name, 'dot2_f32_bf16')
     if name == 'V_DOT4_I32_IU8':
         return InstructionSemantics(name, 'dot4_i32_iu8')
     if name == 'V_DOT8_I32_IU4':

@@ -55,8 +55,11 @@ class Os : AllStatic {
   static bool GetFileHandle(const char* fname, FileDesc* fd_ptr, size_t* sz_ptr);
 
   // Returns the file name & file offset of mapped memory if the file is mapped.
+  // If region_bound_ptr is non-null and 'image' lies in a readable mapping, it is
+  // set to the number of readable bytes from 'image' to the end of that mapping
+  // (populated for anonymous mappings too, even when no file name is resolved).
   static bool FindFileNameFromAddress(const void* image, std::string* fname_ptr,
-                                      size_t* foffset_ptr);
+                                      size_t* foffset_ptr, size_t* region_bound_ptr = nullptr);
 
   // Given a valid file descriptor returns mmaped memory for size and offset
   static bool MemoryMapFileDesc(FileDesc fdesc, size_t fsize, size_t foffset,

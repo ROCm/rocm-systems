@@ -3808,10 +3808,10 @@ VAddCoCiU32Vop3SdstEnc::VAddCoCiU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_add_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
                   make_exec_fn<VAddCoCiU32Vop3SdstEnc>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src2(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   dst_operands_[1] = &sdst;
   src_operands_[0] = &src0;
@@ -3842,7 +3842,7 @@ VAddCoCiU32Vop3SdstEnc::VAddCoCiU32Vop3SdstEnc(const MachineInst *inst)
     src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(64, OperandType::OPR_SIMM32,
+    src2 = Operand(32, OperandType::OPR_SIMM32,
                    static_cast<int>(
                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
@@ -3850,7 +3850,7 @@ VAddCoCiU32Vop3SdstEnc::VAddCoCiU32Vop3SdstEnc(const MachineInst *inst)
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
     uint64_t literal64 =
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
@@ -3911,10 +3911,10 @@ VSubCoCiU32Vop3SdstEnc::VSubCoCiU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_sub_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
                   make_exec_fn<VSubCoCiU32Vop3SdstEnc>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src2(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   dst_operands_[1] = &sdst;
   src_operands_[0] = &src0;
@@ -3945,7 +3945,7 @@ VSubCoCiU32Vop3SdstEnc::VSubCoCiU32Vop3SdstEnc(const MachineInst *inst)
     src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(64, OperandType::OPR_SIMM32,
+    src2 = Operand(32, OperandType::OPR_SIMM32,
                    static_cast<int>(
                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
@@ -3953,7 +3953,7 @@ VSubCoCiU32Vop3SdstEnc::VSubCoCiU32Vop3SdstEnc(const MachineInst *inst)
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
     uint64_t literal64 =
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
@@ -4014,10 +4014,10 @@ VSubrevCoCiU32Vop3SdstEnc::VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_subrev_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
                   make_exec_fn<VSubrevCoCiU32Vop3SdstEnc>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src2(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   dst_operands_[1] = &sdst;
   src_operands_[0] = &src0;
@@ -4048,7 +4048,7 @@ VSubrevCoCiU32Vop3SdstEnc::VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst)
     src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(64, OperandType::OPR_SIMM32,
+    src2 = Operand(32, OperandType::OPR_SIMM32,
                    static_cast<int>(
                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
@@ -4056,7 +4056,7 @@ VSubrevCoCiU32Vop3SdstEnc::VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst)
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
     uint64_t literal64 =
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
@@ -4117,7 +4117,7 @@ VDivScaleF32Vop3SdstEnc::VDivScaleF32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_div_scale_f32", reinterpret_cast<const OpEncoding *>(inst),
                   make_exec_fn<VDivScaleF32Vop3SdstEnc>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
@@ -4221,7 +4221,7 @@ VDivScaleF64Vop3SdstEnc::VDivScaleF64Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_div_scale_f64", reinterpret_cast<const OpEncoding *>(inst),
                   make_exec_fn<VDivScaleF64Vop3SdstEnc>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
@@ -4331,7 +4331,7 @@ VMadCoU64U32Vop3SdstEnc::VMadCoU64U32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_mad_co_u64_u32", reinterpret_cast<const OpEncoding *>(inst),
                   make_exec_fn<VMadCoU64U32Vop3SdstEnc>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
@@ -4435,7 +4435,7 @@ VMadCoI64I32Vop3SdstEnc::VMadCoI64I32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_mad_co_i64_i32", reinterpret_cast<const OpEncoding *>(inst),
                   make_exec_fn<VMadCoI64I32Vop3SdstEnc>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
@@ -4539,7 +4539,7 @@ VAddCoU32Vop3SdstEnc::VAddCoU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_add_co_u32", reinterpret_cast<const OpEncoding *>(inst),
                   make_exec_fn<VAddCoU32Vop3SdstEnc>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -4629,7 +4629,7 @@ VSubCoU32Vop3SdstEnc::VSubCoU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_sub_co_u32", reinterpret_cast<const OpEncoding *>(inst),
                   make_exec_fn<VSubCoU32Vop3SdstEnc>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -4719,7 +4719,7 @@ VSubrevCoU32Vop3SdstEnc::VSubrevCoU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_subrev_co_u32", reinterpret_cast<const OpEncoding *>(inst),
                   make_exec_fn<VSubrevCoU32Vop3SdstEnc>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;

@@ -200,12 +200,7 @@ def gen_vector_mad_64_32(dst: list[str], src: list[str], dtype: str | None) -> s
         )
     L.append('  }')
     if writes_carry:
-        L.append('  if (wf.wf_size() <= 32)')
-        L.append(
-            f'    amdgpu::RegisterAccess(wf).write_scalar({dst[1]}, static_cast<uint32_t>(carry));'
-        )
-        L.append('  else')
-        L.append(f'    amdgpu::RegisterAccess(wf).write_scalar64({dst[1]}, carry);')
+        L.append(f'  amdgpu::write_wave_mask_scalar({dst[1]}, wf, carry);')
     return '\n'.join(L)
 
 
@@ -539,12 +534,7 @@ def gen_vector_div_scale(
     )
     L.append('  }')
     if len(dst) > 1:
-        L.append('  if (wf.wf_size() <= 32)')
-        L.append(
-            f'    amdgpu::RegisterAccess(wf).write_scalar({dst[1]}, static_cast<uint32_t>(vcc));'
-        )
-        L.append('  else')
-        L.append(f'    amdgpu::RegisterAccess(wf).write_scalar64({dst[1]}, vcc);')
+        L.append(f'  amdgpu::write_wave_mask_scalar({dst[1]}, wf, vcc);')
     else:
         L.append('  wf.set_vcc(vcc);')
     return '\n'.join(L)
@@ -755,13 +745,15 @@ def gen_vector_bitop3(
 def gen_vector_permlane_swap(dst: list[str], src: list[str], stride: int) -> str:
     """Generate V_PERMLANE{16,32}_SWAP_B32.
 
-    For each lane N in [0..stride-1]:
-      tmp = src0[N]
-      src0[N]        ← vdst[N + stride]
-      vdst[N+stride] ← tmp
-    vdst[0..stride-1] and src0[stride..] are UNCHANGED.
-    EXEC mask is IGNORED.
-    Both vdst and src0 are outputs (LLVM: returns {vdst_new, src0_new}).
+    The swap operates on every 2*stride-lane block of the wavefront, not just the
+    first. Within each block starting at lane `base`:
+      src0[base + i]          ← old vdst[base + stride + i]   (i in 0..stride-1)
+      vdst[base + stride + i] ← old src0[base + i]
+    So for the 16-lane form on a wave64 this swaps lanes 0-15<->16-31 AND
+    32-47<->48-63 (all four groups); for the 32-lane form it swaps 0-31<->32-63.
+    src0[base+stride..] and vdst[base..base+stride-1] within each block are
+    UNCHANGED. EXEC mask is IGNORED. Both vdst and src0 are outputs (LLVM:
+    returns {vdst_new, src0_new}).
     """
     L = []
     L.append('  uint32_t tmp_dst[64] = {}, tmp_src[64] = {};')
@@ -773,14 +765,17 @@ def gen_vector_permlane_swap(dst: list[str], src: list[str], stride: int) -> str
         f'    tmp_src[lane] = amdgpu::RegisterAccess(wf).read_lane({dst[1]}, lane);'
     )
     L.append('  }')
-    L.append(f'  for (uint32_t lane = 0; lane < {stride}; ++lane) {{')
-    L.append(f'    if (lane + {stride} >= wf.wf_size()) break;')
     L.append(
-        f'    amdgpu::RegisterAccess(wf).write_lane({dst[1]}, lane, tmp_dst[lane + {stride}]);'
+        f'  for (uint32_t base = 0; base + {stride} < wf.wf_size(); base += 2u * {stride}) {{'
+    )
+    L.append(f'    for (uint32_t i = 0; i < {stride}; ++i) {{')
+    L.append(
+        f'      amdgpu::RegisterAccess(wf).write_lane({dst[1]}, base + i, tmp_dst[base + {stride} + i]);'
     )
     L.append(
-        f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane + {stride}, tmp_src[lane]);'
+        f'      amdgpu::RegisterAccess(wf).write_lane({dst[0]}, base + {stride} + i, tmp_src[base + i]);'
     )
+    L.append('    }')
     L.append('  }')
     return '\n'.join(L)
 
