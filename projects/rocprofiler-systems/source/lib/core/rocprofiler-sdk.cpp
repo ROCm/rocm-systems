@@ -321,9 +321,6 @@ config_settings(const std::shared_ptr<settings>& _config)
 #if(ROCPROFILER_VERSION >= 10000)
     _add_domain("kfd_events");
 #endif
-#if(ROCPROFILER_VERSION >= 10303)
-    _add_domain("hipfile_api");
-#endif
 
     for(const auto& itr : buffered_tracing_info)
         _add_domain(itr.name);
@@ -420,8 +417,8 @@ get_callback_domains()
         supported.emplace(ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API);
     }
 #endif
-#if(ROCPROFILER_VERSION >= 10303)
-    if(_version.formatted >= 10303)
+#if(ROCPROFILER_VERSION >= 10304)
+    if(_version.formatted >= 10304)
     {
         supported.emplace(ROCPROFILER_CALLBACK_TRACING_HIPFILE_API);
     }
@@ -482,25 +479,6 @@ get_callback_domains()
         {
             _data.emplace(ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API);
         }
-#if(ROCPROFILER_VERSION >= 10303)
-        else if(itr == "hipfile_api")
-        {
-            if(_version.formatted < 10303)
-            {
-                static bool _warned = false;
-                if(!_warned)
-                {
-                    LOG_WARNING("hipFILE tracing domain 'hipfile_api' disabled: "
-                                "rocprofiler-sdk {}.{}.{} does not support hipFILE "
-                                "tracing (requires >= 1.3.3)",
-                                _version.major, _version.minor, _version.patch);
-                    _warned = true;
-                }
-                continue;
-            }
-            _data.emplace(ROCPROFILER_CALLBACK_TRACING_HIPFILE_API);
-        }
-#endif
         else
         {
             for(size_t idx = 0; idx < callback_tracing_info.size(); ++idx)
