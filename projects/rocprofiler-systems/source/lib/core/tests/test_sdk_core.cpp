@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
@@ -57,6 +58,10 @@ enum backend_tag : int
     config_duplicate              = 83,
     callback_backtrace_operations = 84,
     buffered_backtrace_operations = 85,
+    callback_operations           = 86,
+    buffered_operations           = 87,
+    buffered_domains_memory_copy  = 88,
+    buffered_domains_aliases      = 89,
     rocm_events                   = 90,
 };
 
@@ -382,6 +387,126 @@ TEST(sdk_core_config_settings,
     ASSERT_NE(itr, config->end());
     EXPECT_EQ(itr->second->get<std::string>().second,
               "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory");
+}
+
+// ─── get_buffered_domains ─────────────────────────────────────────────────────
+
+TEST_F(sdk_core_domains_test, get_buffered_domains_memory_copy_returns_memory_copy)
+{
+    using backend_t = tagged_backend<buffered_domains_memory_copy>;
+    using sut       = sdk_core<backend_t, mock_sdk_externals>;
+
+    auto config = std::make_shared<fake_settings>();
+    sut::config_settings(config);
+
+    EXPECT_CALL(*g_mock, get_version)
+        .Times(1)
+        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
+            *major = 1;
+            *minor = 2;
+            *patch = 2;
+        });
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{ "memory_copy" }));
+    EXPECT_CALL(*g_mock_externals, get_settings)
+        .Times(1)
+        .WillOnce(gtest::Return(config.get()));
+    EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
+        .Times(1)
+        .WillOnce(gtest::Return(false));
+
+    EXPECT_THAT(sut::get_buffered_domains(),
+                gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_MEMORY_COPY));
+}
+
+TEST_F(sdk_core_domains_test, get_buffered_domains_aliases_expand_to_exact_domains)
+{
+    using backend_t = tagged_backend<buffered_domains_aliases>;
+    using sut       = sdk_core<backend_t, mock_sdk_externals>;
+
+    auto config = std::make_shared<fake_settings>();
+    sut::config_settings(config);
+
+    EXPECT_CALL(*g_mock, get_version)
+        .Times(1)
+        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
+            *major = 1;
+            *minor = 2;
+            *patch = 2;
+        });
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{ "hsa_api,hip_api,marker_api" }));
+    EXPECT_CALL(*g_mock_externals, get_settings)
+        .Times(1)
+        .WillOnce(gtest::Return(config.get()));
+    EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
+        .Times(1)
+        .WillOnce(gtest::Return(false));
+
+    EXPECT_THAT(
+        sut::get_buffered_domains(),
+        gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_HSA_CORE_API,
+                                    backend_t::BUFFER_TRACING_HSA_AMD_EXT_API,
+                                    backend_t::BUFFER_TRACING_HSA_IMAGE_EXT_API,
+                                    backend_t::BUFFER_TRACING_HSA_FINALIZE_EXT_API,
+                                    backend_t::BUFFER_TRACING_HIP_COMPILER_API,
+                                    backend_t::BUFFER_TRACING_HIP_RUNTIME_API,
+                                    backend_t::BUFFER_TRACING_MARKER_CORE_API));
+}
+
+// ─── get_operations ───────────────────────────────────────────────────────────
+
+TEST_F(sdk_core_domains_test,
+       get_operations_callback_applies_include_and_exclude_settings)
+{
+    using backend_t = tagged_backend<callback_operations>;
+    using sut       = sdk_core<backend_t, mock_sdk_externals>;
+
+    auto config = std::make_shared<fake_settings>();
+    sut::config_settings(config);
+
+    EXPECT_CALL(*g_mock_externals,
+                get_setting_value(gtest::Eq("ROCPROFSYS_ROCM_MARKER_API_OPERATIONS")))
+        .Times(1)
+        .WillOnce(
+            gtest::Return(std::string{ "roctxMarkA|roctxRangePushA|roctxRangePop" }));
+    EXPECT_CALL(*g_mock_externals, get_setting_value(gtest::Eq(
+                                       "ROCPROFSYS_ROCM_MARKER_API_OPERATIONS_EXCLUDE")))
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{ "roctxRangePushA" }));
+
+    EXPECT_THAT(
+        sut::get_operations(backend_t::CALLBACK_TRACING_MARKER_CORE_API),
+        gtest::ElementsAre(
+            static_cast<std::int32_t>(backend_t::MARKER_CORE_API_ID_roctxMarkA),
+            static_cast<std::int32_t>(backend_t::MARKER_CORE_API_ID_roctxRangePop)));
+}
+
+TEST_F(sdk_core_domains_test,
+       get_operations_buffered_applies_include_and_exclude_settings)
+{
+    using backend_t = tagged_backend<buffered_operations>;
+    using sut       = sdk_core<backend_t, mock_sdk_externals>;
+
+    auto config = std::make_shared<fake_settings>();
+    sut::config_settings(config);
+
+    EXPECT_CALL(*g_mock_externals,
+                get_setting_value(gtest::Eq("ROCPROFSYS_ROCM_MEMORY_COPY_OPERATIONS")))
+        .Times(1)
+        .WillOnce(gtest::Return(
+            std::string{ "HOST_TO_DEVICE|DEVICE_TO_HOST|DEVICE_TO_DEVICE" }));
+    EXPECT_CALL(*g_mock_externals, get_setting_value(gtest::Eq(
+                                       "ROCPROFSYS_ROCM_MEMORY_COPY_OPERATIONS_EXCLUDE")))
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{ "DEVICE_TO_DEVICE" }));
+
+    EXPECT_THAT(sut::get_operations(backend_t::BUFFER_TRACING_MEMORY_COPY),
+                gtest::ElementsAre(
+                    static_cast<std::int32_t>(ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE),
+                    static_cast<std::int32_t>(ROCPROFILER_MEMORY_COPY_DEVICE_TO_HOST)));
 }
 
 // ─── get_backtrace_operations ─────────────────────────────────────────────────
