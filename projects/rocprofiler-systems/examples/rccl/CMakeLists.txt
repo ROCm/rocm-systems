@@ -79,17 +79,6 @@ if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
     endif()
 endif()
 
-if(
-    (
-        NOT CMAKE_CXX_COMPILER_IS_HIPCC
-        OR (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT hip_FOUND)
-    )
-    AND (NOT COMMAND rocprofiler_systems_custom_compilation AND NOT HIPCC_EXECUTABLE)
-)
-    message(AUTHOR_WARNING "rccl-tests could not be built")
-    return()
-endif()
-
 find_package(Threads REQUIRED)
 
 # ----------------------------------------------------------------------------
@@ -194,21 +183,10 @@ function(rccl_tests_setup_hip_target _target)
         target_link_options(${_target} PRIVATE --offload-arch=${_arch})
     endforeach()
 
-    if(
-        CMAKE_CXX_COMPILER_ID MATCHES "Clang"
-        AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
-        AND NOT HIPCC_EXECUTABLE
-    )
-        target_link_libraries(
-            ${_target}
-            PRIVATE
-                $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
-                $<TARGET_NAME_IF_EXISTS:hip::host>
-                $<TARGET_NAME_IF_EXISTS:hip::device>
-        )
-    endif()
-
-    if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
+    # HIPCC_EXECUTABLE is guaranteed to be set (early return otherwise), so the
+    # sources are compiled through hipcc unless the main C++ compiler already is
+    # hipcc.
+    if(NOT CMAKE_CXX_COMPILER_IS_HIPCC)
         # defined in MacroUtilities.cmake (or standalone-helpers.cmake)
         rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET ${_target})
     endif()

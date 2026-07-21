@@ -2,7 +2,7 @@
 
 ## Overview
 
-This example builds the rccl-tests performance test suite, which benchmarks RCCL (ROCm Communication Collectives Library) operations across multiple GPUs. It includes performance tests for all major collectives - AllGather, AllReduce, AllToAll, Broadcast, Gather, Reduce, ReduceScatter, Scatter, and SendRecv - measuring bandwidth and latency for inter-GPU communication. This is useful for profiling GPU-to-GPU collective communication patterns and PCIe/Infinity Fabric interconnect performance.
+This example builds the rccl-tests performance test suite, which benchmarks RCCL (ROCm Communication Collectives Library) operations across multiple GPUs. It includes performance tests for the major collectives - AllGather, AllReduce, AllToAll, AllToAllV, Broadcast, Reduce, and ReduceScatter - measuring bandwidth and latency for inter-GPU communication. This is useful for profiling GPU-to-GPU collective communication patterns and PCIe/Infinity Fabric interconnect performance.
 
 ## Source Files
 
