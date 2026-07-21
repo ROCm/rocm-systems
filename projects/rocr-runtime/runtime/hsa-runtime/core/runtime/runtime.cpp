@@ -361,7 +361,7 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
     std::map<const void*, AllocationRegion>::iterator it = allocation_map_.find(ptr);
 
     if (it == allocation_map_.end()) {
-      debug_warning(false && "Can't find address in allocation map");
+      debug_warning(false, "Can't find address in allocation map");
       return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     }
     region = it->second.region;
@@ -2578,7 +2578,7 @@ hsa_status_t Runtime::Load() {
      * This is not a failure, in some environments such as SRIOV, not all CPUID info is
      * exposed inside the guest
      */
-    debug_warning("Parsing CPUID failed.");
+    debug_warning(false, "Parsing CPUID failed.");
   }
 
   flag_.Refresh();
@@ -2610,7 +2610,7 @@ hsa_status_t Runtime::Load() {
   // Setup system clock frequency for the first time.
   if (sys_clock_freq_ == 0) {
     sys_clock_freq_ = os::SystemClockFrequency();
-    if (sys_clock_freq_ < 100000) debug_warning("System clock resolution is low.");
+    debug_warning(sys_clock_freq_ < 100000, "System clock resolution is low.");
   }
 
   BindErrorHandlers();
@@ -4000,7 +4000,7 @@ hsa_status_t Runtime::VMemoryAddressFree(void* va, size_t size) {
   std::map<const void*, AddressHandle>::iterator it = reserved_address_map_.find(va);
 
   if (it == reserved_address_map_.end()) {
-    debug_warning(false && "Can't find address in reserved address");
+    debug_warning(false, "Can't find address in reserved address");
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
@@ -4093,7 +4093,7 @@ hsa_status_t Runtime::VMemoryHandleRelease(hsa_amd_vmem_alloc_handle_t memoryOnl
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(memoryOnlyHandle));
 
   if (memoryHandle == nullptr) {
-    debug_warning(false && "Can't find memory handle");
+    debug_warning(false, "Can't find memory handle");
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
@@ -4126,9 +4126,9 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
   /* Confirm that this VA range has not been mapped yet */
   auto upperMappedHandleIt = mapped_handle_map_.upper_bound(va);
   if (upperMappedHandleIt != mapped_handle_map_.begin()) {
-    upperMappedHandleIt--;
-    if ((reinterpret_cast<const uint8_t*>(upperMappedHandleIt->first) +
-         upperMappedHandleIt->second.size) > va) {
+    --upperMappedHandleIt;
+    if ((static_cast<const uint8_t*>(upperMappedHandleIt->first) + upperMappedHandleIt->second.size) > va)
+    {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
   }
@@ -4141,7 +4141,7 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
 
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(memoryOnlyHandle));
   if (memoryHandle == nullptr) {
-    debug_warning(false && "Can't find memory handle");
+    debug_warning(false, "Can't find memory handle");
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
@@ -4592,7 +4592,7 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
   *dmabuf_fd = -1;
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(handle));
   if (memoryHandle == nullptr) {
-    debug_warning(false && "Can't find memory handle");
+    debug_warning(false, "Can't find memory handle");
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 

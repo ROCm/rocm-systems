@@ -15,16 +15,13 @@
 # Defines:
 # - amdhsacode library and target include directories
 
-set(USE_AMD_LIBELF "no" CACHE STRING "Do not use AMD LIBELF by default")
-set(NO_SI_SP3      "no" CACHE STRING "Disable using SP3")
+set(USE_AMD_LIBELF OFF CACHE STRING "Do not use AMD LIBELF by default")
+set(NO_SI_SP3      OFF CACHE STRING "Disable using SP3")
 
 file(GLOB sources *.cpp *.hpp)
 
 add_library(amdhsacode STATIC ${sources})
-set_target_properties(amdhsacode PROPERTIES
-  MSVC_RUNTIME_LIBRARY          "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-  POSITION_INDEPENDENT_CODE     ON
-)
+set_target_properties(amdhsacode PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|(Apple)?Clang)$")
   target_compile_options(amdhsacode PRIVATE
@@ -34,7 +31,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|(Apple)?Clang)$")
 endif()
 
 set(LIBELF_LIB)
-if(${USE_AMD_LIBELF} STREQUAL "yes")
+if(USE_AMD_LIBELF)
   target_compile_definitions(amdhsacode PRIVATE AMD_LIBELF)
   target_include_directories(amdhsacode PUBLIC ${HSAIL_ELFTOOLCHAIN_DIR}/common)
   if(WIN32)
@@ -52,7 +49,7 @@ endif()
 target_include_directories(amdhsacode PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(amdhsacode PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 target_include_directories(amdhsacode PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../hsail-tools/libHSAIL)
-if(${NO_SI_SP3} STREQUAL "no")
+if(NOT NO_SI_SP3)
   target_include_directories(amdhsacode PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../Chip/sp3)
 endif()
 #if defined(GFX102_BUILD)
@@ -68,15 +65,10 @@ target_compile_definitions(amdhsacode PRIVATE GFX115_BUILD)
 target_compile_definitions(amdhsacode PRIVATE GFX12_BUILD)
 #endif
 
-if(${NO_SI_SP3} STREQUAL "yes")
+if(NOT NO_SI_SP3)
+  target_link_libraries(amdhsacode PUBLIC sp3)
+else()
   target_compile_definitions(amdhsacode PRIVATE NO_SI_SP3)
 endif()
 
 target_link_libraries(amdhsacode PRIVATE ${LIBELF_LIB})
-
-if(${NO_SI_SP3} STREQUAL "no")
-  set(SC_BUILD_SP3 ON)
-  if(SC_BUILD_SP3)
-    target_link_libraries(amdhsacode PUBLIC sp3)
-  endif()
-endif()
