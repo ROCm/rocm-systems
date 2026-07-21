@@ -2,6 +2,16 @@ name: rocprofiler-compute GHCR Packages for CI Images
 
 on:
   workflow_dispatch:
+    inputs:
+      gpu_type:
+        description: 'Image type(s) to build and publish'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - multiarch
+          - base
   schedule:
     - cron: 0 5 * * *
   push:
@@ -21,6 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       containers_list: ${{ steps.generate_containers_list.outputs.containers_list }}
+      gpu_list: ${{ steps.generate_containers_list.outputs.gpu_list }}
 
     steps:
       - uses: actions/checkout@v6
@@ -34,6 +45,16 @@ jobs:
           CONTAINERS_LIST=$(cat containers-ci.yml | yq '.matrix' -I=0 -o=json)
           echo "containers_list=$CONTAINERS_LIST" >> $GITHUB_OUTPUT
 
+          GPU_TYPE="${{ inputs.gpu_type }}"
+          if [ "${GPU_TYPE}" = "multiarch" ]; then
+            GPU_LIST='["multiarch"]'
+          elif [ "${GPU_TYPE}" = "base" ]; then
+            GPU_LIST='["base"]'
+          else
+            GPU_LIST='["multiarch","base"]'
+          fi
+          echo "gpu_list=${GPU_LIST}" >> $GITHUB_OUTPUT
+
   rocprofiler-compute-ci:
     needs: prepare_matrix_ci
     runs-on: ubuntu-latest
@@ -45,7 +66,7 @@ jobs:
       fail-fast: false
       matrix:
         system: ${{ fromJSON(needs.prepare_matrix_ci.outputs.containers_list) }}
-        gpu: [ 'multiarch', 'base' ]
+        gpu: ${{ fromJSON(needs.prepare_matrix_ci.outputs.gpu_list) }}
 
     steps:
       - name: Checkout Repository
