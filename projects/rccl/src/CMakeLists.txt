@@ -202,6 +202,7 @@ set(SRC_FILES
   include/proxy.h
   include/ras.h
   include/rccl_common.h
+  include/rccl_decision.h
   include/rccl_vars.h
   include/register.h
   include/register_inline.h
