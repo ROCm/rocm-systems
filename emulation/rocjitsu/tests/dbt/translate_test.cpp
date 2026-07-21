@@ -7467,8 +7467,9 @@ TEST(BinaryTranslatorE2E, Gfx1250Ds2MovesData1VgprBankToSecondData0Role) {
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
   EXPECT_EQ(target_words[0], set_vgpr_msb[0]);
   EXPECT_EQ(target_words[3],
-            gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x14})[0]);
-  EXPECT_EQ(target_words[6], set_vgpr_msb[0]);
+            gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x1014})[0]);
+  EXPECT_EQ(target_words[6],
+            gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x1410})[0]);
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250Ds2AdjustsDestinationBankForSecondLoad) {
@@ -7493,7 +7494,7 @@ TEST(BinaryTranslatorE2E, Gfx1250Ds2AdjustsDestinationBankForSecondLoad) {
   EXPECT_EQ(target_words[2],
             gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x40})[0]);
   EXPECT_EQ(target_words[5],
-            gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0})[0]);
+            gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x4000})[0]);
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250SplitsEveryK128Fp8Bf8WmmaForA0) {
@@ -7640,6 +7641,44 @@ TEST(BinaryTranslatorE2E, Gfx1250MaterializesDsAddtidAddressForA0) {
             2);
 }
 
+TEST(BinaryTranslatorE2E, Gfx1250GeneratedVgprMsbTransitionsCarryPreviousState) {
+  constexpr uint16_t kAllVgprMsbFieldsHwreg = 1u | (12u << 6) | (7u << 11);
+  constexpr auto original_mode = gfx1250::build_sopk(
+      gfx1250::kSSetregImm32B32Sopk, {.simm16 = kAllVgprMsbFieldsHwreg});
+  constexpr auto addtid = gfx1250::build_vds(
+      gfx1250::kDsStoreAddtidB32Vds, {.offset0 = 4, .data0 = 8});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {original_mode[0], 1u << 14, addtid[0], addtid[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_GE(decoded.size(), 4u);
+  EXPECT_EQ(decoded[0]->mnemonic(), "s_setreg_imm32_b32");
+  EXPECT_EQ(decoded[1]->mnemonic(), "s_nop");
+  EXPECT_EQ(decoded[2]->mnemonic(), "s_set_vgpr_msb");
+  ASSERT_NE(decoded[2]->raw_encoding(), nullptr);
+  EXPECT_EQ(decoded[2]->raw_encoding()[0] & 0xffffu, 0x0100u);
+
+  std::vector<uint16_t> generated_modes;
+  for (size_t index = 1; index < decoded.size(); ++index) {
+    if (decoded[index]->mnemonic() == "s_set_vgpr_msb") {
+      ASSERT_NE(decoded[index]->raw_encoding(), nullptr);
+      generated_modes.push_back(
+          static_cast<uint16_t>(decoded[index]->raw_encoding()[0] & 0xffffu));
+    }
+  }
+  EXPECT_EQ(generated_modes, (std::vector<uint16_t>{0x0100, 0x0004, 0x0401}));
+}
+
 TEST(BinaryTranslatorE2E, Gfx1250ConservativelyPadsIu8WmmaForA0) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   const auto source_wmma = gfx1250::build_vop3p(
@@ -7750,7 +7789,7 @@ TEST(BinaryTranslatorE2E, Gfx1250K128WmmaSplitTemporarilyMatchesMismatchedVgprMs
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
   constexpr auto select_vdst_bank_for_src2 =
-      gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0});
+      gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x1000});
 
   EXPECT_EQ(target_words[3], select_vdst_bank_for_src2[0]);
   EXPECT_EQ(target_words[6], set_vgpr_msb[0]);
@@ -7778,9 +7817,8 @@ TEST(BinaryTranslatorE2E, Gfx1250K128WmmaSplitAllowsMatchingNonzeroVgprMsbBanks)
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250K128WmmaSplitUsesLowEightSetVgprMsbBits) {
-  // The architectural immediate is only eight bits. Real compiler output can
-  // carry nonzero reserved upper bits such as 0x100; those do not change any
-  // VGPR bank and must not cause a whole-kernel false rejection.
+  // Only the low byte changes the active bank. The upper byte carries the
+  // previous bank state for trap recovery and must not affect analysis.
   constexpr auto set_vgpr_msb = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x100});
   constexpr auto source_wmma = gfx1250::build_vop3p(
       gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p, {.vdst = 32, .src0 = 256, .src1 = 272, .src2 = 128});
@@ -7821,7 +7859,8 @@ TEST(BinaryTranslatorE2E, Gfx1250K128WmmaSplitAdjustsModeForBankCrossingInput) {
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
   constexpr auto set_src0_bank_one = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 1});
-  constexpr auto restore_mode = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp);
+  constexpr auto restore_mode =
+      gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x100});
 
   EXPECT_EQ(target_words[2], set_src0_bank_one[0]);
   EXPECT_EQ(target_words[4] & 0x1ffu, 256u + 2u);
@@ -7853,11 +7892,13 @@ TEST(BinaryTranslatorE2E, Gfx1250K128WmmaSplitCombinesInputCrossingAndAccumulato
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
   constexpr auto second_mode =
-      gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 1});
+      gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x1001});
+  constexpr auto restored_mode =
+      gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x110});
 
   EXPECT_EQ(target_words[3], second_mode[0]);
   EXPECT_EQ(target_words[5] & 0x1ffu, 256u + 2u);
-  EXPECT_EQ(target_words[6], original_mode[0]);
+  EXPECT_EQ(target_words[6], restored_mode[0]);
   EXPECT_EQ(target_words[7], kGfx1250SEndpgm);
 }
 

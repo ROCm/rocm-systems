@@ -129,6 +129,30 @@ void append_words(std::vector<uint32_t> &output, const std::array<uint32_t, N> &
   output.insert(output.end(), words.begin(), words.end());
 }
 
+/// @brief Change the gfx1250 VGPR-bank mode while preserving trap recovery state.
+///
+/// @details SIMM16[7:0] selects the new SRC0/SRC1/SRC2/DST banks. The MI450
+/// trap convention stores the immediately preceding mode in SIMM16[15:8]. If
+/// this is the first instruction in a generated sequence, conservatively place
+/// an S_NOP in front of it: the source-stream predecessor is outside the
+/// expansion and may be an S_SETREG* write to MODE, which must not immediately
+/// precede S_SET_VGPR_MSB. Once an expansion has emitted any instruction, that
+/// instruction already provides the required separation.
+void append_gfx1250_vgpr_msb_transition(std::vector<uint32_t> &words, uint8_t &current_mode,
+                                        uint8_t new_mode) {
+  if (current_mode == new_mode)
+    return;
+
+  if (words.empty())
+    append_words(words, gfx1250::build_sopp(gfx1250::kSNopSopp, {.simm16 = 0}));
+
+  const uint16_t immediate = static_cast<uint16_t>(new_mode) |
+                             (static_cast<uint16_t>(current_mode) << 8);
+  append_words(words,
+               gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = immediate}));
+  current_mode = new_mode;
+}
+
 /// @brief Conservatively remove one hard-clause scheduling directive.
 ///
 /// @details A legal S_CLAUSE has no architectural data result; it only groups
@@ -319,9 +343,9 @@ ExpandResult expand_gfx1250_ds2(const Instruction &inst, uint32_t, uint64_t,
 
   std::vector<uint32_t> words;
   words.reserve(9);
+  uint8_t current_mode = original_mode;
   const auto set_mode = [&](uint8_t mode) {
-    append_words(words,
-                 gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = mode}));
+    append_gfx1250_vgpr_msb_transition(words, current_mode, mode);
   };
   if (second_first) {
     if (second_mode != original_mode)
@@ -529,14 +553,14 @@ ExpandResult expand_gfx1250_wmma_32x16_f4(const Instruction &inst, uint32_t, uin
       *src0_bank | (*src1_bank << 2) | (*src2_bank << 4) | (*dst_bank << 6));
   std::vector<uint32_t> words;
   words.reserve(6);
+  uint8_t current_mode = original_mode;
   for (uint16_t half = 0; half < 2; ++half) {
     if (half != 0 && (dst_crosses || src0_crosses || src2_crosses)) {
       const uint8_t upper_mode = static_cast<uint8_t>(
           (*src0_bank + (src0_crosses ? 1u : 0u)) | (*src1_bank << 2) |
           ((*src2_bank + (src2_crosses ? 1u : 0u)) << 4) |
           ((*dst_bank + (dst_crosses ? 1u : 0u)) << 6));
-      append_words(words,
-                   gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = upper_mode}));
+      append_gfx1250_vgpr_msb_transition(words, current_mode, upper_mode);
     }
 
     const uint16_t delta = static_cast<uint16_t>(half * kHalfDwords);
@@ -557,10 +581,8 @@ ExpandResult expand_gfx1250_wmma_32x16_f4(const Instruction &inst, uint32_t, uin
     replacement[0] &= ~((uint32_t{1} << 13)); // Do not carry matrix reuse.
     append_words(words, replacement);
   }
-  if (dst_crosses || src0_crosses || src2_crosses) {
-    append_words(words,
-                 gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = original_mode}));
-  }
+  if (dst_crosses || src0_crosses || src2_crosses)
+    append_gfx1250_vgpr_msb_transition(words, current_mode, original_mode);
   return ExpandResult::success(std::move(words));
 }
 
@@ -941,10 +963,8 @@ ExpandResult expand_gfx1250_ds_addtid(const Instruction &inst, uint32_t, uint64_
 
   std::vector<uint32_t> words;
   words.reserve(18);
-  if (compute_mode != original_mode) {
-    append_words(words,
-                 gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = compute_mode}));
-  }
+  uint8_t current_mode = original_mode;
+  append_gfx1250_vgpr_msb_transition(words, current_mode, compute_mode);
   append_words(words, gfx1250::build_vop3(
                           gfx1250::kVMbcntLoU32B32Vop3,
                           {.vdst = static_cast<uint8_t>(temp),
@@ -974,20 +994,14 @@ ExpandResult expand_gfx1250_ds_addtid(const Instruction &inst, uint32_t, uint64_
 
   if (is_store) {
     const uint8_t ds_mode = static_cast<uint8_t>(*src0_bank << 2);
-    if (ds_mode != compute_mode) {
-      append_words(words,
-                   gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = ds_mode}));
-    }
+    append_gfx1250_vgpr_msb_transition(words, current_mode, ds_mode);
     append_words(words, gfx1250::build_vds(
                             gfx1250::kDsStoreB32Vds,
                             {.offset0 = static_cast<uint8_t>(source.offset0),
                              .offset1 = static_cast<uint8_t>(source.offset1),
                              .addr = static_cast<uint8_t>(temp),
                              .data0 = static_cast<uint8_t>(source.data0)}));
-    if (ds_mode != original_mode) {
-      append_words(words,
-                   gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = original_mode}));
-    }
+    append_gfx1250_vgpr_msb_transition(words, current_mode, original_mode);
   } else {
     append_words(words, gfx1250::build_vds(
                             gfx1250::kDsLoadB32Vds,
@@ -995,10 +1009,7 @@ ExpandResult expand_gfx1250_ds_addtid(const Instruction &inst, uint32_t, uint64_
                              .offset1 = static_cast<uint8_t>(source.offset1),
                              .addr = static_cast<uint8_t>(temp),
                              .vdst = static_cast<uint8_t>(temp)}));
-    if (compute_mode != original_mode) {
-      append_words(words,
-                   gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = original_mode}));
-    }
+    append_gfx1250_vgpr_msb_transition(words, current_mode, original_mode);
   }
   return ExpandResult::success(std::move(words));
 }
@@ -1072,19 +1083,15 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
       static_cast<uint8_t>(((source.opsel & 1u) << 1u) | ((source.opsel & 2u) >> 1u));
   std::vector<uint32_t> words;
   words.reserve(40);
-  if (extract_mode != original_mode) {
-    append_words(words,
-                 gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = extract_mode}));
-  }
+  uint8_t current_mode = original_mode;
+  append_gfx1250_vgpr_msb_transition(words, current_mode, extract_mode);
   append_words(words, gfx1250::build_vop3(
                           gfx1250::kVBfeU32Vop3,
                           {.vdst = static_cast<uint8_t>(out),
                            .src0 = static_cast<uint16_t>(source.src0),
                            .src1 = gfx1250_inline_u32(static_cast<uint16_t>(byte_sel * 8u)),
                            .src2 = gfx1250_inline_u32(8)}));
-  if (extract_mode != 0) {
-    append_words(words, gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0}));
-  }
+  append_gfx1250_vgpr_msb_transition(words, current_mode, 0);
 
   append_compare_literal(words, gfx1250::kVCmpEqU32Vop3,
                          static_cast<uint8_t>(*nan_mask), gfx1250_vgpr_src(out), 0xffu);
@@ -1123,20 +1130,14 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
                       {.vdst = static_cast<uint8_t>(temp), .src0 = 255}, 0x7fa3d000u);
 
   const uint8_t final_mode = static_cast<uint8_t>(*dst_bank << 6);
-  if (final_mode != 0) {
-    append_words(words,
-                 gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = final_mode}));
-  }
+  append_gfx1250_vgpr_msb_transition(words, current_mode, final_mode);
   append_words(words, gfx1250::build_vop3(
                           gfx1250::kVCndmaskB32Vop3,
                           {.vdst = static_cast<uint8_t>(source.vdst),
                            .src0 = gfx1250_vgpr_src(out),
                            .src1 = gfx1250_vgpr_src(temp),
                            .src2 = *nan_mask}));
-  if (final_mode != original_mode) {
-    append_words(words,
-                 gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = original_mode}));
-  }
+  append_gfx1250_vgpr_msb_transition(words, current_mode, original_mode);
   return ExpandResult::success(std::move(words));
 }
 
@@ -1260,12 +1261,13 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
   std::vector<uint32_t> words;
   words.reserve(first.size() + second.size() + (second_mode ? 2 : 0));
   words.insert(words.end(), first.begin(), first.end());
+  uint8_t current_mode = original_mode.value_or(0);
   if (second_mode) {
-    append_words(words, gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = *second_mode}));
+    append_gfx1250_vgpr_msb_transition(words, current_mode, *second_mode);
   }
   append_words(words, second);
   if (original_mode) {
-    append_words(words, gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = *original_mode}));
+    append_gfx1250_vgpr_msb_transition(words, current_mode, *original_mode);
   }
   return ExpandResult::success(std::move(words));
 }

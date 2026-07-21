@@ -109,14 +109,20 @@ void apply_mode_write(VgprMsbState &state, uint16_t hwreg, std::optional<uint32_
       continue;
     }
 
-    // A partial literal write can retain the untouched bit when the old field
-    // is known. If the old field was already ambiguous, learning one bit is
-    // insufficient to identify a unique bank, so it remains unknown.
+    const uint16_t overlap_begin = std::max(begin, field_begin);
+    const uint16_t overlap_end = std::min(end, field_end);
+    // A literal write covering both bits determines the bank even if the
+    // incoming state was ambiguous. A partial write can retain the untouched
+    // bit only when that incoming state is known.
+    if (overlap_begin == field_begin && overlap_end == field_end) {
+      const uint8_t source_bit = static_cast<uint8_t>(field_begin - begin);
+      state.banks[role] = static_cast<uint8_t>((*value >> source_bit) & 0x3u);
+      continue;
+    }
     if (!state.banks[role])
       continue;
     uint8_t bank = *state.banks[role];
-    for (uint16_t mode_bit = std::max(begin, field_begin); mode_bit < std::min(end, field_end);
-         ++mode_bit) {
+    for (uint16_t mode_bit = overlap_begin; mode_bit < overlap_end; ++mode_bit) {
       const uint8_t field_bit = static_cast<uint8_t>(mode_bit - field_begin);
       const uint8_t source_bit = static_cast<uint8_t>(mode_bit - begin);
       const uint8_t bit = static_cast<uint8_t>((*value >> source_bit) & 1u);
@@ -124,6 +130,21 @@ void apply_mode_write(VgprMsbState &state, uint16_t hwreg, std::optional<uint32_
     }
     state.banks[role] = bank;
   }
+}
+
+/// @brief Model MI450's unmasked VGPR-MSB side effect for immediate MODE writes.
+///
+/// S_SETREG_IMM32_B32 targeting MODE updates MODE[19:12] from the same literal
+/// bits even when those fields are outside the instruction's requested bit
+/// slice. Compiler workarounds therefore carry the intended banks in literal
+/// bits [19:12]. Model the hardware result rather than the architectural mask.
+void apply_immediate_mode_vgpr_msb_side_effect(VgprMsbState &state, uint16_t hwreg,
+                                               uint32_t literal) {
+  constexpr uint16_t kModeHwreg = 1;
+  if ((hwreg & 0x3f) != kModeHwreg)
+    return;
+  for (size_t role = 0; role < kRoleCount; ++role)
+    state.banks[role] = static_cast<uint8_t>((literal >> kModeBitOffset[role]) & 0x3u);
 }
 
 void transfer_instruction(VgprMsbState &state, const Instruction &inst) {
@@ -158,9 +179,12 @@ void transfer_instruction(VgprMsbState &state, const Instruction &inst) {
   const uint32_t *raw = inst.raw_encoding();
   if (raw == nullptr || inst.size() < 2 * static_cast<int>(sizeof(uint32_t))) {
     apply_mode_write(state, hwreg, std::nullopt);
+    if ((hwreg & 0x3f) == 1)
+      state.banks.fill(std::nullopt);
     return;
   }
   apply_mode_write(state, hwreg, raw[1]);
+  apply_immediate_mode_vgpr_msb_side_effect(state, hwreg, raw[1]);
 }
 
 } // namespace
