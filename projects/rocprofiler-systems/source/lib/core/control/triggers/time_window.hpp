@@ -6,6 +6,7 @@
 #include "core/control/clock.hpp"
 #include "core/control/session.hpp"
 #include "core/control/trigger.hpp"
+#include "core/state.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -94,6 +95,8 @@ private:
 
     void worker()
     {
+        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+
         const auto t0           = m_clock.now();
         const bool has_delay    = m_config.delay > clock_duration::zero();
         const bool has_duration = m_config.duration > clock_duration::zero();

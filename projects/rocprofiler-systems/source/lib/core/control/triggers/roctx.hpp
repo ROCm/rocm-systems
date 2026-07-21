@@ -27,6 +27,11 @@ public:
     roctx(session& sess, std::string_view trace_regions);
     ~roctx() override;
 
+    roctx(const roctx&)            = delete;
+    roctx& operator=(const roctx&) = delete;
+    roctx(roctx&&)                 = delete;
+    roctx& operator=(roctx&&)      = delete;
+
     [[nodiscard]] std::string_view name() const noexcept override { return "roctx"; }
     [[nodiscard]] vote             initial_vote() const noexcept override;
 
