@@ -5293,8 +5293,9 @@ void *VirtualGPU::getOrCreateHostcallBuffer() {
   }
 
   uint32_t zero = 0;
-  if (!blitMgr().fillBuffer(*occupiedMem, &zero, sizeof(zero), amd::Coord3D(occupiedSize, 1, 1),
-                            amd::Coord3D(0, 0, 0), amd::Coord3D(occupiedSize, 1, 1), true)) {
+  // xferMgr() is synchronous, so the fill completes before any kernel reads it.
+  if (!dev().xferMgr().fillBuffer(*occupiedMem, &zero, sizeof(zero), amd::Coord3D(occupiedSize, 1, 1),
+                                  amd::Coord3D(0, 0, 0), amd::Coord3D(occupiedSize, 1, 1), true)) {
     ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
             "Failed to zero-initialize hostcall occupied bitfield");
     occupiedBuf->release();
