@@ -108,7 +108,7 @@ flowchart TD
     X0["X0 DONE<br/>expansion corpus surveyed and<br/>aggregate four-profile contract defined"]
     XP0["XP0 DONE<br/>PyTorch/Triton TDM plus clustered-dispatch<br/>clean vertical passes all four profiles"]
     XP1["XP1 DONE<br/>torch.mode SuperCollider and Record/Replay<br/>full bundles accepted"]
-    XP1B["XP1B ACTIVE<br/>torch.mode Sampled and Inline<br/>full-object execution bounds remain"]
+    XP1B["XP1B TODO<br/>torch.mode Inline static/oracle passes with contention gap;<br/>Sampled construction remains long"]
     XP4["XP4 DONE<br/>tagged LDS atomic address token plus isolated-release<br/>classification pass torch.mode clean"]
     XP5["XP5 DONE<br/>histogram Inline paired and reviewed-fault bundle<br/>green at 175-access denominator"]
     XP6["XP6 DONE<br/>histogram Record/Replay paired and fault bundle<br/>green at 175-access denominator"]
@@ -118,7 +118,7 @@ flowchart TD
     XP2B["XP2B TODO<br/>torch.topk Sampled report now fits;<br/>full-object construction exceeds 300 seconds"]
     XP2C["XP2C DONE<br/>torch.topk unrestricted Record/Replay exact/dynamic;<br/>113,760/160,848 accesses, all barriers"]
     XP2D["XP2D TODO<br/>torch.topk Record/Replay residual needs<br/>site/subgroup scalar routing"]
-    XP3["XP3 TODO<br/>top-k SC at 160,752/160,848;<br/>96 remain after rotation"]
+    XP3["XP3 ACTIVE<br/>top-k SC at 160,752/160,848;<br/>96 scalar-continuation gaps remain"]
     XP9["XP9 DONE<br/>norm plus softmax Record/Replay clean, paired,<br/>and reviewed-fault bundle green"]
     XP9B["XP9B DONE<br/>norm plus softmax Sampled clean, paired,<br/>and reviewed-fault bundle green"]
     XP9C["XP9C TODO<br/>literal identity recovers 46 Inline sites;<br/>VGPR spill and publication contention remain"]
@@ -298,8 +298,8 @@ flowchart TD
 
   class R0,E0,D0,C0,V0,B0,B1,B2,B3,B4,B5,S0,S1,S2,S3,S4,S5,S6,A0,A1,A2,A3A,A4A,SC0,RR0,SA0,IS0,IS1,F0,Q0,V1,V2,V3,V8,V4A,V4B,V4C,V4D,V5A,V5B,V6A,V6B,V7,VT,VD,VP,VW,X0,XP0,XP1,XP2A,XP2C,XP4,XP5,XP6,XP7,XP8,XP9,XP10,XT1,XT2A,XT2B,XT2C1,XT3D,XT4A,XT4 done
   class XP9B done
-  class XP1B active
-  class G0,XP2B,XP2D,XP3,XP9C,XT2C2,XT2C3,XT3A,XT3B,XT3E,XT3C,XF,XG todo
+  class XP3 active
+  class G0,XP1B,XP2B,XP2D,XP9C,XT2C2,XT2C3,XT3A,XT3B,XT3E,XT3C,XF,XG todo
 ```
 
 Broader partial-EXEC, dynamic-stack, high-register, cache/fence-shape, and
@@ -347,6 +347,19 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP1B rotates to TODO after a real Inline bug fix and an orange-
+  to-yellow promotion.  Artifact `054` shows that all 744 workgroup-local
+  atomic access probes emit the expected exact transaction but fail final
+  validation because its candidate lookup omits Atomic.  Commit `a6721f8e76`
+  fixes that lookup; the focused regression and broad Inline suite pass 91/91.
+  Clean-tree one-repetition artifact
+  `consan-green-expansion-20260721-pytorch-mode-inline-atomic-validation-independent-055`
+  passes the exact oracle in 32.26 seconds with complete 28,939/28,939 access
+  and 4,446/4,446 barrier lowering.  Its 13,342 bounded publication failures
+  remain, so the Mermaid box returns to gray/TODO rather than blue/DONE.  XP3
+  becomes the sole blue/ACTIVE box for top-k SuperCollider's 96 bounded scalar-
+  continuation gaps.
 
 - 2026-07-21: XT3B rotates to TODO after a clean-tree SuperCollider HGEMM
   reassessment.  One-repetition artifact
