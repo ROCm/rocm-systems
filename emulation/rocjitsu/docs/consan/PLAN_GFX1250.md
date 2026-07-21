@@ -118,7 +118,7 @@ flowchart TD
     XP2B["XP2B TODO<br/>torch.topk Sampled report now fits;<br/>full-object construction exceeds 300 seconds"]
     XP2C["XP2C DONE<br/>torch.topk unrestricted Record/Replay exact/dynamic;<br/>113,760/160,848 accesses, all barriers"]
     XP2D["XP2D TODO<br/>torch.topk Record/Replay residual needs<br/>site/subgroup scalar routing"]
-    XP3["XP3 ACTIVE<br/>top-k SC at 160,752/160,848;<br/>96 scalar-continuation gaps remain"]
+    XP3["XP3 TODO<br/>top-k SC oracle passes;<br/>current exact object has 88 bounded gaps"]
     XP9["XP9 DONE<br/>norm plus softmax Record/Replay clean, paired,<br/>and reviewed-fault bundle green"]
     XP9B["XP9B DONE<br/>norm plus softmax Sampled clean, paired,<br/>and reviewed-fault bundle green"]
     XP9C["XP9C TODO<br/>literal identity recovers 46 Inline sites;<br/>VGPR spill and publication contention remain"]
@@ -134,7 +134,7 @@ flowchart TD
     XT3B["XT3B TODO<br/>HGEMM reaches 136 exact rows at 300 seconds;<br/>F8 fault health also remains"]
     XT3D["XT3D DONE<br/>full SGEMM first problem complete;<br/>quadratic 115,776-event frontier isolated"]
     XT3E["XT3E TODO<br/>both emulator baselines prove intrinsic full-grid bound;<br/>substantially longer unrestricted RR run remains"]
-    XT3C["XT3C TODO<br/>SPMM F8 relay-window fix passes 692/692 tests;<br/>rebuilt-hook unrestricted rerun remains"]
+    XT3C["XT3C ACTIVE<br/>SPMM F8 Sampled clean assessment;<br/>RR relay-window fix retained"]
     XT4A["XT4A DONE<br/>019 F16 clean, paired, and reviewed-fault bundle<br/>accepted at 31,265/31,265 accesses"]
     XT4["XT4 DONE<br/>decoded opcode union frozen over accepted rows,<br/>including complete 019 bundle"]
     XF["XF TODO<br/>fault, resource, and frozen-tip bundles<br/>for every expansion row"]
@@ -298,8 +298,8 @@ flowchart TD
 
   class R0,E0,D0,C0,V0,B0,B1,B2,B3,B4,B5,S0,S1,S2,S3,S4,S5,S6,A0,A1,A2,A3A,A4A,SC0,RR0,SA0,IS0,IS1,F0,Q0,V1,V2,V3,V8,V4A,V4B,V4C,V4D,V5A,V5B,V6A,V6B,V7,VT,VD,VP,VW,X0,XP0,XP1,XP2A,XP2C,XP4,XP5,XP6,XP7,XP8,XP9,XP10,XT1,XT2A,XT2B,XT2C1,XT3D,XT4A,XT4 done
   class XP9B done
-  class XP3 active
-  class G0,XP1B,XP2B,XP2D,XP9C,XT2C2,XT2C3,XT3A,XT3B,XT3E,XT3C,XF,XG todo
+  class XT3C active
+  class G0,XP1B,XP2B,XP2D,XP3,XP9C,XT2C2,XT2C3,XT3A,XT3B,XT3E,XF,XG todo
 ```
 
 Broader partial-EXEC, dynamic-stack, high-register, cache/fence-shape, and
@@ -347,6 +347,20 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP3 rotates to TODO after a current-tip exact-object audit
+  sharpened the SuperCollider `torch.topk` boundary without starting a broad
+  scalar-spill project.  A bounded startup capture in
+  `consan-topk-sc-current-dumps-056` retains the exact 13,255,032-byte object;
+  host-only standard-profile patching covers 112,528/112,616 supported sites.
+  Eight gaps present in artifact `282` have therefore closed on the current
+  tip.  Of the remaining 88, exactly 84 lack the four-word scalar tuple needed
+  by the long appended-cave entry and return.  RocJITsu has no shared SGPR
+  spill encoder; the MOI-local spill path depends on a VGPR intermediary and
+  does not directly preserve this SuperCollider continuation shape.  The four
+  other gaps do not justify a new subsystem while the clean oracle already
+  passes.  The Mermaid box returns to gray/TODO, and XT3C becomes ACTIVE for a
+  bounded Sampled assessment of the SPMM F8 stress row.
 
 - 2026-07-21: XP1B rotates to TODO after a real Inline bug fix and an orange-
   to-yellow promotion.  Artifact `054` shows that all 744 workgroup-local
