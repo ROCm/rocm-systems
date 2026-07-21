@@ -28,8 +28,9 @@
 //
 // Each context's emitted trace is decoded to verify it holds real waves (not just a
 // non-empty header): most decoded instructions must resolve to a valid PC (a loaded code
-// object), and every data chunk must come from a shader engine the context selected.
-// Runs in both device and dispatch thread-trace modes (ATT_TRACE_MODE).
+// object), every data chunk must come from a shader engine the context selected, and on
+// gfx10+ every wave must come from the selected SIMD. Runs in both device and dispatch
+// thread-trace modes (ATT_TRACE_MODE).
 //
 // undefine NDEBUG so asserts are implemented
 #ifdef NDEBUG
@@ -67,17 +68,34 @@ trace_mode()
     return trace_mode_t::device;
 }
 
-// Per-context configuration, derived deterministically from the context index so the
-// shader-data callback can recompute a context's config (e.g. its shader-engine mask)
-// from the index carried in userdata.
-constexpr uint32_t SIMD_SELECTS[]   = {0xF, 0x1, 0x2, 0x4, 0x8};
-constexpr size_t   NUM_SIMD_SELECTS = sizeof(SIMD_SELECTS) / sizeof(SIMD_SELECTS[0]);
+// Number of SIMDs per CU/WGP that SQTT can target (SIMD_SEL is 2 bits on gfx10+).
+constexpr uint32_t NUM_SIMDS = 4;
 
+// gfx major version from an agent's gfx_target_version (major = (v / 10000) % 100); >=10 is
+// RDNA. Mirrors the encoding documented on rocprofiler_agent_v0_t::gfx_target_version.
+uint32_t
+gfx_major(uint32_t gfx_target_version)
+{
+    return (gfx_target_version / 10000) % 100;
+}
+
+// Encode a logical SIMD target [0,NUM_SIMDS) for the agent's arch: gfx9 takes a SIMD_EN
+// bitmask (one bit per SIMD), gfx10+ takes a SIMD_SEL index. aqlprofile writes this value
+// straight into the arch's register field, so the caller must supply the right form.
+uint32_t
+simd_select_param(uint32_t gfx_target_version, uint32_t simd_index)
+{
+    return gfx_major(gfx_target_version) >= 10 ? simd_index : (1u << simd_index);
+}
+
+// Per-context configuration, derived deterministically from the context index so the
+// shader-data callback can recompute a context's config (e.g. its shader-engine mask or
+// target SIMD) from the index carried in userdata.
 struct ctx_config_t
 {
     uint32_t target_cu;
     uint32_t se_mask;
-    uint32_t simd_select;
+    uint32_t simd_index;  // logical SIMD [0,NUM_SIMDS); encoded per-arch at configure time
     uint64_t buffer_size;
 };
 
@@ -86,9 +104,9 @@ config_for(size_t i)
 {
     constexpr uint64_t GB             = 1ull << 30;
     const uint64_t     buffer_sizes[] = {1 * GB, 512ull << 20};
-    return ctx_config_t{static_cast<uint32_t>(i % 4),        // target_cu in [0,3]
-                        (i % 2) != 0 ? 0x3u : 0x1u,          // shader-engine mask
-                        SIMD_SELECTS[i % NUM_SIMD_SELECTS],  // simd selection
+    return ctx_config_t{static_cast<uint32_t>(i % 4),          // target_cu in [0,3]
+                        (i % 2) != 0 ? 0x3u : 0x1u,            // shader-engine mask
+                        static_cast<uint32_t>(i % NUM_SIMDS),  // target SIMD [0,NUM_SIMDS)
                         buffer_sizes[i % 2]};
 }
 
@@ -104,10 +122,17 @@ std::atomic<size_t> g_chunks{0};    // shader-data chunks delivered
 // The shader engine id is on the chunk itself, so this is checkable without the decoder.
 std::atomic<size_t> g_wrong_se{0};
 
-// Note on SIMD/CU targeting: on gfx9 (e.g. gfx942) SQTT emits wave records for all four
-// SIMDs regardless of the requested simd_select, and the decoder reports every wave's cu
-// as the configured target_cu, so neither can be validated for exclusivity here. Shader
-// engine targeting (below) is honored and is validated instead.
+// Decoded waves whose SIMD != the one the context selected. Only meaningful on gfx10+
+// (see the note below); gated by g_check_simd.
+std::atomic<size_t> g_wrong_simd{0};
+std::atomic<bool>   g_check_simd{false};  // set once in tool_init: true iff all agents gfx10+
+
+// Note on SIMD/CU targeting: SIMD_SELECT is encoded per-arch (see simd_select_param). gfx9
+// SQTT emits wave records for all four SIMDs regardless of the request, so SIMD exclusivity
+// cannot be checked there; it is validated on gfx10+ (g_wrong_simd), where the hardware
+// honors per-SIMD selection. The decoder always reports a wave's cu as the configured
+// target_cu, so CU exclusivity is never checkable. Shader-engine targeting is honored and
+// validated on all archs.
 
 // Heap-allocated so we control destruction order relative to rocprofiler shutdown.
 struct ToolState
@@ -146,9 +171,12 @@ constexpr uint64_t CAPTURE_WINDOW = 2;
 // Per-decode scratch passed through rocprofiler_trace_decode to decode_record().
 struct decode_scratch_t
 {
-    size_t waves{0};
-    size_t valid_pc{0};
-    size_t total_pc{0};
+    size_t  waves{0};
+    size_t  valid_pc{0};
+    size_t  total_pc{0};
+    size_t  wrong_simd{0};     // waves whose SIMD != expected_simd (only when check_simd)
+    uint8_t expected_simd{0};  // SIMD [0,NUM_SIMDS) this context selected (gfx10+)
+    bool    check_simd{false};
 };
 
 void
@@ -166,6 +194,9 @@ decode_record(rocprofiler_thread_trace_decoder_record_type_t record_type_id,
     {
         const auto& wave = waves[w];
         scratch->waves++;
+
+        // gfx10+ honors per-SIMD selection, so every wave must be from the selected SIMD.
+        if(scratch->check_simd && wave.simd != scratch->expected_simd) scratch->wrong_simd++;
 
         // A wave is "real" if its instructions resolve to a loaded code object. The
         // decoder sets pc.code_object_id != 0 only when it matched the PC to a
@@ -197,11 +228,14 @@ shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
     if(decoder_ok)
     {
         decode_scratch_t scratch{};
+        scratch.check_simd    = g_check_simd.load();
+        scratch.expected_simd = static_cast<uint8_t>(cfg.simd_index);
         DECODER_CALL(rocprofiler_trace_decode(
             decoder, decode_record, shader_data.data, shader_data.data_size, &scratch));
         g_waves.fetch_add(scratch.waves);
         g_valid_pc.fetch_add(scratch.valid_pc);
         g_total_pc.fetch_add(scratch.total_pc);
+        g_wrong_simd.fetch_add(scratch.wrong_simd);
         got_waves = scratch.waves > 0;
     }
 
@@ -316,19 +350,27 @@ dispatch_tracing_callback(rocprofiler_callback_tracing_record_t record,
     }
 }
 
-std::vector<rocprofiler_agent_id_t>
+// A GPU agent plus its gfx arch version, needed to encode SIMD_SELECT per-arch.
+struct gpu_agent_t
+{
+    rocprofiler_agent_id_t id{};
+    uint32_t               gfx_target_version{};
+};
+
+std::vector<gpu_agent_t>
 get_gpu_agents()
 {
-    std::vector<rocprofiler_agent_id_t> agents{};
+    std::vector<gpu_agent_t> agents{};
     ROCPROFILER_CALL(
         rocprofiler_query_available_agents(
             ROCPROFILER_AGENT_INFO_VERSION_0,
             [](rocprofiler_agent_version_t, const void** _agents, size_t _num, void* _data) {
-                auto* out = static_cast<std::vector<rocprofiler_agent_id_t>*>(_data);
+                auto* out = static_cast<std::vector<gpu_agent_t>*>(_data);
                 for(size_t i = 0; i < _num; ++i)
                 {
                     const auto* agent = static_cast<const rocprofiler_agent_v0_t*>(_agents[i]);
-                    if(agent->type == ROCPROFILER_AGENT_TYPE_GPU) out->emplace_back(agent->id);
+                    if(agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+                        out->push_back({agent->id, agent->gfx_target_version});
                 }
                 return ROCPROFILER_STATUS_SUCCESS;
             },
@@ -357,6 +399,13 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
 
     auto agents = get_gpu_agents();
     if(agents.empty()) return 0;
+
+    // SIMD exclusivity is only observable where the hardware honors per-SIMD selection
+    // (gfx10+); enable the check only if every GPU agent is gfx10+.
+    bool all_gfx10_plus = true;
+    for(const auto& a : agents)
+        if(gfx_major(a.gfx_target_version) < 10) all_gfx10_plus = false;
+    g_check_simd = all_gfx10_plus;
 
     const bool   dispatch = trace_mode() == trace_mode_t::dispatch;
     const size_t N        = num_contexts();
@@ -393,29 +442,32 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
 
         const auto cfg = config_for(i);
 
-        auto params = std::vector<rocprofiler_thread_trace_parameter_t>{};
-        params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {cfg.target_cu}});
-        params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, {cfg.simd_select}});
-        params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {cfg.se_mask}});
-        params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {cfg.buffer_size}});
-
         rocprofiler_user_data_t user{};
         user.ptr = reinterpret_cast<void*>(i);
 
         bool ok = true;
-        for(auto agent : agents)
+        for(const auto& agent : agents)
         {
+            // SIMD_SELECT is encoded per-arch, so build the params for each agent.
+            auto params = std::vector<rocprofiler_thread_trace_parameter_t>{};
+            params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {cfg.target_cu}});
+            params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT,
+                              {simd_select_param(agent.gfx_target_version, cfg.simd_index)}});
+            params.push_back(
+                {ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {cfg.se_mask}});
+            params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {cfg.buffer_size}});
+
             auto status =
                 dispatch
                     ? rocprofiler_configure_dispatch_thread_trace_service(ctx,
-                                                                          agent,
+                                                                          agent.id,
                                                                           params.data(),
                                                                           params.size(),
                                                                           att_dispatch_callback,
                                                                           shader_data_callback,
                                                                           user.ptr)
                     : rocprofiler_configure_device_thread_trace_service(
-                          ctx, agent, params.data(), params.size(), shader_data_callback, user);
+                          ctx, agent.id, params.data(), params.size(), shader_data_callback, user);
             if(status != ROCPROFILER_STATUS_SUCCESS) ok = false;
         }
 
@@ -475,16 +527,17 @@ tool_fini(void* /* tool_data */)
         captured = state->captured.size();
     }
 
-    const size_t waves    = g_waves.load();
-    const size_t valid_pc = g_valid_pc.load();
-    const size_t total_pc = g_total_pc.load();
-    const size_t chunks   = g_chunks.load();
-    const size_t wrong_se = g_wrong_se.load();
+    const size_t waves      = g_waves.load();
+    const size_t valid_pc   = g_valid_pc.load();
+    const size_t total_pc   = g_total_pc.load();
+    const size_t chunks     = g_chunks.load();
+    const size_t wrong_se   = g_wrong_se.load();
+    const size_t wrong_simd = g_wrong_simd.load();
 
     std::cerr << "[many-contexts] configured=" << configured << " ran=" << ran
               << " captured=" << captured << " chunks=" << chunks << " wrong_se=" << wrong_se
-              << " waves=" << waves << " valid_pc=" << valid_pc << "/" << total_pc
-              << " decoder=" << (decoder_ok ? "on" : "off") << std::endl;
+              << " wrong_simd=" << wrong_simd << " waves=" << waves << " valid_pc=" << valid_pc
+              << "/" << total_pc << " decoder=" << (decoder_ok ? "on" : "off") << std::endl;
 
     // Every context must have configured and allocated its (shared) buffer and queue,
     // which is the sharing proof: this would OOM or exhaust HSA queues per-context.
@@ -519,6 +572,8 @@ tool_fini(void* /* tool_data */)
     {
         assert(waves > 0 && total_pc > 0 && "no decodable waves/instructions were captured");
         assert(valid_pc * 10 >= total_pc * 9 && "most instructions should have a valid PC");
+        // gfx10+ only (g_check_simd); on gfx9 wrong_simd stays 0 since the check is disabled.
+        assert(wrong_simd == 0 && "captured a wave from a SIMD that was not selected");
     }
 
     delete state;
