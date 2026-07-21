@@ -35,13 +35,13 @@ template <typename Coop>
 struct ncclCft : ncclCft_internal<Coop> {
   NCCL_DEVICE_INLINE ncclCft(Coop coop, ncclCftSmem& cftSmem);
 
-  NCCL_DEVICE_INLINE ncclCft(Coop coop, ncclCftSmem& cftSmem, int flushCoopSize);
-
   NCCL_DEVICE_INLINE ~ncclCft();
 
   NCCL_DEVICE_INLINE void submit(Coop coop);
 
-  NCCL_DEVICE_INLINE void flush(Coop coop);
+  NCCL_DEVICE_INLINE void flushLocal(Coop coop);
+
+  NCCL_DEVICE_INLINE void flush(Coop coop, bool* hasReport = nullptr, uint32_t* report = nullptr);
 
   NCCL_DEVICE_INLINE void put(Coop coop, ncclCftLeId leId, size_t leOffset, void* smemSource, uint32_t bytes);
 

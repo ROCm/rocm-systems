@@ -299,47 +299,19 @@ NCCL_DEVICE_INLINE void ncclMemFence(Coop coop, cuda::memory_order order, ncclMe
 
 template <typename Coop>
 NCCL_DEVICE_INLINE ncclCft<Coop>::ncclCft(Coop coop, ncclCftSmem& cftSmem)
-  : ncclCft_internal<Coop>{coop, cftSmem,
-                           /*arvCount=*/coop.size(),
-                           /*txCount=*/0,
-                           /*submittedTxCount=*/0} {
+  : ncclCft_internal<Coop>{coop, cftSmem, /*txCount=*/0} {
 #if NCCL_CFT_ENABLE
   if (nccl::cft::internal::elected(coop)) {
     asm volatile("mbarrier.init.shared.layout::v1.b64 [%0], %1;"
                  :
-                 : "r"(nccl::cft::internal::smemAddr(cftSmem)), "r"(this->arvCount)
+                 : "r"(nccl::cft::internal::smemAddr(cftSmem)), "r"(coop.size())
                  : "memory");
-    cftSmem.redCount = 0;
   }
   // Every thread in coop must wait for mbarrier to be initialize before using it
   coop.sync();
 #else
   (void)coop;
   (void)cftSmem;
-  nccl::cft::internal::unsupported();
-#endif
-}
-
-template <typename Coop>
-NCCL_DEVICE_INLINE ncclCft<Coop>::ncclCft(Coop coop, ncclCftSmem& cftSmem, int flushCoopSize)
-  : ncclCft_internal<Coop>{coop, cftSmem,
-                           /*arvCount=*/flushCoopSize,
-                           /*txCount=*/0,
-                           /*submittedTxCount=*/0} {
-#if NCCL_CFT_ENABLE
-  if (nccl::cft::internal::elected(coop)) {
-    asm volatile("mbarrier.init.shared.layout::v1.b64 [%0], %1;"
-                 :
-                 : "r"(nccl::cft::internal::smemAddr(cftSmem)), "r"(this->arvCount)
-                 : "memory");
-    cftSmem.redCount = 0;
-  }
-  // Every thread in coop must wait for mbarrier to be initialize before using it
-  coop.sync();
-#else
-  (void)coop;
-  (void)cftSmem;
-  (void)flushCoopSize;
   nccl::cft::internal::unsupported();
 #endif
 }
@@ -363,10 +335,13 @@ NCCL_DEVICE_INLINE ncclCft<Coop>::~ncclCft() {
 template <typename Coop>
 NCCL_DEVICE_INLINE void ncclCft<Coop>::submit(Coop coop) {
 #if NCCL_CFT_ENABLE
-  // coop.sync(); // Every thread that issue a fabric op needs to submit it, no need to sync
   if (nccl::cft::internal::elected(coop)) {
     asm volatile("fabric.submit;" ::: "memory");
-    this->submittedTxCount = this->txCount;
+    asm volatile("mbarrier.expect_tx.relaxed.cta.shared::cta.b64 [%0], %1;"
+                 :
+                 : "r"(nccl::cft::internal::smemAddr(this->cftSmem)), "r"(this->txCount)
+                 : "memory");
+    this->txCount=0;
   }
 #else
   (void)coop;
@@ -375,45 +350,26 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::submit(Coop coop) {
 }
 
 template <typename Coop>
-NCCL_DEVICE_INLINE void ncclCft<Coop>::flush(Coop coop) {
+NCCL_DEVICE_INLINE void ncclCft<Coop>::flushLocal(Coop coop) {
 #if NCCL_CFT_ENABLE
-#ifdef NCCL_DEVICE_CFT_ENABLE_DEBUG
-  // Make sure all threads in the coop called submit
-  assert(this->txCount == this->submittedTxCount);
-  // Make sure outside of flushCoopMode the size of the flush coop matches the cft init coop
-  assert(this->coop.size() == coop.size());
+  // Wait fabric operations to consume/read shared memory
+  asm volatile("fabric.wait.sync_restrict::reads;" ::: "memory");
+  coop.sync();
+#else
+  nccl::cft::internal::unsupported();
 #endif
-  uint32_t submittedTxCount;
-  if NCCL_IF_CONSTEXPR (ncclCoopIsThread(Coop{})) {
-    submittedTxCount = this->submittedTxCount;
-  } else {
-    // Wait fabric operations to consume/read shared memory (optional)
-    // asm volatile("fabric.wait.sync_restrict::reads;" ::: "memory");
+}
 
-    if (coop.thread_rank() == 0) this->cftSmem.redCount = 0;
+template <typename Coop>
+NCCL_DEVICE_INLINE void ncclCft<Coop>::flush(Coop coop, bool* hasReport, uint32_t* report) {
+#if NCCL_CFT_ENABLE
+  // Wait fabric operations to consume/read shared memory
+  asm volatile("fabric.wait.sync_restrict::reads;" ::: "memory");
 
-    // Sync all threads in coop before reducing txCount across all threads
-    coop.sync();
-
-    // Reduce txCount from all threads in coop so that expect_tx in coop.thread_rank() = 0 accounts for all fabric ops
-    uint32_t old;
-    uint32_t redCountAddr = nccl::cft::internal::smemAddr(&this->cftSmem.redCount);
-    asm volatile("atom.shared.add.u32 %0, [%1], %2;"
-                 : "=r"(old)
-                 : "r"(redCountAddr), "r"(this->submittedTxCount)
-                 : "memory");
-
-    // Sync all threads in flushCoop after reducing txCount across all threads
-    coop.sync();
-
-    // Every thread arrives at the shared memory barrier object but only one of them has to
-    // pass a submittedTxCount that is > 0 that accounts for all the fabric ops in the coop.
-    submittedTxCount = coop.thread_rank() == 0 ? this->cftSmem.redCount : 0;
-  }
   uint64_t arvStatus = 0;
-  asm volatile("mbarrier.arrive.expect_tx.relaxed.cta.shared::cta.b64 %0, [%1], %2;"
+  asm volatile("mbarrier.arrive.relaxed.cta.shared::cta.b64 %0, [%1], %2;"
                : "=l"(arvStatus)
-               : "r"(nccl::cft::internal::smemAddr(this->cftSmem)), "r"(submittedTxCount)
+               : "r"(nccl::cft::internal::smemAddr(this->cftSmem)), "r"(1)
                : "memory");
 
   // Wait for completion
@@ -434,12 +390,12 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::flush(Coop coop) {
                  : "r"(nccl::cft::internal::smemAddr(this->cftSmem)), "l"(arvStatus)
                  : "memory");
   } while (!ready);
-
-  // Reset cft and cftSmem state
-  this->txCount = 0;
-  this->submittedTxCount = 0;
+  if (hasReport) *hasReport = hasReportValue != 0;
+  if (report) *report = reportValue;
 #else
   (void)coop;
+  if (hasReport) *hasReport = false;
+  if (report) *report = 0;
   nccl::cft::internal::unsupported();
 #endif
 }
@@ -448,7 +404,7 @@ template <typename Coop>
 NCCL_DEVICE_INLINE void ncclCft<Coop>::put(Coop coop, ncclCftLeId leId, size_t leOffset, void* smemSource,
                                            uint32_t bytes) {
 #if NCCL_CFT_ENABLE
-  // coop.sync(); // fabric ops are async and do not need a coop.sync()
+  coop.sync();
   if (nccl::cft::internal::elected(coop)) {
     uint32_t srcSmemPtr = nccl::cft::internal::smemAddr(smemSource);
     uint32_t mbarPtr = nccl::cft::internal::smemAddr(this->cftSmem);
@@ -474,7 +430,7 @@ template <typename Coop>
 NCCL_DEVICE_INLINE void ncclCft<Coop>::putCpMask(Coop coop, ncclCftLeId leId, size_t leOffset, void* smemSource,
                                                  uint32_t bytes, uint16_t cpMask) {
 #if NCCL_CFT_ENABLE
-  // coop.sync(); // fabric ops are async and do not need a coop.sync()
+  coop.sync();
   if (nccl::cft::internal::elected(coop)) {
     uint32_t srcSmemPtr = nccl::cft::internal::smemAddr(smemSource);
     uint32_t mbarPtr = nccl::cft::internal::smemAddr(this->cftSmem);
@@ -500,7 +456,7 @@ template <typename Coop>
 NCCL_DEVICE_INLINE void ncclCft<Coop>::putMultimem(Coop coop, ncclCftLeId leId, size_t leOffset, void* smemSource,
                                                    uint32_t bytes) {
 #if NCCL_CFT_ENABLE
-  // coop.sync(); // fabric ops are async and do not need a coop.sync()
+  coop.sync();
   if (nccl::cft::internal::elected(coop)) {
     uint32_t srcSmemPtr = nccl::cft::internal::smemAddr(smemSource);
     uint32_t mbarPtr = nccl::cft::internal::smemAddr(this->cftSmem);
@@ -526,7 +482,7 @@ template <typename Coop>
 NCCL_DEVICE_INLINE void ncclCft<Coop>::putMultimemCpMask(Coop coop, ncclCftLeId leId, size_t leOffset, void* smemSource,
                                                          uint32_t bytes, uint16_t cpMask) {
 #if NCCL_CFT_ENABLE
-  // coop.sync(); // fabric ops are async and do not need a coop.sync()
+  coop.sync();
   if (nccl::cft::internal::elected(coop)) {
     uint32_t srcSmemPtr = nccl::cft::internal::smemAddr(smemSource);
     uint32_t mbarPtr = nccl::cft::internal::smemAddr(this->cftSmem);
@@ -553,7 +509,7 @@ template <typename Coop>
 NCCL_DEVICE_INLINE void ncclCft<Coop>::get(Coop coop, ncclCftLeId leId, size_t leOffset, void* smemDestination,
                                            uint32_t bytes) {
 #if NCCL_CFT_ENABLE
-  // coop.sync(); // fabric ops are async and do not need a coop.sync()
+  coop.sync();
   if (nccl::cft::internal::elected(coop)) {
     uint32_t dstSmemPtr = nccl::cft::internal::smemAddr(smemDestination);
     uint32_t mbarPtr = nccl::cft::internal::smemAddr(this->cftSmem);
@@ -580,7 +536,7 @@ template <typename RedOp>
 NCCL_DEVICE_INLINE void ncclCft<Coop>::red(Coop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red,
                                            void* smemSource, uint32_t bytes) {
 #if NCCL_CFT_ENABLE
-  // coop.sync(); // fabric ops are async and do not need a coop.sync()
+  coop.sync();
   if (nccl::cft::internal::elected(coop)) {
     nccl::cft::internal::Red<RedOp>::red(leId, leOffset, smemSource, bytes, this->cftSmem);
     this->txCount += (bytes / 16);
@@ -602,7 +558,7 @@ template <typename RedOp>
 NCCL_DEVICE_INLINE void ncclCft<Coop>::redCpMask(Coop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red,
                                                  void* smemSource, uint32_t bytes, uint16_t cpMask) {
 #if NCCL_CFT_ENABLE
-  // coop.sync(); // fabric ops are async and do not need a coop.sync()
+  coop.sync();
   if (nccl::cft::internal::elected(coop)) {
     nccl::cft::internal::Red<RedOp>::redCpMask(leId, leOffset, smemSource, bytes, this->cftSmem, cpMask);
     this->txCount += (bytes / 16);
@@ -625,7 +581,7 @@ template <typename RedOp>
 NCCL_DEVICE_INLINE void ncclCft<Coop>::redMultimem(Coop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red,
                                                    void* smemSource, uint32_t bytes) {
 #if NCCL_CFT_ENABLE
-  // coop.sync(); // fabric ops are async and do not need a coop.sync()
+  coop.sync();
   if (nccl::cft::internal::elected(coop)) {
     nccl::cft::internal::Red<RedOp>::redMultimem(leId, leOffset, smemSource, bytes, this->cftSmem);
     this->txCount += (bytes / 16);
@@ -647,7 +603,7 @@ template <typename RedOp>
 NCCL_DEVICE_INLINE void ncclCft<Coop>::redMultimemCpMask(Coop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red,
                                                          void* smemSource, uint32_t bytes, uint16_t cpMask) {
 #if NCCL_CFT_ENABLE
-  // coop.sync(); // fabric ops are async and do not need a coop.sync()
+  coop.sync();
   if (nccl::cft::internal::elected(coop)) {
     nccl::cft::internal::Red<RedOp>::redMultimemCpMask(leId, leOffset, smemSource, bytes, this->cftSmem, cpMask);
     this->txCount += (bytes / 16);
@@ -670,7 +626,7 @@ template <typename RedOp>
 NCCL_DEVICE_INLINE void ncclCft<Coop>::pullRed(Coop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red,
                                                void* smemDestination, uint32_t bytes) {
 #if NCCL_CFT_ENABLE
-  // coop.sync(); // fabric ops are async and do not need a coop.sync()
+  coop.sync();
   if (nccl::cft::internal::elected(coop)) {
     nccl::cft::internal::Red<RedOp>::pullred(leId, leOffset, smemDestination, bytes, this->cftSmem);
     this->txCount += bytes;

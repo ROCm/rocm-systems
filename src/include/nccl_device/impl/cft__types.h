@@ -14,16 +14,13 @@
 #if __cplusplus
 struct ncclCftSmem {
   alignas(8) uint64_t bar;
-  uint32_t redCount;
 };
 
 template <typename Coop>
 struct ncclCft_internal {
   Coop coop;
   ncclCftSmem& cftSmem;
-  int arvCount;
   uint32_t txCount;
-  uint32_t submittedTxCount;
 };
 
 template <typename T>
