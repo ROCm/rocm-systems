@@ -10,6 +10,47 @@ Each example is self-contained with:
 - **Makefile** - Build and run commands
 - **Expected output** - What to look for
 
+## In-depth debugging guides
+
+### Common HIP pattern (all C++ examples)
+
+```mermaid
+flowchart LR
+  subgraph Host["Host CPU — your main()"]
+    A["Allocate host arrays"]
+    B["CPU golden / expected values"]
+    C["hipMalloc + hipMemcpy H2D"]
+    F["hipMemcpy D2H"]
+    G["Compare host vs golden"]
+  end
+  subgraph Device["Device — rocjitsu emulated GPU"]
+    D["<<<grid, block>>> kernel"]
+    E["Parallel per-thread math"]
+  end
+  A --> B --> C --> D --> E --> F --> G
+```
+
+rocjitsu sits on the **host** and intercepts HIP APIs; kernels still run as if on
+a GPU, but execution is simulated. **CPU golden** is always computed on the host
+and is not sent to the device unless you copy it.
+
+Each example has a detailed **`GUIDE.md`** (objectives, **host vs device diagrams**,
+rocjitsu workflow, tools, expected output, limitations):
+
+| Example | Guide |
+|---------|-------|
+| [01-vector-add-basic](01-vector-add-basic/GUIDE.md) | Kernel launch, golden verification, `RJ_LOG=1` |
+| [02-memory-bounds-error](02-memory-bounds-error/GUIDE.md) | Out-of-bounds writes, launch geometry |
+| [03-kernel-crash-debug](03-kernel-crash-debug/GUIDE.md) | NULL pointer — host validation (emulator may not fault) |
+| [04-data-race-simple](04-data-race-simple/GUIDE.md) | Histogram race, `RJ_RACE=1` |
+| [05-global-memory-race](05-global-memory-race/GUIDE.md) | Global reduction race, atomics |
+| [06-memory-coalescing](06-memory-coalescing/GUIDE.md) | Strided vs coalesced access, profiling |
+| [07-occupancy-analysis](07-occupancy-analysis/GUIDE.md) | Block size / register pressure |
+| [08-gemm-debugging](08-gemm-debugging/GUIDE.md) | Tiny GEMM golden check |
+| [09-pytorch-model-debug](09-pytorch-model-debug/GUIDE.md) | PyTorch daemon mode, training smoke |
+| [10-multi-gpu-collective](10-multi-gpu-collective/GUIDE.md) | 2-GPU config, daemon, RCCL path |
+| [11-dbt-cross-arch](11-dbt-cross-arch/GUIDE.md) | DBT gfx950→gfx942 |
+
 ## Examples by Category
 
 ### 🚀 Getting Started (Basic Debugging)
@@ -18,7 +59,7 @@ Each example is self-contained with:
 |---------|-------------|--------------|-------|
 | [01-vector-add-basic](01-vector-add-basic/) | Simple vector addition | Kernel launch, memory transfers, verification | `vector_add.cpp`, `Makefile` |
 | [02-memory-bounds-error](02-memory-bounds-error/) | Out-of-bounds detection | Buffer overruns, memory safety | `bounds_error.cpp`, `bounds_fixed.cpp`, `Makefile` |
-| [03-kernel-crash-debug](03-kernel-crash-debug/) | Debug kernel crashes | Segfaults, NULL pointers, invalid access | `crash_example.cpp`, `crash_fixed.cpp`, `Makefile` |
+| [03-kernel-crash-debug](03-kernel-crash-debug/) | Invalid device pointers | NULL ptr, host validation, sim vs hardware | `crash_example.cpp`, `crash_fixed.cpp`, `Makefile` |
 
 ### 🔍 Race Detection
 
@@ -188,8 +229,8 @@ Every example includes these targets:
 # Enable verbose logging
 RJ_LOG=1 make run
 
-# Enable race detection
-RJ_SINKS=race_detector make run
+# Enable race detection (correct flag)
+RJ_RACE=1 make run
 
 # Write logs to file
 RJ_SINKS=file RJ_SINK_DIR=./logs make run
@@ -299,7 +340,7 @@ cd /workspace/emulation/rocjitsu/usage-examples
 RJ_LOG=1 make run
 
 # Check for races
-RJ_SINKS=race_detector make run
+RJ_RACE=1 make run
 
 # Use verbose output
 make run-verbose 2>&1 | tee output.log
