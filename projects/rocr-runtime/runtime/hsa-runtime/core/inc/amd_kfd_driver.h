@@ -91,11 +91,10 @@ public:
                                    std::vector<HsaMemoryProperties>& mem_props) const override;
   hsa_status_t GetCacheProperties(uint32_t node_id, uint32_t processor_id,
                                   std::vector<HsaCacheProperties>& cache_props) const override;
-  hsa_status_t AllocateMemory(const core::MemoryRegion &mem_region,
-                              core::MemoryRegion::AllocateFlags alloc_flags,
-                              void **mem, size_t size,
-                              uint32_t node_id) override;
-  hsa_status_t FreeMemory(void *mem, size_t size) override;
+  hsa_status_t AllocateMemory(const core::MemoryRegion& mem_region,
+                              core::MemoryRegion::AllocateFlags alloc_flags, size_t size,
+                              uint32_t node_id, core::DriverMemoryHandle* handle) override;
+  hsa_status_t FreeMemory(const core::DriverMemoryHandle& handle) override;
   hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                            HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id, void* queue_addr,
                            uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes, HsaEvent* event,
@@ -108,18 +107,16 @@ public:
   hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
                              uint32_t* first_gws) const override;
   hsa_status_t ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
-                                  core::ShareType type, uint32_t flags, void* export_handle,
-                                  uint64_t* export_offset = nullptr) override;
+                                  core::ShareType type, void* export_handle) override;
   hsa_status_t ImportMemoryHandle(const core::Agent& agent, core::DriverMemoryHandle* handle,
                                   core::ShareType type, void* import_handle,
                                   void* mem = nullptr) override;
-  hsa_status_t DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) override;
   hsa_status_t Map(const core::DriverMemoryHandle& handle, void *mem, size_t offset,
                    size_t size, hsa_access_permission_t perms,uint32_t node_id) override;
   hsa_status_t Unmap(const core::DriverMemoryHandle& handle, void *mem, size_t offset,
                      size_t size, uint32_t node_id) override;
-  hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size, const core::Agent& agent,
-                                     core::DriverMemoryHandle* handle, uint64_t* offset) override;
+  hsa_status_t CreateShareableHandle(core::DriverMemoryHandle* handle, const core::Agent& agent,
+                                     uint64_t* offset) override;
   hsa_status_t DestroyMemoryHandle(core::DriverMemoryHandle* handle) override;
   hsa_status_t SPMAcquire(uint32_t preferred_node_id) const override;
   hsa_status_t SPMRelease(uint32_t preferred_node_id) const override;
@@ -150,11 +147,39 @@ public:
                                        hsa_amd_external_semaphore_t* out_sem) const override;
   hsa_status_t DestroyExternalSemaphore(hsa_amd_external_semaphore_t sem) const override;
 
+  hsa_status_t SignalExternalSemaphore(uint64_t queue_id, hsa_amd_external_semaphore_t sem,
+                                       uint64_t value) const override;
+  hsa_status_t WaitExternalSemaphore(uint64_t queue_id, hsa_amd_external_semaphore_t sem,
+                                     uint64_t value) const override;
+
   hsa_status_t IsModelEnabled(bool* enable) const override;
 
   hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const override;
 
+  hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const override;
+
  private:
+  /// @brief Flags for @ref ExportMemoryHandleImpl.
+  enum ExportMemoryFlags : uint32_t {
+    EXPORT_MEMORY_FLAGS_NONE = 0,
+    /// Export a KFD allocation via @c hsaKmtExportDMABufHandle. @p handle.handle is the
+    /// allocation address and @p handle.size is the allocation size. @p export_offset is required.
+    EXPORT_MEMORY_FLAGS_KFD_DMABUF = 1,
+  };
+
+  /// @brief Internal export implementation supporting KFD-specific flags and offset.
+  ///
+  /// @param[in] agent agent that owns the memory
+  /// @param[in] handle driver memory handle to export
+  /// @param[in] type @ref core::ShareType to export
+  /// @param[in] flags @ref ExportMemoryFlags
+  /// @param[out] export_handle output handle; @p int* for @p DMABUF_FD,
+  ///             @p hsa_fabric_handle_t* for @p FABRIC_HANDLE
+  /// @param[out] export_offset allocation offset; required when @p EXPORT_MEMORY_FLAGS_KFD_DMABUF
+  ///             is set in @p flags
+  hsa_status_t ExportMemoryHandleImpl(const core::Agent& agent,
+                                      const core::DriverMemoryHandle& handle, core::ShareType type,
+                                      uint32_t flags, void* export_handle, uint64_t* export_offset);
 
   /// @brief Query for user preference and use that to determine Xnack mode
   /// of ROCm system. Return true if Xnack mode is ON or false if OFF. Xnack

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "test_paths.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/executable.h"
@@ -38,10 +39,9 @@ RJ_DIAGNOSTIC_POP
 namespace {
 
 using namespace rocjitsu;
+using test::kernel_path;
 
-const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
-
-std::string kernel_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".o"; }
+const std::string CONFIG_PATH = test::config_path("gfx950_cdna4.json");
 
 constexpr uint32_t TOTAL_XCDS = 8;
 constexpr uint32_t CUS_PER_XCD = 32; // 4 SEs × 8 CUs
@@ -123,7 +123,7 @@ struct KernelExecFixture {
     if (num_threads > 1)
       partition_by_xcd(num_threads);
     else
-      engine->build();
+      engine->create();
 
     Executable exec(kernel_path(kernel_name));
     ASSERT_TRUE(exec.is_valid());
@@ -156,7 +156,7 @@ struct KernelExecFixture {
           }
           return 0; // Top-level components → partition 0.
         });
-    engine->build();
+    engine->create();
   }
 
   amdgpu::GpuMemory *mem() { return gpu_mem; }
@@ -392,7 +392,7 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
   loaded.wire_links(engine->topology());
-  engine->build();
+  engine->create();
 
   // Write a kernel descriptor + s_endpgm to GPU memory.
   using namespace rocr::llvm::amdhsa;
@@ -459,7 +459,7 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt_MultiThreaded) {
         }
         return 0;
       });
-  engine->build();
+  engine->create();
 
   using namespace rocr::llvm::amdhsa;
   kernel_descriptor_t kd{};

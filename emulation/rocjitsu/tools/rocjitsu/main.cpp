@@ -11,16 +11,28 @@
 
 #include "rocjitsu/vm/rj_vm.h"
 
+#include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/config/dbt_guest_config.h"
+#include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/version.h"
 
+#include "embedded_schema.h"
+
+#include <algorithm>
+#include <cctype>
 #include <cerrno>
+#include <charconv>
 #include <csignal>
+#include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <mutex>
+#include <optional>
 #include <stop_token>
 #include <string_view>
 #include <sys/mman.h>
@@ -30,24 +42,67 @@
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 using namespace rocjitsu;
 
-static void handle_client(int client_fd, rj_vm_t *vm, std::stop_token stop) {
+namespace {
+
+pid_t peer_pid_for_socket(int fd) {
+  struct ucred cred {};
+  socklen_t len = sizeof(cred);
+  if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) == 0 && cred.pid > 0)
+    return cred.pid;
+  return 0;
+}
+
+void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::stop_token stop) {
   uint32_t process_id = 0;
   bool connected = true;
 
   while (!stop.stop_requested() && connected) {
     RpcHeader hdr{};
-    if (!rpc_recv_exact(client_fd, &hdr, sizeof(hdr)))
-      break;
+    // Capture an optional SCM_RIGHTS fd the client attaches to the message (the
+    // debugger notifier pipe on DBG_TRAP ENABLE). A received fd is owned here
+    // and must be closed if not adopted by the debug session.
+    int in_fd = -1;
+    {
+      int in_fds[1] = {-1};
+      size_t num_in_fds = 1;
+      ssize_t hdr_bytes = rpc_recv_msg(client_fd, &hdr, sizeof(hdr), in_fds, &num_in_fds);
+      if (num_in_fds > 0)
+        in_fd = in_fds[0];
+      // A short read means the peer truncated the header (or closed); drop the
+      // connection instead of acting on a partial header, reclaiming any fd that
+      // arrived with it. (rpc_recv_exact did this implicitly; recvmsg does not.)
+      if (hdr_bytes != static_cast<ssize_t>(sizeof(hdr))) {
+        if (in_fd >= 0)
+          ::close(in_fd);
+        break;
+      }
+    }
 
     switch (hdr.opcode) {
     case RPC_HANDSHAKE: {
-      auto open_rc = rj_vm_device_open(vm, &process_id);
+      // One connection opens exactly one device. A second HANDSHAKE would overwrite
+      // process_id without closing the first, leaking that daemon-side process (its
+      // allocations, queues, CP callbacks) until the connection tears down. Treat a
+      // repeat handshake as a protocol violation and drop the connection.
+      if (process_id != 0) {
+        RpcHeader resp{};
+        resp.opcode = hdr.opcode;
+        resp.request_id = hdr.request_id;
+        resp.result = -1;
+        rpc_send_exact(client_fd, &resp, sizeof(resp));
+        connected = false;
+        break;
+      }
+      auto open_rc = rj_vm_device_open(vm, client_pid, &process_id);
       if (open_rc != ROCJITSU_STATUS_SUCCESS) {
         RpcHeader resp{};
+        resp.opcode = hdr.opcode;
         resp.request_id = hdr.request_id;
         resp.result = -1;
         rpc_send_exact(client_fd, &resp, sizeof(resp));
@@ -67,6 +122,7 @@ static void handle_client(int client_fd, rj_vm_t *vm, std::stop_token stop) {
       auto drm_len = drm ? std::strlen(drm) : 0;
 
       RpcHeader resp{};
+      resp.opcode = hdr.opcode;
       resp.request_id = hdr.request_id;
 
       RpcHandshakeResponse hs{};
@@ -90,6 +146,7 @@ static void handle_client(int client_fd, rj_vm_t *vm, std::stop_token stop) {
       rj_vm_device_close(vm, process_id);
       process_id = 0;
       RpcHeader resp{};
+      resp.opcode = hdr.opcode;
       resp.request_id = hdr.request_id;
       rpc_send_exact(client_fd, &resp, sizeof(resp));
       connected = false;
@@ -112,8 +169,12 @@ static void handle_client(int client_fd, rj_vm_t *vm, std::stop_token stop) {
       rj_vm_device_map_as(vm, process_id, &map);
 
       RpcHeader resp{};
+      resp.opcode = hdr.opcode;
       resp.request_id = hdr.request_id;
-      resp.result = (reinterpret_cast<void *>(map.mapped_addr) == MAP_FAILED) ? -errno : 0;
+      // Relay the errno captured inside rj_vm_device_map_as at the failing mmap, not
+      // this thread's errno — bookkeeping syscalls between the mmap and here could
+      // have clobbered it, sending the client a misleading error code.
+      resp.result = (reinterpret_cast<void *>(map.mapped_addr) == MAP_FAILED) ? -map.map_errno : 0;
       resp.payload_bytes = sizeof(RpcMmapResponse);
 
       RpcMmapResponse mresp{.mapped_addr = map.mapped_addr};
@@ -142,6 +203,7 @@ static void handle_client(int client_fd, rj_vm_t *vm, std::stop_token stop) {
       rj_vm_device_unmap_as(vm, process_id, &unmap);
 
       RpcHeader resp{};
+      resp.opcode = hdr.opcode;
       resp.request_id = hdr.request_id;
       rpc_send_exact(client_fd, &resp, sizeof(resp));
       break;
@@ -165,10 +227,16 @@ static void handle_client(int client_fd, rj_vm_t *vm, std::stop_token stop) {
       cmd.buf = payload.data() + sizeof(RpcIoctlRequest);
       cmd.buf_size = ioctl_request->args_bytes;
       cmd.shared_handle = -1;
+      cmd.in_handle = in_fd;
+      in_fd = -1; // ownership passes to cmd; execute clears it on adoption
       rj_vm_execute_as(vm, process_id, &cmd);
+      // The debug session adopts the notifier fd on success (in_handle cleared);
+      // reclaim it otherwise.
+      if (cmd.in_handle >= 0)
+        ::close(cmd.in_handle);
 
       RpcHeader resp{};
-      resp.opcode = RPC_IOCTL;
+      resp.opcode = hdr.opcode;
       resp.request_id = hdr.request_id;
       resp.result = cmd.result;
       resp.payload_bytes = static_cast<uint32_t>(cmd.buf_size);
@@ -192,47 +260,89 @@ static void handle_client(int client_fd, rj_vm_t *vm, std::stop_token stop) {
       connected = false;
       break;
     }
+
+    // Safety net: reclaim any notifier fd attached to a non-ioctl message (the
+    // client only sends one on DBG_TRAP ENABLE).
+    if (in_fd >= 0)
+      ::close(in_fd);
   }
 
   if (process_id != 0)
     rj_vm_device_close(vm, process_id);
-  ::close(client_fd);
+  // NOTE: the client fd is intentionally NOT closed here. The spawning thread closes
+  // it under client_threads_mutex together with erasing it from active_fds, so the
+  // close and the active_fds removal are atomic w.r.t. the shutdown path — otherwise
+  // a window exists where this thread has closed the fd but not yet removed it, and
+  // teardown could shutdown() the (closed, possibly recycled) descriptor.
 }
 
-static volatile sig_atomic_t g_listen_fd = -1;
+volatile sig_atomic_t g_listen_fd = -1;
 
-static int run_daemon_server(const char *config_path) {
+int run_daemon_server(const char *config_path, const std::string &socket_path = {}) {
   rj_vm_t *vm = nullptr;
   if (rj_vm_create(config_path, RJ_VM_MODE_DAEMON, &vm) != ROCJITSU_STATUS_SUCCESS) {
     std::cerr << std::format("rocjitsu: failed to create VM from {}\n", config_path);
     return 1;
   }
 
-  std::jthread engine_thread([vm]() { rj_vm_run(vm, nullptr); });
+  // Set up the listening socket BEFORE spawning the engine thread. rj_vm_run() blocks
+  // in engine->run() (daemon mode runs indefinitely) and the jthread destructor joins
+  // it, so if the engine thread existed during socket setup an early error return
+  // would deadlock in ~jthread. Doing all fallible socket setup first means the error
+  // paths simply destroy the VM and return with no engine thread to join.
+  auto socket_setup_failed = [&](int rc) {
+    rj_vm_destroy(vm);
+    return rc;
+  };
 
-  auto sock_path = rpc_default_socket_path();
-  std::filesystem::create_directories(std::filesystem::path(sock_path).parent_path());
+  auto sock_path = socket_path.empty() ? rpc_default_socket_path() : socket_path;
+  std::error_code mkdir_ec;
+  std::filesystem::create_directories(std::filesystem::path(sock_path).parent_path(), mkdir_ec);
+  if (mkdir_ec) {
+    std::cerr << std::format("rocjitsu: cannot create runtime dir for {}: {}\n", sock_path,
+                             mkdir_ec.message());
+    return socket_setup_failed(1);
+  }
   unlink(sock_path.c_str());
 
   int listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
   if (listen_fd < 0)
-    return 1;
-  g_listen_fd = listen_fd;
+    return socket_setup_failed(1);
 
   sockaddr_un addr{};
   addr.sun_family = AF_UNIX;
+  // Reject an over-long socket path rather than silently binding a truncated one.
+  if (sock_path.size() >= sizeof(addr.sun_path)) {
+    std::cerr << std::format("rocjitsu: daemon socket path too long ({} bytes): {}\n",
+                             sock_path.size(), sock_path);
+    ::close(listen_fd);
+    return socket_setup_failed(1);
+  }
   sock_path.copy(addr.sun_path, sizeof(addr.sun_path) - 1);
 
   if (bind(listen_fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0 ||
       listen(listen_fd, 16) != 0) {
     ::close(listen_fd);
-    return 1;
+    return socket_setup_failed(1);
   }
 
+  // Socket is ready; now start the engine. From here, error/normal exit must request
+  // exit and join the engine thread (see the end of this function).
+  std::jthread engine_thread([vm]() { rj_vm_run(vm, nullptr); });
+  g_listen_fd = listen_fd;
+
   std::stop_source stop_source;
-  std::vector<std::jthread> client_threads;
-  std::vector<int> active_client_fds;
+  // Per-connection threads keyed by a monotonic id (never a recyclable fd number).
+  // active_fds tracks each live connection's fd for shutdown-on-teardown; a finishing
+  // client closes its fd and removes it from active_fds atomically under
+  // client_threads_mutex, so teardown never shutdown()s a closed-and-possibly-recycled
+  // fd. finished_ids lets the accept loop reap completed threads instead of
+  // accumulating them until server shutdown.
+  std::unordered_map<uint64_t, std::jthread> client_threads;
+  std::unordered_map<uint64_t, int> active_fds;
+  std::vector<uint64_t> finished_ids;
   std::mutex client_threads_mutex;
+  uint64_t next_conn_id = 1;
 
   std::signal(SIGINT, [](int) {
     int fd = g_listen_fd;
@@ -247,25 +357,79 @@ static int run_daemon_server(const char *config_path) {
       shutdown(fd, SHUT_RDWR);
   });
 
+  // Join and erase any threads that finished since the last accept. Caller holds
+  // client_threads_mutex. Draining a moved-out jthread list under the lock is safe:
+  // each id in finished_ids belongs to a thread that has run to completion and only
+  // needs its handle joined (the jthread destructor does that on erase).
+  auto reap_finished = [&]() {
+    for (uint64_t id : finished_ids) {
+      active_fds.erase(id);
+      client_threads.erase(id);
+    }
+    finished_ids.clear();
+  };
+
   while (g_listen_fd >= 0) {
     int client = accept(listen_fd, nullptr, nullptr);
     if (client < 0)
       break;
 
+    pid_t peer_pid = peer_pid_for_socket(client);
     std::lock_guard<std::mutex> lock(client_threads_mutex);
-    active_client_fds.push_back(client);
-    client_threads.emplace_back(handle_client, client, vm, stop_source.get_token());
+    reap_finished();
+    uint64_t conn_id = next_conn_id++;
+    active_fds[conn_id] = client;
+    client_threads[conn_id] =
+        std::jthread([&client_threads_mutex, &active_fds, &finished_ids, conn_id, client, vm,
+                      peer_pid, token = stop_source.get_token()]() {
+          handle_client(client, vm, peer_pid, token);
+          // Close the fd and drop it from the active set ATOMICALLY under the lock, so
+          // the teardown path (which shutdown()s every active_fds entry under the same
+          // lock) can never observe this fd after it is closed — closing it here rather
+          // than in handle_client() is what makes close+erase indivisible. Then mark
+          // ourselves for reaping by the accept loop / teardown.
+          std::lock_guard<std::mutex> done_lock(client_threads_mutex);
+          ::close(client);
+          active_fds.erase(conn_id);
+          finished_ids.push_back(conn_id);
+        });
   }
 
   stop_source.request_stop();
+  // Wake any client thread parked in an infinite-timeout WAIT_EVENTS ioctl before we
+  // join below. request_stop() is only observed at the top of handle_client's loop and
+  // shutdown(fd) only interrupts a thread blocked in recv() — neither unblocks a thread
+  // stuck inside a blocking ioctl on a condition variable. Closing every process fires
+  // notify_closing(), which wakes those waiters so their jthread joins can complete
+  // instead of hanging until the client happens to disconnect. A client that closes its
+  // own device concurrently just finds the process already gone.
+  rj_vm_close_all_devices(vm);
   {
-    std::lock_guard<std::mutex> lock(client_threads_mutex);
-    for (int fd : active_client_fds)
-      shutdown(fd, SHUT_RDWR);
-    client_threads.clear();
+    std::unordered_map<uint64_t, std::jthread> to_join;
+    {
+      std::lock_guard<std::mutex> lock(client_threads_mutex);
+      reap_finished();
+      for (const auto &[conn_id, fd] : active_fds)
+        shutdown(fd, SHUT_RDWR);
+      // Move the threads OUT and join them below without holding the mutex: a client
+      // thread's completion lambda takes client_threads_mutex, so joining while
+      // holding it would deadlock against a thread mid-completion.
+      to_join = std::move(client_threads);
+      client_threads.clear();
+    }
+    to_join.clear(); // ~jthread joins each, off-lock.
   }
   ::close(listen_fd);
   unlink(sock_path.c_str());
+  // In daemon-with-app mode (a per-PID socket_path was supplied) the socket lives in
+  // this invocation's own <runtime>/<pid>/ directory; remove it now that the socket is
+  // gone so a normal shutdown does not leave an empty dir for a later run to reap.
+  // The default (daemon-only) socket sits directly in the shared runtime root, whose
+  // parent must never be removed — hence the socket_path.empty() guard.
+  if (!socket_path.empty()) {
+    std::error_code rm_ec;
+    std::filesystem::remove(std::filesystem::path(sock_path).parent_path(), rm_ec);
+  }
 
   rj_vm_request_exit(vm, "daemon shutdown");
   engine_thread.join();
@@ -273,31 +437,69 @@ static int run_daemon_server(const char *config_path) {
   return 0;
 }
 
-static std::string find_interposer_lib() {
-  char self[4096];
-  auto n = readlink("/proc/self/exe", self, sizeof(self) - 1);
-  if (n <= 0)
+std::optional<std::filesystem::path> current_executable_path() {
+  std::vector<char> buffer(256);
+  for (;;) {
+    ssize_t n = readlink("/proc/self/exe", buffer.data(), buffer.size());
+    if (n < 0)
+      return std::nullopt;
+    if (static_cast<size_t>(n) < buffer.size())
+      return std::filesystem::path(std::string(buffer.data(), static_cast<size_t>(n)));
+    buffer.resize(buffer.size() * 2);
+  }
+}
+
+std::string canonical_existing_path(const std::filesystem::path &candidate) {
+  std::error_code ec;
+  if (!std::filesystem::exists(candidate, ec) || ec)
     return {};
-  self[n] = '\0';
-  auto bin_dir = std::filesystem::path(self).parent_path();
-  // Installed layout: <prefix>/bin/rocjitsu → <prefix>/lib/librocjitsu_kmd.so
-  //                   or <prefix>/bin/rocjitsu → <prefix>/lib64/librocjitsu_kmd.so
-  // Build layout: build/tools/rocjitsu/rocjitsu → build/lib/.../librocjitsu_kmd.so
-  //               or build/tools/rocjitsu/rocjitsu → build/lib64/.../librocjitsu_kmd.so
-  for (auto &candidate : {
-           bin_dir / ".." / "lib" / "librocjitsu_kmd.so",
-           bin_dir / ".." / "lib64" / "librocjitsu_kmd.so",
-           bin_dir / ".." / ".." / "lib" / "rocjitsu" / "src" / "rocjitsu" / "kmd" / "linux" /
-               "librocjitsu_kmd.so",
+
+  // The launcher should keep probing candidate layouts when a path disappears
+  // or cannot be canonicalized, rather than letting a filesystem exception
+  // terminate the process before exec.
+  std::filesystem::path canonical = std::filesystem::canonical(candidate, ec);
+  return ec ? std::string{} : canonical.string();
+}
+
+std::string find_runtime_lib(std::string_view lib_name) {
+  auto self = current_executable_path();
+  if (!self)
+    return {};
+  auto bin_dir = self->parent_path();
+  const std::filesystem::path library_name{std::string(lib_name)};
+
+  // Installed layouts use <prefix>/lib or <prefix>/lib64. CMake build trees may
+  // place shared libraries either at the build root or under target directories,
+  // so use the same ordered probe list for both the interposer and HSA hooks.
+  for (const auto &candidate : {
+           bin_dir / ".." / "lib" / library_name,
+           bin_dir / ".." / "lib64" / library_name,
+           bin_dir / ".." / ".." / library_name,
+           bin_dir / ".." / ".." / "lib" / "rocjitsu" / "src" / "rocjitsu" / "hooks" / library_name,
+           bin_dir / ".." / ".." / "lib64" / "rocjitsu" / "src" / "rocjitsu" / "hooks" /
+               library_name,
        }) {
-    if (std::filesystem::exists(candidate))
-      return std::filesystem::canonical(candidate).string();
+    if (std::string path = canonical_existing_path(candidate); !path.empty())
+      return path;
   }
   return {};
 }
 
-static bool write_config_file(const std::string &config_path) {
-  auto cfg_file = rpc_default_config_file_path();
+std::string find_interposer_lib() { return find_runtime_lib("librocjitsu.so"); }
+
+std::string find_hooks_lib() { return find_runtime_lib("librocjitsu_hooks.so"); }
+
+void prepend_env_path(const char *name, const std::string &value) {
+  if (const char *old_value = std::getenv(name); old_value && *old_value) {
+    std::string combined = value + ":" + old_value;
+    setenv(name, combined.c_str(), 1);
+    return;
+  }
+  setenv(name, value.c_str(), 1);
+}
+
+bool write_config_file(const std::string &config_path, pid_t pid) {
+  auto cfg_file = rpc_invocation_config_file_path(pid);
   std::filesystem::create_directories(std::filesystem::path(cfg_file).parent_path());
   std::ofstream ofs(cfg_file);
   if (!ofs)
@@ -306,14 +508,258 @@ static bool write_config_file(const std::string &config_path) {
   return ofs.good();
 }
 
-static void cleanup_runtime_files() {
-  auto cfg_file = rpc_default_config_file_path();
-  unlink(cfg_file.c_str());
-  auto sock_file = rpc_default_socket_path();
-  unlink(sock_file.c_str());
+void cleanup_runtime_files(pid_t pid) {
+  std::error_code ec;
+  std::filesystem::remove_all(rpc_invocation_runtime_dir(pid), ec);
 }
 
-static void print_usage() {
+// Best-effort reap of per-PID runtime dirs left behind by prior invocations that
+// exited via execvp (which never returns, so cleanup_runtime_files does not run).
+// Each numeric <pid> subdir of the runtime root is removed if that PID is no
+// longer alive, so a recycled PID cannot inherit a stale config_path/daemon.sock.
+void reap_stale_runtime_dirs() {
+  // Never iterate an empty root: directory_iterator("") scans the CWD, which would
+  // let this reaper remove_all unrelated numeric directories. rpc_default_runtime_dir()
+  // already treats a set-but-empty $ROCJITSU_RUNTIME_DIR as unset, but guard here too
+  // since the loop body deletes.
+  const std::string root = rpc_default_runtime_dir();
+  if (root.empty())
+    return;
+  // Advance the iterator with an error_code (not the throwing operator++): another
+  // launcher may remove_all an entry concurrently, and a throw here would abort the
+  // launcher before exec. Best-effort — any filesystem error just ends the scan.
+  std::error_code ec;
+  std::filesystem::directory_iterator it(root, ec);
+  const std::filesystem::directory_iterator end;
+  for (; !ec && it != end; it.increment(ec)) {
+    // Only real per-PID directories are reapable. Use symlink_status() (which does
+    // NOT follow the link) and require a plain directory: is_directory() follows
+    // symlinks, so a numeric symlink pointing at a directory would otherwise pass
+    // and have its target remove_all'd — never chase a symlink out of the runtime
+    // root.
+    std::error_code st_ec;
+    auto st = std::filesystem::symlink_status(it->path(), st_ec);
+    if (st_ec || st.type() != std::filesystem::file_type::directory)
+      continue;
+    const std::string name = it->path().filename().string();
+    if (!std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isdigit(c); }))
+      continue;
+    pid_t pid = 0;
+    auto [ptr, err] = std::from_chars(name.data(), name.data() + name.size(), pid);
+    if (err != std::errc{} || ptr != name.data() + name.size() || pid <= 0)
+      continue;
+    // kill(pid, 0) probes existence without signalling: ESRCH means the process
+    // is gone and its runtime dir is safe to reclaim. EPERM/success mean it is
+    // still alive (possibly another user's PID), so leave it alone.
+    if (kill(pid, 0) != 0 && errno == ESRCH) {
+      std::error_code rm_ec;
+      std::filesystem::remove_all(it->path(), rm_ec);
+    }
+  }
+}
+
+struct KfdGpuOrdinal {
+  uint32_t ordinal = 0;
+  uint32_t node_id = 0;
+  uint32_t gpu_id = 0;
+  uint32_t gfx_target_version = 0;
+};
+
+std::optional<uint32_t> parse_u32(std::string_view text) {
+  uint32_t value = 0;
+  auto *begin = text.data();
+  auto *end = text.data() + text.size();
+  auto [ptr, err] = std::from_chars(begin, end, value);
+  if (err != std::errc{} || ptr != end)
+    return std::nullopt;
+  return value;
+}
+
+std::string_view trim(std::string_view text) {
+  while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())))
+    text.remove_prefix(1);
+  while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())))
+    text.remove_suffix(1);
+  return text;
+}
+
+std::optional<uint32_t> read_u32_file(const std::filesystem::path &path) {
+  std::ifstream in(path);
+  uint32_t value = 0;
+  if (!(in >> value))
+    return std::nullopt;
+  return value;
+}
+
+std::optional<uint32_t> read_u32_property(const std::filesystem::path &path, std::string_view key) {
+  std::ifstream in(path);
+  std::string name;
+  uint64_t value = 0;
+  while (in >> name >> value) {
+    if (name == key)
+      return static_cast<uint32_t>(value);
+  }
+  return std::nullopt;
+}
+
+std::vector<KfdGpuOrdinal> real_kfd_gpu_ordinals() {
+  std::filesystem::path nodes_dir = "/sys/devices/virtual/kfd/kfd/topology/nodes";
+  if (!std::filesystem::exists(nodes_dir))
+    nodes_dir = "/sys/class/kfd/kfd/topology/nodes";
+
+  struct KfdNodeInfo {
+    uint32_t node_id = 0;
+    uint32_t gpu_id = 0;
+    uint32_t gfx_target_version = 0;
+  };
+
+  std::vector<KfdNodeInfo> nodes;
+  std::error_code ec;
+  for (const auto &entry : std::filesystem::directory_iterator(nodes_dir, ec)) {
+    if (!entry.is_directory(ec))
+      continue;
+
+    std::string name = entry.path().filename().string();
+    auto node_id = parse_u32(name);
+    if (!node_id)
+      continue;
+
+    auto gpu_id = read_u32_file(entry.path() / "gpu_id");
+    if (gpu_id && *gpu_id != 0) {
+      uint32_t gfx_target_version =
+          read_u32_property(entry.path() / "properties", "gfx_target_version").value_or(0);
+      nodes.push_back({*node_id, *gpu_id, gfx_target_version});
+    }
+  }
+
+  std::sort(nodes.begin(), nodes.end(),
+            [](const auto &lhs, const auto &rhs) { return lhs.node_id < rhs.node_id; });
+
+  std::vector<KfdGpuOrdinal> gpus;
+  gpus.reserve(nodes.size());
+  for (uint32_t ordinal = 0; ordinal < nodes.size(); ++ordinal)
+    gpus.push_back({ordinal, nodes[ordinal].node_id, nodes[ordinal].gpu_id,
+                    nodes[ordinal].gfx_target_version});
+  return gpus;
+}
+
+/// @brief Reject implicit host selection when more than one GPU has the host ISA.
+///
+/// @details The launcher, GuestKfd, and HSA tools hook discover the host through
+/// separate views of KFD and ROCR. Selecting the first ISA match independently
+/// is only well-defined when that match is unique. On a multi-GPU host, require
+/// the config to name the shared KFD gpu_id so every layer routes to the same
+/// physical GPU.
+bool has_unambiguous_host_gpu(const rocjitsu::config::DbtGuestConfig &dbt_guest) {
+  if (dbt_guest.host.gpu_id != 0)
+    return true;
+
+  std::optional<uint32_t> target_version =
+      rocjitsu::kmd::gfx_target_version_from_name(dbt_guest.host.isa);
+  if (!target_version)
+    return true;
+
+  std::vector<uint32_t> matching_gpu_ids;
+  for (const KfdGpuOrdinal &gpu : real_kfd_gpu_ordinals()) {
+    if (gpu.gfx_target_version == *target_version)
+      matching_gpu_ids.push_back(gpu.gpu_id);
+  }
+  if (matching_gpu_ids.size() <= 1)
+    return true;
+
+  std::cerr << std::format(
+      "rocjitsu: dbt_guest.host_isa '{}' matches {} host GPUs; set host_gpu_id to one of:",
+      dbt_guest.host.isa, matching_gpu_ids.size());
+  for (uint32_t gpu_id : matching_gpu_ids)
+    std::cerr << ' ' << gpu_id;
+  std::cerr << '\n';
+  return false;
+}
+
+bool append_unique(std::vector<std::string> *tokens, std::string token) {
+  if (token.empty())
+    return false;
+  if (std::find(tokens->begin(), tokens->end(), token) != tokens->end())
+    return false;
+  tokens->push_back(std::move(token));
+  return true;
+}
+
+std::string join_comma(const std::vector<std::string> &tokens) {
+  std::string result;
+  for (size_t i = 0; i < tokens.size(); ++i) {
+    if (i != 0)
+      result += ',';
+    result += tokens[i];
+  }
+  return result;
+}
+
+void maybe_expand_rocr_visible_devices(const rocjitsu::config::DbtGuestConfig &dbt_guest) {
+  const char *visible = std::getenv("ROCR_VISIBLE_DEVICES");
+  if (visible == nullptr || *visible == '\0')
+    return;
+
+  std::vector<KfdGpuOrdinal> gpus = real_kfd_gpu_ordinals();
+  if (gpus.empty())
+    return;
+
+  uint32_t host_ordinal = 0;
+  if (dbt_guest.host.gpu_id != 0) {
+    auto match = std::find_if(gpus.begin(), gpus.end(), [&](const KfdGpuOrdinal &gpu) {
+      return gpu.gpu_id == dbt_guest.host.gpu_id;
+    });
+    if (match == gpus.end())
+      return;
+    host_ordinal = match->ordinal;
+  } else {
+    std::optional<uint32_t> target_version =
+        rocjitsu::kmd::gfx_target_version_from_name(dbt_guest.host.isa);
+    if (!target_version)
+      return;
+
+    auto match = std::find_if(gpus.begin(), gpus.end(), [&](const KfdGpuOrdinal &gpu) {
+      return gpu.gfx_target_version == *target_version;
+    });
+    if (match == gpus.end())
+      return;
+    host_ordinal = match->ordinal;
+  }
+
+  const uint32_t guest_ordinal = static_cast<uint32_t>(gpus.size());
+  std::vector<std::string> expanded;
+  std::string_view rest = visible;
+  bool changed = false;
+
+  while (true) {
+    size_t comma = rest.find(',');
+    std::string_view raw = comma == std::string_view::npos ? rest : rest.substr(0, comma);
+    std::string_view token = trim(raw);
+    if (!token.empty()) {
+      std::optional<uint32_t> ordinal = parse_u32(token);
+      if (ordinal && (*ordinal == host_ordinal || *ordinal == guest_ordinal)) {
+        // ROCR filters topology before HSA tools callbacks. Include both the
+        // hidden host and appended guest internally so our HSA iteration hook
+        // can present one public replacement agent.
+        changed = append_unique(&expanded, std::to_string(host_ordinal)) || changed;
+        changed = append_unique(&expanded, std::to_string(guest_ordinal)) || changed;
+      } else {
+        changed = append_unique(&expanded, std::string(token)) || changed;
+      }
+    }
+
+    if (comma == std::string_view::npos)
+      break;
+    rest.remove_prefix(comma + 1);
+  }
+
+  std::string rewritten = join_comma(expanded);
+  if (!rewritten.empty() && rewritten != visible) {
+    setenv("ROCR_VISIBLE_DEVICES", rewritten.c_str(), 1);
+  }
+}
+
+void print_usage() {
   std::cerr
       << "Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]\n"
          "\n"
@@ -328,6 +774,8 @@ static void print_usage() {
          "  --version, -v     Print version and exit\n"
          "  --help, -h        Print this help and exit\n";
 }
+
+} // namespace
 
 int main(int argc, char *argv[]) {
   std::signal(SIGPIPE, SIG_IGN);
@@ -374,7 +822,27 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+  rocjitsu::config::DbtGuestConfig dbt_guest_config;
+  try {
+    dbt_guest_config = rocjitsu::config::load_dbt_guest_config_from_file(abs_config);
+    if (!dbt_guest_config.enabled)
+      (void)rocjitsu::config::load_config(abs_config, rocjitsu::kEmbeddedSchema);
+  } catch (const std::exception &e) {
+    std::cerr << std::format("rocjitsu: failed to parse config: {}\n", e.what());
+    return 1;
+  }
+  const bool dbt_guest_mode = dbt_guest_config.enabled;
+  if (dbt_guest_mode && (daemon_mode || attach_mode)) {
+    std::cerr << "rocjitsu: dbt_guest mode currently supports local launch only\n";
+    return 1;
+  }
+
   bool has_app = (separator_idx >= 0 && separator_idx + 1 < argc);
+
+  // Reclaim per-PID runtime dirs orphaned by prior runs (execvp never returns, so
+  // those invocations could not clean up after themselves). Done for every mode,
+  // including daemon-only, before this invocation creates its own directory.
+  reap_stale_runtime_dirs();
 
   if (daemon_mode && !has_app)
     return run_daemon_server(abs_config.c_str());
@@ -389,9 +857,26 @@ int main(int argc, char *argv[]) {
 
   auto lib_path = find_interposer_lib();
   if (lib_path.empty()) {
-    std::cerr << "rocjitsu: could not find librocjitsu_kmd.so\n";
+    std::cerr << "rocjitsu: could not find librocjitsu.so\n";
     return 1;
   }
+
+  std::string hooks_path;
+  if (dbt_guest_mode) {
+    if (dbt_guest_config.guest_isa.empty() || dbt_guest_config.host.isa.empty()) {
+      std::cerr << "rocjitsu: dbt_guest requires guest_isa and host_isa\n";
+      return 1;
+    }
+    if (!has_unambiguous_host_gpu(dbt_guest_config))
+      return 1;
+    hooks_path = find_hooks_lib();
+    if (hooks_path.empty()) {
+      std::cerr << "rocjitsu: could not find librocjitsu_hooks.so\n";
+      return 1;
+    }
+  }
+
+  pid_t my_pid = getpid();
 
   if (attach_mode) {
     auto sock_path = rpc_default_socket_path();
@@ -400,6 +885,9 @@ int main(int argc, char *argv[]) {
       return 1;
     }
   } else if (daemon_mode) {
+    auto sock_path = rpc_invocation_socket_path(my_pid);
+    std::filesystem::create_directories(rpc_invocation_runtime_dir(my_pid));
+
     pid_t daemon_pid = fork();
     if (daemon_pid < 0) {
       std::cerr << std::format("rocjitsu: fork failed: {}\n", strerror(errno));
@@ -408,10 +896,9 @@ int main(int argc, char *argv[]) {
 
     if (daemon_pid == 0) {
       prctl(PR_SET_PDEATHSIG, SIGTERM);
-      return run_daemon_server(abs_config.c_str());
+      return run_daemon_server(abs_config.c_str(), sock_path);
     }
 
-    auto sock_path = rpc_default_socket_path();
     for (int i = 0; i < 300; ++i) {
       if (std::filesystem::exists(sock_path))
         break;
@@ -424,16 +911,29 @@ int main(int argc, char *argv[]) {
       return 1;
     }
   } else {
-    if (!write_config_file(abs_config)) {
+    if (!write_config_file(abs_config, my_pid)) {
       std::cerr << "rocjitsu: failed to write config file\n";
       return 1;
     }
   }
 
-  setenv("LD_PRELOAD", lib_path.c_str(), 1);
+  prepend_env_path("LD_PRELOAD", lib_path);
+  if (dbt_guest_mode) {
+    maybe_expand_rocr_visible_devices(dbt_guest_config);
+    // The HSA hook still uses the legacy tools callback path. Disable only the
+    // rocprofiler-register table-delivery path so it cannot validate an
+    // unshadowed table before rocjitsu installs guest-agent wrappers.
+    setenv("HSA_TOOLS_DISABLE_REGISTER", "1", 1);
+    setenv("HSA_TOOLS_LIB", hooks_path.c_str(), 1);
+  }
+  // Export the invocation runtime dir so every descendant (including grandchild
+  // processes spawned through wrappers like ctest) inherits the exact directory
+  // holding config_path/daemon.sock. Attach mode creates no such dir.
+  if (!attach_mode)
+    setenv(rocjitsu::kRpcInvocationDirEnv, rpc_invocation_runtime_dir(my_pid).c_str(), 1);
   execvp(app_argv[0], app_argv);
 
   std::cerr << std::format("rocjitsu: execvp failed: {}\n", strerror(errno));
-  cleanup_runtime_files();
+  cleanup_runtime_files(my_pid);
   return 1;
 }

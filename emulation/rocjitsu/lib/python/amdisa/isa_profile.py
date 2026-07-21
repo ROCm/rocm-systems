@@ -19,6 +19,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
+# \NPI new ISA family: (1) sync shared/machine-readable-isa via download.py and \
+# add amdgpu_isa_<isa>.xml, (2) add its profile in this module, (3) regenerate \
+# per docs/codegen.md, (4) author the hand-written isa.h / insts.h / mma_exec.h \
+# / addr_calc.* under lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/<isa>/.
 _FLOAT_NAME_MAP: dict[float, str] = {
     -0.5: 'NEG_HALF',
     -1.0: 'NEG_ONE',
@@ -361,6 +365,21 @@ class IsaProfile(ABC):
         return False
 
     @property
+    def vop3_cmp_sdst_size_bits(self) -> int | None:
+        """Explicit VOP3 compare destination width, if target-specific."""
+        return None
+
+    @property
+    def vop3_cndmask_selector_size_bits(self) -> int | None:
+        """Explicit VOP3 cndmask scalar-selector width, if target-specific."""
+        return None
+
+    @property
+    def vop3_carry_mask_size_bits(self) -> int | None:
+        """Explicit VOP3 carry input/output mask width, if target-specific."""
+        return None
+
+    @property
     def waitcnt_decode(self) -> str:
         """Return C++ code block that decodes a WAITCNT immediate into
         vmcnt, expcnt, and lgkmcnt local variables.
@@ -432,6 +451,15 @@ class IsaProfile(ABC):
             The default returns an empty rule (no transformation).
         """
         return MnemonicRule()
+
+    def saddr_null_selector_expr(self, enc_name: str) -> str | None:
+        """Return the generated NULL-SADDR selector for an encoding.
+
+        The selector is an encoding property rather than a generic scalar
+        operand-table property. Profiles return ``None`` for encodings that do
+        not carry an optional scalar address.
+        """
+        return None
 
     def encoding_modifiers(self, enc_name: str) -> list[EncodingModifier]:
         """Return the disassembly modifier fields for an encoding format.
@@ -719,6 +747,12 @@ class _AmdgpuProfileBase(IsaProfile):
             return MnemonicRule(use_flat_mnemonic=True)
         return MnemonicRule()
 
+    def saddr_null_selector_expr(self, enc_name: str) -> str | None:
+        """Legacy FLAT reserves the all-ones 7-bit SADDR selector."""
+        if enc_name.upper() == 'ENC_FLAT':
+            return '0x7F'
+        return None
+
     def is_alt_encoding(self, enc_name: str) -> bool:
         parts = enc_name.split('_')
         if parts[0] != 'ENC':
@@ -793,6 +827,16 @@ class _AmdgpuProfileBase(IsaProfile):
         """Maximum wavefront size. RDNA supports Wave32 and Wave64;
         CDNA is Wave64-only."""
         return self.wave_size
+
+    @property
+    def supports_wgp_mode(self) -> bool:
+        """Whether COMPUTE_PGM_RSRC1.WGP_MODE exists."""
+        return False
+
+    @property
+    def max_addressable_vgprs_per_wf(self) -> int:
+        """Maximum VGPR index space addressable by one wavefront."""
+        return 256
 
     @property
     def has_acc_vgpr(self) -> bool:
@@ -1029,6 +1073,13 @@ class CdnaProfile(_AmdgpuProfileBase):
     def coherency_model(self) -> MemoryCoherencyModel:
         return MemoryCoherencyModel.GFX940_SC0_SC1_NT
 
+    @property
+    def uses_true16_vop3_opsel(self) -> bool:
+        # CDNA VOP3 OP_SEL uses bits [0:2] for source half selection and
+        # bit [3] for destination half selection. Low-destination writes
+        # zero the upper half; see the CDNA ISA OP_SEL field description.
+        return True
+
 
 class Cdna1Profile(CdnaProfile):
     """ISA profile for CDNA1 (GFX908 / MI100).
@@ -1174,6 +1225,10 @@ class Rdna1Profile(_AmdgpuProfileBase):
         return 64  # RDNA supports Wave32 and Wave64
 
     @property
+    def supports_wgp_mode(self) -> bool:
+        return True
+
+    @property
     def waitcnt_family(self) -> str:
         return 'gfx10'
 
@@ -1286,6 +1341,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
     @property
     def wave_size_max(self) -> int:
         return 64
+
+    @property
+    def supports_wgp_mode(self) -> bool:
+        return True
 
     @property
     def waitcnt_family(self) -> str:
@@ -1421,6 +1480,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return 64
 
     @property
+    def supports_wgp_mode(self) -> bool:
+        return True
+
+    @property
     def waitcnt_family(self) -> str:
         return 'gfx12'
 
@@ -1463,6 +1526,12 @@ class Rdna4Profile(_AmdgpuProfileBase):
         if upper in ('ENC_VOP1', 'ENC_VOP2', 'ENC_VOPC'):
             return _VOP_E32_RULE
         return MnemonicRule()
+
+    def saddr_null_selector_expr(self, enc_name: str) -> str | None:
+        """GFX12 VFLAT/VGLOBAL use the architectural scalar NULL value."""
+        if enc_name.upper() in ('ENC_VFLAT', 'ENC_VGLOBAL'):
+            return 'OPR_SREG_NULL'
+        return super().saddr_null_selector_expr(enc_name)
 
     @property
     def coherency_field_names(self) -> tuple[str, str, str | None]:
@@ -1545,6 +1614,26 @@ class Gfx1250Profile(Rdna4Profile):
     @property
     def wave_size_max(self) -> int:
         return 32
+
+    @property
+    def vop3_cmp_sdst_size_bits(self) -> int | None:
+        return 32
+
+    @property
+    def vop3_cndmask_selector_size_bits(self) -> int | None:
+        return 32
+
+    @property
+    def vop3_carry_mask_size_bits(self) -> int | None:
+        return 32
+
+    @property
+    def supports_wgp_mode(self) -> bool:
+        return False
+
+    @property
+    def max_addressable_vgprs_per_wf(self) -> int:
+        return 1024
 
     @property
     def has_vopd3(self) -> bool:

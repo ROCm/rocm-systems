@@ -23,6 +23,9 @@ using namespace rocjitsu::tools;
 namespace {
 
 constexpr int kUsageError = 1;
+// Matches the translation-failure exit code used by translate_code_object so a
+// non-dispatchable (skipped-kernel) artifact reports the same class of failure.
+constexpr int kTranslationError = 3;
 constexpr int kOutputError = 4;
 
 enum class OutputMode {
@@ -38,6 +41,8 @@ struct TargetInfo {
   rj_code_target_id_t code_object_target;
 };
 
+// \NPI new GPU: add a {"gfxNNNN", ARCH, EF_MACH, TARGET} row here
+// (and bump the  std::array size) so the DBT tool can translate to/from it.
 constexpr std::array<TargetInfo, 4> kTargetInfos = {{
     {"gfx942", ROCJITSU_CODE_ARCH_CDNA3, EF_AMDGPU_MACH_AMDGCN_GFX942, ROCJITSU_CODE_TARGET_GFX942},
     {"gfx950", ROCJITSU_CODE_ARCH_CDNA4, EF_AMDGPU_MACH_AMDGCN_GFX950, ROCJITSU_CODE_TARGET_GFX950},
@@ -78,6 +83,7 @@ void print_help() {
       << "  --output-mode MODE              disasm, code-object, or diff (default: disasm)\n"
       << "  --debug-conservative-liveness N Only allocate free VGPR scratch at or above N\n"
       << "  --debug-continue-after-failure Continue collecting diagnostics after failures\n"
+      << "  --skip-failed-kernels          Preserve failed kernels and continue other kernels\n"
       << "  --list-code-objects             List extractable code objects and exit\n"
       << "  --help                          Show this help\n\n"
       << "Supported target names: ";
@@ -152,6 +158,10 @@ void print_help() {
     }
     if (arg == "--debug-continue-after-failure") {
       options.translate.debug_continue_after_failure = true;
+      continue;
+    }
+    if (arg == "--skip-failed-kernels") {
+      options.translate.skip_failed_kernels = true;
       continue;
     }
 
@@ -269,6 +279,8 @@ struct ReportTotals {
     return "expand-failed";
   case DiagnosticKind::ResourceLimit:
     return "resource-limit";
+  case DiagnosticKind::KernelSkipped:
+    return "kernel-skipped";
   }
   return "unknown";
 }
@@ -527,6 +539,17 @@ int main(int argc, char **argv) {
     for (const auto &error : result.errors)
       std::cerr << "error: " << error.message << "\n";
     return result.errors.front().exit_code;
+  }
+
+  // A skipped kernel is a warning, so result.ok() stays true, but its
+  // s_trap; s_endpgm stub completes normally without a trap handler and would
+  // silently produce wrong results if dispatched. Refuse to emit an executable
+  // code object in that case (the HSA hook rejects the same load). Diff/Disasm
+  // are diagnostic-only inspection modes and remain available.
+  if (options.output_mode == OutputMode::CodeObject && !result.value.dispatchable()) {
+    std::cerr << "error: translation skipped one or more kernels; the code object is not "
+                 "dispatchable and will not be written\n";
+    return kTranslationError;
   }
 
   if (options.output_mode != OutputMode::Diff && !emit_output(options, result.value)) {

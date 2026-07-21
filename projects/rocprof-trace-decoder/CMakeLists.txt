@@ -56,9 +56,43 @@ set(TTD_ALL_VERSIONS ON)
 
 option(BUILD_TESTS "Enable Building Tests for ROCProf Trace Decoder" OFF)
 option(BUILD_UNIT_TESTS "Enable Building Unit Tests for ROCProf Trace Decoder" ON)
+set(BUILD_PYTHON
+    "AUTO"
+    CACHE STRING "Install Python API: AUTO, ON, or OFF")
+
+set_property(CACHE BUILD_PYTHON PROPERTY STRINGS AUTO ON OFF)
+option(BUILD_MARKERS "Enable Building SQTT marker instrumentation plugin" OFF)
 option(DISABLE_COMGR "Disable dependency on amd_comgr disassembly" OFF)
 
+if(BUILD_MARKERS)
+    add_subdirectory(markers)
+endif()
+
 add_subdirectory(source)
+
+if(BUILD_PYTHON)
+    set(Python3_FIND_UNVERSIONED_NAMES LAST)
+    if(BUILD_PYTHON STREQUAL "AUTO")
+        find_package(Python3 3.8 COMPONENTS Interpreter QUIET)
+    else()
+        find_package(Python3 3.8 COMPONENTS Interpreter REQUIRED)
+    endif()
+
+    if(Python3_FOUND)
+        set(ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR
+            "${CMAKE_INSTALL_LIBDIR}/python${Python3_VERSION_MAJOR}/site-packages"
+            CACHE PATH "Install directory for the rocprof-trace-decoder Python API")
+
+        install(
+            DIRECTORY python/rocprof_trace_decoder
+            DESTINATION ${ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR}
+            COMPONENT runtime
+            PATTERN "__pycache__" EXCLUDE
+            PATTERN "*.pyc" EXCLUDE)
+    else()
+        message(STATUS "Skipping Python API install: Python 3.8+ interpreter not found")
+    endif()
+endif()
 
 if(BUILD_TESTS)
     enable_testing()
@@ -67,9 +101,10 @@ endif()
 
 include(packaging)
 
-# Format target: runs clang-format and cmake-format
+# Format target: runs clang-format, cmake-format, and autopep8.
 find_program(CLANG_FORMAT NAMES clang-format-14)
 find_program(CMAKE_FORMAT cmake-format)
+find_program(AUTOPEP8 NAMES autopep8 DOC "Path to autopep8 Python formatter")
 
 set(FORMAT_COMMANDS)
 
@@ -80,6 +115,9 @@ if(CLANG_FORMAT)
         ${CMAKE_SOURCE_DIR}/source/*.cpp
         ${CMAKE_SOURCE_DIR}/source/*.hpp
         ${CMAKE_SOURCE_DIR}/source/*.h
+        ${CMAKE_SOURCE_DIR}/markers/*.cpp
+        ${CMAKE_SOURCE_DIR}/markers/*.hpp
+        ${CMAKE_SOURCE_DIR}/markers/*.h
         ${CMAKE_SOURCE_DIR}/include/*.hpp
         ${CMAKE_SOURCE_DIR}/include/*.h
         ${CMAKE_SOURCE_DIR}/test/*.cpp
@@ -91,11 +129,26 @@ if(CLANG_FORMAT)
 endif()
 
 if(CMAKE_FORMAT)
-    set(ALL_CMAKE_FILES ${CMAKE_SOURCE_DIR}/CMakeLists.txt ${CMAKE_SOURCE_DIR}/source/CMakeLists.txt
-                        ${CMAKE_SOURCE_DIR}/test/CMakeLists.txt ${CMAKE_SOURCE_DIR}/test/unit/CMakeLists.txt)
+    set(ALL_CMAKE_FILES
+        ${CMAKE_SOURCE_DIR}/CMakeLists.txt ${CMAKE_SOURCE_DIR}/source/CMakeLists.txt
+        ${CMAKE_SOURCE_DIR}/markers/CMakeLists.txt ${CMAKE_SOURCE_DIR}/test/CMakeLists.txt
+        ${CMAKE_SOURCE_DIR}/test/unit/CMakeLists.txt)
     file(GLOB CMAKE_MODULES ${CMAKE_SOURCE_DIR}/cmake/*.cmake)
     list(APPEND ALL_CMAKE_FILES ${CMAKE_MODULES})
     list(APPEND FORMAT_COMMANDS COMMAND ${CMAKE_FORMAT} -i ${ALL_CMAKE_FILES})
+endif()
+
+if(AUTOPEP8)
+    file(
+        GLOB_RECURSE
+        ALL_PYTHON_SOURCES
+        CONFIGURE_DEPENDS
+        ${CMAKE_SOURCE_DIR}/python/*.py
+        ${CMAKE_SOURCE_DIR}/samples/*.py
+        ${CMAKE_SOURCE_DIR}/test/*.py)
+    list(FILTER ALL_PYTHON_SOURCES EXCLUDE REGEX ".*/build.*/.*")
+    list(APPEND FORMAT_COMMANDS COMMAND ${AUTOPEP8} --in-place --max-line-length 100 --ignore E402
+                                ${ALL_PYTHON_SOURCES})
 endif()
 
 if(FORMAT_COMMANDS)
@@ -123,19 +176,40 @@ find_program(GENHTML genhtml)
 if(BUILD_TESTS
    AND LCOV
    AND GENHTML)
+    set(TTD_COVERAGE_DEPS rocprof-trace-decoder)
+    if(TARGET unit_tests)
+        list(APPEND TTD_COVERAGE_DEPS unit_tests)
+        list(APPEND TTD_COVERAGE_DEPS unit_tests_logging)
+    endif()
+    if(BUILD_MARKERS)
+        list(APPEND TTD_COVERAGE_DEPS SQTTInstrumentPass)
+        if(TARGET marker_unit_tests)
+            list(APPEND TTD_COVERAGE_DEPS marker_unit_tests)
+        endif()
+    endif()
+
+    set(TTD_COVERAGE_SOURCES "${CMAKE_SOURCE_DIR}/source/*")
+    if(BUILD_MARKERS)
+        list(
+            APPEND
+            TTD_COVERAGE_SOURCES
+            "${CMAKE_SOURCE_DIR}/markers/*"
+            "${CMAKE_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/markers.hpp")
+    endif()
+
     add_custom_target(
         coverage
         # Remove stale profiling data
         COMMAND find ${CMAKE_BINARY_DIR} -name "*.gcda" -delete
         # Run tests (skip sanitizer variants)
-        COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR}/test -E sanitize -E ubsan -E asan -j8
+        COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR}/test -E "sanitize|ubsan|asan" -j8
                 --output-on-failure
         # Capture coverage
         COMMAND ${LCOV} --quiet --capture --directory ${CMAKE_BINARY_DIR} --output-file
                 ${CMAKE_BINARY_DIR}/coverage.info --gcov-tool gcov --ignore-errors mismatch,mismatch,gcov,empty
         # Extract only project sources (use full path to avoid matching
         # googletest-src etc.)
-        COMMAND ${LCOV} --quiet --extract ${CMAKE_BINARY_DIR}/coverage.info "${CMAKE_SOURCE_DIR}/source/*" --output-file
+        COMMAND ${LCOV} --quiet --extract ${CMAKE_BINARY_DIR}/coverage.info ${TTD_COVERAGE_SOURCES} --output-file
                 ${CMAKE_BINARY_DIR}/coverage_src.info --ignore-errors empty,unused
         # Generate HTML report
         COMMAND ${GENHTML} --quiet ${CMAKE_BINARY_DIR}/coverage_src.info --output-directory
@@ -143,6 +217,22 @@ if(BUILD_TESTS
         COMMAND ${CMAKE_COMMAND} -E echo "Coverage report: ${CMAKE_BINARY_DIR}/coverage_report/index.html"
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Generating code coverage report"
-        DEPENDS unit_tests rocprof-trace-decoder
+        DEPENDS ${TTD_COVERAGE_DEPS}
         VERBATIM)
+
+    if(BUILD_MARKERS)
+        add_custom_command(
+            TARGET coverage
+            POST_BUILD
+            COMMAND
+                ${LCOV} --quiet --extract ${CMAKE_BINARY_DIR}/coverage.info "${CMAKE_SOURCE_DIR}/markers/*"
+                "${CMAKE_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/markers.hpp" --output-file
+                ${CMAKE_BINARY_DIR}/coverage_markers.info --ignore-errors empty,unused
+            COMMAND ${LCOV} --summary ${CMAKE_BINARY_DIR}/coverage_markers.info --fail-under-lines 90
+            COMMAND ${GENHTML} --quiet ${CMAKE_BINARY_DIR}/coverage_markers.info --output-directory
+                    ${CMAKE_BINARY_DIR}/coverage_markers_report --ignore-errors empty
+            COMMAND ${CMAKE_COMMAND} -E echo
+                    "Marker coverage report: ${CMAKE_BINARY_DIR}/coverage_markers_report/index.html"
+            VERBATIM)
+    endif()
 endif()

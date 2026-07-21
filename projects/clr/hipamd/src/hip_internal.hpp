@@ -37,6 +37,10 @@
 #define KCYN "\x1B[36m"
 #define KWHT "\x1B[37m"
 
+namespace amd::device {
+class Signal;
+}
+
 template <typename T> T ReturnPtrValue(T* ptr) { return (ptr != nullptr) ? *ptr : nullptr; }
 
 typedef struct hipArray {
@@ -71,7 +75,8 @@ enum MemcpyType {
 
 struct Graph;
 struct GraphNode;
-struct GraphExec;
+class GraphExecBase;
+class GraphExecSegmented;
 struct UserObject;
 class Stream;
 
@@ -428,12 +433,14 @@ namespace hip {
     }
     /// Release graph when capture is invalidated
     void ReleaseCaptureGraph();
+    /// Drop the capture-graph pointer without freeing it (forks alias the origin's graph).
+    void ClearCaptureGraph() { pCaptureGraph_ = nullptr; }
     /// Generate and assign a new capture ID (used at BeginCapture)
     void SetCaptureID() { captureID_ = GenerateCaptureID(); }
     /// Inherit capture ID from the parent stream
     void SetCaptureID(uint64_t captureId) { captureID_ = captureId; }
-    /// Reset capture parameters
-    hipError_t EndCapture();
+    /// Reset capture parameters, optionally keeping an invalidated status observable.
+    hipError_t EndCapture(bool preserveInvalidated = false);
     /// Set capture status
     void SetCaptureStatus(hipStreamCaptureStatus captureStatus) { captureStatus_ = captureStatus; }
     /// Set capture mode
@@ -469,9 +476,9 @@ namespace hip {
     /// destroyed. Behavior:
     ///   - Subsequent work-submit / sync APIs on this stream must return
     ///     hipErrorStreamDetached (enforced by CHECK_STREAM_DETACHED).
-    ///   - If a stream capture is active on this stream, the capture is
-    ///     invalidated (status -> hipStreamCaptureStatusInvalidated) and every
-    ///     forked parallel branch is marked invalidated as well.
+    ///   - If a stream capture is active or already invalidated on this stream,
+    ///     Detach() performs the invalidated EndCapture cleanup that API calls
+    ///     can no longer reach.
     ///   - hipStreamDestroy continues to succeed on a detached stream.
     void Detach();
     /// Returns true once Detach() has been called.
@@ -598,6 +605,16 @@ namespace hip {
     /// doesn't stall the current thread.
     void WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stream = false);
 
+    // Destroying a recorded IPC event must wait for the GPU barrier that decrements the
+    // event's IPC signal before the signal can be freed (otherwise the GPU could write to
+    // freed memory).
+
+    /// Transfer an IPC signal (and its record marker's event, may be null) to this device's
+    /// deferred-cleanup queue. Frees inline if the queue grows past its bound.
+    void EnqueueDeferredIpcSignal(amd::device::Signal* signal, amd::Event* event);
+    /// Wait for the pending barriers of all deferred IPC signals on this device and free them.
+    void DrainDeferredIpcSignals();
+
     // --- Device activity ---
 
     void SetActiveStatus() { isActive_.store(true, std::memory_order_release); }
@@ -672,6 +689,18 @@ namespace hip {
     std::unordered_map<uint32_t, ResourceMeta> resourceFamilyMap_;
     std::mutex resourceFamilyMapLock_;
 
+    struct DeferredIpcSignal {
+      amd::device::Signal* signal;  //!< IPC signal to free once its barrier completes
+      amd::Event* event;            //!< record marker's event (non-null => signal was armed)
+    };
+    /// Wait for an armed signal's in-flight barrier, then free the signal and release its event.
+    static void CleanupDeferredIpcSignal(const DeferredIpcSignal& item);
+
+    std::mutex deferredIpcLock_;                        //!< Guards deferredIpcSignals_
+    std::vector<DeferredIpcSignal> deferredIpcSignals_; //!< Signals awaiting deferred cleanup
+    /// Drain inline once the queue reaches this many entries, bounding memory if an app
+    /// destroys many IPC events without an intervening device sync.
+    static constexpr size_t kDeferredIpcDrainThreshold = 256;
   };
 
   /// Per-thread state aggregator for HIP runtime (one instance per thread via thread_local).
@@ -724,6 +753,7 @@ namespace hip {
   extern hipError_t ihipMemGetInfo(size_t* free, size_t* total);
   extern amd::Memory* getMemoryObject(hip::Device* device, const void* ptr, size_t& offset,
                                        size_t size = 0);
+  extern bool IsManagedMemory(cl_mem_flags flags);
   extern std::vector<amd::Memory*> getMemoryObjectBatch(hip::Device* device, void* const* ptrs,
                                                          size_t count,
                                                          std::vector<size_t>& offsets);

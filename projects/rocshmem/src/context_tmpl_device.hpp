@@ -84,7 +84,7 @@ __device__ void Context::to_all(T *dest, const T *source, int nreduce,
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ int Context::reduce(rocshmem_team_t team, T *dest, const T *source,
+__device__ int Context::reduce_wg(rocshmem_team_t team, T *dest, const T *source,
                                int nreduce) {
   if (nreduce == 0) {
     return ROCSHMEM_SUCCESS;
@@ -94,7 +94,35 @@ __device__ int Context::reduce(rocshmem_team_t team, T *dest, const T *source,
     ctxStats.incStat(NUM_REDUCE);
   }
 
-  DISPATCH_RET(reduce<PAIR(T, Op)>(team, dest, source, nreduce));
+  DISPATCH_RET(reduce_wg<PAIR(T, Op)>(team, dest, source, nreduce));
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ int Context::reduce_scatter_wg(rocshmem_team_t team, T *dest,
+                                          const T *source, int nreduce) {
+  if (nreduce == 0) {
+    return ROCSHMEM_SUCCESS;
+  }
+
+  if (is_thread_zero_in_block()) {
+    ctxStats.incStat(NUM_REDUCE_SCATTER);
+  }
+
+  DISPATCH_RET(reduce_scatter_wg<PAIR(T, Op)>(team, dest, source, nreduce));
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ int Context::reduce_wave(rocshmem_team_t team, T *dest,
+                                    const T *source, int nreduce) {
+  if (nreduce == 0) {
+    return ROCSHMEM_SUCCESS;
+  }
+
+  if (is_thread_zero_in_block()) {
+    ctxStats.incStat(NUM_REDUCE);
+  }
+
+  DISPATCH_RET(reduce_wave<PAIR(T, Op)>(team, dest, source, nreduce));
 }
 
 template <typename T>
@@ -144,7 +172,7 @@ __device__ void Context::get_nbi(T *dest, const T *source, size_t nelems,
 }
 
 template <typename T>
-__device__ void Context::alltoall(rocshmem_team_t team, T *dest,
+__device__ void Context::alltoall_wg(rocshmem_team_t team, T *dest,
                                   const T *source, int nelems) {
   if (nelems == 0) {
     return;
@@ -154,7 +182,21 @@ __device__ void Context::alltoall(rocshmem_team_t team, T *dest,
     ctxStats.incStat(NUM_ALLTOALL);
   }
 
-  DISPATCH(alltoall<T>(team, dest, source, nelems));
+  DISPATCH(alltoall_wg<T>(team, dest, source, nelems));
+}
+
+template <typename T>
+__device__ int Context::alltoall_wave(rocshmem_team_t team, T *dest,
+                                  const T *source, int nelems) {
+  if (nelems == 0) {
+    return ROCSHMEM_SUCCESS;
+  }
+
+  if (is_thread_zero_in_block()) {
+    ctxStats.incStat(NUM_ALLTOALL);
+  }
+
+  DISPATCH_RET(alltoall_wave<T>(team, dest, source, nelems));
 }
 
 template <typename T>
@@ -174,7 +216,7 @@ __device__ void Context::alltoallv(rocshmem_team_t team,
 }
 
 template <typename T>
-__device__ void Context::fcollect(rocshmem_team_t team, T *dest,
+__device__ void Context::fcollect_wg(rocshmem_team_t team, T *dest,
                                   const T *source, int nelems) {
   if (nelems == 0) {
     return;
@@ -184,11 +226,25 @@ __device__ void Context::fcollect(rocshmem_team_t team, T *dest,
     ctxStats.incStat(NUM_FCOLLECT);
   }
 
-  DISPATCH(fcollect<T>(team, dest, source, nelems));
+  DISPATCH(fcollect_wg<T>(team, dest, source, nelems));
 }
 
 template <typename T>
-__device__ void Context::broadcast(rocshmem_team_t team, T *dest,
+__device__ int Context::fcollect_wave(rocshmem_team_t team, T *dest,
+                                  const T *source, int nelems) {
+  if (nelems == 0) {
+    return ROCSHMEM_SUCCESS;
+  }
+
+  if (is_thread_zero_in_block()) {
+    ctxStats.incStat(NUM_FCOLLECT);
+  }
+
+  DISPATCH_RET(fcollect_wave<T>(team, dest, source, nelems));
+}
+
+template <typename T>
+__device__ void Context::broadcast_wg(rocshmem_team_t team, T *dest,
                                    const T *source, int nelems, int pe_root) {
   if (nelems == 0) {
     return;
@@ -198,11 +254,11 @@ __device__ void Context::broadcast(rocshmem_team_t team, T *dest,
     ctxStats.incStat(NUM_BROADCAST);
   }
 
-  DISPATCH(broadcast<T>(team, dest, source, nelems, pe_root));
+  DISPATCH(broadcast_wg<T>(team, dest, source, nelems, pe_root));
 }
 
 template <typename T>
-__device__ void Context::broadcast(T *dest, const T *source, int nelems,
+__device__ void Context::broadcast_wg(T *dest, const T *source, int nelems,
                                    int pe_root, int pe_start, int log_pe_stride,
                                    int pe_size,
                                    long *p_sync) {  // NOLINT(runtime/int)
@@ -214,7 +270,7 @@ __device__ void Context::broadcast(T *dest, const T *source, int nelems,
     ctxStats.incStat(NUM_BROADCAST);
   }
 
-  DISPATCH(broadcast<T>(dest, source, nelems, pe_root, pe_start, log_pe_stride,
+  DISPATCH(broadcast_wg<T>(dest, source, nelems, pe_root, pe_start, log_pe_stride,
                         pe_size, p_sync));
 }
 
@@ -842,6 +898,13 @@ __device__ inline int Context::tile_min_reduce_wg(rocshmem_team_t team, void* ds
   DISPATCH_RET(tile_min_reduce_wg(team, dst_data, src_data, dst_strides, src_strides,
                                   start_coord, boundary, ndim, element_size, root, flags));
 }
+
+template <typename T>
+__device__ int Context::broadcast_wave(rocshmem_team_t team, 
+                              T *dest, const T *source, int nelement, int PE_root){
+  DISPATCH_RET(broadcast_wave<T>(team, dest, source, nelement, PE_root));
+}
+
 }  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_CONTEXT_TMPL_DEVICE_HPP_

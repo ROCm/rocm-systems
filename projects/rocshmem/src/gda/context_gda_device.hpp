@@ -28,6 +28,8 @@
 #include "context.hpp"
 #include "team.hpp"
 #include "queue_pair.hpp"
+#include "constmem.hpp"
+#include "gda/gda_symm_table.hpp"
 
 namespace rocshmem {
 
@@ -142,14 +144,34 @@ class GDAContext : public Context {
 
   // Collectives
   template <typename T, ROCSHMEM_OP Op>
-  __device__ int reduce(rocshmem_team_t team, T *dest, const T *source, int nreduce);
+  __device__ int reduce_wg(rocshmem_team_t team, T *dest, const T *source, int nreduce);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int reduce_scatter_wg(rocshmem_team_t team, T *dest, const T *source,
+                                   int nreduce);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int reduce_wave(rocshmem_team_t team, T *dest, const T *source, int nreduce);
 
   template <typename T>
-  __device__ void broadcast(rocshmem_team_t team, T *dest, const T *source,
+  __device__ void broadcast_wg(rocshmem_team_t team, T *dest, const T *source,
                             int nelems, int pe_root);
 
+  __device__ void broadcastmem_wg(rocshmem_team_t team, void *dest, const void* source, 
+                                  int nelement, int PE_root);
+
   template <typename T>
-  __device__ void alltoall(rocshmem_team_t team, T *dest, const T *source,
+  __device__ int broadcast_wave(rocshmem_team_t team,
+                                T *dest, const T* source, int nelement, int PE_root);
+
+  __device__ int broadcastmem_wave(rocshmem_team_t team,
+                                void *dest, const void* source, int nelement, int PE_root);
+
+  template <typename T>
+  __device__ void alltoall_wg(rocshmem_team_t team, T *dest, const T *source,
+                           int nelems);
+
+  __device__ void alltoallmem_wg(rocshmem_team_t team, void *dest, const void *source,
                            int nelems);
 
   template <typename T>
@@ -174,9 +196,25 @@ class GDAContext : public Context {
                                 const size_t source_displs[]);
 
   template <typename T>
-  __device__ void fcollect(rocshmem_team_t team, T *dest, const T *source,
+  __device__ int alltoall_wave(rocshmem_team_t team, T* dest, 
+                                  const T* source, int nelems);
+
+  __device__ int alltoallmem_wave(rocshmem_team_t team, void* dest, 
+                                  const void* source, int nelems);
+
+  template <typename T>
+  __device__ void fcollect_wg(rocshmem_team_t team, T *dest, const T *source,
                            int nelems);
 
+  __device__ void fcollectmem_wg(rocshmem_team_t team, void *dest, const void *source,
+                           int nelems);
+
+  template <typename T>
+  __device__ int fcollect_wave(rocshmem_team_t team, T *dest, const T *source,
+                           int nelems);
+
+  __device__ int fcollectmem_wave(rocshmem_team_t team, void *dest, const void *source,
+                           int nelems);
 
   // Block/wave functions
   __device__ void putmem_wg(void *dest, const void *source, size_t nelems,
@@ -252,30 +290,62 @@ class GDAContext : public Context {
  private:
 
   //internal functions used by collective operations
+  __device__ void internal_broadcastmem_wg(void *dest, const void *source, int nelems,
+      int pe_root, int pe_start, int stride, int pe_size, long *p_sync);  // NOLINT(runtime/int)
+
+  __device__ void internal_put_broadcastmem_wg(void *dst, const void *src, int nelems,
+      int pe_root, int PE_start, int logPE_stride, int PE_size,
+      ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
+
+  __device__ void internal_get_broadcastmem_wg(void *dst, const void *src, int nelems,
+      int pe_root, ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
+
   template <typename T>
-  __device__ void internal_broadcast(T *dest, const T *source, int nelems,
+  __device__ void internal_broadcast_wave(T *dest, const T *source, int nelems,
       int pe_root, int pe_start, int stride, int pe_size, long *p_sync);  // NOLINT(runtime/int)
 
   template <typename T>
-  __device__ void internal_put_broadcast(T *dst, const T *src, int nelems,
+  __device__ void internal_put_broadcast_wave(T *dst, const T *src, int nelems,
       int pe_root, int PE_start, int logPE_stride, int PE_size,
       ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
 
   template <typename T>
-  __device__ void internal_get_broadcast(T *dst, const T *src, int nelems,
+  __device__ void internal_get_broadcast_wave(T *dst, const T *src, int nelems,
       int pe_root, ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
 
-  template <typename T>
-  __device__ void fcollect_linear(rocshmem_team_t team, T *dest,
-      const T *source, int nelems);
+  __device__ void internal_broadcastmem_wave(void *dst, const void *src,
+    int nelems, int pe_root, int pe_start, int stride, int pe_size,
+    long *p_sync);
+
+  __device__ void internal_get_broadcastmem_wave(void *dst, const void *src,
+    int nelems, int pe_root, ActiveWFInfo &wf_info);
+
+  __device__ void internal_put_broadcastmem_wave(void *dst, const void *src,
+    int nelems, int pe_root, int pe_start, int stride, int pe_size,
+    ActiveWFInfo &wf_info);
 
   template <typename T>
-  __device__ void alltoall_linear(rocshmem_team_t team, T *dest,
+  __device__ void fcollect_linear_wg(rocshmem_team_t team, T *dest,
+      const T *source, int nelems);
+      
+  __device__ void fcollectmem_linear_wg(rocshmem_team_t team, void *dest,
+      const void *source, int nelems);
+
+  __device__ void fcollectmem_linear_wave(rocshmem_team_t team, void *dest,
+      const void *source, int nelems);
+
+  template <typename T>
+  __device__ void alltoall_linear_wg(rocshmem_team_t team, T *dest,
     const T *source, int nelems);
 
-  template <typename T>
-  __device__ void alltoall_linear_thread_puts(rocshmem_team_t team, T *dest,
-                                              const T *source, int nelems);
+  __device__ void alltoallmem_linear_thread_puts_wg(rocshmem_team_t team, void *dest,
+                                              const void *source, int nelems);
+
+  __device__ void alltoallmem_linear_wave(rocshmem_team_t team, void *dst,
+                                          const void *src, int nelems);
+
+  __device__ void alltoallmem_linear_thread_puts_wave(rocshmem_team_t team,
+    void *dst, const void *src, int nelems);
 
   __device__ void internal_sync(int pe, int PE_start, int stride, int PE_size,
       int64_t *pSync, ActiveWFInfo &wf_info);
@@ -296,11 +366,20 @@ class GDAContext : public Context {
       int n_pes, int64_t *pSync, ActiveWFInfo &wf_info);
 
   template <typename T, ROCSHMEM_OP Op>
-  __device__ void internal_direct_allreduce(T *dst, const T *src, int nelems,
+  __device__ void internal_direct_allreduce_wg(T *dst, const T *src, int nelems,
       GDATeam *team_obj, ActiveWFInfo &wf_info);
 
   template <typename T, ROCSHMEM_OP Op>
-  __device__ void internal_ring_allreduce(T *dst, const T *src, int nelems,
+  __device__ void internal_direct_allreduce_wave(T *dst, const T *src, int nelems,
+      GDATeam *team_obj, ActiveWFInfo &wf_info);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ void internal_ring_allreduce_wg(T *dst, const T *src, int nelems,
+      GDATeam *team_obj, int n_seg, int seg_size, int chunk_size,
+      ActiveWFInfo &wf_info);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ void internal_ring_allreduce_wave(T *dst, const T *src, int nelems,
       GDATeam *team_obj, int n_seg, int seg_size, int chunk_size,
       ActiveWFInfo &wf_info);
 
@@ -359,6 +438,20 @@ class GDAContext : public Context {
    * @brief Get the Queue Pair index to use for a given PE
    */
   __device__ __forceinline__ uint32_t get_qp_index(int pe, ActiveWFInfo wf_info);
+
+  /**
+   * @brief Resolve the node-local peer pointer for a symmetric address.
+   *
+   * Delegates to the shared IpcImpl::ipcPeerPtr resolver, indexed by this PE's
+   * shm rank and the node-local peer index (as returned by isIpcAvailable).
+   * Handles both heap objects and IPC-registered user buffers; returns nullptr
+   * when the address is not reachable over IPC (e.g. an NIC-only registered
+   * buffer or IPC disabled), so callers fall back to the NIC path.
+   */
+  __device__ __forceinline__ char *ipc_peer_ptr(const void *sym_addr,
+                                                 int local_pe) {
+    return ipcImpl_.ipcPeerPtr(sym_addr, ipcImpl_.shm_rank, local_pe);
+  }
 
   //Temporary scratchpad memory used by internal barrier algorithms.
   int64_t *barrier_sync{nullptr};

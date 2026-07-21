@@ -274,11 +274,18 @@ class SystemCapabilities:
 
     @cached_property
     def num_procs(self) -> int:
-        """Get the number of available processors."""
-        num_procs_real = os.cpu_count()
-        if num_procs_real is None:
-            return 2
-        return num_procs_real
+        """Number of processors available to this process.
+
+        Uses sched_getaffinity so Slurm/cgroup/taskset limits match CMake
+        ProcessorCount and runtime thread-pool sizing.
+        """
+        try:
+            affinity = os.sched_getaffinity(0)
+            count = len(affinity)
+        except (AttributeError, NotImplementedError, OSError):
+            count = os.cpu_count() or 0
+
+        return count if count > 0 else 2
 
     @cached_property
     def ptrace_scope(self) -> int:
@@ -460,6 +467,42 @@ class SystemCapabilities:
             return (int(match.group(1)), int(match.group(2)))
         except (subprocess.SubprocessError, OSError):
             return None
+
+    @cached_property
+    def oshrun_strips_double_dash(self) -> bool:
+        """Return True if this oshrun strips the first '--' from application argv.
+
+        Probes the live binary by running:
+            oshrun -n 1 probe.sh -- SENTINEL
+        and checking whether the script receives 'SENTINEL' (stripped) or '--'
+        (preserved).  Falls back to False when oshrun is absent or the probe
+        fails.
+        """
+        if not self.oshrun_exec:
+            return False
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".sh", delete=False
+        ) as probe_file:
+            probe_file.write("#!/bin/sh\nprintf '%s\\n' \"$1\"\n")
+            probe_path = probe_file.name
+        try:
+            os.chmod(probe_path, 0o700)
+            for extra in ([], ["--allow-run-as-root"]):
+                cmd = (
+                    [str(self.oshrun_exec)]
+                    + extra
+                    + ["-n", "1", probe_path, "--", "SENTINEL"]
+                )
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                if result.returncode == 0:
+                    return result.stdout.strip() == "SENTINEL"
+            return False
+        except (subprocess.SubprocessError, OSError):
+            return False
+        finally:
+            os.unlink(probe_path)
 
     @cached_property
     def rocprofiler_sdk_version(self) -> Optional[tuple[int, int, int]]:

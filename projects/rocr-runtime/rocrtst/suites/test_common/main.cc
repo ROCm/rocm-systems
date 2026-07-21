@@ -551,6 +551,7 @@ TEST(rocrtstFunc, VirtMemory_Access_Test) {
     vmt.CPUAccessToGPUMemoryTest();
     vmt.GPUAccessToCPUMemoryTest();
     vmt.GPUAccessToGPUMemoryTest();
+    vmt.ImportedShareableHandleSetAccessAfterFdClose();
     RunCustomTestEpilog(&vmt);
 }
 
@@ -570,10 +571,39 @@ TEST(rocrtstFunc, VirtMemory_Aliasing_Test) {
     RunCustomTestEpilog(&vmt);
 }
 
-TEST(rocrtstFunc, VirtMemory_Interprocess_Test) {
-    VirtMemoryTestInterProcess vmt;
+TEST(rocrtstFunc, VirtMemory_NonContiguousChunks_Test) {
+  VirtMemoryTestBasic vmt;
+
+  if (!RunCustomTestProlog(&vmt)) return;
+  vmt.NonContiguousChunks();
+  RunCustomTestEpilog(&vmt);
+}
+
+TEST(rocrtstFunc, VirtMemory_GPUtoHostAccess_Test) {
+  VirtMemoryTestBasic vmt;
+
+  if (!RunCustomTestProlog(&vmt)) return;
+  vmt.TestGpuAccessToHostMemoryAllocation();
+  RunCustomTestEpilog(&vmt);
+}
+
+TEST(rocrtstFunc, VirtMemory_Interprocess_DevicePool_Test) {
+    VirtMemoryTestInterProcess vmt(PoolType::kDevicePool);
     if (!RunCustomTestProlog(&vmt)) return;
     RunCustomTestEpilog(&vmt);
+}
+
+TEST(rocrtstFunc, VirtMemory_Interprocess_HostPool_Test) {
+    VirtMemoryTestInterProcess vmt(PoolType::kCpuPool);
+    if (!RunCustomTestProlog(&vmt)) return;
+    RunCustomTestEpilog(&vmt);
+}
+
+TEST(rocrtstFunc, VirtMemory_FabricExport_Readiness_Test) {
+  VirtMemoryTestBasic vmt;
+  if (!RunCustomTestProlog(&vmt)) return;
+  vmt.TestFabricExportAcceleratorReadiness();
+  RunCustomTestEpilog(&vmt);
 }
 
 TEST(rocrtstFunc, Filter_Devices_Test) {
@@ -894,5 +924,13 @@ int main(int argc, char** argv) {
     }
     DumpMonitorInfo();
   }
-  return RUN_ALL_TESTS();
+
+  int result = RUN_ALL_TESTS();
+
+  // Print skipped test summary (grouped by reason)
+  rocrtst::SkippedTestTracker::getInstance().printSummary(
+      rocrtst::PlatformDetector::platformName(
+          rocrtst::TestFilterManager::getInstance().getPlatform()));
+
+  return result;
 }

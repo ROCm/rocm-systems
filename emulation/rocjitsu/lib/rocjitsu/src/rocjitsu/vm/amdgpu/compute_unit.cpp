@@ -34,7 +34,7 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
     : simdojo::CompositeComponent(std::move(name)), config_(config), memory_(memory),
       wf_size_(wf_size), decoder_(Decoder::create(config.arch)), l2_(l2), l1_scalar_(l2),
       l1_vector_(l2), lds_(config.lds_size_kb), scalar_mem_pipeline_(&l1_scalar_),
-      global_mem_pipeline_(&l1_vector_, l2), local_mem_pipeline_(&lds_) {
+      global_mem_pipeline_(&l1_vector_, l2), local_mem_pipeline_() {
   if (!decoder_)
     throw std::runtime_error("Unsupported architecture for ComputeUnit decoder");
 
@@ -50,7 +50,7 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
   // Completer port: CP sends dispatch activation messages here.
   cpl_ = add_port(std::make_unique<simdojo::Port>("cpl", 0, this, simdojo::PortDirection::IN,
                                                   simdojo::PortProtocol::DISPATCH));
-  cpl_->set_handler([this](simdojo::Tick, simdojo::Message *) { activate(); });
+  cpl_->set_handler([this](simdojo::Tick, simdojo::Message *) { schedule_work(); });
 
   // Requester port: structural connection to shared L2 cache.
   req_ = add_port(std::make_unique<simdojo::Port>("req", 1, this, simdojo::PortDirection::OUT,
@@ -74,6 +74,7 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
     break
 
   switch (config.arch) {
+    // \NPI new ISA family: add ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_<NAME>, <isa>::Isa);
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA1, cdna1::Isa);
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA2, cdna2::Isa);
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA3, cdna3::Isa);
@@ -91,16 +92,11 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
   throw std::runtime_error("Unsupported architecture for ComputeUnit");
 }
 
-Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sgprs,
-                                        uint32_t vgprs) {
+Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
+                                        uint32_t num_vgprs) {
   assert(wfs_.size() == config_.num_wf_slots && "wavefront slots not properly initialized");
-  // Free register allocations from previously halted wavefronts before claiming
-  // a new slot. This is needed so SGPR/VGPR blocks can be reused. However, we
-  // must NOT reset the LDS allocator here — that would zero next_lds_alloc_
-  // between WF dispatches of the same WG, causing concurrent WGs to share
-  // the same LDS base. The LDS reset is handled separately by the CP.
-  retire_halted_wfs_no_lds_reset();
-  // Find an idle slot.
+  // Halted wavefronts have already freed their SGPR/VGPR blocks at s_endpgm, so a
+  // halted slot is immediately available. Find an idle slot.
   size_t slot = config_.num_wf_slots;
   for (size_t i = 0; i < wfs_.size(); ++i) {
     if (wfs_[i]->is_halted()) {
@@ -108,14 +104,19 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
       break;
     }
   }
+
+  // No free slot: fail the dispatch (like the register-allocation failures below)
+  // rather than indexing wfs_ out of bounds. The CP normally gates placement on
+  // can_accept_workgroup(), but returning nullptr is part of this API's contract
+  // and must hold even when a caller dispatches directly to a full CU.
   if (slot >= config_.num_wf_slots)
     return nullptr;
 
-  int32_t sgpr_base = sgpr_file_.allocate(sgprs);
+  int32_t sgpr_base = sgpr_file_.allocate(num_sgprs);
   if (sgpr_base < 0)
     return nullptr;
 
-  int32_t vgpr_base = allocate_vgprs(vgprs);
+  int32_t vgpr_base = allocate_vgprs(num_vgprs);
   if (vgpr_base < 0) {
     sgpr_file_.free(static_cast<uint32_t>(sgpr_base));
     return nullptr;
@@ -124,7 +125,7 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
   // Zero the allocated register blocks so reused slots don't inherit stale
   // values from previous kernel runs.
   std::fill(&sgpr_file_[sgpr_base], &sgpr_file_[sgpr_base] + config_.sgprs_per_wf, 0u);
-  std::memset(vgpr_data(static_cast<uint32_t>(vgpr_base)), 0,
+  std::memset(raw_vgpr_data(static_cast<uint32_t>(vgpr_base)), 0,
               vgpr_allocation_block_size() * wf_size_ * sizeof(uint32_t));
 
   // Invalidate the L1 scalar cache so this wavefront reads fresh kernel
@@ -135,10 +136,10 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
   auto *wf = wfs_[slot].get();
   wf->wg_id_ = wg_id;
   wf->pc = pc;
-  wf->sgpr_alloc_ = {static_cast<uint32_t>(sgpr_base), sgprs};
-  wf->vgpr_alloc_ = {static_cast<uint32_t>(vgpr_base), vgprs};
-  wf->num_sgprs_ = sgprs;
-  wf->num_vgprs_ = vgprs;
+  wf->sgpr_alloc_ = {static_cast<uint32_t>(sgpr_base), num_sgprs};
+  wf->vgpr_alloc_ = {static_cast<uint32_t>(vgpr_base), num_vgprs};
+  wf->num_sgprs_ = num_sgprs;
+  wf->num_vgprs_ = num_vgprs;
   wf->exec_ = wf_size_ == 64 ? ~0ULL : (1ULL << wf_size_) - 1;
   wf->vcc_ = 0;
   wf->m0_ = 0;
@@ -148,55 +149,36 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
   wf->set_ready_cycle(cycle_counter_);
   wf->trace_inst_count_ = 0;
 
-  std::fill(sgpr_to_wave_.begin() + sgpr_base, sgpr_to_wave_.begin() + sgpr_base + sgprs, wf);
+  std::fill(sgpr_to_wave_.begin() + sgpr_base, sgpr_to_wave_.begin() + sgpr_base + num_sgprs, wf);
   fill_vgpr_to_wave(static_cast<uint32_t>(vgpr_base), vgpr_allocation_block_size(), wf);
 
   util::Logger::cp("DISPATCH_WF cu=", this->full_path(), " wf=", wf->wf_id(), " slot=", slot,
                    " pc=0x", std::hex, pc, std::dec, " wg=", wg_id, " pid=", wf->process_id());
+
+  schedule_work();
   return wf;
 }
 
 size_t ComputeUnitCore::num_wfs() const {
   size_t count = 0;
   for (const auto &w : wfs_)
-    if (w->sgpr_alloc().count > 0)
+    if (!w->is_halted())
       ++count;
   return count;
 }
 
-void ComputeUnitCore::reset_all_wf() {
-  for (auto &w : wfs_) {
-    if (w->sgpr_alloc().count > 0) {
-      sgpr_file_.free(w->sgpr_alloc().base);
-      free_vgprs(w->vgpr_alloc().base);
-    }
-    w->reset();
+void ComputeUnitCore::free_wavefront_resources(Wavefront &wf) {
+  if (wf.sgpr_alloc().count > 0) {
+    sgpr_file_.free(wf.sgpr_alloc().base);
+    free_vgprs(wf.vgpr_alloc().base);
   }
+  wf.trace_inst_count_ = 0;
+  wf.reset();
 }
 
-void ComputeUnitCore::retire_halted_wfs_no_lds_reset() {
-  for (auto &w : wfs_) {
-    if (w->is_halted() && w->sgpr_alloc().count > 0) {
-      sgpr_file_.free(w->sgpr_alloc().base);
-      free_vgprs(w->vgpr_alloc().base);
-      w->trace_inst_count_ = 0;
-      w->reset();
-    }
-  }
-}
-
-void ComputeUnitCore::retire_halted_wfs() {
-  for (auto &w : wfs_) {
-    if (w->is_halted() && w->sgpr_alloc().count > 0) {
-      sgpr_file_.free(w->sgpr_alloc().base);
-      free_vgprs(w->vgpr_alloc().base);
-      w->trace_inst_count_ = 0;
-      w->reset();
-    }
-  }
-  if (!has_active_wfs()) {
+void ComputeUnitCore::maybe_reset_lds_alloc() {
+  if (!has_active_wfs() && !lds_allocation_pinned())
     reset_lds_alloc();
-  }
 }
 
 void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id) {
@@ -208,6 +190,24 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id) {
     if (cp_)
       cp_->notify_wg_complete(dispatch_id, wg_id);
   }
+  // The whole workgroup's per-WG LDS region can be reclaimed once the CU has fully
+  // drained and no cluster peer can still multicast into it.
+  maybe_reset_lds_alloc();
+}
+
+void ComputeUnitCore::abort_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
+  // Roll back a workgroup that was committed via begin_workgroup() but whose peers
+  // in the same clustered dispatch failed to fully dispatch. Unlike release_wf(),
+  // this fires no completion hook and no CP notify — the WG never executed. Free any
+  // resident (not-yet-halted) waves belonging to this WG, drop the refcount entry,
+  // and reclaim LDS if the CU is now idle and unpinned. The caller unpins the cluster
+  // LDS separately (the pin is CP-side bookkeeping).
+  for (const auto &w : wfs_) {
+    if (!w->is_halted() && w->dispatch_id() == dispatch_id && w->wg_id() == wg_id)
+      free_wavefront_resources(*w);
+  }
+  active_wgs_.erase(wg_key(dispatch_id, wg_id));
+  maybe_reset_lds_alloc();
 }
 
 bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes) const {
@@ -407,6 +407,24 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   }
 
   execute_instruction(inst, *active);
+
+  // A terminating instruction (s_endpgm with no pending waits) halts the wave
+  // inside execute_instruction, which frees and resets its slot. Its registers,
+  // pc, and allocations are now zeroed, so the after-execute hook, result logging,
+  // and pc-advance below must not run on the dead slot. The dedicated
+  // onAmdgpuWavefrontHalted hook already fired (with live state) from halt().
+  // s_endpgm is never a memory op, so just reclaim the decoded instruction.
+  //
+  // Note the intentional asymmetry: an s_endpgm that defers to ENDING (pending
+  // memory waits) is NOT halted here, so it DOES fire onAmdgpuAfterExecuteInstruction
+  // below; the immediate-halt case does not. onAmdgpuWavefrontHalted is the
+  // authoritative terminal hook and fires in both cases — consumers should observe
+  // termination there, not via the after-execute hook.
+  if (active->is_halted()) {
+    delete inst;
+    return;
+  }
+
   plugin_group_->onAmdgpuAfterExecuteInstruction(active->pc, *inst, *active);
 
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
@@ -440,15 +458,10 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
 bool ComputeUnitCore::step() {
   update_wf_states();
 
-  bool issued = false;
   for (auto &wf : wfs_) {
-    if (wf->state() == WfState::RUNNING) {
+    if (wf->state() == WfState::RUNNING)
       issue_instruction(wf.get());
-      issued = true;
-    }
   }
-  if (!issued)
-    retire_halted_wfs();
 
   ++step_count_;
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_CP)) {
