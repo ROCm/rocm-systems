@@ -71,6 +71,10 @@ enum backend_tag : int
     buffered_domains_generic_lookup = 95,
     buffered_domains_invalid        = 96,
     buffered_domains_page_migration = 97,
+    callback_domains_aliases        = 98,
+    callback_domains_generic_lookup = 99,
+    callback_domains_implicit_flags = 100,
+    callback_domains_invalid        = 101,
 };
 
 template <int Tag>
@@ -410,6 +414,137 @@ TEST(sdk_core_config_settings,
     ASSERT_NE(itr, config->end());
     EXPECT_EQ(itr->second->get<std::string>().second,
               "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory");
+}
+
+// ─── get_callback_domains ─────────────────────────────────────────────────────
+
+TEST_F(sdk_core_domains_test, get_callback_domains_aliases_expand_to_exact_domains)
+{
+    using backend_t = tagged_backend<callback_domains_aliases>;
+    using sut       = sdk_core<backend_t, mock_sdk_externals>;
+
+    auto config = std::make_shared<fake_settings>();
+    sut::config_settings(config);
+
+    EXPECT_CALL(*g_mock, get_version)
+        .Times(1)
+        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
+            *major = 1;
+            *minor = 2;
+            *patch = 2;
+        });
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{ "hsa_api,hip_api,marker_api" }));
+    EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(false));
+    EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(false));
+    EXPECT_CALL(*g_mock_externals, get_settings)
+        .Times(1)
+        .WillOnce(gtest::Return(config.get()));
+
+    EXPECT_THAT(
+        sut::get_callback_domains(),
+        gtest::UnorderedElementsAre(backend_t::CALLBACK_TRACING_HSA_CORE_API,
+                                    backend_t::CALLBACK_TRACING_HSA_AMD_EXT_API,
+                                    backend_t::CALLBACK_TRACING_HSA_IMAGE_EXT_API,
+                                    backend_t::CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
+                                    backend_t::CALLBACK_TRACING_HIP_RUNTIME_API,
+                                    backend_t::CALLBACK_TRACING_HIP_COMPILER_API,
+                                    backend_t::CALLBACK_TRACING_MARKER_CORE_API));
+}
+
+TEST_F(sdk_core_domains_test,
+       get_callback_domains_supported_callback_info_name_returns_domain)
+{
+    using backend_t = tagged_backend<callback_domains_generic_lookup>;
+    using sut       = sdk_core<backend_t, mock_sdk_externals>;
+
+    auto config = std::make_shared<fake_settings>();
+    sut::config_settings(config);
+
+    EXPECT_CALL(*g_mock, get_version)
+        .Times(1)
+        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
+            *major = 1;
+            *minor = 2;
+            *patch = 2;
+        });
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{ "rccl_api" }));
+    EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(false));
+    EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(false));
+    EXPECT_CALL(*g_mock_externals, get_settings)
+        .Times(1)
+        .WillOnce(gtest::Return(config.get()));
+
+    EXPECT_THAT(sut::get_callback_domains(),
+                gtest::UnorderedElementsAre(backend_t::CALLBACK_TRACING_RCCL_API));
+}
+
+TEST_F(sdk_core_domains_test,
+       get_callback_domains_rccl_and_ompt_flags_return_both_domains)
+{
+    using backend_t = tagged_backend<callback_domains_implicit_flags>;
+    using sut       = sdk_core<backend_t, mock_sdk_externals>;
+
+    auto config = std::make_shared<fake_settings>();
+    sut::config_settings(config);
+
+    EXPECT_CALL(*g_mock, get_version)
+        .Times(1)
+        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
+            *major = 1;
+            *minor = 2;
+            *patch = 2;
+        });
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{}));
+    EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(true));
+    EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(true));
+    EXPECT_CALL(*g_mock_externals, get_settings)
+        .Times(1)
+        .WillOnce(gtest::Return(config.get()));
+
+    EXPECT_THAT(sut::get_callback_domains(),
+                gtest::UnorderedElementsAre(backend_t::CALLBACK_TRACING_RCCL_API,
+                                            backend_t::CALLBACK_TRACING_OMPT));
+}
+
+TEST_F(sdk_core_domains_test, get_callback_domains_invalid_domain)
+{
+    using backend_t = tagged_backend<callback_domains_invalid>;
+    using sut       = sdk_core<backend_t, mock_sdk_externals>;
+
+    auto config = std::make_shared<fake_settings>();
+    sut::config_settings(config);
+
+    EXPECT_CALL(*g_mock, get_version)
+        .Times(1)
+        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
+            *major = 1;
+            *minor = 2;
+            *patch = 2;
+        });
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{ "invalid_domain" }));
+    EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(false));
+    EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(false));
+    EXPECT_CALL(*g_mock_externals, get_settings)
+        .Times(1)
+        .WillOnce(gtest::Return(config.get()));
+
+    try
+    {
+        static_cast<void>(sut::get_callback_domains());
+        FAIL() << "Expected std::runtime_error";
+    } catch(const std::runtime_error& error)
+    {
+        EXPECT_STREQ(error.what(),
+                     "unsupported ROCPROFSYS_ROCM_DOMAINS value: invalid_domain");
+    }
 }
 
 // ─── get_buffered_domains ─────────────────────────────────────────────────────
