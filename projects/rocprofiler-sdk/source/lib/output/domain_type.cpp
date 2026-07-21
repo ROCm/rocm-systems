@@ -77,6 +77,7 @@ DEFINE_BUFFER_TYPE_NAME(SPM_COUNTER_VALUES,
                         "SPM_counter_values",
                         "SPM_counter_values")
 DEFINE_BUFFER_TYPE_NAME(OMPT, "OMPT", "ompt_trace", "ompt_stats")
+DEFINE_BUFFER_TYPE_NAME(HIP_GRAPH, "HIP_GRAPH", "hip_graph_trace", "hip_graph_stats")
 
 #undef DEFINE_BUFFER_TYPE_NAME
 

@@ -469,6 +469,11 @@
           "test_filter": "PackRoundtripTest.LoadStorePack_*:PackRoundtripTest.L2_StorePackBoundary:PackRoundtripTest.Store16Load16Global_Direct"
         },
         {
+          "name": "DeviceApi",
+          "description": "Verify RCCL Device API: symmetric window registration and ncclDevCommCreate gating",
+          "test_filter": "DeviceApi.*"
+        },
+        {
           "name": "Fixtures_All",
           "description": "All release fixture tests"
         }
@@ -557,6 +562,11 @@
           "name": "DdaIpcEligibilityTest",
           "description": "Dda IPC eligibility tests",
           "test_filter": "DdaIpcEligibilityTest.*"
+        },
+        {
+          "name": "DdaAlltoAllThresholdTest",
+          "description": "DDA AlltoAll 4 MiB threshold and host staging-byte unit tests for gfx942/gfx950",
+          "test_filter": "DdaAlltoAllThresholdTest.*:DdaAlltoAllThreshold.*"
         },
         {
           "name": "DdaFabricEligibilityTest",
