@@ -3602,7 +3602,7 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
     generate_output(pc_sampling_stochastic_output, outdata, contributions, cleanups, skip_output);
     generate_output(spm_counters_output, outdata, contributions, cleanups, skip_output);
     generate_output(hip_graph_output, outdata, contributions, cleanups, skip_output);
-    generate_output(hipfile_output, outdata, contributions, cleanups);
+    generate_output(hipfile_output, outdata, contributions, cleanups, skip_output);
 
     if(!skip_output && tool::get_config().advanced_thread_trace &&
        !tool_metadata->att_filenames.empty())
