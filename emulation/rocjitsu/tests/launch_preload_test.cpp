@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <gtest/gtest.h>
+#include <optional>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -15,6 +16,26 @@
 #include <unistd.h>
 
 namespace {
+
+class ScopedUnsetLdPreload {
+public:
+  ScopedUnsetLdPreload() {
+    if (const char *value = std::getenv("LD_PRELOAD"))
+      original_value_ = value;
+    unset_result_ = unsetenv("LD_PRELOAD");
+  }
+
+  ~ScopedUnsetLdPreload() {
+    if (original_value_)
+      setenv("LD_PRELOAD", original_value_->c_str(), 1);
+  }
+
+  int unset_result() const { return unset_result_; }
+
+private:
+  std::optional<std::string> original_value_;
+  int unset_result_ = -1;
+};
 
 std::vector<std::string> copy_environment(char *const *envp) {
   std::vector<std::string> entries;
@@ -81,6 +102,37 @@ TEST(LaunchPreloadTest, NoAsanPrependsInterposerBeforeExistingPreload) {
   GTEST_SKIP() << "shared sanitizer builds exercise sanitizer ordering cases";
 #else
   expect_no_sanitizer_preload_order();
+#endif
+}
+
+TEST(LaunchPreloadTest, UnsetLdPreloadUsesInterposerOnly) {
+#if defined(RJ_EXPECT_SHARED_ASAN_RUNTIME) || defined(RJ_EXPECT_SHARED_TSAN_RUNTIME)
+  GTEST_SKIP() << "shared sanitizer builds include the sanitizer runtime";
+#else
+  ScopedUnsetLdPreload scoped_unset;
+  ASSERT_EQ(0, scoped_unset.unset_result());
+
+  const std::string interposer = "/tmp/librocjitsu.so";
+  rocjitsu::cli::LaunchEnvironment environment;
+  ASSERT_EQ(nullptr, environment.get("LD_PRELOAD"));
+
+  rocjitsu::cli::prepend_launch_preloads(environment, interposer);
+
+  expect_ld_preload_eq(environment, interposer);
+#endif
+}
+
+TEST(LaunchPreloadTest, EmptyLdPreloadUsesInterposerOnly) {
+#if defined(RJ_EXPECT_SHARED_ASAN_RUNTIME) || defined(RJ_EXPECT_SHARED_TSAN_RUNTIME)
+  GTEST_SKIP() << "shared sanitizer builds include the sanitizer runtime";
+#else
+  const std::string interposer = "/tmp/librocjitsu.so";
+  rocjitsu::cli::LaunchEnvironment environment;
+  environment.set("LD_PRELOAD", "");
+
+  rocjitsu::cli::prepend_launch_preloads(environment, interposer);
+
+  expect_ld_preload_eq(environment, interposer);
 #endif
 }
 

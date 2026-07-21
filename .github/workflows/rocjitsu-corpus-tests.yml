@@ -73,6 +73,16 @@ jobs:
             enable_tsan: 0
             enable_expensive_checks: 1
             sanitizer_runtime: SHARED
+          - name: asan-static-launch-preload
+            allow_failure: false
+            build_target: launch_preload_test
+            test_regex: '^LaunchPreloadTest\.'
+            build_type: RelWithDebInfo
+            enable_asan: 1
+            enable_ubsan: 0
+            enable_tsan: 0
+            enable_expensive_checks: 0
+            sanitizer_runtime: STATIC
           - name: tsan
             allow_failure: true
             test_regex: ''
@@ -177,6 +187,7 @@ jobs:
             "CvtNarrow\.AllTests"
             "RaceTest\..*"
           )
+          # https://github.com/ROCm/rocm-systems/issues/8922
           TSAN_EXCLUDED_TESTS=(
             "${ASAN_UBSAN_EXCLUDED_TESTS[@]}"
             "MatmulStressTest\.TiledAllCU"
@@ -223,7 +234,11 @@ jobs:
 
           # Set a conservative number of workers to avoid OOM and excessive system load.
           WORKERS="$(( ($(nproc) + 1) / 2 ))"
-          cmake --build "${ROCJITSU_BUILD_DIR}" -j "${WORKERS}"
+          BUILD_TARGET=()
+          if [[ -n "${{ matrix.build_target }}" ]]; then
+            BUILD_TARGET=(--target "${{ matrix.build_target }}")
+          fi
+          cmake --build "${ROCJITSU_BUILD_DIR}" "${BUILD_TARGET[@]}" -j "${WORKERS}"
 
           CTEST_SELECTION=()
           if [[ -n "${{ matrix.test_regex }}" ]]; then
