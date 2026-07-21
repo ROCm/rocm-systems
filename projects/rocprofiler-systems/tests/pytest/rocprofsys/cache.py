@@ -20,6 +20,7 @@ import getpass
 import hashlib
 import importlib
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -29,14 +30,30 @@ _DISABLE_ENV = "ROCPROFSYS_DISABLE_TEST_CACHE"
 # Set only by disable_for_process() to turn off cache for remainder of this process
 _proc_cache_disabled = False
 
-# Debug aid, prints HIT/MISS lines for cache lookup attempts.
+# Debug aid, logs HIT/MISS lines for cache lookup attempts.
 _DEBUG_ENV = "ROCPROFSYS_TEST_CACHE_DEBUG"
+
+_logger = logging.getLogger("rocprofsys.syscache")
+
+
+def _configure_debug_logger() -> None:
+    """Enable ``[syscache] ...`` debug output when ``_DEBUG_ENV`` is truthy."""
+    if os.environ.get(_DEBUG_ENV, "").strip() not in ("1", "ON", "on", "true", "True"):
+        return
+    _logger.setLevel(logging.DEBUG)
+    if not _logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("[syscache] %(message)s"))
+        _logger.addHandler(handler)
+        _logger.propagate = False
+
+
+_configure_debug_logger()
 
 
 def _debug_log(event: str, cache_key: str) -> None:
-    """Print a ``[syscache] HIT/MISS: <key>`` line when debugging is enabled."""
-    if os.environ.get(_DEBUG_ENV, "").strip() in ("1", "ON", "on", "true", "True"):
-        print(f"[syscache] {event}: {cache_key}")
+    """Log a ``[syscache] HIT/MISS: <key>`` line when debugging is enabled."""
+    _logger.debug("%s: %s", event, cache_key)
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +84,7 @@ class DeserializationError(CacheError):
 # it.
 # ---------------------------------------------------------------------------
 def encode(obj: Any) -> Any:
+    # No lookup table: we dispatch by subclass, not exact type.
     if obj is None or isinstance(obj, (bool, int, float, str)):
         return obj
     if isinstance(obj, Path):
@@ -115,24 +133,29 @@ def _resolve_dataclass(module_name: str, qualname: str) -> type:
     return resolved
 
 
+def _decode_dataclass(obj: dict) -> Any:
+    cls = _resolve_dataclass(obj.get("module"), obj.get("qualname"))
+    return cls(**{name: decode(v) for name, v in obj["value"].items()})
+
+
+_DECODERS: dict[str, Callable[[dict], Any]] = {
+    "path": lambda obj: Path(obj["value"]),
+    "tuple": lambda obj: tuple(decode(x) for x in obj["value"]),
+    "set": lambda obj: set(decode(x) for x in obj["value"]),
+    "dict": lambda obj: {decode(k): decode(v) for k, v in obj["value"]},
+    "dataclass": _decode_dataclass,
+}
+
+
 def decode(obj: Any) -> Any:
     if isinstance(obj, list):
         return [decode(x) for x in obj]
     if isinstance(obj, dict):
         kind = obj.get("__type__")
-        value = obj.get("value")
-        if kind == "path":
-            return Path(value)
-        if kind == "tuple":
-            return tuple(decode(x) for x in value)
-        if kind == "set":
-            return set(decode(x) for x in value)
-        if kind == "dict":
-            return {decode(k): decode(v) for k, v in value}
-        if kind == "dataclass":
-            cls = _resolve_dataclass(obj.get("module"), obj.get("qualname"))
-            return cls(**{name: decode(v) for name, v in value.items()})
-        raise DeserializationError(f"unknown cache tag: {kind!r}")
+        handler = _DECODERS.get(kind)
+        if handler is None:
+            raise DeserializationError(f"unknown cache tag: {kind!r}")
+        return handler(obj)
     return obj
 
 
@@ -144,7 +167,7 @@ class PersistentCache:
 
     def __init__(self, path: Path):
         self.path = path
-        # Lock a separate sidecar file, not the cache file itself: _atomic_write
+        # Lock a separate sidecar file, not the cache file itself: _flush
         # swaps the cache file's inode via os.replace and flock locks the inode,
         # so locking the cache file would not serialize concurrent writers
         # (lost writes in CTest parallel mode).
@@ -154,16 +177,7 @@ class PersistentCache:
 
     def _load(self) -> None:
         """Load entries from disk (missing/corrupt files load as empty)."""
-        try:
-            with open(self.path, "r") as f:
-                data = json.load(f)
-        except (OSError, ValueError):
-            return
-        if not isinstance(data, dict):
-            return
-        raw_entries = data.get("entries", {})
-        if isinstance(raw_entries, dict):
-            self._entries = raw_entries
+        self._entries = self._read_disk_state()["entries"]
 
     def get(self, key: str) -> tuple[bool, Any]:
         """Return ``(found, value)``. ``found`` is False on miss or any error.
@@ -186,7 +200,7 @@ class PersistentCache:
         self._entries = {}
         try:
             with self._exclusive_lock():
-                self._atomic_write({"entries": {}})
+                self._flush({"entries": {}})
         except OSError:
             pass  # fail-open: in-memory clear still forces recompute this process
 
@@ -199,7 +213,7 @@ class PersistentCache:
 
         self._entries[key] = encoded
         try:
-            self._write_locked(key, encoded)
+            self._persist(key, encoded)
         except OSError:
             pass
 
@@ -219,29 +233,39 @@ class PersistentCache:
             fcntl.flock(lock_fd, fcntl.LOCK_UN)
             os.close(lock_fd)
 
-    def _atomic_write(self, data: dict[str, Any]) -> None:
-        """Replace the data file with ``data`` atomically (caller holds the lock)."""
+    def _read_disk_state(self) -> dict[str, Any]:
+        """Return the on-disk ``{"entries": {...}}`` state.
+
+        Missing/corrupt files (or any unexpected shape) read as empty. Does not
+        lock; callers needing consistency hold ``_exclusive_lock``.
+        """
+        try:
+            with open(self.path, "r") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            return {"entries": {}}  # missing/corrupt -> start fresh
+        if isinstance(data, dict) and isinstance(data.get("entries"), dict):
+            return {"entries": data["entries"]}
+        return {"entries": {}}
+
+    def _flush(self, data: dict[str, Any]) -> None:
+        """Replace the cache file with ``data`` atomically (caller holds the lock)."""
         tmp = f"{self.path}.{os.getpid()}.tmp"
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w") as f:
             json.dump(data, f)
         os.replace(tmp, self.path)
 
-    def _write_locked(self, key: str, encoded: Any) -> None:
-        with self._exclusive_lock():
-            data: dict[str, Any] = {"entries": {}}
-            try:
-                with open(self.path, "r") as f:
-                    existing = json.load(f)
-                if isinstance(existing, dict) and isinstance(
-                    existing.get("entries"), dict
-                ):
-                    data["entries"] = existing["entries"]
-            except (OSError, ValueError):
-                pass  # missing/corrupt -> start fresh
+    def _persist(self, key: str, encoded: Any) -> None:
+        """Merge ``key`` into the on-disk cache under an exclusive lock.
 
+        Re-reads the current disk state before writing so a concurrent writer's
+        entries are preserved (CTest parallel mode).
+        """
+        with self._exclusive_lock():
+            data = self._read_disk_state()
             data["entries"][key] = encoded
-            self._atomic_write(data)
+            self._flush(data)
 
 
 # ---------------------------------------------------------------------------
