@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -48,21 +49,27 @@ inline std::unique_ptr<gmock_sdk_core_backend> g_mock;
 // its own static caches (get_version cache, operation option maps, tracing info tables).
 enum backend_tag : int
 {
-    version_fields                = 1,
-    version_formatted             = 2,
-    version_caching               = 3,
-    ops_throw                     = 60,
-    config_domains                = 80,
-    config_events                 = 81,
-    config_operations             = 82,
-    config_duplicate              = 83,
-    callback_backtrace_operations = 84,
-    buffered_backtrace_operations = 85,
-    callback_operations           = 86,
-    buffered_operations           = 87,
-    buffered_domains_memory_copy  = 88,
-    buffered_domains_aliases      = 89,
-    rocm_events                   = 90,
+    version_fields                  = 1,
+    version_formatted               = 2,
+    version_caching                 = 3,
+    ops_throw                       = 60,
+    config_domains                  = 80,
+    config_events                   = 81,
+    config_operations               = 82,
+    config_duplicate                = 83,
+    callback_backtrace_operations   = 84,
+    buffered_backtrace_operations   = 85,
+    callback_operations             = 86,
+    buffered_operations             = 87,
+    buffered_domains_memory_copy    = 88,
+    buffered_domains_aliases        = 89,
+    rocm_events                     = 90,
+    buffered_domains_kfd_events     = 91,
+    buffered_domains_kfd_individual = 92,
+    buffered_domains_allocation     = 93,
+    buffered_domains_unified_memory = 94,
+    buffered_domains_generic_lookup = 95,
+    buffered_domains_invalid        = 96,
 };
 
 template <int Tag>
@@ -454,6 +461,203 @@ TEST_F(sdk_core_domains_test, get_buffered_domains_aliases_expand_to_exact_domai
                                     backend_t::BUFFER_TRACING_HIP_COMPILER_API,
                                     backend_t::BUFFER_TRACING_HIP_RUNTIME_API,
                                     backend_t::BUFFER_TRACING_MARKER_CORE_API));
+}
+
+TEST_F(sdk_core_domains_test, get_buffered_domains_kfd_events_returns_all_kfd_domains)
+{
+    using backend_t = tagged_backend<buffered_domains_kfd_events>;
+    using sut       = sdk_core<backend_t, mock_sdk_externals>;
+
+    auto config = std::make_shared<fake_settings>();
+    sut::config_settings(config);
+
+    EXPECT_CALL(*g_mock, get_version)
+        .Times(1)
+        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
+            *major = 1;
+            *minor = 2;
+            *patch = 2;
+        });
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{ "kfd_events" }));
+    EXPECT_CALL(*g_mock_externals, get_settings)
+        .Times(1)
+        .WillOnce(gtest::Return(config.get()));
+    EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
+        .Times(1)
+        .WillOnce(gtest::Return(false));
+
+    EXPECT_THAT(
+        sut::get_buffered_domains(),
+        gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_KFD_PAGE_FAULT,
+                                    backend_t::BUFFER_TRACING_KFD_PAGE_MIGRATE,
+                                    backend_t::BUFFER_TRACING_KFD_QUEUE,
+                                    backend_t::BUFFER_TRACING_KFD_EVENT_QUEUE,
+                                    backend_t::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
+                                    backend_t::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS));
+}
+
+TEST_F(sdk_core_domains_test,
+       get_buffered_domains_individual_kfd_names_return_all_kfd_domains)
+{
+    using backend_t = tagged_backend<buffered_domains_kfd_individual>;
+    using sut       = sdk_core<backend_t, mock_sdk_externals>;
+
+    auto config = std::make_shared<fake_settings>();
+    sut::config_settings(config);
+
+    EXPECT_CALL(*g_mock, get_version)
+        .Times(1)
+        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
+            *major = 1;
+            *minor = 2;
+            *patch = 2;
+        });
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
+        .Times(1)
+        .WillOnce(gtest::Return(
+            std::string{ "kfd_page_fault, kfd_page_migrate, kfd_queue, kfd_event_queue, "
+                         "kfd_event_unmap_from_gpu, kfd_event_dropped_events" }));
+    EXPECT_CALL(*g_mock_externals, get_settings)
+        .Times(1)
+        .WillOnce(gtest::Return(config.get()));
+    EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
+        .Times(1)
+        .WillOnce(gtest::Return(false));
+
+    EXPECT_THAT(
+        sut::get_buffered_domains(),
+        gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_KFD_PAGE_FAULT,
+                                    backend_t::BUFFER_TRACING_KFD_PAGE_MIGRATE,
+                                    backend_t::BUFFER_TRACING_KFD_QUEUE,
+                                    backend_t::BUFFER_TRACING_KFD_EVENT_QUEUE,
+                                    backend_t::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
+                                    backend_t::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS));
+}
+
+TEST_F(sdk_core_domains_test,
+       get_buffered_domains_memory_allocation_returns_memory_allocation)
+{
+    using backend_t = tagged_backend<buffered_domains_allocation>;
+    using sut       = sdk_core<backend_t, mock_sdk_externals>;
+
+    auto config = std::make_shared<fake_settings>();
+    sut::config_settings(config);
+
+    EXPECT_CALL(*g_mock, get_version)
+        .Times(1)
+        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
+            *major = 1;
+            *minor = 2;
+            *patch = 2;
+        });
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{ "memory_allocation" }));
+    EXPECT_CALL(*g_mock_externals, get_settings)
+        .Times(1)
+        .WillOnce(gtest::Return(config.get()));
+    EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
+        .Times(1)
+        .WillOnce(gtest::Return(false));
+
+    EXPECT_THAT(sut::get_buffered_domains(),
+                gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_MEMORY_ALLOCATION));
+}
+
+TEST_F(sdk_core_domains_test,
+       get_buffered_domains_unified_memory_enables_page_fault_and_migrate)
+{
+    using backend_t = tagged_backend<buffered_domains_unified_memory>;
+    using sut       = sdk_core<backend_t, mock_sdk_externals>;
+
+    auto config = std::make_shared<fake_settings>();
+    sut::config_settings(config);
+
+    EXPECT_CALL(*g_mock, get_version)
+        .Times(1)
+        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
+            *major = 1;
+            *minor = 2;
+            *patch = 2;
+        });
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{}));
+    EXPECT_CALL(*g_mock_externals, get_settings)
+        .Times(1)
+        .WillOnce(gtest::Return(config.get()));
+    EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
+        .Times(1)
+        .WillOnce(gtest::Return(true));
+
+    EXPECT_THAT(sut::get_buffered_domains(),
+                gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_KFD_PAGE_FAULT,
+                                            backend_t::BUFFER_TRACING_KFD_PAGE_MIGRATE));
+}
+
+TEST_F(sdk_core_domains_test,
+       get_buffered_domains_supported_buffer_info_name_returns_domain)
+{
+    using backend_t = tagged_backend<buffered_domains_generic_lookup>;
+    using sut       = sdk_core<backend_t, mock_sdk_externals>;
+
+    auto config = std::make_shared<fake_settings>();
+    sut::config_settings(config);
+
+    EXPECT_CALL(*g_mock, get_version)
+        .Times(1)
+        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
+            *major = 1;
+            *minor = 2;
+            *patch = 2;
+        });
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{ "scratch_memory" }));
+    EXPECT_CALL(*g_mock_externals, get_settings)
+        .Times(1)
+        .WillOnce(gtest::Return(config.get()));
+    EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
+        .Times(1)
+        .WillOnce(gtest::Return(false));
+
+    EXPECT_THAT(sut::get_buffered_domains(),
+                gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_SCRATCH_MEMORY));
+}
+
+TEST_F(sdk_core_domains_test, get_buffered_domains_invalid_domain_throws)
+{
+    using backend_t = tagged_backend<buffered_domains_invalid>;
+    using sut       = sdk_core<backend_t, mock_sdk_externals>;
+
+    auto config = std::make_shared<fake_settings>();
+    sut::config_settings(config);
+
+    EXPECT_CALL(*g_mock, get_version)
+        .Times(1)
+        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
+            *major = 1;
+            *minor = 2;
+            *patch = 2;
+        });
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{ "invalid_domain" }));
+    EXPECT_CALL(*g_mock_externals, get_settings)
+        .Times(1)
+        .WillOnce(gtest::Return(config.get()));
+
+    try
+    {
+        static_cast<void>(sut::get_buffered_domains());
+        FAIL() << "Expected std::runtime_error";
+    } catch(const std::runtime_error& error)
+    {
+        EXPECT_STREQ(error.what(),
+                     "unsupported ROCPROFSYS_ROCM_DOMAINS value: invalid_domain");
+    }
 }
 
 // ─── get_operations ───────────────────────────────────────────────────────────
