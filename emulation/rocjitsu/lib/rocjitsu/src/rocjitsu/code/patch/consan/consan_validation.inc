@@ -551,7 +551,7 @@ validate_sc_branch_only_continuation_semantics(const AmdGpuCodeObject &replaceme
           owned_relay_slots.insert(offset);
       } else {
         const auto slots =
-            sc_relay_reservoir_slot_offsets(patch.anchor_offset, patch.original_size);
+            sc_relay_reservoir_all_slot_offsets(patch.anchor_offset, patch.original_size);
         owned_relay_slots.insert(slots.begin(), slots.end());
       }
     }
@@ -1080,6 +1080,15 @@ validate_sc_relay_reservoir_semantics(const AmdGpuCodeObject &original,
           {.start_offset = function.entry_text_offset, .size = function.code_size});
   }
   auto blocks = BasicBlock::build(original, *decoder, arch, extra_leaders, code_ranges);
+  std::vector<BasicBlock *> blocks_by_offset;
+  blocks_by_offset.reserve(blocks.size());
+  for (const std::unique_ptr<BasicBlock> &block : blocks) {
+    if (!block->instructions().empty())
+      blocks_by_offset.push_back(block.get());
+  }
+  std::ranges::sort(blocks_by_offset, [](BasicBlock *lhs, BasicBlock *rhs) {
+    return (*lhs->instructions().begin()).src_loc() < (*rhs->instructions().begin()).src_loc();
+  });
   const uint32_t nop = build_s_nop(0, arch);
   const uint32_t branch_opcode = build_s_branch(0, arch) & 0xffff0000u;
   const auto read_word = [](std::span<const uint8_t> bytes,
@@ -1125,7 +1134,7 @@ validate_sc_relay_reservoir_semantics(const AmdGpuCodeObject &original,
           relay_vertices.insert(offset);
       } else {
         for (uint64_t offset :
-             sc_relay_reservoir_slot_offsets(patch.anchor_offset, patch.original_size))
+             sc_relay_reservoir_all_slot_offsets(patch.anchor_offset, patch.original_size))
           relay_vertices.insert(offset);
       }
     }
@@ -1223,7 +1232,12 @@ validate_sc_relay_reservoir_semantics(const AmdGpuCodeObject &original,
     }
 
     bool found_pristine_block = false;
-    for (const std::unique_ptr<BasicBlock> &block : blocks) {
+    const auto owning_block =
+        std::ranges::upper_bound(blocks_by_offset, patch->anchor_offset, {}, [](BasicBlock *block) {
+          return (*block->instructions().begin()).src_loc();
+        });
+    if (owning_block != blocks_by_offset.begin()) {
+      BasicBlock *block = *std::prev(owning_block);
       uint64_t cursor = patch->anchor_offset;
       uint32_t clause_remaining = 0;
       bool inside = false;
@@ -1253,7 +1267,6 @@ validate_sc_relay_reservoir_semantics(const AmdGpuCodeObject &original,
       }
       if (inside && valid && cursor == patch->anchor_offset + patch->original_size) {
         found_pristine_block = true;
-        break;
       }
     }
     if (!found_pristine_block) {

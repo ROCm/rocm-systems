@@ -149,6 +149,20 @@ constexpr uint16_t kRdna4ExecHi = 127u;
   return slots;
 }
 
+[[nodiscard]] std::vector<uint64_t> sc_relay_reservoir_all_slot_offsets(uint64_t anchor_offset,
+                                                                        uint32_t original_size) {
+  const uint64_t payload_begin = anchor_offset + kScRelayEntryWords * sizeof(uint32_t);
+  const uint64_t payload_end =
+      anchor_offset + original_size - kScRelayTailRestoreWords * sizeof(uint32_t);
+  std::vector<uint64_t> slots;
+  if (payload_end <= payload_begin)
+    return slots;
+  slots.reserve(static_cast<size_t>((payload_end - payload_begin) / sizeof(uint32_t)));
+  for (uint64_t offset = payload_begin; offset < payload_end; offset += sizeof(uint32_t))
+    slots.push_back(offset);
+  return slots;
+}
+
 [[nodiscard]] bool append_lds_check_trap_indirect_jump(std::vector<uint32_t> &words,
                                                        uint64_t words_text_offset,
                                                        uint64_t target_text_offset,

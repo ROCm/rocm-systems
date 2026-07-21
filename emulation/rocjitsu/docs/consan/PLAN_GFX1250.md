@@ -128,7 +128,8 @@ flowchart TD
     XP2H["XP2H DONE<br/>torch.topk Inline post-bank-fix retest;<br/>same execution signal excludes shared cause"]
     XP3["XP3 DONE<br/>top-k SC 88-site residual bounded;<br/>scalar-continuation subsystem required"]
     XP3A["XP3A DONE<br/>SuperCollider scalar spill plus bidirectional continuation<br/>synthetic exact; real relay capacity bounded"]
-    XP3D["XP3D ACTIVE<br/>SuperCollider branch-only routes through proven relay reservoirs;<br/>focused proof green, real top-k rerun pending"]
+    XP3D["XP3D DONE<br/>SuperCollider site-paired spill continuations recover<br/>all 85 rejected top-k accesses end to end"]
+    XP3E["XP3E ACTIVE<br/>classify final 12-access top-k SC residual;<br/>large object is 112,612/112,616"]
     XP3B["XP3B DONE<br/>torch.sort Sampled clean plus paired accepted;<br/>two reviewed selectors remain noncausal"]
     XP3C["XP3C DONE<br/>torch.sort Sampled clean, paired, inventory, and<br/>reviewed noncausal fault bundle green"]
     XP9["XP9 DONE<br/>norm plus softmax Record/Replay clean, paired,<br/>and reviewed-fault bundle green"]
@@ -327,7 +328,8 @@ flowchart TD
   XP9C --> XF
   XP10 --> XF
   XP3A --> XP3D
-  XP3D --> XF
+  XP3D --> XP3E
+  XP3E --> XF
   XP3B --> XF
   XT2C2 --> XF
   XT2C3 --> XF
@@ -367,7 +369,8 @@ flowchart TD
   class XT3L,XT3M,XT3N done
   class XP3B done
   class XP3A done
-  class XP3D active
+  class XP3D done
+  class XP3E active
   class XP5S,XP1A done
   class XP3C done
   class G0,V9,XP2D,XT2C2,XT2C3,XT3E,XT3I,XF,XG todo
@@ -419,7 +422,17 @@ performance value is copied from another architecture.
 
 ## Progress log
 
-- 2026-07-21: XP3D is ACTIVE/blue at a resumable implementation checkpoint.
+- 2026-07-21: XP3D is DONE/green and XP3E is ACTIVE/blue.  The
+  one-repetition top-k SuperCollider artifact
+  `consan-green-expansion-20260721-pytorch-topk-sc-paired-reservoir-174`
+  passes both exact FP64/BF16 oracles and advances aggregate coverage from
+  160,751/160,848 to 160,836/160,848.  Exact site-paired spill continuations
+  recover all 85 formerly rejected large-object accesses.  A sorted block
+  index keeps final reservoir validation near-linear.  XP3E now classifies the
+  final 12-access aggregate residual rather than reopening the completed
+  continuation mechanism.
+
+- 2026-07-21: XP3D was ACTIVE/blue at a resumable implementation checkpoint.
   SuperCollider branch-only entry and return chains can now materialize the
   existing proven straight-line relay reservoirs when selected probe-anchor
   words alone cannot span a far body.  Final validation accepts only the exact

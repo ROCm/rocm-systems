@@ -36,7 +36,9 @@ RJ_DIAGNOSTIC_POP
 #include <initializer_list>
 #include <iterator>
 #include <memory>
+#include <numeric>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
