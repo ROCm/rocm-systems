@@ -1,0 +1,119 @@
+# AMD SMI (amdsmitst) Test Categories Configuration
+# Aligned with Test Filter Standardization (quick/standard/comprehensive/full).
+#
+# The amdsmitst gtest binary groups tests into a few suites:
+#   AmdSmiDynamicMetricTest.*  - fast, host-side dynamic metric checks
+#   amdsmitstReadOnly.*        - read-only device queries
+#   amdsmitstReadWrite.*       - read/write device operations
+#   CperEntriesTest.*          - CPER fixture parsing (flaky in CI -> excluded)
+#
+# The category patterns and exclude list mirror the legacy per-component
+# script TheRock/build_tools/github_actions/test_executable_scripts/test_amdsmi.py:
+#   - quick    == legacy TEST_TYPE=quick  (AmdSmiDynamicMetricTest.*)
+#   - standard == legacy TEST_TYPE=standard include/exclude filter
+# The arch-specific ignores (TESTS_TO_IGNORE) map to the exclude_gpu blocks.
+
+# Shared exclusion list - keep in sync with the exclude_tests / temporary
+# blacklist in test_amdsmi.py and tests/amd_smi_test/amdsmitst.exclude.
+_common_excludes: &common_excludes
+  - "*DISABLED*"
+  # Consistently flaky / debug-only across all ASICs (amdsmitst.exclude
+  # TEMPORARY_BLACKLIST_ALL_ASICS).
+  - "CperEntriesTest.*"
+  # Legacy standard-run excludes (test_amdsmi.py exclude_tests).
+  - "amdsmitstReadOnly.TempRead"
+  - "amdsmitstReadOnly.TestFrequenciesRead"
+  - "amdsmitstReadWrite.TestPowerReadWrite"
+
+test_categories:
+  quick:
+    description: "Fast sanity checks (target: < 5 min) - dynamic metric tests only"
+    test_patterns:
+      - "AmdSmiDynamicMetricTest.*"
+    exclude: *common_excludes
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Pre-checkin validation - read-only queries + curated read/write ops"
+    test_patterns:
+      - "amdsmitstReadOnly.*"
+      - "amdsmitstReadWrite.FanReadWrite"
+      - "amdsmitstReadWrite.TestOverdriveReadWrite"
+      - "amdsmitstReadWrite.TestPciReadWrite"
+      - "amdsmitstReadWrite.TestPerfCntrReadWrite"
+      - "amdsmitstReadWrite.TestEvtNotifReadWrite"
+      - "AmdSmiDynamicMetricTest.*"
+    exclude: *common_excludes
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "Nightly comprehensive tests - all read-only and read/write suites"
+    test_patterns:
+      - "amdsmitstReadOnly.*"
+      - "amdsmitstReadWrite.*"
+      - "AmdSmiDynamicMetricTest.*"
+    exclude: *common_excludes
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Complete test suite - every test the binary registers"
+    test_patterns:
+      - "*"
+    exclude: *common_excludes
+    labels:
+      - "full"
+      - "all"
+
+# GPU-arch-specific known failures, mirroring TESTS_TO_IGNORE in test_amdsmi.py.
+# Each entry lists every category label it applies to plus an ex_gpu_<arch>
+# label that test_runner.py uses to scope the run to the current GPU.
+exclude_gpu:
+  # gfx90a (MI200): sysinfo/idinfo/PCI read-write are unreliable.
+  exclude_gpu_gfx90a:
+    test_patterns:
+      - "amdsmitstReadOnly.TestSysInfoRead"
+      - "amdsmitstReadOnly.TestIdInfoRead"
+      - "amdsmitstReadWrite.TestPciReadWrite"
+    labels:
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx90a"
+
+  # gfx110X (RDNA3 dGPU): fan read/write not supported.
+  exclude_gpu_gfx110X:
+    test_patterns:
+      - "amdsmitstReadWrite.FanReadWrite"
+    labels:
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx110X"
+
+  # gfx103X (RDNA2 dGPU): fan read/write not supported.
+  exclude_gpu_gfx103X:
+    test_patterns:
+      - "amdsmitstReadWrite.FanReadWrite"
+    labels:
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx103X"
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 300            # 5 minutes
+    standard: 2700        # 45 minutes
+    comprehensive: 25200  # 7 hours
+    full: 28800           # 8 hours
