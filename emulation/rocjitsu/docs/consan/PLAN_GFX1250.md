@@ -116,7 +116,7 @@ flowchart TD
     XP7["XP7 DONE<br/>histogram Sampled paired and fault bundle<br/>green at 175-access denominator"]
     XP8["XP8 DONE<br/>scatter all four profiles green;<br/>inapplicable fault families recorded as typed N/A"]
     XP2A["XP2A DONE<br/>torch.topk exact oracles and dense Record/Replay<br/>106/106 diagnostic vertical"]
-    XP2B["XP2B TODO<br/>torch.topk Sampled report now fits;<br/>full-object construction exceeds 300 seconds"]
+    XP2B["XP2B TODO<br/>torch.topk Sampled report fits;<br/>distinct construction bottleneck exceeds 180 seconds"]
     XP2C["XP2C DONE<br/>torch.topk unrestricted Record/Replay exact/dynamic;<br/>113,760/160,848 accesses, all barriers"]
     XP2D["XP2D TODO<br/>torch.topk Record/Replay residual needs<br/>site/subgroup scalar routing"]
     XP3["XP3 TODO<br/>top-k SC oracle passes;<br/>current exact object has 88 bounded gaps"]
@@ -350,6 +350,14 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP2B receives one bounded post-index reassessment and remains
+  TODO/gray.  Current-tip one-repetition artifact
+  `consan-green-expansion-20260721-pytorch-topk-sampled-indexed-075` allocates
+  the complete 93.3 MB report but remains between patch begin/end at 180
+  seconds.  The three indexes that reduced `torch.mode` do not close this
+  distinct top-k construction bottleneck.  The run is not repeated or widened;
+  XP2B rotates while preserving its TODO box color.
 
 - 2026-07-21: XP1C is DONE/green.  Paired artifact
   `consan-green-expansion-20260721-pytorch-mode-sampled-overhead-072`
