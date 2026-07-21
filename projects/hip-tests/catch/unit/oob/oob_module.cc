@@ -15,7 +15,7 @@
 // fixtures: installing corrupt ELFs broke DEB packaging, because dh_makeshlibs
 // runs `objdump -p` on every installed ELF and aborts on a bad header. The
 // mutation recipes below are ported from the former gen_evil_elfs.py.
-constexpr std::string_view kValidModule = "oob_kernel.co";
+constexpr std::string_view kValidModule = "oob_kernel.code";
 
 namespace {
 using Bytes = std::vector<char>;
