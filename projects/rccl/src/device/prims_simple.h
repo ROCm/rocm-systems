@@ -16,13 +16,6 @@ enum primsMode {
   primsModePatAg = 2
 };
 
-<<<<<<< HEAD
-template <typename T, typename RedOp, typename Fan, int Direct, int SlicePerChunk, int StepPerSlice, int Unroll,
-          int P2p, int MultimemSrcs, int MultimemDsts, bool isNetOffload, int Metadata, int Pipeline, int useAcc>
-class Primitives<T, RedOp, Fan, Direct,
-                 ProtoSimple<SlicePerChunk, StepPerSlice, useAcc, Unroll, MultimemSrcs, MultimemDsts>, P2p,
-                 isNetOffload, Metadata, Pipeline, useAcc> {
-=======
 __device__ inline void invalidate_vector_l1() {
 #if defined(__gfx942__) || defined(__gfx950__)
     // CDNA 3 / MI300 path
@@ -76,7 +69,6 @@ template<typename T, typename RedOp, typename Fan, int Direct,
 class Primitives<
     T, RedOp, Fan, Direct, ProtoSimple<SlicePerChunk, StepPerSlice, useAcc, Unroll, MultimemSrcs, MultimemDsts>, P2p, isNetOffload, Metadata, Pipeline, useAcc
   > {
->>>>>>> be758f4726 (temp commit)
   static constexpr int MaxRecv = Fan::MaxRecv, MaxSend = Fan::MaxSend;
   static constexpr int Input = 0, Output = 1;
   static constexpr int RoleInput = 0x01, RoleOutput = 0x02, RoleWaitRecv = 0x04, RoleWaitSend = 0x08,

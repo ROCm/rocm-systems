@@ -632,16 +632,8 @@ static ncclResult_t commFree(ncclComm_t comm) {
 
   NCCLCHECK(ncclDestroySideStream(comm->cudaDev));
 
-<<<<<<< HEAD
   INFO(NCCL_DESTROY, "comm %p rank %d nranks %d cudaDev %d busId %lx - %s COMPLETE", comm, comm->rank, comm->nRanks,
        comm->cudaDev, comm->busId, abort ? "Abort" : "Destroy");
-=======
-  if(comm->p2pSingleProcMemRegActive) {
-    NCCLCHECK(freeCrossGpuBarrier());
-  }
-
-  INFO(NCCL_DESTROY,"comm %p rank %d nranks %d cudaDev %d busId %lx - %s COMPLETE", comm, comm->rank, comm->nRanks, comm->cudaDev, comm->busId, abort ? "Abort" : "Destroy");
->>>>>>> be758f4726 (temp commit)
 
   commPoison(comm); // poison comm before free to avoid comm reuse.
   NCCLCHECK(ncclProfilerPluginFinalize(comm));
@@ -925,7 +917,7 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
   
   if (comm->p2pSingleProcMemRegActive) {
     tmpCommAndChans.comm.p2pSingleProcMemRegActive = true;
-    NCCLCHECK(initCrossGpuBarrier(&tmpCommAndChans.comm.crossGpuBarrierPool)); 
+    // NCCLCHECK(initCrossGpuBarrier(&tmpCommAndChans.comm.crossGpuBarrierPool)); 
   }
   
 
