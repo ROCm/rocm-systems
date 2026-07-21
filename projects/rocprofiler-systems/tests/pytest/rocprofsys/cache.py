@@ -22,6 +22,7 @@ import importlib
 import json
 import logging
 import os
+import tempfile
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -165,19 +166,14 @@ def decode(obj: Any) -> Any:
 class PersistentCache:
     """A JSON key/value store shared across processes for one build tree."""
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path) -> None:
         self.path = path
         # Lock a separate sidecar file, not the cache file itself: _flush
         # swaps the cache file's inode via os.replace and flock locks the inode,
         # so locking the cache file would not serialize concurrent writers
         # (lost writes in CTest parallel mode).
         self.lock_path = path.with_name(f"{path.stem}.lock{path.suffix}")
-        self._entries: dict[str, Any] = {}
-        self._load()
-
-    def _load(self) -> None:
-        """Load entries from disk (missing/corrupt files load as empty)."""
-        self._entries = self._read_disk_state()["entries"]
+        self._entries: dict[str, Any] = self._read_entries_from_disk()
 
     def get(self, key: str) -> tuple[bool, Any]:
         """Return ``(found, value)``. ``found`` is False on miss or any error.
@@ -233,39 +229,51 @@ class PersistentCache:
             fcntl.flock(lock_fd, fcntl.LOCK_UN)
             os.close(lock_fd)
 
-    def _read_disk_state(self) -> dict[str, Any]:
-        """Return the on-disk ``{"entries": {...}}`` state.
+    def _read_entries_from_disk(self) -> dict[str, Any]:
+        """Return the on-disk entries mapping (empty on missing/corrupt/bad shape).
 
-        Missing/corrupt files (or any unexpected shape) read as empty. Does not
-        lock; callers needing consistency hold ``_exclusive_lock``.
+        Does not lock; callers needing consistency hold ``_exclusive_lock``.
         """
         try:
             with open(self.path, "r") as f:
                 data = json.load(f)
         except (OSError, ValueError):
-            return {"entries": {}}  # missing/corrupt -> start fresh
+            return {}  # missing/corrupt -> start fresh
         if isinstance(data, dict) and isinstance(data.get("entries"), dict):
-            return {"entries": data["entries"]}
-        return {"entries": {}}
+            return data["entries"]
+        return {}
 
     def _flush(self, data: dict[str, Any]) -> None:
-        """Replace the cache file with ``data`` atomically (caller holds the lock)."""
-        tmp = f"{self.path}.{os.getpid()}.tmp"
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
-            json.dump(data, f)
-        os.replace(tmp, self.path)
+        """Replace the cache file with ``data`` atomically (caller holds the lock).
+
+        It is placed in the target directory so ``os.replace`` stays on one
+        filesystem (atomic swap), and named ``<cachefile>.*.tmp`` so the suite's
+        cleanup still sweeps it if a crash leaves it behind.
+        """
+        fd, tmp = tempfile.mkstemp(
+            dir=self.path.parent, prefix=f"{self.path.name}.", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(data, f)
+            os.replace(tmp, self.path)
+        except BaseException:
+            # mkstemp makes a fresh file each call, so a leftover would accumulate;
+            # remove it on any failure (os.replace consumes it on success).
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+            raise
 
     def _persist(self, key: str, encoded: Any) -> None:
         """Merge ``key`` into the on-disk cache under an exclusive lock.
 
-        Re-reads the current disk state before writing so a concurrent writer's
+        Re-reads current entries before writing so a concurrent writer's
         entries are preserved (CTest parallel mode).
         """
         with self._exclusive_lock():
-            data = self._read_disk_state()
-            data["entries"][key] = encoded
-            self._flush(data)
+            entries = self._read_entries_from_disk()
+            entries[key] = encoded
+            self._flush({"entries": entries})
 
 
 # ---------------------------------------------------------------------------
@@ -287,6 +295,20 @@ def _cache_discriminator() -> str:
     return hashlib.sha256(root.encode("utf-8")).hexdigest()[:16]
 
 
+def resolve_username() -> str:
+    """Best-effort current username for building per-user tmp paths.
+
+    Falls back to the numeric uid, then ``"0"``.
+    """
+    try:
+        return getpass.getuser()
+    except Exception:
+        try:
+            return str(os.getuid())
+        except Exception:
+            return "0"
+
+
 def _cache_file_path(discriminator: str) -> Path:
     # Resolve the tmp base exactly like the suite's cleanup step
     # (ROCPROFSYS_TMPDIR -> TMPDIR -> /tmp)
@@ -295,12 +317,9 @@ def _cache_file_path(discriminator: str) -> Path:
         uid = os.getuid()
     except AttributeError:  # pragma: no cover - non-POSIX
         uid = 0
-    try:
-        user = getpass.getuser()
-    except Exception:
-        user = str(uid)
     # Nest under the user's name (``/tmp/$USER`` by default)
-    return Path(base) / user / f"rocprofsys-syscache-{uid}-{discriminator}.tmp"
+    filename = f"rocprofsys-syscache-{uid}-{discriminator}.tmp"
+    return Path(base) / resolve_username() / filename
 
 
 def disable_for_process() -> None:
@@ -410,7 +429,7 @@ class persistent_cached_property:
      - compute (if necessary, then written to shared file)
     """
 
-    def __init__(self, func: Callable):
+    def __init__(self, func: Callable) -> None:
         self.func = func
         self.attrname: Optional[str] = None
         self.__doc__ = func.__doc__

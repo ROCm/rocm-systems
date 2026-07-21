@@ -275,7 +275,7 @@ class TestCache(RocprofsysTest):
     ``cache_store`` fixture so they never touch the real shared cache file.
     """
 
-    def test_codec_round_trips_supported_types_and_rejects_others(self):
+    def test_codec_round_trips_supported_types_and_rejects_others(self) -> None:
         """The tagged JSON codec preserves every supported type and rejects the rest."""
         payload = {
             "none": None,
@@ -297,7 +297,7 @@ class TestCache(RocprofsysTest):
         with pytest.raises(cache.DeserializationError):  # unknown tag on decode
             cache.decode({"__type__": "bogus", "value": 1})
 
-    def test_persistent_cache_store(self, tmp_path):
+    def test_persistent_cache_store(self, tmp_path) -> None:
         """get/set/miss, cross-instance persistence, clear, typed values, resilience."""
         path = tmp_path / "c.json"
         store = cache.PersistentCache(path)
@@ -330,7 +330,7 @@ class TestCache(RocprofsysTest):
         corrupt.set("k", 1)
         assert corrupt.get("k") == (True, 1)
 
-    def test_persistent_cache_decorator(self, cache_store, monkeypatch):
+    def test_persistent_cache_decorator(self, cache_store, monkeypatch) -> None:
         """@persistent_cache: compute-once, arg keying, converters, method=True, unserializable-raises, fail-open."""
         fn_calls: list[int] = []
 
@@ -362,7 +362,7 @@ class TestCache(RocprofsysTest):
         meth_calls: list[tuple[str, str]] = []
 
         class Probe:
-            def __init__(self, tag: str):
+            def __init__(self, tag: str) -> None:
                 self.tag = tag
 
             @cache.persistent_cache("test.meth", method=True)
@@ -396,12 +396,12 @@ class TestCache(RocprofsysTest):
         assert disabled(1) == 2
         assert disabled_calls == [1, 1]  # recomputed each time, no store
 
-    def test_persistent_cached_property(self, cache_store):
+    def test_persistent_cached_property(self, cache_store) -> None:
         """Cross-instance sharing, per-class key namespacing, and loud on unserializable."""
         calls: list[int] = []
 
         class Caps:
-            def __init__(self, n: int):
+            def __init__(self, n: int) -> None:
                 self._n = n
 
             @cache.persistent_cached_property
@@ -431,7 +431,7 @@ class TestCache(RocprofsysTest):
         with pytest.raises(cache.SerializationError):
             BadProp().value
 
-    def test_dataclass_round_trips(self, cache_store):
+    def test_dataclass_round_trips(self, cache_store) -> None:
         """Dataclasses (de)serialize automatically, with no to_cache/from_cache.
 
         Covers a direct codec round-trip (nested set + Path fields), reuse through
@@ -461,7 +461,7 @@ class TestCache(RocprofsysTest):
         with pytest.raises(cache.SerializationError):
             cache.encode(_BadField(object()))
 
-    def test_concurrent_writers_preserve_all_entries(self, tmp_path):
+    def test_concurrent_writers_preserve_all_entries(self, tmp_path) -> None:
         """Parallel writers to distinct keys must not clobber each other.
 
         Regression guard for the file-lock design: the exclusive lock is held on a

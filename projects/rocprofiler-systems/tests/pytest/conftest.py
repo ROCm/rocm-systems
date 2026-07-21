@@ -1309,6 +1309,53 @@ def _seed_object_cached_properties(obj: object) -> None:
                 pass
 
 
+def _reset_cache_for_regeneration(store) -> None:
+    """Discard the previous run's cache so every probe recomputes and rewrites.
+
+    Clears the on-disk store and the in-process memoization on
+    ``get_rocprof_config`` so nothing stale carries over.
+    """
+    cache_existed = store.path.exists()
+    print(
+        f"Overwriting old cache file: {store.path}"
+        if cache_existed
+        else f"Generating cache file: {store.path}"
+    )
+    store.clear()
+    try:
+        get_rocprof_config.cache_clear()
+    except Exception:
+        pass
+
+
+def _warm_gpu_probes(rocprof_config: RocprofsysConfig) -> None:
+    """Compute + store the GPU / ROCm tooling probes for the active ROCm path."""
+    from rocprofsys.cache import SerializationError
+
+    for probe in (detect_gpu, get_offload_extractor, get_xnack_support):
+        try:
+            probe(rocprof_config.rocm_path)
+        except SerializationError:
+            raise
+        except Exception as e:
+            print(f"Warning: seeding {probe.__name__} failed: {e}")
+
+
+def _warm_cached_properties(rocprof_config: RocprofsysConfig) -> None:
+    """Seed every non-target-dependent persistent_cached_property (config + capabilities)."""
+    from rocprofsys.cache import SerializationError
+
+    _seed_object_cached_properties(rocprof_config)
+    try:
+        cap = rocprof_config.capabilities
+    except SerializationError:
+        raise
+    except Exception:
+        cap = None
+    if cap is not None:
+        _seed_object_cached_properties(cap)
+
+
 def _seed_capability_cache() -> None:
     """(Re)generate the persistent capability cache during the config setup step.
 
@@ -1321,21 +1368,7 @@ def _seed_capability_cache() -> None:
     if store is None:
         return  # caching disabled/unavailable
 
-    cache_existed = store.path.exists()
-    print(
-        f"Overwriting old cache file: {store.path}"
-        if cache_existed
-        else f"Generating cache file: {store.path}"
-    )
-
-    # Force a full regeneration: discard any cache from a previous run plus the
-    # in-process memoization on get_rocprof_config, so every probe below
-    # recomputes and rewrites
-    store.clear()
-    try:
-        get_rocprof_config.cache_clear()
-    except Exception:
-        pass
+    _reset_cache_for_regeneration(store)
 
     try:
         rocprof_config = get_rocprof_config()
@@ -1344,25 +1377,8 @@ def _seed_capability_cache() -> None:
     except Exception:
         return
 
-    # GPU / ROCm tooling probes.
-    for probe in (detect_gpu, get_offload_extractor, get_xnack_support):
-        try:
-            probe(rocprof_config.rocm_path)
-        except SerializationError:
-            raise
-        except Exception as e:
-            print(f"Warning: seeding {probe.__name__} failed: {e}")
-
-    # Every persistent_cached_property that is not target-dependent
-    _seed_object_cached_properties(rocprof_config)
-    try:
-        cap = rocprof_config.capabilities
-    except SerializationError:
-        raise
-    except Exception:
-        cap = None
-    if cap is not None:
-        _seed_object_cached_properties(cap)
+    _warm_gpu_probes(rocprof_config)
+    _warm_cached_properties(rocprof_config)
 
 
 # ----------------------------------------------------------------------------
@@ -1738,22 +1754,14 @@ def _run_cleanup() -> None:
 
 def _cleanup_temp_patterns() -> list[str]:
     """Return list of rocprofiler-systems temp file patterns to clean up."""
-    import getpass
+    from rocprofsys.cache import resolve_username
 
     tmpdir = os.environ.get("ROCPROFSYS_TMPDIR", os.environ.get("TMPDIR", "/tmp"))
     dirs = ["/tmp"]
     if tmpdir and not tmpdir.startswith("%") and tmpdir != "/tmp":
         dirs.append(tmpdir)
 
-    try:
-        user = getpass.getuser()
-    except Exception:
-        # Match cache.py's fallback: it names the per-user dir with the numeric
-        # uid when getuser() fails, so cleanup must look there too or leak files
-        try:
-            user = str(os.getuid())
-        except Exception:
-            user = None
+    user = resolve_username()
 
     patterns = []
     for d in dirs:
