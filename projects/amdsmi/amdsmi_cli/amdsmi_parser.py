@@ -378,11 +378,17 @@ class AMDSMIParser(argparse.ArgumentParser):
                 # Check if the sclk and mclk parameters are valid
                 if clk_type not in valid_clk_types:
                     raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
-                        sys.argv[1], clk_type, output_format
+                        sys.argv[1],
+                        clk_type,
+                        output_format,
+                        hint=f"Valid options are: {', '.join(valid_clk_types)}.",
                     )
                 if lim_type not in valid_lim_types:
                     raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
-                        sys.argv[1], lim_type, output_format
+                        sys.argv[1],
+                        lim_type,
+                        output_format,
+                        hint=f"Valid options are: {', '.join(valid_lim_types)}.",
                     )
 
                 # Check if the val is a valid integer value
@@ -422,7 +428,10 @@ class AMDSMIParser(argparse.ArgumentParser):
                 # Check if the sclk and mclk parameters are valid
                 if clk_type not in valid_clk_types:
                     raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
-                        sys.argv[1], clk_type, output_format
+                        sys.argv[1],
+                        clk_type,
+                        output_format,
+                        hint=f"Valid options are: {', '.join(valid_clk_types)}.",
                     )
 
                 if not perf_levels_str:
