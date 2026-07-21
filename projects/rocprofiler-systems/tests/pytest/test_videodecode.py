@@ -60,8 +60,7 @@ def require_video_data(rocprof_config) -> None:
     missing there is nothing to decode, so skip instead of failing.
     """
     videos_dir = rocprof_config.rocprofsys_examples_dir / "videos"
-    video_files = sorted(videos_dir.glob("*.mp4")) if videos_dir.is_dir() else []
-    if not video_files:
+    if not (videos_dir.is_dir() and any(videos_dir.iterdir())):
         pytest.skip(
             f"No rocDecode sample videos found in {videos_dir}; "
             "possibly built against a non-test build which doesn't have those files."

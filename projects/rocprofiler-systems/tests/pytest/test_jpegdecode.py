@@ -62,8 +62,7 @@ def require_jpeg_data(rocprof_config) -> None:
     there is nothing to decode, so skip instead of failing.
     """
     images_dir = rocprof_config.rocprofsys_examples_dir / "images"
-    image_files = sorted(images_dir.iterdir()) if images_dir.is_dir() else []
-    if not image_files:
+    if not (images_dir.is_dir() and any(images_dir.iterdir())):
         pytest.skip(
             f"No rocJPEG sample images found in {images_dir}; "
             "possibly built against a non-test build which doesn't have those files."
