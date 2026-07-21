@@ -129,6 +129,7 @@ flowchart TD
     XP3["XP3 DONE<br/>top-k SC 88-site residual bounded;<br/>scalar-continuation subsystem required"]
     XP3A["XP3A DONE<br/>SuperCollider scalar spill plus bidirectional continuation<br/>synthetic exact; real relay capacity bounded"]
     XP3B["XP3B DONE<br/>torch.sort Sampled clean plus paired accepted;<br/>two reviewed selectors remain noncausal"]
+    XP3C["XP3C ACTIVE<br/>torch.sort Sampled noncausal fault classification;<br/>precommit observed-stable pass expectation"]
     XP9["XP9 DONE<br/>norm plus softmax Record/Replay clean, paired,<br/>and reviewed-fault bundle green"]
     XP9B["XP9B DONE<br/>norm plus softmax Sampled clean, paired,<br/>and reviewed-fault bundle green"]
     XP9C["XP9C DONE<br/>norm/softmax Inline clean, paired,<br/>and reviewed-fault bundle green"]
@@ -281,6 +282,7 @@ flowchart TD
   XP0 --> XP3
   XP3 --> XP3A
   XP3 --> XP3B
+  XP3B --> XP3C
   X0 --> XT0
   XT0 --> XT1
   XT1 --> XT2A
@@ -316,6 +318,7 @@ flowchart TD
   XP2E --> XF
   XP2F --> XF
   XP2G --> XF
+  XP3C --> XF
   XP2G --> XP2H
   XP2H --> XF
   XP9 --> XF
@@ -363,6 +366,7 @@ flowchart TD
   class XP3B done
   class XP3A done
   class XP5S,XP1A done
+  class XP3C active
   class G0,V9,XP2D,XT2C2,XT2C3,XT3E,XT3I,XF,XG todo
 ```
 
