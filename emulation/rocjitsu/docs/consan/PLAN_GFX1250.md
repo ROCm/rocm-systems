@@ -121,7 +121,7 @@ flowchart TD
     XP3["XP3 TODO<br/>top-k SC at 160,752/160,848;<br/>96 remain after rotation"]
     XP9["XP9 DONE<br/>norm plus softmax Record/Replay clean, paired,<br/>and reviewed-fault bundle green"]
     XP9B["XP9B DONE<br/>norm plus softmax Sampled clean, paired,<br/>and reviewed-fault bundle green"]
-    XP9C["XP9C ACTIVE<br/>norm plus softmax Inline has bounded<br/>publication-contention undercoverage"]
+    XP9C["XP9C TODO<br/>literal identity recovers 46 Inline sites;<br/>VGPR spill and publication contention remain"]
     XP10["XP10 DONE<br/>cluster Record/Replay clean, paired, and reviewed-fault<br/>bundle accepted at 23/23 accesses and 2/2 barriers"]
     XT0["XT0 DONE<br/>RocJITsu corpus runner, provenance,<br/>and one-repetition contract"]
     XT1["XT1 DONE<br/>both compact P0 kernels green<br/>in all four profiles"]
@@ -131,7 +131,7 @@ flowchart TD
     XT2C2["XT2C2 TODO<br/>004 Stream-K kernel 3/4;<br/>Inline long-bound completion remains"]
     XT2C3["XT2C3 TODO<br/>007 Stream-K kernel 3/4;<br/>Inline long-bound completion remains"]
     XT3A["XT3A TODO<br/>reduced SGEMM SC/RR/Sampled green;<br/>Inline backend-dependent and long"]
-    XT3B["XT3B TODO<br/>F8 SuperCollider paired passes;<br/>fault loses postflight health"]
+    XT3B["XT3B ACTIVE<br/>quick-GEMM SuperCollider frontier:<br/>HGEMM completion and F8 fault health remain"]
     XT3D["XT3D DONE<br/>full SGEMM first problem complete;<br/>quadratic 115,776-event frontier isolated"]
     XT3E["XT3E TODO<br/>both emulator baselines prove intrinsic full-grid bound;<br/>substantially longer unrestricted RR run remains"]
     XT3C["XT3C TODO<br/>SPMM F8 relay-window fix passes 692/692 tests;<br/>rebuilt-hook unrestricted rerun remains"]
@@ -298,8 +298,8 @@ flowchart TD
 
   class R0,E0,D0,C0,V0,B0,B1,B2,B3,B4,B5,S0,S1,S2,S3,S4,S5,S6,A0,A1,A2,A3A,A4A,SC0,RR0,SA0,IS0,IS1,F0,Q0,V1,V2,V3,V8,V4A,V4B,V4C,V4D,V5A,V5B,V6A,V6B,V7,VT,VD,VP,VW,X0,XP0,XP1,XP2A,XP2C,XP4,XP5,XP6,XP7,XP8,XP9,XP10,XT1,XT2A,XT2B,XT2C1,XT3D,XT4A,XT4 done
   class XP9B done
-  class XP9C active
-  class G0,XP1B,XP2B,XP2D,XP3,XT2C2,XT2C3,XT3A,XT3B,XT3E,XT3C,XF,XG todo
+  class XT3B active
+  class G0,XP1B,XP2B,XP2D,XP3,XP9C,XT2C2,XT2C3,XT3A,XT3E,XT3C,XF,XG todo
 ```
 
 Broader partial-EXEC, dynamic-stack, high-register, cache/fence-shape, and
@@ -347,6 +347,19 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP9C rotates to TODO after a bounded scalar-pressure improvement.
+  Commit `e2c1e026bc` lets non-atomic gfx1250 Inline probes embed the stable
+  report dispatch identity instead of reserving a code-object-wide SGPR pair;
+  atomic-ordering probes and other architectures are unchanged.  The focused
+  Inline suite passes 90/90, and clean one-repetition artifact
+  `consan-green-expansion-20260721-norm-softmax-inline-literal-dispatch-independent-052`
+  passes the exact oracle while recovering 28 access and 18 barrier sites.
+  The remaining 474 access plus 189 barrier plans require 16--19 temporary
+  VGPRs without enough site-local vector space, and the independent 1,022
+  publication-contention failures remain.  The Mermaid box is gray/TODO, and
+  the sole blue/ACTIVE box moves to XT3B's SuperCollider quick-GEMM frontier
+  for instrumentation-mode balance rather than starting two hard subsystems.
 
 - 2026-07-21: XP9B is DONE/green.  Its one-repetition clean, paired, exact
   mutation, containment, report-memory, cleanup, and frozen-provenance gates
