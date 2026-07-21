@@ -183,7 +183,7 @@ have since advanced name their newer committed revision and retained evidence.
 | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
 | `torch.mode` | 🟥 Signals after replacement, before oracle | 🟩 At `6491647e31`: exact oracle; 28,939/28,939 accesses, 2/2 atomics, and 4,446/4,446 barriers; paired 208.78x; reviewed exact-one qualified miss and both health gates accepted | 🟩 At `96ecd9024a`: exact oracle; 28,939/28,939 accesses, 2/2 atomics, and 8,892/8,892 barrier members; paired 120.09x; reviewed exact-one qualified miss and both health gates accepted | 🟩 Exact oracle; 28,939/28,939 accesses and 4,446/4,446 barriers |
-| `torch.histc` | 🟥 Signals after replacement, before oracle | 🟩 Exact oracle; 175/175 accesses and 84/84 barriers | 🟩 Exact oracle; 175/175 accesses and 168/168 barriers | 🟩 Exact oracle; 175/175 accesses and 84/84 barriers |
+| `torch.histc` | 🟩 At `502b286cfc`: strict exact oracle; 133/133 ordinary accesses; paired 85.67x; reviewed exact-one causal barrier mutation and both health gates accepted | 🟩 Exact oracle; 175/175 accesses and 84/84 barriers | 🟩 Exact oracle; 175/175 accesses and 168/168 barriers | 🟩 Exact oracle; 175/175 accesses and 84/84 barriers |
 | `001_sk_mxf8f4gemm_tdm` | 🟩 Exact oracle; 768/768 accesses | 🟩 Exact oracle; 768/768 accesses, 204/204 barriers, and 24/24 fences | 🟩 Exact oracle; 768/768 accesses and 180/180 barriers | 🟨 Seventeen exact rows pass, but the final solution remains active at the 300-second bound; no final verdict |
 | `006_sk_hgemm_quick` | 🟧 Existing bounded result retained | 🟧 Exact numeric rows and complete 8,162/8,162 access, 292/292 barrier, and 80/80 fence coverage, but replay emits four conflicts and marks analysis dynamically incomplete | 🟩 Exact oracle; 8,162/8,162 accesses and 544/544 barriers | 🟧 Existing bounded result retained |
 
@@ -256,6 +256,19 @@ do not promote matrix cells without the end-to-end evidence above.
 | Four focused flavor verticals | 🟨 Four-engine bootstrap | A clean ping-pong cooperative-LDS workload passed its host-reference oracle with 4/4 accesses patched by SuperCollider.  Record/Replay passed with 4/4 accesses and 8/8 barriers patched and visible records.  Sampled passed with 4/4 accesses and two visible records, but 0/8 barriers.  Inline Shadow is statically and dynamically complete with 4/4 accesses, 8/8 barriers, and one visible record.  Fault/diagnostic behavior, replay qualification, and Sampled synchronization remain open. |
 
 ## Progress log
+
+- 2026-07-21: Restored `torch.histc` SuperCollider to green under the current
+  strict policy at `502b286cfc`.  SuperCollider now keeps LDS atomics as typed
+  exclusions without rejecting co-resident ordinary LDS accesses; replaying
+  an atomic as an ordinary load/store would change program semantics.  The
+  full 299-test host ConSan suite passes.  One-repetition clean artifact
+  `consan-green-expansion-20260721-histc-sc-strict-clean-148` accepts the exact
+  histogram oracle with complete 133/133 ordinary-access coverage.  Paired
+  artifact `...-strict-overhead-149` accepts 5,907.34 versus 68.95 ms, or
+  85.67x.  Fresh inventory `...-strict-inventory-150` retains the reviewed
+  causal barrier identity, and fault artifact `...-strict-fault-health-153`
+  applies it exactly once, observes the precommitted failing-oracle and
+  no-diagnosis outcome, and passes target health before and after.
 
 - 2026-07-21: `torch.mode` Sampled returns to green at committed revision
   `96ecd9024a`.  The access pass retains the relocated guest offset, qualified

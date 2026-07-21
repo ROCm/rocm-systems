@@ -109,10 +109,11 @@ flowchart TD
     X0["X0 DONE<br/>expansion corpus surveyed and<br/>aggregate four-profile contract defined"]
     XP0["XP0 DONE<br/>PyTorch/Triton TDM plus clustered-dispatch<br/>clean vertical passes all four profiles"]
     XP1["XP1 DONE<br/>torch.mode Record/Replay composes ordinary-access<br/>and atomic-ordering probes; full bundle restored"]
-    XP1A["XP1A TODO<br/>torch.mode SuperCollider current execution signal;<br/>isolate and repair replacement failure"]
+    XP1A["XP1A ACTIVE<br/>torch.mode SuperCollider current execution signal;<br/>apply histogram admission result, then isolate residual"]
     XP1B["XP1B DONE<br/>torch.mode Inline dynamic-LDS clean, paired,<br/>and reviewed-fault bundle accepted"]
     XP1C["XP1C DONE<br/>torch.mode Sampled access-plus-ordering composition;<br/>full 2/2-atomic bundle restored"]
     XP4["XP4 DONE<br/>tagged LDS atomic address token plus isolated-release<br/>classification pass torch.mode clean"]
+    XP5S["XP5S DONE<br/>histogram SuperCollider strict admission restored;<br/>clean, paired, and reviewed-fault bundle green"]
     XP5["XP5 DONE<br/>histogram Inline paired and reviewed-fault bundle<br/>green at 175-access denominator"]
     XP6["XP6 DONE<br/>histogram Record/Replay paired and fault bundle<br/>green at 175-access denominator"]
     XP7["XP7 DONE<br/>histogram Sampled paired and fault bundle<br/>green at 175-access denominator"]
@@ -261,6 +262,7 @@ flowchart TD
   XP0 --> XP1B
   XP0 --> XP4
   XP4 --> XP1C
+  XP4 --> XP5S
   XP4 --> XP5
   XP5 --> XP6
   XP6 --> XP7
@@ -304,6 +306,7 @@ flowchart TD
   XP1B --> XF
   XP1C --> XF
   XP4 --> XF
+  XP5S --> XF
   XP5 --> XF
   XP6 --> XF
   XP7 --> XF
@@ -359,7 +362,9 @@ flowchart TD
   class XT3L,XT3M,XT3N done
   class XP3B done
   class XP3A done
-  class G0,V9,XP1A,XP2D,XT2C2,XT2C3,XT3E,XT3I,XF,XG todo
+  class XP5S done
+  class XP1A active
+  class G0,V9,XP2D,XT2C2,XT2C3,XT3E,XT3I,XF,XG todo
 ```
 
 Broader partial-EXEC, dynamic-stack, high-register, cache/fence-shape, and
@@ -407,6 +412,16 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP5S is DONE/green at `502b286cfc`.  The strict-policy
+  `torch.histc` failure was an all-or-nothing SuperCollider preflight defect:
+  co-resident atomics incorrectly rejected kernels whose 133 ordinary LDS
+  accesses were valid race probes.  Atomics now remain typed exclusions while
+  ordinary accesses are admitted.  All 299 host ConSan tests pass, and the
+  committed one-repetition clean, paired-overhead, inventory, exact-one fault,
+  containment-health, and provenance bundle accepts.  XP1A becomes the sole
+  ACTIVE/blue box because `torch.mode` is the next current SuperCollider
+  execution residual that can reuse this result.
 
 - 2026-07-21: XP1C is DONE at `96ecd9024a`, and its Mermaid box is green.
   Sampled now composes ordinary atomic-access publication and typed ordering
