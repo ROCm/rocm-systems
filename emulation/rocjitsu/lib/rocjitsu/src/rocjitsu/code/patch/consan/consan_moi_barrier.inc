@@ -1137,7 +1137,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           .push_back(index);
     }
     std::vector<std::pair<uint64_t, uint64_t>> occupied_ranges;
-    occupied_ranges.reserve(result.patches.size() + patches.size() + selected_candidates.size());
+    occupied_ranges.reserve(result.patches.size() + patches.size() + selected_candidates.size() +
+                            options.preapplied_reserved_ranges.size());
     const auto append_occupied_range = [&](uint64_t begin, uint64_t size) {
       if (size != 0u && begin <= std::numeric_limits<uint64_t>::max() - size)
         occupied_ranges.emplace_back(begin, begin + size);
@@ -1148,6 +1149,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       append_occupied_range(patch.anchor_offset, patch.original_size);
     for (const BarrierRecordCandidate &candidate : selected_candidates)
       append_occupied_range(candidate.site.text_offset, candidate.site.size);
+    for (const ConSanPreappliedReservedRange &reserved : options.preapplied_reserved_ranges)
+      append_occupied_range(reserved.text_offset, reserved.size);
     std::ranges::sort(occupied_ranges);
     size_t merged_range_count = 0u;
     for (const auto &range : occupied_ranges) {

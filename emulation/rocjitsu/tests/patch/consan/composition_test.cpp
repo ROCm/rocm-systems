@@ -267,16 +267,22 @@ TEST(ConSanMoi, FaultBarrierMarkerlessUncoveredLocalCaveComposesWithInlineShadow
 
 TEST(ConSanMoi, Gfx1250DenseInlineHostPreservesPreappliedBarrierDrop) {
   constexpr uint32_t kAccessCount = 9u;
-  std::vector<uint32_t> text_words = {
-      *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_GFX1250),
-      *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_GFX1250),
-  };
-  text_words.resize(9u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250));
+  constexpr size_t kLargeTextWords = 33000u;
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/100, /*ssrc0=*/100, ROCJITSU_CODE_ARCH_GFX1250);
+  std::vector<uint32_t> text_words(kLargeTextWords, filler);
+  size_t cursor = 32u;
+  const size_t dropped_pair_word = cursor;
+  text_words[cursor++] = *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_GFX1250);
+  text_words[cursor++] = *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_GFX1250);
+  text_words[cursor++] = build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250);
+  text_words[cursor++] = build_s_mov_b32(/*sdst=*/1, /*ssrc0=*/1, ROCJITSU_CODE_ARCH_GFX1250);
+  text_words[cursor++] = *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_GFX1250);
+  text_words[cursor++] = *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_GFX1250);
   for (uint32_t index = 0; index < kAccessCount; ++index) {
-    text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
-    text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+    text_words[cursor++] = 0xD8340000u | index * sizeof(uint32_t);
+    text_words[cursor++] = 0x00000000u; // ds_store_b32 v0, v0 offset:index*4
   }
-  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "gfx1250_dense_inline_fault");
 
@@ -286,8 +292,8 @@ TEST(ConSanMoi, Gfx1250DenseInlineHostPreservesPreappliedBarrierDrop) {
   inventory_options.fault_dry_run = true;
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
   ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
-  ASSERT_EQ(inventory.sync_sequences.size(), 1u);
-  ASSERT_EQ(inventory.fault_sites.size(), 2u);
+  ASSERT_EQ(inventory.sync_sequences.size(), 2u);
+  ASSERT_EQ(inventory.fault_sites.size(), 4u);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.scratch_vgpr = 82;
@@ -317,12 +323,17 @@ TEST(ConSanMoi, Gfx1250DenseInlineHostPreservesPreappliedBarrierDrop) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
+                               &ConSanPatchInfo::kind),
+            1u);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   std::array<uint32_t, 2> dropped{};
-  std::memcpy(dropped.data(), patched.text_sections().front()->data(), sizeof(dropped));
+  std::memcpy(dropped.data(),
+              patched.text_sections().front()->data() + dropped_pair_word * sizeof(uint32_t),
+              sizeof(dropped));
   EXPECT_EQ(dropped[0], build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   EXPECT_EQ(dropped[1], build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
 }
