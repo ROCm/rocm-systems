@@ -46,8 +46,10 @@ HIP_TEST_CASE(Unit_hipGraphBatchMemOpNode_WriteAndWait) {
 
   // Allocate signal memory required for wait-value operations on AMD
   hipDeviceptr_t devPtr = 0;
+#if HT_AMD
   HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&devPtr), sizeof(uint64_t),
                                   hipMallocSignalMemory));
+#endif
   HIP_CHECK(hipMemset(reinterpret_cast<void*>(devPtr), 0, sizeof(uint64_t)));
 
   // Build batch: WriteValue32(1000) then WaitValue32(== 1000)
@@ -93,7 +95,9 @@ HIP_TEST_CASE(Unit_hipGraphBatchMemOpNode_WriteAndWait) {
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(stream));
+#if HT_AMD
   HIP_CHECK(hipFree(reinterpret_cast<void*>(devPtr)));
+#endif
   HIP_CHECK(hipCtxPopCurrent(&ctx));
   HIP_CHECK(hipCtxDestroy(ctx));
 }
