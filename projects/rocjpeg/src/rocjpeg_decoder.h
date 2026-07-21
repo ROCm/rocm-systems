@@ -200,7 +200,6 @@ private:
    hipDeviceProp_t hip_dev_prop_; // HIP device properties
    hipStream_t hip_stream_; // HIP stream
    std::mutex mutex_; // Mutex for thread safety
-   std::mutex stream_mutex_; // Mutex for HIP stream
    RocJpegBackend backend_; // RocJpeg backend
    RocJpegVappiDecoder jpeg_vaapi_decoder_; // RocJpeg VAAPI decoder object
    std::unordered_map<RocJpegImage*, AsyncDecodeState> pending_decodes_; // Map of pending asynchronous decodes keyed by destination

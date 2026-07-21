@@ -260,8 +260,7 @@ RocJpegStatus RocJpegDecoder::FinalizeDecode(VASurfaceID current_surface_id, con
         is_roi_valid = false;
     }
 
-    // Serialize HIP stream for concurrent SyncSurface calls
-    std::lock_guard<std::mutex> stream_lock(stream_mutex_);
+
     switch (decode_params->output_format) {
         case ROCJPEG_OUTPUT_NATIVE:
             // Copy the native decoded output buffers from interop memory directly to the destination buffers
