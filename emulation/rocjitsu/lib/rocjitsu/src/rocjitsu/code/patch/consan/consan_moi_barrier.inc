@@ -907,6 +907,11 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         barrier_island_begin = candidate_begin;
     }
   }
+  if (barrier_island_begin) {
+    local_indirect_allocator.reserve(
+        *barrier_island_begin,
+        static_cast<uint32_t>(planned_candidates.size() * kIndirectIslandWords));
+  }
   std::vector<size_t> dense_fallback_indices;
 
   for (size_t planned_index = 0; planned_index < planned_candidates.size(); ++planned_index) {
@@ -1096,8 +1101,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     info.original_size = site.size;
     info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
     info.relocated_guest_instruction_offset =
-        cave_text_offset +
-        (candidate_options.moi_persistent_epoch_sgpr ? sizeof(uint32_t) : 0u);
+        cave_text_offset + (candidate_options.moi_persistent_epoch_sgpr ? sizeof(uint32_t) : 0u);
     info.scratch_vgpr = planned.scratch_vgpr;
     info.persistent_epoch_private_offset = planned.private_epoch_offset;
     info.required_private_segment_size = planned.required_private_bytes;
@@ -1317,8 +1321,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                           .offset = body_offset,
                           .relocated_guest_instruction_offset =
                               body_offset +
-                              (candidate_options.moi_persistent_epoch_sgpr ? sizeof(uint32_t)
-                                                                           : 0u),
+                              (candidate_options.moi_persistent_epoch_sgpr ? sizeof(uint32_t) : 0u),
                           .words = std::move(*body_words)});
       }
 

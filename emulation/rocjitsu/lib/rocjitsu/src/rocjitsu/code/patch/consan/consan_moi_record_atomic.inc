@@ -72,12 +72,14 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     ResolvedMoiScratchPlan resources;
     ConSanMoiAtomicAddressPlan address_plan;
     std::optional<VgprSpillSequence> spill;
+    std::optional<InlineSgprSpillSequence> scalar_spill;
   };
   std::vector<PlannedAtomicRecord> selected_candidates;
   selected_candidates.reserve(max_candidates);
   MoiResourcePlanningState resource_state(bytes, arch, options, result);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;
+  MoiDescriptorSgprRequirements scalar_requirements;
   MoiDescriptorPrivateRequirements private_requirements;
   for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
     const AtomicRecordCandidate &candidate = candidates[candidate_index];
@@ -142,8 +144,24 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
       if (!spill)
         continue;
     }
-    selected_candidates.push_back(
-        {std::move(planned_candidate), *resources, address_plan, std::move(spill)});
+    ConSanOptions candidate_options = options;
+    candidate_options.scratch_vgpr = resources->base;
+    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+                                             resources->owner_descriptor_file_offsets)) {
+      result.warnings.emplace_back(
+          "ConSan MOI atomic record patch found no common transient SGPR assignment");
+      continue;
+    }
+    std::optional<InlineSgprSpillSequence> scalar_spill;
+    if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
+      scalar_spill = build_inline_sgpr_spill_sequence(
+          *resources, candidate_options, spill_managers, arch, result.warnings,
+          /*private_layout_base=*/std::nullopt, /*spill_count=*/4u);
+      if (!scalar_spill)
+        continue;
+    }
+    selected_candidates.push_back({std::move(planned_candidate), *resources, address_plan,
+                                   std::move(spill), std::move(scalar_spill)});
   }
   // Do not prune a release based on module-local absence of an acquire. Real
   // applications can split producers and consumers across code objects, and
@@ -156,10 +174,25 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     if (planned.spill) {
       note_spill_descriptor_requirements(private_requirements, planned.resources, *planned.spill);
     }
+    if (planned.scalar_spill) {
+      for (uint64_t descriptor_offset : planned.resources.owner_descriptor_file_offsets) {
+        auto [it, inserted] = private_requirements.emplace(
+            descriptor_offset, planned.scalar_spill->total_private_bytes);
+        if (!inserted)
+          it->second = std::max(it->second, planned.scalar_spill->total_private_bytes);
+      }
+    }
     note_descriptor_requirements(descriptor_requirements, planned.resources);
+    ConSanOptions candidate_options = options;
+    if (apply_moi_transient_sgpr_assignment(candidate_options,
+                                            planned.resources.owner_descriptor_file_offsets)) {
+      note_moi_sgpr_requirements(scalar_requirements, planned.resources, candidate_options, arch);
+    }
   }
   if (!apply_descriptor_requirements(patcher, code_object, active_bytes, result,
                                      descriptor_requirements, arch, result.errors) ||
+      !apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements,
+                                          result.errors) ||
       !apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
                                            private_requirements, result.errors)) {
     return;
@@ -178,10 +211,17 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     const uint64_t return_text_offset = site.text_offset + site.size;
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
+    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+                                             planned.resources.owner_descriptor_file_offsets)) {
+      result.errors.emplace_back(
+          "ConSan MOI atomic record patch lost its transient SGPR assignment");
+      return;
+    }
     uint32_t guest_instruction_offset = 0;
     auto cave_words = build_atomic_record_cave_words(
         active_bytes, candidate, planned.address_plan, candidate_options,
-        planned.spill ? &*planned.spill : nullptr, arch, record_index,
+        planned.spill ? &*planned.spill : nullptr,
+        planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
         layout.atomic_record_capacity, layout.atomic_records_offset, cave_text_offset,
         return_text_offset, guest_instruction_offset, result.errors);
     if (!cave_words)
@@ -255,6 +295,10 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     if (planned.spill) {
       info.spilled_vgpr_count = planned.spill->vgpr_count;
       info.required_private_segment_size = planned.spill->total_private_bytes;
+    }
+    if (planned.scalar_spill) {
+      info.required_private_segment_size =
+          std::max(info.required_private_segment_size, planned.scalar_spill->total_private_bytes);
     }
     patches.push_back(info);
     ++record_index;

@@ -1916,50 +1916,65 @@ TEST(ConSanMoi, RecordReplayOwnerLocalExecSaveRequiresCommonWindowForSharedHelpe
       }));
 }
 
-TEST(ConSanMoi, RecordReplaySpillsExecVccStateWithSeparateDeadDenseRouter) {
-  const std::array<uint16_t, 4> dead = {0u, 1u, 4u, 6u};
-  std::vector<uint32_t> words;
-  for (uint32_t index = 0; index < 9u; ++index) {
-    words.push_back(0xD8340000u);
-    words.push_back(0x00000000u); // ds_store_b32 v0, v0
+TEST(ConSanMoi, RecordReplaySpillsExecVccStateOnGfx12) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
+    SCOPED_TRACE(arch);
+    const std::array<uint16_t, 4> dead = {0u, 1u, 4u, 6u};
+    const uint32_t access_count = arch == ROCJITSU_CODE_ARCH_GFX1250 ? 9u : 1u;
+    std::vector<uint32_t> words;
+    for (uint32_t index = 0; index < access_count; ++index) {
+      words.push_back(0xD8340000u);
+      words.push_back(0x00000000u); // ds_store_b32 v0, v0
+    }
+    if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
+      words.push_back(0xBF940000u); // s_barrier_wait -1
+      words.push_back(0xBF940000u); // s_barrier_wait -1
+    }
+    if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
+      for (uint32_t padding = 0; padding < 16u; ++padding)
+        words.push_back(build_s_nop(0, arch));
+    }
+    for (uint16_t sgpr = 0; sgpr < 106u; ++sgpr) {
+      if (std::ranges::find(dead, sgpr) == dead.end())
+        words.push_back(build_s_mov_b32(/*sdst=*/0u, sgpr, arch));
+    }
+    words.push_back(build_s_endpgm(arch));
+    const std::vector<uint8_t> bytes = arch == ROCJITSU_CODE_ARCH_GFX1250
+                                           ? make_gfx1250_code_object(words)
+                                           : make_rdna4_lds_code_object(words);
+
+    ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+    options.scratch_vgpr = 8;
+    options.moi_owner_vgpr = 40;
+    options.moi_epoch_vgpr = 41;
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(
+        access_count, 0, 0, 0, arch == ROCJITSU_CODE_ARCH_RDNA4 ? 2u : 0u);
+    options.moi_track_barriers = arch == ROCJITSU_CODE_ARCH_RDNA4;
+    options.moi_track_atomics = false;
+    options.max_patches = access_count;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+    const ConSanMoiTransientSgprAssignment &assignment =
+        result.resolved_moi_transient_sgpr_assignments.front();
+    EXPECT_TRUE(assignment.spill_backed);
+    EXPECT_EQ(assignment.indirect_pc_sgpr, 0u);
+    EXPECT_EQ(assignment.indirect_scc_sgpr, 4u);
+    EXPECT_EQ(assignment.dispatch_key_sgpr, 6u);
+    EXPECT_EQ(assignment.call_return_sgpr, assignment.indirect_pc_sgpr);
+    EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                                 &ConSanPatchInfo::kind),
+              access_count);
+    EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+      return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore &&
+             patch.required_private_segment_size > 0u;
+    }));
+    EXPECT_TRUE(result.final_validation_passed);
   }
-  for (uint16_t sgpr = 0; sgpr < 106u; ++sgpr) {
-    if (std::ranges::find(dead, sgpr) == dead.end())
-      words.push_back(build_s_mov_b32(/*sdst=*/0u, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
-  }
-  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
-  const std::vector<uint8_t> bytes = make_gfx1250_code_object(words);
-
-  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
-  options.moi_report_buffer_address = 0x123456780000ull;
-  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(9, 0, 0, 0);
-  options.moi_track_barriers = false;
-  options.moi_track_atomics = false;
-  options.max_patches = 9u;
-
-  const ConSanResult result = try_patch_consan(bytes, options);
-
-  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
-  const ConSanMoiTransientSgprAssignment &assignment =
-      result.resolved_moi_transient_sgpr_assignments.front();
-  EXPECT_TRUE(assignment.spill_backed);
-  EXPECT_EQ(assignment.indirect_pc_sgpr, 0u);
-  EXPECT_EQ(assignment.indirect_scc_sgpr, 4u);
-  EXPECT_EQ(assignment.dispatch_key_sgpr, 6u);
-  EXPECT_EQ(assignment.call_return_sgpr, assignment.indirect_pc_sgpr);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
-                               &ConSanPatchInfo::kind),
-            9u);
-  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore &&
-           patch.required_private_segment_size > 0u;
-  }));
-  EXPECT_TRUE(result.final_validation_passed);
 }
 
 TEST(ConSanMoi, RecordReplayRejectsSpillRouterWithoutDeadPairAndScalars) {
@@ -3110,39 +3125,49 @@ TEST(ConSanMoi, Gfx1250IsolatedLdsReleaseIsRetainedWithAccessReplay) {
   }));
 }
 
-TEST(ConSanMoi, Gfx1250DenseAccessesShareOneWordCallRelay) {
-  constexpr uint32_t kAccessCount = 9u;
-  std::vector<uint32_t> text_words(
-      8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250));
-  for (uint32_t index = 0; index < kAccessCount; ++index) {
-    text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
-    text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+TEST(ConSanMoi, Rdna4FamilyDenseAccessesShareOneWordCallRelay) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
+    SCOPED_TRACE(arch);
+    constexpr uint32_t kAccessCount = 9u;
+    std::vector<uint32_t> text_words(8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, arch));
+    for (uint32_t index = 0; index < kAccessCount; ++index) {
+      text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
+      text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+    }
+    if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
+      // Keep the sites near the entry and the appended relay beyond SOPP
+      // reach, requiring the RDNA4 dense-relay recovery path.
+      text_words.resize(33'000u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, arch));
+    }
+    text_words.push_back(build_s_endpgm(arch));
+    std::vector<uint8_t> bytes =
+        arch == ROCJITSU_CODE_ARCH_GFX1250
+            ? make_gfx1250_code_object(text_words, "gfx1250_dense_record_replay")
+            : make_rdna4_lds_code_object(text_words, "rdna4_dense_record_replay");
+
+    ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+    options.scratch_vgpr = 8;
+    options.moi_exec_save_sgpr = 80;
+    options.moi_owner_vgpr = 40;
+    options.moi_epoch_vgpr = 41;
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
+    options.moi_track_barriers = false;
+    options.moi_track_atomics = false;
+    options.max_patches = kAccessCount;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                                 &ConSanPatchInfo::kind),
+              kAccessCount);
+    EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                                 &ConSanPatchInfo::kind),
+              2u); // One local relay plus one appended return-PC dispatcher.
   }
-  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
-  std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "gfx1250_dense_record_replay");
-
-  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.scratch_vgpr = 8;
-  options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
-  options.moi_report_buffer_address = 0x123456780000ull;
-  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
-  options.moi_track_barriers = false;
-  options.moi_track_atomics = false;
-  options.max_patches = kAccessCount;
-
-  const ConSanResult result = try_patch_consan(bytes, options);
-
-  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
-                               &ConSanPatchInfo::kind),
-            kAccessCount);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            2u); // One local relay plus one appended return-PC dispatcher.
 }
 
 TEST(ConSanMoi, Gfx1250DenseAccessesPartitionRelayWindowsAcrossLargeKernel) {
@@ -3798,6 +3823,60 @@ TEST(ConSanMoi, AtomicRecordForcedSpillUsesPlannedPrivateWindow) {
   EXPECT_EQ(result.resource_plan_summary.spill_plans, 2u);
   EXPECT_EQ(result.resource_plan_summary.emitted_spill_patches, 2u);
   EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 40u);
+}
+
+TEST(ConSanMoi, AtomicRecordSpillsSpecialStateOnRdna4) {
+  std::vector<uint32_t> words = {
+      0xBFC90000u, // s_wait_storecnt_dscnt 0
+      0xEE0F0006u, 0x00880000u,
+      0x00000000u, // global_atomic_and_b32 v0, v1, s[6:7], no-return, device
+      0xEE0EC07Cu, 0x05080000u,
+      0x00001408u, // global_atomic_max_u32 v[8:9], v10, off offset:20, device
+      0xEE0AC000u, 0x00000000u,
+      0x00000000u, // global_inv scope:device
+  };
+  const std::array<uint16_t, 4> dead_router_sgprs = {0u, 1u, 4u, 5u};
+  for (uint16_t sgpr = 0; sgpr < 106u; ++sgpr) {
+    if (std::ranges::find(dead_router_sgprs, sgpr) != dead_router_sgprs.end())
+      continue;
+    const auto use =
+        build_s_cmp_eq_u32(sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_TRUE(use);
+    words.push_back(*use);
+  }
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = true;
+  options.max_patches = 2u;
+  options.scratch_vgpr = 16u;
+  options.moi_owner_vgpr = 30u;
+  options.moi_epoch_vgpr = 31u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0, 0, 2, 2);
+
+  const ConSanResult result =
+      try_patch_consan(make_rdna4_lds_code_object(words, "rdna4_atomic_scalar_spill"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  EXPECT_TRUE(result.resolved_moi_transient_sgpr_assignments.front().spill_backed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord,
+                               &ConSanPatchInfo::kind),
+            2u);
+  EXPECT_TRUE(std::ranges::all_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind != ConSanPatchKind::TrampolineMoiAtomicRecord ||
+           patch.required_private_segment_size > 0u;
+  }));
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
+                               &ConSanPatchInfo::kind),
+            1u);
+  EXPECT_TRUE(std::ranges::all_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind != ConSanPatchKind::TrampolineMoiFenceRecord ||
+           patch.required_private_segment_size > 0u;
+  }));
+  EXPECT_TRUE(result.final_validation_passed);
 }
 
 TEST(ConSanMoi, Cdna4AtomicRecordForcedSpillUsesNativePrivateWindow) {

@@ -329,10 +329,10 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_atomic_record_cave_words(
     std::span<const uint8_t> bytes, const AtomicRecordCandidate &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const ConSanOptions &options,
-    const VgprSpillSequence *spill, rj_code_arch_t arch, uint32_t record_index,
-    uint32_t atomic_record_capacity, size_t atomic_records_offset, uint64_t cave_text_offset,
-    uint64_t return_text_offset, uint32_t &guest_instruction_offset,
-    std::vector<std::string> &errors) {
+    const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
+    rj_code_arch_t arch, uint32_t record_index, uint32_t atomic_record_capacity,
+    size_t atomic_records_offset, uint64_t cave_text_offset, uint64_t return_text_offset,
+    uint32_t &guest_instruction_offset, std::vector<std::string> &errors) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI atomic record patch requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
@@ -402,6 +402,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
                 (spill ? spill->save_words.size() + spill->restore_words.size() : 0u));
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
+  if (scalar_spill)
+    words.insert(words.end(), scalar_spill->save_words.begin(), scalar_spill->save_words.end());
   if (address_plan.requires_materialization()) {
     const auto special_state = moi_special_state_sgprs(options);
     if (!special_state) {
@@ -628,6 +630,9 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     return std::nullopt;
   }
 
+  if (scalar_spill)
+    words.insert(words.end(), scalar_spill->restore_words.begin(),
+                 scalar_spill->restore_words.end());
   if (spill)
     words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
   if (record_before_guest_release) {

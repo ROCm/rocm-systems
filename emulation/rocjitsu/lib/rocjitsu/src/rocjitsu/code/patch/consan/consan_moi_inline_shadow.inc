@@ -16,9 +16,9 @@ build_inline_sgpr_spill_sequence(const ResolvedMoiScratchPlan &resources,
        !options.automatic_moi_record_replay_sgpr_spill) ||
       !options.moi_exec_save_sgpr)
     return std::nullopt;
-  if (arch != ROCJITSU_CODE_ARCH_GFX1250 || resources.owner_descriptor_file_offsets.empty()) {
+  if (!is_rdna4_family_arch(arch) || resources.owner_descriptor_file_offsets.empty()) {
     warnings.emplace_back(
-        "ConSan MOI spill-backed scalar state requires at least one gfx1250 kernel owner");
+        "ConSan MOI spill-backed scalar state requires at least one gfx12 kernel owner");
     return std::nullopt;
   }
   const auto private_limit = address_free_scratch_private_limit(arch);

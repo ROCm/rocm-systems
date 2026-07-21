@@ -56,11 +56,13 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     ResolvedMoiScratchPlan resources;
     ConSanMoiAtomicAddressPlan address_plan;
     std::optional<VgprSpillSequence> spill;
+    std::optional<InlineSgprSpillSequence> scalar_spill;
   };
   std::vector<PlannedFenceRecord> selected;
   MoiResourcePlanningState resource_state(bytes, arch, options, result);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;
+  MoiDescriptorSgprRequirements scalar_requirements;
   MoiDescriptorPrivateRequirements private_requirements;
   for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
     if (selected.size() == max_candidates)
@@ -97,8 +99,18 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       continue;
     }
     ResolvedMoiScratchPlan active_resources = *resources;
+    ConSanOptions candidate_options = options;
+    candidate_options.scratch_vgpr = resources->base;
+    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+                                             resources->owner_descriptor_file_offsets)) {
+      result.warnings.emplace_back(
+          "ConSan MOI fence record patch found no common transient SGPR assignment");
+      continue;
+    }
     std::optional<VgprSpillSequence> spill;
-    if (resources->source == ConSanRegisterAllocationSource::SpillRequired) {
+    std::optional<InlineSgprSpillSequence> scalar_spill;
+    if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
+        candidate_options.automatic_moi_record_replay_sgpr_spill) {
       uint32_t active_private_size = 0u;
       bool active_descriptor_missing = false;
       for (uint64_t descriptor_offset : resources->owner_descriptor_file_offsets) {
@@ -125,11 +137,26 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       if (active_descriptor_missing)
         continue;
       active_resources.original_private_segment_size = active_private_size;
+    }
+    if (resources->source == ConSanRegisterAllocationSource::SpillRequired) {
       spill = build_moi_spill_sequence(result, active_resources, options, spill_managers, arch,
                                        result.warnings);
       if (!spill)
         continue;
       note_spill_descriptor_requirements(private_requirements, active_resources, *spill);
+    }
+    if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
+      scalar_spill = build_inline_sgpr_spill_sequence(
+          active_resources, candidate_options, spill_managers, arch, result.warnings,
+          active_resources.original_private_segment_size, /*spill_count=*/4u);
+      if (!scalar_spill)
+        continue;
+      for (uint64_t descriptor_offset : active_resources.owner_descriptor_file_offsets) {
+        auto [it, inserted] =
+            private_requirements.emplace(descriptor_offset, scalar_spill->total_private_bytes);
+        if (!inserted)
+          it->second = std::max(it->second, scalar_spill->total_private_bytes);
+      }
     }
     const ConSanMoiAtomicAddressPlan address_plan = plan_consan_moi_atomic_address(
         candidate.communication_site, resources->base, resources->count, resources->source, arch);
@@ -146,7 +173,9 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
         continue;
     }
     note_descriptor_requirements(descriptor_requirements, active_resources);
-    selected.push_back({std::move(candidate), active_resources, address_plan, std::move(spill)});
+    note_moi_sgpr_requirements(scalar_requirements, active_resources, candidate_options, arch);
+    selected.push_back({std::move(candidate), active_resources, address_plan, std::move(spill),
+                        std::move(scalar_spill)});
   }
   if (selected.empty()) {
     result.warnings.emplace_back("ConSan MOI fence record patch found no patchable fences");
@@ -154,6 +183,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
   }
   if (!apply_descriptor_requirements(patcher, code_object, active_bytes, result,
                                      descriptor_requirements, arch, result.errors) ||
+      !apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements,
+                                          result.errors) ||
       !apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
                                            private_requirements, result.errors))
     return;
@@ -207,9 +238,16 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     const uint64_t return_text_offset = fence.text_offset + fence.size;
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
+    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+                                             planned.resources.owner_descriptor_file_offsets)) {
+      result.errors.emplace_back(
+          "ConSan MOI fence record patch lost its transient SGPR assignment");
+      return;
+    }
     auto cave_words = build_fence_record_cave_words(
         active_bytes, planned.candidate, planned.address_plan, candidate_options,
-        planned.spill ? &*planned.spill : nullptr, arch, record_index, record_count,
+        planned.spill ? &*planned.spill : nullptr,
+        planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index, record_count,
         layout.fence_records_offset, cave_text_offset, return_text_offset, std::nullopt,
         result.errors);
     if (!cave_words)
@@ -236,8 +274,9 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       if (dense_relay) {
         cave_words = build_fence_record_cave_words(
             active_bytes, planned.candidate, planned.address_plan, candidate_options,
-            planned.spill ? &*planned.spill : nullptr, arch, record_index, record_count,
-            layout.fence_records_offset, cave_text_offset, return_text_offset,
+            planned.spill ? &*planned.spill : nullptr,
+            planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
+            record_count, layout.fence_records_offset, cave_text_offset, return_text_offset,
             static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u), result.errors);
         if (!cave_words)
           return;
@@ -289,9 +328,9 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
                 anchor_words.size() * sizeof(uint32_t));
     if (has_indirect_entry_island &&
         !emit_moi_local_indirect_entry_island(
-            new_text, indirect_entry_island, placement->body_offset, fence.text_offset, options,
-            planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
-            "ConSan MOI fence record patch")) {
+            new_text, indirect_entry_island, placement->body_offset, fence.text_offset,
+            candidate_options, planned.resources.owner_descriptor_file_offsets, arch, patches,
+            result.errors, "ConSan MOI fence record patch")) {
       return;
     }
     append_words_bytes(new_text, *cave_words);
@@ -366,6 +405,10 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     if (planned.spill) {
       info.spilled_vgpr_count = planned.spill->vgpr_count;
       info.required_private_segment_size = planned.spill->total_private_bytes;
+    }
+    if (planned.scalar_spill) {
+      info.required_private_segment_size =
+          std::max(info.required_private_segment_size, planned.scalar_spill->total_private_bytes);
     }
     patches.push_back(std::move(info));
     ++record_index;
@@ -868,7 +911,7 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
       }
     }
   }
-  if (state.arch == ROCJITSU_CODE_ARCH_GFX1250 && options.automatic_moi_partial_exec_save_sgprs &&
+  if (is_rdna4_family_arch(state.arch) && options.automatic_moi_partial_exec_save_sgprs &&
       options.moi_exec_save_sgpr) {
     const uint16_t exec_base = *options.moi_exec_save_sgpr;
     for (ConSanCandidateResourcePlan &plan : result.resource_plans) {

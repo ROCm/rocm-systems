@@ -110,6 +110,14 @@ public:
     return offset;
   }
 
+  [[nodiscard]] bool has_reachable(uint64_t anchor_offset, uint32_t claim_words = 0u) const {
+    claim_words = claim_words == 0u ? island_words_ : claim_words;
+    return std::ranges::any_of(available_offsets_, [&](uint64_t candidate) {
+      return claim_fits(candidate, claim_words) &&
+             compute_sopp_branch_simm16(anchor_offset, candidate).has_value();
+    });
+  }
+
   [[nodiscard]] std::optional<uint64_t>
   claim_reachable_from_all(std::span<const uint64_t> anchor_offsets, uint32_t claim_words = 0u) {
     if (anchor_offsets.empty())
@@ -143,6 +151,8 @@ public:
     retire_overlaps(offset, claim_words);
     return offset;
   }
+
+  void reserve(uint64_t offset, uint32_t words) { retire_overlaps(offset, words); }
 
 private:
   [[nodiscard]] bool claim_fits(uint64_t offset, uint32_t claim_words) const {
@@ -1493,6 +1503,8 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   };
   for (const ConSanMoiCandidate &candidate : result.moi_candidates)
     include_site(candidate.text_offset);
+  for (const ConSanCandidateResourcePlan &plan : result.resource_plans)
+    include_site(plan.text_offset);
   for (const ConSanSiteDispositionRecord &site : result.site_dispositions) {
     if (site.disposition == ConSanSiteDisposition::Supported)
       include_site(site.text_offset);
@@ -1664,7 +1676,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       }
     }
     if (!selected && options.moi_engine == ConSanMoiEngine::RecordReplay &&
-        arch == ROCJITSU_CODE_ARCH_GFX1250 && !options.moi_dynamic_stack_spill &&
+        is_rdna4_family_arch(arch) && !options.moi_dynamic_stack_spill &&
         address_free_scratch_private_limit(arch)) {
       const auto reserved = [&](uint16_t base, uint16_t width) {
         return (options.moi_owner_sgpr &&
@@ -1844,6 +1856,8 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   };
   for (const ConSanMoiCandidate &candidate : result.moi_candidates)
     include_site(candidate.text_offset);
+  for (const ConSanCandidateResourcePlan &plan : result.resource_plans)
+    include_site(plan.text_offset);
   for (const ConSanSiteDispositionRecord &site : result.site_dispositions) {
     if (site.disposition == ConSanSiteDisposition::Supported)
       include_site(site.text_offset);
@@ -2076,7 +2090,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   // This is deliberately more conservative than site-local liveness: the
   // retained window is safe across entry relays and every guest instruction
   // in each admitted kernel.
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+  if (is_rdna4_family_arch(arch)) {
     const int32_t last_base = static_cast<int32_t>((ordinary_sgpr_limit - count) & ~1u);
     for (int32_t base = last_base; base >= 0; base -= 2) {
       const uint16_t candidate = static_cast<uint16_t>(base);
@@ -2115,8 +2129,8 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   // which to seed the ordinary high-window fallback. Seed component planning
   // with a placeholder; every admitted owner must replace it with either a
   // liveness-dead window or the spill-backed Record/Replay layout.
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250 && (options.moi_engine == ConSanMoiEngine::RecordReplay ||
-                                             options.moi_engine == ConSanMoiEngine::InlineShadow)) {
+  if (is_rdna4_family_arch(arch) && (options.moi_engine == ConSanMoiEngine::RecordReplay ||
+                                     options.moi_engine == ConSanMoiEngine::InlineShadow)) {
     options.moi_exec_save_sgpr = 0u;
     options.automatic_moi_exec_save_sgprs = true;
     options.automatic_moi_partial_exec_save_sgprs = true;

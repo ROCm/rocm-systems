@@ -2018,14 +2018,13 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   result.modified = true;
 }
 
-[[nodiscard]] std::optional<std::vector<uint32_t>>
-build_fence_record_cave_words(std::span<const uint8_t> bytes, const FenceRecordCandidate &candidate,
-                              const ConSanMoiAtomicAddressPlan &address_plan,
-                              const ConSanOptions &options, const VgprSpillSequence *spill,
-                              rj_code_arch_t arch, uint32_t record_index, uint32_t record_count,
-                              size_t fence_records_offset, uint64_t cave_text_offset,
-                              uint64_t return_text_offset, std::optional<uint16_t> call_return_sgpr,
-                              std::vector<std::string> &errors) {
+[[nodiscard]] std::optional<std::vector<uint32_t>> build_fence_record_cave_words(
+    std::span<const uint8_t> bytes, const FenceRecordCandidate &candidate,
+    const ConSanMoiAtomicAddressPlan &address_plan, const ConSanOptions &options,
+    const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
+    rj_code_arch_t arch, uint32_t record_index, uint32_t record_count, size_t fence_records_offset,
+    uint64_t cave_text_offset, uint64_t return_text_offset,
+    std::optional<uint16_t> call_return_sgpr, std::vector<std::string> &errors) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI fence record patch requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
@@ -2099,6 +2098,8 @@ build_fence_record_cave_words(std::span<const uint8_t> bytes, const FenceRecordC
         static_cast<uint8_t>(*vgpr_msb_mode), 0u, arch));
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
+  if (scalar_spill)
+    words.insert(words.end(), scalar_spill->save_words.begin(), scalar_spill->save_words.end());
   if (address_plan.requires_materialization()) {
     const auto special_state = moi_special_state_sgprs(options);
     if (!special_state) {
@@ -2167,6 +2168,9 @@ build_fence_record_cave_words(std::span<const uint8_t> bytes, const FenceRecordC
     errors.emplace_back("ConSan MOI fence record patch could not restore VCC/SCC");
     return std::nullopt;
   }
+  if (scalar_spill)
+    words.insert(words.end(), scalar_spill->restore_words.begin(),
+                 scalar_spill->restore_words.end());
   if (spill)
     words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
   if (select_low_vgpr_bank)
