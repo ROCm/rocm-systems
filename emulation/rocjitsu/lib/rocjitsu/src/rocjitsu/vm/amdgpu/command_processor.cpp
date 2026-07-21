@@ -177,22 +177,7 @@ bool plan_cluster_workgroups(const DispatchEntry &entry, uint32_t cluster_base_l
 bool sgpr_count_is_descriptor_encoded(rj_code_arch_t arch, uint32_t sgpr_gran) {
   if (sgpr_gran != 0)
     return true;
-
-  /*
-   * \NPI new ISA family: classify the new arch for CP-visible behavior here \
-   * (RDNA-style encodings return false; CDNA-style fall through to the default).
-   */
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-  case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
-    return false;
-  default:
-    return true;
-  }
+  return isa_properties(arch).descriptor_sgpr_count_encoded;
 }
 
 } // namespace
@@ -309,7 +294,6 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     if (pkt.enable_wg_id_z)
       cu->write_sgpr(sbase + sys_idx++, wg_id_z);
   }
-
   const auto properties = isa_properties(cu->arch());
   if (properties.uses_ttmp_workgroup_ids) {
     // The simulator aliases TTMP scalar selectors into the wavefront SGPR
@@ -481,19 +465,15 @@ void CommandProcessor::register_queue(HwQueue queue) {
       engine()->primary_release();
       is_primary_ = false;
     }
-    // Start the doorbell poll thread for KFD (host-accessible) queues under the
-    // same lock that guards doorbell_thread_'s companion state. Internal test
-    // queues inject doorbell events directly via schedule_event_now(). Starting the
-    // jthread while holding hw_queue_mutex_ is safe: the new thread's first action
-    // (scan_doorbells) takes hw_queue_mutex_, so it simply blocks until this scope
-    // releases. Holding the lock also removes a data race on doorbell_thread_ if a
-    // second register_queue ever runs concurrently.
-    if (start_poll && !doorbell_thread_.joinable()) {
-      util::Logger::cp(
-          [&](auto &os) { os << std::format("{}: STARTING doorbell thread", name()); });
-      doorbell_thread_ = std::jthread([this](std::stop_token stop) { doorbell_poll_loop(stop); });
-    }
   }
+  // Start (or restart) the doorbell poll thread for KFD (host-accessible) queues
+  // AFTER releasing hw_queue_mutex_. ensure_doorbell_monitor() serializes on its
+  // own doorbell_thread_mutex_ and may join a monitor that self-exited when the
+  // previous last queue was destroyed; joining while holding hw_queue_mutex_ could
+  // deadlock against that exiting monitor's final scan. Internal test queues inject
+  // doorbell events directly via schedule_event_now() and need no monitor.
+  if (start_poll)
+    ensure_doorbell_monitor();
 }
 
 void CommandProcessor::unregister_queue(uint32_t queue_id, uint32_t process_id) {
@@ -531,11 +511,39 @@ void CommandProcessor::set_doorbell_base(uint32_t process_id, void *base) {
   }
 }
 
-void CommandProcessor::stop_doorbell_monitor() {
+void CommandProcessor::ensure_doorbell_monitor() {
+  std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
+  // A monitor is already servicing this CP's queues — nothing to do. (The
+  // register→ring window is fine: the live monitor scans every registered queue
+  // each pass, so it will pick up the queue this call just added.)
+  if (doorbell_running_)
+    return;
+  // No monitor is running. If a previous one self-exited (it saw the last
+  // host-accessible queue destroyed) its jthread is joinable-but-finished; join it
+  // here before launching a fresh one so the handle does not leak. request_stop()
+  // is harmless on an already-returned thread and makes the join immediate.
   if (doorbell_thread_.joinable()) {
     doorbell_thread_.request_stop();
     doorbell_thread_.join();
   }
+  util::Logger::cp([&](auto &os) { os << std::format("{}: STARTING doorbell thread", name()); });
+  // Construct the thread BEFORE setting doorbell_running_: if the jthread
+  // constructor throws (std::system_error on thread-creation failure) the flag
+  // must stay false so a later ensure_doorbell_monitor() retries instead of
+  // no-oping forever. We still hold doorbell_thread_mutex_, and the loop's
+  // self-exit path only clears the flag under a TRY-lock of that mutex, so the
+  // new thread cannot observe or clear doorbell_running_ until we release here.
+  doorbell_thread_ = std::jthread([this](std::stop_token stop) { doorbell_poll_loop(stop); });
+  doorbell_running_ = true;
+}
+
+void CommandProcessor::stop_doorbell_monitor() {
+  std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
+  if (doorbell_thread_.joinable()) {
+    doorbell_thread_.request_stop();
+    doorbell_thread_.join();
+  }
+  doorbell_running_ = false;
 }
 
 uint64_t CommandProcessor::read_gpu_u64(uint64_t va, uint32_t vmid) const {
@@ -609,6 +617,53 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
   // flag re-read on some iterations (an early continue before the retry check) would
   // reintroduce a lost-wakeup.
   while (!stop.stop_requested()) {
+    // Self-exit once this CP owns no host-accessible queue. Destroying the last
+    // such queue does NOT join this thread (that join could deadlock against a
+    // monitor mid-iteration inside engine/event code), so the monitor must retire
+    // itself instead of idling forever at the 100us cadence.
+    //
+    // Acquire doorbell_thread_mutex_ with TRY-lock, never a blocking lock: a
+    // concurrent stop_doorbell_monitor() holds that mutex while it join()s this very
+    // thread, so a blocking acquire here would deadlock (it waits for the mutex; the
+    // joiner waits for us to return). A failed try means another lifecycle path owns
+    // the mutex right now — either stop_doorbell_monitor() (which has already issued
+    // request_stop(), so the top-of-loop stop check retires us next turn) or
+    // ensure_doorbell_monitor() (which is only inspecting/starting the monitor). In
+    // both cases deferring this exit check one 100us iteration is harmless. When the
+    // try succeeds and the queue set has no host-accessible queue and no retry is
+    // pending (a stall/invalid retry is still in-flight work), clear doorbell_running_
+    // and return; the lock releases as the stack unwinds. A later
+    // ensure_doorbell_monitor() reaps this exited jthread and starts a fresh one.
+    {
+      std::unique_lock<std::mutex> tlock(doorbell_thread_mutex_, std::try_to_lock);
+      if (tlock.owns_lock()) {
+        // has_kfd_queues() is the dominant exit guard: it is read under
+        // hw_queue_mutex_, atomically with the queue vector that register_queue()/
+        // unregister_queue() mutate, so the monitor never retires while a
+        // host-accessible queue is live. The two retry flags are a conservative
+        // backstop read in the same critical section. Their SETTERS run under
+        // hw_queue_mutex_ (invalid_pending_ in fetch_from_queue; stall_pending_ via
+        // arm_stall_recheck, itself gated on has_kfd_queues()), but handle_doorbell
+        // CLEARS them at entry without the lock, so a flag read here is not perfectly
+        // serialized against a clear. That is harmless: while any queue is live the
+        // has_kfd_queues() term keeps should_exit false regardless of the flags, and
+        // once no host-accessible queue remains no further retry can be armed, so
+        // dropping a stale pending flag at exit forfeits nothing real.
+        bool should_exit;
+        {
+          std::lock_guard<std::recursive_mutex> qlock(hw_queue_mutex_);
+          should_exit = !has_kfd_queues() && !invalid_pending_.load(std::memory_order_acquire) &&
+                        !stall_pending_.load(std::memory_order_acquire);
+        }
+        if (should_exit) {
+          util::Logger::cp([&](auto &os) {
+            os << std::format("{}: doorbell monitor self-exit (no KFD queues)", name());
+          });
+          doorbell_running_ = false;
+          return;
+        }
+      }
+    }
     bool doorbell_changed = scan_doorbells();
     // Retry on a pending INVALID packet (the runtime has not finished writing it
     // yet) OR a pending barrier/dependency stall (waiting on a signal a peer rank
@@ -1277,27 +1332,32 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
       cu->flush_all(queue.process_id);
   }
 
-  std::string kernel_sym;
+  std::string kernel_symbol;
   if (host_accessible && memory_) {
-    auto [range_base, range_size] = memory_->find_host_range(pkt.kernel_object, queue.process_id);
-    auto *mapped_page = memory_->resolve_host_ptr(pkt.kernel_object, queue.process_id);
-    if (range_base != 0 && mapped_page) {
-      auto *ko = mapped_page + (pkt.kernel_object & GpuMemory::PAGE_MASK);
-      auto *range_start = reinterpret_cast<const uint8_t *>(range_base);
-      auto *elf = find_elf_base(ko, range_start);
-      if (elf) {
-        uint64_t accessible = range_size - static_cast<uint64_t>(elf - range_start);
-        kernel_sym = find_kernel_symbol(ko, elf, accessible);
+    auto [host_range_base, host_range_size] =
+        memory_->find_host_range(pkt.kernel_object, queue.process_id);
+    auto *kernel_object_page = memory_->resolve_host_ptr(pkt.kernel_object, queue.process_id);
+    if (host_range_base != 0 && kernel_object_page) {
+      auto *kernel_object_host_ptr =
+          kernel_object_page + (pkt.kernel_object & GpuMemory::PAGE_MASK);
+      auto *host_range_begin = reinterpret_cast<const uint8_t *>(host_range_base);
+      auto *elf_base = find_elf_base(kernel_object_host_ptr, host_range_begin);
+      if (elf_base) {
+        uint64_t elf_accessible =
+            host_range_size - static_cast<uint64_t>(elf_base - host_range_begin);
+        kernel_symbol = find_kernel_symbol(kernel_object_host_ptr, elf_base, elf_accessible);
       }
     }
   }
+  std::string kernel_name = kernel_display_name(kernel_symbol);
   ++total_dispatched_;
 
   KernelDispatchInfo dispatch_info{};
   dispatch_info.dispatch_id = dp.dispatch_id;
   dispatch_info.kernel_object = pkt.kernel_object;
   dispatch_info.entry_pc = entry_pc;
-  dispatch_info.kernel_name = kernel_sym;
+  dispatch_info.kernel_symbol = kernel_symbol;
+  dispatch_info.kernel_name = kernel_name;
   dispatch_info.grid_size_x = pkt.grid_size_x;
   dispatch_info.grid_size_y = pkt.grid_size_y;
   dispatch_info.grid_size_z = pkt.grid_size_z;
@@ -1311,20 +1371,22 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   plugin_group_->onAmdgpuDispatchPacketProcessed(dispatch_info);
 
   util::Logger::vm([&](auto &os) {
-    os << std::format("dispatch #{} d={} \"{}\" grid=[{},{},{}] wg=[{},{},{}] wgs={} "
+    os << std::format("dispatch #{} d={} \"{}\" symbol=\"{}\" grid=[{},{},{}] wg=[{},{},{}] wgs={} "
                       "lds={} mode={} sgpr={} vgpr={} sig={:#x}",
-                      total_dispatched_, dp.dispatch_id, kernel_sym.empty() ? "?" : kernel_sym,
-                      pkt.grid_size_x, pkt.grid_size_y, pkt.grid_size_z, pkt.workgroup_size_x,
-                      pkt.workgroup_size_y, pkt.workgroup_size_z, total_wgs,
-                      kd.group_segment_fixed_size, dp.wgp_mode ? "WGP" : "CU", dp.sgprs_per_wf,
-                      dp.vgprs_per_wf, dp.completion_signal);
+                      total_dispatched_, dp.dispatch_id, dispatch_info.kernelNameOrUnknown(),
+                      dispatch_info.kernelSymbolOrUnknown(), pkt.grid_size_x, pkt.grid_size_y,
+                      pkt.grid_size_z, pkt.workgroup_size_x, pkt.workgroup_size_y,
+                      pkt.workgroup_size_z, total_wgs, kd.group_segment_fixed_size,
+                      dp.wgp_mode ? "WGP" : "CU", dp.sgprs_per_wf, dp.vgprs_per_wf,
+                      dp.completion_signal);
   });
   util::Logger::cp([&](auto &os) {
-    os << std::format("DISPATCH #{} d={} \"{}\" wgs={} wfs/wg={} sig={:#x} pid={} ko={:#x} pc={:#x}"
-                      " kernarg={:#x} user_sgprs={}",
-                      total_dispatched_, dp.dispatch_id, kernel_sym.empty() ? "?" : kernel_sym,
-                      total_wgs, wfs_per_wg, dp.completion_signal, dp.process_id, pkt.kernel_object,
-                      entry_pc, dp.kernarg_addr, dp.num_user_sgprs);
+    os << std::format("DISPATCH #{} d={} \"{}\" symbol=\"{}\" wgs={} wfs/wg={} sig={:#x} pid={} "
+                      "ko={:#x} pc={:#x} kernarg={:#x} user_sgprs={}",
+                      total_dispatched_, dp.dispatch_id, dispatch_info.kernelNameOrUnknown(),
+                      dispatch_info.kernelSymbolOrUnknown(), total_wgs, wfs_per_wg,
+                      dp.completion_signal, dp.process_id, pkt.kernel_object, entry_pc,
+                      dp.kernarg_addr, dp.num_user_sgprs);
     if (memory_) {
       auto *ko_ptr = memory_->translate_debug(pkt.kernel_object, queue.process_id);
       auto *pc_ptr = memory_->translate_debug(entry_pc, queue.process_id);
