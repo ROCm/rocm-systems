@@ -28,6 +28,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    and_,
     create_engine,
     func,
     select,
@@ -547,21 +548,86 @@ class Database:
             .group_by(median_sort_subquery.c.kernel_uuid)
         ).subquery()
 
-        stall_reason_json_subquery = (
+        pc_sample_base = (
             select(
-                PCSampleStallReason.pc_sample_state_uuid,
-                func.json_group_object(
-                    PCSampleStallReasonLookup.text, PCSampleStallReason.count
-                ).label("stall_reason"),
+                CodeObjectStore.workload_id.label("workload_id"),
+                InstructionLine.kernel_uuid.label("kernel_uuid"),
+                InstructionLine.code_object_offset.label("offset"),
+                InstructionLine.instruction.label("instruction"),
+                InstructionLine.comment.label("source"),
+                PCSampleState.pc_sample_state_uuid.label("pc_sample_state_uuid"),
+                PCSampleState.total_count.label("total_count"),
+                PCSampleState.issue_count.label("issue_count"),
+                PCSampleState.stall_count.label("stall_count"),
             )
-            .select_from(PCSampleStallReason)
+            .select_from(PCSampleState)
+            .join(
+                InstructionLine,
+                PCSampleState.instruction_uuid == InstructionLine.instruction_uuid,
+            )
+            .join(
+                CodeObjectStore,
+                InstructionLine.code_object_uuid == CodeObjectStore.code_object_uuid,
+            )
+        ).cte("pc_sample_base")
+
+        pc_sample_identity = (
+            pc_sample_base.c.workload_id,
+            pc_sample_base.c.kernel_uuid,
+            pc_sample_base.c.offset,
+            pc_sample_base.c.instruction,
+            pc_sample_base.c.source,
+        )
+        pc_sample_totals = (
+            select(
+                *pc_sample_identity,
+                func.sum(pc_sample_base.c.total_count).label("count"),
+                func.sum(pc_sample_base.c.issue_count).label("count_issue"),
+                func.sum(pc_sample_base.c.stall_count).label("count_stall"),
+            )
+            .group_by(*pc_sample_identity)
+            .cte("pc_sample_totals")
+        )
+
+        pc_sample_stall_reason_totals = (
+            select(
+                *pc_sample_identity,
+                PCSampleStallReasonLookup.text.label("reason"),
+                func.sum(PCSampleStallReason.count).label("reason_count"),
+            )
+            .select_from(pc_sample_base)
+            .join(
+                PCSampleStallReason,
+                pc_sample_base.c.pc_sample_state_uuid
+                == PCSampleStallReason.pc_sample_state_uuid,
+            )
             .join(
                 PCSampleStallReasonLookup,
                 PCSampleStallReason.pc_sample_stall_reason_lookup_uuid
                 == PCSampleStallReasonLookup.pc_sample_stall_reason_lookup_uuid,
             )
-            .group_by(PCSampleStallReason.pc_sample_state_uuid)
-        ).subquery()
+            .group_by(*pc_sample_identity, PCSampleStallReasonLookup.text)
+            .cte("pc_sample_stall_reason_totals")
+        )
+
+        pc_sample_stall_reason_identity = (
+            pc_sample_stall_reason_totals.c.workload_id,
+            pc_sample_stall_reason_totals.c.kernel_uuid,
+            pc_sample_stall_reason_totals.c.offset,
+            pc_sample_stall_reason_totals.c.instruction,
+            pc_sample_stall_reason_totals.c.source,
+        )
+        pc_sample_stall_reason_json = (
+            select(
+                *pc_sample_stall_reason_identity,
+                func.json_group_object(
+                    pc_sample_stall_reason_totals.c.reason,
+                    pc_sample_stall_reason_totals.c.reason_count,
+                ).label("stall_reason"),
+            )
+            .group_by(*pc_sample_stall_reason_identity)
+            .cte("pc_sample_stall_reason_json")
+        )
 
         definitions: dict[str, Select[Any]] = {
             "kernel": select(
@@ -641,33 +707,38 @@ class Database:
                 MetricDefinition.metric_uuid == WorkloadMetricValue.metric_uuid,
             ),
             "pc_sampling": select(
-                CodeObjectStore.workload_id.label("workload_id"),
-                CodeObjectStore.pid.label("pid"),
-                Kernel.kernel_uuid.label("kernel_uuid"),
+                pc_sample_totals.c.workload_id,
+                pc_sample_totals.c.kernel_uuid,
                 Kernel.kernel_name,
-                InstructionLine.code_object_offset.label("offset"),
-                InstructionLine.instruction,
-                InstructionLine.comment.label("source"),
-                PCSampleState.total_count.label("count"),
-                PCSampleState.issue_count.label("count_issue"),
-                PCSampleState.stall_count.label("count_stall"),
-                stall_reason_json_subquery.c.stall_reason,
+                pc_sample_totals.c.offset,
+                pc_sample_totals.c.instruction,
+                pc_sample_totals.c.source,
+                pc_sample_totals.c.count,
+                pc_sample_totals.c.count_issue,
+                pc_sample_totals.c.count_stall,
+                pc_sample_stall_reason_json.c.stall_reason,
             )
-            .select_from(PCSampleState)
-            .join(
-                InstructionLine,
-                PCSampleState.instruction_uuid == InstructionLine.instruction_uuid,
-            )
-            .join(
-                CodeObjectStore,
-                InstructionLine.code_object_uuid == CodeObjectStore.code_object_uuid,
-            )
-            .join(Kernel, InstructionLine.kernel_uuid == Kernel.kernel_uuid)
-            # host_trap samples have no stall reasons, so the subquery is empty.
+            .select_from(pc_sample_totals)
+            .join(Kernel, pc_sample_totals.c.kernel_uuid == Kernel.kernel_uuid)
             .outerjoin(
-                stall_reason_json_subquery,
-                PCSampleState.pc_sample_state_uuid
-                == stall_reason_json_subquery.c.pc_sample_state_uuid,
+                pc_sample_stall_reason_json,
+                and_(
+                    pc_sample_totals.c.workload_id.is_not_distinct_from(
+                        pc_sample_stall_reason_json.c.workload_id
+                    ),
+                    pc_sample_totals.c.kernel_uuid.is_not_distinct_from(
+                        pc_sample_stall_reason_json.c.kernel_uuid
+                    ),
+                    pc_sample_totals.c.offset.is_not_distinct_from(
+                        pc_sample_stall_reason_json.c.offset
+                    ),
+                    pc_sample_totals.c.instruction.is_not_distinct_from(
+                        pc_sample_stall_reason_json.c.instruction
+                    ),
+                    pc_sample_totals.c.source.is_not_distinct_from(
+                        pc_sample_stall_reason_json.c.source
+                    ),
+                ),
             ),
         }
 
