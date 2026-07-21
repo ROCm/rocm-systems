@@ -69,6 +69,14 @@ inline constexpr uint32_t kSopcEncodingPrefix = 0x17E;
 inline constexpr uint32_t kSopkEncodingPrefix = 0xB;
 inline constexpr uint16_t kScalarPositiveInlineBase = 128;
 inline constexpr uint16_t kDelayAluSaluDep1 = 9;
+// Scalar-operand codes for special registers, used as the ssrc/sdst of a plain
+// s_mov to save/restore them across a probe call. VCC_LO and EXEC_LO are stable
+// across every AMDGPU generation; M0 moved (see scalar_operand_m0).
+inline constexpr uint16_t kScalarOperandVccLo = 106;
+inline constexpr uint16_t kScalarOperandExecLo = 126;
+// Inline-constant scalar source for -1 (all bits set); as a b64 source it sign-
+// extends to 0xFFFF'FFFF'FFFF'FFFF, i.e. `s_mov_b64 exec, -1` = all lanes active.
+inline constexpr uint16_t kScalarInlineNegOne = 193;
 /// @brief Pack a SOPP instruction word from its constituent fields.
 ///
 /// @param op      7-bit SOPP opcode.
@@ -296,6 +304,30 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 /// @brief Scalar source operand encoding for a non-negative inline integer.
 [[nodiscard]] inline constexpr uint16_t scalar_positive_inline_u32(uint16_t value) {
   return static_cast<uint16_t>(kScalarPositiveInlineBase + value);
+}
+
+/// @brief Scalar-operand code for M0 on @p arch.
+///
+/// M0 is operand 124 on gfx9 / gfx10.x (CDNA1-4, RDNA1/2) but was moved to 125
+/// on gfx11+ (RDNA3/3.5/4, gfx1250), where 124 became NULL. Callers that encode
+/// an s_mov touching M0 must use the per-arch code.
+[[nodiscard]] inline constexpr uint16_t scalar_operand_m0(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return 124;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return 125;
+  default:
+    throw util::UnimplementedInst("M0 operand code for target architecture");
+  }
 }
 
 /// @brief Compute the SOPP simm16 dword field for a branch from @p branch_pc
@@ -548,6 +580,15 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   }
 }
 
+/// @brief Get the s_mov_b64 opcode for a target ISA.
+[[nodiscard]] inline constexpr uint32_t sop1_op_mov_b64(rj_code_arch_t arch) {
+  switch (arch) {
+    ROCJITSU_COMMON_OPCODE_CASES(kSMovB64Sop1);
+  default:
+    throw util::UnimplementedInst("s_mov_b64 for target architecture");
+  }
+}
+
 /// @brief SOP2 opcode for s_cselect_b32 on @p arch.
 [[nodiscard]] inline constexpr uint32_t sop2_op_cselect_b32(rj_code_arch_t arch) {
   switch (arch) {
@@ -656,6 +697,12 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4)
 [[nodiscard]] inline constexpr uint32_t build_s_mov_b32(uint16_t sdst, uint16_t ssrc0,
                                                         rj_code_arch_t arch) {
   return build_sop1_encoding(arch, sop1_op_mov_b32(arch), sdst, ssrc0);
+}
+
+/// @brief Encode s_mov_b64 for the given target ISA (SGPR pair or EXEC/VCC).
+[[nodiscard]] inline constexpr uint32_t build_s_mov_b64(uint16_t sdst, uint16_t ssrc0,
+                                                        rj_code_arch_t arch) {
+  return build_sop1_encoding(arch, sop1_op_mov_b64(arch), sdst, ssrc0);
 }
 
 /// @brief Encode s_lshl_b32 for the given target ISA.
