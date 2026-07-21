@@ -108,7 +108,7 @@ flowchart TD
     X0["X0 DONE<br/>expansion corpus surveyed and<br/>aggregate four-profile contract defined"]
     XP0["XP0 DONE<br/>PyTorch/Triton TDM plus clustered-dispatch<br/>clean vertical passes all four profiles"]
     XP1["XP1 DONE<br/>torch.mode SuperCollider and Record/Replay<br/>full bundles accepted"]
-    XP1B["XP1B ACTIVE<br/>torch.mode Inline dynamic-LDS mirror gap isolated;<br/>dynamic-LDS-aware shadow selection in progress"]
+    XP1B["XP1B ACTIVE<br/>torch.mode Inline clean-complete with dynamic LDS;<br/>paired and reviewed-fault gates in progress"]
     XP4["XP4 DONE<br/>tagged LDS atomic address token plus isolated-release<br/>classification pass torch.mode clean"]
     XP5["XP5 DONE<br/>histogram Inline paired and reviewed-fault bundle<br/>green at 175-access denominator"]
     XP6["XP6 DONE<br/>histogram Record/Replay paired and fault bundle<br/>green at 175-access denominator"]
@@ -348,6 +348,15 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP1B advances within ACTIVE after commit `af3b46a020` closes the
+  dynamic-LDS Inline gap.  Hidden dynamic LDS now selects the external exact
+  shadow and private owner/epoch state automatically.  Clean-tree artifact
+  `consan-green-expansion-20260721-pytorch-mode-inline-dynamic-clean-065`
+  passes exact values and indices with 28,939/28,939 accesses, 4,446/4,446
+  barriers, zero dynamic undercoverage, and no diagnostics.  The STATUS cell
+  is blue; the Mermaid box remains blue/ACTIVE only for paired overhead and
+  reviewed-fault completion.
 
 - 2026-07-21: XP1B returns to ACTIVE after the latest `torch.mode` Inline
   experiment replaced its earlier contention hypothesis with an actionable
