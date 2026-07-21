@@ -155,6 +155,31 @@ __global__ void bf16_compare(float* val, unsigned* res, size_t size) {
   }
 }
 
+// Test NaN comparison semantics: for inputs where at least one operand is NaN the
+// ordered predicates (no 'u' suffix) must return false and the unordered predicates
+// ('u' suffix) must return true. Returns 1 only if every relation has the expected
+// result. Each a[i]/b[i] pair must have at least one NaN.
+__global__ void bf16_compare_nan(const float* a, const float* b, unsigned* res, size_t size) {
+  auto i = threadIdx.x;
+  if (i < size) {
+    const __hip_bfloat16 x = __float2bfloat16(a[i]);
+    const __hip_bfloat16 y = __float2bfloat16(b[i]);
+    const __hip_bfloat162 x2{x, x};
+    const __hip_bfloat162 y2{y, y};
+
+    // Ordered scalar predicates -> false for NaN.
+    const bool ordered = !__heq(x, y) && !__hne(x, y) && !__hlt(x, y) && !__hle(x, y) &&
+                         !__hgt(x, y) && !__hge(x, y);
+    // Unordered scalar predicates -> true for NaN.
+    const bool unordered = __hequ(x, y) && __hneu(x, y) && __hltu(x, y) && __hleu(x, y) &&
+                           __hgtu(x, y) && __hgeu(x, y);
+    // Ordered bool2 reductions -> false for NaN.
+    const bool ordered_bool2 = !__hbeq2(x2, y2) && !__hbne2(x2, y2);
+
+    res[i] = bool_to_unsigned(ordered && unordered && ordered_bool2);
+  }
+}
+
 // Convert to bits
 __global__ void bf16_conv_bits(float* val, unsigned short* res, size_t size) {
   auto i = threadIdx.x;
@@ -316,6 +341,36 @@ HIP_TEST_CASE(Unit_bf16_basic) {
     }
 
     HIP_CHECK(hipFree(d_in));
+    HIP_CHECK(hipFree(d_res));
+  }
+
+  SECTION("NaN comparison semantics") {
+    const float qnan = std::numeric_limits<float>::quiet_NaN();
+    constexpr size_t size = 6;
+    // Each pair has at least one NaN.
+    float a[size] = {qnan, qnan, 1.0f, qnan, -2.0f, qnan};
+    float b[size] = {qnan, 1.0f, qnan, -3.0f, qnan, 0.0f};
+    float *d_a, *d_b;
+    unsigned* d_res;
+    HIP_CHECK(hipMalloc(&d_a, sizeof(float) * size));
+    HIP_CHECK(hipMalloc(&d_b, sizeof(float) * size));
+    HIP_CHECK(hipMalloc(&d_res, sizeof(unsigned) * size));
+
+    HIP_CHECK(hipMemcpy(d_a, a, sizeof(float) * size, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_b, b, sizeof(float) * size, hipMemcpyHostToDevice));
+
+    bf16_compare_nan<<<1, size>>>(d_a, d_b, d_res, size);
+
+    std::vector<unsigned> res(size, 0);
+    HIP_CHECK(hipMemcpy(res.data(), d_res, sizeof(unsigned) * size, hipMemcpyDeviceToHost));
+
+    for (size_t i = 0; i < res.size(); i++) {
+      INFO("Index: " << i << " a: " << a[i] << " b: " << b[i] << " output: " << res[i]);
+      REQUIRE(res[i] == 1);
+    }
+
+    HIP_CHECK(hipFree(d_a));
+    HIP_CHECK(hipFree(d_b));
     HIP_CHECK(hipFree(d_res));
   }
 
