@@ -157,20 +157,31 @@ void expect_c_api_accepts_target(uint32_t mach_flag, rj_code_target_id_t target)
   ASSERT_EQ(rj_code_executable_get_code_object(exec, target, 0, &obj), ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(obj, nullptr);
 
+  // The returned code-object handle must keep its executable storage alive.
+  rj_code_executable_destroy(exec);
+
   rj_code_basic_block_list_t *blocks = nullptr;
   EXPECT_EQ(rj_code_basic_block_list_create(obj, target, &blocks), ROCJITSU_STATUS_SUCCESS)
       << "rj_code_basic_block_list_create must succeed for a target whose decoder is wired in";
-  EXPECT_NE(blocks, nullptr);
+  ASSERT_NE(blocks, nullptr);
+
+  rj_code_basic_block_t *block = nullptr;
+  ASSERT_EQ(rj_code_basic_block_list_get(blocks, 0, &block), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(block, nullptr);
+
+  // Likewise, a returned block must keep its list and decoded instructions alive.
+  rj_code_basic_block_list_destroy(blocks);
+  EXPECT_EQ(rj_code_basic_block_start_offset(block), 0u);
+  EXPECT_EQ(rj_code_basic_block_num_instructions(block), 2u);
 
   // Cleanup follows the refcount discipline in refcount.h:
-  //   - blocks came from _create()   -> refcount 0 -> destroy only.
+  //   - block  came from _get()      -> refcount 1 -> destroy + release.
   //   - obj    came from _get_code_object() -> refcount 1 -> destroy + release.
-  //   - exec   came from _create()   -> refcount 0 -> destroy only.
-  if (blocks)
-    rj_code_basic_block_list_destroy(blocks);
+  // Their destroyed parents are released automatically with the child handles.
+  rj_code_basic_block_destroy(block);
+  rj_code_basic_block_release(block);
   rj_code_object_destroy(obj);
   rj_code_object_release(obj);
-  rj_code_executable_destroy(exec);
 
   std::error_code ec;
   std::filesystem::remove(tmp, ec); // best-effort
