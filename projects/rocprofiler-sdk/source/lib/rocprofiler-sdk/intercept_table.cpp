@@ -30,6 +30,7 @@
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
 #include "lib/rocprofiler-sdk/rocjpeg/rocjpeg.hpp"
+#include "lib/rocprofiler-sdk/rocshmem/rocshmem.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hip.h>
@@ -73,6 +74,7 @@ ROCPROFILER_INTERCEPT_TABLE_KIND_STRING(MARKER_NAME, "MARKER (ROCTx Name)")
 ROCPROFILER_INTERCEPT_TABLE_KIND_STRING(RCCL, "RCCL")
 ROCPROFILER_INTERCEPT_TABLE_KIND_STRING(ROCDECODE, "rocDecode")
 ROCPROFILER_INTERCEPT_TABLE_KIND_STRING(ROCJPEG, "rocJPEG")
+ROCPROFILER_INTERCEPT_TABLE_KIND_STRING(ROCSHMEM, "rocSHMEM")
 ROCPROFILER_INTERCEPT_TABLE_KIND_STRING(HIPFILE, "hipFILE")
 
 // this is used to loop over the different libraries
@@ -85,6 +87,7 @@ constexpr auto intercept_library_seq = library_sequence_t<ROCPROFILER_HSA_TABLE,
                                                           ROCPROFILER_RCCL_TABLE,
                                                           ROCPROFILER_ROCDECODE_TABLE,
                                                           ROCPROFILER_ROCJPEG_TABLE,
+                                                          ROCPROFILER_ROCSHMEM_TABLE>,
                                                           ROCPROFILER_HIPFILE_TABLE>{};
 
 // check that intercept_library_seq is up to date
@@ -253,7 +256,13 @@ template void notify_intercept_table_registration(rocprofiler_intercept_table_t,
 template void notify_intercept_table_registration(rocprofiler_intercept_table_t,
                                                   uint64_t,
                                                   uint64_t,
+                                                  std::tuple<rocshmemApiFuncTable*>);
+  
+template void notify_intercept_table_registration(rocprofiler_intercept_table_t,
+                                                  uint64_t,
+                                                  uint64_t,
                                                   std::tuple<hipFileDispatchTable*>);
+
 }  // namespace intercept_table
 }  // namespace rocprofiler
 

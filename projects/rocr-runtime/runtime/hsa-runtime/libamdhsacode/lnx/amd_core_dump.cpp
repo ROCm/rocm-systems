@@ -312,16 +312,17 @@ static hsa_status_t build_lightweight_coredump_ranges(MemoryRegionFilter& filter
       AMD::AqlQueue* aql_queue = static_cast<AMD::AqlQueue*>(q);
 
       // We need to capture the queue amd_queue_t for the debugger.
-      debug_print("Added aql_queue_t range: %#p - %#p (size: %zu)\n",
-                  &aql_queue->amd_queue_, &aql_queue->amd_queue_ + 1,
+      debug_print("Added aql_queue_t range: %#" PRIx64 " - %#" PRIx64 " (size: %zu)\n",
+                  reinterpret_cast<uint64_t>(&aql_queue->amd_queue_),
+                  reinterpret_cast<uint64_t>(&aql_queue->amd_queue_ + 1),
                   sizeof(aql_queue->amd_queue_));
       filter.add_range(reinterpret_cast<uint64_t>(&aql_queue->amd_queue_),
                        sizeof(aql_queue->amd_queue_));
 
       // Same goes for the ring buffer.
-      debug_print("Added ring buffer range: %#p - %#p (size: %zu)\n",
-                  aql_queue->amd_queue_.hsa_queue.base_address,
-                  static_cast<void*>(aql_queue->amd_queue_.hsa_queue.base_address)
+      debug_print("Added ring buffer range: %#" PRIx64 " - %#" PRIx64 " (size: %zu)\n",
+                  reinterpret_cast<uint64_t>(aql_queue->amd_queue_.hsa_queue.base_address),
+                  reinterpret_cast<uint64_t>(aql_queue->amd_queue_.hsa_queue.base_address)
                     + aql_queue->amd_queue_.hsa_queue.size * sizeof(hsa_kernel_dispatch_packet_t),
                   aql_queue->amd_queue_.hsa_queue.size * sizeof(hsa_kernel_dispatch_packet_t));
       filter.add_range(reinterpret_cast<uint64_t>(aql_queue->amd_queue_.hsa_queue.base_address),
@@ -334,9 +335,9 @@ static hsa_status_t build_lightweight_coredump_ranges(MemoryRegionFilter& filter
         return HSA_STATUS_ERROR;
       }
 
-      debug_print("Added CWSR area range: %#p - %#p (size: %zu)\n",
-                  queue_info.SaveAreaHeader,
-                  static_cast<void*>(queue_info.SaveAreaHeader) + queue_info.SaveAreaSizeInBytes,
+      debug_print("Added CWSR area range: %#" PRIx64 " - %#" PRIx64 " (size: %zu)\n",
+                  reinterpret_cast<uint64_t>(queue_info.SaveAreaHeader),
+                  reinterpret_cast<uint64_t>(queue_info.SaveAreaHeader) + queue_info.SaveAreaSizeInBytes,
                   queue_info.SaveAreaSizeInBytes);
       filter.add_range(reinterpret_cast<uint64_t>(queue_info.SaveAreaHeader),
                        queue_info.SaveAreaSizeInBytes);

@@ -21,6 +21,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SSubCoU32Sop2 : public Sop2 {
@@ -30,6 +31,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SAddCoI32Sop2 : public Sop2 {
@@ -39,6 +41,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SSubCoI32Sop2 : public Sop2 {
@@ -48,6 +51,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SAddCoCiU32Sop2 : public Sop2 {
@@ -57,6 +61,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SSubCoCiU32Sop2 : public Sop2 {
@@ -66,6 +71,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SAbsdiffI32Sop2 : public Sop2 {
@@ -75,6 +81,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SLshlB32Sop2 : public Sop2 {
@@ -84,6 +91,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SLshlB64Sop2 : public Sop2 {
@@ -93,6 +101,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SLshrB32Sop2 : public Sop2 {
@@ -102,6 +111,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SLshrB64Sop2 : public Sop2 {
@@ -111,6 +121,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SAshrI32Sop2 : public Sop2 {
@@ -120,6 +131,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SAshrI64Sop2 : public Sop2 {
@@ -129,6 +141,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SLshl1AddU32Sop2 : public Sop2 {
@@ -138,6 +151,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SLshl2AddU32Sop2 : public Sop2 {
@@ -147,6 +161,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SLshl3AddU32Sop2 : public Sop2 {
@@ -156,6 +171,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SLshl4AddU32Sop2 : public Sop2 {
@@ -165,6 +181,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SMinI32Sop2 : public Sop2 {
@@ -174,6 +191,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SMinU32Sop2 : public Sop2 {
@@ -183,6 +201,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SMaxI32Sop2 : public Sop2 {
@@ -192,6 +211,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SMaxU32Sop2 : public Sop2 {
@@ -201,6 +221,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SAndB32Sop2 : public Sop2 {
@@ -210,6 +231,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SAndB64Sop2 : public Sop2 {
@@ -219,6 +241,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SOrB32Sop2 : public Sop2 {
@@ -228,6 +251,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SOrB64Sop2 : public Sop2 {
@@ -237,6 +261,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SXorB32Sop2 : public Sop2 {
@@ -246,6 +271,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SXorB64Sop2 : public Sop2 {
@@ -255,6 +281,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SNandB32Sop2 : public Sop2 {
@@ -264,6 +291,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SNandB64Sop2 : public Sop2 {
@@ -273,6 +301,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SNorB32Sop2 : public Sop2 {
@@ -282,6 +311,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SNorB64Sop2 : public Sop2 {
@@ -291,6 +321,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SXnorB32Sop2 : public Sop2 {
@@ -300,6 +331,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SXnorB64Sop2 : public Sop2 {
@@ -309,6 +341,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SAndNot1B32Sop2 : public Sop2 {
@@ -318,6 +351,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SAndNot1B64Sop2 : public Sop2 {
@@ -327,6 +361,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SOrNot1B32Sop2 : public Sop2 {
@@ -336,6 +371,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SOrNot1B64Sop2 : public Sop2 {
@@ -345,6 +381,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SBfeU32Sop2 : public Sop2 {
@@ -354,6 +391,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SBfeI32Sop2 : public Sop2 {
@@ -363,6 +401,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SBfeU64Sop2 : public Sop2 {
@@ -372,6 +411,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SBfeI64Sop2 : public Sop2 {
@@ -381,6 +421,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SBfmB32Sop2 : public Sop2 {
@@ -390,6 +431,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SBfmB64Sop2 : public Sop2 {
@@ -399,6 +441,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SMulI32Sop2 : public Sop2 {
@@ -408,6 +451,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SMulHiU32Sop2 : public Sop2 {
@@ -417,6 +461,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SMulHiI32Sop2 : public Sop2 {
@@ -426,6 +471,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SCselectB32Sop2 : public Sop2 {
@@ -435,6 +481,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SCselectB64Sop2 : public Sop2 {
@@ -444,6 +491,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SPackLlB32B16Sop2 : public Sop2 {
@@ -453,6 +501,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SPackLhB32B16Sop2 : public Sop2 {
@@ -462,6 +511,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SPackHhB32B16Sop2 : public Sop2 {
@@ -471,6 +521,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SPackHlB32B16Sop2 : public Sop2 {
@@ -480,6 +531,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SAddF32Sop2 : public Sop2 {
@@ -489,6 +541,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SSubF32Sop2 : public Sop2 {
@@ -498,6 +551,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SMinNumF32Sop2 : public Sop2 {
@@ -507,6 +561,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SMaxNumF32Sop2 : public Sop2 {
@@ -516,6 +571,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SMulF32Sop2 : public Sop2 {
@@ -525,6 +581,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SFmaakF32Sop2 : public Sop2 {
@@ -536,6 +593,7 @@ public:
   Operand ssrc1;
   Operand literal;
   Operand src2;
+  static const bool execute_registered_;
 };
 
 class SFmamkF32Sop2 : public Sop2 {
@@ -547,6 +605,7 @@ public:
   Operand literal;
   Operand ssrc1;
   Operand src2;
+  static const bool execute_registered_;
 };
 
 class SFmacF32Sop2 : public Sop2 {
@@ -556,6 +615,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SCvtPkRtzF16F32Sop2 : public Sop2 {
@@ -565,6 +625,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SAddF16Sop2 : public Sop2 {
@@ -575,6 +636,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SSubF16Sop2 : public Sop2 {
@@ -585,6 +647,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SMinNumF16Sop2 : public Sop2 {
@@ -595,6 +658,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SMaxNumF16Sop2 : public Sop2 {
@@ -605,6 +669,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SMulF16Sop2 : public Sop2 {
@@ -615,6 +680,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SFmacF16Sop2 : public Sop2 {
@@ -625,6 +691,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SMinimumF32Sop2 : public Sop2 {
@@ -634,6 +701,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SMaximumF32Sop2 : public Sop2 {
@@ -643,6 +711,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SMinimumF16Sop2 : public Sop2 {
@@ -653,6 +722,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SMaximumF16Sop2 : public Sop2 {
@@ -663,6 +733,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SAddNcU64Sop2 : public Sop2 {
@@ -672,6 +743,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SSubNcU64Sop2 : public Sop2 {
@@ -681,6 +753,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 class SMulU64Sop2 : public Sop2 {
@@ -690,6 +763,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  static const bool execute_registered_;
 };
 
 } // namespace gfx1250

@@ -253,6 +253,7 @@ parse:
         WRAP_FAIL_REGEX: '*'
         PRELOAD_WRAP_PASS_REGEX: '*'
         PRELOAD_WRAP_FAIL_REGEX: '*'
+        LOG_LEVEL: '*'
   override_spec: {}
   vartags: []
   proptags: []

@@ -52,7 +52,7 @@ revision_id=01
 family=0019
 model=0074
 unit_id=0004
-package_core_id=0:0
+package_id=0
 last_update=6980d761
 
 [NIC:0]
@@ -71,7 +71,7 @@ last_update=1753987166
 ```
 
 - **GPU:** `device_node` links the CUID to hardware.
-- **CPU:** `package_core_id` identifies cores (`package_id:core_id`).
+- **CPU:** `package_id` identifies physical CPU package, akin to the socket.
 - **NIC:** `device_node` links to the network device.
 - **PLATFORM:** Only the derived CUID is listed.
 
