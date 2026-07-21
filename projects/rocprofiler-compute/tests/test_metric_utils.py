@@ -4,6 +4,7 @@
 """Unit tests for utils.metrics.* modules."""
 
 import ast
+import sys
 from unittest.mock import patch
 
 import numpy as np
@@ -108,13 +109,18 @@ class TestSafeExpression:
             MAX_EXPRESSION_NODES
         )
 
-        with pytest.raises(UnsafeExpressionError, match="too deeply nested"):
-            evaluate_expression(
-                expression,
-                variables={},
-                functions={},
-                subscriptable_names=set(),
-            )
+        original_limit = sys.getrecursionlimit()
+        try:
+            sys.setrecursionlimit(1000)
+            with pytest.raises(UnsafeExpressionError, match="too deeply nested"):
+                evaluate_expression(
+                    expression,
+                    variables={},
+                    functions={},
+                    subscriptable_names=set(),
+                )
+        finally:
+            sys.setrecursionlimit(original_limit)
 
 
 # =============================================================================
