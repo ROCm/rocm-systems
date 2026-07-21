@@ -108,36 +108,27 @@ template <typename Wrapper, typename Externals = default_sdk_externals>
 class sdk_core
 {
 public:
-    // public
     static void config_settings(const std::shared_ptr<typename Externals::Settings>&);
 
-    // public
     static version_info& get_version();
 
-    // public
     static std::unordered_set<typename Wrapper::callback_tracing_kind>
     get_callback_domains();
 
-    // public
     static std::unordered_set<typename Wrapper::buffer_tracing_kind>
     get_buffered_domains();
 
-    // public
     static std::vector<std::int32_t> get_operations(
         typename Wrapper::callback_tracing_kind kindv);
 
-    // public
     static std::vector<std::int32_t> get_operations(
         typename Wrapper::buffer_tracing_kind kindv);
 
-    // public
     static std::vector<std::string> get_rocm_events();
 
-    // public
     static std::unordered_set<std::int32_t> get_backtrace_operations(
         typename Wrapper::callback_tracing_kind kindv);
 
-    // public
     static std::unordered_set<std::int32_t> get_backtrace_operations(
         typename Wrapper::buffer_tracing_kind kindv);
 
@@ -151,14 +142,6 @@ private:
     static std::string to_lower(const Tp& val);
     static std::string get_setting_name(const std::string& val);
 
-    static void set_operation_options(typename Wrapper::callback_tracing_kind kind,
-                                      std::string include, std::string exclude,
-                                      std::string backtrace);
-
-    static void set_operation_options(typename Wrapper::buffer_tracing_kind kind,
-                                      std::string include, std::string exclude,
-                                      std::string backtrace);
-
     template <typename TracingKind>
         requires tracing_kind_for<Wrapper, TracingKind>
     static std::unordered_set<std::int32_t> get_operations_impl(
@@ -166,7 +149,6 @@ private:
 
     template <typename Tp>
     static auto insert_config_setting(
-
         const std::shared_ptr<typename Externals::Settings>& config,
         std::string_view env_name, std::string_view description, Tp initial_value,
         const std::initializer_list<std::string_view>& extra_categories);
@@ -237,28 +219,6 @@ sdk_core<Wrapper, Externals>::get_setting_name(const std::string& value)
     }
 
     return value;
-}
-
-// ─── set_operation_options ────────────────────────────────────────────────────
-
-template <typename Wrapper, typename Externals>
-void
-sdk_core<Wrapper, Externals>::set_operation_options(
-    typename Wrapper::callback_tracing_kind kind, std::string include,
-    std::string exclude, std::string backtrace)
-{
-    s_callback_operation_option_names[kind] = { std::move(include), std::move(exclude),
-                                                std::move(backtrace) };
-}
-
-template <typename Wrapper, typename Externals>
-void
-sdk_core<Wrapper, Externals>::set_operation_options(
-    typename Wrapper::buffer_tracing_kind kind, std::string include, std::string exclude,
-    std::string backtrace)
-{
-    s_buffered_operation_option_names[kind] = { std::move(include), std::move(exclude),
-                                                std::move(backtrace) };
 }
 
 // ─── Static data members ─────────────────────────────────────────────────────
