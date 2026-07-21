@@ -294,6 +294,32 @@ struct reader_t
         const reader_types::timeline_event_t& event) const;
 
     /**
+     * @brief Get call stack for an event, by its opaque handle.
+     *
+     * Overload for consumers that hold only an opaque event_id_t (e.g. from
+     * get_interval_track / get_scalar_track / flows) and never construct a
+     * timeline_event_t. Internally builds a timeline_event_t from the handle and
+     * delegates to the timeline_event_t overload — the decode stays private inside
+     * the reader, so event_id_t opacity (task 028) is preserved; no public
+     * type/row_id accessor is exposed.
+     * @param id Opaque event handle.
+     * @return Call stack data (empty if not available in database).
+     */
+    [[nodiscard]] reader_types::call_stack_t get_call_stack(
+        const reader_types::event_id_t& id) const;
+
+    /**
+     * @brief Get source code context for an event, by its opaque handle.
+     *
+     * Opaque-handle overload of get_source_context; see get_call_stack(event_id_t)
+     * for the opacity-preserving delegation rationale.
+     * @param id Opaque event handle.
+     * @return List of source context entries (empty if not available).
+     */
+    [[nodiscard]] reader_types::source_context_list_t get_source_context(
+        const reader_types::event_id_t& id) const;
+
+    /**
      * @brief Get function arguments for an event
      * @param event Timeline event to fetch arguments for (typically region events)
      * @return List of argument data (empty if not available)

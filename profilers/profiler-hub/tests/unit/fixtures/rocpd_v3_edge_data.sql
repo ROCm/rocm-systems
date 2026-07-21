@@ -241,6 +241,21 @@ INSERT INTO "rocpd_memory_allocate{{uuid}}"
     (id, nid, pid, agent_id, type, level, start, "end", size, stream_id, event_id)
 VALUES (1, 1, 1, 1, 'ALLOC', 'REAL', 6100, 6200, 4096, 1, 7);
 
+-- Arguments (rocpd_arg) keyed on the shared rocpd_event row --------------------
+-- Args attach to rocpd_event.id (rocpd_arg.event_id -> rocpd_event.id), the same
+-- row kernel_dispatch/memory_copy/memory_allocate carry via their event_id column.
+-- The bundled bit_extract capture (rocpd.db) only has args on region events, so
+-- this is the sole coverage that get_event_detail folds args for the other three
+-- detail types (task 037 Phase 1 Item 2). Keyed by:
+--   event 4 -> kernel_dispatch id 1 (2 args)
+--   event 5 -> memory_copy     id 1 (1 arg)
+--   event 7 -> memory_allocate id 1 (1 arg)
+INSERT INTO "rocpd_arg{{uuid}}" (id, event_id, position, type, name, value)
+VALUES (1, 4, 0, 'const char*', 'kernel_name', 'vecAdd'),
+       (2, 4, 1, 'unsigned int', 'grid', '256'),
+       (3, 5, 0, 'size_t', 'bytes', '1024'),
+       (4, 7, 0, 'size_t', 'alloc_bytes', '4096');
+
 -- Counter samples + PMC values ----------------------------------------------
 -- Track 2 (counter, no tid) -- pmc 1 GRBM_COUNT. Row-id order != timestamp
 -- order proves get_scalar_track()'s "ORDER BY timestamp":

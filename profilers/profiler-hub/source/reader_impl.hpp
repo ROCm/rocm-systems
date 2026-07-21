@@ -154,6 +154,13 @@ struct reader_t::impl
     [[nodiscard]] reader_types::source_context_list_t get_source_context(
         const reader_types::timeline_event_t& event);
 
+    // Opaque-handle overloads: build a timeline_event_t from the handle and delegate.
+    [[nodiscard]] reader_types::call_stack_t get_call_stack(
+        const reader_types::event_id_t& id);
+
+    [[nodiscard]] reader_types::source_context_list_t get_source_context(
+        const reader_types::event_id_t& id);
+
     [[nodiscard]] reader_types::arg_data_list_t get_arguments(
         const reader_types::timeline_event_t& event);
 

@@ -1976,6 +1976,33 @@ reader_t::impl::get_source_context(const reader_types::timeline_event_t& event)
     return event_meta->line_info;
 }
 
+// Opaque-handle overloads. These build a minimal timeline_event_t from the handle's
+// private {row_id, type} and delegate to the timeline_event_t overloads above -- the
+// exact internal bridge the region case of get_event_detail already uses (see the
+// get_arguments call there). The decode lives entirely inside the reader, so event_id_t
+// opacity (task 028) is preserved: no public type/row_id accessor is added, and the
+// consumer only ever holds the opaque handle. resolve_event_metadata reads only
+// unique_identifier.{id,type}, so this minimal event is sufficient; types with no stack
+// or source context (sample / pmc_event) fall through to the empty-return semantics of
+// the delegates.
+reader_types::call_stack_t
+reader_t::impl::get_call_stack(const reader_types::event_id_t& id)
+{
+    reader_types::timeline_event_t ev{};
+    ev.unique_identifier = { reader_types::detail::event_id_access::row_id(id),
+                             reader_types::detail::event_id_access::type(id) };
+    return get_call_stack(ev);
+}
+
+reader_types::source_context_list_t
+reader_t::impl::get_source_context(const reader_types::event_id_t& id)
+{
+    reader_types::timeline_event_t ev{};
+    ev.unique_identifier = { reader_types::detail::event_id_access::row_id(id),
+                             reader_types::detail::event_id_access::type(id) };
+    return get_source_context(ev);
+}
+
 reader_types::arg_data_list_t
 reader_t::impl::get_arguments(const reader_types::timeline_event_t& event)
 {
@@ -3112,6 +3139,17 @@ reader_t::impl::get_event_detail(const reader_types::event_id_t& id)
     auto push_opt_u = [&](std::string key, const std::optional<size_t>& v) {
         if(v.has_value()) push_u(std::move(key), v.value());
     };
+    // Fold rocpd_arg rows into the property bag as name-keyed values. Args key on the
+    // shared rocpd_event row, so region / kernel_dispatch / memory_copy / memory_allocate
+    // all carry them; point events (sample / pmc_event) do not. Builds the internal
+    // timeline_event_t from the handle exactly as get_arguments' delegate expects.
+    auto fold_args = [&]() {
+        reader_types::timeline_event_t ev{};
+        ev.unique_identifier = { reader_types::detail::event_id_access::row_id(id),
+                                 reader_types::detail::event_id_access::type(id) };
+        for(const auto& a : get_arguments(ev))
+            detail.properties.push_back({ a->name, a->value });
+    };
 
     switch(reader_types::detail::event_id_access::type(id))
     {
@@ -3126,11 +3164,7 @@ reader_t::impl::get_event_detail(const reader_types::event_id_t& id)
 
             // Freeform region call-arguments as string-valued properties, keyed by name.
             // (args are not populated by get_region_details; fetch them separately.)
-            reader_types::timeline_event_t ev{};
-            ev.unique_identifier = { reader_types::detail::event_id_access::row_id(id),
-                                     event_type_t::region };
-            for(const auto& a : get_arguments(ev))
-                detail.properties.push_back({ a->name, a->value });
+            fold_args();
             break;
         }
         case event_type_t::kernel_dispatch:
@@ -3165,6 +3199,7 @@ reader_t::impl::get_event_detail(const reader_types::event_id_t& id)
             if(d->agent_info) push_u("agent_id", d->agent_info->id);
             if(d->stream_info) push_u("stream_id", d->stream_info->stream_id);
             if(d->queue_info) push_u("queue_id", d->queue_info->queue_id);
+            fold_args();
             break;
         }
         case event_type_t::memory_copy:
@@ -3187,6 +3222,7 @@ reader_t::impl::get_event_detail(const reader_types::event_id_t& id)
             if(d->thread_info) push_u("thread_id", d->thread_info->thread_id);
             if(d->stream_info) push_u("stream_id", d->stream_info->stream_id);
             if(d->queue_info) push_u("queue_id", d->queue_info->queue_id);
+            fold_args();
             break;
         }
         case event_type_t::memory_allocate:
@@ -3207,6 +3243,7 @@ reader_t::impl::get_event_detail(const reader_types::event_id_t& id)
             if(d->agent_info) push_u("agent_id", d->agent_info->id);
             if(d->stream_info) push_u("stream_id", d->stream_info->stream_id);
             if(d->queue_info) push_u("queue_id", d->queue_info->queue_id);
+            fold_args();
             break;
         }
         case event_type_t::sample:
