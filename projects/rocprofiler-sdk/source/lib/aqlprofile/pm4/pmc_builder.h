@@ -347,11 +347,11 @@ private:
 public:
     explicit GpuPmcBuilder(const AgentInfo* agent_info)
     : PmcBuilder()
-    , builder(acquire_ip_offset_table(agent_info))
     , se_number_(agent_info->se_num / agent_info->xcc_num)
+    , sarrays_per_se_(agent_info->shader_arrays_per_se)
     , xcc_number_(agent_info->xcc_num)
     , xcc_per_aid_(agent_info->xcc_per_aid)
-    , sarrays_per_se_(agent_info->shader_arrays_per_se)
+    , builder(acquire_ip_offset_table(agent_info))
     {
         this->wgp_per_sa_ = (agent_info->cu_num / 2 + sarrays_per_se_ * se_number_ - 1) /
                             (se_number_ * sarrays_per_se_);
@@ -925,7 +925,7 @@ public:
                         }
                         else if(bIsWGPcounter12)
                         {
-                            for(int wgp = 0; wgp < wgp_per_sa_; wgp++)
+                            for(uint32_t wgp = 0; wgp < wgp_per_sa_; wgp++)
                             {
                                 // TODO: This patch is needed to avoid soft-hang for some WGP
                                 //       blocks, will remove after CU mask support is added to
