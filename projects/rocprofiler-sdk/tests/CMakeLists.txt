@@ -98,6 +98,7 @@ add_subdirectory(environment)
 # rocpd validation tests
 add_subdirectory(rocpd)
 add_subdirectory(rocpd-api)
+add_subdirectory(rocpd-back-compat)
 
 # rocattach validation tests
 add_subdirectory(rocattach)
