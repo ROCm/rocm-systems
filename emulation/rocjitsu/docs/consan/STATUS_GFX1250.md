@@ -176,14 +176,13 @@ direct reruns with both hooks pass all four workload tests with 40/40 accesses,
 ### Post-merge revalidation exceptions
 
 This small override ledger takes precedence over stale green cells in the
-larger table below.  Every entry is from a one-repetition run at `66586a47b2`.
-The same failures were reproduced
-with the pre-rebase `58379f3c1a` hook, so they are current defects but not
-regressions introduced by the shared-branch rebase.
+larger table below.  The merge-revalidation failures were first recorded at
+`66586a47b2` and reproduced with the pre-rebase `58379f3c1a` hook; cells that
+have since advanced name their newer committed revision and retained evidence.
 
 | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
-| `torch.mode` | 🟥 Signals after replacement, before oracle | 🟧 Exact oracle and 28,939/28,939 accesses plus 4,446/4,446 barriers, but 0/2 newly inventoried atomics patched | 🟧 Exact oracle and complete access/barrier coverage, but two newly inventoried atomics are unsupported and analysis is incomplete | 🟩 Exact oracle; 28,939/28,939 accesses and 4,446/4,446 barriers |
+| `torch.mode` | 🟥 Signals after replacement, before oracle | 🟩 At `6491647e31`: exact oracle; 28,939/28,939 accesses, 2/2 atomics, and 4,446/4,446 barriers; paired 208.78x; reviewed exact-one qualified miss and both health gates accepted | 🟧 Exact oracle and complete access/barrier coverage, but two newly inventoried atomics are unsupported and analysis is incomplete | 🟩 Exact oracle; 28,939/28,939 accesses and 4,446/4,446 barriers |
 | `torch.histc` | 🟥 Signals after replacement, before oracle | 🟩 Exact oracle; 175/175 accesses and 84/84 barriers | 🟩 Exact oracle; 175/175 accesses and 168/168 barriers | 🟩 Exact oracle; 175/175 accesses and 84/84 barriers |
 | `001_sk_mxf8f4gemm_tdm` | 🟩 Exact oracle; 768/768 accesses | 🟩 Exact oracle; 768/768 accesses, 204/204 barriers, and 24/24 fences | 🟩 Exact oracle; 768/768 accesses and 180/180 barriers | 🟨 Seventeen exact rows pass, but the final solution remains active at the 300-second bound; no final verdict |
 | `006_sk_hgemm_quick` | 🟧 Existing bounded result retained | 🟧 Exact numeric rows and complete 8,162/8,162 access, 292/292 barrier, and 80/80 fence coverage, but replay emits four conflicts and marks analysis dynamically incomplete | 🟩 Exact oracle; 8,162/8,162 accesses and 544/544 barriers | 🟧 Existing bounded result retained |
@@ -257,6 +256,24 @@ do not promote matrix cells without the end-to-end evidence above.
 | Four focused flavor verticals | 🟨 Four-engine bootstrap | A clean ping-pong cooperative-LDS workload passed its host-reference oracle with 4/4 accesses patched by SuperCollider.  Record/Replay passed with 4/4 accesses and 8/8 barriers patched and visible records.  Sampled passed with 4/4 accesses and two visible records, but 0/8 barriers.  Inline Shadow is statically and dynamically complete with 4/4 accesses, 8/8 barriers, and one visible record.  Fault/diagnostic behavior, replay qualification, and Sampled synchronization remain open. |
 
 ## Progress log
+
+- 2026-07-21: `torch.mode` Record/Replay returns to green at committed revision
+  `6491647e31`.  ConSan now composes the ordering probe around the ordinary
+  access probe's relocated guest instruction, so the two ordered no-return LDS
+  operations are each represented as both accesses and atomic-ordering events.
+  One-repetition clean artifact
+  `consan-green-expansion-20260721-mode-rr-composed-clean-136` passes the exact
+  oracle with complete 28,939/28,939 access, 2/2 atomic, and 4,446/4,446
+  barrier coverage.  Paired artifact `...-composed-overhead-137` accepts
+  140.95/28,677.46/133.76 ms, or 208.78x against the mean baseline.  Current
+  inventory `...-composed-inventory-138` retains 4,446 barrier sequences.
+  Reviewed fault artifact `...-composed-fault-best-effort-141` applies the
+  selected whole-barrier mutation exactly once, observes the precommitted
+  pass-oracle/no-diagnosis qualified miss, and passes both health gates.  That
+  fault trial deliberately retains the historical best-effort fault policy:
+  strict analysis rejects unrelated kernels whose ordered-atomic idioms cease
+  to qualify after mutation; the clean and paired standard-v1 runs remain
+  strict and fully complete.
 
 - 2026-07-21: Bounded the P0 `torch.topk` SuperCollider continuation work.
   Artifacts `consan-green-expansion-20260721-pytorch-topk-sc-branch-only-131`

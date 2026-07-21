@@ -108,9 +108,10 @@ flowchart TD
   subgraph X[PyTorch and RocJITsu test-corpus expansion]
     X0["X0 DONE<br/>expansion corpus surveyed and<br/>aggregate four-profile contract defined"]
     XP0["XP0 DONE<br/>PyTorch/Triton TDM plus clustered-dispatch<br/>clean vertical passes all four profiles"]
-    XP1["XP1 DONE<br/>torch.mode SuperCollider and Record/Replay<br/>full bundles accepted"]
+    XP1["XP1 DONE<br/>torch.mode Record/Replay composes ordinary-access<br/>and atomic-ordering probes; full bundle restored"]
+    XP1A["XP1A TODO<br/>torch.mode SuperCollider current execution signal;<br/>isolate and repair replacement failure"]
     XP1B["XP1B DONE<br/>torch.mode Inline dynamic-LDS clean, paired,<br/>and reviewed-fault bundle accepted"]
-    XP1C["XP1C DONE<br/>torch.mode Sampled clean, paired,<br/>and reviewed-fault bundle accepted"]
+    XP1C["XP1C ACTIVE<br/>torch.mode Sampled access-plus-ordering composition;<br/>close the current 0/2 atomic gap"]
     XP4["XP4 DONE<br/>tagged LDS atomic address token plus isolated-release<br/>classification pass torch.mode clean"]
     XP5["XP5 DONE<br/>histogram Inline paired and reviewed-fault bundle<br/>green at 175-access denominator"]
     XP6["XP6 DONE<br/>histogram Record/Replay paired and fault bundle<br/>green at 175-access denominator"]
@@ -256,9 +257,10 @@ flowchart TD
   G0 --> X0
   X0 --> XP0
   XP0 --> XP1
+  XP0 --> XP1A
   XP0 --> XP1B
-  XP0 --> XP1C
   XP0 --> XP4
+  XP4 --> XP1C
   XP4 --> XP5
   XP5 --> XP6
   XP6 --> XP7
@@ -298,6 +300,7 @@ flowchart TD
   XT0 --> XT4A
   XT4A --> XT4
   XP1 --> XF
+  XP1A --> XF
   XP1B --> XF
   XP1C --> XF
   XP4 --> XF
@@ -340,7 +343,8 @@ flowchart TD
   classDef todo fill:#e8e8e8,stroke:#666666,color:#111111,stroke-width:1px
   classDef blocked fill:#9e2a2b,stroke:#ffd0d0,color:#ffffff,stroke-width:3px
 
-  class R0,E0,D0,C0,V0,B0,B1,B2,B3,B4,B5,S0,S1,S2,S3,S4,S5,S6,A0,A1,A2,A3A,A4A,SC0,RR0,SA0,IS0,IS1,F0,Q0,V1,V2,V3,V8,V4A,V4B,V4C,V4D,V5A,V5B,V6A,V6B,V7,VT,VD,VP,VW,X0,XP0,XP1,XP1B,XP1C,XP2A,XP2C,XP4,XP5,XP6,XP7,XP8,XP9,XP9C,XP10,XT1,XT2A,XT2B,XT2C1,XT3C,XT3D,XT4A,XT4 done
+  class R0,E0,D0,C0,V0,B0,B1,B2,B3,B4,B5,S0,S1,S2,S3,S4,S5,S6,A0,A1,A2,A3A,A4A,SC0,RR0,SA0,IS0,IS1,F0,Q0,V1,V2,V3,V8,V4A,V4B,V4C,V4D,V5A,V5B,V6A,V6B,V7,VT,VD,VP,VW,X0,XP0,XP1,XP1B,XP2A,XP2C,XP4,XP5,XP6,XP7,XP8,XP9,XP9C,XP10,XT1,XT2A,XT2B,XT2C1,XT3C,XT3D,XT4A,XT4 done
+  class XP1C active
   class XP9B done
   class XT3B done
   class XP2B done
@@ -356,7 +360,7 @@ flowchart TD
   class XT3L,XT3M,XT3N done
   class XP3B done
   class XP3A done
-  class G0,V9,XP2D,XT2C2,XT2C3,XT3E,XT3I,XF,XG todo
+  class G0,V9,XP1A,XP2D,XT2C2,XT2C3,XT3E,XT3I,XF,XG todo
 ```
 
 Broader partial-EXEC, dynamic-stack, high-register, cache/fence-shape, and
@@ -404,6 +408,16 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP1 is DONE again at `6491647e31`.  Record/Replay now nests its
+  atomic-ordering cave around the ordinary access cave's relocated guest
+  instruction.  The focused 73-test slice passes, and the one-repetition
+  `torch.mode` clean, paired-overhead, inventory, reviewed-fault, containment,
+  and provenance bundle is accepted with all 2/2 ordered LDS atomics.  XP1C is
+  ACTIVE on the equivalent Sampled composition.  XP1A separately records the
+  current SuperCollider signal as TODO, so neither historical acceptance nor
+  one repaired MOI engine hides those remaining cells; the Mermaid colors now
+  match these states.
 
 - 2026-07-21: XP3A is DONE as a bounded subsystem result.  Full-pressure
   synthetic coverage now preserves the VCC-save scalar through a scratch VGPR
