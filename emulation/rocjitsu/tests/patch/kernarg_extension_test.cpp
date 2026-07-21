@@ -12,6 +12,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <span>
 #include <vector>
 
@@ -106,6 +107,163 @@ TEST(KernargExtensionTest, MetadataRoundTripsNamedPayloadContracts) {
     EXPECT_EQ(extension.payloads[i].size, input.front().payloads[i].size);
     EXPECT_EQ(extension.payloads[i].alignment, input.front().payloads[i].alignment);
   }
+}
+
+// --- write_kernarg_extension_wrapper negative paths -------------------------
+
+TEST(KernargExtensionTest, WrapperWriteRejectsWrongWrapperSize) {
+  const rocjitsu::KernargExtensionPayloadLayout payload{.size = 8, .alignment = 8};
+  const auto layout =
+      rocjitsu::make_kernarg_extension_layout(/*original_kernarg_size=*/0, std::span{&payload, 1});
+  ASSERT_TRUE(layout.has_value());
+
+  const std::array<uint8_t, 8> payload_bytes = {};
+  const std::array<rocjitsu::KernargExtensionPayloadWrite, 1> writes = {{
+      {.data = payload_bytes.data(), .size = static_cast<uint32_t>(payload_bytes.size())},
+  }};
+  // Buffer one byte short of layout.wrapper_size must be rejected.
+  std::vector<uint8_t> wrapper(layout->wrapper_size - 1, 0);
+  EXPECT_FALSE(rocjitsu::write_kernarg_extension_wrapper(
+      std::span<uint8_t>(wrapper.data(), wrapper.size()), *layout, /*original_kernarg=*/nullptr,
+      /*original_kernarg_pointer=*/0, std::span{writes}));
+}
+
+TEST(KernargExtensionTest, WrapperWriteRejectsPayloadCountMismatch) {
+  const rocjitsu::KernargExtensionPayloadLayout payload{.size = 8, .alignment = 8};
+  const auto layout =
+      rocjitsu::make_kernarg_extension_layout(/*original_kernarg_size=*/0, std::span{&payload, 1});
+  ASSERT_TRUE(layout.has_value());
+
+  std::vector<uint8_t> wrapper(layout->wrapper_size, 0);
+  // layout expects one payload; supply zero writes.
+  EXPECT_FALSE(rocjitsu::write_kernarg_extension_wrapper(
+      std::span<uint8_t>(wrapper.data(), wrapper.size()), *layout, /*original_kernarg=*/nullptr,
+      /*original_kernarg_pointer=*/0, std::span<const rocjitsu::KernargExtensionPayloadWrite>{}));
+}
+
+TEST(KernargExtensionTest, WrapperWriteRejectsNullOriginalWithNonZeroSize) {
+  const rocjitsu::KernargExtensionPayloadLayout payload{.size = 8, .alignment = 8};
+  const auto layout =
+      rocjitsu::make_kernarg_extension_layout(/*original_kernarg_size=*/16, std::span{&payload, 1});
+  ASSERT_TRUE(layout.has_value());
+
+  const std::array<uint8_t, 8> payload_bytes = {};
+  const std::array<rocjitsu::KernargExtensionPayloadWrite, 1> writes = {{
+      {.data = payload_bytes.data(), .size = static_cast<uint32_t>(payload_bytes.size())},
+  }};
+  std::vector<uint8_t> wrapper(layout->wrapper_size, 0);
+  // original_kernarg_size is 16 but the original pointer is null.
+  EXPECT_FALSE(rocjitsu::write_kernarg_extension_wrapper(
+      std::span<uint8_t>(wrapper.data(), wrapper.size()), *layout, /*original_kernarg=*/nullptr,
+      /*original_kernarg_pointer=*/0, std::span{writes}));
+}
+
+TEST(KernargExtensionTest, WrapperWriteRejectsNullPayloadDataWithNonZeroSize) {
+  const rocjitsu::KernargExtensionPayloadLayout payload{.size = 8, .alignment = 8};
+  const auto layout =
+      rocjitsu::make_kernarg_extension_layout(/*original_kernarg_size=*/0, std::span{&payload, 1});
+  ASSERT_TRUE(layout.has_value());
+
+  // Non-zero payload size with a null data pointer must be rejected.
+  const std::array<rocjitsu::KernargExtensionPayloadWrite, 1> writes = {{
+      {.data = nullptr, .size = 8},
+  }};
+  std::vector<uint8_t> wrapper(layout->wrapper_size, 0);
+  EXPECT_FALSE(rocjitsu::write_kernarg_extension_wrapper(
+      std::span<uint8_t>(wrapper.data(), wrapper.size()), *layout, /*original_kernarg=*/nullptr,
+      /*original_kernarg_pointer=*/0, std::span{writes}));
+}
+
+// --- make_kernarg_extension_layout overflow guards --------------------------
+
+TEST(KernargExtensionTest, LayoutRejectsPayloadSizeOverflow) {
+  // The saved pointer already advances the cursor past 0, so a payload claiming
+  // the full uint32 range cannot fit and the layout must fail closed.
+  const rocjitsu::KernargExtensionPayloadLayout payload{
+      .size = std::numeric_limits<uint32_t>::max(), .alignment = 8};
+  EXPECT_FALSE(
+      rocjitsu::make_kernarg_extension_layout(/*original_kernarg_size=*/0, std::span{&payload, 1})
+          .has_value());
+}
+
+TEST(KernargExtensionTest, LayoutRejectsOriginalSizeAlignmentOverflow) {
+  // Aligning an original size within 7 bytes of the uint32 max up to 8 overflows.
+  const rocjitsu::KernargExtensionPayloadLayout payload{.size = 8, .alignment = 8};
+  EXPECT_FALSE(rocjitsu::make_kernarg_extension_layout(
+                   /*original_kernarg_size=*/std::numeric_limits<uint32_t>::max() - 1,
+                   std::span{&payload, 1})
+                   .has_value());
+}
+
+// --- parse_kernarg_extension_metadata negative paths ------------------------
+
+namespace {
+// Header field byte offsets (see MetadataHeader in kernarg_extension.cpp):
+// magic[8]@0, version@8, extension_count@12, payload_count@16, string_bytes@20.
+constexpr size_t kVersionOffset = 8;
+constexpr size_t kExtensionCountOffset = 12;
+constexpr size_t kPayloadCountOffset = 16;
+constexpr size_t kStringBytesOffset = 20;
+// ExtensionRecord starts at 24; its reserved field is the 8th uint32.
+constexpr size_t kFirstExtensionReservedOffset = 24 + 7 * sizeof(uint32_t);
+
+std::vector<uint8_t> valid_metadata_bytes() {
+  const std::vector<rocjitsu::KernargExtensionMetadata> input = {{
+      .kernel_name = "kernel",
+      .variant_name = "variant",
+      .original_kernarg_size = 24,
+      .payloads = {{.size = 24, .alignment = 8, .name = "state"}},
+  }};
+  return rocjitsu::serialize_kernarg_extension_metadata(input);
+}
+
+void poke_u32(std::vector<uint8_t> &bytes, size_t offset, uint32_t value) {
+  ASSERT_GE(bytes.size(), offset + sizeof(value));
+  std::memcpy(bytes.data() + offset, &value, sizeof(value));
+}
+} // namespace
+
+TEST(KernargExtensionTest, ParseRejectsTruncatedHeader) {
+  auto bytes = valid_metadata_bytes();
+  ASSERT_GE(bytes.size(), 24u);
+  bytes.resize(23); // one byte short of the 24-byte header
+  EXPECT_FALSE(rocjitsu::parse_kernarg_extension_metadata(bytes).has_value());
+}
+
+TEST(KernargExtensionTest, ParseRejectsWrongMagic) {
+  auto bytes = valid_metadata_bytes();
+  bytes[0] ^= 0xFF; // corrupt the first magic byte
+  EXPECT_FALSE(rocjitsu::parse_kernarg_extension_metadata(bytes).has_value());
+}
+
+TEST(KernargExtensionTest, ParseRejectsUnknownVersion) {
+  auto bytes = valid_metadata_bytes();
+  poke_u32(bytes, kVersionOffset, 2);
+  EXPECT_FALSE(rocjitsu::parse_kernarg_extension_metadata(bytes).has_value());
+}
+
+TEST(KernargExtensionTest, ParseRejectsExtensionCountExceedingBuffer) {
+  auto bytes = valid_metadata_bytes();
+  poke_u32(bytes, kExtensionCountOffset, 0x10000u);
+  EXPECT_FALSE(rocjitsu::parse_kernarg_extension_metadata(bytes).has_value());
+}
+
+TEST(KernargExtensionTest, ParseRejectsPayloadCountExceedingBuffer) {
+  auto bytes = valid_metadata_bytes();
+  poke_u32(bytes, kPayloadCountOffset, 0x10000u);
+  EXPECT_FALSE(rocjitsu::parse_kernarg_extension_metadata(bytes).has_value());
+}
+
+TEST(KernargExtensionTest, ParseRejectsStringBytesExceedingBuffer) {
+  auto bytes = valid_metadata_bytes();
+  poke_u32(bytes, kStringBytesOffset, 0x10000u);
+  EXPECT_FALSE(rocjitsu::parse_kernarg_extension_metadata(bytes).has_value());
+}
+
+TEST(KernargExtensionTest, ParseRejectsNonZeroExtensionReserved) {
+  auto bytes = valid_metadata_bytes();
+  poke_u32(bytes, kFirstExtensionReservedOffset, 1);
+  EXPECT_FALSE(rocjitsu::parse_kernarg_extension_metadata(bytes).has_value());
 }
 
 } // namespace

@@ -127,7 +127,21 @@ struct TranslatedCodeObject {
   rj_code_arch_t host_arch = ROCJITSU_CODE_ARCH_INVALID; ///< Host ISA architecture.
   std::vector<TranslationDiagnostic> diagnostics;        ///< Translation warnings/errors.
 
+  /// @brief True if translation produced no error diagnostics.
+  ///
+  /// @details Note that ok() can be true while the artifact is NOT dispatchable:
+  /// skip_failed_kernels reports a KernelSkipped *warning*, not an error. Use
+  /// dispatchable() before emitting or executing the ELF.
   [[nodiscard]] bool ok() const { return !has_error_diagnostic(diagnostics); }
+
+  /// @brief True if the artifact is safe to emit for execution.
+  ///
+  /// @details False when any kernel was replaced by a non-dispatchable trap stub
+  /// (has_skipped_kernel). A skipped kernel's s_trap; s_endpgm stub completes
+  /// normally without a trap handler and would silently produce wrong results if
+  /// dispatched, so code-object output paths and the CLI must refuse it, matching
+  /// the HSA hook that rejects such a load.
+  [[nodiscard]] bool dispatchable() const { return ok() && !has_skipped_kernel(diagnostics); }
 };
 
 /// @brief Top-level dynamic binary translator.

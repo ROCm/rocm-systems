@@ -41,6 +41,10 @@ namespace {
 
 constexpr hsa_agent_t kGuestAgent{1};
 constexpr hsa_agent_t kHostAgent{2};
+// An agent that is neither the guest nor the guest's execution host. Its queues
+// are tracked for doorbell forwarding but never rewritten, and host_lds_bytes
+// (derived from the guest target arch) does not apply to them.
+constexpr hsa_agent_t kUnrelatedAgent{3};
 constexpr hsa_isa_t kGuestIsa{950};
 constexpr hsa_isa_t kHostIsa{1201};
 constexpr hsa_amd_memory_pool_t kGuestPool{10};
@@ -2438,6 +2442,145 @@ TEST(HsaHooksUnitTest, VirtualLdsInterceptKeepsStaticPlusDynamicLimitOnNormalDes
   EXPECT_EQ(g_fake_queue_packets[kPacketIndex].reserved2, 0u);
 
   EXPECT_EQ(api.core.hsa_queue_destroy_fn(queue), HSA_STATUS_SUCCESS);
+}
+
+TEST(HsaHooksUnitTest, DoorbellForwardsOversizedPacketOnUnrelatedAgentQueueUnchanged) {
+  using rocr::llvm::amdhsa::kernel_descriptor_t;
+
+  reset_pool_blocker(false);
+  reset_queue_fakes();
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  // A queue on an agent that is neither the guest nor the guest's execution host.
+  // host_lds_bytes is derived from the guest target arch (gfx1201 -> 64 KiB), so
+  // it does not describe this agent. Its dispatches must be forwarded unchanged
+  // even when the group segment exceeds that guest-derived limit -- the fail-close
+  // for oversized-no-metadata launches applies only to the guest's own queue.
+  hsa_queue_t *queue = nullptr;
+  ASSERT_EQ(api.core.hsa_queue_create_fn(kUnrelatedAgent, 2, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                                         nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+  ASSERT_NE(queue, nullptr);
+
+  kernel_descriptor_t descriptor{};
+  descriptor.group_segment_fixed_size = 96 * 1024;
+
+  auto &packet = g_fake_queue_packets[0];
+  packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
+  packet.kernel_object = reinterpret_cast<uintptr_t>(&descriptor);
+  packet.private_segment_size = 12;
+  packet.group_segment_size = 96 * 1024; // exceeds the guest-derived 64 KiB limit
+  packet.workgroup_size_x = 256;
+  packet.workgroup_size_y = 1;
+  packet.workgroup_size_z = 1;
+  packet.grid_size_x = 256;
+  packet.grid_size_y = 1;
+  packet.grid_size_z = 1;
+
+  api.core.hsa_signal_store_relaxed_fn(queue->doorbell_signal, 0);
+
+  EXPECT_TRUE(g_fake_allocation_sizes.empty());
+  EXPECT_EQ(packet.kernel_object, reinterpret_cast<uintptr_t>(&descriptor));
+  EXPECT_EQ(packet.group_segment_size, 96u * 1024u);
+  EXPECT_EQ(packet.private_segment_size, 12u);
+
+  EXPECT_EQ(api.core.hsa_queue_destroy_fn(queue), HSA_STATUS_SUCCESS);
+}
+
+TEST(HsaHooksUnitTest, InterceptForwardsOversizedPacketOnUnrelatedAgentQueueUnchanged) {
+  using rocr::llvm::amdhsa::kernel_descriptor_t;
+
+  reset_pool_blocker(false);
+  reset_queue_fakes();
+  FakeApiTable api;
+  api.amd.hsa_amd_queue_intercept_create_fn = fake_amd_queue_intercept_create;
+  api.amd.hsa_amd_queue_intercept_register_fn = fake_amd_queue_intercept_register;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  hsa_queue_t *queue = nullptr;
+  ASSERT_EQ(api.core.hsa_queue_create_fn(kUnrelatedAgent, 4, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                                         nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+  ASSERT_NE(queue, nullptr);
+  ASSERT_NE(g_fake_intercept_handler, nullptr);
+
+  kernel_descriptor_t descriptor{};
+  descriptor.group_segment_fixed_size = 96 * 1024;
+
+  hsa_kernel_dispatch_packet_t packet{};
+  packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
+  packet.kernel_object = reinterpret_cast<uintptr_t>(&descriptor);
+  packet.private_segment_size = 12;
+  packet.group_segment_size = 96 * 1024; // exceeds the guest-derived 64 KiB limit
+  packet.workgroup_size_x = 256;
+  packet.workgroup_size_y = 1;
+  packet.workgroup_size_z = 1;
+  packet.grid_size_x = 256;
+  packet.grid_size_y = 1;
+  packet.grid_size_z = 1;
+
+  constexpr uint64_t kPacketIndex = 2;
+  g_fake_queue_packets[kPacketIndex] = packet;
+  g_fake_intercept_handler(&packet, 1, kPacketIndex, g_fake_intercept_user_data,
+                           fake_intercept_packet_writer);
+
+  // The unrelated-agent intercept queue forwards the oversized packet untouched:
+  // no allocation, no rewrite, no abort.
+  EXPECT_TRUE(g_fake_allocation_sizes.empty());
+  ASSERT_EQ(g_last_intercept_written_packets.size(), 1u);
+  const hsa_kernel_dispatch_packet_t &written = g_last_intercept_written_packets[0];
+  EXPECT_EQ(written.kernel_object, reinterpret_cast<uintptr_t>(&descriptor));
+  EXPECT_EQ(written.group_segment_size, 96u * 1024u);
+  EXPECT_EQ(written.private_segment_size, 12u);
+
+  EXPECT_EQ(api.core.hsa_queue_destroy_fn(queue), HSA_STATUS_SUCCESS);
+}
+
+TEST(HsaHooksUnitDeathTest, InterceptGuestUnregisteredOversizedDispatchAborts) {
+  using rocr::llvm::amdhsa::kernel_descriptor_t;
+
+  // fork-based death test: the guest queue's intercept handler runs synchronously
+  // (no scanner jthread on the intercept path), so aborting inside it is safe to
+  // observe. A dispatch on the GUEST queue whose kernel object has no virtual-LDS
+  // metadata and whose group segment exceeds the host LDS limit has no sidecar to
+  // fall back to, so it must fail closed rather than submit a host-faulting launch.
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  EXPECT_DEATH(
+      {
+        reset_pool_blocker(false);
+        reset_queue_fakes();
+        FakeApiTable api;
+        api.amd.hsa_amd_queue_intercept_create_fn = fake_amd_queue_intercept_create;
+        api.amd.hsa_amd_queue_intercept_register_fn = fake_amd_queue_intercept_register;
+        InstalledHook hook(api);
+
+        hsa_queue_t *queue = nullptr;
+        api.core.hsa_queue_create_fn(kGuestAgent, 4, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, 0, 0,
+                                     &queue);
+
+        kernel_descriptor_t descriptor{};
+        descriptor.group_segment_fixed_size = 96 * 1024;
+
+        hsa_kernel_dispatch_packet_t packet{};
+        packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
+        packet.kernel_object = reinterpret_cast<uintptr_t>(&descriptor);
+        packet.group_segment_size = 96 * 1024; // exceeds the guest 64 KiB limit
+        packet.workgroup_size_x = 256;
+        packet.workgroup_size_y = 1;
+        packet.workgroup_size_z = 1;
+        packet.grid_size_x = 256;
+        packet.grid_size_y = 1;
+        packet.grid_size_z = 1;
+
+        constexpr uint64_t kPacketIndex = 2;
+        g_fake_queue_packets[kPacketIndex] = packet;
+        g_fake_intercept_handler(&packet, 1, kPacketIndex, g_fake_intercept_user_data,
+                                 fake_intercept_packet_writer);
+      },
+      "no virtual-LDS variant but its group segment exceeds the host LDS limit");
 }
 
 TEST(HsaHooksUnitTest, UntrackedSignalStoreScreleaseIsForwarded) {

@@ -400,8 +400,13 @@ make_minimal_amdgpu_elf_with_descriptor_after_text(const std::vector<uint32_t> &
   std::vector<uint8_t> strtab{'\0'};
   const uint32_t kd_symbol_name = add_elf_name(strtab, "kernel.kd");
 
-  const uint64_t rodata_offset = text_offset + text_size;
-  const uint64_t rodata_vaddr = text_vaddr + text_size + load_align;
+  // The kernel descriptor requires 8-byte alignment (tests reinterpret_cast the
+  // .rodata bytes to TestKernelDescriptor). An odd text_words count leaves
+  // text_offset + text_size only 4-aligned, so pad up to 8. text_offset and
+  // text_vaddr are both 8-aligned and differ by a multiple of load_align, so
+  // padding both keeps the PT_LOAD p_offset == p_vaddr (mod p_align) congruence.
+  const uint64_t rodata_offset = align_up_for_test(text_offset + text_size, 8);
+  const uint64_t rodata_vaddr = align_up_for_test(text_vaddr + text_size, 8) + load_align;
   const uint64_t strtab_offset = rodata_offset + rodata_size;
   const uint64_t symtab_offset = align_up_for_test(strtab_offset + strtab.size(), 8);
   constexpr size_t sym_count = 2;
@@ -549,8 +554,13 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernel_descriptors(
   const uint32_t kernel0_name = add_elf_name(strtab, "kernel0.kd");
   const uint32_t kernel1_name = add_elf_name(strtab, "kernel1.kd");
 
-  const uint64_t rodata_offset = text_offset + text_size;
-  const uint64_t rodata_vaddr = text_vaddr + text_size + load_align;
+  // The kernel descriptors require 8-byte alignment (tests reinterpret_cast the
+  // .rodata bytes to TestKernelDescriptor). An odd text_words count leaves
+  // text_offset + text_size only 4-aligned, so pad up to 8. text_offset and
+  // text_vaddr are both 8-aligned and differ by a multiple of load_align, so
+  // padding both keeps the PT_LOAD p_offset == p_vaddr (mod p_align) congruence.
+  const uint64_t rodata_offset = align_up_for_test(text_offset + text_size, 8);
+  const uint64_t rodata_vaddr = align_up_for_test(text_vaddr + text_size, 8) + load_align;
   const uint64_t strtab_offset = rodata_offset + rodata_size;
   const uint64_t symtab_offset = align_up_for_test(strtab_offset + strtab.size(), 8);
   constexpr size_t sym_count = 3;
@@ -3930,6 +3940,10 @@ TEST(BinaryTranslatorE2E, SkipFailedKernelKeepsIndependentKernelTranslating) {
 
   ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
                                                           : result.diagnostics.front().message);
+  // A skipped kernel is only a warning, so ok() stays true, but the artifact is
+  // NOT dispatchable: its trap stub would silently complete if dispatched. Code
+  // object output paths (CLI, API consumers) must gate on dispatchable().
+  EXPECT_FALSE(result.dispatchable());
   ASSERT_FALSE(result.elf_bytes.empty());
   const auto skipped = std::ranges::find_if(result.diagnostics, [](const auto &diagnostic) {
     return diagnostic.kind == rocjitsu::DiagnosticKind::KernelSkipped;

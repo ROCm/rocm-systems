@@ -93,6 +93,7 @@ using rocjitsu::elf_mach_name;
 using rocjitsu::ELFCLASS64;
 using rocjitsu::EM_AMDGPU;
 using rocjitsu::has_error_diagnostic;
+using rocjitsu::has_skipped_kernel;
 using rocjitsu::KernargExtensionLayout;
 using rocjitsu::KernargExtensionMetadata;
 using rocjitsu::KernargExtensionPayloadLayout;
@@ -2173,6 +2174,13 @@ public:
     state.doorbell_signal = queue->doorbell_signal.handle;
     if (auto config = layer().config())
       state.host_lds_bytes = arch_lds_bytes(config->target.arch);
+    // host_agent is the mapped agent: for a guest queue rj_queue_create remapped
+    // the guest agent to the guest's execution host, so a match here means this is
+    // the queue that runs guest work. Only that queue's dispatches are rewritten
+    // and only its oversized-no-metadata launches fail closed; unrelated agents'
+    // queues are tracked for doorbell forwarding but otherwise left untouched.
+    const hsa_agent_t guest_host = AgentMapper::instance().host_for_guest();
+    state.is_guest_queue = guest_host.handle != 0 && host_agent.handle == guest_host.handle;
     state.uses_packet_interceptor = uses_packet_interceptor;
     state.slots.resize(queue->size);
 
@@ -2394,6 +2402,12 @@ private:
     uint64_t next_packet_id = 0;
     uint32_t host_lds_bytes = 0;
     bool uses_packet_interceptor = false;
+    // True only for the queue running guest work on the guest's execution host
+    // agent. host_lds_bytes is derived from the guest target arch, so it is only
+    // meaningful for this queue. Other agents' queues are tracked (so their
+    // doorbell stores still forward) but their dispatches are never rewritten and
+    // an oversized packet on them is the driver's concern, not ours.
+    bool is_guest_queue = false;
     std::vector<VirtualLdsDispatchBuffers> slots;
     std::vector<VirtualLdsDispatchBuffers> retired_buffers;
   };
@@ -2598,11 +2612,13 @@ private:
     auto resolved =
         VirtualLdsRuntimeRegistry::instance().find_by_kernel_object(packet.kernel_object);
     if (!resolved) {
-      // No virtual-LDS variant for this kernel object. If its packet group
-      // segment still exceeds the host LDS limit there is no sidecar to fall back
-      // to and the normal descriptor would fault the host, so fail closed rather
-      // than submit an oversized launch (consistent with the post-plan paths).
-      if (exceeds_host_lds_limit(state, packet.group_segment_size)) {
+      // No virtual-LDS variant for this kernel object. On the guest's own queue a
+      // group segment exceeding the host LDS limit has no sidecar to fall back to
+      // and the normal descriptor would fault the host, so fail closed (consistent
+      // with the post-plan paths). host_lds_bytes is derived from the guest target
+      // arch, so this check is only meaningful for the guest queue; an unrelated
+      // agent with a larger real LDS capacity must keep its packet unchanged.
+      if (state.is_guest_queue && exceeds_host_lds_limit(state, packet.group_segment_size)) {
         abort_virtual_lds_dispatch("kernel has no virtual-LDS variant but its group segment "
                                    "exceeds the host LDS limit",
                                    delivery, packet_id, "<unregistered>", packet.group_segment_size,
@@ -3833,10 +3849,7 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
   // results. (This trades the "keep the module loadable when an unused kernel
   // fails to translate" behavior for correctness; a dispatched skipped kernel
   // must never appear to succeed.)
-  const auto skipped = std::ranges::find_if(translated.diagnostics, [](const auto &diagnostic) {
-    return diagnostic.kind == DiagnosticKind::KernelSkipped;
-  });
-  if (skipped != translated.diagnostics.end()) {
+  if (has_skipped_kernel(translated.diagnostics)) {
     std::fprintf(stderr,
                  "[rocjitsu-hooks] code object contains a kernel that could not be translated and "
                  "would silently complete if dispatched; refusing the load\n");
