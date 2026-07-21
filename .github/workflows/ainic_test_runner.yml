@@ -112,11 +112,14 @@ env:
 
 jobs:
   ainic-test-runner:
-    # On PRs, run only when the "ainic-test" label is present. All other events
-    # (workflow_dispatch, schedule) always run.
+    # On PRs, run only for same-repo branches (never forks) that carry the
+    # "ainic-test" label -- the same-repo guard stops a labeled fork PR from
+    # running updated fork code on the self-hosted runner via later synchronize
+    # events. All other events (workflow_dispatch, schedule) always run.
     if: >-
       github.event_name != 'pull_request' ||
-      contains(github.event.pull_request.labels.*.name, 'ainic-test')
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       contains(github.event.pull_request.labels.*.name, 'ainic-test'))
     runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
     timeout-minutes: 540
 
