@@ -251,9 +251,11 @@ find_path(const std::string& _path, int _verbose, const std::string& _search_pat
 parent_path(std::string_view fpath, std::uint16_t levels)
 {
     std::filesystem::path result{ fpath };
-    for(auto i = 0; i < levels; ++i)
+    for(std::uint16_t i = 0; i < levels; ++i)
     {
-        result = result.parent_path();
+        auto parent = result.parent_path();
+        if(parent == result) break;  // reached root ("/") or relative bottom ("")
+        result = std::move(parent);
     }
     return result.string();
 }
@@ -413,10 +415,8 @@ get_origin(const std::string& _filename, std::vector<int>&& _open_modes)
 std::string
 get_rocprofsys_root()
 {
-    auto _exe_rp  = realpath("/proc/self/exe");
-    auto _exe_dir = parent_path(_exe_rp);
-    if(_exe_dir.empty()) _exe_dir = "./";
-    return fmt::format("{}/{}", _exe_dir, "..");
+    // strip 2 levels from exe filepath to reach root
+    return parent_path(realpath("/proc/self/exe"), 2);
 }
 
 std::string

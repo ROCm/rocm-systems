@@ -244,17 +244,11 @@ TEST_F(PathTest, PathType_Nonexistent)
     EXPECT_FALSE(static_cast<bool>(pt));
 }
 
-TEST_F(PathTest, GetRocprofsysRoot_ReturnsNonEmpty)
+TEST_F(PathTest, GetRocprofsysRoot_ReturnsNonEmptyAbsolute)
 {
     std::string root = get_rocprofsys_root();
     EXPECT_FALSE(root.empty());
-}
-
-TEST_F(PathTest, GetRocprofsysRoot_EndsWithParentDir)
-{
-    std::string root = get_rocprofsys_root();
-    EXPECT_TRUE(root.length() >= 2);
-    EXPECT_EQ(root.substr(root.length() - 2), "..");
+    EXPECT_EQ(root.front(), '/');
 }
 
 TEST_F(PathTest, GetInternalLibdir_ContainsLib)
@@ -379,6 +373,19 @@ TEST_F(PathTest, ParentPath_Relative_OneLevel) { EXPECT_EQ(parent_path("a/b", 1)
 TEST_F(PathTest, ParentPath_Relative_Overwalk) { EXPECT_EQ(parent_path("a/b", 5), ""); }
 
 TEST_F(PathTest, ParentPath_Identity) { EXPECT_EQ(parent_path("/a/b/c", 0), "/a/b/c"); }
+
+TEST_F(PathTest, ParentPath_Identity_RedundantSlashesVerbatim)
+{
+    EXPECT_EQ(parent_path("/a//b", 0), "/a//b");
+    EXPECT_EQ(parent_path("/a/b//", 0), "/a/b//");
+}
+
+TEST_F(PathTest, ParentPath_NegativeArgWrapsAndClamps)
+{
+    // -1 converts to uint16_t max (65535); loop clamps at the root / relative bottom
+    EXPECT_EQ(parent_path("/a/b/c", -1), "/");
+    EXPECT_EQ(parent_path("a/b/c", -1), "");
+}
 
 TEST_F(PathTest, ParentPath_TrailingSlash_Redundant)
 {
