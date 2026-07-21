@@ -296,14 +296,31 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                                  {}});
   };
 
+  // Shared functions can contribute hundreds of candidate sites to the same
+  // owner.  Computing the owner's maximum register references for every site
+  // turns otherwise modest multi-kernel objects into a quadratic scan.  The
+  // answer depends only on the immutable decoded blocks and kernel range, so
+  // compute it once per descriptor and reuse it for both kernel-local and
+  // shared-function candidates.
+  std::unordered_map<uint64_t, const ConSanKernelInfo *> kernels_by_descriptor;
+  std::unordered_map<uint64_t, KernelMaxRegisterRefs> max_refs_by_descriptor;
+  kernels_by_descriptor.reserve(result.kernels.size());
+  max_refs_by_descriptor.reserve(result.kernels.size());
+  for (const ConSanKernelInfo &kernel : result.kernels) {
+    kernels_by_descriptor.emplace(kernel.descriptor_file_offset, &kernel);
+    max_refs_by_descriptor.emplace(
+        kernel.descriptor_file_offset,
+        max_register_refs_in_kernel(kernel, KernelBlockScope(block_ptrs)));
+  }
+
   for (const ConSanKernelInfo &kernel : result.kernels) {
     if (kernel.preflight_action == ConSanPreflightAction::Reject)
       continue;
     if (!options.test_kernel_name_filter.empty() &&
         kernel.name.find(options.test_kernel_name_filter) == std::string::npos)
       continue;
-    const KernelMaxRegisterRefs max_refs =
-        max_register_refs_in_kernel(kernel, KernelBlockScope(block_ptrs));
+    const KernelMaxRegisterRefs &max_refs =
+        max_refs_by_descriptor.at(kernel.descriptor_file_offset);
     std::optional<uint16_t> min_auto_scratch_vgpr;
     if (max_refs.vgpr && *max_refs.vgpr < 255)
       min_auto_scratch_vgpr = static_cast<uint16_t>(*max_refs.vgpr + 1u);
@@ -350,11 +367,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                                           ? std::min(common_allocated_vgpr_count, *allocated)
                                           : *allocated;
         has_common_allocated_vgpr_count = true;
-        const auto owner_kernel =
-            std::ranges::find(result.kernels, owner, &ConSanKernelInfo::descriptor_file_offset);
-        if (owner_kernel != result.kernels.end()) {
-          const KernelMaxRegisterRefs refs =
-              max_register_refs_in_kernel(*owner_kernel, KernelBlockScope(block_ptrs));
+        const auto owner_kernel = kernels_by_descriptor.find(owner);
+        if (owner_kernel != kernels_by_descriptor.end()) {
+          const KernelMaxRegisterRefs &refs = max_refs_by_descriptor.at(owner);
           if (refs.sgpr)
             max_owner_sgpr_ref =
                 max_owner_sgpr_ref ? std::max(*max_owner_sgpr_ref, *refs.sgpr) : *refs.sgpr;
