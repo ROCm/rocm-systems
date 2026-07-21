@@ -76,10 +76,10 @@ public:
       it->second.client_pid = client_pid;
   }
 
-  /// @brief Enable passthrough for unmapped addresses (local/user-mode only).
-  /// @details When true, addresses not found in the page table are treated as
-  /// host pointers (GPU VA == host VA). This mirrors QEMU user-mode's identity
-  /// mapping and is only valid when simulator and target share an address space.
+  /// @brief Enable passthrough for VMID-0 unmapped addresses (local/user-mode only).
+  /// @details Process-scoped VMIDs must not directly dereference page-table misses:
+  /// local-mode KFD clients can hold large PROT_NONE GPUVA reservations. Those
+  /// accesses fall back to process_vm_readv/process_vm_writev instead.
   void set_passthrough(bool v) { passthrough_ = v; }
 
   /// @brief Resolve a GPU VA to a host pointer via the given VMID's page table.
@@ -331,9 +331,6 @@ private:
           return pt_it->second.host_ptr;
       }
     }
-    static constexpr uint64_t kUserSpaceLimit = 0x800000000000ULL;
-    if (passthrough_ && addr < kUserSpaceLimit)
-      return reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
     return nullptr;
   }
 
