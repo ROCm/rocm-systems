@@ -23,6 +23,11 @@ constexpr uint32_t S0 = 0, S1 = 64, ACC = 128, DST = 192, DST_REGS = 32;
 constexpr uint32_t IN_REGS = 16, ACC_REGS = 32;
 constexpr uint32_t CONST_ONE = 0x3F800000u;
 
+using MfmaFloatSpecFn = void (*)(amdgpu::ComputeUnitCore &, uint32_t, uint32_t, uint32_t, uint32_t,
+                                 uint32_t, uint32_t, uint32_t, uint32_t);
+using MfmaIntSpecFn = void (*)(amdgpu::ComputeUnitCore &, uint32_t, uint32_t, uint32_t, uint32_t,
+                               uint32_t);
+
 struct MfmaFixture : ExactFixture {
   MfmaFixture() : ExactFixture(ROCJITSU_CODE_ARCH_CDNA4, WF) {}
 };
@@ -118,7 +123,7 @@ TEST(MfmaSimdExact, F32_f16_Permuted) {
 // --- specialized f16 kernels (constexpr dims + F16C bulk convert) ---
 TEST(MfmaSimdExact, F16Spec_AllShapes) {
   SKIP_IF_NO_SIMD();
-  auto spec = [](auto fn, const char *label) {
+  auto spec = [](MfmaFloatSpecFn fn, const char *label) {
     run_case(label, Fmt::F16, Fmt::F32, [fn](MfmaFixture &fx, uint32_t const_acc) {
       fn(*fx.cu, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, const_acc, 0, 0, 0);
     });
@@ -134,7 +139,7 @@ TEST(MfmaSimdExact, F16Spec_AllShapes) {
 // --- specialized bf16 kernels (constexpr dims + bf16 zero-extend bulk convert) ---
 TEST(MfmaSimdExact, Bf16Spec_AllShapes) {
   SKIP_IF_NO_SIMD();
-  auto spec = [](auto fn, const char *label) {
+  auto spec = [](MfmaFloatSpecFn fn, const char *label) {
     run_case(label, Fmt::BF16, Fmt::F32, [fn](MfmaFixture &fx, uint32_t const_acc) {
       fn(*fx.cu, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, const_acc, 0, 0, 0);
     });
@@ -152,7 +157,7 @@ TEST(MfmaSimdExact, Bf16Spec_AllShapes) {
 // denorm, and max-finite f8 codes through both paths. ---
 TEST(MfmaSimdExact, F8Spec_AllShapes) {
   SKIP_IF_NO_SIMD();
-  auto spec = [](auto fn, Fmt fmt, const char *label) {
+  auto spec = [](MfmaFloatSpecFn fn, Fmt fmt, const char *label) {
     run_case(label, fmt, Fmt::F32, [fn](MfmaFixture &fx, uint32_t const_acc) {
       fn(*fx.cu, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, const_acc, 0, 0, 0);
     });
@@ -170,7 +175,7 @@ TEST(MfmaSimdExact, F8Spec_AllShapes) {
 // --- specialized f32 kernels ---
 TEST(MfmaSimdExact, F32Spec_AllShapes) {
   SKIP_IF_NO_SIMD();
-  auto spec = [](auto fn, const char *label) {
+  auto spec = [](MfmaFloatSpecFn fn, const char *label) {
     run_case(label, Fmt::F32, Fmt::F32, [fn](MfmaFixture &fx, uint32_t const_acc) {
       fn(*fx.cu, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, const_acc, 0, 0, 0);
     });
@@ -214,7 +219,7 @@ TEST(MfmaSimdExact, I32_i8_AllShapes) {
 // range, so wrap-around near INT32_MAX/INT32_MIN is exercised on both paths.
 TEST(MfmaSimdExact, I8Spec_AllShapes) {
   SKIP_IF_NO_SIMD();
-  auto spec = [](auto fn, const char *label) {
+  auto spec = [](MfmaIntSpecFn fn, const char *label) {
     run_case(label, Fmt::I8, Fmt::I8, [fn](MfmaFixture &fx, uint32_t const_acc) {
       fn(*fx.cu, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, const_acc);
     });

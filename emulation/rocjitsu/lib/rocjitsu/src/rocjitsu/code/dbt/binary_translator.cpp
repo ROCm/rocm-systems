@@ -19,6 +19,7 @@
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/patch/kernel_text_layout.h"
+#include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -744,6 +745,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         scope.translation->target_vgpr_count, scope.translation->target_agpr_count,
         scope.translation->target_accvgpr_base, scope.translation->target_sgpr_count);
     LivenessAnalysisOptions liveness_options;
+    liveness_options.max_free_vgpr =
+        static_cast<uint16_t>(isa_properties(host_arch_).max_addressable_vgprs_per_wf);
     if (options_.debug_min_free_vgpr)
       liveness_options.min_free_vgpr = *options_.debug_min_free_vgpr;
     const auto liveness_edges = scoped_call_liveness_edges(KernelBlockScope(scope.blocks), text);

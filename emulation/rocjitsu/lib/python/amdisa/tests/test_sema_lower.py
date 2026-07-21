@@ -188,7 +188,7 @@ class TestLowerVectorAdd:
         result = lower_sema_block(block)
         assert 'std::fma(' in result
 
-    def test_vector_explicit_vcc_dst_preserves_high_sgpr_on_wave32(self):
+    def test_vector_explicit_vcc_dst_uses_wave_mask_helper(self):
         body = SemaNode(
             SemaNodeKind.ASSIGN,
             children=(
@@ -221,12 +221,7 @@ class TestLowerVectorAdd:
 
         result = lower_sema_block(block, ctx)
 
-        assert 'if (wf.wf_size() <= 32)' in result
-        assert (
-            'amdgpu::RegisterAccess(wf).write_scalar(sdst, static_cast<uint32_t>(vcc))'
-            in result
-        )
-        assert 'amdgpu::RegisterAccess(wf).write_scalar64(sdst, vcc)' in result
+        assert 'amdgpu::write_wave_mask_scalar(sdst, wf, vcc);' in result
 
     def test_vector_block_can_write_scalar_destination(self):
         body = SemaNode(
