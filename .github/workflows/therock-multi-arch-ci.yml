@@ -110,7 +110,7 @@ jobs:
           fi
           export BASE_REF
           export HEAD_REF
-          python3 .github/scripts/get_changed_projects.py
+          cd .github/scripts && python3 get_changed_projects.py
 
   setup:
     needs: configure
