@@ -760,7 +760,10 @@ hsa_status_t hsa_queue_create(
                               group_segment_size, true, &cmd_queue);
   if (status != HSA_STATUS_SUCCESS) return status;
 
-  assert(cmd_queue != nullptr && "Queue not returned but status was success.\n");
+  if (cmd_queue == nullptr) {
+    assert(false && "Queue not returned but status was success.");
+    return HSA_STATUS_ERROR;
+  }
   *queue = core::Queue::Convert(cmd_queue);
   return status;
 
@@ -790,7 +793,10 @@ hsa_status_t hsa_soft_queue_create(hsa_region_t region, uint32_t size,
   void* shared_queue = nullptr;
   hsa_status_t err = HSA::hsa_memory_allocate(region, sizeof(core::SharedQueue), &shared_queue);
   if (err != HSA_STATUS_SUCCESS) return err;
-  assert(shared_queue && "Queue struct is NULL when creating host queue.");
+  if (shared_queue == nullptr) {
+    assert(false && "Queue struct is NULL when creating host queue.");
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
 
   core::HostQueue* host_queue = new core::HostQueue(static_cast<core::SharedQueue*>(shared_queue),
                                                     region, size, type, features, doorbell_signal);
