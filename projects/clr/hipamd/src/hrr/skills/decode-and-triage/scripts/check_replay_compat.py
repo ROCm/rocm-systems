@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -139,6 +140,126 @@ _DOCKER_ROC_LIB = (
 )
 
 
+def resolve_clr_lib_dir(
+    *,
+    clr_build: str | None = None,
+    hrr_playback: str | None = None,
+    clr_lib: str | None = None,
+) -> Path | None:
+    """Resolve the CLR hipamd lib dir used for docker replay mounts."""
+    if clr_lib:
+        path = Path(clr_lib)
+        if path.is_dir() and any(path.glob("libamdhip64.so*")):
+            return path.resolve()
+    if clr_build:
+        path = Path(clr_build) / "hipamd" / "lib"
+        if path.is_dir() and any(path.glob("libamdhip64.so*")):
+            return path.resolve()
+    if hrr_playback:
+        play = Path(hrr_playback)
+        if play.is_file():
+            path = (play.parent / "../../../lib").resolve()
+            if path.is_dir() and any(path.glob("libamdhip64.so*")):
+                return path
+    return None
+
+
+def _hip_version_from_soname(filename: str) -> str | None:
+    match = re.search(r"libamdhip64\.so\.(\d+\.\d+\.\d+)", filename)
+    if match:
+        return match.group(1)
+    return None
+
+
+def hip_version_from_clr_lib(clr_lib: Path) -> str | None:
+    """Parse HIP runtime version from the mounted libamdhip64 SONAME."""
+    lib_dir = clr_lib.resolve()
+    resolved: list[Path] = []
+    for name in ("libamdhip64.so", "libamdhip64.so.7"):
+        link = lib_dir / name
+        if not link.exists():
+            continue
+        try:
+            target = link.resolve()
+        except OSError:
+            continue
+        if target.is_file():
+            resolved.append(target)
+    if not resolved:
+        versioned = sorted(
+            lib_dir.glob("libamdhip64.so.*.*.*"),
+            key=lambda path: path.name,
+        )
+        if versioned:
+            resolved.append(versioned[-1].resolve())
+    for path in resolved:
+        version = _hip_version_from_soname(path.name)
+        if version:
+            return version
+    return None
+
+
+def default_docker_extra_ld(image: str) -> str | None:
+    if image.startswith("rocm/vllm:"):
+        return "/opt/python/lib/python3.13/site-packages/_rocm_sdk_core/lib"
+    return None
+
+
+def build_docker_ld_inside(
+    *,
+    clr_lib: Path | None,
+    rocr_lib: Path | None,
+    extra_ld: str | None,
+) -> str:
+    """Mirror replay_docker.sh LD_LIBRARY_PATH inside the container."""
+    if clr_lib is None:
+        parts: list[str] = []
+        if extra_ld:
+            parts.append(extra_ld)
+        parts.append("/opt/rocm/lib")
+        return ":".join(parts)
+    parts = ["/opt/hrr/lib"]
+    if rocr_lib is not None:
+        parts.append("/opt/hrr/rocr")
+    if extra_ld:
+        parts.extend([extra_ld, "/opt/rocm/lib"])
+    else:
+        parts.append("/opt/rocm/lib")
+    return ":".join(parts)
+
+
+def docker_mount_clr_enabled() -> bool:
+    return os.environ.get("HRR_DOCKER_MOUNT_CLR", "0") == "1"
+
+
+def resolve_replay_mounts(
+    *,
+    docker_image: str | None = None,
+    clr_build: str | None = None,
+    hrr_playback: str | None = None,
+    clr_lib: str | None = None,
+    rocr_lib: str | None = None,
+    extra_ld: str | None = None,
+    mount_clr: bool = False,
+) -> tuple[Path | None, Path | None, str | None]:
+    extra = extra_ld
+    if extra is None and docker_image:
+        extra = default_docker_extra_ld(docker_image)
+    if not mount_clr:
+        return None, None, extra
+    clr = resolve_clr_lib_dir(
+        clr_build=clr_build,
+        hrr_playback=hrr_playback,
+        clr_lib=clr_lib,
+    )
+    rocr: Path | None = None
+    if rocr_lib:
+        candidate = Path(rocr_lib)
+        if candidate.is_dir() and (candidate / "libhsa-runtime64.so.1").is_file():
+            rocr = candidate.resolve()
+    return clr, rocr, extra
+
+
 def _parse_hip_version(text: str) -> str | None:
     for line in text.splitlines():
         m = re.search(r"HIP version\s*:\s*(\S+)", line, re.I)
@@ -213,7 +334,10 @@ def _parse_rocm_smi(text: str) -> tuple[int, list[str], list[str]]:
     return count, archs, names
 
 
-def probe_host_replay_env() -> ReplayEnvironment:
+def probe_host_replay_env(
+    *,
+    clr_lib: Path | None = None,
+) -> ReplayEnvironment:
     env = ReplayEnvironment(source="host")
     if shutil.which("rocm-smi"):
         proc = _run(["rocm-smi", "--showid", "--showproductname"])
@@ -227,34 +351,55 @@ def probe_host_replay_env() -> ReplayEnvironment:
         render_nodes = sorted(Path("/dev/dri").glob("renderD*"))
         if render_nodes:
             env.visible_gpus = len(render_nodes)
-    if shutil.which("hipconfig"):
+    if clr_lib is not None:
+        env.hip_runtime_version = hip_version_from_clr_lib(clr_lib)
+        if env.hip_runtime_version:
+            env.source = f"host:mounted:{clr_lib}"
+    if env.hip_runtime_version is None and shutil.which("hipconfig"):
         proc = _run(["hipconfig", "--version"])
         env.hip_runtime_version = _parse_hip_version(proc.stdout + proc.stderr)
     env.comgr_version = probe_comgr_version()
     return env
 
 
-def probe_docker_replay_env(image: str) -> ReplayEnvironment:
+def probe_docker_replay_env(
+    image: str,
+    *,
+    clr_lib: Path | None = None,
+    rocr_lib: Path | None = None,
+    extra_ld: str | None = None,
+) -> ReplayEnvironment:
     env = ReplayEnvironment(source=f"docker:{image}")
     if not shutil.which("docker"):
         env.source = "docker:unavailable"
         return env
+
+    ld_inside = build_docker_ld_inside(
+        clr_lib=clr_lib,
+        rocr_lib=rocr_lib,
+        extra_ld=extra_ld,
+    )
+    if clr_lib is not None:
+        env.source = f"docker:{image}:overlay:{clr_lib}"
+
     probe_shell = (
-        f"export LD_LIBRARY_PATH={_DOCKER_ROC_LIB}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}; "
+        f"export LD_LIBRARY_PATH={ld_inside}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}; "
         "rocm-smi --showid --showproductname 2>/dev/null || true; "
         "hipconfig --version 2>/dev/null || true"
     )
-    cmd = _docker_cmd(
+    docker_args = [
         "run",
         "--rm",
         "--device=/dev/kfd",
         "--device=/dev/dri",
-        image,
-        "bash",
-        "-lc",
-        probe_shell,
-    )
-    proc = _run(cmd, timeout=120)
+    ]
+    if clr_lib is not None:
+        docker_args.extend(["-v", f"{clr_lib}:/opt/hrr/lib:ro"])
+    if rocr_lib is not None:
+        docker_args.extend(["-v", f"{rocr_lib}:/opt/hrr/rocr:ro"])
+    docker_args.extend([image, "bash", "-lc", probe_shell])
+
+    proc = _run(_docker_cmd(*docker_args), timeout=120)
     out = proc.stdout + proc.stderr
     if proc.returncode != 0 and "permission denied" in out.lower():
         env.source = "docker:permission-denied"
@@ -264,13 +409,21 @@ def probe_docker_replay_env(image: str) -> ReplayEnvironment:
         env.visible_gpus = count
         env.gpu_archs = archs
         env.gpu_names = names
-    env.hip_runtime_version = _parse_hip_version(out)
+    if clr_lib is not None:
+        env.hip_runtime_version = hip_version_from_clr_lib(clr_lib)
+    if env.hip_runtime_version is None:
+        env.hip_runtime_version = _parse_hip_version(out)
     comgr_proc = _run(
         _docker_cmd(
             "run",
             "--rm",
+            *(
+                ["-v", f"{clr_lib}:/opt/hrr/lib:ro"]
+                if clr_lib is not None
+                else []
+            ),
             "-e",
-            f"LD_LIBRARY_PATH={_DOCKER_ROC_LIB}",
+            f"LD_LIBRARY_PATH={ld_inside}",
             image,
             "python3",
             "-c",
@@ -412,6 +565,14 @@ def main() -> int:
     ap.add_argument("--archive", required=True, help="pid-* archive directory")
     ap.add_argument("--mode", choices=("host", "docker"), default="host")
     ap.add_argument("--docker-image", help="Capture/replay Docker image")
+    ap.add_argument(
+        "--clr-lib",
+        help="CLR hipamd lib dir mounted for replay (default: CLR_BUILD/HRR_PLAYBACK)",
+    )
+    ap.add_argument(
+        "--rocr-lib",
+        help="In-tree ROCR lib dir mounted for replay (default: ROCR_LIB env)",
+    )
     ap.add_argument("--gpu", type=int, default=0, help="Replay GPU ordinal")
     ap.add_argument("--strict-version", action="store_true")
     ap.add_argument("--strict-arch", action="store_true")
@@ -426,15 +587,40 @@ def main() -> int:
         )
         return 0
 
+    clr_lib, rocr_lib, extra_ld = resolve_replay_mounts(
+        docker_image=args.docker_image,
+        clr_build=os.environ.get("CLR_BUILD"),
+        hrr_playback=os.environ.get("HRR_PLAYBACK"),
+        clr_lib=args.clr_lib or os.environ.get("HRR_DOCKER_CLR_LIB"),
+        rocr_lib=args.rocr_lib or os.environ.get("ROCR_LIB"),
+        extra_ld=os.environ.get("HRR_DOCKER_EXTRA_LD"),
+        mount_clr=args.mode == "docker" and docker_mount_clr_enabled(),
+    )
+    if clr_lib is not None:
+        print(
+            f"[compat] dev overlay: probing mounted CLR lib at {clr_lib}",
+            file=sys.stderr,
+        )
+    elif args.mode == "docker":
+        print(
+            "[compat] probing Docker image HRR stack (set HRR_DOCKER_MOUNT_CLR=1 to overlay host build)",
+            file=sys.stderr,
+        )
+
     if args.mode == "docker":
         if not args.docker_image:
             print(
                 "error: --docker-image required for docker preflight", file=sys.stderr
             )
             return 2
-        replay = probe_docker_replay_env(args.docker_image)
+        replay = probe_docker_replay_env(
+            args.docker_image,
+            clr_lib=clr_lib,
+            rocr_lib=rocr_lib,
+            extra_ld=extra_ld,
+        )
     else:
-        replay = probe_host_replay_env()
+        replay = probe_host_replay_env(clr_lib=clr_lib)
 
     if replay.visible_gpus is None:
         print(

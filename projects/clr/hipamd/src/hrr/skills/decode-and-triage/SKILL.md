@@ -28,7 +28,10 @@ rocm/vllm:rocm7.13.0_gfx950-dcgpu_ubuntu24.04_py3.13_pytorch_2.10.0_vllm_0.19.1
    if capture used more GPUs than replay exposes, or requested `GPU` ordinal is missing.
    **HIP or comgr version mismatch** prints a confirmation prompt before replay; in
    non-interactive runs (agents) exit code 2 — ask the user *"Do you want to continue?"*
-   and re-run with `HRR_CONTINUE=1` if yes. Legacy archives without metadata skip preflight.
+   and re-run with `HRR_CONTINUE=1` if yes. Docker preflight probes the image's own
+   HRR/ROCm stack by default. Set `HRR_DOCKER_MOUNT_CLR=1` to overlay a host dev build
+   (`CLR_BUILD` / `HRR_PLAYBACK` → `/opt/hrr/lib`) for WIP HRR work. Legacy archives
+   without metadata skip preflight.
    Override: `HRR_SKIP_COMPAT=1`; hard block (no prompt): `HRR_STRICT_VERSION=1`,
    `HRR_STRICT_ARCH=1`.
 3. **Native first:** `"$SKILL/scripts/triage_archive.sh" --archive <pid-dir>`
@@ -37,9 +40,11 @@ rocm/vllm:rocm7.13.0_gfx950-dcgpu_ubuntu24.04_py3.13_pytorch_2.10.0_vllm_0.19.1
    export HRR_DOCKER_IMAGE='<image from user>'
    "$SKILL/scripts/triage_archive.sh" --archive <pid-dir> --replay docker
    ```
-   `ensure_playback.sh` sets `ROCR_LIB` when in-tree ROCR exists. `replay_docker.sh`
-   defaults `HRR_DOCKER_EXTRA_LD` for `rocm/vllm:*` images. Optional: `export GPU=1`
-   when GPU 0 is busy.
+   Docker replay uses **`hrr-playback` from the image** by default. For a host dev
+   overlay (image lacks HRR or you need a WIP build): `export HRR_DOCKER_MOUNT_CLR=1`
+   plus `CLR_BUILD` or `HRR_PLAYBACK`. `ensure_playback.sh --build` runs for native
+   replay and for docker overlay only. `replay_docker.sh` defaults `HRR_DOCKER_EXTRA_LD`
+   for `rocm/vllm:*` images. Optional: `export GPU=1` when GPU 0 is busy.
 5. Reply with finding summary + short capture explainer.
 
 `auto` uses docker when `HRR_DOCKER_IMAGE` is already set, else native. `--no-replay`
@@ -80,7 +85,8 @@ Re-run triage with `HRR_CONTINUE=1` only after they confirm.
 |-----------|--------|
 | `--build` fails (`rocdevice.cpp` etc.) | Set `CLR_BUILD` to existing `projects/clr/build-hrr*` if present; re-run. |
 | Native replay fails | `LD_LIBRARY_PATH`: `<clr-build>/hipamd/lib` → in-tree ROCR → `/opt/rocm/lib`. Then docker replay with capture image. |
-| Docker `hip_7.14 not found` | Mounted CLR libs must come **before** container SDK on `LD_LIBRARY_PATH` (handled by `replay_docker.sh`). |
+| Docker `hrr-playback` not in image | Set `HRR_DOCKER_MOUNT_CLR=1` with `CLR_BUILD` / `HRR_PLAYBACK` for dev overlay. |
+| Docker `hip_7.14 not found` | With dev overlay, mounted CLR libs must come **before** container SDK on `LD_LIBRARY_PATH` (handled by `replay_docker.sh`). |
 
 ## Reply template (required)
 

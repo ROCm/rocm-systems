@@ -142,9 +142,15 @@ run_replay_preflight() {
   fi
 }
 
-if [[ "$mode" != "skip" && -x "$ENSURE" ]]; then
+if [[ "$mode" != "skip" && "$mode" == "native" && -x "$ENSURE" ]]; then
   HRR_PLAYBACK="$("$ENSURE" --build)" || {
     echo "error: ensure_playback.sh --build failed (see SKILL.md; do not patch source)" >&2
+    exit 1
+  }
+  export HRR_PLAYBACK
+elif [[ "$mode" == "docker" && "${HRR_DOCKER_MOUNT_CLR:-0}" == "1" && -x "$ENSURE" ]]; then
+  HRR_PLAYBACK="$("$ENSURE" --build)" || {
+    echo "error: ensure_playback.sh --build failed for HRR_DOCKER_MOUNT_CLR=1" >&2
     exit 1
   }
   export HRR_PLAYBACK
