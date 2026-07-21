@@ -779,7 +779,7 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& cpu_pmc_smpl)
                 static_cast<double>(cpu_pmc_smpl.process_data.user_mode_time) /
                     units::sec);
         }
-        
+
         if(enabled_m.bits.kernel_time)
         {
             insert_event_and_sample(
@@ -794,8 +794,7 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& cpu_pmc_smpl)
     {
         auto get_freq_track_name = [device_id](const auto& cpu_id) {
             return std::string(trait::name<category::cpu_freq>::value) + " [" +
-                   std::to_string(device_id) + "] Core [" + std::to_string(cpu_id) +
-                   "]";
+                   std::to_string(device_id) + "] Core [" + std::to_string(cpu_id) + "]";
         };
 
         const auto core_freq_samples = deserialize_freqs(cpu_pmc_smpl.freqs);
@@ -803,8 +802,7 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& cpu_pmc_smpl)
         {
             auto track_name = get_freq_track_name(core.id);
             insert_event_and_sample(trait::name<category::cpu_freq>::value,
-                                    track_name.c_str(),
-                                    static_cast<double>(core.value));
+                                    track_name.c_str(), static_cast<double>(core.value));
         }
     }
 
@@ -812,8 +810,7 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& cpu_pmc_smpl)
     {
         auto get_load_track_name = [device_id](const auto& cpu_id) {
             return std::string(trait::name<category::cpu_load>::value) + " [" +
-                   std::to_string(device_id) + "] Core [" + std::to_string(cpu_id) +
-                   "]";
+                   std::to_string(device_id) + "] Core [" + std::to_string(cpu_id) + "]";
         };
 
         const auto core_load_samples = deserialize_loads(cpu_pmc_smpl.loads);
@@ -821,8 +818,7 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& cpu_pmc_smpl)
         {
             auto track_name = get_load_track_name(core.id);
             insert_event_and_sample(trait::name<category::cpu_load>::value,
-                                    track_name.c_str(),
-                                    static_cast<double>(core.value));
+                                    track_name.c_str(), static_cast<double>(core.value));
         }
     }
 }
@@ -1162,10 +1158,8 @@ rocpd_processor_t::post_process_metadata()
         uid.agent_id            = pmc_agent_uid;
         pmc_info_data.unique_id = uid;
         pmc_info_data.target_arch =
-    pmc_info_data.target_arch =
-        is_cpu_gpu_agent
-            ? std::optional<std::string_view>{ pmc_info.target_arch }
-            : std::nullopt;
+            is_cpu_gpu_agent ? std::optional<std::string_view>{ pmc_info.target_arch }
+                             : std::nullopt;
         pmc_info_data.event_code       = pmc_info.event_code;
         pmc_info_data.instance_id      = pmc_info.instance_id;
         pmc_info_data.symbol           = pmc_info.symbol;
