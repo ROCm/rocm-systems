@@ -352,6 +352,13 @@ performance value is copied from another architecture.
 
 ## Progress log
 
+- 2026-07-21: XP9C remains ACTIVE/blue after commit `4bfa285247` and clean-tree
+  artifact
+  `consan-green-expansion-20260721-norm-softmax-inline-component-spill-clean-079`
+  repeat the exact oracle, static/dynamic completeness, 4,756/4,756 accesses,
+  and 2,352/2,352 barriers in 37.19 seconds.  The STATUS cell advances from
+  yellow to blue; only paired overhead and reviewed-fault gates remain.
+
 - 2026-07-21: XP9C advances within ACTIVE/blue.  Component-scoped Inline
   scalar state now covers accesses, barriers, and owner-entry initialization;
   local-LDS-shadow owners require a private-memory-backed 30-SGPR save while
