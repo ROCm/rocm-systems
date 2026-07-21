@@ -312,8 +312,7 @@ TEST_F(PathTest, ChainedSymlinks)
     EXPECT_EQ(symlink("chain_link1", link2_path.c_str()), 0);
 
     // Verify that link1 and link2_path are actual links:
-    // read_symlink() returns link target for real links
-    // and unchanged input for non-links
+    // for a non-link read_symlink() would return unchanged input
     EXPECT_NE(read_symlink(link1), link1);
     EXPECT_NE(read_symlink(link2_path), link2_path);
 
