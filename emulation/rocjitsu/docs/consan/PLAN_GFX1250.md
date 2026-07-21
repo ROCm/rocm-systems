@@ -116,10 +116,10 @@ flowchart TD
     XP7["XP7 DONE<br/>histogram Sampled paired and fault bundle<br/>green at 175-access denominator"]
     XP8["XP8 DONE<br/>scatter all four profiles green;<br/>inapplicable fault families recorded as typed N/A"]
     XP2A["XP2A DONE<br/>torch.topk exact oracles and dense Record/Replay<br/>106/106 diagnostic vertical"]
-    XP2B["XP2B ACTIVE<br/>torch.topk Sampled report fits;<br/>profile post-index construction bottleneck"]
+    XP2B["XP2B DONE<br/>torch.topk Sampled exact client completes;<br/>construction indexes validated"]
     XP2C["XP2C DONE<br/>torch.topk unrestricted Record/Replay exact/dynamic;<br/>113,760/160,848 accesses, all barriers"]
     XP2D["XP2D TODO<br/>torch.topk Record/Replay residual needs<br/>site/subgroup scalar routing"]
-    XP3["XP3 TODO<br/>top-k SC oracle passes;<br/>current exact object has 88 bounded gaps"]
+    XP3["XP3 ACTIVE<br/>top-k SC oracle passes;<br/>close 88 bounded scalar-continuation gaps"]
     XP9["XP9 DONE<br/>norm plus softmax Record/Replay clean, paired,<br/>and reviewed-fault bundle green"]
     XP9B["XP9B DONE<br/>norm plus softmax Sampled clean, paired,<br/>and reviewed-fault bundle green"]
     XP9C["XP9C DONE<br/>norm/softmax Inline clean, paired,<br/>and reviewed-fault bundle green"]
@@ -302,8 +302,9 @@ flowchart TD
   class R0,E0,D0,C0,V0,B0,B1,B2,B3,B4,B5,S0,S1,S2,S3,S4,S5,S6,A0,A1,A2,A3A,A4A,SC0,RR0,SA0,IS0,IS1,F0,Q0,V1,V2,V3,V8,V4A,V4B,V4C,V4D,V5A,V5B,V6A,V6B,V7,VT,VD,VP,VW,X0,XP0,XP1,XP1B,XP1C,XP2A,XP2C,XP4,XP5,XP6,XP7,XP8,XP9,XP9C,XP10,XT1,XT2A,XT2B,XT2C1,XT3C,XT3D,XT4A,XT4 done
   class XP9B done
   class XT3B done
-  class XP2B active
-  class G0,XP2B,XP2D,XP3,XT2C2,XT2C3,XT3A,XT3E,XF,XG todo
+  class XP2B done
+  class XP3 active
+  class G0,XP2D,XT2C2,XT2C3,XT3A,XT3E,XF,XG todo
 ```
 
 Broader partial-EXEC, dynamic-stack, high-register, cache/fence-shape, and
@@ -351,6 +352,20 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP2B is DONE/green and XP3 becomes the sole ACTIVE/blue box.
+  Commit `71a333dccf` replaces four nested linear searches in Sampled dense
+  access placement, barrier placement, synchronization identity lookup, and
+  final patch-byte accounting with indexed or ordered equivalents.  The
+  8,192-range final-validation regression and all 80 focused Sampled tests
+  pass.  Clean-tree one-repetition artifact
+  `consan-green-expansion-20260721-pytorch-topk-sampled-scaled-clean-095`
+  finishes in 80.30 seconds, passes both exact FP64/BF16 value-and-index
+  oracles, remains dynamically complete, patches 102,598/161,136 accesses and
+  all 15,182 barriers, and emits no forbidden diagnostic or overflow.  The
+  Sampled cell advances from orange to blue; bounded executable growth keeps
+  it from green.  Work rotates to SuperCollider's smaller 88-site top-k scalar
+  continuation residual.
 
 - 2026-07-21: XP9C is DONE/green.  Reviewed fault artifact
   `consan-green-expansion-20260721-norm-softmax-inline-component-spill-fault-084`
