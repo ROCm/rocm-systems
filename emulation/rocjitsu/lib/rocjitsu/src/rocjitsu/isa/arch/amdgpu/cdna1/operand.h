@@ -24,6 +24,7 @@ public:
   std::string name() const override;
   std::optional<uint64_t> literal64_value() const override;
   std::optional<RegisterRef> to_register_ref() const override;
+  std::optional<RegClass> to_special_reg_class() const override;
 
 private:
   uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;

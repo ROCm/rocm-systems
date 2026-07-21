@@ -1152,6 +1152,24 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
   return std::nullopt;
 }
 
+std::optional<RegClass> Operand::to_special_reg_class() const {
+  switch (opr_type_) {
+  case OperandType::OPR_PC:
+    return RegClass::PC;
+  case OperandType::OPR_SDST_EXEC:
+    return RegClass::EXEC;
+  case OperandType::OPR_SDST_M0:
+    return RegClass::M0;
+  case OperandType::OPR_SSRC_SPECIAL_SCC:
+    return RegClass::SCC;
+  case OperandType::OPR_VCC:
+    return RegClass::VCC;
+  default:
+    break;
+  }
+  return std::nullopt;
+}
+
 namespace {
 
 uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {

@@ -579,6 +579,50 @@ TEST(InstDefUseSpecialEffects, SpecialEffectsDoNotEnterScratchLiveness) {
   EXPECT_TRUE(du.memory.any());
 }
 
+TEST(SpecialEffectAnalysis, SaveexecReportsExecAndSccFromDecodedOperands) {
+  // Real decoded instruction: s_and_saveexec_b64 s[0:1], s[0:1] (CDNA4). Its
+  // fieldless special operands drive the InstDefUse special sets by direction:
+  //   dst EXEC + dst SCC  -> special_defs
+  //   src EXEC (old exec) -> special_uses
+  // while the ordinary sdst/ssrc0 SGPRs stay in the ordinary defs/uses that feed
+  // scratch allocation. Special effects never enter ordinary RegisterSet liveness.
+  const uint32_t words[] = {0xBE802000u, 0x00000000u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "s_and_saveexec_b64");
+
+  InstDefUse du(*inst);
+
+  EXPECT_TRUE(du.special_defs.contains(RegClass::EXEC));
+  EXPECT_TRUE(du.special_defs.contains(RegClass::SCC));
+  EXPECT_TRUE(du.special_uses.contains(RegClass::EXEC));
+  EXPECT_FALSE(du.special_uses.contains(RegClass::SCC));
+
+  // Ordinary sdst/ssrc0 (s[0:1]) still tracked as ordinary registers.
+  EXPECT_TRUE(du.defs.contains({RegClass::SGPR, 0, 2}));
+  EXPECT_TRUE(du.uses.contains({RegClass::SGPR, 0, 2}));
+
+  // Special registers do not leak into ordinary scratch liveness.
+  EXPECT_FALSE(du.defs.contains({RegClass::EXEC, 0, 1}));
+  EXPECT_FALSE(du.defs.contains({RegClass::SCC, 0, 1}));
+}
+
+TEST(SpecialEffectAnalysis, OrdinaryInstructionReportsNoSpecialEffects) {
+  // A plain vector op with only ordinary register operands exposes no special
+  // effects -- both special sets stay empty.
+  constexpr std::array<uint32_t, 2> kWritelaneV141S4Lane2 = {0xd28a008du, 0x00010404u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(kWritelaneV141S4Lane2.data()));
+  ASSERT_NE(inst, nullptr);
+
+  InstDefUse du(*inst);
+  EXPECT_TRUE(du.special_defs.empty());
+  EXPECT_TRUE(du.special_uses.empty());
+}
+
 TEST(CfgAnalysis, LoopBackEdgeLinksPredecessor) {
   auto blocks = build_test_blocks({TestOpcode::Nop, TestOpcode::BranchBackToStart});
 

@@ -9445,6 +9445,31 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             f'}}'
         )
 
+        # to_special_reg_class(): maps a special operand (VCC/EXEC/SDST_EXEC/
+        # SSRC_SPECIAL_SCC/M0/PC) to its special RegClass so InstDefUse can
+        # record it in special_defs/special_uses. Driven by shared fieldless
+        # operand policy table's effect column.
+        special_ref_cases = []
+        for opnd_type in self.isa_spec.operand_types:
+            effect = fieldless_policy(opnd_type).effect
+            if effect is not None and effect.special_reg is not None:
+                special_ref_cases.append(
+                    f'case OperandType::{opnd_type}: '
+                    f'return RegClass::{effect.special_reg.name};'
+                )
+        special_ref_cases.sort()
+        special_ref_body = '\n'.join(special_ref_cases)
+        special_ref_impl = (
+            f'std::optional<RegClass> Operand::to_special_reg_class() const {{\n'
+            f'switch (opr_type_) {{\n'
+            f'{special_ref_body}\n'
+            f'default:\n'
+            f'  break;\n'
+            f'}}\n'
+            f'return std::nullopt;\n'
+            f'}}'
+        )
+
         operand_ctor_decl = (
             '  Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
             '          bool packed_16bit_source = false, bool packed_16bit_dst = false);\n'
@@ -9569,6 +9594,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  std::string name() const override;\n'
                 f'{literal64_decl}'
                 '  std::optional<RegisterRef> to_register_ref() const override;\n'
+                '  std::optional<RegClass> to_special_reg_class() const override;\n'
                 f'{execution_backend_public_decl}'
                 f'{execution_decls}'
                 'private:\n'
@@ -9644,6 +9670,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 cgen.Line(literal64_impl),
                 cgen.Line(name_impl),
                 cgen.Line(ref_impl),
+                cgen.Line(special_ref_impl),
             ]
         )
 
