@@ -440,6 +440,7 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
 
   size_t selected_candidate_count = 0;
   bool selected_flat_candidate = false;
+  uint64_t selected_native_lds_extent = 0;
   const size_t selected_candidate_limit =
       options.max_patches_is_expert_limit ? options.max_patches : result.moi_candidates.size();
   for (const ConSanMoiCandidate &candidate : result.moi_candidates) {
@@ -460,6 +461,13 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     ++selected_candidate_count;
     selected_flat_candidate |= candidate.source == ConSanMoiCandidateSource::FlatGroup ||
                                candidate.source == ConSanMoiCandidateSource::FlatMaybeGroup;
+    if (candidate.source == ConSanMoiCandidateSource::NativeLds) {
+      for (const ConSanMoiAccessRange &range : *ranges) {
+        selected_native_lds_extent =
+            std::max<uint64_t>(selected_native_lds_extent,
+                               static_cast<uint64_t>(range.static_byte_offset) + range.byte_count);
+      }
+    }
     inventory.access_range_count += ranges->size();
   }
 
@@ -540,12 +548,14 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     }
     // A native LDS instruction can name storage that is not reflected in the
     // kernel descriptor's fixed-LDS field (for example, target-managed tensor
-    // transfers). Such a descriptor cannot host a descriptor-grown local
-    // mirror, so provision the external full-aperture fallback just as we do
-    // for group-FLAT accesses.
+    // transfers or dynamically sized LDS). Such a descriptor cannot host a
+    // descriptor-grown local mirror. A nonzero field is not sufficient proof:
+    // some dynamic-LDS objects retain a one-byte placeholder even though a
+    // decoded access itself spans more bytes. Provision the external
+    // full-aperture fallback just as we do for group-FLAT accesses.
     const bool descriptor_opaque_lds = result.arch_name == "gfx1250" &&
                                        inventory.access_range_count != 0u &&
-                                       inventory.inline_lds_bytes == 0u;
+                                       inventory.inline_lds_bytes < selected_native_lds_extent;
     if (selected_flat_candidate || descriptor_opaque_lds) {
       inventory.inline_lds_bytes = std::max<uint64_t>(
           inventory.inline_lds_bytes,

@@ -1164,6 +1164,25 @@ TEST(ConSanMoi, Gfx1250AutoReportUsesExternalApertureForDescriptorOpaqueLds) {
   EXPECT_TRUE(plan_consan_moi_auto_report(inventory).complete());
 }
 
+TEST(ConSanMoi, Gfx1250AutoReportRejectsUndersizedDynamicLdsPlaceholder) {
+  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
+  const std::array<uint32_t, 3> text_words = {store[0], store[1],
+                                              build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
+  std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "dynamic_lds_placeholder");
+  mutate_first_kernel_descriptor(bytes,
+                                 [](KD &descriptor) { descriptor.group_segment_fixed_size = 1u; });
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result));
+  const ConSanMoiAutoReportInventory inventory =
+      inventory_consan_moi_auto_report(result, options, bytes);
+  EXPECT_EQ(inventory.inline_lds_bytes, kConSanMoiInlineShadowConservativeExactShadowEntries *
+                                            consan_moi_exact_shadow::granule_bytes);
+  EXPECT_TRUE(plan_consan_moi_auto_report(inventory).complete());
+}
+
 TEST(ConSanMoi, AutoReportInventoryCoversFullLdsApertureForFlatGroupAccess) {
   const std::array<uint32_t, 1> kernel_words = {
       0xBFB00000u, // s_endpgm
