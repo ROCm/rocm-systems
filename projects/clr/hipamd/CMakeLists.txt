@@ -10,28 +10,23 @@ include(GNUInstallDirs)
 # ROCM_PATH is the path where ROCM is installed
 #  For shared lib of hip-rocclr runtime
 #    For release version
-#      cmake -DHIP_COMMON_DIR="$HIP_DIR" -DHIPCC_BIN_DIR="$HIPCC_DIR/bin" -DAMD_OPENCL_PATH=$OPENCL_DIR -DROCCLR_PATH=$ROCCLR_DIR -DCMAKE_PREFIX_PATH="<ROCM_PATH>/" -DCMAKE_INSTALL_PREFIX=</where/to/install/hip> ..
+#      cmake -DHIP_COMMON_DIR="$HIP_DIR" -DHIPCC_BIN_DIR="$HIPCC_DIR/bin" -DAMD_OPENCL_PATH=$OPENCL_DIR -DROCCLR_PATH=$ROCCLR_DIR -DCMAKE_PREFIX_PATH="<ROCM_PATH>/" ..
 #    For debug version
-#      cmake -DHIP_COMMON_DIR="$HIP_DIR" -DHIPCC_BIN_DIR="$HIPCC_DIR/bin" -DAMD_OPENCL_PATH=$OPENCL_DIR -DROCCLR_PATH=$ROCCLR_DIR -DCMAKE_PREFIX_PATH="<ROCM_PATH>/" -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=</where/to/install/hip> ..
+#      cmake -DHIP_COMMON_DIR="$HIP_DIR" -DHIPCC_BIN_DIR="$HIPCC_DIR/bin" -DAMD_OPENCL_PATH=$OPENCL_DIR -DROCCLR_PATH=$ROCCLR_DIR -DCMAKE_PREFIX_PATH="<ROCM_PATH>/" -DCMAKE_BUILD_TYPE=Debug ..
 #  For static lib of hip-rocclr runtime
 #    For release version
-#      cmake -DHIP_COMMON_DIR="$HIP_DIR" -DHIPCC_BIN_DIR="$HIPCC_DIR/bin" -DAMD_OPENCL_PATH=$OPENCL_DIR -DROCCLR_PATH=$ROCCLR_DIR -DBUILD_SHARED_LIBS=OFF -DCMAKE_PREFIX_PATH="<ROCM_PATH>/" -DCMAKE_INSTALL_PREFIX=</where/to/install/hip> ..
+#      cmake -DHIP_COMMON_DIR="$HIP_DIR" -DHIPCC_BIN_DIR="$HIPCC_DIR/bin" -DAMD_OPENCL_PATH=$OPENCL_DIR -DROCCLR_PATH=$ROCCLR_DIR -DBUILD_SHARED_LIBS=OFF -DCMAKE_PREFIX_PATH="<ROCM_PATH>/" ..
 #    For debug version
-#      cmake -DHIP_COMMON_DIR="$HIP_DIR" -DHIPCC_BIN_DIR="$HIPCC_DIR/bin" -DAMD_OPENCL_PATH=$OPENCL_DIR -DROCCLR_PATH=$ROCCLR_DIR -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH="<ROCM_PATH>/" -DCMAKE_INSTALL_PREFIX=</where/to/install/hip> ..
-#  If you don't specify CMAKE_INSTALL_PREFIX, hip-rocclr runtime will be installed to "<ROCM_PATH>/hip".
+#      cmake -DHIP_COMMON_DIR="$HIP_DIR" -DHIPCC_BIN_DIR="$HIPCC_DIR/bin" -DAMD_OPENCL_PATH=$OPENCL_DIR -DROCCLR_PATH=$ROCCLR_DIR -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH="<ROCM_PATH>/" ..
 #  By default, CMake will search for a folder named vdi or ROCclr relative to the current path. Specify -DROCCLR_PATH=$ROCCLR_DIR if rocclr source is in obscure location.
 #  By default, CMake will search for a folder named opencl or ROCm-OpenCL-Runtime relative to the current path. Specify -DAMD_OPENCL_PATH=$OPENCL_DIR if opencl source is in obscure location.
 list(APPEND CMAKE_MODULE_PATH ${HIP_COMMON_DIR}/cmake)
-
 
 #############################
 # Options
 #############################
 option(__HIP_ENABLE_PCH "Enable/Disable pre-compiled hip headers" ON)
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
-option(THEROCK_FLAG_STAMP_LIBRARY_GIT_VERSIONS
-  "Stamp git revisions into generated library version metadata"
-  ON)
 
 if(MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zi")
@@ -52,13 +47,8 @@ message(STATUS "HIP_COMMON_DIR found at ${HIP_COMMON_DIR}")
 message(STATUS "HIPNV_DIR found at ${HIPNV_DIR}")
 set(HIP_COMMON_INCLUDE_DIR ${HIP_COMMON_DIR}/include)
 set(HIP_COMMON_BIN_DIR ${HIP_COMMON_DIR}/bin)
-if (WIN32)
-  set(HIPCC_EXECUTABLE "hipcc.exe")
-  set(HIPCONFIG_EXECUTABLE "hipconfig.exe")
-else()
-  set(HIPCC_EXECUTABLE "hipcc")
-  set(HIPCONFIG_EXECUTABLE "hipconfig")
-endif()
+set(HIPCC_EXECUTABLE "hipcc${CMAKE_EXECUTABLE_SUFFIX}")
+set(HIPCONFIG_EXECUTABLE "hipconfig${CMAKE_EXECUTABLE_SUFFIX}")
 
 #############################
 # Setup config generation
@@ -90,7 +80,6 @@ endmacro()
 # Setup version information
 #############################
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
-find_package(Git)
 
 set(ENV{HIP_PATH} "")
 file(STRINGS ${HIP_COMMON_DIR}/VERSION VERSION_LIST REGEX "^[0-9]+")
@@ -271,31 +260,13 @@ message (STATUS "ROCM Installation path(ROCM_PATH): ${ROCM_PATH}")
 if (UNIX)
     set(HIP_DEFAULT_INSTALL_PREFIX "${ROCM_PATH}")
 endif()
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-    set(CMAKE_INSTALL_PREFIX ${HIP_DEFAULT_INSTALL_PREFIX} CACHE PATH "Installation path for HIP" FORCE)
-endif()
-
-# Set default install path as "${ROCM_PATH}", can override the path from cmake build.
-set(CPACK_INSTALL_PREFIX ${HIP_DEFAULT_INSTALL_PREFIX} CACHE PATH "Package Installation path for HIP")
-
-if(IS_ABSOLUTE ${CMAKE_INSTALL_PREFIX})
-    message(STATUS "HIP will be installed in: " ${CMAKE_INSTALL_PREFIX})
-else()
-    message(FATAL_ERROR "Don't know where to install HIP. Please specify absolute path using -DCMAKE_INSTALL_PREFIX")
-endif()
-
-# set the installation path for the installer package
-set(CPACK_SET_DESTDIR ON CACHE BOOL "Installer package will install hip to CMAKE_INSTALL_PREFIX instead of CPACK_PACKAGING_INSTALL_PREFIX")
-if (NOT CPACK_SET_DESTDIR)
-  set(CPACK_PACKAGING_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Default installation path of hcc installer package")
-endif (NOT CPACK_SET_DESTDIR)
 
 #############################
 # Build steps
 #############################
-set(BIN_INSTALL_DIR ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR})
-set(LIB_INSTALL_DIR ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR})
-set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR})
+set(BIN_INSTALL_DIR ${CMAKE_INSTALL_BINDIR})
+set(LIB_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR})
+set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 set(CONFIG_PACKAGE_INSTALL_DIR ${LIB_INSTALL_DIR}/cmake/hip)
 set(CONFIG_LANG_PACKAGE_INSTALL_DIR ${LIB_INSTALL_DIR}/cmake/hip-lang)
 set(CONFIG_RTC_PACKAGE_INSTALL_DIR ${LIB_INSTALL_DIR}/cmake/hiprtc)
@@ -357,40 +328,30 @@ if(WIN32)
 endif()
 
 # Install src, bin, include & cmake if necessary
-execute_process(COMMAND test ${CMAKE_INSTALL_PREFIX} -ef ${CMAKE_CURRENT_SOURCE_DIR}
-    RESULT_VARIABLE INSTALL_SOURCE)
-if(NOT ${INSTALL_SOURCE} EQUAL 0)
-    if(WIN32)
-      install(DIRECTORY ${HIP_COMMON_BIN_DIR} DESTINATION . USE_SOURCE_PERMISSIONS)
-      if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-        install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/src/" DESTINATION ${CMAKE_INSTALL_BINDIR}
-                FILES_MATCHING PATTERN "*.pdb"
-                               PATTERN "*.ilk"
-                               PATTERN "CMakeFiles" EXCLUDE
-                               PATTERN "hip_rtc_gen" EXCLUDE
-                               PATTERN "libelf" EXCLUDE
-                               PATTERN "loader" EXCLUDE
-                               PATTERN "pal" EXCLUDE
-                               PATTERN "libamdhsacode" EXCLUDE)
-      endif()
-    endif()
+if(WIN32)
+  install(DIRECTORY ${HIP_COMMON_BIN_DIR} DESTINATION . USE_SOURCE_PERMISSIONS)
+  if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/src/" DESTINATION ${CMAKE_INSTALL_BINDIR}
+            FILES_MATCHING PATTERN "*.pdb"
+                           PATTERN "*.ilk" EXCLUDE
+                           PATTERN "CMakeFiles" EXCLUDE
+                           PATTERN "hip_rtc_gen" EXCLUDE
+                           PATTERN "libelf" EXCLUDE
+                           PATTERN "loader" EXCLUDE
+                           PATTERN "pal" EXCLUDE
+                           PATTERN "libamdhsacode" EXCLUDE)
+  endif()
+endif()
 
-    if(WIN32) #not required for flat folder structure
-      # The following two lines will be removed after upstream updation
-      install(CODE "MESSAGE(\"Removing ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}\")")
-      install(CODE "file(REMOVE_RECURSE ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR})")
-    endif()
-
-    install(DIRECTORY include DESTINATION .)
-    if(DEFINED HIPNV_DIR)
-        install(DIRECTORY ${HIPNV_DIR}/include/hip/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hip/)
-    endif()
-    install(DIRECTORY ${HIP_COMMON_INCLUDE_DIR}/hip/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hip/)
-    if(WIN32)
-      install(DIRECTORY ${HIP_COMMON_DIR}/cmake DESTINATION .)
-    else()
-      install(DIRECTORY ${HIP_COMMON_DIR}/cmake/ DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR})
-    endif()
+install(DIRECTORY include DESTINATION .)
+if(DEFINED HIPNV_DIR)
+    install(DIRECTORY ${HIPNV_DIR}/include/hip/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hip/)
+endif()
+install(DIRECTORY ${HIP_COMMON_INCLUDE_DIR}/hip/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hip/)
+if(WIN32)
+  install(DIRECTORY ${HIP_COMMON_DIR}/cmake DESTINATION .)
+else()
+  install(DIRECTORY ${HIP_COMMON_DIR}/cmake/ DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR})
 endif()
 
 # Install generated headers
@@ -423,31 +384,28 @@ endif()
 include(CMakePackageConfigHelpers)
 
 configure_package_config_file(
-    hip-config.cmake.in
-    ${CMAKE_CURRENT_BINARY_DIR}/hip-config.cmake
-    INSTALL_DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR}
-    PATH_VARS LIB_INSTALL_DIR INCLUDE_INSTALL_DIR BIN_INSTALL_DIR
-    )
+        hip-config.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-config.cmake
+        INSTALL_DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR}
+        PATH_VARS LIB_INSTALL_DIR INCLUDE_INSTALL_DIR BIN_INSTALL_DIR)
 
 configure_package_config_file(
-      hip-config-amd.cmake.in
-      ${CMAKE_CURRENT_BINARY_DIR}/hip-config-amd.cmake
-      INSTALL_DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR}
-      PATH_VARS LIB_INSTALL_DIR INCLUDE_INSTALL_DIR BIN_INSTALL_DIR
-      )
+        hip-config-amd.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-config-amd.cmake
+        INSTALL_DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR}
+        PATH_VARS LIB_INSTALL_DIR INCLUDE_INSTALL_DIR BIN_INSTALL_DIR)
 
 configure_package_config_file(
       hip-config-nvidia.cmake.in
       ${CMAKE_CURRENT_BINARY_DIR}/hip-config-nvidia.cmake
       INSTALL_DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR}
-      PATH_VARS LIB_INSTALL_DIR INCLUDE_INSTALL_DIR BIN_INSTALL_DIR
-      )
+      PATH_VARS LIB_INSTALL_DIR INCLUDE_INSTALL_DIR BIN_INSTALL_DIR)
 
 write_basic_package_version_file(
     ${CMAKE_CURRENT_BINARY_DIR}/hip-config-version.cmake
     VERSION "${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH}"
-    COMPATIBILITY SameMajorVersion
-    )
+    COMPATIBILITY SameMajorVersion)
+
 install(
     FILES
     ${CMAKE_CURRENT_BINARY_DIR}/hip-config.cmake

@@ -32,12 +32,12 @@ set_target_properties(hiprtc PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 
 if(WIN32)
-  if(${HIP_LIB_VERSION_MAJOR} VERSION_GREATER 9)
+  if(HIP_LIB_VERSION_MAJOR GREATER 9)
     set(HIP_MAJOR_VERSION "${HIP_LIB_VERSION_MAJOR}")
   else()
     set(HIP_MAJOR_VERSION "0${HIP_LIB_VERSION_MAJOR}")
   endif()
-  if(${HIP_LIB_VERSION_MINOR} VERSION_GREATER 9)
+  if(HIP_LIB_VERSION_MINOR VERSION_GREATER 9)
     set(HIP_MINOR_VERSION "${HIP_LIB_VERSION_MINOR}")
   else()
     set(HIP_MINOR_VERSION "0${HIP_LIB_VERSION_MINOR}")
@@ -47,8 +47,7 @@ endif()
 if(BUILD_SHARED_LIBS)
   if(WIN32)
     set_target_properties(hiprtc PROPERTIES
-      OUTPUT_NAME "hiprtc${HIP_MAJOR_VERSION}${HIP_MINOR_VERSION}"
-      ARCHIVE_OUTPUT_NAME "hiprtc")
+      OUTPUT_NAME "hiprtc${HIP_MAJOR_VERSION}${HIP_MINOR_VERSION}")
   else()
     set_target_properties(hiprtc PROPERTIES
       VERSION ${HIP_LIB_VERSION_STRING}
@@ -57,12 +56,6 @@ if(BUILD_SHARED_LIBS)
 endif()
 
 target_sources(hiprtc PRIVATE hiprtc.cpp ../hip_comgr_helper.cpp hiprtcInternal.cpp)
-
-set_target_properties(hiprtc PROPERTIES
-  CXX_STANDARD 17
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-  POSITION_INDEPENDENT_CODE ON)
 
 target_include_directories(hiprtc
   PRIVATE
@@ -92,8 +85,8 @@ target_link_libraries(hiprtc PUBLIC ${CMAKE_DL_LIBS})
 # Add link to comgr, hsa-runtime and other required libraries in target files
 # This is required for static libraries
 if(NOT BUILD_SHARED_LIBS)
-  find_package(hsa-runtime64)
-  find_package(amd_comgr)
+  find_package(hsa-runtime64 REQUIRED)
+  find_package(amd_comgr REQUIRED)
   target_link_libraries(hiprtc PRIVATE
     pthread numa rt c amd_comgr hsa-runtime64::hsa-runtime64)
 endif()
@@ -215,8 +208,7 @@ if(WIN32)
   configure_file(hiprtc_in.rc.in  hiprtc-builtins_info.rc @ONLY)
   target_sources(hiprtc-builtins PRIVATE  hiprtc-builtins_info.rc)
   set_target_properties(hiprtc-builtins PROPERTIES
-    OUTPUT_NAME "hiprtc-builtins${HIP_MAJOR_VERSION}${HIP_MINOR_VERSION}"
-    ARCHIVE_OUTPUT_NAME "hiprtc-builtins")
+    OUTPUT_NAME "hiprtc-builtins${HIP_MAJOR_VERSION}${HIP_MINOR_VERSION}")
   # Since ${HIPRTC_GEN_OBJ} was manually generated with llvm-mc, /MT did not embed
   # libcmt.lib inside of the obj. So we need to manually set it as defaultlib.
   target_link_options(hiprtc-builtins PRIVATE "LINKER:/DEFAULTLIB:libcmt")
@@ -237,19 +229,22 @@ target_sources(hiprtc PRIVATE ${HIPRTC_GEN_OBJ})
 target_compile_definitions(hiprtc PRIVATE __HIP_ENABLE_RTC)
 
 add_dependencies(hiprtc hiprtc-builtins)
+
 install(TARGETS hiprtc-builtins
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
-INSTALL(TARGETS hiprtc
+install(TARGETS hiprtc
   EXPORT hiprtc-targets
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-INSTALL(EXPORT hiprtc-targets NAMESPACE hiprtc:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hiprtc)
+install(EXPORT hiprtc-targets
+        NAMESPACE hiprtc::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hiprtc)
 
 #############################
 # hiprtc-config
@@ -267,11 +262,10 @@ write_basic_package_version_file(
   VERSION "${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH}"
   COMPATIBILITY SameMajorVersion)
 
-INSTALL(FILES ${HIP_COMMON_INCLUDE_DIR}/hip/hiprtc.h DESTINATION "include/hip")
+install(FILES ${HIP_COMMON_INCLUDE_DIR}/hip/hiprtc.h
+              ${HIP_COMMON_INCLUDE_DIR}/hip/hip_common.h
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hip")
 
-INSTALL(FILES ${HIP_COMMON_INCLUDE_DIR}/hip/hip_common.h DESTINATION "include/hip")
-
-INSTALL(
-  FILES ${PROJECT_BINARY_DIR}/hiprtc-config.cmake
-        ${PROJECT_BINARY_DIR}/hiprtc-config-version.cmake
-  DESTINATION ${CONFIG_RTC_PACKAGE_INSTALL_DIR})
+install(FILES ${PROJECT_BINARY_DIR}/hiprtc-config.cmake
+              ${PROJECT_BINARY_DIR}/hiprtc-config-version.cmake
+        DESTINATION ${CONFIG_RTC_PACKAGE_INSTALL_DIR})

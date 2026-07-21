@@ -152,27 +152,29 @@ if(NOT AMDDeviceLibs_FOUND)
       message(STATUS "Found LLVM: ${LLVM_PACKAGE_VERSION}")
     endif()
   endif()
-  
-  find_path(BITCODE_DIR 
-    NAMES "opencl.bc" "opencl.amdgcn.bc" "oclc_isa_version_803.bc"
-    HINTS
-      "${LLVM_LIBRARY_DIR}/amdgcn/bitcode"
-      "${LLVM_LIBRARY_DIR}/../amdgcn/bitcode"
-      "${CMAKE_INSTALL_PREFIX}/amdgcn/bitcode"
-      "${CMAKE_INSTALL_PREFIX}/lib/amdgcn/bitcode"
-      "${CMAKE_PREFIX_PATH}/amdgcn/bitcode"
-      "${CMAKE_PREFIX_PATH}/lib/amdgcn/bitcode"
+
+  set(__search_path_suffixes
+          amdgcn amdgcn/bitcode lib lib/amdgcn lib/amdgcn/bitcode
+          .. ../amdgcn ../amdgcn/bitcode ../lib ../lib/amdgcn ../lib/amdgcn/bitcode)
+
+  find_path(BITCODE_DIR
+    NAMES opencl.bc opencl.amdgcn.bc oclc_isa_version_803.bc
+    PATHS ${LLVM_LIBRARY_DIR} ${CMAKE_PREFIX_PATH} PATH_SUFFIXES ${__search_path_suffixes}
     NO_DEFAULT_PATH
   )
   
   if(NOT BITCODE_DIR)
+    foreach(__suffix ${_search_path_suffixes})
+      cmake_path(ABSOLUTE_PATH "${LLVM_LIBRARY_DIR}/${__suffix}" NORMALIZE OUTPUT_VARIABLE __search_path)
+      list(APPEND __searched_paths "  ${__search_path}\n")
+      foreach(__prefix_path ${CMAKE_PREFIX_PATH})
+        cmake_path(ABSOLUTE_PATH "${__prefix_path}/${__suffix}" NORMALIZE OUTPUT_VARIABLE __search_path)
+        list(APPEND __searched_paths "  ${__search_path}\n"
+      endforeach()
+    endforeach()
     message(FATAL_ERROR 
       "AMD Device Libraries (bitcode) not found!\n"
-      "Searched locations:\n"
-      "  ${LLVM_LIBRARY_DIR}/amdgcn/bitcode\n"
-      "  ${LLVM_LIBRARY_DIR}/../amdgcn/bitcode\n"
-      "  ${CMAKE_INSTALL_PREFIX}/amdgcn/bitcode\n"
-      "  ${CMAKE_INSTALL_PREFIX}/lib/amdgcn/bitcode\n"
+      "Searched locations:\n${__searched_paths}"
       "Please ensure device-libs are built and installed.")
   endif()
 endif()

@@ -223,9 +223,8 @@ hsa_status_t Memory::interopMapBuffer(hsa_handle_t fdn, hsa_interop_map_flag_t f
   // if map_buffer wrote a legitimate SRD, copy it to amdImageDesc_
   // Note: Check if amdImageDesc_ is valid, because VA library maps linear planes of YUV image
   // as buffers for processing in HIP later
-  if ((amdImageDesc_ != nullptr) && (metadata_size != 0) &&
-      (reinterpret_cast<hsa_amd_image_descriptor_t*>(metadata)->deviceID ==
-       amdImageDesc_->deviceID)) {
+  if (amdImageDesc_ != nullptr && metadata_size != 0 && metadata != nullptr &&
+      static_cast<hsa_amd_image_descriptor_t*>(metadata)->deviceID == amdImageDesc_->deviceID) {
     memcpy(amdImageDesc_, metadata, metadata_size);
   }
   kind_ = MEMORY_KIND_INTEROP;

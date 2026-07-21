@@ -43,29 +43,28 @@ sudo apt-get install ocl-icd-opencl-dev
 
 ### Linux
 
-1. Clone the repository:
+#### 1. Clone the repository:
    ```bash
    git clone git@github.com:ROCm/rocm-systems.git
    ```
 
-2. Build **HIP**:
+#### 2. Build **HIP**:
    ```bash
    export CLR_DIR="$(readlink -f rocm-systems/projects/clr)"
    export HIP_DIR="$(readlink -f rocm-systems/projects/hip)"
 
    cd "$CLR_DIR"
-   mkdir -p build; cd build
-   cmake -DHIP_COMMON_DIR=$HIP_DIR -DCMAKE_PREFIX_PATH="/opt/rocm/" -DCMAKE_INSTALL_PREFIX=$PWD/install -DCLR_BUILD_HIP=ON -DCLR_BUILD_OCL=OFF -DHIP_PLATFORM=amd ..
-   make -j$(nproc)
-   make install
+   cmake -B build -S . -DHIP_COMMON_DIR=$HIP_DIR -DCMAKE_PREFIX_PATH="/opt/rocm/" -DCLR_BUILD_HIP=ON -DCLR_BUILD_OCL=OFF -DHIP_PLATFORM=amd
+   cmake --build build -j $(nproc)
+   cmake --install build --prefix $PWD/install
    ```
 
-3. Build **OpenCL™**:
+#### 3. Build **OpenCL™**:
    ```bash
    cd "$CLR_DIR"
-   mkdir -p build; cd build
-   cmake -DCMAKE_PREFIX_PATH="/opt/rocm/" -DCLR_BUILD_HIP=OFF -DCLR_BUILD_OCL=ON ..
-   make -j$(nproc)
+   cmake -B build -S . -DCMAKE_PREFIX_PATH="/opt/rocm/" -DCLR_BUILD_HIP=OFF -DCLR_BUILD_OCL=ON
+   cmake --build build -j $(nproc)
+   cmake --install build --prefix $PWD/install
    ```
 
    > **Note:** Build both `OCL` and `HIP` together by passing `-DCLR_BUILD_HIP=ON -DCLR_BUILD_OCL=ON` to the configure command.
@@ -74,7 +73,7 @@ For detailed instructions, please refer to [How to build HIP](https://rocm.docs.
 
 ### Windows
 
-1. Install the prerequisites:
+#### 1. Install the prerequisites:
    - **Visual Studio C++ 2022/2026** — [Download](https://visualstudio.microsoft.com/downloads/)
    - **Python 3.12** — `winget install -e --id Python.Python.3.12`
    - **CMake** — `winget install -e --id Kitware.CMake`
@@ -82,38 +81,28 @@ For detailed instructions, please refer to [How to build HIP](https://rocm.docs.
    - **TheRock package** — Download the tarball archive and extract to `c:/opt`.
      See [TheRock Releases](https://github.com/ROCm/TheRock/blob/main/RELEASES.md#installing-from-tarballs).
 
-2. Set up environment variables:
+#### 2. Set up environment variables:
    ```cmd
-   set HIP_COMMON_DIR=c:/github/rocm-systems/projects/hip
+   set HIP_COMMON_DIR=c:\github\rocm-systems\projects\hip
    set HIPCC_BIN_DIR=c:\opt\rocm\bin
    ```
    - `HIP_COMMON_DIR` — path to [HIP](https://github.com/ROCm/rocm-systems/tree/develop/projects/hip).
-   - `HIPCC_BIN_DIR` — path to the hipcc directory. If you have TheRock installed you can point it to `<Installation_of_therock>/rocm/bin`.
+   - `HIPCC_BIN_DIR` — path to the hipcc compiler. If you have TheRock installed you can point it to `<Installation_of_therock>/rocm/bin`.
 
-   For parallel builds, also set:
-   ```cmd
-   set CMAKE_BUILD_PARALLEL_LEVEL=<num_parallel_builds>
-   ```
-   This controls the number of parallel compilations for a single project using MSVC.
-
-3. Create a build directory:
-   ```cmd
-   mkdir hipamd
-   cd hipamd
-   ```
-
-4. Configure and build.
+#### 3. Configure and build.
 
    **Public release build (ROCR + PAL static lib):**
    ```cmd
-   cmake ../rocm-systems/projects/clr -DCMAKE_BUILD_TYPE=Release -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=%HIP_COMMON_DIR% -DHIPCC_BIN_DIR=%HIPCC_BIN_DIR% -DCMAKE_INSTALL_PREFIX=..\install -D__HIP_ENABLE_PCH=OFF -DROCCLR_ENABLE_HSA=ON -DROCCLR_ENABLE_PAL=ON -D__HIP_ENABLE_RTC=ON -DUSE_PROF_API=OFF -DROCR_DLL_LOAD=OFF -DAMD_COMPUTE_WIN=../../../shared/amdgpu-windows-interop/
-   cmake --build . --config Release -j 6 --target install
+   cmake -B build -S ./projects/clr -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=%HIP_COMMON_DIR% -DHIPCC_BIN_DIR=%HIPCC_BIN_DIR% -D__HIP_ENABLE_PCH=OFF -DROCCLR_ENABLE_HSA=ON -DROCCLR_ENABLE_PAL=ON -D__HIP_ENABLE_RTC=ON -DUSE_PROF_API=OFF -DROCR_DLL_LOAD=OFF -DAMD_COMPUTE_WIN=./shared/amdgpu-windows-interop/
+   cmake --build build --config Release -j <num_jobs>
+   cmake --install build --prefix ./install --config Release  
    ```
 
    **Release build (ROCR backend only):**
    ```cmd
-   cmake ../rocm-systems/projects/clr -DCMAKE_BUILD_TYPE=Release -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=%HIP_COMMON_DIR% -DHIPCC_BIN_DIR=%HIPCC_BIN_DIR% -DCMAKE_INSTALL_PREFIX=..\install -D__HIP_ENABLE_PCH=OFF -DROCCLR_ENABLE_HSA=ON -DROCCLR_ENABLE_PAL=OFF -D__HIP_ENABLE_RTC=ON -DUSE_PROF_API=OFF -DROCR_DLL_LOAD=OFF -DAMD_COMPUTE_WIN=../../../shared/amdgpu-windows-interop/
-   cmake --build . --config Release -j 6 --target install
+   cmake -B build -S ./rocm-systems/projects/clr -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=%HIP_COMMON_DIR% -DHIPCC_BIN_DIR=%HIPCC_BIN_DIR% -D__HIP_ENABLE_PCH=OFF -DROCCLR_ENABLE_HSA=ON -DROCCLR_ENABLE_PAL=OFF -D__HIP_ENABLE_RTC=ON -DUSE_PROF_API=OFF -DROCR_DLL_LOAD=OFF -DAMD_COMPUTE_WIN=./shared/amdgpu-windows-interop/
+   cmake --build build --config Release -j <num_jobs>
+   cmake --install build --prefix ./install --config Release
    ```
 
 ## Tests

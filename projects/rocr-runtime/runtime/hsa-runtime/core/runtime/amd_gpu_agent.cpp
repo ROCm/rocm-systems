@@ -2366,7 +2366,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       // support UUID's
       if (uuid_value == 0) {
         char uuid_tmp[] = "GPU-XX";
-        snprintf((char*)value, sizeof(uuid_tmp), "%s", uuid_tmp);
+        snprintf(static_cast<char*>(value), sizeof(uuid_tmp), "%s", uuid_tmp);
         break;
       }
 
@@ -2374,21 +2374,21 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       std::stringstream ss;
       ss << "GPU-" << std::setfill('0') << std::setw(sizeof(uint64_t) * 2) << std::hex
          << uuid_value;
-      snprintf((char*)value, (ss.str().length() + 1), "%s", (char*)ss.str().c_str());
+      snprintf(static_cast<char*>(value), ss.str().length() + 1, "%s", const_cast<char*>(ss.str().c_str()));
       break;
     }
     case HSA_AMD_AGENT_INFO_ASIC_REVISION:
-      *((uint32_t*)value) = static_cast<uint32_t>(properties_.Capability.ui32.ASICRevision);
+      *static_cast<uint32_t*>(value) = static_cast<uint32_t>(properties_.Capability.ui32.ASICRevision);
       break;
     case HSA_AMD_AGENT_INFO_SVM_DIRECT_HOST_ACCESS:
       assert(regions_.size() != 0 && "No device local memory found!");
-      *((bool*)value) = properties_.Capability.ui32.CoherentHostAccess == 1;
+      *static_cast<bool*>(value) = properties_.Capability.ui32.CoherentHostAccess == 1;
       break;
     case HSA_AMD_AGENT_INFO_COOPERATIVE_COMPUTE_UNIT_COUNT:
       if (core::Runtime::runtime_singleton_->flag().coop_cu_count() &&
           !(core::Runtime::runtime_singleton_->flag().cu_mask(enum_index_).empty())) {
-        debug_warning("Cooperative launch and CU masking are currently incompatible!");
-        *((uint32_t*)value) = 0;
+        debug_warning(false, "Cooperative launch and CU masking are currently incompatible!");
+        *static_cast<uint32_t*>(value) = 0;
         break;
       }
 
@@ -2399,7 +2399,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
         [[maybe_unused]] hsa_status_t cu_err =
             GetInfo((hsa_agent_info_t)HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT, &count);
         assert(cu_err == HSA_STATUS_SUCCESS && "CU count query failed.");
-        *((uint32_t*)value) = (count & 0xFFFFFFF8) - 8;  // value = floor(count/8)*8-8
+        *static_cast<uint32_t*>(value) = (count & 0xFFFFFFF8) - 8;  // value = floor(count/8)*8-8
         break;
       }
       return GetInfo((hsa_agent_info_t)HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT, value);
@@ -3795,8 +3795,8 @@ hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& sessi
 
   // Check if a session is already active
   if (pcs_data->session && pcs_data->session->isActive()) {
-    debug_warning("Already have a PC sampling session in progress!");
-    return (hsa_status_t)HSA_STATUS_ERROR_RESOURCE_BUSY;
+    debug_warning(false, "Already have a PC sampling session in progress!");
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_RESOURCE_BUSY);
   }
 
   // Assign the new session and mark it as active
