@@ -34,8 +34,8 @@ endfunction()
 # construction, working-directory selection, timeout defaults, and optional
 # properties here prevents the live-GPU matrix from drifting as cases are
 # added. ENVIRONMENT is a list of KEY=VALUE entries. Every instrumented case
-# supplies an environment and is explicitly enabled here; flavor and engine
-# variables only select the analysis.
+# supplies an environment; loading the hook enables ConSan, and the mode
+# selects the analysis.
 function(rj_add_consan_hip_case)
     set(_options RUN_SERIAL)
     set(_one_value_args
@@ -78,7 +78,11 @@ function(rj_add_consan_hip_case)
     set(_case_sets_barrier_tracking FALSE)
     set(_case_sets_atomic_tracking FALSE)
     foreach(_environment_entry IN LISTS _case_ENVIRONMENT)
-        if(_environment_entry STREQUAL "RJ_CONSAN_FLAVOR=moi")
+        if(
+            _environment_entry
+                MATCHES
+                "^RJ_CONSAN_MODE=(record-replay|inline-shadow|sampled)$"
+        )
             set(_case_is_moi TRUE)
         elseif(_environment_entry MATCHES "^RJ_CONSAN_MOI_TRACK_BARRIERS=")
             set(_case_sets_barrier_tracking TRUE)
@@ -107,7 +111,6 @@ function(rj_add_consan_hip_case)
         ${_case_TIMEOUT}
     )
     if(_case_ENVIRONMENT)
-        list(APPEND _case_ENVIRONMENT "RJ_CONSAN_ENABLE=1")
         list(APPEND _test_args ENVIRONMENT ${_case_ENVIRONMENT})
     endif()
     rj_add_test(${_test_args})
@@ -224,8 +227,7 @@ function(rj_add_consan_hip_tests)
                 PASS_REGEX "site=access.*source=spill reason=none"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
@@ -243,8 +245,7 @@ function(rj_add_consan_hip_tests)
                 PASS_REGEX "site=access.*source=spill reason=none"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=sampled"
+                    "RJ_CONSAN_MODE=sampled"
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
@@ -262,8 +263,7 @@ function(rj_add_consan_hip_tests)
                 PASS_REGEX "site=access.*source=spill reason=none"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
@@ -283,8 +283,7 @@ function(rj_add_consan_hip_tests)
                 PASS_REGEX "site=access.*source=spill reason=none owners=2"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
@@ -302,8 +301,7 @@ function(rj_add_consan_hip_tests)
                 PASS_REGEX "site=barrier.*source=spill reason=none"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
@@ -321,8 +319,7 @@ function(rj_add_consan_hip_tests)
                 PASS_REGEX "site=atomic.*source=spill reason=none"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
@@ -340,8 +337,7 @@ function(rj_add_consan_hip_tests)
                 PASS_REGEX "site=access.*source=spill reason=none"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
@@ -490,8 +486,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
@@ -507,8 +502,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=sampled"
+                    "RJ_CONSAN_MODE=sampled"
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
@@ -530,8 +524,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_MOI_INIT_OWNER_EPOCH=0"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_full_vgpr_file_test_kernel_for_instrumentation"
@@ -552,8 +545,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_shared_noinline_lds_helper_for_instrumentation"
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_MAX_PATCHES=1"
@@ -572,8 +564,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_MOI_INIT_OWNER_EPOCH=0"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_shared_noinline_lds_helper_for_instrumentation"
@@ -594,8 +585,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_shared_noinline_atomic_add_for_instrumentation"
@@ -617,8 +607,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_shared_noinline_atomic_add_for_instrumentation"
@@ -647,8 +636,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_static_private_stack_test_kernel_for_instrumentation"
                     "RJ_CONSAN_LOG=1"
@@ -674,8 +662,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_dynamic_private_stack_test_kernel_for_instrumentation"
                     "RJ_CONSAN_LOG=1"
@@ -699,7 +686,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=supercollider"
+                    "RJ_CONSAN_MODE=supercollider"
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_DELAY=2"
                     "RJ_CONSAN_TMP_VGPR=3"
@@ -718,7 +705,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=supercollider"
+                    "RJ_CONSAN_MODE=supercollider"
                     "RJ_CONSAN_SC_REPORT_MODE=trap"
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_DELAY=2"
@@ -733,7 +720,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=supercollider"
+                    "RJ_CONSAN_MODE=supercollider"
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_DELAY=2"
                     "RJ_CONSAN_TMP_VGPR=3"
@@ -746,7 +733,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=supercollider"
+                    "RJ_CONSAN_MODE=supercollider"
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_DELAY=2"
                     "RJ_CONSAN_TMP_VGPR=3"
@@ -759,8 +746,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_LOG=1"
@@ -779,8 +765,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_TEST_SEED_INLINE_EXACT_ODD=1"
                     "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
                     "RJ_CONSAN_LOG=1"
@@ -801,8 +786,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 60
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_LOG=1"
@@ -825,8 +809,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_LOG=1"
@@ -841,8 +824,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_FLAT_PROVENANCE=strict"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
@@ -858,8 +840,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=1048576"
                     "RJ_CONSAN_FLAT_PROVENANCE=strict"
                     "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
@@ -877,8 +858,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_LOG=1"
@@ -893,8 +873,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=padded_barrier_ordered_lds_store"
@@ -909,8 +888,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 60
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
@@ -938,8 +916,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
@@ -955,8 +932,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
@@ -974,8 +950,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
@@ -992,8 +967,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=padded_barrier_ordered_lds_store"
@@ -1009,8 +983,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=padded_atomic_ordered_lds_accesses"
@@ -1025,8 +998,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
@@ -1046,8 +1018,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
@@ -1066,8 +1037,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
@@ -1086,8 +1056,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=padded_atomic_ordered_lds_accesses"
@@ -1103,8 +1072,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
@@ -1120,8 +1088,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
@@ -1139,8 +1106,7 @@ function(rj_add_consan_hip_tests)
                 PASS_REGEX "atomic_patched=[1-9][0-9]*"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
@@ -1156,8 +1122,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=padded_atomic_cas_failure_does_not_publish"
@@ -1172,8 +1137,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MODE=inline-shadow"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
@@ -1192,8 +1156,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_two_wave_lds_accesses"
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_MAX_PATCHES=2"
@@ -1206,8 +1169,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_equivalent_lds_accesses_in_different_workgroups"
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_MAX_PATCHES=8"
@@ -1220,8 +1182,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_equivalent_lds_accesses_in_different_2d_workgroups"
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_MAX_PATCHES=10"
@@ -1234,8 +1195,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_equivalent_lds_accesses_in_different_3d_workgroups"
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_MAX_PATCHES=12"
@@ -1248,8 +1208,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=sampled"
+                    "RJ_CONSAN_MODE=sampled"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_two_wave_lds_accesses"
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_MAX_PATCHES=2"
@@ -1262,8 +1221,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=sampled"
+                    "RJ_CONSAN_MODE=sampled"
                     "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=2"
                     "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET=0"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_two_wave_lds_accesses"
@@ -1278,8 +1236,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=sampled"
+                    "RJ_CONSAN_MODE=sampled"
                     "RJ_CONSAN_MOI_SAMPLED_CHECK=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_two_wave_lds_accesses"
                     "RJ_CONSAN_LOG=1"
@@ -1293,8 +1250,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=sampled"
+                    "RJ_CONSAN_MODE=sampled"
                     "RJ_CONSAN_MOI_SAMPLED_CHECK=1"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
@@ -1315,8 +1271,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=sampled"
+                    "RJ_CONSAN_MODE=sampled"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_two_wave_lds_accesses"
@@ -1331,8 +1286,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=sampled"
+                    "RJ_CONSAN_MODE=sampled"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
@@ -1354,8 +1308,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=sampled"
+                    "RJ_CONSAN_MODE=sampled"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
@@ -1377,8 +1330,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_two_wave_lds_accesses"
                     "RJ_CONSAN_LOG=1"
@@ -1392,8 +1344,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_two_wave_lds_accesses"
@@ -1408,8 +1359,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=240"
                     "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_two_wave_lds_accesses"
@@ -1429,8 +1379,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_two_wave_lds_accesses"
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_MAX_PATCHES=2"
@@ -1443,8 +1392,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_MOI_INIT_OWNER_EPOCH=0"
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_two_wave_lds_accesses_with_barrier"
@@ -1459,8 +1407,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_flat_atomic_add_record"
                     "RJ_CONSAN_LOG=1"
@@ -1474,8 +1421,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_atomic_handoff_lds_accesses"
                     "RJ_CONSAN_LOG=1"
@@ -1493,8 +1439,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 60
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=1048576"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
                     "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
@@ -1514,8 +1459,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 60
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=1048576"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
                     "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
@@ -1541,8 +1485,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-                    "RJ_CONSAN_FLAVOR=moi"
-                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=1048576"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
                     "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"

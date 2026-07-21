@@ -35,6 +35,11 @@ enum class ScReportMode : uint8_t {
   Trap,
 };
 
+enum class HookPolicy : uint8_t {
+  Default,
+  Strict,
+};
+
 // This is an implementation safety ceiling, not a user-facing selection
 // policy. It avoids the unbounded vector reservations that UINT32_MAX would
 // trigger in planners while exceeding the supported-site count of current
@@ -43,6 +48,7 @@ constexpr uint32_t kConSanAllSupportedPatchBudget = 65536;
 
 struct HookConfig {
   bool enabled = false;
+  HookPolicy policy = HookPolicy::Default;
   std::optional<rocjitsu::ConSanFlavor> flavor;
   rocjitsu::ConSanMoiEngine moi_engine = rocjitsu::ConSanMoiEngine::RecordReplay;
   rocjitsu::ConSanMoiOwnerSource moi_owner_source = rocjitsu::ConSanMoiOwnerSource::WorkitemId;
@@ -604,6 +610,10 @@ flat_provenance_mode_name(rocjitsu::ConSanFlatProvenanceMode mode) {
 
 [[nodiscard]] inline const char *sc_report_mode_name(ScReportMode mode) {
   return mode == ScReportMode::Auto ? "auto" : "trap";
+}
+
+[[nodiscard]] inline const char *hook_policy_name(HookPolicy policy) {
+  return policy == HookPolicy::Default ? "default" : "strict";
 }
 
 [[nodiscard]] inline const char *lds_access_kind_name(rocjitsu::ConSanLdsAccessKind kind) {

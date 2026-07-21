@@ -9,7 +9,7 @@ not need to be rebuilt.
 Build the hook in an existing out-of-source rocJITsu build, then name it:
 
 ```sh
-cmake --build "$ROCJITSU_BUILD_DIR" --target rocjitsu_dbi_hooks -j4
+cmake --build "$ROCJITSU_BUILD_DIR" --target rocjitsu_dbi_hooks
 
 export CONSAN_HOOK="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so"
 ```
@@ -20,18 +20,15 @@ Start with one ordinary run:
 
 ```sh
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_ENABLE=1 \
   RJ_CONSAN_LOG=1 \
   ./application
 ```
 
-That is the complete ordinary setup. `RJ_CONSAN_ENABLE=1` selects ConSan's
-recommended default analysis and its standard settings. ConSan discovers
-relevant sites and manages registers, report memory, synchronization tracking,
-and other instrumentation resources automatically.
-
-Loading the hook alone is inert; `RJ_CONSAN_ENABLE=1` is what turns ConSan on.
-`RJ_CONSAN_LOG=1` adds the compact evidence needed to understand the run.
+Loading the hook selects ConSan's recommended default analysis and standard
+settings. ConSan discovers relevant sites and manages registers, report memory,
+synchronization tracking, and other instrumentation resources automatically.
+`RJ_CONSAN_LOG=1` is optional; it adds compact evidence for understanding the
+run.
 
 If the application needs a non-system ROCm distribution, set its library path
 before running it:
@@ -87,16 +84,14 @@ MOI engines and the complementary SuperCollider flavor.
 
 ### Other MOI engines
 
-Inline Shadow and Sampled are engines within the default MOI flavor. Their
-commands therefore change only `RJ_CONSAN_MOI_ENGINE`.
+Select an alternative analysis with the single `RJ_CONSAN_MODE` variable.
 
 Use Inline Shadow when immediate supported-form device-side attribution is
 worth more device work:
 
 ```sh
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_ENABLE=1 \
-  RJ_CONSAN_MOI_ENGINE=inline_shadow \
+  RJ_CONSAN_MODE=inline-shadow \
   RJ_CONSAN_LOG=1 \
   ./application
 ```
@@ -106,23 +101,19 @@ acceptable:
 
 ```sh
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_ENABLE=1 \
-  RJ_CONSAN_MOI_ENGINE=sampled \
+  RJ_CONSAN_MODE=sampled \
   RJ_CONSAN_LOG=1 \
   ./application
 ```
 
 ### Different flavor: SuperCollider
 
-SuperCollider is a separate ConSan flavor, **not** an MOI engine. Its command
-must set `RJ_CONSAN_FLAVOR=supercollider`; do not try to select it through
-`RJ_CONSAN_MOI_ENGINE` or omit the flavor setting when adapting an MOI command.
-Use it for its complementary delayed redundant-observation signal:
+SuperCollider is a separate ConSan flavor. Select it with the same mode
+variable and use it for its complementary delayed redundant-observation signal:
 
 ```sh
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_ENABLE=1 \
-  RJ_CONSAN_FLAVOR=supercollider \
+  RJ_CONSAN_MODE=supercollider \
   RJ_CONSAN_LOG=1 \
   ./application
 ```
@@ -132,42 +123,34 @@ support and allocate registers and reports. The MOI engines also enable
 supported barrier and atomic tracking; Sampled chooses its runtime sampling
 parameters automatically.
 
-## 5. Enable ConSan self-checks
+## 5. Require complete instrumentation
 
 An ordinary run reports instrumentation problems in its log. For a focused
 test, ConSan can instead treat those problems as failures. These self-checks
 prevent an ineffective run from looking reassuringly clean:
 
-| Self-check | What it enforces |
-| --- | --- |
-| `RJ_CONSAN_FAIL_CLOSED=1` | Do not fall back to the original code when transformation is unsupported or invalid. |
-| `RJ_CONSAN_REQUIRE_PATCH=1` | Require a real access, barrier, atomic, or fence instrumentation patch in applicable code. |
-| `RJ_CONSAN_MOI_REQUIRE_RECORDS=1` | Require the default MOI analysis to produce visible runtime evidence. |
-| `RJ_CONSAN_MOI_FORBID_OVERFLOW=1` | Fail if MOI report capacity is exhausted. |
-
-Enable them alongside the default analysis:
+`RJ_CONSAN_POLICY=strict` combines the usual instrumentation-health checks: it
+rejects unsupported transforms, requires real instrumentation patches and MOI
+runtime evidence, and rejects report overflow. Enable it alongside the default
+analysis:
 
 ```sh
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_ENABLE=1 \
+  RJ_CONSAN_POLICY=strict \
   RJ_CONSAN_LOG=1 \
-  RJ_CONSAN_FAIL_CLOSED=1 \
-  RJ_CONSAN_REQUIRE_PATCH=1 \
-  RJ_CONSAN_MOI_REQUIRE_RECORDS=1 \
-  RJ_CONSAN_MOI_FORBID_OVERFLOW=1 \
   ./application
 ```
 
-These checks describe the health of ConSan instrumentation, not whether the
-program is race-free. If a known-correct test should also produce no ConSan
-diagnostic, add this separate expected-result assertion before `./application`:
+Strict policy describes the health of ConSan instrumentation, not whether the
+program is race-free, and diagnostics remain non-fatal. If a known-correct
+test should also produce no ConSan diagnostic, add this expert expected-result
+assertion before `./application`:
 
 ```sh
   RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1 \
 ```
 
-Apply self-checks first to a focused test or kernel.
-`RJ_CONSAN_FAIL_CLOSED=1` and `RJ_CONSAN_REQUIRE_PATCH=1` can be too strict for
+Apply strict policy first to a focused test or kernel. It can be too strict for
 a large application that also loads unsupported or irrelevant helper code.
 
 ## 6. Validate detection with fault injection
@@ -194,7 +177,6 @@ for atomic release operations whose ordering can be weakened:
 
 ```sh
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_ENABLE=1 \
   RJ_CONSAN_LOG=1 \
   RJ_CONSAN_FAULT_DRY_RUN=1 \
   RJ_CONSAN_FAULT_ATOMIC_WEAKEN_ORDER=1 \
@@ -208,7 +190,6 @@ other fields. Then copy the complete `primary=` value into a live run:
 
 ```sh
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_ENABLE=1 \
   RJ_CONSAN_LOG=1 \
   RJ_CONSAN_FAULT_ATOMIC_WEAKEN_ORDER=1 \
   RJ_CONSAN_FAULT_ATOMIC_ORDER_EDGE=release \
@@ -237,7 +218,6 @@ families and their additional selectors.
 No ConSan logs:
 
 - verify `HSA_TOOLS_LIB` names the newly built hook;
-- verify `RJ_CONSAN_ENABLE=1` is present in the application environment;
 - verify the process uses an HSA runtime that honors HSA tools; and
 - set `RJ_CONSAN_LOG=1` explicitly.
 

@@ -14,7 +14,7 @@ Use [TUTORIAL.md](TUTORIAL.md) for a short walkthrough,
 Build in a rocJITsu CMake build directory, never in the source tree:
 
 ```sh
-cmake --build "$ROCJITSU_BUILD_DIR" --target rocjitsu_dbi_hooks -j4
+cmake --build "$ROCJITSU_BUILD_DIR" --target rocjitsu_dbi_hooks
 ```
 
 The hook is normally located at:
@@ -28,14 +28,12 @@ Load it into any HSA application with:
 ```sh
 env \
   HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_ENABLE=1 \
   RJ_CONSAN_LOG=1 \
   ./application
 ```
 
-`RJ_CONSAN_ENABLE=1` is required to enable ConSan and defaults to MOI
-Record/Replay. Loading the hook without it remains inert. Flavor and engine
-variables select the analysis but do not enable it.
+Loading the hook enables ConSan and defaults to MOI Record/Replay.
+`RJ_CONSAN_LOG=1` is optional.
 
 Every valid code object on a waitcheck-supported target is checked for missing
 AMDGPU waits at load time before ConSan allocates runtime state or runs its DBI
@@ -55,13 +53,13 @@ comparison in [FLAVORS.md](FLAVORS.md).
 
 | Selection | Ordinary `standard-v1` behavior | Primary tradeoff |
 | --- | --- | --- |
-| `RJ_CONSAN_FLAVOR=moi`, `RJ_CONSAN_MOI_ENGINE=record_replay` | Instrument all admitted supported access, barrier, atomic, and fence sites; allocate an inventory-sized report; replay visible records on the host. | **Recommended starting engine:** clear reference/debug semantics, but only a bounded dynamic snapshot. |
-| `RJ_CONSAN_FLAVOR=moi`, `RJ_CONSAN_MOI_ENGINE=inline_shadow` | Publish exact-shadow cells and bounded diagnostics on the GPU; track admitted barriers and atomics. | Strongest supported-form attribution, with higher overhead. |
-| `RJ_CONSAN_FLAVOR=moi`, `RJ_CONSAN_MOI_ENGINE=sampled` | Patch all admitted supported sites; use automatic runtime stride 16,384 and offset zero; retain bounded sampled causal windows and synchronization metadata. | Bounded retained state and probabilistic detection. |
-| `RJ_CONSAN_FLAVOR=supercollider` | Duplicate/read-back supported LDS accesses, delay, compare, and set an automatically allocated non-trapping mismatch marker. | Complementary value-instability diagnostic; it does not attribute a happens-before edge or exact racing pair. |
+| default or `RJ_CONSAN_MODE=record-replay` | Instrument all admitted supported access, barrier, atomic, and fence sites; allocate an inventory-sized report; replay visible records on the host. | **Recommended starting engine:** clear reference/debug semantics, but only a bounded dynamic snapshot. |
+| `RJ_CONSAN_MODE=inline-shadow` | Publish exact-shadow cells and bounded diagnostics on the GPU; track admitted barriers and atomics. | Strongest supported-form attribution, with higher overhead. |
+| `RJ_CONSAN_MODE=sampled` | Patch all admitted supported sites; use automatic runtime stride 16,384 and offset zero; retain bounded sampled causal windows and synchronization metadata. | Bounded retained state and probabilistic detection. |
+| `RJ_CONSAN_MODE=supercollider` | Duplicate/read-back supported LDS accesses, delay, compare, and set an automatically allocated non-trapping mismatch marker. | Complementary value-instability diagnostic; it does not attribute a happens-before edge or exact racing pair. |
 
-`RJ_CONSAN_MOI_ENGINE` defaults to `record_replay` when the flavor is `moi`,
-but spelling the engine explicitly can make a saved command self-describing.
+`RJ_CONSAN_MODE` defaults to `record-replay`; spelling it explicitly can make a
+saved command self-describing.
 
 Record/Replay's complete static-site instrumentation is not an exhaustive
 dynamic trace: repeated executions of a static site can overwrite earlier
@@ -78,7 +76,6 @@ Recommended default, Record/Replay:
 
 ```sh
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_ENABLE=1 \
   RJ_CONSAN_LOG=1 \
   ./application
 ```
@@ -87,8 +84,7 @@ Inline Shadow:
 
 ```sh
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_ENABLE=1 \
-  RJ_CONSAN_MOI_ENGINE=inline_shadow \
+  RJ_CONSAN_MODE=inline-shadow \
   RJ_CONSAN_LOG=1 \
   ./application
 ```
@@ -97,8 +93,7 @@ Sampled:
 
 ```sh
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_ENABLE=1 \
-  RJ_CONSAN_MOI_ENGINE=sampled \
+  RJ_CONSAN_MODE=sampled \
   RJ_CONSAN_LOG=1 \
   ./application
 ```
@@ -107,39 +102,44 @@ SuperCollider:
 
 ```sh
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_ENABLE=1 \
-  RJ_CONSAN_FLAVOR=supercollider \
+  RJ_CONSAN_MODE=supercollider \
   RJ_CONSAN_LOG=1 \
   ./application
 ```
 
-Add self-checks only when their expected outcome is known:
+For focused tests, require complete instrumentation and report collection:
 
 ```sh
-export RJ_CONSAN_FAIL_CLOSED=1
-export RJ_CONSAN_REQUIRE_PATCH=1
-export RJ_CONSAN_MOI_REQUIRE_RECORDS=1
-export RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1   # known-correct MOI control
-export RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1  # predeclared positive MOI control
-export RJ_CONSAN_MOI_FORBID_OVERFLOW=1
+export RJ_CONSAN_POLICY=strict
 ```
 
-Do not enable both diagnostic guards. `FAIL_CLOSED` and `REQUIRE_PATCH` are
-useful for focused programs but can be too strict for a broad application that
-loads helper code objects with no admitted sites.
+Strict policy does not make race diagnostics fatal. Expert validation harnesses
+with a predeclared expected result can add one of these assertions:
+
+```sh
+export RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1   # known-correct MOI control
+export RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1  # predeclared positive MOI control
+```
+
+Do not enable both diagnostic guards. Strict policy can be too restrictive for
+a broad application that loads helper code objects with no admitted sites.
 
 ## Core controls
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `RJ_CONSAN_ENABLE=0|1` | unset | The sole activation control. `1` enables ConSan with MOI Record/Replay defaults; unset or `0` keeps the loaded hook inert. |
-| `RJ_CONSAN_FLAVOR=supercollider|moi` | `moi` when enabled | Select the flavor after enabling ConSan. This variable does not activate ConSan by itself. |
-| `RJ_CONSAN_MOI_ENGINE=record_replay|sampled|inline_shadow` | `record_replay` for MOI | Select the MOI engine. |
+| `RJ_CONSAN_MODE=record-replay|inline-shadow|sampled|supercollider` | `record-replay` | Select the analysis. Loading the hook activates ConSan. |
+| `RJ_CONSAN_POLICY=default|strict` | `default` | `strict` rejects unsupported or incomplete instrumentation, requires real patches and MOI evidence, and rejects report overflow. It does not make diagnostics fatal. |
 | `RJ_CONSAN_LOG=N` | disabled | Enable compact logs at `1`; larger values add inventory detail. |
 | `RJ_CONSAN_FAIL_CLOSED=0|1` | `0` | Reject unsupported/invalid transformation outcomes instead of loading the original. |
 | `RJ_CONSAN_REQUIRE_PATCH=0|1` | `0` | Reject an applicable code object when no real access/barrier/atomic/fence instrumentation patch is emitted. Prologues and metadata-only changes do not satisfy it. |
 | `RJ_CONSAN_FLAT_PROVENANCE=likely|strict` | `likely` | Admit proven `Group` plus heuristic `MaybeGroup` flat LDS sites, or only proven `Group` sites. |
 | `RJ_CONSAN_DUMP_DIR=PATH` | unset | Write original and transformed `.hsaco` objects for inspection. |
+
+For one transition, the old `RJ_CONSAN_ENABLE`, `RJ_CONSAN_FLAVOR`,
+`RJ_CONSAN_MOI_ENGINE`, and `RJ_CONSAN_MOI_BACKEND` variables remain accepted
+with deprecation warnings. Do not combine old selection variables with
+`RJ_CONSAN_MODE`. Deprecated `RJ_CONSAN_ENABLE=0` still keeps the hook inert.
 
 ## SuperCollider controls
 

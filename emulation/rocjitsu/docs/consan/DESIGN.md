@@ -24,7 +24,7 @@ in [AMDGPU register spilling](../spilling.md).
 | --- | --- | --- |
 | Interception | HSA-tools hook via `HSA_TOOLS_LIB`. | Keep HSA-tools as the main path. |
 | Architecture | Target-specific native instrumentation for `gfx950`, `gfx1201`, and `gfx1250`. | Keep target capabilities and encoders explicit; do not translate between targets. |
-| Public selection | `RJ_CONSAN_ENABLE=1` selects the MOI Record/Replay default. Explicit flavor and MOI-engine controls select alternatives. | Keep the two-level flavor/engine model beneath a simple activation control. |
+| Public selection | Loading the hook selects MOI Record/Replay. `RJ_CONSAN_MODE` selects alternatives and `RJ_CONSAN_POLICY` selects default or strict completeness checks. | Keep flavor and engine as implementation concepts beneath a small public interface. |
 | SuperCollider | Delayed redundant LDS and admitted group-flat observations with an automatic mismatch marker. | Keep as a complementary perturbation/value-instability flavor. |
 | MOI Record/Replay | Bounded device records plus host replay. This is the recommended starting engine. | Preserve clear reference/debug semantics while making snapshot limits explicit. |
 | MOI Inline Shadow | Immediate supported-form shadow checks for admitted LDS accesses, barriers, and selected atomic ordering. | Broaden proven instruction and ordering coverage without weakening typed exclusions. |
@@ -132,39 +132,29 @@ Test anchors:
   - ConSan HSA/DBI fixtures and focused runtime contract tests. Generic DBI
     fixtures remain in the parent `tests/dbi/` directory.
 
-## Public flavor and engine model
+## Public mode and policy model
 
-ConSan has a two-level public selection.
-
-The ordinary activation is:
-
-```sh
-RJ_CONSAN_ENABLE=1
-```
-
-It defaults to MOI Record/Replay. Loading the hook without activation remains
-inert. Flavor and engine controls only refine this selection after
-`RJ_CONSAN_ENABLE=1`; they do not activate ConSan by themselves.
-
-Top-level flavor:
+Loading the HSA hook activates ConSan. The ordinary default is MOI
+Record/Replay. Alternatives use one variable:
 
 ```sh
-RJ_CONSAN_FLAVOR=supercollider
-RJ_CONSAN_FLAVOR=moi
+RJ_CONSAN_MODE=record-replay
+RJ_CONSAN_MODE=inline-shadow
+RJ_CONSAN_MODE=sampled
+RJ_CONSAN_MODE=supercollider
 ```
 
-MOI engine, used only with `RJ_CONSAN_FLAVOR=moi`:
+Focused validation can require complete instrumentation and evidence:
 
 ```sh
-RJ_CONSAN_MOI_ENGINE=record_replay
-RJ_CONSAN_MOI_ENGINE=inline_shadow
-RJ_CONSAN_MOI_ENGINE=sampled
+RJ_CONSAN_POLICY=strict
 ```
 
-The legacy `RJ_CONSAN_MOI_BACKEND` names remain compatibility aliases:
-
-- `context` maps to `record_replay`.
-- `sampled_watchpoint` maps to `sampled`.
+Strict policy rejects unsupported or incomplete instrumentation, requires real
+patches and MOI evidence, and rejects overflow. It does not make race
+diagnostics fatal. The former `RJ_CONSAN_ENABLE`, `RJ_CONSAN_FLAVOR`,
+`RJ_CONSAN_MOI_ENGINE`, and `RJ_CONSAN_MOI_BACKEND` inputs remain deprecated
+transition aliases.
 
 The public terminology is:
 
@@ -240,7 +230,6 @@ The recommended ordinary invocation is:
 
 ```sh
 env HSA_TOOLS_LIB=/path/to/librocjitsu_dbi_hooks.so \
-  RJ_CONSAN_ENABLE=1 \
   ./application
 ```
 
@@ -716,7 +705,7 @@ Runtime self-checks:
 
 ### Record/Replay engine
 
-`RJ_CONSAN_MOI_ENGINE=record_replay` is the recommended starting engine and the
+`RJ_CONSAN_MODE=record-replay` is the recommended starting engine and the
 reference model for the other MOI engines.
 
 Current implementation:
@@ -758,7 +747,7 @@ Design role:
 
 ### Inline Shadow engine
 
-`RJ_CONSAN_MOI_ENGINE=inline_shadow` is the immediate supported-form GPU-side
+`RJ_CONSAN_MODE=inline-shadow` is the immediate supported-form GPU-side
 engine. It updates and checks shadow state during kernel execution instead of
 logging each access for host replay.
 
@@ -831,7 +820,7 @@ Design role:
 
 ### Sampled engine
 
-`RJ_CONSAN_MOI_ENGINE=sampled` is the statistical engine. It retains selected
+`RJ_CONSAN_MODE=sampled` is the statistical engine. It retains selected
 causal windows instead of attempting to preserve every dynamic event.
 
 Current implementation:

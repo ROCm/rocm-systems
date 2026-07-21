@@ -1334,7 +1334,7 @@ public:
 
     log_message(
         kLogInfo,
-        "installed ConSan hook flavor=%s moi_engine=%s moi_profile=%s delay_nops=%u "
+        "installed ConSan hook flavor=%s moi_engine=%s policy=%s moi_profile=%s delay_nops=%u "
         "fail_closed=%s "
         "require_patch=%s "
         "probe_nop=%s probe_trampoline_nop=%s probe_endpgm=%s probe_lds_endpgm=%s "
@@ -1353,7 +1353,7 @@ public:
         "moi_report_buffer=%s moi_report_buffer_size=%llu "
         "moi_auto_report_buffer_size=%llu moi_auto_report_buffer_size_source=%s mode=%s",
         flavor_name(config.flavor.value_or(rocjitsu::ConSanFlavor::None)),
-        rocjitsu::consan_moi_engine_name(config.moi_engine),
+        rocjitsu::consan_moi_engine_name(config.moi_engine), hook_policy_name(config.policy),
         config.flavor == rocjitsu::ConSanFlavor::Moi ? kMoiStandardProfile.data() : "none",
         config.delay_nops, config.fail_closed ? "true" : "false",
         config.require_patch ? "true" : "false", config.probe_nop ? "true" : "false",

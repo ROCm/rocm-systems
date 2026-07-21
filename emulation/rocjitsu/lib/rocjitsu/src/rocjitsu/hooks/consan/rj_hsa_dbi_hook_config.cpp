@@ -472,14 +472,91 @@ void warn_env(const char *name, const char *message) {
   std::fprintf(stderr, "[rocjitsu-dbi-hooks] warning: %s: %s\n", name, message);
 }
 
+void warn_deprecated_env(const char *name, const char *replacement) {
+  std::fprintf(stderr, "[rocjitsu-dbi-hooks] warning: %s is deprecated; use %s instead\n", name,
+               replacement);
+}
+
+[[nodiscard]] bool parse_mode_env(HookConfig *config) {
+  const char *value = std::getenv("RJ_CONSAN_MODE");
+  if (value == nullptr || *value == '\0') {
+    if (env_has_value("RJ_CONSAN_FLAVOR"))
+      warn_deprecated_env("RJ_CONSAN_FLAVOR", "RJ_CONSAN_MODE");
+    if (env_has_value("RJ_CONSAN_MOI_ENGINE"))
+      warn_deprecated_env("RJ_CONSAN_MOI_ENGINE", "RJ_CONSAN_MODE");
+    if (env_has_value("RJ_CONSAN_MOI_BACKEND"))
+      warn_deprecated_env("RJ_CONSAN_MOI_BACKEND", "RJ_CONSAN_MODE");
+
+    if (!parse_flavor_env(&config->flavor))
+      return false;
+    if (!config->flavor)
+      config->flavor = rocjitsu::ConSanFlavor::Moi;
+    return parse_moi_engine_env(&config->moi_engine);
+  }
+
+  constexpr const char *kLegacySelectionVariables[] = {
+      "RJ_CONSAN_FLAVOR",
+      "RJ_CONSAN_MOI_ENGINE",
+      "RJ_CONSAN_MOI_BACKEND",
+  };
+  for (const char *name : kLegacySelectionVariables) {
+    if (env_has_value(name)) {
+      std::fprintf(stderr, "[rocjitsu-dbi-hooks] %s and RJ_CONSAN_MODE cannot both be set\n", name);
+      return false;
+    }
+  }
+
+  if (ascii_iequals(value, "record-replay") || ascii_iequals(value, "record_replay")) {
+    config->flavor = rocjitsu::ConSanFlavor::Moi;
+    config->moi_engine = rocjitsu::ConSanMoiEngine::RecordReplay;
+    return true;
+  }
+  if (ascii_iequals(value, "inline-shadow") || ascii_iequals(value, "inline_shadow")) {
+    config->flavor = rocjitsu::ConSanFlavor::Moi;
+    config->moi_engine = rocjitsu::ConSanMoiEngine::InlineShadow;
+    return true;
+  }
+  if (ascii_iequals(value, "sampled")) {
+    config->flavor = rocjitsu::ConSanFlavor::Moi;
+    config->moi_engine = rocjitsu::ConSanMoiEngine::Sampled;
+    return true;
+  }
+  if (ascii_iequals(value, "supercollider")) {
+    config->flavor = rocjitsu::ConSanFlavor::SuperCollider;
+    config->moi_engine = rocjitsu::ConSanMoiEngine::RecordReplay;
+    return true;
+  }
+
+  std::fprintf(stderr,
+               "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MODE='%s'; expected "
+               "record-replay|inline-shadow|sampled|supercollider\n",
+               value);
+  return false;
+}
+
+[[nodiscard]] bool parse_policy_env(HookPolicy *out) {
+  const char *value = std::getenv("RJ_CONSAN_POLICY");
+  if (value == nullptr || *value == '\0' || ascii_iequals(value, "default")) {
+    *out = HookPolicy::Default;
+    return true;
+  }
+  if (ascii_iequals(value, "strict")) {
+    *out = HookPolicy::Strict;
+    return true;
+  }
+  std::fprintf(stderr,
+               "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_POLICY='%s'; expected default|strict\n",
+               value);
+  return false;
+}
+
 void warn_irrelevant_env_combinations(const HookConfig &config) {
   if (env_has_value("RJ_CONSAN_MOI_ENGINE") && env_has_value("RJ_CONSAN_MOI_BACKEND"))
     warn_ignored_env("RJ_CONSAN_MOI_BACKEND", "RJ_CONSAN_MOI_ENGINE takes precedence");
 
   if (config.flavor == rocjitsu::ConSanFlavor::Moi) {
     if (env_has_value("RJ_CONSAN_SC_REPORT_MODE"))
-      warn_ignored_env("RJ_CONSAN_SC_REPORT_MODE",
-                       "only applies to RJ_CONSAN_FLAVOR=supercollider");
+      warn_ignored_env("RJ_CONSAN_SC_REPORT_MODE", "only applies to RJ_CONSAN_MODE=supercollider");
     if (config.moi_engine != rocjitsu::ConSanMoiEngine::Sampled) {
       constexpr const char *kSampledOnlyKnobs[] = {
           "RJ_CONSAN_MOI_SAMPLE_STRIDE",         "RJ_CONSAN_MOI_SAMPLE_OFFSET",
@@ -488,7 +565,7 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
       };
       for (const char *name : kSampledOnlyKnobs) {
         if (env_has_value(name))
-          warn_ignored_env(name, "only applies to RJ_CONSAN_MOI_ENGINE=sampled");
+          warn_ignored_env(name, "only applies to RJ_CONSAN_MODE=sampled");
       }
     }
     if (config.moi_engine != rocjitsu::ConSanMoiEngine::RecordReplay &&
@@ -496,10 +573,10 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
          env_has_value("RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT"))) {
       if (env_has_value("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS"))
         warn_ignored_env("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS",
-                         "only applies to RJ_CONSAN_MOI_ENGINE=record_replay");
+                         "only applies to RJ_CONSAN_MODE=record-replay");
       if (env_has_value("RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT"))
         warn_ignored_env("RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT",
-                         "only applies to RJ_CONSAN_MOI_ENGINE=record_replay");
+                         "only applies to RJ_CONSAN_MODE=record-replay");
     }
     const bool probe_local_owner = config.moi_engine == rocjitsu::ConSanMoiEngine::InlineShadow;
     if (!config.moi_init_owner_epoch && !probe_local_owner &&
@@ -543,7 +620,7 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   };
   for (const char *name : kMoiOnlyKnobs) {
     if (env_has_value(name))
-      warn_ignored_env(name, "RJ_CONSAN_FLAVOR is not moi");
+      warn_ignored_env(name, "RJ_CONSAN_MODE does not select an MOI engine");
   }
 }
 
@@ -557,25 +634,33 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   std::optional<bool> explicit_enable;
   if (!parse_optional_bool_env("RJ_CONSAN_ENABLE", &explicit_enable))
     return std::nullopt;
-  if (explicit_enable != true) {
-    if (env_has_value("RJ_CONSAN_FLAVOR"))
-      warn_ignored_env("RJ_CONSAN_FLAVOR", "RJ_CONSAN_ENABLE=1 is required");
+  if (explicit_enable) {
+    warn_deprecated_env("RJ_CONSAN_ENABLE", "loading the hook to enable ConSan");
+  }
+  if (explicit_enable == false) {
+    constexpr const char *kDisabledSelectionVariables[] = {
+        "RJ_CONSAN_MODE",       "RJ_CONSAN_POLICY",      "RJ_CONSAN_FLAVOR",
+        "RJ_CONSAN_MOI_ENGINE", "RJ_CONSAN_MOI_BACKEND",
+    };
+    for (const char *name : kDisabledSelectionVariables) {
+      if (env_has_value(name))
+        warn_ignored_env(name, "deprecated RJ_CONSAN_ENABLE=0 disables ConSan");
+    }
     return config;
   }
-  if (!parse_flavor_env(&config.flavor))
+  if (!parse_mode_env(&config))
     return std::nullopt;
-  if (!config.flavor)
-    config.flavor = rocjitsu::ConSanFlavor::Moi;
+  if (!parse_policy_env(&config.policy))
+    return std::nullopt;
   config.enabled = true;
-  if (!parse_moi_engine_env(&config.moi_engine))
-    return std::nullopt;
   if (!parse_flat_provenance_mode_env(&config.flat_provenance_mode))
     return std::nullopt;
   if (!parse_moi_owner_source_env(&config.moi_owner_source))
     return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_FAIL_CLOSED", false, &config.fail_closed))
+  const bool strict_policy = config.policy == HookPolicy::Strict;
+  if (!parse_bool_env("RJ_CONSAN_FAIL_CLOSED", strict_policy, &config.fail_closed))
     return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_REQUIRE_PATCH", false, &config.require_patch))
+  if (!parse_bool_env("RJ_CONSAN_REQUIRE_PATCH", strict_policy, &config.require_patch))
     return std::nullopt;
   if (!parse_bool_env("RJ_CONSAN_PROBE_NOP", false, &config.probe_nop))
     return std::nullopt;
@@ -610,7 +695,7 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   if (config.sc_perturb_kind != rocjitsu::ConSanPerturbationKind::None &&
       config.flavor != rocjitsu::ConSanFlavor::SuperCollider) {
     std::fprintf(stderr, "[rocjitsu-dbi-hooks] RJ_CONSAN_SC_PERTURB_KIND requires "
-                         "RJ_CONSAN_FLAVOR=supercollider\n");
+                         "RJ_CONSAN_MODE=supercollider\n");
     return std::nullopt;
   }
   if (config.sc_perturb_max == 0 || config.sc_perturb_max > 2 || config.sc_perturb_sleep == 0 ||
@@ -814,7 +899,9 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   }
   if (const char *test_filter = std::getenv("RJ_CONSAN_TEST_KERNEL_FILTER"))
     config.test_kernel_name_filter = test_filter;
-  if (!parse_bool_env("RJ_CONSAN_MOI_REQUIRE_RECORDS", false, &config.moi_require_records))
+  const bool strict_moi_policy = strict_policy && config.flavor == rocjitsu::ConSanFlavor::Moi;
+  if (!parse_bool_env("RJ_CONSAN_MOI_REQUIRE_RECORDS", strict_moi_policy,
+                      &config.moi_require_records))
     return std::nullopt;
   if (!parse_bool_env("RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS", false, &config.moi_require_diagnostics))
     return std::nullopt;
@@ -823,7 +910,8 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   if (!parse_bool_env("RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT", false,
                       &config.moi_require_replay_conflict))
     return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_MOI_FORBID_OVERFLOW", false, &config.moi_forbid_overflow))
+  if (!parse_bool_env("RJ_CONSAN_MOI_FORBID_OVERFLOW", strict_moi_policy,
+                      &config.moi_forbid_overflow))
     return std::nullopt;
   if (!parse_u32_env("RJ_CONSAN_FAULT_BARRIER_INDEX", 0, &config.fault_barrier_index))
     return std::nullopt;

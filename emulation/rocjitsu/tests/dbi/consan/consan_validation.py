@@ -32,7 +32,6 @@ from consan_validation_support import (
     sha256_file,
 )
 
-
 SCHEMA_VERSION = 1
 WORKSPACE_ENV = "CONSAN_VALIDATION_WORKSPACE_DIR"
 TARGET_ENV = "CONSAN_VALIDATION_TARGET"
@@ -144,8 +143,8 @@ PROFILES = {
         flavor="supercollider",
         engine="supercollider",
         environment={
-            "RJ_CONSAN_ENABLE": "1",
-            "RJ_CONSAN_FLAVOR": "supercollider",
+            "RJ_CONSAN_MODE": "supercollider",
+            "RJ_CONSAN_POLICY": "strict",
         },
     ),
     "record-replay": Profile(
@@ -153,12 +152,9 @@ PROFILES = {
         flavor="moi",
         engine="record_replay",
         environment={
-            "RJ_CONSAN_ENABLE": "1",
-            "RJ_CONSAN_FLAVOR": "moi",
-            "RJ_CONSAN_MOI_ENGINE": "record_replay",
-            "RJ_CONSAN_MOI_REQUIRE_RECORDS": "1",
+            "RJ_CONSAN_MODE": "record-replay",
+            "RJ_CONSAN_POLICY": "strict",
             "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS": "1",
-            "RJ_CONSAN_MOI_FORBID_OVERFLOW": "1",
         },
     ),
     "sampled": Profile(
@@ -166,11 +162,10 @@ PROFILES = {
         flavor="moi",
         engine="sampled",
         environment={
-            "RJ_CONSAN_ENABLE": "1",
-            "RJ_CONSAN_FLAVOR": "moi",
-            "RJ_CONSAN_MOI_ENGINE": "sampled",
+            "RJ_CONSAN_MODE": "sampled",
+            "RJ_CONSAN_POLICY": "strict",
             "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS": "1",
-            "RJ_CONSAN_MOI_FORBID_OVERFLOW": "1",
+            "RJ_CONSAN_MOI_REQUIRE_RECORDS": "0",
         },
     ),
     "inline-shadow": Profile(
@@ -178,12 +173,9 @@ PROFILES = {
         flavor="moi",
         engine="inline_shadow",
         environment={
-            "RJ_CONSAN_ENABLE": "1",
-            "RJ_CONSAN_FLAVOR": "moi",
-            "RJ_CONSAN_MOI_ENGINE": "inline_shadow",
-            "RJ_CONSAN_MOI_REQUIRE_RECORDS": "1",
+            "RJ_CONSAN_MODE": "inline-shadow",
+            "RJ_CONSAN_POLICY": "strict",
             "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS": "1",
-            "RJ_CONSAN_MOI_FORBID_OVERFLOW": "1",
         },
     ),
 }
@@ -701,12 +693,10 @@ WORKLOADS = (
             "hip_moi_instrumented_rdna4_wmma_streamk_arrival_counter_test"
         ),
         clean_filter=(
-            "HipMoiRdna4WmmaStreamKArrivalCounter."
-            "AcqRelFetchAddOrdersWmmaPartials"
+            "HipMoiRdna4WmmaStreamKArrivalCounter." "AcqRelFetchAddOrdersWmmaPartials"
         ),
         overhead_filter=(
-            "HipMoiRdna4WmmaStreamKArrivalCounter."
-            "AcqRelFetchAddOrdersWmmaPartials"
+            "HipMoiRdna4WmmaStreamKArrivalCounter." "AcqRelFetchAddOrdersWmmaPartials"
         ),
         sharktank_workload=None,
         sharktank_mode=None,
@@ -726,8 +716,7 @@ WORKLOADS = (
         ),
         clean_filter="HipMoiRdna4WmmaStreamKTreeAtomicOr.*",
         overhead_filter=(
-            "HipMoiRdna4WmmaStreamKTreeAtomicOr."
-            "AcqRelBitmaskOrdersWmmaPartials"
+            "HipMoiRdna4WmmaStreamKTreeAtomicOr." "AcqRelBitmaskOrdersWmmaPartials"
         ),
         sharktank_workload=None,
         sharktank_mode=None,
@@ -787,8 +776,7 @@ GFX950_WORKLOAD_OVERRIDES: dict[str, dict[str, str]] = {
         # This specialization executes the admitted group-FLAT probes on
         # gfx950; ExactContext has no dynamic ConSan access evidence.
         "overhead_filter": (
-            "HipMoiCdna4D128AttentionBlock."
-            "SampledFastContextMatchesHostReference"
+            "HipMoiCdna4D128AttentionBlock." "SampledFastContextMatchesHostReference"
         ),
     },
     "d128-pressure": {
@@ -814,12 +802,10 @@ GFX950_WORKLOAD_OVERRIDES: dict[str, dict[str, str]] = {
             "hip_moi_instrumented_cdna4_mfma_streamk_arrival_counter_test"
         ),
         "clean_filter": (
-            "HipMoiCdna4MfmaStreamKArrivalCounter."
-            "AcqRelFetchAddOrdersMfmaPartials"
+            "HipMoiCdna4MfmaStreamKArrivalCounter." "AcqRelFetchAddOrdersMfmaPartials"
         ),
         "overhead_filter": (
-            "HipMoiCdna4MfmaStreamKArrivalCounter."
-            "AcqRelFetchAddOrdersMfmaPartials"
+            "HipMoiCdna4MfmaStreamKArrivalCounter." "AcqRelFetchAddOrdersMfmaPartials"
         ),
     },
     "tree-atomic-or": {
@@ -829,8 +815,7 @@ GFX950_WORKLOAD_OVERRIDES: dict[str, dict[str, str]] = {
         ),
         "clean_filter": "HipMoiCdna4MfmaStreamKTreeAtomicOr.*",
         "overhead_filter": (
-            "HipMoiCdna4MfmaStreamKTreeAtomicOr."
-            "AcqRelBitmaskOrdersMfmaPartials"
+            "HipMoiCdna4MfmaStreamKTreeAtomicOr." "AcqRelBitmaskOrdersMfmaPartials"
         ),
     },
     # This name is intentionally not redirected to a different workload.  The
@@ -974,9 +959,7 @@ def _command_json(value: str) -> list[str]:
 
 
 def _hook_path(workspace: Path) -> Path:
-    suffix = Path(
-        "lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so"
-    )
+    suffix = Path("lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so")
     candidates = (
         workspace / "rocjitsu-build" / suffix,
         workspace / "rocjitsu-main-gpu-build" / suffix,
@@ -987,7 +970,9 @@ def _hook_path(workspace: Path) -> Path:
     return candidates[0]
 
 
-def _required_paths(workspace: Path, workloads: tuple[Workload, ...]) -> dict[str, Path]:
+def _required_paths(
+    workspace: Path, workloads: tuple[Workload, ...]
+) -> dict[str, Path]:
     hook = _hook_path(workspace)
     paths = {
         "rocjitsu-build": hook.parents[5],
@@ -1173,11 +1158,10 @@ def _clean_environment(
         {
             "HSA_TOOLS_LIB": str(hook),
             "RJ_CONSAN_LOG": "1",
-            "RJ_CONSAN_REQUIRE_PATCH": "1",
         }
     )
     if not workload.moi_record_evidence_expected:
-        environment.pop("RJ_CONSAN_MOI_REQUIRE_RECORDS", None)
+        environment["RJ_CONSAN_MOI_REQUIRE_RECORDS"] = "0"
     if workload.id == "qwen-prefill" and profile == "sampled":
         environment["RJ_CONSAN_MOI_REQUIRE_RECORDS"] = "1"
     return environment
@@ -1197,8 +1181,7 @@ def _controlled_environment(environment: dict[str, str]) -> dict[str, str]:
     names = {
         key
         for key in environment
-        if key.startswith(CONTROLLED_ENV_PREFIX)
-        or key in runtime_names
+        if key.startswith(CONTROLLED_ENV_PREFIX) or key in runtime_names
     }
     return {key: environment[key] for key in sorted(names)}
 
@@ -1211,6 +1194,8 @@ def _setting_metadata(name: str) -> dict:
     elif name.startswith("RJ_CONSAN_FAULT_"):
         category = "fault-injection"
     elif name in {
+        "RJ_CONSAN_MODE",
+        "RJ_CONSAN_POLICY",
         "RJ_CONSAN_ENABLE",
         "RJ_CONSAN_FLAVOR",
         "RJ_CONSAN_MOI_ENGINE",
@@ -1297,7 +1282,9 @@ def _profile_runtime_defaults(
     ]
 
 
-def _qwen_command(workspace: Path, target: str, overhead: bool, output: Path) -> list[str]:
+def _qwen_command(
+    workspace: Path, target: str, overhead: bool, output: Path
+) -> list[str]:
     root = workspace / "iree-test-suites-build" / "torch_models" / "qwen3-600m"
     data = root / "hf" / "qwen3-600m"
     command = [
@@ -1624,9 +1611,7 @@ def _run_profile(
     row_dir.mkdir(parents=True, exist_ok=False)
     hook = _hook_path(workspace)
     repetitions = (
-        1
-        if target == "gfx1250" or phase != "overhead"
-        else workload.overhead_processes
+        1 if target == "gfx1250" or phase != "overhead" else workload.overhead_processes
     )
     logs = []
     commands = []
@@ -1635,9 +1620,7 @@ def _run_profile(
     qwen_json_paths = []
     for index in range(repetitions):
         benchmark_path = row_dir / f"benchmark-{index}.json"
-        command = _workload_command(
-            workspace, target, workload, phase, benchmark_path
-        )
+        command = _workload_command(workspace, target, workload, phase, benchmark_path)
         if launcher:
             command = [*launcher, *command]
         log_path = row_dir / f"run-{index}.log"
@@ -1655,13 +1638,13 @@ def _run_profile(
     timing = None
     if phase == "overhead" and all(code == 0 for code in returncodes):
         if workload.kind == "qwen":
-            timing = {"dispatch": statistics.median(
-                _benchmark_median(path) for path in qwen_json_paths
-            )}
+            timing = {
+                "dispatch": statistics.median(
+                    _benchmark_median(path) for path in qwen_json_paths
+                )
+            }
         elif workload.kind in {"sharktank", "pytorch", "tensile"}:
-            per_run = [
-                _json_medians(log, workload.kind.capitalize()) for log in logs
-            ]
+            per_run = [_json_medians(log, workload.kind.capitalize()) for log in logs]
             keys = set.intersection(*(set(item) for item in per_run))
             timing = {
                 key: statistics.median(item[key] for item in per_run)
@@ -1946,9 +1929,7 @@ def _inventory(args: argparse.Namespace) -> int:
         environment.update(_fault_inventory_environment(family))
         log_path = root / f"command-{family}.log"
         returncode, elapsed, output, collection_complete, outcome = (
-            _run_inventory_process(
-                command, environment, log_path, args.timeout, family
-            )
+            _run_inventory_process(command, environment, log_path, args.timeout, family)
         )
         records = _inventory_records(output, family)
         for kind, values in records.items():
@@ -1965,9 +1946,7 @@ def _inventory(args: argparse.Namespace) -> int:
                 "log": str(log_path),
             }
         )
-    records = {
-        kind: sorted(values) for kind, values in aggregate_records.items()
-    }
+    records = {kind: sorted(values) for kind, values in aggregate_records.items()}
     document = {
         "schema_version": SCHEMA_VERSION,
         "target": target,
@@ -1994,7 +1973,9 @@ def _inventory(args: argparse.Namespace) -> int:
             1,
         )
     atomic_write_json(root / "inventory.json", document)
-    atomic_write_json(root / "fault-spec.template.json", _fault_template(target, workload))
+    atomic_write_json(
+        root / "fault-spec.template.json", _fault_template(target, workload)
+    )
     print(json.dumps(document, indent=2, sort_keys=True))
     return 0 if document["accepted"] else 1
 
@@ -2051,7 +2032,9 @@ def _load_fault(
         or not isinstance(value, str)
         for key, value in environment.items()
     ):
-        raise ValidationError("fault environment may contain only string RJ_CONSAN_FAULT_* values")
+        raise ValidationError(
+            "fault environment may contain only string RJ_CONSAN_FAULT_* values"
+        )
     mutations = [
         key
         for key, value in environment.items()
@@ -2089,8 +2072,7 @@ def _fault_trials(fault: dict, profile: str) -> tuple[dict, list[dict[str, str]]
         raise ValidationError(f"invalid profile environment for {profile}")
     unset = policy.get("unset", [])
     if not isinstance(unset, list) or any(
-        not isinstance(name, str) or not name.startswith("RJ_CONSAN_")
-        for name in unset
+        not isinstance(name, str) or not name.startswith("RJ_CONSAN_") for name in unset
     ):
         raise ValidationError(f"invalid profile unset list for {profile}")
     if "trials" in policy and "trial_axis" in policy:
@@ -2110,7 +2092,9 @@ def _fault_trials(fault: dict, profile: str) -> tuple[dict, list[dict[str, str]]
             or bounds["stop"] - bounds["start"] > 256
         ):
             raise ValidationError(f"invalid trial_axis for {profile}")
-        trials = [{name: str(value)} for value in range(bounds["start"], bounds["stop"])]
+        trials = [
+            {name: str(value)} for value in range(bounds["start"], bounds["stop"])
+        ]
     else:
         trials = policy.get("trials", [{}])
     if not isinstance(trials, list) or not trials:
@@ -2502,9 +2486,7 @@ def _print_explain(document: dict) -> None:
         print("fault expectations: REVIEW_REQUIRED templates (no --spec supplied)")
     else:
         source = (
-            "reference-only"
-            if document["fault_spec"]["reference_only"]
-            else "reviewed"
+            "reference-only" if document["fault_spec"]["reference_only"] else "reviewed"
         )
         print(f"fault expectations: {source} {document['fault_spec']['path']}")
     usability = document["usability_audit"]
@@ -2746,7 +2728,9 @@ def _fault(args: argparse.Namespace) -> int:
         if expected_detector == "statistical":
             minimum = policy.get("minimum_detections")
             if not isinstance(minimum, int) or isinstance(minimum, bool) or minimum < 1:
-                profile_reasons.append("statistical policy needs minimum_detections >= 1")
+                profile_reasons.append(
+                    "statistical policy needs minimum_detections >= 1"
+                )
             elif detected < minimum:
                 profile_reasons.append(
                     f"detections={detected}/{len(profile_rows)}, minimum={minimum}"
@@ -2797,9 +2781,11 @@ def _run(args: argparse.Namespace) -> int:
     )
     profiles = PROFILE_IDS if args.profile == "all" else (args.profile,)
     if args.phase == "overhead" and args.include_baseline:
-        selections = ((None, "baseline-before"),) + tuple(
-            (profile, None) for profile in profiles
-        ) + ((None, "baseline-after"),)
+        selections = (
+            ((None, "baseline-before"),)
+            + tuple((profile, None) for profile in profiles)
+            + ((None, "baseline-after"),)
+        )
     else:
         selected = (None, *profiles) if args.include_baseline else profiles
         selections = tuple((profile, None) for profile in selected)
@@ -2864,9 +2850,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     explain.add_argument(
         "--workload", choices=(*tuple(WORKLOAD_BY_ID), "all"), default="all"
     )
-    explain.add_argument(
-        "--profile", choices=(*PROFILE_IDS, "all"), default="all"
-    )
+    explain.add_argument("--profile", choices=(*PROFILE_IDS, "all"), default="all")
     explain.add_argument(
         "--spec", type=Path, help="reviewed fault spec to include in the audit"
     )
@@ -2949,9 +2933,7 @@ def main(argv: list[str] | None = None) -> int:
         workspace = _workspace_from_environment()
         if args.command == "explain":
             workload_ids = (
-                tuple(WORKLOAD_BY_ID)
-                if args.workload == "all"
-                else (args.workload,)
+                tuple(WORKLOAD_BY_ID) if args.workload == "all" else (args.workload,)
             )
             profiles = PROFILE_IDS if args.profile == "all" else (args.profile,)
             result = _explain_contract(
@@ -2981,7 +2963,9 @@ def main(argv: list[str] | None = None) -> int:
                     state = "ok" if item["present"] else "MISSING"
                     print(f"{state:7} {label}: {item['path']}")
                 for tool, path in result["tools"].items():
-                    print(f"{'ok' if path else 'MISSING':7} PATH tool {tool}: {path or '-'}")
+                    print(
+                        f"{'ok' if path else 'MISSING':7} PATH tool {tool}: {path or '-'}"
+                    )
             return 0 if result["ok"] else 1
         if args.command == "inventory":
             return _inventory(args)

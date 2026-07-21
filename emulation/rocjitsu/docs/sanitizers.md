@@ -39,7 +39,6 @@ export ROCJITSU_SANITIZER_HOOK="$ROCJITSU_BUILD/lib/rocjitsu/src/rocjitsu/hooks/
 env \
   HSA_TOOLS_DISABLE_REGISTER=1 \
   HSA_TOOLS_LIB="$ROCJITSU_SANITIZER_HOOK" \
-  RJ_CONSAN_ENABLE=1 \
   ./application
 ```
 
@@ -48,6 +47,11 @@ hook or set `ROCJITSU_WAITCHECK*` variables. The combined hook always runs an
 exhaustive load-time waitcheck first. A waitcheck diagnostic is printed with a
 `rocjitsu-waitcheck:` prefix, then ConSan continues with DBI. Add
 `RJ_CONSAN_LOG=1` only when you want verbose pass and instrumentation summaries.
+
+Record/Replay is the default. Select another analysis with
+`RJ_CONSAN_MODE=inline-shadow`, `sampled`, or `supercollider`. For a focused
+test where incomplete instrumentation must fail, add
+`RJ_CONSAN_POLICY=strict`; race diagnostics themselves remain non-fatal.
 
 For ConSan engines, diagnostics, coverage, and expert controls, continue with
 the [ConSan tutorial](consan/TUTORIAL.md) or [ConSan usage reference](consan/USAGE.md).

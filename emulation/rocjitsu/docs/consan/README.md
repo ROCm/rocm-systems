@@ -8,13 +8,13 @@ replacement when instrumentation is possible. ConSan has native support for
 ConSan exposes the SuperCollider flavor and three MOI engines. MOI stands for
 **Memory-Ordering Instrumentation**.
 
-- `RJ_CONSAN_FLAVOR=supercollider`: redundant-access/read-back checking with an
+- `RJ_CONSAN_MODE=supercollider`: redundant-access/read-back checking with an
   automatic non-trapping mismatch marker;
-- `RJ_CONSAN_FLAVOR=moi`, `RJ_CONSAN_MOI_ENGINE=record_replay`: bounded
+- `RJ_CONSAN_MODE=record-replay`: bounded
   records plus host replay;
-- `RJ_CONSAN_FLAVOR=moi`, `RJ_CONSAN_MOI_ENGINE=sampled`: bounded statistical
+- `RJ_CONSAN_MODE=sampled`: bounded statistical
   causal windows; and
-- `RJ_CONSAN_FLAVOR=moi`, `RJ_CONSAN_MOI_ENGINE=inline_shadow`: supported-form
+- `RJ_CONSAN_MODE=inline-shadow`: supported-form
   exact GPU shadowing and attributed diagnostics.
 
 The flavor and all three engines select every relevant site they support and
@@ -26,23 +26,18 @@ switch, or sampling residue for ordinary runs.
 ## Quick start
 
 ```sh
-cmake --build "$ROCJITSU_BUILD_DIR" --target rocjitsu_dbi_hooks -j4
+cmake --build "$ROCJITSU_BUILD_DIR" --target rocjitsu_dbi_hooks
 
 export CONSAN_HOOK="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so"
 
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_ENABLE=1 \
-  RJ_CONSAN_LOG=1 \
   ./application
 ```
 
-`RJ_CONSAN_ENABLE=1` selects MOI Record/Replay by default. It is the
-recommended starting engine and provides an inspectable host-side model. Its
-retained dynamic history is bounded, so a clean replay is not proof of race
-freedom.
-
-Loading the hook without `RJ_CONSAN_ENABLE=1` remains inert. Flavor and engine
-variables select the analysis but do not enable ConSan by themselves.
+Loading the hook activates MOI Record/Replay by default. It is the recommended
+starting engine and provides an inspectable host-side model. Its retained
+dynamic history is bounded, so a clean replay is not proof of race freedom.
+Add `RJ_CONSAN_LOG=1` for instrumentation and completeness summaries.
 
 When enabled, the same hook always runs waitcheck over each supported original
 code object before ConSan DBI. It reports missing waits or analysis failures,
@@ -50,10 +45,9 @@ then continues into ConSan so suspect kernels are still instrumented. No
 separate waitcheck HSA tool or waitcheck environment settings are needed for a
 ConSan run.
 
-For a focused program known to contain supported sites, the self-checks
-`RJ_CONSAN_FAIL_CLOSED=1`, `RJ_CONSAN_REQUIRE_PATCH=1`, and
-`RJ_CONSAN_MOI_REQUIRE_RECORDS=1` prevent ineffective instrumentation from
-looking clean. These are assertions, not tuning controls.
+For a focused program known to contain supported sites,
+`RJ_CONSAN_POLICY=strict` prevents ineffective or incomplete instrumentation
+from looking clean. It does not make race diagnostics fatal.
 
 Look for transformed-byte, coverage, and completeness records:
 

@@ -31,7 +31,6 @@ from consan_validation_support import (
     sha256_file,
 )
 
-
 MAX_GPU_JOBS = 4
 QUARANTINE_FILE = ".gpu-quarantine.json"
 GLOBAL_DESTRUCTIVE_LOCK_ENV = "CONSAN_DESTRUCTIVE_GPU_LOCK"
@@ -42,9 +41,7 @@ INVENTORY = "inventory"
 INCOMPLETE_BARRIER_DROP_ENV = (
     "RJ_CONSAN_FAULT_ALLOW_DESTRUCTIVE_INCOMPLETE_BARRIER_DROP"
 )
-DIVERGENT_BARRIER_MOVE_ENV = (
-    "RJ_CONSAN_FAULT_ALLOW_DESTRUCTIVE_DIVERGENT_BARRIER_MOVE"
-)
+DIVERGENT_BARRIER_MOVE_ENV = "RJ_CONSAN_FAULT_ALLOW_DESTRUCTIVE_DIVERGENT_BARRIER_MOVE"
 
 _CONSAN_PREFIX = "[rocjitsu-dbi-hooks] ConSan "
 _MUTATION_PATCH_KINDS = {
@@ -55,6 +52,25 @@ _MUTATION_PATCH_KINDS = {
     "inline-atomic-order-rewrite",
     "inline-atomic-scope-rewrite",
 }
+
+_MODE_SELECTIONS = {
+    "record-replay": ("moi", "record_replay"),
+    "record_replay": ("moi", "record_replay"),
+    "inline-shadow": ("moi", "inline_shadow"),
+    "inline_shadow": ("moi", "inline_shadow"),
+    "sampled": ("moi", "sampled"),
+    "supercollider": ("supercollider", "supercollider"),
+}
+
+
+def _selection_from_environment(environment: dict[str, str]) -> tuple[str, str]:
+    mode = environment.get("RJ_CONSAN_MODE", "").strip().lower()
+    if mode in _MODE_SELECTIONS:
+        return _MODE_SELECTIONS[mode]
+    return (
+        environment.get("RJ_CONSAN_FLAVOR", UNSPECIFIED),
+        environment.get("RJ_CONSAN_MOI_ENGINE", UNSPECIFIED),
+    )
 
 
 def _key_values(text: str) -> dict[str, str]:
@@ -123,7 +139,9 @@ def _parse_inline_release_evidence(fields: dict[str, str]) -> dict[str, object] 
     prior_owner = 0
     for entry_index in range(snapshot_count):
         ancestor_owner = _required_integer(fields, f"snapshot{entry_index}_owner")
-        ancestor_epoch = _required_integer(fields, f"snapshot{entry_index}_epoch_plus_one")
+        ancestor_epoch = _required_integer(
+            fields, f"snapshot{entry_index}_epoch_plus_one"
+        )
         if (
             ancestor_owner is None
             or ancestor_epoch is None
@@ -175,7 +193,10 @@ def _parse_inline_token_evidence(fields: dict[str, str]) -> dict[str, object] | 
     )
     values = {name: _required_integer(fields, name) for name in names}
     kind = fields.get("kind")
-    if any(value is None for value in values.values()) or kind not in {"direct", "inherited"}:
+    if any(value is None for value in values.values()) or kind not in {
+        "direct",
+        "inherited",
+    }:
         return None
     if (
         values["index"] < 0
@@ -213,13 +234,20 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
         has_coverage_summary = any(
             _CONSAN_PREFIX + "coverage " in line for line in log_text.splitlines()
         )
-        parsed_coverage = parse_coverage_evidence(log_text) if has_coverage_summary else None
-        sites = parsed_coverage.sites if parsed_coverage else parse_coverage_site_records(log_text)
+        parsed_coverage = (
+            parse_coverage_evidence(log_text) if has_coverage_summary else None
+        )
+        sites = (
+            parsed_coverage.sites
+            if parsed_coverage
+            else parse_coverage_site_records(log_text)
+        )
         coverage_sites = [asdict(site) for site in sites]
         analysis_verdict = asdict(parsed_coverage.verdict) if parsed_coverage else None
         static_coverage_records = (
             [asdict(record) for record in parsed_coverage.coverage]
-            if parsed_coverage else []
+            if parsed_coverage
+            else []
         )
         coverage_site_parse_error = None
     except CoverageParseError as error:
@@ -428,13 +456,15 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
                     )
         elif record.startswith("patch end "):
             patch_count += _integer(fields, "patches")
-            patch_outcomes.append({
-                "reader": fields.get("reader", UNSPECIFIED),
-                "outcome": fields.get("outcome", "unknown"),
-                "errors": _integer(fields, "errors"),
-                "warnings": _integer(fields, "warnings"),
-                "patches": _integer(fields, "patches"),
-            })
+            patch_outcomes.append(
+                {
+                    "reader": fields.get("reader", UNSPECIFIED),
+                    "outcome": fields.get("outcome", "unknown"),
+                    "errors": _integer(fields, "errors"),
+                    "warnings": _integer(fields, "warnings"),
+                    "patches": _integer(fields, "patches"),
+                }
+            )
             per_reader = reader_record(fields)
             if per_reader is not None:
                 per_reader["patches"] += _integer(fields, "patches")
@@ -567,7 +597,9 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             report_allocated_bytes += summary["allocated_bytes"]
             report_live_before_cleanup_bytes += summary["live_before_cleanup"]
             report_live_after_cleanup_bytes += summary["live_after_cleanup"]
-            report_peak_live_bytes = max(report_peak_live_bytes, summary["peak_live_bytes"])
+            report_peak_live_bytes = max(
+                report_peak_live_bytes, summary["peak_live_bytes"]
+            )
             report_allocation_failures += summary["allocation_failures"]
             report_capacity_failures += summary["capacity_failures"]
             report_cleanup_failures += summary["cleanup_failures"]
@@ -586,13 +618,19 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             )
             inline_diagnostics += _integer(fields, "visible_diagnostics")
             sampled_conflicts += _integer(fields, "sampled_conflicts")
-            sampled_immediate_conflicts += _integer(fields, "sampled_immediate_conflicts")
+            sampled_immediate_conflicts += _integer(
+                fields, "sampled_immediate_conflicts"
+            )
             sampled_claimed_windows += _integer(fields, "sampled_claimed_windows")
-            sampled_snapshot_counts["stale"] += _integer(fields, "sampled_stale_snapshots")
+            sampled_snapshot_counts["stale"] += _integer(
+                fields, "sampled_stale_snapshots"
+            )
             sampled_snapshot_counts["incomplete"] += _integer(
                 fields, "sampled_incomplete_snapshots"
             )
-            sampled_snapshot_counts["changed"] += _integer(fields, "sampled_changed_snapshots")
+            sampled_snapshot_counts["changed"] += _integer(
+                fields, "sampled_changed_snapshots"
+            )
             sampled_snapshot_counts["malformed"] += _integer(
                 fields, "sampled_malformed_snapshots"
             )
@@ -785,16 +823,19 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             if release_capacity == 0 or release["index"] >= release_capacity:
                 reject_reader_evidence(record, "capacity_violations")
         for token in tokens:
-            if record["inline_token_capacity"] == 0 or token["index"] >= record["inline_token_capacity"]:
+            if (
+                record["inline_token_capacity"] == 0
+                or token["index"] >= record["inline_token_capacity"]
+            ):
                 reject_reader_evidence(record, "capacity_violations")
             sources = [
                 release
                 for release in releases
                 if (
-                release["dispatch"] == token["dispatch"]
-                and release["workgroup"] == token["workgroup"]
-                and release["address"] == token["source_address"]
-                and release["version"] == token["source_version"]
+                    release["dispatch"] == token["dispatch"]
+                    and release["workgroup"] == token["workgroup"]
+                    and release["address"] == token["source_address"]
+                    and release["version"] == token["source_version"]
                 )
             ]
             if len(sources) != 1:
@@ -835,7 +876,9 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
         ):
             reject_reader_evidence(record, "state_mismatches")
 
-    requested = max((_integer(fields, "requested") for fields in fault_summaries), default=0)
+    requested = max(
+        (_integer(fields, "requested") for fields in fault_summaries), default=0
+    )
     planned = sum(_integer(fields, "planned") for fields in fault_summaries)
     applied = sum(_integer(fields, "applied") for fields in fault_summaries)
     mutation_readers = [
@@ -891,7 +934,9 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
         )
         fault_process_evidence.append(process_record)
     fault_process_evidence.sort(key=lambda record: record["process"])
-    selected_loads = sum(fields.get("selected") == "true" for fields in fault_load_selections)
+    selected_loads = sum(
+        fields.get("selected") == "true" for fields in fault_load_selections
+    )
     load_selection = {
         "schema_version": 1,
         "requested_occurrences": sorted(
@@ -920,7 +965,9 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             for fields in fault_load_selections
         ],
         "selected_loads": selected_loads,
-        "overflowed": any(fields.get("overflow") == "true" for fields in fault_load_selections)
+        "overflowed": any(
+            fields.get("overflow") == "true" for fields in fault_load_selections
+        )
         or any(fields.get("overflow") == "true" for fields in fault_load_summaries),
         "accepted_summaries": sum(
             fields.get("accepted") == "true" for fields in fault_load_summaries
@@ -1025,7 +1072,8 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             "analysis_verdict": analysis_verdict,
             "analysis_complete": (
                 analysis_verdict.get("analysis_complete")
-                if isinstance(analysis_verdict, dict) else None
+                if isinstance(analysis_verdict, dict)
+                else None
             ),
             "static_coverage_records": static_coverage_records,
             "patch_outcomes": patch_outcomes,
@@ -1054,10 +1102,12 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             "inline_coverage_counts": inline_coverage_counts,
             "inline_evidence_counts": inline_evidence_counts,
             "inline_release_evidence": sorted(
-                inline_release_evidence, key=lambda value: (value["reader"], value["index"])
+                inline_release_evidence,
+                key=lambda value: (value["reader"], value["index"]),
             ),
             "inline_token_evidence": sorted(
-                inline_token_evidence, key=lambda value: (value["reader"], value["index"])
+                inline_token_evidence,
+                key=lambda value: (value["reader"], value["index"]),
             ),
             "overflowed": any(overflow_counts.values())
             or any(sampled_snapshot_counts.values())
@@ -1126,7 +1176,9 @@ def _code_object_metrics(hashes: list[dict[str, object]]) -> dict[str, int]:
         if match is None or "size" not in entry:
             continue
         objects.setdefault(match.group(1), {})[match.group(2)] = int(entry["size"])
-    pairs = [value for value in objects.values() if {"original", "patched"} <= value.keys()]
+    pairs = [
+        value for value in objects.values() if {"original", "patched"} <= value.keys()
+    ]
     original = sum(value["original"] for value in pairs)
     patched = sum(value["patched"] for value in pairs)
     return {
@@ -1147,7 +1199,10 @@ def _read_oracle_result(
         "result_file": path.name,
     }
     if not path.is_file():
-        iree_success = "[SUCCESS] all function outputs matched their expected values." in command_log
+        iree_success = (
+            "[SUCCESS] all function outputs matched their expected values."
+            in command_log
+        )
         iree_failure = "[FAILED] result[" in command_log
         if iree_success != iree_failure:
             default = {
@@ -1157,18 +1212,22 @@ def _read_oracle_result(
                 "detail": "iree-run-module checked every requested expected output",
             }
         else:
-            passed = [int(value) for value in re.findall(
-                r"\[\s+PASSED\s+\]\s+(\d+)\s+tests?", command_log
-            )]
-            failed = [int(value) for value in re.findall(
-                r"\[\s+FAILED\s+\]\s+(\d+)\s+tests?", command_log
-            )]
+            passed = [
+                int(value)
+                for value in re.findall(
+                    r"\[\s+PASSED\s+\]\s+(\d+)\s+tests?", command_log
+                )
+            ]
+            failed = [
+                int(value)
+                for value in re.findall(
+                    r"\[\s+FAILED\s+\]\s+(\d+)\s+tests?", command_log
+                )
+            ]
             gtest_outcome = (
                 "fail"
                 if failed and failed[-1] > 0
-                else "pass"
-                if passed and passed[-1] > 0
-                else None
+                else "pass" if passed and passed[-1] > 0 else None
             )
             if gtest_outcome is not None:
                 default = {
@@ -1188,7 +1247,12 @@ def _read_oracle_result(
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         return (
-            {**default, "outcome": "unknown", "source": "malformed", "detail": str(exc)},
+            {
+                **default,
+                "outcome": "unknown",
+                "source": "malformed",
+                "detail": str(exc),
+            },
             {
                 "outcome": "unknown",
                 "count": None,
@@ -1249,11 +1313,18 @@ def _read_oracle_result(
         count = source.get("count")
         expectation = source.get("expectation")
         source_outcome = source.get("outcome")
-        valid_count = isinstance(count, int) and not isinstance(count, bool) and count >= 0
-        if expectation == "not_applicable" and count is None and source_outcome in {
-            None,
-            "not_applicable",
-        }:
+        valid_count = (
+            isinstance(count, int) and not isinstance(count, bool) and count >= 0
+        )
+        if (
+            expectation == "not_applicable"
+            and count is None
+            and source_outcome
+            in {
+                None,
+                "not_applicable",
+            }
+        ):
             source_result = {
                 **source,
                 "outcome": "not_applicable",
@@ -1294,7 +1365,9 @@ def _parallel_level(explicit_value: str | None = None) -> int:
     try:
         level = int(value)
     except ValueError as exc:
-        raise ValueError("CTEST_PARALLEL_LEVEL must be an integer from 1 through 4") from exc
+        raise ValueError(
+            "CTEST_PARALLEL_LEVEL must be an integer from 1 through 4"
+        ) from exc
     if level < 1 or level > MAX_GPU_JOBS:
         raise ValueError("CTEST_PARALLEL_LEVEL must be an integer from 1 through 4")
     return level
@@ -1322,7 +1395,11 @@ def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
 
 
 def _run_command(
-    command: list[str], cwd: Path, environment: dict[str, str], log_path: Path, timeout: float
+    command: list[str],
+    cwd: Path,
+    environment: dict[str, str],
+    log_path: Path,
+    timeout: float,
 ) -> tuple[int, bool]:
     with log_path.open("wb") as log:
         process = subprocess.Popen(
@@ -1337,7 +1414,11 @@ def _run_command(
             return process.wait(timeout=timeout), False
         except subprocess.TimeoutExpired:
             _terminate_process_group(process)
-            return process.returncode if process.returncode is not None else -signal.SIGKILL, True
+            return (
+                process.returncode
+                if process.returncode is not None
+                else -signal.SIGKILL
+            ), True
 
 
 def _parse_assignment(value: str) -> tuple[str, str]:
@@ -1368,11 +1449,15 @@ def _parse_command_json(value: str) -> list[str]:
         or not command
         or not all(isinstance(item, str) for item in command)
     ):
-        raise argparse.ArgumentTypeError("expected a non-empty JSON argv array of strings")
+        raise argparse.ArgumentTypeError(
+            "expected a non-empty JSON argv array of strings"
+        )
     return command
 
 
-def _hash_files(files: list[tuple[str, Path]], object_dir: Path) -> list[dict[str, object]]:
+def _hash_files(
+    files: list[tuple[str, Path]], object_dir: Path
+) -> list[dict[str, object]]:
     paths = list(files)
     if object_dir.exists():
         paths.extend(
@@ -1389,7 +1474,9 @@ def _hash_files(files: list[tuple[str, Path]], object_dir: Path) -> list[dict[st
             "exists": resolved.is_file(),
         }
         if resolved.is_file():
-            entry.update({"size": resolved.stat().st_size, "sha256": sha256_file(resolved)})
+            entry.update(
+                {"size": resolved.stat().st_size, "sha256": sha256_file(resolved)}
+            )
         values.append(entry)
     return values
 
@@ -1404,7 +1491,9 @@ def _revisions(cwd: Path, roots: list[Path]) -> list[dict[str, object]]:
     return [revisions[key] for key in sorted(revisions)]
 
 
-def _relevant_environment(environment: dict[str, str], explicit: set[str]) -> dict[str, str]:
+def _relevant_environment(
+    environment: dict[str, str], explicit: set[str]
+) -> dict[str, str]:
     prefixes = ("RJ_", "HSA_", "ROCM_", "HIP_", "CTEST_")
     names = {
         key
@@ -1443,7 +1532,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--env", action="append", default=[], type=_parse_assignment)
     parser.add_argument("--revision-root", action="append", default=[], type=Path)
     parser.add_argument("--run-contract", type=Path)
-    parser.add_argument("--hash-file", action="append", default=[], type=_parse_labeled_path)
+    parser.add_argument(
+        "--hash-file", action="append", default=[], type=_parse_labeled_path
+    )
     parser.add_argument("--site-id", action="append", default=[])
     parser.add_argument("--health-command-json", type=_parse_command_json)
     parser.add_argument("--smoke-command-json", type=_parse_command_json)
@@ -1461,14 +1552,18 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     if args.destructive and not args.allow_destructive:
         parser.error("--destructive requires --allow-destructive")
     if (args.health_command_json is None) != (args.smoke_command_json is None):
-        parser.error("--health-command-json and --smoke-command-json must be provided together")
+        parser.error(
+            "--health-command-json and --smoke-command-json must be provided together"
+        )
     if not args.name or args.name in {".", ".."} or Path(args.name).name != args.name:
         parser.error("--name must be one path-component-safe row name")
     return args
 
 
 def _parse_replay_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Replay a retained ConSan fault-row manifest")
+    parser = argparse.ArgumentParser(
+        description="Replay a retained ConSan fault-row manifest"
+    )
     parser.add_argument("manifest", type=Path)
     parser.add_argument("--artifact-root", type=Path)
     parser.add_argument("--name")
@@ -1478,7 +1573,9 @@ def _parse_replay_args(argv: list[str]) -> argparse.Namespace:
 
 
 def _parse_clear_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Clear a ConSan GPU quarantine after checks")
+    parser = argparse.ArgumentParser(
+        description="Clear a ConSan GPU quarantine after checks"
+    )
     parser.add_argument("--artifact-root", type=Path, required=True)
     parser.add_argument("--cwd", type=Path, default=Path.cwd())
     parser.add_argument("--health-command-json", type=_parse_command_json)
@@ -1561,23 +1658,27 @@ def _pair_classification(
     if not _execution_is_adequate(clean):
         return "clean_control_failed", evidence
     clean_execution = clean.get("execution", {})
-    if not isinstance(clean_execution, dict) or clean_execution.get("outcome") != "passed":
+    if (
+        not isinstance(clean_execution, dict)
+        or clean_execution.get("outcome") != "passed"
+    ):
         return "clean_control_failed", evidence
     if evidence["clean_oracle_outcome"] == "fail":
         return "clean_control_failed", evidence
     if evidence["clean_oracle_outcome"] != "pass":
         return "indeterminate_execution", evidence
     clean_sanitizer = clean.get("sanitizer", {})
-    if isinstance(clean_sanitizer, dict) and clean_sanitizer.get("outcome") == "detected":
+    if (
+        isinstance(clean_sanitizer, dict)
+        and clean_sanitizer.get("outcome") == "detected"
+    ):
         return "clean_control_failed", evidence
     if not _execution_is_adequate(fault):
         return "indeterminate_execution", evidence
 
     clean_coverage = clean.get("coverage", {})
     fault_coverage = fault.get("coverage", {})
-    if (
-        isinstance(clean_coverage, dict) and clean_coverage.get("overflowed")
-    ) or (
+    if (isinstance(clean_coverage, dict) and clean_coverage.get("overflowed")) or (
         isinstance(fault_coverage, dict) and fault_coverage.get("overflowed")
     ):
         return "overflowed", evidence
@@ -1624,8 +1725,17 @@ def _summarize(args: argparse.Namespace) -> int:
             continue
         manifests.append((path, value, _normalized_spec(value)))
 
-    grouped: dict[tuple[str, ...], list[tuple[Path, dict[str, object], dict[str, str]]]] = {}
-    dimension_keys = ("pair_id", "corpus", "workload", "flavor", "engine", "fault_family")
+    grouped: dict[
+        tuple[str, ...], list[tuple[Path, dict[str, object], dict[str, str]]]
+    ] = {}
+    dimension_keys = (
+        "pair_id",
+        "corpus",
+        "workload",
+        "flavor",
+        "engine",
+        "fault_family",
+    )
     for path, manifest, spec in manifests:
         if spec["pair_id"] == UNSPECIFIED:
             key = (f"unpaired:{path}", *(spec[name] for name in dimension_keys[1:]))
@@ -1636,12 +1746,18 @@ def _summarize(args: argparse.Namespace) -> int:
     groups = []
     for key in sorted(grouped):
         rows = grouped[key]
-        clean_rows = [manifest for _, manifest, spec in rows if spec["row_role"] == "clean"]
-        fault_rows = [manifest for _, manifest, spec in rows if spec["row_role"] == "fault"]
+        clean_rows = [
+            manifest for _, manifest, spec in rows if spec["row_role"] == "clean"
+        ]
+        fault_rows = [
+            manifest for _, manifest, spec in rows if spec["row_role"] == "fault"
+        ]
         classification, evidence = _pair_classification(clean_rows, fault_rows)
         groups.append(
             {
-                "pair_id": key[0] if not key[0].startswith("unpaired:") else UNSPECIFIED,
+                "pair_id": (
+                    key[0] if not key[0].startswith("unpaired:") else UNSPECIFIED
+                ),
                 **dict(zip(dimension_keys[1:], key[1:])),
                 "classification": classification,
                 "clean_rows": [
@@ -1774,7 +1890,9 @@ def _unique_replay_name(root: Path, requested: str) -> str:
 def _check_replay_drift(manifest: dict[str, object]) -> list[str]:
     drift = []
     for entry in manifest.get("hashes_before", []):
-        if not isinstance(entry, dict) or str(entry.get("label", "")).startswith("captured:"):
+        if not isinstance(entry, dict) or str(entry.get("label", "")).startswith(
+            "captured:"
+        ):
             continue
         if not entry.get("exists"):
             continue
@@ -1833,9 +1951,10 @@ def _replay_to_run_args(args: argparse.Namespace) -> list[str]:
         run_args.extend(["--destructive", "--allow-destructive"])
     if manifest.get("gpu_serialized"):
         run_args.append("--serialize-gpu")
-    if manifest.get("health_command"):
-        run_args.extend(["--health-command-json", json.dumps(manifest["health_command"])])
-    if manifest.get("smoke_command"):
+    if manifest.get("health_command") and manifest.get("smoke_command"):
+        run_args.extend(
+            ["--health-command-json", json.dumps(manifest["health_command"])]
+        )
         run_args.extend(["--smoke-command-json", json.dumps(manifest["smoke_command"])])
     if manifest.get("health_timeout_seconds"):
         run_args.extend(["--health-timeout", str(manifest["health_timeout_seconds"])])
@@ -1967,7 +2086,10 @@ def main(argv: list[str] | None = None) -> int:
     health_command = args.health_command_json or _default_health_command(environment)
     smoke_command = args.smoke_command_json
     if args.destructive and health_command is None:
-        print("destructive rows require rocminfo or --health-command-json", file=sys.stderr)
+        print(
+            "destructive rows require rocminfo or --health-command-json",
+            file=sys.stderr,
+        )
         return 2
     if args.destructive and smoke_command is None:
         print("destructive rows require --smoke-command-json", file=sys.stderr)
@@ -1996,13 +2118,14 @@ def main(argv: list[str] | None = None) -> int:
     explicit_environment.add(ROW_RESULT_ENV)
     cwd = args.cwd.resolve()
 
+    environment_flavor, environment_engine = _selection_from_environment(environment)
     spec = {
         "pair_id": args.pair_id,
         "row_role": args.row_role,
         "corpus": args.corpus,
         "workload": args.workload,
-        "flavor": args.flavor or environment.get("RJ_CONSAN_FLAVOR", UNSPECIFIED),
-        "engine": args.engine or environment.get("RJ_CONSAN_MOI_ENGINE", UNSPECIFIED),
+        "flavor": args.flavor or environment_flavor,
+        "engine": args.engine or environment_engine,
         "fault_family": args.fault_family,
     }
 
@@ -2022,7 +2145,8 @@ def main(argv: list[str] | None = None) -> int:
         "environment": _relevant_environment(environment, explicit_environment),
         "git_revisions": _revisions(cwd, args.revision_root),
         "hash_files": [
-            {"label": label, "path": str(path.resolve())} for label, path in args.hash_file
+            {"label": label, "path": str(path.resolve())}
+            for label, path in args.hash_file
         ],
         "hashes_before": _hash_files(args.hash_file, object_dir),
         "site_identities": args.site_id,
@@ -2078,7 +2202,9 @@ def main(argv: list[str] | None = None) -> int:
             (row_dir / "command.log").write_text(
                 "row not launched: pre-run GPU health check failed\n", encoding="utf-8"
             )
-            _write_quarantine(args.artifact_root, args.name, "pre-run health check failed")
+            _write_quarantine(
+                args.artifact_root, args.name, "pre-run health check failed"
+            )
         else:
             command_ran = True
             command_started = time.monotonic()

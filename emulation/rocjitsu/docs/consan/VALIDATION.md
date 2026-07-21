@@ -178,9 +178,8 @@ python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
 Replace `qwen-prefill` with any ID printed by `manifest`. Each process starts
 after removing inherited `HSA_TOOLS_LIB` and every `RJ_CONSAN_*` setting. The
 runner then applies only the named canonical profile. Every instrumented
-profile records the required sole activation control `RJ_CONSAN_ENABLE=1`,
-plus its explicit flavor and engine where applicable, so provenance does not
-depend on selection defaults. This
+profile records its explicit `RJ_CONSAN_MODE` and strict completeness policy,
+so provenance does not depend on selection defaults. This
 prevents a coverage-limiting setting, kernel filter, explicit temporary register,
 force-spill control, or stale sampling setting from silently qualifying a cell.
 

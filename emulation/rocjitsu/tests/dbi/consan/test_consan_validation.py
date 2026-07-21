@@ -19,7 +19,9 @@ from consan_validation_test_support import temporary_root
 class ConSanValidationTest(unittest.TestCase):
     def test_launcher_json_is_an_exact_argv_prefix(self) -> None:
         self.assertEqual(
-            validation._launcher_from_json('["env", "-u", "HSA_MODEL_LIB", "tool", "--"]'),
+            validation._launcher_from_json(
+                '["env", "-u", "HSA_MODEL_LIB", "tool", "--"]'
+            ),
             ["env", "-u", "HSA_MODEL_LIB", "tool", "--"],
         )
         self.assertEqual(validation._launcher_from_json(None), [])
@@ -42,9 +44,11 @@ class ConSanValidationTest(unittest.TestCase):
         child_pid = int(output.splitlines()[0])
         for _ in range(20):
             try:
-                state = Path(f"/proc/{child_pid}/stat").read_text(
-                    encoding="utf-8"
-                ).split()[2]
+                state = (
+                    Path(f"/proc/{child_pid}/stat")
+                    .read_text(encoding="utf-8")
+                    .split()[2]
+                )
             except FileNotFoundError:
                 break
             if state == "Z":
@@ -106,10 +110,7 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(
             workloads["d128-block"]["overhead_filter"],
-            (
-                "HipMoiCdna4D128AttentionBlock."
-                "SampledFastContextMatchesHostReference"
-            ),
+            ("HipMoiCdna4D128AttentionBlock." "SampledFastContextMatchesHostReference"),
         )
         self.assertIn(
             "HipMoiCdna4MfmaStreamKArrivalCounter",
@@ -120,7 +121,10 @@ class ConSanValidationTest(unittest.TestCase):
             "hip-moi-build/tests/hip_moi_reference_cdna4_jakub_matmul",
         )
         native_spellings = json.dumps(
-            [workloads[workload_id] for workload_id in validation.GFX950_WORKLOAD_OVERRIDES]
+            [
+                workloads[workload_id]
+                for workload_id in validation.GFX950_WORKLOAD_OVERRIDES
+            ]
         )
         self.assertNotIn("rdna4", native_spellings.lower())
 
@@ -173,7 +177,9 @@ class ConSanValidationTest(unittest.TestCase):
         d128 = doctor["paths"]["workload:d128-block:executable"]
         self.assertTrue(d128["path"].endswith("gfx1250_d128_attention_block_test"))
         jakub = doctor["paths"]["workload:jakub-attention:executable"]
-        self.assertTrue(jakub["path"].endswith("hip_moi_reference_gfx1250_jakub_matmul"))
+        self.assertTrue(
+            jakub["path"].endswith("hip_moi_reference_gfx1250_jakub_matmul")
+        )
 
     def test_workload_doctor_requires_only_selected_corpus_and_tools(self) -> None:
         with temporary_root() as workspace:
@@ -195,7 +201,9 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertTrue(command[0].endswith("cdna4_d128_attention_block_test"))
         self.assertEqual(command[1], "--gtest_filter=HipMoiCdna4D128AttentionBlock.*")
 
-    def test_profile_environment_scrubs_controls_and_relies_on_sync_defaults(self) -> None:
+    def test_profile_environment_scrubs_controls_and_relies_on_sync_defaults(
+        self,
+    ) -> None:
         workload = validation.WORKLOAD_BY_ID["streamk-arrival"]
         with mock.patch.dict(
             os.environ,
@@ -212,6 +220,11 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertNotIn("RJ_CONSAN_MAX_PATCHES", environment)
         self.assertNotIn("RJ_CONSAN_TMP_VGPR", environment)
         self.assertEqual(environment["HSA_TOOLS_LIB"], "/new/hook.so")
+        self.assertEqual(environment["RJ_CONSAN_MODE"], "record-replay")
+        self.assertEqual(environment["RJ_CONSAN_POLICY"], "strict")
+        self.assertNotIn("RJ_CONSAN_ENABLE", environment)
+        self.assertNotIn("RJ_CONSAN_FLAVOR", environment)
+        self.assertNotIn("RJ_CONSAN_MOI_ENGINE", environment)
         self.assertNotIn("RJ_CONSAN_MOI_TRACK_BARRIERS", environment)
         self.assertNotIn("RJ_CONSAN_MOI_TRACK_ATOMICS", environment)
         self.assertEqual(
@@ -230,13 +243,15 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertNotIn("RJ_CONSAN_MOI_TRACK_BARRIERS", environment)
         self.assertNotIn("RJ_CONSAN_MOI_TRACK_ATOMICS", environment)
 
-    def test_scatter_does_not_require_inapplicable_lds_records(self) -> None:
+    def test_scatter_disables_strict_record_requirement_for_inapplicable_lds(
+        self,
+    ) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-scatter-reduce"]
         for profile in ("record-replay", "inline-shadow"):
             environment = validation._clean_environment(
                 profile, workload, Path("/hook.so")
             )
-            self.assertNotIn("RJ_CONSAN_MOI_REQUIRE_RECORDS", environment)
+            self.assertEqual(environment["RJ_CONSAN_MOI_REQUIRE_RECORDS"], "0")
 
     def test_qwen_sampled_relies_on_the_standard_runtime_operating_point(self) -> None:
         qwen = validation.WORKLOAD_BY_ID["qwen-prefill"]
@@ -286,9 +301,7 @@ class ConSanValidationTest(unittest.TestCase):
             )
         self.assertEqual(command[0], "/workspace/venv/bin/python")
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
-        self.assertEqual(
-            command[command.index("--workload") + 1], "tdm-descriptor-add"
-        )
+        self.assertEqual(command[command.index("--workload") + 1], "tdm-descriptor-add")
 
     def test_pytorch_cluster_workload_runs_once(self) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-cluster-load-sync"]
@@ -304,9 +317,7 @@ class ConSanValidationTest(unittest.TestCase):
                 Path("/unused"),
             )
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
-        self.assertEqual(
-            command[command.index("--workload") + 1], "cluster-load-sync"
-        )
+        self.assertEqual(command[command.index("--workload") + 1], "cluster-load-sync")
 
     def test_tensile_gfx1250_uses_numeric_runner_once(self) -> None:
         workload = validation.WORKLOAD_BY_ID["tensile-sk-mxf8gemm-explicit"]
@@ -324,9 +335,7 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(command[0], "/workspace/venv/bin/python")
         self.assertTrue(command[1].endswith("consan_tensile_validation.py"))
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
-        self.assertEqual(
-            command[command.index("--config") + 1], workload.relative_path
-        )
+        self.assertEqual(command[command.index("--config") + 1], workload.relative_path)
         self.assertEqual(
             command[command.index("--output-dir") + 1],
             "/artifacts/tensile-work",
@@ -363,9 +372,7 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(command[0], "/workspace/venv/bin/python")
         self.assertTrue(command[1].endswith("consan_tensile_validation.py"))
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
-        self.assertEqual(
-            command[command.index("--config") + 1], workload.relative_path
-        )
+        self.assertEqual(command[command.index("--config") + 1], workload.relative_path)
         self.assertEqual(
             command[command.index("--output-dir") + 1],
             "/artifacts/tensile-work",
@@ -432,10 +439,7 @@ class ConSanValidationTest(unittest.TestCase):
             profile for profile in workload["profiles"] if profile["id"] == "sampled"
         )
         self.assertEqual(
-            {
-                item["name"]
-                for item in sampled["implicit_runtime_defaults"]
-            },
+            {item["name"] for item in sampled["implicit_runtime_defaults"]},
             {
                 "RJ_CONSAN_MOI_TRACK_BARRIERS",
                 "RJ_CONSAN_MOI_TRACK_ATOMICS",
@@ -619,9 +623,7 @@ class ConSanValidationTest(unittest.TestCase):
             )
         )
         self.assertFalse(
-            validation._inventory_collection_complete(
-                output, "atomic-weaken-order"
-            )
+            validation._inventory_collection_complete(output, "atomic-weaken-order")
         )
 
     def test_inventory_runner_stops_after_static_collection(self) -> None:
@@ -879,12 +881,8 @@ class ConSanValidationTest(unittest.TestCase):
             "256",
         )
         self.assertEqual(len(trials), 32)
-        self.assertEqual(
-            trials[0], {"RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": "0"}
-        )
-        self.assertEqual(
-            trials[-1], {"RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": "31"}
-        )
+        self.assertEqual(trials[0], {"RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": "0"})
+        self.assertEqual(trials[-1], {"RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": "31"})
 
 
 if __name__ == "__main__":

@@ -107,9 +107,8 @@ intended.
 
 For most structured investigations, start with the **MOI Record/Replay**
 engine. It combines a clean, inspectable host-side model with broad static-site
-instrumentation. The default activation `RJ_CONSAN_ENABLE=1` selects MOI
-Record/Replay. `RJ_CONSAN_FLAVOR=moi` may be stated explicitly in a saved
-command, but it does not enable ConSan and is unnecessary for this default.
+instrumentation. Loading the hook selects MOI Record/Replay by default;
+`RJ_CONSAN_MODE=record-replay` may be stated explicitly in a saved command.
 
 That recommendation is not a completeness claim. Record/Replay retains a
 bounded snapshot, and repeated executions of a static site can overwrite
