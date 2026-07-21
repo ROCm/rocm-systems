@@ -138,6 +138,13 @@ Each selected case must be added to `consan_validation.py` with its exact
 target-native command and independent oracle.  Its four gray cells advance
 independently: evidence from one engine never promotes another.
 
+The 2026-07-21 D0 setup attempt reached the existing local ROCm SDK at
+`TheRock-build/dist/rocm`, but that SDK does not contain the `hipblas` CMake
+package required by the vendored llama.cpp build.  Both llama rows therefore
+remain unassessed; this is a local build-prerequisite gap, not an observed
+ConSan or workload failure.  Continue with another gray row instead of building
+a larger SDK solely for these two candidates.
+
 ## Native gfx1201 PyTorch discovery
 
 PyTorch is checked out separately at
@@ -180,7 +187,7 @@ after seeing what the RDNA4 stack actually dispatches.
 |---|---|---|---|---|---|
 | **D0** `test/test_sort_and_select.py` and `test/test_reductions.py` | 🟥 Promoted; fat-object rejection ends in `SIGSEGV` | 🟥 Promoted; 30-second fat-object gate | 🟥 Promoted; 30-second fat-object gate | 🟥 Promoted; 30-second fat-object gate | A decode-style `topk` over one 151,936-element Qwen vocabulary row with `k=50` is now in the main matrix. Its exact baseline passes. The native rocPRIM path loads 3,153 kernels and exposes shared whole-code-object scalability and unsupported-site handling that the compact Inductor client does not. |
 | **D0** Attention and model paths, including `test/inductor/test_fused_attention.py` and `test/nn/test_multihead_attention.py` | 🟨 Promoted: independent oracle; clean 158/158 | 🟨 Promoted: clean 158/158 + 22/22 + 2/2 + 2/2 | 🟥 Promoted: full-pressure persistent/transient SGPR placement | 🟥 Promoted: same full-pressure SGPR placement | Ordinary causal `torch.nn.functional.scaled_dot_product_attention` is now in the main matrix.  It selects a real native attention kernel and exposed the RDNA4 scalar-spilling and relay-placement work needed to make default Record/Replay clean-complete. |
-| **D1** `test/test_scatter_gather_ops.py` | 🩶 Atomic inventory pending | 🩶 Atomic inventory pending | 🩶 Atomic inventory pending | 🩶 Atomic inventory pending | Select a collision-heavy reduction only if gfx1201 inventory proves a meaningful atomic synchronization role; retain exact collision results. |
+| **D1** `test/test_scatter_gather_ops.py` | 🩶 Admitted; clean run pending | 🩶 Admitted; clean run pending | 🩶 Admitted; clean run pending | 🩶 Admitted; clean run pending | Exact BF16/FP32 collision oracles pass. Artifact `rdna4-pytorch-scatter-inventory` records a complete 656-site global-atomic inventory for both order and scope mutation families. The workload is now enabled on gfx1201; next run the four clean profiles independently before assigning colors. |
 | **D1** `test/test_reductions.py` histogram | 🟥 Promoted: strict atomic-containing-object rejection ends in `SIGSEGV` | 🟧 Promoted: exact oracle, 135/135 accesses, 42/84 barriers | 🟥 Promoted: invalid third-object transform ends in `SIGSEGV` | 🟧 Promoted: exact oracle, 100/135 accesses, 43/84 barriers | Ordinary `torch.histc` is now in the main matrix. Its native object adds a real precompiled-library placement and relaxed-atomic difficulty class; the relaxed LDS atomics are accesses, not qualified memory-ordering events. |
 | **D1** `torch.compile` softmax selected from the reduction/softmax survey | 🟩 Promoted: clean 4/4; exact drop qualified miss; 0.960x | 🟩 Promoted: clean 4/4 + 3/3; exact drop detected; 1.052x | 🟧 Promoted but clean false conflict | 🟧 Promoted: static 4/4 + 3/3; dynamic workgroup-bank limit | The `128x256` exact client is in the main matrix.  Record/Replay detects the third exact barrier-pair drop even though the numeric oracle remains schedule-masked. Inline now instruments every site and exposes a distinct 32-bank external-shadow scalability limit; a different native shape remains desirable for Sampled. |
 | **D2** `test/inductor/test_cooperative_reductions.py` and `test/inductor/test_online_softmax.py` | 🩶 Native case pending | 🩶 Native case pending | 🩶 Native case pending | 🩶 Native case pending | Admit only target-native generated kernels that terminate reliably and add dynamic/shared-memory or multi-stage coverage absent from D0/D1. |

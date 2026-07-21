@@ -529,7 +529,7 @@ WORKLOADS = (
         tracks_atomics=True,
         overhead_processes=1,
         fault_families=("atomic-weaken-order", "atomic-weaken-scope"),
-        targets=("gfx1250",),
+        targets=("gfx1250", "gfx1201"),
         moi_record_evidence_expected=False,
     ),
     Workload(

@@ -109,13 +109,13 @@ class ConSanValidationTest(unittest.TestCase):
 
     def test_manifest_is_the_complete_north_star_matrix(self) -> None:
         manifest = validation._manifest("gfx1201")
-        self.assertEqual(len(manifest["workloads"]), 15)
+        self.assertEqual(len(manifest["workloads"]), 16)
         self.assertEqual(
             [profile["id"] for profile in manifest["profiles"]],
             list(validation.PROFILE_IDS),
         )
         self.assertEqual(
-            len({workload["id"] for workload in manifest["workloads"]}), 15
+            len({workload["id"] for workload in manifest["workloads"]}), 16
         )
         workloads = {workload["id"]: workload for workload in manifest["workloads"]}
         self.assertEqual(
