@@ -180,6 +180,44 @@ struct jinja_variables
 };
 }  // namespace rocpd
 
+bool
+operator==(rocpd_version_triplet_t lhs, rocpd_version_triplet_t rhs)
+{
+    return std::tie(lhs.major, lhs.minor, lhs.patch) == std::tie(rhs.major, rhs.minor, rhs.patch);
+}
+
+bool
+operator<(rocpd_version_triplet_t lhs, rocpd_version_triplet_t rhs)
+{
+    auto lhs_v = ROCPROFILER_SDK_COMPUTE_VERSION_VALUE(1000, lhs.major, lhs.minor, lhs.patch);
+    auto rhs_v = ROCPROFILER_SDK_COMPUTE_VERSION_VALUE(1000, rhs.major, rhs.minor, rhs.patch);
+    return (lhs_v < rhs_v);
+}
+
+bool
+operator!=(rocpd_version_triplet_t lhs, rocpd_version_triplet_t rhs)
+{
+    return !(lhs == rhs);
+}
+
+bool
+operator<=(rocpd_version_triplet_t lhs, rocpd_version_triplet_t rhs)
+{
+    return (lhs < rhs) || (lhs == rhs);
+}
+
+bool
+operator>(rocpd_version_triplet_t lhs, rocpd_version_triplet_t rhs)
+{
+    return !(lhs <= rhs);
+}
+
+bool
+operator>=(rocpd_version_triplet_t lhs, rocpd_version_triplet_t rhs)
+{
+    return !(lhs < rhs);
+}
+
 PYBIND11_MODULE(libpyrocpd, pyrocpd)
 {
     // namespace sdk  = ::rocprofiler::sdk;
@@ -354,9 +392,19 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
              [](const rocpd_version_triplet_t& v) {
                  return fmt::format("{}.{}.{}", v.major, v.minor, v.patch);
              })
-        .def("__repr__", [](const rocpd_version_triplet_t& v) {
-            return fmt::format("schema_version({}, {}, {})", v.major, v.minor, v.patch);
-        });
+        .def("__repr__",
+             [](const rocpd_version_triplet_t& v) {
+                 return fmt::format("schema_version({}, {}, {})", v.major, v.minor, v.patch);
+             })
+        // NOLINTBEGIN(misc-redundant-expression)
+        .def(py::self == py::self)
+        .def(py::self != py::self)
+        .def(py::self < py::self)
+        .def(py::self > py::self)
+        .def(py::self <= py::self)
+        .def(py::self >= py::self)
+        // NOLINTEND(misc-redundant-expression)
+        ;
 
     py::class_<rocpd::RocpdImportData>(pyrocpd, "RocpdImportData", "RocPD database(s) instances")
         .def(py::init<>())

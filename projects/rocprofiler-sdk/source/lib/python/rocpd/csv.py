@@ -442,12 +442,15 @@ def write_csv(importData, config):
 
     write_agent_info_csv(importData, config)
     write_counters_csv(importData, config)
-    write_graph_launch_csv(importData, config)
     write_kernel_csv(importData, config)
     write_memory_allocation_csv(importData, config)
     write_memory_copy_csv(importData, config)
     write_region_csv(importData, config)
     write_scratch_memory_csv(importData, config)
+
+    # graph launch was not introduced until schema version 3.0.2
+    if importData.schema_version >= libpyrocpd.schema_version(3, 0, 2):
+        write_graph_launch_csv(importData, config)
 
 
 def execute(input, config=None, **kwargs):
