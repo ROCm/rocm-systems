@@ -43,8 +43,9 @@ class GpuMemory : public simdojo::SparseMemory {
 public:
   explicit GpuMemory(std::string name)
       : simdojo::SparseMemory(std::move(name)),
-        // A monotonic lifetime token prevents a thread-local cache from
-        // matching a different GpuMemory later constructed at the same address.
+        // Function-static TLS translation caches may outlive a GpuMemory on a
+        // long-lived host thread. A lifetime token prevents one of those caches
+        // from matching an object later reconstructed at the same address.
         instance_id_(next_instance_id_.fetch_add(1, std::memory_order_relaxed)) {
     cpl_ = add_port(std::make_unique<simdojo::Port>("cpl", 0, this, simdojo::PortDirection::IN,
                                                     simdojo::PortProtocol::MEMORY));
@@ -66,12 +67,19 @@ public:
   /// @param generation Optional mutation counter used by translation caches.
   ///        Omitting it disables the per-thread fast path for this page table.
   void register_process(uint32_t pid, KfdProcess::PageTable *pt, std::shared_mutex *mu,
-                        std::atomic<uint64_t> *generation = nullptr) {
+                        const uint64_t *generation = nullptr) {
     util::Logger::cp("VMID_REG pid=", pid, " mem=0x", std::hex, reinterpret_cast<uintptr_t>(this),
                      std::dec, " pt_size=", pt->size());
     std::unique_lock lk(vmid_mutex_);
-    vmid_table_[pid] = {pt, mu, 0, generation};
-    vmid_table_generation_.fetch_add(1, std::memory_order_release);
+    vmid_table_[pid] = {
+        .page_table = pt,
+        .mutex = mu,
+        .client_pid = 0,
+        .generation = generation,
+    };
+    // The VMID may now select a different page table even though neither page
+    // table changed. Invalidate TLS entries that cached the old registration.
+    ++vmid_registry_generation_;
   }
 
   /// @brief Unregister a process from the VMID table.
@@ -82,10 +90,8 @@ public:
     auto it = vmid_table_.find(pid);
     if (it == vmid_table_.end())
       return;
-    if (it->second.generation)
-      it->second.generation->fetch_add(1, std::memory_order_release);
     vmid_table_.erase(it);
-    vmid_table_generation_.fetch_add(1, std::memory_order_release);
+    ++vmid_registry_generation_;
   }
 
   void set_process_client_pid(uint32_t pid, pid_t client_pid) {
@@ -175,7 +181,7 @@ public:
     const pid_t client_pid = client_pid_for_vmid(vmid);
     uintptr_t key = static_cast<uintptr_t>(addr ^ (addr >> 32));
     if (client_pid > 0) {
-      key ^= static_cast<uintptr_t>(client_pid) * 0x9e3779b97f4a7c15ULL;
+      key ^= static_cast<uintptr_t>(client_pid) * kClientPidHashSalt;
     } else {
       key ^= reinterpret_cast<uintptr_t>(this);
     }
@@ -330,11 +336,24 @@ public:
   }
 
 private:
+  // The largest supported atomic is eight bytes, so discard the three byte
+  // offset bits before choosing a lock stripe.
+  static constexpr unsigned kBackingAtomicGranuleShift = 3;
+  // Fold high address bits into the low stripe-index bits before masking.
+  static constexpr unsigned kBackingAtomicHashFoldShift1 = 17;
+  static constexpr unsigned kBackingAtomicHashFoldShift2 = 31;
+  // Bound mutex storage while keeping collisions low for common GPU workloads.
+  static constexpr size_t kBackingAtomicLockStripes = 4096;
+  // The 64-bit golden-ratio hash constant scatters adjacent client PIDs.
+  static constexpr uintptr_t kClientPidHashSalt = static_cast<uintptr_t>(0x9e3779b97f4a7c15ULL);
+  static_assert((kBackingAtomicLockStripes & (kBackingAtomicLockStripes - 1)) == 0,
+                "atomic lock stripe count must be a power of two");
+
   static std::mutex &backing_atomic_mutex(uintptr_t key) {
-    static std::array<std::mutex, 4096> mutexes;
-    key >>= 3;
-    key ^= key >> 17;
-    key ^= key >> 31;
+    static std::array<std::mutex, kBackingAtomicLockStripes> mutexes;
+    key >>= kBackingAtomicGranuleShift;
+    key ^= key >> kBackingAtomicHashFoldShift1;
+    key ^= key >> kBackingAtomicHashFoldShift2;
     return mutexes[key & (mutexes.size() - 1)];
   }
 
@@ -354,21 +373,21 @@ private:
     KfdProcess::PageTable *page_table = nullptr;
     std::shared_mutex *mutex = nullptr;
     pid_t client_pid = 0;
-    std::atomic<uint64_t> *generation = nullptr;
+    const uint64_t *generation = nullptr;
   };
 
   struct PteCache {
     const GpuMemory *memory = nullptr;
     uint64_t memory_instance = 0;
     uint32_t vmid = 0;
-    uint64_t table_generation = 0;
+    uint64_t registry_generation = 0;
     uint64_t page_key = 0;
     uint64_t generation = 0;
     bool found = false;
     KfdProcess::PageTableEntry pte;
     KfdProcess::PageTable *page_table = nullptr;
     std::shared_mutex *mutex = nullptr;
-    std::atomic<uint64_t> *generation_ptr = nullptr;
+    const uint64_t *generation_ptr = nullptr;
   };
 
   /// @brief Walk a VMID page table with a generation-keyed thread-local cache.
@@ -377,15 +396,15 @@ private:
   /// the whole copy and makes translate() and pte_mtype() share one invalidation
   /// protocol.
   template <typename F>
-  auto cached_walk(uint64_t addr, uint32_t vmid, PteCache &cache,
-                   F &&fn) const -> std::invoke_result_t<F, const KfdProcess::PageTableEntry *> {
+  auto cached_walk(uint64_t addr, uint32_t vmid, PteCache &cache, F &&fn) const
+      -> std::invoke_result_t<F, const KfdProcess::PageTableEntry *> {
     const uint64_t page_key = addr >> PAGE_SHIFT;
     std::shared_lock vmid_lock(vmid_mutex_);
-    const uint64_t table_generation = vmid_table_generation_.load(std::memory_order_acquire);
+    const uint64_t registry_generation = vmid_registry_generation_;
 
-    const bool cached_table = cache.memory == this && cache.memory_instance == instance_id_ &&
-                              cache.vmid == vmid && cache.table_generation == table_generation &&
-                              cache.page_table && cache.mutex;
+    const bool cached_table =
+        cache.memory == this && cache.memory_instance == instance_id_ && cache.vmid == vmid &&
+        cache.registry_generation == registry_generation && cache.page_table && cache.mutex;
     if (!cached_table) {
       auto it = vmid_table_.find(vmid);
       if (it == vmid_table_.end()) {
@@ -395,7 +414,7 @@ private:
       cache.memory = this;
       cache.memory_instance = instance_id_;
       cache.vmid = vmid;
-      cache.table_generation = table_generation;
+      cache.registry_generation = registry_generation;
       cache.page_table = it->second.page_table;
       cache.mutex = it->second.mutex;
       cache.generation_ptr = it->second.generation;
@@ -403,8 +422,7 @@ private:
     }
 
     std::shared_lock page_table_lock(*cache.mutex);
-    const uint64_t generation =
-        cache.generation_ptr ? cache.generation_ptr->load(std::memory_order_acquire) : 0;
+    const uint64_t generation = cache.generation_ptr ? *cache.generation_ptr : 0;
     const bool cached_page = cached_table && cache.generation_ptr &&
                              cache.generation == generation && cache.page_key == page_key;
     if (!cached_page) {
@@ -504,13 +522,14 @@ private:
   }
 
   simdojo::Port *cpl_ = nullptr;
-  // fetch_add is intentional: every object lifetime needs a distinct token;
-  // resetting this atomic would let an address-reused object match stale TLS.
+  // Every object lifetime needs a distinct token because the function-static
+  // TLS caches can survive destruction on long-lived host threads.
   inline static std::atomic<uint64_t> next_instance_id_{1};
   const uint64_t instance_id_;
   mutable std::shared_mutex vmid_mutex_;
   std::unordered_map<uint32_t, VmidEntry> vmid_table_;
-  mutable std::atomic<uint64_t> vmid_table_generation_ = 1;
+  // Version of VMID-to-page-table bindings, accessed only under vmid_mutex_.
+  uint64_t vmid_registry_generation_ = 1;
   bool passthrough_ = false;
 };
 

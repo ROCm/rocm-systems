@@ -252,7 +252,7 @@ public:
   }
 
   /// @brief Return the mutation counter used by GpuMemory translation caches.
-  std::atomic<uint64_t> *page_table_generation() { return &page_table_generation_; }
+  const uint64_t *page_table_generation() const { return &page_table_generation_; }
 
   mutable std::shared_mutex page_table_mutex_;
   PageTable page_table_;
@@ -302,15 +302,13 @@ public:
   DebugSession debug_session_;
 
 private:
-  void publish_page_table_mutation_locked() {
-    page_table_generation_.fetch_add(1, std::memory_order_release);
-  }
+  void publish_page_table_mutation_locked() { ++page_table_generation_; }
 
-  /// @brief Page table version counter, bumped (release) on every PTE mutation.
+  /// @brief Page table version counter, bumped on every PTE mutation.
   /// @details GpuMemory keeps per-thread TLB-like translation caches keyed by
-  ///          this generation; a mismatch on load (acquire) invalidates the
-  ///          cached entry and forces a fresh page-table walk.
-  std::atomic<uint64_t> page_table_generation_{1};
+  ///          this generation; all reads and writes occur while holding
+  ///          page_table_mutex_, so the counter itself does not need atomics.
+  uint64_t page_table_generation_{1};
 };
 
 } // namespace rocjitsu
