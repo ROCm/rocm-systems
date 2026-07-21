@@ -1,56 +1,178 @@
 #include <hip_test_common.hh>
 #include <hip/hiprtc.h>
+#include "hip_test_filesystem.hh"
+#include <unistd.h>
+#include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <string>
 #include <string_view>
 #include <vector>
 
-// Fixtures are installed flat alongside the test binary; load by basename (cwd-relative).
-#define DECL_MODULE_PATH(input_name) constexpr std::string_view input_name = #input_name ".co"
+// Only the valid code object is shipped alongside the test binary (cwd-relative
+// basename). The malformed variants that exercise getElfSize's rejection paths
+// are synthesized here at runtime instead of being generated and installed as
+// fixtures: installing corrupt ELFs broke DEB packaging, because dh_makeshlibs
+// runs `objdump -p` on every installed ELF and aborts on a bad header. The
+// mutation recipes below are ported from the former gen_evil_elfs.py.
+constexpr std::string_view kValidModule = "oob_kernel.co";
 
-static std::vector<char> ReadFile(std::string_view path) {
+namespace {
+using Bytes = std::vector<char>;
+
+// Elf64_Ehdr field offsets we mutate.
+constexpr size_t kEShoff = 40;      // e_shoff (u64)
+constexpr size_t kEShentsize = 58;  // e_shentsize (u16)
+constexpr size_t kEShnum = 60;      // e_shnum (u16)
+
+constexpr char kElfMagic[4] = {0x7f, 'E', 'L', 'F'};
+
+Bytes ReadFile(std::string_view path) {
   std::ifstream f(std::string(path), std::ios::binary | std::ios::ate);
   REQUIRE(f.good());
   auto size = f.tellg();
   f.seekg(0);
-  std::vector<char> buf(static_cast<size_t>(size));
+  Bytes buf(static_cast<size_t>(size));
   f.read(buf.data(), size);
   REQUIRE(f.good());
   return buf;
 }
 
+// AMDGPU is little-endian and so are all supported hosts, so a plain copy matches
+// the '<' packing the original Python used.
+uint16_t Rd16(const Bytes& b, size_t o) {
+  uint16_t v;
+  std::memcpy(&v, b.data() + o, sizeof(v));
+  return v;
+}
+uint64_t Rd64(const Bytes& b, size_t o) {
+  uint64_t v;
+  std::memcpy(&v, b.data() + o, sizeof(v));
+  return v;
+}
+void Wr16(Bytes& b, size_t o, uint16_t v) { std::memcpy(b.data() + o, &v, sizeof(v)); }
+void Wr32(Bytes& b, size_t o, uint32_t v) { std::memcpy(b.data() + o, &v, sizeof(v)); }
+void Wr64(Bytes& b, size_t o, uint64_t v) { std::memcpy(b.data() + o, &v, sizeof(v)); }
+
+// Extract the first AMDGPU ELF from a clang offload bundle (pass a raw ELF through).
+// Keeps arch aligned with whatever oob_kernel.co was just compiled for.
+Bytes ExtractElf(const Bytes& data) {
+  if (data.size() >= 4 && std::memcmp(data.data(), kElfMagic, 4) == 0) {
+    return data;
+  }
+  static constexpr char kBundleMagic[] = "__CLANG_OFFLOAD_BUNDLE__";
+  REQUIRE(data.size() >= 24);
+  REQUIRE(std::memcmp(data.data(), kBundleMagic, 24) == 0);
+  size_t off = 24;
+  uint64_t num = Rd64(data, off);
+  off += 8;
+  for (uint64_t i = 0; i < num; ++i) {
+    uint64_t entry_off = Rd64(data, off);
+    uint64_t entry_size = Rd64(data, off + 8);
+    uint64_t id_len = Rd64(data, off + 16);
+    off += 24 + id_len;
+    if (entry_size > 0 && entry_off + 4 <= data.size() &&
+        std::memcmp(data.data() + entry_off, kElfMagic, 4) == 0) {
+      return Bytes(data.begin() + entry_off, data.begin() + entry_off + entry_size);
+    }
+  }
+  FAIL("no ELF entry in bundle");
+  return {};
+}
+
+// e_shnum past the buffer.
+Bytes MakeHugeShnum(const Bytes& elf) {
+  Bytes b = elf;
+  Wr16(b, kEShnum, 0xFFFF);
+  return b;
+}
+
+// e_shoff: section table start past end of file.
+Bytes MakeBadShoff(const Bytes& elf) {
+  Bytes b = elf;
+  Wr64(b, kEShoff, uint64_t(1) << 40);
+  return b;
+}
+
+// e_shoff + e_shnum: table starts in bounds but its end spills past the file.
+Bytes MakeTableSpill(const Bytes& elf) {
+  Bytes b = elf;
+  Wr64(b, kEShoff, elf.size() - 10);
+  Wr16(b, kEShnum, 1);
+  return b;
+}
+
+// sh_offset + sh_size on one section overflows a uint64.
+Bytes MakeShOverflow(const Bytes& elf) {
+  Bytes b = elf;
+  uint64_t shoff = Rd64(elf, kEShoff);
+  uint16_t shentsize = Rd16(elf, kEShentsize);
+  size_t s5 = shoff + 5 * shentsize;
+  REQUIRE(s5 + 40 <= b.size());
+  Wr32(b, s5 + 4, 1);              // sh_type = SHT_PROGBITS
+  Wr64(b, s5 + 24, ~uint64_t(0));  // sh_offset -> overflow on + sh_size
+  Wr64(b, s5 + 32, 0x10);          // sh_size
+  return b;
+}
+
+// Writes a byte buffer to a uniquely-named temp .co and removes it on scope exit,
+// so the file-backed loader path (hipModuleLoad) sees an exact on-disk file size.
+class TempCodeObject {
+ public:
+  TempCodeObject(std::string_view name, const Bytes& data) {
+    path_ = fs::temp_directory_path() / (std::string("oob_") + std::string(name) + "_" +
+                                         std::to_string(::getpid()) + ".co");
+    std::ofstream f(path_, std::ios::binary);
+    f.write(data.data(), static_cast<std::streamsize>(data.size()));
+    f.close();
+    REQUIRE(f.good());
+  }
+  ~TempCodeObject() {
+    std::error_code ec;
+    fs::remove(path_, ec);
+  }
+  TempCodeObject(const TempCodeObject&) = delete;
+  TempCodeObject& operator=(const TempCodeObject&) = delete;
+
+  std::string path() const { return path_.string(); }
+
+ private:
+  fs::path path_;
+};
+}  // namespace
+
 // File-backed path: hipModuleLoad(fname) - image_size_ is the exact file size.
 HIP_TEST_CASE(OOB_hip_module_load_over) {
-  DECL_MODULE_PATH(oob_kernel);
-  DECL_MODULE_PATH(elf_huge_shnum);
-  DECL_MODULE_PATH(elf_bad_shoff);
-  DECL_MODULE_PATH(elf_table_spill);
-  DECL_MODULE_PATH(elf_sh_overflow);
+  Bytes elf = ExtractElf(ReadFile(kValidModule));
 
   SECTION("valid - sanity") {
     hipModule_t module{};
-    HIP_CHECK(hipModuleLoad(&module, oob_kernel.data()));
+    HIP_CHECK(hipModuleLoad(&module, std::string(kValidModule).c_str()));
     HIP_CHECK(hipModuleUnload(module));
   }
 
   SECTION("huge shnum") {
+    TempCodeObject fixture("huge_shnum", MakeHugeShnum(elf));
     hipModule_t module{};
-    HIP_CHECK_ERROR(hipModuleLoad(&module, elf_huge_shnum.data()), hipErrorInvalidImage);
+    HIP_CHECK_ERROR(hipModuleLoad(&module, fixture.path().c_str()), hipErrorInvalidImage);
   }
 
   SECTION("bad shoff") {
+    TempCodeObject fixture("bad_shoff", MakeBadShoff(elf));
     hipModule_t module{};
-    HIP_CHECK_ERROR(hipModuleLoad(&module, elf_bad_shoff.data()), hipErrorInvalidImage);
+    HIP_CHECK_ERROR(hipModuleLoad(&module, fixture.path().c_str()), hipErrorInvalidImage);
   }
 
   SECTION("table spill") {
+    TempCodeObject fixture("table_spill", MakeTableSpill(elf));
     hipModule_t module{};
-    HIP_CHECK_ERROR(hipModuleLoad(&module, elf_table_spill.data()), hipErrorInvalidImage);
+    HIP_CHECK_ERROR(hipModuleLoad(&module, fixture.path().c_str()), hipErrorInvalidImage);
   }
 
   SECTION("sh overflow") {
+    TempCodeObject fixture("sh_overflow", MakeShOverflow(elf));
     hipModule_t module{};
-    HIP_CHECK_ERROR(hipModuleLoad(&module, elf_sh_overflow.data()), hipErrorInvalidImage);
+    HIP_CHECK_ERROR(hipModuleLoad(&module, fixture.path().c_str()), hipErrorInvalidImage);
   }
 }
 
@@ -59,17 +181,16 @@ HIP_TEST_CASE(OOB_hip_module_load_over) {
 // getElfSize before any device/arch check, so they are arch-independent. The valid
 // in-memory load is covered by OOB_hiprtc_roundtrip_loads, which is arch-correct.
 HIP_TEST_CASE(OOB_hip_module_load_data_over) {
-  DECL_MODULE_PATH(elf_bad_shoff);
-  DECL_MODULE_PATH(elf_sh_overflow);
+  Bytes elf = ExtractElf(ReadFile(kValidModule));
 
   SECTION("bad shoff in-memory") {
-    auto buf = ReadFile(elf_bad_shoff);
+    Bytes buf = MakeBadShoff(elf);
     hipModule_t module{};
     HIP_CHECK_ERROR(hipModuleLoadData(&module, buf.data()), hipErrorInvalidImage);
   }
 
   SECTION("sh overflow in-memory") {
-    auto buf = ReadFile(elf_sh_overflow);
+    Bytes buf = MakeShOverflow(elf);
     hipModule_t module{};
     HIP_CHECK_ERROR(hipModuleLoadData(&module, buf.data()), hipErrorInvalidImage);
   }
