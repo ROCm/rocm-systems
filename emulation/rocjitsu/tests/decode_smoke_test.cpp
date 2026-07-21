@@ -383,7 +383,18 @@ TEST(Rdna3DecodeTest, GlobalFlatAllOnesSaddrIsNull) {
   std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "global_load_b64");
-  EXPECT_EQ(inst->num_src_operands(), 1);
+  // vaddr + the fieldless OPR_GPUMEM memory operand (saddr is null, so it
+  // is not added); gpumem is counted but currently carries no register.
+  EXPECT_EQ(inst->num_src_operands(), 2);
+  {
+    int fieldless_srcs = 0;
+    for (int i = 0; i < inst->num_src_operands(); ++i)
+      if (inst->src_operand(i)->is_fieldless()) {
+        ++fieldless_srcs;
+        EXPECT_FALSE(inst->src_operand(i)->to_register_ref());
+      }
+    EXPECT_EQ(fieldless_srcs, 1);
+  }
 
   InstDefUse def_use(*inst);
   EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 1, 2}));
@@ -1141,7 +1152,18 @@ TEST(Gfx1250DecodeTest, FlatVaddrWidthFollowsSaddrMode) {
   ASSERT_NE(saddr_inst, nullptr);
   EXPECT_EQ(saddr_inst->mnemonic(), "flat_load_b64");
   EXPECT_EQ(saddr_inst->disassemble(), "flat_load_b64 v[2:3], v1, s[6:7]");
-  EXPECT_EQ(saddr_inst->num_src_operands(), 2);
+  // vaddr + saddr + fieldless OPR_GPUMEM memory operand (counted but currently
+  // to_register_ref() == nullopt).
+  EXPECT_EQ(saddr_inst->num_src_operands(), 3);
+  {
+    int fieldless_srcs = 0;
+    for (int i = 0; i < saddr_inst->num_src_operands(); ++i)
+      if (saddr_inst->src_operand(i)->is_fieldless()) {
+        ++fieldless_srcs;
+        EXPECT_FALSE(saddr_inst->src_operand(i)->to_register_ref());
+      }
+    EXPECT_EQ(fieldless_srcs, 1);
+  }
   InstDefUse saddr_def_use(*saddr_inst);
   EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::VGPR, 1, 1}));
   EXPECT_FALSE(saddr_def_use.uses.contains({RegClass::VGPR, 1, 2}));
@@ -1150,7 +1172,7 @@ TEST(Gfx1250DecodeTest, FlatVaddrWidthFollowsSaddrMode) {
   std::unique_ptr<Instruction> vector_only_inst(decoder->decode(vector_only_words));
   ASSERT_NE(vector_only_inst, nullptr);
   EXPECT_EQ(vector_only_inst->mnemonic(), "flat_load_b64");
-  EXPECT_EQ(vector_only_inst->num_src_operands(), 1);
+  EXPECT_EQ(vector_only_inst->num_src_operands(), 2); // vaddr + gpumem
   InstDefUse vector_only_def_use(*vector_only_inst);
   EXPECT_TRUE(vector_only_def_use.uses.contains({RegClass::VGPR, 1, 2}));
   EXPECT_FALSE(vector_only_def_use.uses.contains({RegClass::SGPR, 124, 1}));
@@ -1178,7 +1200,18 @@ TEST(Gfx1250DecodeTest, GlobalVaddrWidthFollowsSaddrMode) {
   ASSERT_NE(saddr_inst, nullptr);
   EXPECT_EQ(saddr_inst->mnemonic(), "global_load_b64");
   EXPECT_EQ(saddr_inst->disassemble(), "global_load_b64 v[2:3], v10, s[6:7]");
-  EXPECT_EQ(saddr_inst->num_src_operands(), 2);
+  // vaddr + saddr + fieldless OPR_GPUMEM memory operand (counted but currently
+  // to_register_ref() == nullopt).
+  EXPECT_EQ(saddr_inst->num_src_operands(), 3);
+  {
+    int fieldless_srcs = 0;
+    for (int i = 0; i < saddr_inst->num_src_operands(); ++i)
+      if (saddr_inst->src_operand(i)->is_fieldless()) {
+        ++fieldless_srcs;
+        EXPECT_FALSE(saddr_inst->src_operand(i)->to_register_ref());
+      }
+    EXPECT_EQ(fieldless_srcs, 1);
+  }
   InstDefUse saddr_def_use(*saddr_inst);
   EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::VGPR, 10, 1}));
   EXPECT_FALSE(saddr_def_use.uses.contains({RegClass::VGPR, 10, 2}));
@@ -1187,7 +1220,7 @@ TEST(Gfx1250DecodeTest, GlobalVaddrWidthFollowsSaddrMode) {
   std::unique_ptr<Instruction> vector_only_inst(decoder->decode(vector_only_words));
   ASSERT_NE(vector_only_inst, nullptr);
   EXPECT_EQ(vector_only_inst->mnemonic(), "global_load_b64");
-  EXPECT_EQ(vector_only_inst->num_src_operands(), 1);
+  EXPECT_EQ(vector_only_inst->num_src_operands(), 2); // vaddr + gpumem
   InstDefUse vector_only_def_use(*vector_only_inst);
   EXPECT_TRUE(vector_only_def_use.uses.contains({RegClass::VGPR, 10, 2}));
   EXPECT_FALSE(vector_only_def_use.uses.contains({RegClass::SGPR, 124, 1}));
