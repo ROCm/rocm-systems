@@ -852,9 +852,12 @@ bool Os::GetFileHandle(const char* fname, FileDesc* fd_ptr, size_t* sz_ptr) {
 }
 
 bool amd::Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr,
-                                      size_t* foffset_ptr) {
+                                      size_t* foffset_ptr, size_t* region_bound_ptr) {
   // Get the list of mapped file list
   bool ret_value = false;
+  if (region_bound_ptr != nullptr) {
+    *region_bound_ptr = 0;
+  }
   std::ifstream proc_maps;
   proc_maps.open("/proc/self/maps", std::ifstream::in);
   if (!proc_maps.is_open() || !proc_maps.good()) {
@@ -881,6 +884,10 @@ bool amd::Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr,
       uint64_t inode;
       tokens >> permissions >> std::hex >> offset >> std::dec >> device >> inode;
       std::getline(tokens >> std::ws, uri_file_path);
+
+      if (region_bound_ptr != nullptr && !permissions.empty() && permissions[0] == 'r') {
+        *region_bound_ptr = static_cast<size_t>(high_address - address);
+      }
 
       if (inode == 0 || uri_file_path.empty()) {
         return ret_value;
