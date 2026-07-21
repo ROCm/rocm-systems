@@ -59,6 +59,7 @@ typedef struct rj_vm_cmd_t {
   size_t buf_size;           ///< Total size of the arguments buffer.
   int32_t result;            ///< [out] Return code (0 on success, negative errno on failure).
   rj_handle_t shared_handle; ///< [out] Backing handle for shareable allocations, or -1.
+  rj_handle_t in_handle;     ///< [in,out] Client-provided fd (e.g. debugger notifier), or -1.
 } rj_vm_cmd_t;
 
 /// @brief Device memory mapping descriptor.
@@ -69,6 +70,7 @@ typedef struct rj_vm_map_t {
   uint32_t prot;        ///< Memory protection flags.
   uint32_t flags;       ///< Mapping flags.
   uint64_t mapped_addr; ///< [out] Address the mapping was placed at.
+  int32_t map_errno;    ///< [out] errno captured at the failing mmap (0 on success).
 } rj_vm_map_t;
 
 /// @brief Device memory unmapping descriptor.
@@ -223,6 +225,14 @@ RJ_API_EXPORT rj_status_t rj_vm_restore_checkpoint(const char *path, rj_vm_t **v
 RJ_API_EXPORT rj_status_t rj_vm_execute(rj_vm_t *vm, rj_vm_cmd_t *cmd);
 
 /// @brief Execute a device command for a specific process (daemon mode).
+///
+/// @details In daemon mode, if @p cmd carries a client-provided input fd in
+/// cmd->in_handle (e.g. the debugger's notifier pipe for AMDKFD_IOC_DBG_TRAP
+/// ENABLE), the VM substitutes it into the command payload and, on success,
+/// adopts it — clearing cmd->in_handle to -1 so the caller does not close the
+/// descriptor. If the command does not consume the fd, cmd->in_handle is left
+/// unchanged for the caller to reclaim. Set cmd->in_handle to -1 when there is
+/// no fd to transfer.
 /// @param[in] vm VM handle.
 /// @param[in] process_id The target process ID.
 /// @param[in,out] cmd Command descriptor.
@@ -242,6 +252,12 @@ RJ_API_EXPORT rj_status_t rj_vm_device_open(rj_vm_t *vm, rj_client_pid_t client_
 /// @param[in] vm VM handle.
 /// @param[in] process_id The process ID to close (0 closes the local process).
 RJ_API_EXPORT rj_status_t rj_vm_device_close(rj_vm_t *vm, uint32_t process_id);
+
+/// @brief Close every registered KFD process, waking any parked event waiters.
+/// @details Daemon-teardown helper: closes all live processes so client threads
+/// blocked in an infinite-timeout WAIT_EVENTS unblock and can be joined.
+/// @param[in] vm VM handle.
+RJ_API_EXPORT rj_status_t rj_vm_close_all_devices(rj_vm_t *vm);
 
 /// @brief Map device memory (local mode).
 /// @param[in] vm VM handle.

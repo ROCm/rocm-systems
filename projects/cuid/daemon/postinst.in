@@ -1,0 +1,121 @@
+#!/bin/sh
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+# Post-installation script for amdcuid daemon.
+# Template processed by CMake to generate the installed 'postinst' script.
+# Do not edit the generated 'postinst' script directly; edit this 'postinst.in' template instead.
+# This script reads the daemon config file to decide whether to install udev
+# rules (daemonize=true) or a one-shot boot service (daemonize=false) for the daemon.
+
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+CONFIG_DIR="@AMDCUID_SHARED_CONFIG_DIR@"
+VERSIONED_CONFIG_FILE="$SCRIPT_DIR/config/amdcuid_daemon.conf"
+CONFIG_FILE="$CONFIG_DIR/amdcuid_daemon.conf"
+TOOL_BIN="$SCRIPT_DIR/../../bin/amdcuid_tool"
+UDEV_RULES_FILE="/etc/udev/rules.d/90-amdcuid.rules"
+SERVICE_NAME="amdcuid_daemon"
+
+# Determine the correct systemd unit directory.
+# DEB-based distros (Debian, Ubuntu) use /lib/systemd/system;
+# RPM-based distros (RHEL, Fedora, SUSE) use /usr/lib/systemd/system.
+if [ -f /etc/debian_version ]; then
+    SYSTEMD_UNIT_DIR="/lib/systemd/system"
+else
+    SYSTEMD_UNIT_DIR="/usr/lib/systemd/system"
+fi
+
+if [ ! -f "$CONFIG_FILE" ]; then
+    # First install: seed the shared config dir from the versioned defaults.
+    mkdir -p "$CONFIG_DIR"
+    chmod 755 "$CONFIG_DIR"
+    if [ -f "$VERSIONED_CONFIG_FILE" ]; then
+        cp "$VERSIONED_CONFIG_FILE" "$CONFIG_FILE"
+    else
+        echo "Warning: amdcuid config not found at $VERSIONED_CONFIG_FILE; skipping daemon setup."
+        exit 0
+    fi
+fi
+
+SETUP_HMAC="$SCRIPT_DIR/amdcuid_setup_hmac.sh"
+if [ -x "$SETUP_HMAC" ]; then
+    "$SETUP_HMAC"
+else
+    echo "POST-INSTALL ERROR: HMAC setup script not found at $SETUP_HMAC." >&2
+    exit 1
+fi
+
+# Remove any existing service or udev rules in case we're upgrading from a
+# previous install with different settings.
+if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+    echo "Stopping $SERVICE_NAME..."
+    systemctl stop "$SERVICE_NAME" || true
+fi
+
+if systemctl is-enabled --quiet "$SERVICE_NAME" 2>/dev/null; then
+    echo "Disabling $SERVICE_NAME..."
+    systemctl disable "$SERVICE_NAME" || true
+fi
+
+SERVICE_LINK="$SYSTEMD_UNIT_DIR/${SERVICE_NAME}.service"
+if [ -L "$SERVICE_LINK" ] || [ -f "$SERVICE_LINK" ]; then
+    echo "Removing systemd service file: $SERVICE_LINK"
+    rm -f "$SERVICE_LINK"
+fi
+
+systemctl daemon-reload 2>/dev/null || true
+
+if [ -f "$UDEV_RULES_FILE" ]; then
+    echo "Removing udev rules: $UDEV_RULES_FILE"
+    rm -f "$UDEV_RULES_FILE"
+    udevadm control --reload-rules 2>/dev/null || true
+    udevadm trigger 2>/dev/null || true
+fi
+
+DAEMONIZE=$(grep "^daemonize=" "$CONFIG_FILE" | cut -d'=' -f2 | tr -d '[:space:]')
+
+if [ "$DAEMONIZE" = "true" ]; then
+    # Persistent mode: install udev rules so the daemon is notified on device
+    # changes, then enable and start the service.
+    echo "Setting up udev rules for amdcuid daemon..."
+    cat > "$UDEV_RULES_FILE" << EOF
+# AMD CUID daemon udev rules
+SUBSYSTEM=="drm", ACTION=="add|remove|change", RUN+="$TOOL_BIN --notify-daemon"
+SUBSYSTEM=="net", ACTION=="add|remove|change", RUN+="$TOOL_BIN --notify-daemon"
+EOF
+    udevadm control --reload-rules
+    udevadm trigger
+fi
+
+# Install, enable, and start the service regardless of mode.
+# When daemonize=false the daemon runs once on start and exits with code 0;
+# Restart=on-failure in the unit file will not trigger on a clean exit, so
+# no additional unit type is required.
+# To apply future config changes, edit the config file then run:
+#   sudo systemctl restart amdcuid_daemon
+if [ -d /run/systemd/system ]; then
+    SERVICE_FILE="$SCRIPT_DIR/../../libexec/amdcuid/amdcuid_daemon.service"
+    ACTUAL_DAEMON_BIN="$SCRIPT_DIR/../../bin/amdcuid_daemon"
+    sed -i "s|^ExecStart=.*|ExecStart=${ACTUAL_DAEMON_BIN}|" "$SERVICE_FILE"
+    ln -s -f -r "$SERVICE_FILE" "$SYSTEMD_UNIT_DIR/amdcuid_daemon.service"
+fi
+systemctl daemon-reload
+systemctl enable "$SERVICE_NAME"
+systemctl start "$SERVICE_NAME"

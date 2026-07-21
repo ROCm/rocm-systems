@@ -49,6 +49,7 @@ set(TEST_SRC
     hipMallocHost.cc
     hipMemAllocHost.cc
     hipMallocManaged_MultiScenario.cc
+    hipManagedMultiGpuVaConsistency.cc
     hipMemsetNegative.cc
     hipMemset.cc
     hipMemset3D.cc
@@ -198,9 +199,11 @@ set(TEST_SRC
     hipMemGetAddressRange.cc
     hipMallocMipmappedArray.cc
     hipFreeMipmappedArray.cc
+    hipMipmappedArrayMemoryLeak.cc
     hipHostAlloc.cc
     hipMemSetMemPool.cc
-    hipMemGetMemPool.cc)
+    hipMemGetMemPool.cc
+    hipMemGetDefaultMemPool.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC

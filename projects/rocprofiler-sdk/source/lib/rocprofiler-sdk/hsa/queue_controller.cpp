@@ -560,9 +560,13 @@ enable_queue_intercept()
         bool has_scratch_reporting = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY) ||
                                      itr->is_tracing(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
 
+        // Keep interception active for HIP_GRAPH subscribers (drives kernel_dispatch_count).
+        bool has_hip_graph_tracing = itr->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_GRAPH);
+
         if(itr->dispatch_counter_collection || itr->pc_sampler || has_kernel_tracing ||
            itr->dispatch_spm || has_scratch_reporting || itr->device_counter_collection ||
-           itr->device_thread_trace || itr->dispatch_thread_trace)
+           (itr->device_thread_trace && itr->device_thread_trace->requires_queue_intercept()) ||
+           itr->dispatch_thread_trace || has_hip_graph_tracing)
             return true;
     }
     return false;

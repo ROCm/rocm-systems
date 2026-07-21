@@ -20,16 +20,14 @@ using nccl_dda_detail::DdaIpcBarrierState;
 using nccl_dda_detail::ddaMaxNBlocksForScratch;
 using nccl_dda_detail::kDdaNranks;
 
-
-#define HIP_CALL(cmd)                                                                   \
-    do {                                                                                \
-        hipError_t error = (cmd);                                                       \
-        if (error != hipSuccess)                                                        \
-        {                                                                               \
-            std::cerr << "Encountered HIP error (" << hipGetErrorString(error)          \
-                      << ") at line " << __LINE__ << " in file " << __FILE__ << "\n";   \
-        }                                                                               \
-    } while (0)
+#define HIP_CALL(cmd) \
+  do { \
+    hipError_t error = (cmd); \
+    if (error != hipSuccess) { \
+      std::cerr << "Encountered HIP error (" << hipGetErrorString(error) << ") at line " << __LINE__ << " in file " \
+                << __FILE__ << "\n"; \
+    } \
+  } while (0)
 
 ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   if (comm == nullptr) {
@@ -47,12 +45,9 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   //   uncached-memory IPC export fails (hipIpcGetMemHandle -> hipErrorInvalidValue),
   //   which aborts comm init entirely. Gate init to match dispatch.
   const bool ddaArchSupported =
-      comm->archName != nullptr &&
-      (IsArchMatch(comm->archName, "gfx942") ||
-       IsArchMatch(comm->archName, "gfx950"));
-  if (comm->nRanks != kDdaNranks || comm->nNodes != 1 ||
-      comm->bootstrap == nullptr || comm->directMode || comm->MNNVL ||
-      !ddaArchSupported) {
+    comm->archName != nullptr && (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950"));
+  if (comm->nRanks != kDdaNranks || comm->nNodes != 1 || comm->bootstrap == nullptr || comm->directMode ||
+      comm->MNNVL || !ddaArchSupported) {
     return ncclSuccess;
   }
 
@@ -64,11 +59,9 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   for (int i = 0; i < comm->nRanks; i++) {
     for (int j = i + 1; j < comm->nRanks; j++) {
       int canAccess = 0;
-      hipError_t err = hipDeviceCanAccessPeer(
-          &canAccess, comm->peerInfo[i].cudaDev, comm->peerInfo[j].cudaDev);
+      hipError_t err = hipDeviceCanAccessPeer(&canAccess, comm->peerInfo[i].cudaDev, comm->peerInfo[j].cudaDev);
       if (err != hipSuccess || !canAccess) {
-        INFO(NCCL_INIT,
-             "ncclDdaIpcCommInit: no P2P between GPU %d and GPU %d, skipping DDA IPC",
+        INFO(NCCL_INIT, "ncclDdaIpcCommInit: no P2P between GPU %d and GPU %d, skipping DDA IPC",
              comm->peerInfo[i].cudaDev, comm->peerInfo[j].cudaDev);
         return ncclSuccess;
       }
@@ -94,8 +87,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     HIP_CALL(hipMemset(scratch, 0, bytes));
   }
 
-  auto* handler = new (std::nothrow) ncclIpcMemHandler(
-      comm->bootstrap, comm->rank, comm->nRanks);
+  auto* handler = new (std::nothrow) ncclIpcMemHandler(comm->bootstrap, comm->rank, comm->nRanks);
   if (handler == nullptr) {
     CUDACHECKIGNORE(cudaFree(scratch));
     WARN("ncclDdaIpcCommInit: OOM allocating ncclIpcMemHandler");
@@ -122,9 +114,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   if (ce != cudaSuccess) {
     delete handler;
     CUDACHECKIGNORE(cudaFree(scratch));
-    WARN(
-        "ncclDdaIpcCommInit: cudaMalloc(peer table) failed (%s)",
-        cudaGetErrorString(ce));
+    WARN("ncclDdaIpcCommInit: cudaMalloc(peer table) failed (%s)", cudaGetErrorString(ce));
     return ncclSuccess;
   }
 
@@ -142,18 +132,12 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     h_ptrs[i] = p;
   }
 
-  ce = cudaMemcpy(
-      peerDev,
-      h_ptrs,
-      kDdaNranks * sizeof(void*),
-      cudaMemcpyHostToDevice);
+  ce = cudaMemcpy(peerDev, h_ptrs, kDdaNranks * sizeof(void*), cudaMemcpyHostToDevice);
   if (ce != cudaSuccess) {
     CUDACHECKIGNORE(cudaFree(peerDev));
     delete handler;
     CUDACHECKIGNORE(cudaFree(scratch));
-    WARN(
-        "ncclDdaIpcCommInit: cudaMemcpy(peer table) failed (%s)",
-        cudaGetErrorString(ce));
+    WARN("ncclDdaIpcCommInit: cudaMemcpy(peer table) failed (%s)", cudaGetErrorString(ce));
     return ncclSuccess;
   }
 
@@ -184,8 +168,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
 
 
   const int nBlocksMax = ddaMaxNBlocksForScratch();
-  auto barrierPair = meta::comms::IpcGpuBarrier::mallocAndInit(
-      kDdaNranks, nBlocksMax, comm->rank, comm->bootstrap);
+  auto barrierPair = meta::comms::IpcGpuBarrier::mallocAndInit(kDdaNranks, nBlocksMax, comm->rank, comm->bootstrap);
   if (!barrierPair.first) {
     free(comm->ddaPeerPtrsHost);
     comm->ddaPeerPtrsHost = nullptr;
@@ -215,11 +198,8 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   comm->ddaScratchBytes = bytes;
   comm->ddaPeerPtrsDev = peerDev;
   comm->ddaIpcBarrierState = barrierState;
-  INFO(
-      NCCL_INIT,
-      "ncclDdaIpcCommInit: scratch %zu bytes, IpcGpuBarrier nBlocks=%d, peer IPC table on device",
-      bytes,
-      nBlocksMax);
+  INFO(NCCL_INIT, "ncclDdaIpcCommInit: scratch %zu bytes, IpcGpuBarrier nBlocks=%d, peer IPC table on device", bytes,
+       nBlocksMax);
   return ncclSuccess;
 }
 

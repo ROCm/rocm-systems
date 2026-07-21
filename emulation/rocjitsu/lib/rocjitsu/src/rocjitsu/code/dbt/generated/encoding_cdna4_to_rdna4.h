@@ -13,6 +13,7 @@
 #include "encoding_fields.h"
 #include "rocjitsu/code/dbt/encoding_translator.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
 
 namespace rocjitsu {
@@ -265,98 +266,112 @@ inline Vop3SdstEncFields decode_vop3_sdst_enc_cdna4(uint32_t w0, uint32_t w1) {
 }
 
 inline TranslationResult encode_sop1_rdna4(const Sop1Fields &f, uint16_t dst_op) {
-  rocjitsu::rdna4::Sop1MachineInst dst{};
-  dst.encoding = 0x17D;
-  dst.op = dst_op;
+  rocjitsu::rdna4::Sop1BuilderFields dst{};
   dst.ssrc0 = f.ssrc0 & 0xFF;
   dst.sdst = f.sdst & 0x7F;
-  return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
+  const auto words = rocjitsu::rdna4::build_sop1(dst_op, dst);
+  TranslationResult r{};
+  r.word_count = uint8_t{1};
+  r.words[0] = words[0];
+  return r;
 }
 
 inline TranslationResult encode_sop2_rdna4(const Sop2Fields &f, uint16_t dst_op) {
-  rocjitsu::rdna4::Sop2MachineInst dst{};
-  dst.encoding = 0x2;
-  dst.op = dst_op;
+  rocjitsu::rdna4::Sop2BuilderFields dst{};
   dst.ssrc0 = f.ssrc0 & 0xFF;
   dst.ssrc1 = f.ssrc1 & 0xFF;
   dst.sdst = f.sdst & 0x7F;
-  return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
+  const auto words = rocjitsu::rdna4::build_sop2(dst_op, dst);
+  TranslationResult r{};
+  r.word_count = uint8_t{1};
+  r.words[0] = words[0];
+  return r;
 }
 
 inline TranslationResult encode_sopc_rdna4(const SopcFields &f, uint16_t dst_op) {
-  rocjitsu::rdna4::SopcMachineInst dst{};
-  dst.encoding = 0x17E;
-  dst.op = dst_op;
+  rocjitsu::rdna4::SopcBuilderFields dst{};
   dst.ssrc0 = f.ssrc0 & 0xFF;
   dst.ssrc1 = f.ssrc1 & 0xFF;
-  return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
+  const auto words = rocjitsu::rdna4::build_sopc(dst_op, dst);
+  TranslationResult r{};
+  r.word_count = uint8_t{1};
+  r.words[0] = words[0];
+  return r;
 }
 
 inline TranslationResult encode_sopk_rdna4(const SopkFields &f, uint16_t dst_op) {
-  rocjitsu::rdna4::SopkMachineInst dst{};
-  dst.encoding = 0xB;
-  dst.op = dst_op;
+  rocjitsu::rdna4::SopkBuilderFields dst{};
   dst.simm16 = f.simm16 & 0xFFFF;
   dst.sdst = f.sdst & 0x7F;
-  return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
+  const auto words = rocjitsu::rdna4::build_sopk(dst_op, dst);
+  TranslationResult r{};
+  r.word_count = uint8_t{1};
+  r.words[0] = words[0];
+  return r;
 }
 
 inline TranslationResult encode_sopp_rdna4(const SoppFields &f, uint16_t dst_op) {
-  rocjitsu::rdna4::SoppMachineInst dst{};
-  dst.encoding = 0x17F;
-  dst.op = dst_op;
+  rocjitsu::rdna4::SoppBuilderFields dst{};
   dst.simm16 = f.simm16 & 0xFFFF;
-  return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
+  const auto words = rocjitsu::rdna4::build_sopp(dst_op, dst);
+  TranslationResult r{};
+  r.word_count = uint8_t{1};
+  r.words[0] = words[0];
+  return r;
 }
 
 inline TranslationResult encode_vop1_rdna4(const Vop1Fields &f, uint16_t dst_op) {
-  rocjitsu::rdna4::Vop1MachineInst dst{};
-  dst.encoding = 0x3F;
-  dst.op = dst_op;
+  rocjitsu::rdna4::Vop1BuilderFields dst{};
   dst.src0 = f.src0 & 0x1FF;
   dst.vdst = f.vdst & 0xFF;
-  return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
+  const auto words = rocjitsu::rdna4::build_vop1(dst_op, dst);
+  TranslationResult r{};
+  r.word_count = uint8_t{1};
+  r.words[0] = words[0];
+  return r;
 }
 
 inline TranslationResult encode_vop2_rdna4(const Vop2Fields &f, uint16_t dst_op) {
-  rocjitsu::rdna4::Vop2MachineInst dst{};
-  dst.encoding = 0x0;
-  dst.op = dst_op;
+  rocjitsu::rdna4::Vop2BuilderFields dst{};
   dst.src0 = f.src0 & 0x1FF;
   dst.vsrc1 = f.vsrc1 & 0xFF;
   dst.vdst = f.vdst & 0xFF;
-  return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
+  const auto words = rocjitsu::rdna4::build_vop2(dst_op, dst);
+  TranslationResult r{};
+  r.word_count = uint8_t{1};
+  r.words[0] = words[0];
+  return r;
 }
 
 inline TranslationResult encode_vopc_rdna4(const VopcFields &f, uint16_t dst_op) {
-  rocjitsu::rdna4::VopcMachineInst dst{};
-  dst.encoding = 0x3E;
-  dst.op = dst_op;
+  rocjitsu::rdna4::VopcBuilderFields dst{};
   dst.src0 = f.src0 & 0x1FF;
   dst.vsrc1 = f.vsrc1 & 0xFF;
-  return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
+  const auto words = rocjitsu::rdna4::build_vopc(dst_op, dst);
+  TranslationResult r{};
+  r.word_count = uint8_t{1};
+  r.words[0] = words[0];
+  return r;
 }
 
 inline TranslationResult encode_ds_rdna4(const DsFields &f, uint16_t dst_op) {
-  rocjitsu::rdna4::VdsMachineInst dst{};
-  dst.encoding = 0x36;
-  dst.op = dst_op;
+  rocjitsu::rdna4::VdsBuilderFields dst{};
   dst.offset0 = f.offset0 & 0xFF;
   dst.offset1 = f.offset1 & 0xFF;
   dst.addr = f.vaddr & 0xFF;
   dst.data0 = f.data0 & 0xFF;
   dst.data1 = f.data1 & 0xFF;
   dst.vdst = f.vdst & 0xFF;
+  const auto words = rocjitsu::rdna4::build_vds(dst_op, dst);
   TranslationResult r{};
   r.word_count = uint8_t{2};
-  std::memcpy(r.words, &dst, sizeof(dst));
+  r.words[0] = words[0];
+  r.words[1] = words[1];
   return r;
 }
 
 inline TranslationResult encode_flat_rdna4(const FlatFields &f, uint16_t dst_op) {
-  rocjitsu::rdna4::VflatMachineInst dst{};
-  dst.encoding = 0xEC;
-  dst.op = dst_op;
+  rocjitsu::rdna4::VflatBuilderFields dst{};
   auto coh = remap_gfx940_to_gfx12({uint8_t(f.sc0), uint8_t(f.sc1), uint8_t(f.nt)});
   dst.scope = coh.scope;
   dst.th = coh.th;
@@ -369,16 +384,17 @@ inline TranslationResult encode_flat_rdna4(const FlatFields &f, uint16_t dst_op)
   dst.sve = 0;
   if (dst.saddr == 0x7F)
     dst.saddr = 0x7C;
+  const auto words = rocjitsu::rdna4::build_vflat(dst_op, dst);
   TranslationResult r{};
   r.word_count = uint8_t{3};
-  std::memcpy(r.words, &dst, sizeof(dst));
+  r.words[0] = words[0];
+  r.words[1] = words[1];
+  r.words[2] = words[2];
   return r;
 }
 
 inline TranslationResult encode_flat_glbl_rdna4(const FlatGlblFields &f, uint16_t dst_op) {
-  rocjitsu::rdna4::VglobalMachineInst dst{};
-  dst.encoding = 0xEE;
-  dst.op = dst_op;
+  rocjitsu::rdna4::VglobalBuilderFields dst{};
   auto coh = remap_gfx940_to_gfx12({uint8_t(f.sc0), uint8_t(f.sc1), uint8_t(f.nt)});
   dst.scope = coh.scope;
   dst.th = coh.th;
@@ -391,16 +407,17 @@ inline TranslationResult encode_flat_glbl_rdna4(const FlatGlblFields &f, uint16_
   dst.nv = 0;
   if (dst.saddr == 0x7F)
     dst.saddr = 0x7C;
+  const auto words = rocjitsu::rdna4::build_vglobal(dst_op, dst);
   TranslationResult r{};
   r.word_count = uint8_t{3};
-  std::memcpy(r.words, &dst, sizeof(dst));
+  r.words[0] = words[0];
+  r.words[1] = words[1];
+  r.words[2] = words[2];
   return r;
 }
 
 inline TranslationResult encode_flat_scratch_rdna4(const FlatScratchFields &f, uint16_t dst_op) {
-  rocjitsu::rdna4::VscratchMachineInst dst{};
-  dst.encoding = 0xED;
-  dst.op = dst_op;
+  rocjitsu::rdna4::VscratchBuilderFields dst{};
   auto coh = remap_gfx940_to_gfx12({uint8_t(f.sc0), uint8_t(f.sc1), uint8_t(f.nt)});
   dst.scope = coh.scope;
   dst.th = coh.th;
@@ -413,16 +430,17 @@ inline TranslationResult encode_flat_scratch_rdna4(const FlatScratchFields &f, u
   dst.nv = 0;
   if (dst.saddr == 0x7F)
     dst.saddr = 0x7C;
+  const auto words = rocjitsu::rdna4::build_vscratch(dst_op, dst);
   TranslationResult r{};
   r.word_count = uint8_t{3};
-  std::memcpy(r.words, &dst, sizeof(dst));
+  r.words[0] = words[0];
+  r.words[1] = words[1];
+  r.words[2] = words[2];
   return r;
 }
 
 inline TranslationResult encode_mubuf_rdna4(const MubufFields &f, uint16_t dst_op) {
-  rocjitsu::rdna4::VbufferMachineInst dst{};
-  dst.encoding = 0x31;
-  dst.op = dst_op;
+  rocjitsu::rdna4::VbufferBuilderFields dst{};
   auto coh = remap_gfx940_to_gfx12({uint8_t(f.sc0), uint8_t(f.sc1), uint8_t(f.nt)});
   dst.scope = coh.scope;
   dst.th = coh.th;
@@ -438,16 +456,17 @@ inline TranslationResult encode_mubuf_rdna4(const MubufFields &f, uint16_t dst_o
   dst.format = 0;
   if (dst.soffset == 0x7F)
     dst.soffset = 0x7C;
+  const auto words = rocjitsu::rdna4::build_vbuffer(dst_op, dst);
   TranslationResult r{};
   r.word_count = uint8_t{3};
-  std::memcpy(r.words, &dst, sizeof(dst));
+  r.words[0] = words[0];
+  r.words[1] = words[1];
+  r.words[2] = words[2];
   return r;
 }
 
 inline TranslationResult encode_smem_rdna4(const SmemFields &f, uint16_t dst_op) {
-  rocjitsu::rdna4::SmemMachineInst dst{};
-  dst.encoding = 0x3D;
-  dst.op = dst_op;
+  rocjitsu::rdna4::SmemBuilderFields dst{};
   auto coh = remap_gfx9_to_gfx12({uint8_t(f.glc)});
   dst.scope = coh.scope;
   dst.th = coh.th;
@@ -460,16 +479,16 @@ inline TranslationResult encode_smem_rdna4(const SmemFields &f, uint16_t dst_op)
     dst.soffset = 0x7C;
   if (f.soffset_en == 0)
     dst.soffset = 0x7C;
+  const auto words = rocjitsu::rdna4::build_smem(dst_op, dst);
   TranslationResult r{};
   r.word_count = uint8_t{2};
-  std::memcpy(r.words, &dst, sizeof(dst));
+  r.words[0] = words[0];
+  r.words[1] = words[1];
   return r;
 }
 
 inline TranslationResult encode_vop3_rdna4(const Vop3Fields &f, uint16_t dst_op) {
-  rocjitsu::rdna4::Vop3MachineInst dst{};
-  dst.encoding = 0x35;
-  dst.op = dst_op;
+  rocjitsu::rdna4::Vop3BuilderFields dst{};
   dst.vdst = f.vdst & 0xFF;
   dst.abs = f.abs & 0x7;
   dst.opsel = f.opsel & 0xF;
@@ -479,16 +498,16 @@ inline TranslationResult encode_vop3_rdna4(const Vop3Fields &f, uint16_t dst_op)
   dst.src2 = f.src2 & 0x1FF;
   dst.omod = f.omod & 0x3;
   dst.neg = f.neg & 0x7;
+  const auto words = rocjitsu::rdna4::build_vop3(dst_op, dst);
   TranslationResult r{};
   r.word_count = uint8_t{2};
-  std::memcpy(r.words, &dst, sizeof(dst));
+  r.words[0] = words[0];
+  r.words[1] = words[1];
   return r;
 }
 
 inline TranslationResult encode_vop3p_rdna4(const Vop3pFields &f, uint16_t dst_op) {
-  rocjitsu::rdna4::Vop3pMachineInst dst{};
-  dst.encoding = 0xCC;
-  dst.op = dst_op;
+  rocjitsu::rdna4::Vop3pBuilderFields dst{};
   dst.vdst = f.vdst & 0xFF;
   dst.neg_hi = f.neg_hi & 0x7;
   dst.opsel = f.opsel & 0x7;
@@ -499,16 +518,16 @@ inline TranslationResult encode_vop3p_rdna4(const Vop3pFields &f, uint16_t dst_o
   dst.src2 = f.src2 & 0x1FF;
   dst.opsel_hi = f.opsel_hi & 0x3;
   dst.neg = f.neg & 0x7;
+  const auto words = rocjitsu::rdna4::build_vop3p(dst_op, dst);
   TranslationResult r{};
   r.word_count = uint8_t{2};
-  std::memcpy(r.words, &dst, sizeof(dst));
+  r.words[0] = words[0];
+  r.words[1] = words[1];
   return r;
 }
 
 inline TranslationResult encode_vop3_sdst_enc_rdna4(const Vop3SdstEncFields &f, uint16_t dst_op) {
-  rocjitsu::rdna4::Vop3SdstEncMachineInst dst{};
-  dst.encoding = 0x35;
-  dst.op = dst_op;
+  rocjitsu::rdna4::Vop3SdstEncBuilderFields dst{};
   dst.vdst = f.vdst & 0xFF;
   dst.sdst = f.sdst & 0x7F;
   dst.clamp = f.clamp & 0x1;
@@ -517,9 +536,11 @@ inline TranslationResult encode_vop3_sdst_enc_rdna4(const Vop3SdstEncFields &f, 
   dst.src2 = f.src2 & 0x1FF;
   dst.omod = f.omod & 0x3;
   dst.neg = f.neg & 0x7;
+  const auto words = rocjitsu::rdna4::build_vop3_sdst_enc(dst_op, dst);
   TranslationResult r{};
   r.word_count = uint8_t{2};
-  std::memcpy(r.words, &dst, sizeof(dst));
+  r.words[0] = words[0];
+  r.words[1] = words[1];
   return r;
 }
 
