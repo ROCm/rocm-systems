@@ -52,8 +52,43 @@ static int getThreadId()
   } while (false)
 #define CHILD_NCCL_CALL_NON_BLOCKING(msg, localRank) CHILD_NCCL_CALL_NON_BLOCKING_BASE(msg, localRank, RETURN_RESULT)
 
+/**
+ * @brief Reads exactly 'count' bytes from a file descriptor, handling partial 
+ * reads and signal interruptions (EINTR).
+ * @return 'count' on success, or -1 on failure.
+ */
+inline ssize_t safe_pipe_read(int fd, void* buf, size_t count) {
+    char* ptr = static_cast<char*>(buf);
+    size_t bytesLeft = count;
+
+    while (bytesLeft > 0) {
+        ssize_t bytesRead = read(fd, ptr, bytesLeft);
+        
+        if (bytesRead < 0) {
+            // If interrupted by an OS signal, just try reading again
+            if (errno == EINTR) {
+                continue; 
+            }
+            return -1; // A real error occurred (like EFAULT or EBADF)
+        }
+        
+        if (bytesRead == 0) {
+            // End of File (EOF): Parent closed the write end prematurely
+            return -1; 
+        }
+
+        ptr += bytesRead;
+        bytesLeft -= bytesRead;
+    }
+    return count; // Successfully read all bytes
+}
+
+// #define PIPE_READ(val) \
+//   if (read(childReadFd, &val, sizeof(val)) != sizeof(val)) return TEST_FAIL;
+
+#undef PIPE_READ // Just in case it's defined elsewhere
 #define PIPE_READ(val) \
-  if (read(childReadFd, &val, sizeof(val)) != sizeof(val)) return TEST_FAIL;
+    if (safe_pipe_read(childReadFd, &val, sizeof(val)) != sizeof(val)) return TEST_FAIL;
 
 #ifdef ENABLE_OPENMP
 #define CHILD_NCCL_CALL_RANK(errCode, cmd, msg) CHILD_NCCL_CALL_BASE(cmd, msg, OMP_CANCEL_FOR, errCode)
@@ -239,9 +274,10 @@ namespace RcclUnitTesting
 
         for (int i = 0; i < this->numStreamsPerGroup[groupCallIdx]; i++)
         {
-          if (hipStreamCreate(&(this->streams[groupCallIdx][localRank][i])) != hipSuccess)
+          hipError_t err = hipStreamCreate(&(this->streams[groupCallIdx][localRank][i]));
+          if (err != hipSuccess)
           {
-            TEST_ERROR("Rank %d on child %d unable to create stream %d for GPU %d in group %d", globalRank, this->childId, i, currGpu, groupCallIdx);
+            TEST_ERROR("Rank %d on child %d unable to create stream %d for GPU %d in group %d HIP Error: %s (%d)", globalRank, this->childId, i, currGpu, groupCallIdx,hipGetErrorString(err), err);
             status = TEST_FAIL;
             break;
           }
@@ -942,45 +978,60 @@ namespace RcclUnitTesting
   }
 
   ErrCode TestBedChild::DestroyComms()
+{
+  if (this->verbose) TEST_INFO("Child %d begins DestroyComms", this->childId);
+
+  // 1. Release NCCL communicators
+  for (int i = 0; i < this->comms.size(); ++i)
   {
-    if (this->verbose) TEST_INFO("Child %d begins DestroyComms", this->childId);
+    if (this->comms[i] == nullptr) continue;
 
-    // Release comms
-    for (int i = 0; i < this->comms.size(); ++i)
+    if (this->useBlocking == false)
     {
-      // Check if the communicator is non-blocking
-      if (this->useBlocking == false)
-      {
-        // handle the non-blocking case
-        ncclCommFinalize(this->comms[i]);
-        CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorCommFinalize", i);
-      }
-      else
-      {
-        // In case of blocking just call Finalize
-        CHILD_NCCL_CALL(ncclCommFinalize(this->comms[i]), "ncclCommFinalize");
-      }
+      ncclCommFinalize(this->comms[i]);
+      CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorCommFinalize", i);
     }
+    else
+    {
+      CHILD_NCCL_CALL(ncclCommFinalize(this->comms[i]), "ncclCommFinalize");
+    }
+  }
 
-    for (int i = 0; i < this->comms.size(); ++i)
+  for (int i = 0; i < this->comms.size(); ++i)
+  {
+    if (this->comms[i] != nullptr)
     {
       CHILD_NCCL_CALL(ncclCommDestroy(this->comms[i]), "ncclCommDestroy");
+      this->comms[i] = nullptr;
     }
-    for (int i = 0; i < this->numGroupCalls; ++i)
+  }
+
+  // 2. Safely release HIP streams with correct device context
+  for (int i = 0; i < this->numGroupCalls; ++i)
+  {
+    for (int j = 0; j < this->streams[i].size(); ++j)
     {
-      for (int j = 0; j < this->streams[i].size(); ++j)
+      // Switch active GPU context to the device that owns this stream group
+      CHECK_HIP(hipSetDevice(this->deviceIds[j]));
+
+      for (int k = 0; k < this->streams[i][j].size(); ++k)
       {
-        for (int k = 0; k < this->streams[i][j].size(); ++k)
+        // Avoid destroying null handles or the default stream (0)
+        if (this->streams[i][j][k] != nullptr)
         {
           CHECK_HIP(hipStreamDestroy(this->streams[i][j][k]));
+          this->streams[i][j][k] = nullptr; // Avoid double-destruction
         }
       }
     }
-    this->comms.clear();
-    this->streams.clear();
-    if (this->verbose) TEST_INFO("Child %d finishes DestroyComms", this->childId);
-    return TEST_SUCCESS;
   }
+
+  this->comms.clear();
+  this->streams.clear();
+  
+  if (this->verbose) TEST_INFO("Child %d finishes DestroyComms", this->childId);
+  return TEST_SUCCESS;
+}
 
   ErrCode TestBedChild::DestroyGraphs()
   {

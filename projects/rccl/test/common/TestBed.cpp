@@ -829,6 +829,14 @@ namespace RcclUnitTesting
               isCorrect = false;
               continue;
             }
+            // ====================================================================
+            // DEBUG: Force GPU execution to complete & flush stdout print buffers
+            // ====================================================================
+            if (!isMultiProcess) {
+              hipDeviceSynchronize(); 
+              fflush(stdout);
+            }
+            
             this->ValidateResults(isCorrect);
             if (!isCorrect)
             {

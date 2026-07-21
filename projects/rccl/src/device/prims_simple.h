@@ -16,11 +16,67 @@ enum primsMode {
   primsModePatAg = 2
 };
 
+<<<<<<< HEAD
 template <typename T, typename RedOp, typename Fan, int Direct, int SlicePerChunk, int StepPerSlice, int Unroll,
           int P2p, int MultimemSrcs, int MultimemDsts, bool isNetOffload, int Metadata, int Pipeline, int useAcc>
 class Primitives<T, RedOp, Fan, Direct,
                  ProtoSimple<SlicePerChunk, StepPerSlice, useAcc, Unroll, MultimemSrcs, MultimemDsts>, P2p,
                  isNetOffload, Metadata, Pipeline, useAcc> {
+=======
+__device__ inline void invalidate_vector_l1() {
+#if defined(__gfx942__) || defined(__gfx950__)
+    // CDNA 3 / MI300 path
+    asm volatile("buffer_inv sc0 sc1");
+#elif defined(__gfx90a__)
+    // CDNA 2 / MI200 path
+    asm volatile("buffer_wbinvl1");
+#else
+    // Fallback or other architectures
+    __threadfence_system(); 
+#endif
+}
+
+__device__ __forceinline__ void crossGpuMonotonicBarrier(uint64_t* barrierAddr, int nRanks) {
+  
+  // 1. Block barrier to guarantee execution alignment.
+  // This ensures all threads in the block have finished their writes 
+  // and those writes are visible to Thread 0.
+  __syncthreads(); 
+
+  // 2. OUTSIDE THE IF: Every wavefront waits for its own 
+  // outstanding memory pipelines to completely drain to the local L2.
+  asm volatile("s_waitcnt vmcnt(0) & lgkmcnt(0)");
+
+  // 3. INSIDE THE IF: Elect Thread 0 to coordinate the inter-GPU fabric sync
+  if (threadIdx.x == 0) {
+    
+    // Thread 0 flushes the block's visible writes to system-scope (remote GPUs)
+    __threadfence_system();
+
+    // Issue a system-scoped atomic addition across the physical fabric.
+    uint64_t myTicket = atomicAdd((unsigned long long*)barrierAddr, 1ULL);
+
+    // Compute target generation 
+    uint64_t target = ((myTicket / nRanks) + 1) * nRanks;
+
+    // Spin-wait on the single address until all remote peers have registered.
+    volatile uint64_t* pool = (volatile uint64_t*)barrierAddr;
+    while (*pool < target) {
+      asm volatile("s_sleep 2"); // Back off scalar scheduler
+    }
+  }
+
+  // 4. Block barrier to ensure all threads wait for Thread 0 
+  // to confirm the remote GPU has checked in before proceeding.
+  __syncthreads(); 
+}
+
+template<typename T, typename RedOp, typename Fan, int Direct,
+         int SlicePerChunk, int StepPerSlice, int Unroll, int P2p, int MultimemSrcs, int MultimemDsts, bool isNetOffload, int Metadata, int Pipeline, int useAcc>
+class Primitives<
+    T, RedOp, Fan, Direct, ProtoSimple<SlicePerChunk, StepPerSlice, useAcc, Unroll, MultimemSrcs, MultimemDsts>, P2p, isNetOffload, Metadata, Pipeline, useAcc
+  > {
+>>>>>>> be758f4726 (temp commit)
   static constexpr int MaxRecv = Fan::MaxRecv, MaxSend = Fan::MaxSend;
   static constexpr int Input = 0, Output = 1;
   static constexpr int RoleInput = 0x01, RoleOutput = 0x02, RoleWaitRecv = 0x04, RoleWaitSend = 0x08,
@@ -257,6 +313,26 @@ class Primitives<T, RedOp, Fan, Direct,
         }
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(srcIx, dstIx, offset, sliceSize);
         subBarrier();
+
+        if(ncclShmem.comm.p2pSingleProcMemRegActive) {
+            // Fetch our unique global pointer array passed from the host,
+            // offset by the current execution channel group
+            // Only block 0, thread 0 of Wavefront 0 prints
+            // ====================================================================
+            // INTEGRATION FIX: LOCK RANKS AT THE SLICE START
+            // ====================================================================
+            // if(blockIdx.x == 0 && threadIdx.x == 0) {
+            //     printf("[GPU DEBUG] Rank %d successfully reached the L1 invalidation block! ncclShmem.comm.p2pSingleProcMemRegActive = %d \n",
+            //            ncclShmem.comm.rank,ncclShmem.comm.p2pSingleProcMemRegActive);}
+            // uint64_t* globalBarrierSlot = ncclShmem.comm.crossGpuBarrierPool + group;
+            // crossGpuMonotonicBarrier(globalBarrierSlot, ncclShmem.comm.nRanks);
+            // subBarrier();
+            __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "");
+            // asm volatile("s_waitcnt vmcnt(0)");
+            // invalidate_vector_l1(); // Purge local L1 cache lines
+            // asm volatile("" ::: "memory"); // Compiler fence
+        }
+
         /* if user abort the kernel, we don't need to actually perform copy/reduce; just set size
          * to 0 to avoid unnecessary workload. */
         int workSize = ncclShmem.aborted ? 0 : sliceSize;
@@ -310,7 +386,7 @@ class Primitives<T, RedOp, Fan, Direct,
           workSize = 0;
         }
         barrier(); // This barrier has a counterpart in following loop
-        postPeer<Recv, Send>(0 < workSize);
+        postPeer<Recv, Send>(0 < workSize); 
         offset += sliceSize;
         slice += 1;
         // Yes, for some template arguments this code will be unreachable.  That's fine.

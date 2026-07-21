@@ -611,8 +611,17 @@ struct ncclKernelComm {
   int* rankToLocalRank;
 
   // Profiler counters
+<<<<<<< HEAD
   struct ncclDevProfiler* workStarted /*[MAXCHANNELS]*/;
   struct ncclDevProfiler* workCompleted /*[MAXCHANNELS]*/;
+=======
+  struct ncclDevProfiler* workStarted/*[MAXCHANNELS]*/;
+  struct ncclDevProfiler* workCompleted/*[MAXCHANNELS]*/;
+ 
+  // For SingleProcMemReg with symmetric memory
+  bool p2pSingleProcMemRegActive;
+  uint64_t* crossGpuBarrierPool;
+>>>>>>> be758f4726 (temp commit)
 
 #ifdef ENABLE_FAULT_INJECTION
   uint64_t faults;
