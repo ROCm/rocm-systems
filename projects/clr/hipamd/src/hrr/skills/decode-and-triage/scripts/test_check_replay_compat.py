@@ -288,6 +288,26 @@ class CheckReplayCompatTests(unittest.TestCase):
             )
             self.assertIsNone(crc.load_capture_metadata(arch))
 
+    def test_render_report_includes_capture_gcn_arch(self) -> None:
+        capture = crc.CaptureMetadata(
+            schema_version=1,
+            hip_runtime_version="7.15.26291",
+            comgr_version="3.0",
+            device_count=1,
+            devices=[SAMPLE_METADATA["devices"][0]],
+        )
+        report = crc.CompatReport(
+            capture=capture,
+            replay=crc.ReplayEnvironment(
+                visible_gpus=1,
+                gpu_archs=["gfx942"],
+                hip_runtime_version="7.15.26291",
+                comgr_version="3.0",
+            ),
+        )
+        text = crc.render_report(report)
+        self.assertIn("gcn_arch_name: gfx942:sramecc+:xnack-", text)
+
 
 if __name__ == "__main__":
     unittest.main()

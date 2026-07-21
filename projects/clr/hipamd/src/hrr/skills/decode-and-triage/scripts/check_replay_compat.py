@@ -113,6 +113,19 @@ def _normalize_arch(name: str | None) -> str | None:
     return base or None
 
 
+def capture_device_arch_names(capture: CaptureMetadata) -> list[str]:
+    names: list[str] = []
+    for dev in capture.devices:
+        props = dev.get("properties")
+        if isinstance(props, dict):
+            arch = props.get("gcn_arch_name")
+        else:
+            arch = dev.get("gcn_arch_name")
+        if arch:
+            names.append(str(arch))
+    return names
+
+
 def _run(cmd: list[str], timeout: int = 30) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         cmd,
@@ -499,6 +512,7 @@ def render_report(report: CompatReport) -> str:
     lines = ["# HRR replay compatibility"]
     if report.capture:
         c = report.capture
+        arch_names = capture_device_arch_names(c)
         lines.extend(
             [
                 "",
@@ -509,8 +523,11 @@ def render_report(report: CompatReport) -> str:
                 f"- device_count: {c.device_count if c.device_count is not None else 'n/a'}",
                 f"- captured_device_count: "
                 f"{c.captured_device_count if c.captured_device_count is not None else 'n/a'}",
+                f"- gcn_arch_name: {arch_names[0] if arch_names else 'n/a'}",
             ]
         )
+        if len(arch_names) > 1:
+            lines.append(f"- gcn_arch_names: {', '.join(arch_names)}")
     if report.replay:
         r = report.replay
         lines.extend(
