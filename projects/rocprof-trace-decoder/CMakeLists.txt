@@ -73,9 +73,15 @@ add_subdirectory(source)
 if(BUILD_PYTHON)
     set(Python3_FIND_UNVERSIONED_NAMES LAST)
     if(BUILD_PYTHON STREQUAL "AUTO")
-        find_package(Python3 3.8 COMPONENTS Interpreter QUIET)
+        find_package(
+            Python3 3.8
+            COMPONENTS Interpreter
+            QUIET)
     else()
-        find_package(Python3 3.8 COMPONENTS Interpreter REQUIRED)
+        find_package(
+            Python3 3.8
+            COMPONENTS Interpreter
+            REQUIRED)
     endif()
 
     if(Python3_FOUND)
@@ -104,7 +110,10 @@ include(packaging)
 # Format target: runs clang-format, cmake-format, and autopep8.
 find_program(CLANG_FORMAT NAMES clang-format-14)
 find_program(CMAKE_FORMAT cmake-format)
-find_program(AUTOPEP8 NAMES autopep8 DOC "Path to autopep8 Python formatter")
+find_program(
+    AUTOPEP8
+    NAMES autopep8
+    DOC "Path to autopep8 Python formatter")
 
 set(FORMAT_COMMANDS)
 
@@ -139,16 +148,20 @@ if(CMAKE_FORMAT)
 endif()
 
 if(AUTOPEP8)
-    file(
-        GLOB_RECURSE
-        ALL_PYTHON_SOURCES
-        CONFIGURE_DEPENDS
-        ${CMAKE_SOURCE_DIR}/python/*.py
-        ${CMAKE_SOURCE_DIR}/samples/*.py
-        ${CMAKE_SOURCE_DIR}/test/*.py)
+    file(GLOB_RECURSE ALL_PYTHON_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/python/*.py
+         ${CMAKE_SOURCE_DIR}/samples/*.py ${CMAKE_SOURCE_DIR}/test/*.py)
     list(FILTER ALL_PYTHON_SOURCES EXCLUDE REGEX ".*/build.*/.*")
-    list(APPEND FORMAT_COMMANDS COMMAND ${AUTOPEP8} --in-place --max-line-length 100 --ignore E402
-                                ${ALL_PYTHON_SOURCES})
+    list(
+        APPEND
+        FORMAT_COMMANDS
+        COMMAND
+        ${AUTOPEP8}
+        --in-place
+        --max-line-length
+        100
+        --ignore
+        E402
+        ${ALL_PYTHON_SOURCES})
 endif()
 
 if(FORMAT_COMMANDS)
@@ -190,11 +203,8 @@ if(BUILD_TESTS
 
     set(TTD_COVERAGE_SOURCES "${CMAKE_SOURCE_DIR}/source/*")
     if(BUILD_MARKERS)
-        list(
-            APPEND
-            TTD_COVERAGE_SOURCES
-            "${CMAKE_SOURCE_DIR}/markers/*"
-            "${CMAKE_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/markers.hpp")
+        list(APPEND TTD_COVERAGE_SOURCES "${CMAKE_SOURCE_DIR}/markers/*"
+             "${CMAKE_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/markers.hpp")
     endif()
 
     add_custom_target(
