@@ -1009,6 +1009,50 @@ TEST(ClusterDispatchTest, ReclaimsLdsBetweenClusterWaves) {
   EXPECT_FALSE(f.cu(1)->has_active_wfs());
 }
 
+TEST(ClusterDispatchTest, Rdna4ExtendedDispatchKeepsOrdinaryTtmpWorkgroupIds) {
+  VmFixture f("rdna4", 1, 8, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  auto *snap = f.capture_halts();
+
+  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/128);
+
+  amdgpu::AmdExtKernelDispatchPacket ext{};
+  ext.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+  ext.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+  ext.setup = 3;
+  ext.workgroup_size_x = 32;
+  ext.workgroup_size_y = 1;
+  ext.workgroup_size_z = 1;
+  ext.cluster_count_x = 1;
+  ext.cluster_count_y = 1;
+  ext.cluster_count_z = 1;
+  ext.cluster_size_x = 2;
+  ext.cluster_size_y = 2;
+  ext.cluster_size_z = 2;
+  ext.kernel_object = ko;
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(ext);
+  step_until_halted(*f.engine, {f.cu()});
+
+  ASSERT_EQ(snap->snapshots().size(), 8u);
+  std::array<bool, 8> seen{};
+  for (const auto &wf : snap->snapshots()) {
+    const uint32_t workgroup_id = wf.wg_id;
+    ASSERT_LT(workgroup_id, seen.size());
+    seen[workgroup_id] = true;
+
+    const uint32_t workgroup_x = workgroup_id % 2;
+    const uint32_t workgroup_y = (workgroup_id / 2) % 2;
+    const uint32_t workgroup_z = workgroup_id / 4;
+    EXPECT_EQ(wf.sgpr(114), 0u);
+    EXPECT_EQ(wf.sgpr(115), (workgroup_z << 16) | workgroup_y);
+    EXPECT_EQ(wf.sgpr(117), workgroup_x);
+  }
+  for (bool was_seen : seen)
+    EXPECT_TRUE(was_seen);
+}
+
 TEST(ClusterDispatchTest, RejectsExtKernelDispatchWithZeroClusterShape) {
   VmFixture f("cdna3", 1, 8);
 
