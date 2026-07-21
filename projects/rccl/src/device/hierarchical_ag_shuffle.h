@@ -3,19 +3,18 @@
 
 #include <hip/hip_runtime.h>
 
-/* 
-* Shuffle kernel for hierarchical allgather.
-* After inter-node AG and intra-node AG, the data in the temp buffer:
-*   src: [LR0:{N0,N1, ..., Nn}, LR1:{N0,N1, ..., Nn}, ..., LRk:{N0,N1, ..., Nn}]
-* this kernel shuffles the data to the following layout:
-*   dst: [N0:{LR0, LR1, ..., LRk}, N1:{LR0, LR1, ..., LRk}, ..., Nn:{LR0, LR1, ..., LRk}]
-*
-* Uses int4 vectorized copies
-* Work is distributed across blocks via block-strided loop.
-*/
-static __global__ __launch_bounds__(1024)
-void hierarchicalAGShuffle(const char* __restrict__ src, char* __restrict__ dst,
-    size_t rankOffset, int nNodes, int localRanks) {
+/*
+ * Shuffle kernel for hierarchical allgather.
+ * After inter-node AG and intra-node AG, the data in the temp buffer:
+ *   src: [LR0:{N0,N1, ..., Nn}, LR1:{N0,N1, ..., Nn}, ..., LRk:{N0,N1, ..., Nn}]
+ * this kernel shuffles the data to the following layout:
+ *   dst: [N0:{LR0, LR1, ..., LRk}, N1:{LR0, LR1, ..., LRk}, ..., Nn:{LR0, LR1, ..., LRk}]
+ *
+ * Uses int4 vectorized copies
+ * Work is distributed across blocks via block-strided loop.
+ */
+static __global__ __launch_bounds__(1024) void hierarchicalAGShuffle(
+  const char* __restrict__ src, char* __restrict__ dst, size_t rankOffset, int nNodes, int localRanks) {
   int totalPairs = nNodes * localRanks;
   size_t numInt4 = rankOffset / sizeof(int4);
 

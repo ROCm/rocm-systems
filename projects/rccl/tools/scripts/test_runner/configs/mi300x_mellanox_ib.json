@@ -469,6 +469,11 @@
           "test_filter": "PackRoundtripTest.LoadStorePack_*:PackRoundtripTest.L2_StorePackBoundary:PackRoundtripTest.Store16Load16Global_Direct"
         },
         {
+          "name": "DeviceApi",
+          "description": "Verify RCCL Device API: symmetric window registration and ncclDevCommCreate gating",
+          "test_filter": "DeviceApi.*"
+        },
+        {
           "name": "Fixtures_All",
           "description": "All release fixture tests"
         }
@@ -491,6 +496,11 @@
           "name": "ParamTests",
           "description": "Parameter handling tests",
           "test_filter": "ParamTests.*"
+        },
+        {
+          "name": "ParameterApiTests",
+          "description": "Public ncclParam C API tests",
+          "test_filter": "ParameterApiTests.*"
         },
         {
           "name": "ArgCheck",
@@ -583,6 +593,7 @@
       "tests": [
         {"name": "HostApi_WindowRegisterDeregister", "description": "Host API: window register/deregister", "test_filter": "HostApiTest.WindowRegisterDeregister"},
         {"name": "HostApi_SinglePutRank0ToRank1", "description": "Host API: single put rank0 to rank1", "test_filter": "HostApiTest.SinglePutRank0ToRank1"},
+        {"name": "HostApi_PutSignalEnqueueIsAsync", "description": "Host API: putSignal enqueue is async", "test_filter": "HostApiTest.PutSignalEnqueueIsAsync"},
         {"name": "HostApi_PutWithNonZeroOffset", "description": "Host API: put with non-zero offset", "test_filter": "HostApiTest.PutWithNonZeroOffset"},
         {"name": "HostApi_PutMultipleDataTypes", "description": "Host API: put multiple data types", "test_filter": "HostApiTest.PutMultipleDataTypes"},
         {"name": "HostApi_SignalOnlyNoData", "description": "Host API: signal only, no data", "test_filter": "HostApiTest.SignalOnlyNoData"},

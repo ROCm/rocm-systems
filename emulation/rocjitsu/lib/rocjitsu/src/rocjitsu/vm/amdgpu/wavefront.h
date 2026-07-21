@@ -9,6 +9,7 @@
 
 #include "rocjitsu/base/api.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "rocjitsu/vm/amdgpu/instruction_compute_unit_view.h"
 #include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 #include "rocjitsu/vm/plugins/wavefront_state.h"
@@ -46,7 +47,8 @@ struct RegAllocation {
 ///
 /// @details The wavefront does not own its register storage, the parent
 /// ComputeUnitCore holds the physical SGPR and VGPR files. Callers access
-/// registers via `wf.cu().read_sgpr(wf.sgpr_alloc().base + idx)` etc.
+/// registers through Operand or RegisterAccess in instruction code and through the owning CU in VM
+/// code.
 ///
 /// Each wavefront is permanently bound to a ComputeUnitCore and a slot index
 /// (wf_id) at construction time. These persist across reset()/dispatch
@@ -199,12 +201,12 @@ public:
   /// @returns Const reference to the VGPR allocation slice.
   const RegAllocation &vgpr_alloc() const { return vgpr_alloc_; }
 
-  /// @brief Return the parent compute unit.
-  /// @returns Reference to the owning ComputeUnitCore.
-  ComputeUnitCore &cu() { return cu_; }
+  /// @brief Return the instruction-facing compute-unit service view.
+  /// @returns Narrow view over the owning compute unit.
+  InstructionComputeUnitView &cu() { return cu_view_; }
 
-  /// @returns Const reference to the owning ComputeUnitCore.
-  const ComputeUnitCore &cu() const { return cu_; }
+  /// @returns Const narrow view over the owning compute unit.
+  const InstructionComputeUnitView &cu() const { return cu_view_; }
 
   /// @brief Return the EXEC mask.
   /// @returns EXEC mask (one bit per lane, 1 = active).
@@ -498,9 +500,11 @@ protected:
   /// @param max_vgprs Maximum VGPRs per wavefront (ISA-fixed).
   Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t wf_size, uint32_t max_sgprs,
             uint32_t max_vgprs)
-      : cu_(cu), wf_id_(wf_id), wf_size_(wf_size), max_sgprs_(max_sgprs), max_vgprs_(max_vgprs) {}
+      : cu_(cu), cu_view_(cu), wf_id_(wf_id), wf_size_(wf_size), max_sgprs_(max_sgprs),
+        max_vgprs_(max_vgprs) {}
 
-  ComputeUnitCore &cu_;       ///< Parent CU (permanent, set at construction).
+  ComputeUnitCore &cu_; ///< Parent CU (permanent, set at construction).
+  InstructionComputeUnitView cu_view_;
   uint32_t wf_id_ = 0;        ///< Slot index within the CU (permanent).
   uint32_t wg_id_ = 0;        ///< Workgroup ID (set per dispatch).
   uint32_t dispatch_id_ = 0;  ///< Dispatch ID (set per dispatch, unique per dispatch).
@@ -520,6 +524,9 @@ protected:
   RegAllocation vgpr_alloc_; ///< Slice in CU's VGPR file.
 
 private:
+  ComputeUnitCore &raw_cu() { return cu_; }
+  const ComputeUnitCore &raw_cu() const { return cu_; }
+
   uint64_t lane_mask() const { return wf_size_ >= 64 ? ~0ULL : ((1ULL << wf_size_) - 1ULL); }
 
   uint64_t exec_ = ~0ULL;            ///< EXEC mask -- one bit per lane (1 = active).
@@ -564,6 +571,14 @@ private:
   WaitTarget wait_target_; ///< Current s_waitcnt thresholds.
 
   friend class ComputeUnitCore; // CU sets allocation fields during dispatch.
+
+  // Memory pipelines complete deferred VM loads into physical SGPR/VGPR
+  // storage. They intentionally bypass instruction read-observation because
+  // completion writes produced memory results rather than instruction source
+  // reads.
+  friend class GlobalMemPipeline;
+  friend class LocalMemPipeline;
+  friend class ScalarMemPipeline;
 };
 
 inline uint32_t apply_gpr_idx(const Wavefront &wf, uint32_t vgpr_off, bool is_dst) {

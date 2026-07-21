@@ -13,6 +13,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna3/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 
+#include <span>
 #include <string>
 #include <vector>
 
@@ -24,8 +25,9 @@ namespace {
 /// create a weaker wait. Until we add precise GFX11 re-encoding, emit a
 /// conservative full-drain wait, which is slower but preserves correctness.
 ExpandResult expand_waitcnt_gfx9_to_gfx11(const Instruction &inst, uint32_t, uint64_t,
-                                          const LivenessAnalysis &, TranslationContext &,
-                                          const LaneLayout *, const LaneLayout *) {
+                                          std::span<const uint8_t>, const LivenessAnalysis &,
+                                          TranslationContext &, const LaneLayout *,
+                                          const LaneLayout *) {
   if (inst.encoding_id() != cdna4::encoding::kSopp)
     return ExpandResult::failed(std::string(inst.mnemonic()) +
                                 " matched the waitcnt expansion rule with an unexpected encoding");

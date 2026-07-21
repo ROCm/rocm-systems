@@ -182,7 +182,7 @@ enum class KeyCode : uint32
 /// Enum to identify possible configurations
 enum class CpuType : uint32
 {
-    Unknown         = 0,                       ///< No capabilities set
+    Unknown         = 0,                       ///< No capabilites set
     AmdK5           = (CpuVendorAmd + 0),      ///< No MMX, no cmov, no 3DNow
     AmdK6           = (CpuVendorAmd + 1),      ///< No MMX, no cmov, 3DNow (models 6 and 7)
     AmdK6_2         = (CpuVendorAmd + 2),      ///< MMX, no cmov, 3DNow (model 8, no HW WC but not part of cpuid)
@@ -197,7 +197,7 @@ enum class CpuType : uint32
     AmdFamily15h    = (CpuVendorAmd + 11),     ///< Family 15h - Orochi, Trinity, Komodo, Kaveri, Basilisk
     AmdFamily16h    = (CpuVendorAmd + 12),     ///< Family 16h - Kabini
     AmdRyzen        = (CpuVendorAmd + 13),     ///< Ryzen
-    IntelOld        = (CpuVendorIntel + 0),    ///< Indicate cpu type before Intel Pentium III
+    IntelOld        = (CpuVendorIntel + 0),    ///< Inidicate cpu type befor Intel Pentium III
     IntelP3         = (CpuVendorIntel + 1),    ///< Generic Pentium III
     IntelP3Model7   = (CpuVendorIntel + 2),    ///< PIII-7, PIII Xeon-7
     IntelP3Model8   = (CpuVendorIntel + 3),    ///< PIII-8, PIII Xeon-8, Celeron-8
@@ -237,7 +237,7 @@ struct SystemInfo
 ///
 /// @param errno_in Value from 'errno' (or functions that return errno_t)
 ///
-/// @returns Relevant Result value for the given errno-- never Success.
+/// @returns Relevent Result value for the given errno-- never Success.
 inline Result ConvertErrno(
     int32 errnoIn)
 {
@@ -308,7 +308,7 @@ extern Result HResultToPal(HRESULT hr);
 ///
 /// @param errno_in System error code from 'GetLastError'
 ///
-/// @returns Relevant Result value for the given system error code.
+/// @returns Relevent Result value for the given system error code.
 inline Result ConvertWinError(
     uint32 winError)
 {
@@ -398,7 +398,6 @@ extern ProcessIntegrityLevel GetProcessIntegrityLevel();
 /// @returns whether the current process is in an App Container
 extern bool IsProcessInAppContainer();
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 921
 /// Tests whether the passed handle is valid or not.
 /// A handle could be either nullptr or INVALID_HANDLE_VALUE.
 /// INVALID_HANDLE_VALUE is the proper value to set a handle to when you intend to error out.
@@ -412,7 +411,6 @@ constexpr bool IsValidHandle(HANDLE handle)
     return (handle != nullptr) && (handle != HANDLE(size_t(-1)));
 #endif
 }
-#endif
 #endif
 
 /// Queries system information.

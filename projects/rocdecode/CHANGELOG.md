@@ -11,6 +11,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 ### Resolved issues
 
 * Fixed decode errors of some AVC interlaced container streams by adding support for the picture data packet from the demuxer which contains multiple pictures.
+* Corrected fake CTest passes.
 
 ## rocDecode 1.8.0 for ROCm 7.13
 
