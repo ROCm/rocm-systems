@@ -222,9 +222,12 @@ TEST(BinaryTranslatorE2E, TranslatesRealMultiKernelSharedSwappcCodeObject) {
 
   // Kernels A-E all call the same noinline helper, and kernel A calls it twice.
   // Those shared-helper edges are compiler-emitted `s_swappc_b64` instructions.
-  EXPECT_GE(count_text_mnemonic(*co, ROCJITSU_CODE_ARCH_CDNA4, "s_swappc_b64"), 6u);
-  EXPECT_GE(count_text_mnemonic(*co, ROCJITSU_CODE_ARCH_CDNA4, "s_setpc_b64"), 3u);
-  EXPECT_GE(count_text_mnemonic(*co, ROCJITSU_CODE_ARCH_CDNA4, "s_call_b64"), 3u);
+  const size_t source_swappc = count_text_mnemonic(*co, ROCJITSU_CODE_ARCH_CDNA4, "s_swappc_b64");
+  const size_t source_setpc = count_text_mnemonic(*co, ROCJITSU_CODE_ARCH_CDNA4, "s_setpc_b64");
+  const size_t source_call = count_text_mnemonic(*co, ROCJITSU_CODE_ARCH_CDNA4, "s_call_b64");
+  EXPECT_GE(source_swappc, 6u);
+  EXPECT_GE(source_setpc, 3u);
+  EXPECT_GE(source_call, 3u);
 
   rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
   auto result = translator.translate(*co);
@@ -244,9 +247,11 @@ TEST(BinaryTranslatorE2E, TranslatesRealMultiKernelSharedSwappcCodeObject) {
   EXPECT_NE(translated.kernel_descriptor_offset("multikernel_indirect_branch_e"), 0u);
   EXPECT_NE(translated.kernel_descriptor_offset("multikernel_indirect_branch_setpc"), 0u);
   EXPECT_NE(translated.kernel_descriptor_offset("multikernel_indirect_branch_scall"), 0u);
-  EXPECT_GE(count_text_mnemonic(translated, ROCJITSU_CODE_ARCH_CDNA3, "s_swappc_b64"), 6u);
-  EXPECT_GE(count_text_mnemonic(translated, ROCJITSU_CODE_ARCH_CDNA3, "s_setpc_b64"), 3u);
-  EXPECT_GE(count_text_mnemonic(translated, ROCJITSU_CODE_ARCH_CDNA3, "s_call_b64"), 3u);
+  EXPECT_EQ(count_text_mnemonic(translated, ROCJITSU_CODE_ARCH_CDNA3, "s_swappc_b64"), 0u)
+      << "in-range recovered swappc targets should patch to direct s_call_b64 windows";
+  EXPECT_GE(count_text_mnemonic(translated, ROCJITSU_CODE_ARCH_CDNA3, "s_setpc_b64"), source_setpc);
+  EXPECT_GE(count_text_mnemonic(translated, ROCJITSU_CODE_ARCH_CDNA3, "s_call_b64"),
+            source_call + source_swappc);
 
   ASSERT_GE(result.elf_bytes.size(), sizeof(rocjitsu::Elf64_Ehdr));
   const auto *ehdr = reinterpret_cast<const rocjitsu::Elf64_Ehdr *>(result.elf_bytes.data());
