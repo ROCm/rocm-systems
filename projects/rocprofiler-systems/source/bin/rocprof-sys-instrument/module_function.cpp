@@ -3,6 +3,7 @@
 
 #include "module_function.hpp"
 #include "InstructionCategories.h"
+#include "common/path.hpp"
 #include "fwd.hpp"
 #include "internal_libs.hpp"
 #include "log.hpp"
@@ -416,9 +417,6 @@ module_function::is_internal_constrained() const
     auto _basename = [](std::string_view _v) {
         return std::string{ tim::filepath::basename(_v) };
     };
-    auto _realpath = [](const std::string& _v) {
-        return tim::filepath::realpath(_v, nullptr, false);
-    };
 
     auto _report = [&](const string_t& _action, const std::string& _type,
                        const string_t& _reason, int _lvl) {
@@ -429,7 +427,7 @@ module_function::is_internal_constrained() const
     const auto& _gnu_libs = get_internal_libs_data();
 
     auto _module_base = _basename(module_name);
-    auto _module_real = _realpath(module_name);
+    auto _module_real = rocprofsys::path::realpath(module_name);
 
     if(std::regex_search(module_name,
                          std::regex{ "lib(rocprof-sys|rocprofsys|timemory|perfetto)" }))

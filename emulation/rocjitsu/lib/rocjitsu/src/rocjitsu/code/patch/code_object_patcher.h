@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <optional>
 #include <span>
-#include <string>
 #include <string_view>
 #include <vector>
 
@@ -16,6 +15,12 @@ namespace rocjitsu {
 
 class AmdGpuCodeObject;
 struct KdTranslation;
+
+/// @brief Location of a sidecar kernel descriptor appended into a loaded ELF segment.
+struct AppendedSidecarDescriptor {
+  uint64_t file_offset = 0;
+  uint64_t vaddr = 0;
+};
 
 class CodeObjectPatcher {
 public:
@@ -36,6 +41,33 @@ public:
   /// entries coherent with explicit descriptor patches applied by DBT.
   [[nodiscard]] bool replace_text(std::span<const uint8_t> new_text);
 
+  /// @brief True if any relocation's place (r_offset) falls inside .text.
+  ///
+  /// @details DBT compacts/expands/moves instructions within .text but does not
+  /// remap relocation places that land in .text — replace_text() only shifts
+  /// relocation offsets for whole sections moved *after* .text. An in-.text
+  /// relocation would therefore be applied to the wrong translated bytes.
+  /// BinaryTranslator uses this to fail closed instead of miscompiling. Real
+  /// AMDHSA kernel code objects carry no such relocations, so this rejects only
+  /// genuinely unsupported inputs.
+  [[nodiscard]] bool has_relocations_within_text() const;
+
+  /// @brief True if any relocation resolves against a location inside .text.
+  ///
+  /// @details DBT moves (and can duplicate) .text blocks, but the symbol values
+  /// (st_value) of anything defined in .text are not remapped. A relocation
+  /// elsewhere (e.g. a function-pointer table in .data) that resolves against
+  /// such a location would therefore point at its stale pre-move PC. This covers
+  /// every symbol whose st_shndx is the text section regardless of type —
+  /// STT_FUNC helpers, STT_NOTYPE labels, and an STT_SECTION symbol for .text
+  /// (whose addend selects an in-.text offset) all alias moved code. Kernel entry
+  /// points are dispatched through the descriptor's kernel_code_entry_byte_offset
+  /// (which DBT does update) and are not the target of in-object relocations, so
+  /// this rejects only genuinely address-taken text locations that cannot be
+  /// relocated safely yet. BinaryTranslator uses it to fail closed instead of
+  /// resolving to a wrong address.
+  [[nodiscard]] bool has_relocation_to_text_symbol() const;
+
   void update_elf_flags(uint32_t new_flags);
 
   [[nodiscard]] bool patch_kernel_descriptor(uint64_t file_offset,
@@ -50,6 +82,29 @@ public:
   [[nodiscard]] bool apply_kernel_descriptor_translation(const KdTranslation &translation,
                                                          rj_code_arch_t target_arch);
 
+  /// @brief Append non-symbolized sidecar descriptors in loaded memory after .text.
+  ///
+  /// @details Sidecar descriptors must be visible to the GPU loader, but they
+  /// do not need to be discoverable through the AMDHSA symbol table. The patcher
+  /// therefore places descriptor bytes in the executable LOAD tail immediately
+  /// after the translated .text payload, without growing the .text section
+  /// itself. Runtime metadata records the returned virtual addresses.
+  [[nodiscard]] std::optional<std::vector<AppendedSidecarDescriptor>>
+  append_sidecar_descriptor_translations(std::span<const KdTranslation> translations,
+                                         rj_code_arch_t target_arch, uint64_t alignment = 64);
+
+  /// @brief Append a named, non-allocated ELF section without moving loadable bytes.
+  ///
+  /// @details DBT runtime metadata must not perturb code-object load addresses:
+  /// ROCR and the kernel descriptor ABI have already consumed those addresses.
+  /// This helper appends the payload, a copied section-string table, and a new
+  /// section-header table at EOF. Program headers and allocated sections are
+  /// left untouched, so the new section is available to tools and rocjitsu's
+  /// own loader-side metadata parser but is not mapped into GPU code memory.
+  [[nodiscard]] bool append_nonalloc_section(std::string_view name,
+                                             std::span<const uint8_t> contents,
+                                             uint64_t alignment = 1);
+
   /// @brief Redirect one kernel descriptor from @p old_entry_text_offset to @p
   /// new_entry_text_offset.
   ///
@@ -60,12 +115,15 @@ public:
                                            uint64_t old_entry_text_offset,
                                            uint64_t new_entry_text_offset);
 
-  std::vector<uint8_t> emit() const;
+  std::vector<uint8_t> emit() const &;
+  std::vector<uint8_t> emit() &&;
 
 private:
   std::vector<uint8_t> image_;
   uint64_t text_offset_;
   uint64_t text_size_;
+  uint64_t text_vaddr_;
+  uint64_t text_tail_size_;
 };
 
 } // namespace rocjitsu
