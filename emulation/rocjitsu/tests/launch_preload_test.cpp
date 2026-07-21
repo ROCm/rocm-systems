@@ -3,16 +3,28 @@
 
 #include "launch_preload.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <string>
 #include <system_error>
+#include <vector>
 
 #include <sys/wait.h>
 #include <unistd.h>
 
 namespace {
+
+std::vector<std::string> copy_environment(char *const *envp) {
+  std::vector<std::string> entries;
+  while (*envp != nullptr) {
+    entries.emplace_back(*envp);
+    ++envp;
+  }
+  EXPECT_EQ(nullptr, *envp);
+  return entries;
+}
 
 void expect_ld_preload_eq(const rocjitsu::cli::LaunchEnvironment &environment,
                           const std::string &expected) {
@@ -46,6 +58,23 @@ void expect_no_sanitizer_preload_order() {
 #endif
 
 } // namespace
+
+TEST(LaunchPreloadTest, EnvpCacheRebuildsAfterSet) {
+  const std::string name = "RJ_LAUNCH_ENV_CACHE_TEST_" + std::to_string(getpid());
+  const std::string before = name + "=before";
+  const std::string after = name + "=after";
+  rocjitsu::cli::LaunchEnvironment environment;
+  environment.set(name, "before");
+
+  const std::vector<std::string> initial = copy_environment(environment.envp());
+  EXPECT_NE(initial.end(), std::find(initial.begin(), initial.end(), before));
+
+  environment.set(name, "after");
+
+  const std::vector<std::string> rebuilt = copy_environment(environment.envp());
+  EXPECT_EQ(rebuilt.end(), std::find(rebuilt.begin(), rebuilt.end(), before));
+  EXPECT_NE(rebuilt.end(), std::find(rebuilt.begin(), rebuilt.end(), after));
+}
 
 TEST(LaunchPreloadTest, NoAsanPrependsInterposerBeforeExistingPreload) {
 #if defined(RJ_EXPECT_SHARED_ASAN_RUNTIME) || defined(RJ_EXPECT_SHARED_TSAN_RUNTIME)
