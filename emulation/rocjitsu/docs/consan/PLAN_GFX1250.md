@@ -140,6 +140,7 @@ flowchart TD
     XT3H["XT3H DONE<br/>quick SGEMM Inline assessed;<br/>first problem exact, aggregate dynamic incomplete"]
     XT3I["XT3I TODO<br/>SPMM F8 Sampled paired run;<br/>one of two objects at fixed 180-second bound"]
     XT3J["XT3J DONE<br/>SPMM F8 Inline standard clean assessed;<br/>MT64x64 wrong-result rows isolate blocker"]
+    XT3K["XT3K ACTIVE<br/>SPMM F8 Inline exact-kernel frontier;<br/>full patching fails while first 8 pass"]
     XT3D["XT3D DONE<br/>full SGEMM first problem complete;<br/>quadratic 115,776-event frontier isolated"]
     XT3E["XT3E TODO<br/>both emulator baselines prove intrinsic full-grid bound;<br/>substantially longer unrestricted RR run remains"]
     XT3C["XT3C DONE<br/>SPMM F8 Sampled exact client passes;<br/>19,960 accesses and 806 barrier members covered"]
@@ -279,6 +280,7 @@ flowchart TD
   XT1 --> XT3H
   XT3C --> XT3I
   XT3C --> XT3J
+  XT3J --> XT3K
   XT1 --> XT3D
   XT3D --> XT3E
   XT2B --> XT3C
@@ -310,6 +312,7 @@ flowchart TD
   XT3H --> XF
   XT3I --> XF
   XT3J --> XF
+  XT3K --> XF
   XT3E --> XF
   XT3C --> XF
   XT4 --> XF
@@ -329,6 +332,7 @@ flowchart TD
   class XP2F done
   class XP2G done
   class XT3J done
+  class XT3K active
   class G0,XP2D,XP3,XT2C2,XT2C3,XT3A,XT3E,XT3I,XF,XG todo
 ```
 
@@ -377,6 +381,14 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XT3K is the sole ACTIVE box.  Exact-kernel artifact `111`
+  reproduces SPMM F8 Inline wrong results with 1,639/1,639 accesses and 25/25
+  barriers, while capped artifact `112` passes the complete first orientation
+  with the earliest eight accesses and eight barriers before its bound expires
+  in the second orientation.  The next bounded step is to locate the first
+  failing patch frontier and connect it to one concrete preservation path;
+  neither the cap nor the partial run changes the orange acceptance cell.
 
 - 2026-07-21: XT3J is DONE as an assessment node.  Standard-profile artifact
   `consan-green-expansion-20260721-spmm-f8-ml-inline-clean-108` fully patches
