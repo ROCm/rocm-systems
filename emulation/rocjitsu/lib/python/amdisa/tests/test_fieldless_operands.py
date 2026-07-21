@@ -441,7 +441,9 @@ def test_fieldless_policy_table_is_golden():
         'OPR_SDST_M0': FieldlessPolicy(sr, _INERT_CAPS, hidden, None),
         'OPR_DSMEM': FieldlessPolicy(mp, _INERT_CAPS, hidden, None),
         'OPR_GPUMEM': FieldlessPolicy(mp, _INERT_CAPS, hidden, None),
-        'OPR_FLAT_SCRATCH': FieldlessPolicy(mp, _INERT_CAPS, hidden, None),
+        # FLAT_SCRATCH is the per-wave scratch-base register state (SGPR pair),
+        # so it is classified as a special register.
+        'OPR_FLAT_SCRATCH': FieldlessPolicy(sr, _INERT_CAPS, hidden, None),
         'OPR_VGPR': FieldlessPolicy(
             FieldlessCategory.PLACEHOLDER, _INERT_CAPS, hidden, None
         ),

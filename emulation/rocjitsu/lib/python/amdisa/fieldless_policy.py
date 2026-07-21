@@ -32,11 +32,12 @@ class FieldlessCategory(enum.Enum):
     generation-time (Python) classification consumed by the code generator to
     decide how to lower the operand; it is not emitted into C++.
 
-      SPECIAL_REGISTER: a real architectural special register (VCC/EXEC/SCC/
-        M0/PC). The concrete operand_type -> C++ RegClass mapping is not modeled
-        here
-      MEMORY_PSEUDO: a memory-resource pseudo-operand (global/LDS/scratch) that
-        carries memory-effect meaning but never a register value.
+      SPECIAL_REGISTER: a real architectural register that has no encoding
+        field -- VCC/EXEC/SCC/M0/PC and FLAT_SCRATCH (per-wave scratch-base
+        register state held in SGPRs). The concrete operand_type -> C++
+        RegClass mapping is not modeled here.
+      MEMORY_PSEUDO: a memory-resource pseudo-operand (global/LDS) that carries
+        memory-effect meaning but never a register value.
       LITERAL: a value-bearing fieldless literal (``OPR_SIMM32``).
       PLACEHOLDER: an inert placeholder modeling no effect yet (gfx12 image
         ``vaddr`` fieldless ``OPR_VGPR``).
@@ -150,9 +151,8 @@ _FIELDLESS_POLICY: dict[str, FieldlessPolicy] = {
     # in a later slice.
     'OPR_DSMEM': FieldlessPolicy(FieldlessCategory.MEMORY_PSEUDO, _INERT),
     'OPR_GPUMEM': FieldlessPolicy(FieldlessCategory.MEMORY_PSEUDO, _INERT),
-    # FLAT_SCRATCH is bucketed as memory-pseudo for now but it could arguably
-    # be a special register. Revisit when it drives execute behavior.
-    'OPR_FLAT_SCRATCH': FieldlessPolicy(FieldlessCategory.MEMORY_PSEUDO, _INERT),
+    # FLAT_SCRATCH is architectural register state so consider it special.
+    'OPR_FLAT_SCRATCH': FieldlessPolicy(FieldlessCategory.SPECIAL_REGISTER, _INERT),
     # gfx12 image address/coordinate placeholder (fieldless OPR_VGPR). Inert,
     # and explicitly non-VGPR so it never reads as a real v0.
     'OPR_VGPR': FieldlessPolicy(FieldlessCategory.PLACEHOLDER, _INERT),
