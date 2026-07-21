@@ -846,14 +846,14 @@ bool Device::init() {
   // Bug fix: atoi("") returns 0, but empty string should mean "use platform default"
   if (gpu_enable_pal_is_empty_string) {
     if (IS_WINDOWS) {
-      // Windows default: Rocr path
+      // Windows default: ROCr path
       GPU_ENABLE_PAL = 0;
     } else {
       // Linux default: ROCr path
       GPU_ENABLE_PAL = 0;
     }
   } else if (IS_WINDOWS && flagIsDefault(GPU_ENABLE_PAL)) {
-    // default Rocr path
+    // default ROCr path
     GPU_ENABLE_PAL = 0;
   }
 
