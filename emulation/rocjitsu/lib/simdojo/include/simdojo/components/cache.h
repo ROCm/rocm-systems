@@ -99,6 +99,11 @@ public:
   static constexpr uint64_t SET_MASK = NumSets - 1;
   static constexpr uint32_t TOTAL_SIZE = LINE_SIZE * NumSets * Associativity;
 
+  struct Allocation {
+    CacheTag *tag = nullptr;
+    uint8_t *data = nullptr;
+  };
+
   Cache()
       : tags_(static_cast<size_t>(NumSets) * Associativity),
         data_(static_cast<size_t>(LINE_SIZE) * NumSets * Associativity, 0) {
@@ -137,6 +142,15 @@ public:
   /// @returns Pointer to the allocated tag entry.
   CacheTag *allocate(uint64_t addr, uint32_t vmid = 0, CacheTag *evicted_tag = nullptr,
                      uint8_t *evicted_data = nullptr) {
+    return allocate_with_data(addr, vmid, evicted_tag, evicted_data).tag;
+  }
+
+  /// @brief Allocate a cache line and return both tag and data pointers.
+  ///
+  /// @details Used by cache controllers that fill a newly allocated line
+  /// directly from a backing level, avoiding a second tag scan in fill_line().
+  Allocation allocate_with_data(uint64_t addr, uint32_t vmid = 0, CacheTag *evicted_tag = nullptr,
+                                uint8_t *evicted_data = nullptr) {
     uint32_t set = set_index(addr);
     uint64_t tag = tag_bits(addr);
 
@@ -150,7 +164,9 @@ public:
         t.dirty = false;
         t.coherence = CoherenceState::INVALID;
         policy_.access(set, w);
-        return &t;
+        if (evicted_tag)
+          *evicted_tag = {};
+        return {&t, line_data(set, w)};
       }
     }
 
@@ -168,7 +184,7 @@ public:
     vt.dirty = false;
     vt.coherence = CoherenceState::INVALID;
     policy_.access(set, victim_way);
-    return &vt;
+    return {&vt, line_data(set, victim_way)};
   }
 
   /// @brief Invalidate the cache line for an address (if present).
@@ -184,6 +200,21 @@ public:
         t.dirty = false;
         t.coherence = CoherenceState::INVALID;
         return;
+      }
+    }
+  }
+
+  /// @brief Invalidate all cache lines for an address across all address spaces.
+  /// @param addr The memory address whose cache line to invalidate.
+  void invalidate_all_vmids(uint64_t addr) {
+    uint32_t set = set_index(addr);
+    uint64_t tag = tag_bits(addr);
+    for (uint32_t w = 0; w < Associativity; ++w) {
+      auto &t = tag_at(set, w);
+      if (t.valid && t.tag == tag) {
+        t.valid = false;
+        t.dirty = false;
+        t.coherence = CoherenceState::INVALID;
       }
     }
   }
@@ -215,6 +246,23 @@ public:
       }
     }
     assert(false && "read_line called on a miss");
+  }
+
+  /// @brief Return a const pointer to the data for a cache line.
+  ///
+  /// @param addr The memory address identifying the cache line.
+  /// @returns Pointer to the line data, or nullptr if not found.
+  const uint8_t *line_data_for_read(uint64_t addr, uint32_t vmid = 0) {
+    uint32_t set = set_index(addr);
+    uint64_t tag = tag_bits(addr);
+    for (uint32_t w = 0; w < Associativity; ++w) {
+      auto &t = tag_at(set, w);
+      if (t.valid && t.tag == tag && t.vmid == vmid) {
+        policy_.access(set, w);
+        return line_data(set, w);
+      }
+    }
+    return nullptr;
   }
 
   /// @brief Write to a cache line (must be a hit - caller ensures via lookup/allocate).

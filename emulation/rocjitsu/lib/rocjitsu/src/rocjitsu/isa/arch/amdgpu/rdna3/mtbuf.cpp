@@ -23,12 +23,23 @@
 namespace rocjitsu {
 namespace rdna3 {
 
+namespace {
+template <typename BufferMachineInst> uint32_t buffer_vaddr_bits(const BufferMachineInst *inst) {
+  if (inst->idxen && inst->offen)
+    return 64;
+  if (inst->idxen || inst->offen)
+    return 32;
+  return 0;
+}
+} // namespace
+
 TbufferLoadFormatXMtbuf::TbufferLoadFormatXMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_x", reinterpret_cast<const OpEncoding *>(inst),
             make_exec_fn<TbufferLoadFormatXMtbuf>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SREG_M0_INL,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -57,8 +68,9 @@ TbufferLoadFormatXyMtbuf::TbufferLoadFormatXyMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_xy", reinterpret_cast<const OpEncoding *>(inst),
             make_exec_fn<TbufferLoadFormatXyMtbuf>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SREG_M0_INL,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -87,8 +99,9 @@ TbufferLoadFormatXyzMtbuf::TbufferLoadFormatXyzMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
             make_exec_fn<TbufferLoadFormatXyzMtbuf>()),
       vdata(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SREG_M0_INL,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -117,8 +130,9 @@ TbufferLoadFormatXyzwMtbuf::TbufferLoadFormatXyzwMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
             make_exec_fn<TbufferLoadFormatXyzwMtbuf>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SREG_M0_INL,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -147,8 +161,9 @@ TbufferStoreFormatXMtbuf::TbufferStoreFormatXMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_format_x", reinterpret_cast<const OpEncoding *>(inst),
             make_exec_fn<TbufferStoreFormatXMtbuf>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SREG_M0_INL,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -186,8 +201,9 @@ TbufferStoreFormatXyMtbuf::TbufferStoreFormatXyMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_format_xy", reinterpret_cast<const OpEncoding *>(inst),
             make_exec_fn<TbufferStoreFormatXyMtbuf>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SREG_M0_INL,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -227,8 +243,9 @@ TbufferStoreFormatXyzMtbuf::TbufferStoreFormatXyzMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
             make_exec_fn<TbufferStoreFormatXyzMtbuf>()),
       vdata(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SREG_M0_INL,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -270,8 +287,9 @@ TbufferStoreFormatXyzwMtbuf::TbufferStoreFormatXyzwMtbuf(const MachineInst *inst
     : Mtbuf("tbuffer_store_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
             make_exec_fn<TbufferStoreFormatXyzwMtbuf>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SREG_M0_INL,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -315,8 +333,9 @@ TbufferLoadD16FormatXMtbuf::TbufferLoadD16FormatXMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_d16_format_x", reinterpret_cast<const OpEncoding *>(inst),
             make_exec_fn<TbufferLoadD16FormatXMtbuf>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SREG_M0_INL,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -336,8 +355,9 @@ TbufferLoadD16FormatXyMtbuf::TbufferLoadD16FormatXyMtbuf(const MachineInst *inst
     : Mtbuf("tbuffer_load_d16_format_xy", reinterpret_cast<const OpEncoding *>(inst),
             make_exec_fn<TbufferLoadD16FormatXyMtbuf>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SREG_M0_INL,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -357,8 +377,9 @@ TbufferLoadD16FormatXyzMtbuf::TbufferLoadD16FormatXyzMtbuf(const MachineInst *in
     : Mtbuf("tbuffer_load_d16_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
             make_exec_fn<TbufferLoadD16FormatXyzMtbuf>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SREG_M0_INL,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -378,8 +399,9 @@ TbufferLoadD16FormatXyzwMtbuf::TbufferLoadD16FormatXyzwMtbuf(const MachineInst *
     : Mtbuf("tbuffer_load_d16_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
             make_exec_fn<TbufferLoadD16FormatXyzwMtbuf>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SREG_M0_INL,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -399,8 +421,9 @@ TbufferStoreD16FormatXMtbuf::TbufferStoreD16FormatXMtbuf(const MachineInst *inst
     : Mtbuf("tbuffer_store_d16_format_x", reinterpret_cast<const OpEncoding *>(inst),
             make_exec_fn<TbufferStoreD16FormatXMtbuf>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SREG_M0_INL,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -420,8 +443,9 @@ TbufferStoreD16FormatXyMtbuf::TbufferStoreD16FormatXyMtbuf(const MachineInst *in
     : Mtbuf("tbuffer_store_d16_format_xy", reinterpret_cast<const OpEncoding *>(inst),
             make_exec_fn<TbufferStoreD16FormatXyMtbuf>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SREG_M0_INL,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -441,8 +465,9 @@ TbufferStoreD16FormatXyzMtbuf::TbufferStoreD16FormatXyzMtbuf(const MachineInst *
     : Mtbuf("tbuffer_store_d16_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
             make_exec_fn<TbufferStoreD16FormatXyzMtbuf>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SREG_M0_INL,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -462,8 +487,9 @@ TbufferStoreD16FormatXyzwMtbuf::TbufferStoreD16FormatXyzwMtbuf(const MachineInst
     : Mtbuf("tbuffer_store_d16_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
             make_exec_fn<TbufferStoreD16FormatXyzwMtbuf>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SREG_M0_INL,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
