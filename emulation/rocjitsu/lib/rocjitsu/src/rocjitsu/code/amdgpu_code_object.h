@@ -22,9 +22,9 @@ namespace rocjitsu {
 /// @brief One kernel descriptor discovered in a code object, with the coordinates
 ///        DBI needs to read and (later) rewrite its scratch reservation.
 struct KernelDescriptorInfo {
-  std::string name;                        ///< Kernel name (the .kd symbol minus the suffix).
-  uint64_t descriptor_file_offset = 0;     ///< File offset of the descriptor bytes.
-  uint64_t entry_text_offset = 0;          ///< .text-relative offset of the kernel entry.
+  std::string name;                            ///< Kernel name (the .kd symbol minus the suffix).
+  uint64_t descriptor_file_offset = 0;         ///< File offset of the descriptor bytes.
+  uint64_t entry_text_offset = 0;              ///< .text-relative offset of the kernel entry.
   uint32_t private_segment_fixed_size = 0;     ///< Per-lane scratch bytes from the descriptor.
   uint32_t granulated_workitem_vgpr_count = 0; ///< Raw compute_pgm_rsrc1 VGPR granule field.
 };
