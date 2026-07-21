@@ -922,8 +922,11 @@ inline constexpr DynamicRecordLayout kDynamicBarrierRecordLayout = {DynamicRecor
                                                                     false};
 inline constexpr DynamicRecordLayout kDynamicAccessRecordLayout = {DynamicRecordStride::Bytes64, 5,
                                                                    false};
+inline constexpr DynamicRecordLayout kDynamicAtomicRecordLayout = {DynamicRecordStride::Bytes80, 4,
+                                                                   true};
 inline constexpr DynamicRecordLayout kDynamicDiagnosticRecordLayout = {DynamicRecordStride::Bytes80,
                                                                        4, true};
+static_assert(sizeof(ConSanMoiAtomicRecord) == 80);
 
 [[nodiscard]] bool append_dynamic_record_address(std::vector<uint32_t> &words,
                                                  const DynamicRecordLayout &layout,
@@ -1095,6 +1098,7 @@ inline constexpr DynamicRecordLayout kDynamicDiagnosticRecordLayout = {DynamicRe
 
 RJ_DYNAMIC_RECORD_WRAPPERS(barrier, kDynamicBarrierRecordLayout)
 RJ_DYNAMIC_RECORD_WRAPPERS(access, kDynamicAccessRecordLayout)
+RJ_DYNAMIC_RECORD_WRAPPERS(atomic, kDynamicAtomicRecordLayout)
 RJ_DYNAMIC_RECORD_WRAPPERS(diagnostic, kDynamicDiagnosticRecordLayout)
 #undef RJ_DYNAMIC_RECORD_WRAPPERS
 
@@ -1119,6 +1123,13 @@ RJ_DYNAMIC_RECORD_WRAPPERS(diagnostic, kDynamicDiagnosticRecordLayout)
       words, kDynamicAccessRecordLayout, field_address, source, slot_vgpr, scratch_vgpr, arch);
 }
 
+[[nodiscard]] bool append_dynamic_atomic_store_workgroup_source(
+    std::vector<uint32_t> &words, uint64_t field_address, const ConSanMoiWorkgroupSource &source,
+    uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch) {
+  return append_dynamic_record_store_workgroup_source(
+      words, kDynamicAtomicRecordLayout, field_address, source, slot_vgpr, scratch_vgpr, arch);
+}
+
 [[nodiscard]] bool
 append_dynamic_barrier_event_index_store(std::vector<uint32_t> &words, uint64_t counter_address,
                                          uint64_t field_address, uint16_t slot_vgpr,
@@ -1134,6 +1145,15 @@ append_dynamic_access_event_index_store(std::vector<uint32_t> &words, uint64_t c
                                         uint16_t scratch_vgpr, rj_code_arch_t arch) {
   return append_dynamic_record_event_index_store(words, kDynamicAccessRecordLayout, counter_address,
                                                  field_address, slot_vgpr, scratch_vgpr, arch);
+}
+
+[[nodiscard]] bool
+append_dynamic_atomic_event_index_store(std::vector<uint32_t> &words, uint64_t counter_address,
+                                        uint64_t field_address, uint16_t slot_vgpr,
+                                        uint16_t scratch_vgpr, rj_code_arch_t arch) {
+  return append_dynamic_record_event_index_store(words, kDynamicAtomicRecordLayout,
+                                                 counter_address, field_address, slot_vgpr,
+                                                 scratch_vgpr, arch);
 }
 
 [[nodiscard]] bool overlaps_scratch_range(uint16_t value, uint16_t scratch_vgpr, uint16_t count) {

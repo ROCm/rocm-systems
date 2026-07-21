@@ -102,7 +102,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     }
     const ConSanCandidateResourcePlan *existing_plan =
         resource_plan_for_site(result, ConSanResourceSiteKind::Atomic, site.text_offset);
-    const uint16_t scratch_count = inline_atomic_scratch_count(site, arch);
+    const uint16_t scratch_count = atomic_record_scratch_count(site, arch);
     ConSanCandidateResourcePlan plan =
         existing_plan
             ? *existing_plan
@@ -170,7 +170,6 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
   MoiLocalNopIslandAllocator indirect_allocator(old_text, result, arch,
                                                 kMoiLocalIndirectIslandWords);
   std::vector<ConSanPatchInfo> patches;
-  const uint32_t record_count = static_cast<uint32_t>(selected_candidates.size());
   uint32_t record_index = 0;
   for (const PlannedAtomicRecord &planned : selected_candidates) {
     const AtomicRecordCandidate &candidate = planned.candidate;
@@ -182,9 +181,9 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     uint32_t guest_instruction_offset = 0;
     auto cave_words = build_atomic_record_cave_words(
         active_bytes, candidate, planned.address_plan, candidate_options,
-        planned.spill ? &*planned.spill : nullptr, arch, record_index, record_count,
-        layout.atomic_records_offset, cave_text_offset, return_text_offset,
-        guest_instruction_offset, result.errors);
+        planned.spill ? &*planned.spill : nullptr, arch, record_index,
+        layout.atomic_record_capacity, layout.atomic_records_offset, cave_text_offset,
+        return_text_offset, guest_instruction_offset, result.errors);
     if (!cave_words)
       return;
 

@@ -1704,8 +1704,8 @@ TEST(ConSanMoi, AtomicRecordCapturesVglobalCasThroughSharedAddressPlan) {
     ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
     options.moi_track_atomics = true;
     options.scratch_vgpr = 8;
-    options.moi_owner_vgpr = 13;
-    options.moi_epoch_vgpr = 14;
+    options.moi_owner_vgpr = 15;
+    options.moi_epoch_vgpr = 16;
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -1721,7 +1721,7 @@ TEST(ConSanMoi, AtomicRecordCapturesVglobalCasThroughSharedAddressPlan) {
       return item.site_kind == ConSanResourceSiteKind::Atomic;
     });
     ASSERT_NE(plan, result.resource_plans.end());
-    EXPECT_EQ(plan->scratch_vgpr_count, vector_only_address ? 3u : 5u);
+    EXPECT_EQ(plan->scratch_vgpr_count, 7u);
 
     AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
     ASSERT_TRUE(patched.is_valid());

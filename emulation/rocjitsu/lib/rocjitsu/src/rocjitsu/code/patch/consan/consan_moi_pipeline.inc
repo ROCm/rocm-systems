@@ -430,7 +430,7 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
           options.moi_engine == ConSanMoiEngine::Sampled ? 10u
           : options.moi_engine == ConSanMoiEngine::InlineShadow
               ? inline_shadow_atomic_scratch_count(candidate.site, candidate.event_kind, state.arch)
-              : inline_atomic_scratch_count(candidate.site, state.arch);
+              : atomic_record_scratch_count(candidate.site, state.arch);
       result.resource_plans.push_back(plan_moi_resource_site(
           state, options, ConSanResourceSiteKind::Atomic, index, candidate.site.text_offset,
           candidate.kernel_descriptor_file_offset, scratch_count, nullptr, &candidate.site));

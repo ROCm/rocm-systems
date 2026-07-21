@@ -335,8 +335,8 @@ TEST(ConSanMoi, SharedHelperAtomicSpillUsesOneLayoutForEveryOwner) {
   ASSERT_NE(patch_it, result.patches.end());
   const ConSanPatchInfo &patch = *patch_it;
   EXPECT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAtomicRecord);
-  EXPECT_EQ(patch.spilled_vgpr_count, 3u);
-  EXPECT_EQ(patch.required_private_segment_size, 44u);
+  EXPECT_EQ(patch.spilled_vgpr_count, 7u);
+  EXPECT_EQ(patch.required_private_segment_size, 60u);
   EXPECT_EQ(patch.owner_descriptor_file_offsets, plan.owner_descriptor_file_offsets);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
                                &ConSanPatchInfo::kind),
@@ -349,7 +349,7 @@ TEST(ConSanMoi, SharedHelperAtomicSpillUsesOneLayoutForEveryOwner) {
     std::memcpy(&descriptor, result.elf_bytes.data() + kernel.descriptor_file_offset,
                 sizeof(descriptor));
     if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1")
-      EXPECT_EQ(descriptor.private_segment_fixed_size, 60u);
+      EXPECT_EQ(descriptor.private_segment_fixed_size, 76u);
     else if (kernel.name == "unrelated_kernel")
       EXPECT_EQ(descriptor.private_segment_fixed_size, 0u);
   }

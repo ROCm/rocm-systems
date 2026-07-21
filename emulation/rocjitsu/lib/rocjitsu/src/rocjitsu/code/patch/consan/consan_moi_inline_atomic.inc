@@ -330,7 +330,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     std::span<const uint8_t> bytes, const AtomicRecordCandidate &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const ConSanOptions &options,
     const VgprSpillSequence *spill, rj_code_arch_t arch, uint32_t record_index,
-    uint32_t record_count, size_t atomic_records_offset, uint64_t cave_text_offset,
+    uint32_t atomic_record_capacity, size_t atomic_records_offset, uint64_t cave_text_offset,
     uint64_t return_text_offset, uint32_t &guest_instruction_offset,
     std::vector<std::string> &errors) {
   if (!options.scratch_vgpr) {
@@ -354,6 +354,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     return std::nullopt;
   }
 
+  (void)record_index;
   std::optional<uint16_t> derived_owner_vgpr;
   std::optional<uint32_t> derived_owner_word;
   if (!options.moi_owner_vgpr) {
@@ -366,7 +367,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
         moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, errors);
     if (!owner_shift)
       return std::nullopt;
-    const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 2u);
+    const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
     const auto owner_init = instrumentation::build_v_lshrrev_b32(
         value_vgpr, scalar_positive_inline_u32(*owner_shift), kRdna4WorkitemIdX, arch);
     if (!owner_init) {
@@ -412,8 +413,6 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     }
     words.insert(words.end(), address_words->begin(), address_words->end());
   }
-  if (derived_owner_word)
-    words.push_back(*derived_owner_word);
   const bool is_compare_exchange = candidate.site.mnemonic.find("cmpswap") != std::string::npos ||
                                    candidate.site.mnemonic.find("cmpxchg") != std::string::npos;
   std::vector<uint32_t> guest_atomic_words;
@@ -433,24 +432,23 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       return std::nullopt;
   }
 
+  const uint16_t recorded_address_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
+  words.push_back(build_v_mov_b32_e32(recorded_address_vgpr,
+                                      vector_source_vgpr(address_plan.result_address_vgpr), arch));
+  words.push_back(build_v_mov_b32_e32(
+      static_cast<uint16_t>(recorded_address_vgpr + 1u),
+      vector_source_vgpr(static_cast<uint16_t>(address_plan.result_address_vgpr + 1u)), arch));
+
   if (!append_save_moi_special_state(words, options, arch)) {
     errors.emplace_back("ConSan MOI atomic record patch could not save VCC/SCC");
     return std::nullopt;
   }
 
   const uint64_t base = *options.moi_report_buffer_address;
-  const uint64_t atomic_record_base =
-      base + atomic_records_offset +
-      static_cast<uint64_t>(record_index) * sizeof(ConSanMoiAtomicRecord);
-  const uint16_t address_vgpr = address_plan.result_address_vgpr;
-  const ConSanMoiAtomicOperation atomic_operation = is_compare_exchange
-                                                        ? ConSanMoiAtomicOperation::CompareExchange
-                                                        : ConSanMoiAtomicOperation::Rmw;
-  const ConSanMoiAtomicOutcome atomic_outcome = is_compare_exchange
-                                                    ? ConSanMoiAtomicOutcome::Unavailable
-                                                    : ConSanMoiAtomicOutcome::NotApplicable;
-  ConSanMoiRecordEmitter record(words, *options.scratch_vgpr,
-                                static_cast<uint16_t>(*options.scratch_vgpr + 2u), arch);
+  const uint64_t atomic_record_base = base + atomic_records_offset;
+  const uint16_t slot_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 2u);
+  const uint16_t lane_rank_vgpr = *options.scratch_vgpr;
+  constexpr uint16_t kScalarInlineMinusOne = 0xC1;
   if (is_compare_exchange) {
     if (!candidate.site.data_vgpr || !candidate.site.dst_vgpr) {
       errors.emplace_back("ConSan MOI atomic record CAS lacks compare/result operands");
@@ -464,52 +462,161 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       return std::nullopt;
     }
     words.push_back(*compare_succeeded);
+    words.push_back(
+        build_v_mov_b32_e32(static_cast<uint16_t>(*options.scratch_vgpr + 3u), kRdna4VccLo, arch));
+    words.push_back(
+        build_v_mov_b32_e32(static_cast<uint16_t>(*options.scratch_vgpr + 4u), kRdna4VccHi, arch));
   }
+  const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
+      lane_rank_vgpr, kScalarInlineMinusOne, scalar_positive_inline_u32(0), arch);
+  const auto mbcnt_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
+      lane_rank_vgpr, kScalarInlineMinusOne, vector_source_vgpr(lane_rank_vgpr), arch);
+  const auto first_active_lane =
+      instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank_vgpr, arch);
+  const auto save_exec = options.moi_exec_save_sgpr
+                             ? instrumentation::build_s_and_saveexec_b64(
+                                   *options.moi_exec_save_sgpr, kRdna4VccLo, arch)
+                             : std::nullopt;
+  if (!mbcnt_lo || !mbcnt_hi || !first_active_lane || !save_exec) {
+    errors.emplace_back("ConSan MOI atomic record patch could not select a wave publisher");
+    return std::nullopt;
+  }
+  words.insert(words.end(), mbcnt_lo->begin(), mbcnt_lo->end());
+  words.insert(words.end(), mbcnt_hi->begin(), mbcnt_hi->end());
+  words.push_back(*first_active_lane);
+  words.push_back(*save_exec);
+  if (!options.moi_exec_save_sgpr ||
+      !append_atomic_fetch_add_one_u32(words,
+                                       base + offsetof(ConSanMoiReportHeader, atomic_record_count),
+                                       slot_vgpr, *options.scratch_vgpr, arch)) {
+    errors.emplace_back("ConSan MOI atomic record patch could not reserve a dynamic record slot");
+    return std::nullopt;
+  }
+  const auto mov_capacity =
+      instrumentation::build_v_mov_b32_literal(lane_rank_vgpr, atomic_record_capacity, arch);
+  const auto slot_in_capacity =
+      instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(lane_rank_vgpr), slot_vgpr, arch);
+  if (!mov_capacity || !slot_in_capacity) {
+    errors.emplace_back("ConSan MOI atomic record patch could not guard dynamic record capacity");
+    return std::nullopt;
+  }
+  words.insert(words.end(), mov_capacity->begin(), mov_capacity->end());
+  words.push_back(*slot_in_capacity);
+  const ConSanMoiAtomicOperation atomic_operation = is_compare_exchange
+                                                        ? ConSanMoiAtomicOperation::CompareExchange
+                                                        : ConSanMoiAtomicOperation::Rmw;
+  const ConSanMoiAtomicOutcome atomic_outcome = is_compare_exchange
+                                                    ? ConSanMoiAtomicOutcome::Unavailable
+                                                    : ConSanMoiAtomicOutcome::NotApplicable;
+  std::vector<uint32_t> record_words;
+  record_words.reserve(128);
+  if (is_compare_exchange) {
+    if (!append_dynamic_atomic_store_u32_vgpr(
+            record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, success_lane_mask),
+            static_cast<uint16_t>(*options.scratch_vgpr + 3u), slot_vgpr, *options.scratch_vgpr,
+            arch) ||
+        !append_dynamic_atomic_store_u32_vgpr(
+            record_words,
+            atomic_record_base + offsetof(ConSanMoiAtomicRecord, success_lane_mask) +
+                sizeof(uint32_t),
+            static_cast<uint16_t>(*options.scratch_vgpr + 4u), slot_vgpr, *options.scratch_vgpr,
+            arch)) {
+      errors.emplace_back("ConSan MOI atomic record patch could not preserve CAS outcome");
+      return std::nullopt;
+    }
+  }
+  if (derived_owner_word)
+    record_words.push_back(*derived_owner_word);
   // Probe-local owner derivation uses the record-emitter temporary. Preserve
   // it before reserving the event index, which reuses that VGPR.
   if ((derived_owner_vgpr &&
-       !append_store_u32_vgpr(words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, owner_id),
-                              *derived_owner_vgpr, *options.scratch_vgpr, arch)) ||
-      !append_atomic_event_index_store(words, base + offsetof(ConSanMoiReportHeader, event_counter),
-                                       atomic_record_base +
-                                           offsetof(ConSanMoiAtomicRecord, event_index),
-                                       *options.scratch_vgpr, arch) ||
-      !append_store_u32_literal(words, base + offsetof(ConSanMoiReportHeader, atomic_record_count),
-                                record_count, *options.scratch_vgpr, arch) ||
-      !record.materialize_address(atomic_record_base) ||
-      !record.store_workgroup(offsetof(ConSanMoiAtomicRecord, workgroup_x), workgroup_sources.x) ||
-      !record.store_workgroup(offsetof(ConSanMoiAtomicRecord, workgroup_y), workgroup_sources.y) ||
-      !record.store_workgroup(offsetof(ConSanMoiAtomicRecord, workgroup_z), workgroup_sources.z) ||
+       !append_dynamic_atomic_store_u32_vgpr(
+           record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, owner_id),
+           *derived_owner_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+      !append_dynamic_atomic_event_index_store(
+          record_words, base + offsetof(ConSanMoiReportHeader, event_counter),
+          atomic_record_base + offsetof(ConSanMoiAtomicRecord, event_index), slot_vgpr,
+          *options.scratch_vgpr, arch) ||
+      !append_dynamic_atomic_store_workgroup_source(
+          record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, workgroup_x),
+          workgroup_sources.x, slot_vgpr, *options.scratch_vgpr, arch) ||
+      !append_dynamic_atomic_store_workgroup_source(
+          record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, workgroup_y),
+          workgroup_sources.y, slot_vgpr, *options.scratch_vgpr, arch) ||
+      !append_dynamic_atomic_store_workgroup_source(
+          record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, workgroup_z),
+          workgroup_sources.z, slot_vgpr, *options.scratch_vgpr, arch) ||
       (options.moi_owner_vgpr &&
-       !record.store_vgpr(offsetof(ConSanMoiAtomicRecord, owner_id), *options.moi_owner_vgpr)) ||
+       !append_dynamic_atomic_store_u32_vgpr(
+           record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, owner_id),
+           *options.moi_owner_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
       (options.moi_epoch_vgpr &&
-       !record.store_vgpr(offsetof(ConSanMoiAtomicRecord, epoch), *options.moi_epoch_vgpr)) ||
-      !record.store_vgpr(offsetof(ConSanMoiAtomicRecord, atomic_address), address_vgpr) ||
-      !record.store_vgpr(offsetof(ConSanMoiAtomicRecord, atomic_address) + sizeof(uint32_t),
-                         static_cast<uint16_t>(address_vgpr + 1u)) ||
-      !record.store_literal(offsetof(ConSanMoiAtomicRecord, instruction_offset),
-                            static_cast<uint32_t>(candidate.site.text_offset)) ||
-      !record.store_literal(offsetof(ConSanMoiAtomicRecord, kind),
-                            static_cast<uint32_t>(candidate.event_kind)) ||
-      !record.store_literal(offsetof(ConSanMoiAtomicRecord, scope), *candidate.site.raw_scope) ||
-      !record.store_literal(offsetof(ConSanMoiAtomicRecord, semantics),
-                            candidate.site.raw_th.value_or(0u)) ||
-      !record.store_literal(offsetof(ConSanMoiAtomicRecord, operation),
-                            static_cast<uint32_t>(atomic_operation)) ||
-      !record.store_literal(offsetof(ConSanMoiAtomicRecord, outcome),
-                            static_cast<uint32_t>(atomic_outcome)) ||
+       !append_dynamic_atomic_store_u32_vgpr(
+           record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, epoch),
+           *options.moi_epoch_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+      !append_dynamic_atomic_store_u32_vgpr(
+          record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, atomic_address),
+          recorded_address_vgpr, slot_vgpr, *options.scratch_vgpr, arch) ||
+      !append_dynamic_atomic_store_u32_vgpr(
+          record_words,
+          atomic_record_base + offsetof(ConSanMoiAtomicRecord, atomic_address) + sizeof(uint32_t),
+          static_cast<uint16_t>(recorded_address_vgpr + 1u), slot_vgpr, *options.scratch_vgpr,
+          arch) ||
+      !append_dynamic_atomic_store_u32_literal(
+          record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, instruction_offset),
+          static_cast<uint32_t>(candidate.site.text_offset), slot_vgpr, *options.scratch_vgpr,
+          arch) ||
+      !append_dynamic_atomic_store_u32_literal(
+          record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, kind),
+          static_cast<uint32_t>(candidate.event_kind), slot_vgpr, *options.scratch_vgpr, arch) ||
+      !append_dynamic_atomic_store_u32_literal(
+          record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, scope),
+          *candidate.site.raw_scope, slot_vgpr, *options.scratch_vgpr, arch) ||
+      !append_dynamic_atomic_store_u32_literal(
+          record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, semantics),
+          candidate.site.raw_th.value_or(0u), slot_vgpr, *options.scratch_vgpr, arch) ||
+      !append_dynamic_atomic_store_u32_literal(
+          record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, operation),
+          static_cast<uint32_t>(atomic_operation), slot_vgpr, *options.scratch_vgpr, arch) ||
+      !append_dynamic_atomic_store_u32_literal(
+          record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, outcome),
+          static_cast<uint32_t>(atomic_outcome), slot_vgpr, *options.scratch_vgpr, arch) ||
       (is_compare_exchange
-           ? (!record.store_sgpr(offsetof(ConSanMoiAtomicRecord, lane_mask), kRdna4ExecLo) ||
-              !record.store_sgpr(offsetof(ConSanMoiAtomicRecord, lane_mask) + sizeof(uint32_t),
-                                 kRdna4ExecHi) ||
-              !record.store_sgpr(offsetof(ConSanMoiAtomicRecord, success_lane_mask), kRdna4VccLo) ||
-              !record.store_sgpr(offsetof(ConSanMoiAtomicRecord, success_lane_mask) +
-                                     sizeof(uint32_t),
-                                 kRdna4VccHi))
+           ? (!append_dynamic_atomic_store_u32_scalar_src(
+                  record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, lane_mask),
+                  *options.moi_exec_save_sgpr, slot_vgpr, *options.scratch_vgpr, arch) ||
+              !append_dynamic_atomic_store_u32_scalar_src(
+                  record_words,
+                  atomic_record_base + offsetof(ConSanMoiAtomicRecord, lane_mask) +
+                      sizeof(uint32_t),
+                  static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u), slot_vgpr,
+                  *options.scratch_vgpr, arch))
            : false)) {
     errors.emplace_back("ConSan MOI atomic record patch could not encode record stores");
     return std::nullopt;
   }
+
+  const auto wait_store = instrumentation::build_s_wait_flat_store0(arch);
+  const auto restore_exec =
+      instrumentation::build_s_mov_b64(kRdna4ExecLo, *options.moi_exec_save_sgpr, arch);
+  if (!wait_store || !restore_exec) {
+    errors.emplace_back("ConSan MOI atomic record patch could not complete dynamic publication");
+    return std::nullopt;
+  }
+  record_words.push_back(*wait_store);
+  if (record_words.size() > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
+    errors.emplace_back("ConSan MOI atomic record overflow branch is out of range");
+    return std::nullopt;
+  }
+  const auto skip_record =
+      instrumentation::build_s_cbranch_vccz(static_cast<int16_t>(record_words.size()), arch);
+  if (!skip_record) {
+    errors.emplace_back("ConSan MOI atomic record patch could not encode its capacity branch");
+    return std::nullopt;
+  }
+  words.push_back(*skip_record);
+  words.insert(words.end(), record_words.begin(), record_words.end());
+  words.push_back(*restore_exec);
 
   if (!append_restore_moi_special_state(words, options, arch)) {
     errors.emplace_back("ConSan MOI atomic record patch could not restore VCC/SCC");

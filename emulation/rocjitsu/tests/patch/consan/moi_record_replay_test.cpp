@@ -3,9 +3,32 @@
 
 #include "consan_test_support.h"
 #include "rocjitsu/code/patch/gfx1250_instrumentation_builder.h"
+#include "rocjitsu/code/patch/instrumentation_builder.h"
 
 namespace rocjitsu {
 namespace {
+
+std::vector<uint32_t> make_expected_fetch_add_one_words(uint64_t address, uint16_t result_vgpr,
+                                                        uint16_t scratch_vgpr) {
+  std::vector<uint32_t> words;
+  const auto mov_address_lo = build_v_mov_b32_e64_literal(
+      scratch_vgpr, static_cast<uint32_t>(address), ROCJITSU_CODE_ARCH_RDNA4);
+  const auto mov_address_hi =
+      build_v_mov_b32_e64_literal(static_cast<uint16_t>(scratch_vgpr + 1u),
+                                  static_cast<uint32_t>(address >> 32u), ROCJITSU_CODE_ARCH_RDNA4);
+  const auto mov_one = build_v_mov_b32_e64_literal(result_vgpr, 1u, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto atomic_add = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+      scratch_vgpr, result_vgpr, result_vgpr, /*return_old_value=*/true, /*scope=*/2,
+      ROCJITSU_CODE_ARCH_RDNA4);
+  if (!mov_address_lo || !mov_address_hi || !mov_one || !atomic_add)
+    return words;
+  words.insert(words.end(), mov_address_lo->begin(), mov_address_lo->end());
+  words.insert(words.end(), mov_address_hi->begin(), mov_address_hi->end());
+  words.insert(words.end(), mov_one->begin(), mov_one->end());
+  words.insert(words.end(), atomic_add->begin(), atomic_add->end());
+  words.push_back(0xBFC00000u);
+  return words;
+}
 
 TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
@@ -741,8 +764,8 @@ TEST(ConSanMoi, FirstLightProbeWritesOneNativeLdsAccessRecord) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   ConSanOptions options = moi_options();
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 11;
-  options.moi_epoch_vgpr = 12;
+  options.moi_owner_vgpr = 15;
+  options.moi_epoch_vgpr = 16;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
@@ -808,10 +831,10 @@ TEST(ConSanMoi, FirstLightProbeWritesOneNativeLdsAccessRecord) {
       << "the shared high half can also match header-field addresses";
   EXPECT_TRUE(contains_subsequence(
       rewritten_words,
-      make_expected_offset_store_words(offsetof(ConSanMoiAccessRecord, wave_id), 11, 8)));
+      make_expected_offset_store_words(offsetof(ConSanMoiAccessRecord, wave_id), 15, 8)));
   EXPECT_TRUE(contains_subsequence(
       rewritten_words,
-      make_expected_offset_store_words(offsetof(ConSanMoiAccessRecord, epoch), 12, 8)));
+      make_expected_offset_store_words(offsetof(ConSanMoiAccessRecord, epoch), 16, 8)));
   EXPECT_TRUE(contains_subsequence(
       rewritten_words,
       make_expected_offset_store_words(offsetof(ConSanMoiAccessRecord, lds_byte_offset), 0, 8)));
@@ -874,8 +897,8 @@ TEST(ConSanMoi, Cdna4FirstLightProbeEmitsNativeVariableLengthRecipes) {
   const std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words);
   ConSanOptions options = moi_options();
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 11;
-  options.moi_epoch_vgpr = 12;
+  options.moi_owner_vgpr = 15;
+  options.moi_epoch_vgpr = 16;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
@@ -1081,35 +1104,15 @@ TEST(ConSanMoi, DynamicAccessRecordProbeAppendsPerLaneRecords) {
   const std::vector<uint32_t> rewritten_words =
       patched_words_at_file_offset(result, 0x100, result.patches.front().original_size);
 
-  auto make_fetch_add_one = [](uint64_t address, uint16_t result_vgpr, uint16_t scratch_vgpr) {
-    std::vector<uint32_t> words;
-    const auto mov_address_lo = build_v_mov_b32_e64_literal(
-        scratch_vgpr, static_cast<uint32_t>(address), ROCJITSU_CODE_ARCH_RDNA4);
-    const auto mov_address_hi = build_v_mov_b32_e64_literal(
-        static_cast<uint16_t>(scratch_vgpr + 1u), static_cast<uint32_t>(address >> 32u),
-        ROCJITSU_CODE_ARCH_RDNA4);
-    const auto mov_one = build_v_mov_b32_e64_literal(result_vgpr, 1u, ROCJITSU_CODE_ARCH_RDNA4);
-    const auto atomic_add = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
-        scratch_vgpr, result_vgpr, result_vgpr, /*return_old_value=*/true, /*scope=*/2,
-        ROCJITSU_CODE_ARCH_RDNA4);
-    if (!mov_address_lo || !mov_address_hi || !mov_one || !atomic_add)
-      return words;
-    words.insert(words.end(), mov_address_lo->begin(), mov_address_lo->end());
-    words.insert(words.end(), mov_address_hi->begin(), mov_address_hi->end());
-    words.insert(words.end(), mov_one->begin(), mov_one->end());
-    words.insert(words.end(), atomic_add->begin(), atomic_add->end());
-    words.push_back(0xBFC00000u);
-    return words;
-  };
-
   const uint64_t base = *options.moi_report_buffer_address;
   EXPECT_TRUE(contains_subsequence(
       rewritten_words,
-      make_fetch_add_one(base + offsetof(ConSanMoiReportHeader, access_record_count),
-                         /*result_vgpr=*/18, /*scratch_vgpr=*/16)));
+      make_expected_fetch_add_one_words(base + offsetof(ConSanMoiReportHeader, access_record_count),
+                                        /*result_vgpr=*/18, /*scratch_vgpr=*/16)));
   EXPECT_TRUE(contains_subsequence(
-      rewritten_words, make_fetch_add_one(base + offsetof(ConSanMoiReportHeader, event_counter),
-                                          /*result_vgpr=*/21, /*scratch_vgpr=*/16)));
+      rewritten_words,
+      make_expected_fetch_add_one_words(base + offsetof(ConSanMoiReportHeader, event_counter),
+                                        /*result_vgpr=*/21, /*scratch_vgpr=*/16)));
 
   const auto compare_capacity =
       build_v_cmp_gt_u32_e32_vcc(vector_source_vgpr(21), /*vsrc1=*/18, ROCJITSU_CODE_ARCH_RDNA4);
@@ -1312,8 +1315,8 @@ TEST(ConSanMoi, FirstLightProbeStoresDescriptorWorkgroupIds) {
 
   ConSanOptions options = moi_options();
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 11;
-  options.moi_epoch_vgpr = 12;
+  options.moi_owner_vgpr = 15;
+  options.moi_epoch_vgpr = 16;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
@@ -2811,8 +2814,8 @@ TEST(ConSanMoi, AtomicRecordPatchTrampolinesFlatAtomicAndWritesRecord) {
   ConSanOptions options = moi_options();
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 11;
-  options.moi_epoch_vgpr = 12;
+  options.moi_owner_vgpr = 15;
+  options.moi_epoch_vgpr = 16;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -2824,13 +2827,14 @@ TEST(ConSanMoi, AtomicRecordPatchTrampolinesFlatAtomicAndWritesRecord) {
   ASSERT_EQ(result.kernels.front().atomic_sites.size(), 1u);
   const auto atomic_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord, &ConSanPatchInfo::kind);
-  ASSERT_NE(atomic_patch, result.patches.end());
+  ASSERT_NE(atomic_patch, result.patches.end())
+      << testing::PrintToString(result.warnings) << testing::PrintToString(result.errors)
+      << testing::PrintToString(result.resource_plans);
   EXPECT_EQ(atomic_patch->anchor_offset, 12u);
   EXPECT_EQ(atomic_patch->original_size, 3u * sizeof(uint32_t));
-  // Non-CAS RMWs have no meaningful success mask. Keep the record body compact
-  // enough for append-cave reachability instead of redundantly writing four
-  // zero mask words into an initialized report slot.
-  EXPECT_LT(atomic_patch->trampoline_size, 700u);
+  // Non-CAS RMWs have no meaningful success mask. Keep the dynamically
+  // indexed record body within a bounded append-cave footprint.
+  EXPECT_LT(atomic_patch->trampoline_size, 1000u);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -2869,46 +2873,74 @@ TEST(ConSanMoi, AtomicRecordPatchTrampolinesFlatAtomicAndWritesRecord) {
       options.moi_report_buffer_size, /*include_barriers=*/false, /*include_atomics=*/true,
       /*include_fences=*/true);
   const uint64_t atomic_record_base = base + layout.atomic_records_offset;
-  EXPECT_TRUE(contains_subsequence(
+  const std::vector<uint32_t> reserve_record = make_expected_fetch_add_one_words(
+      base + offsetof(ConSanMoiReportHeader, atomic_record_count),
+      static_cast<uint16_t>(*options.scratch_vgpr + 2u), *options.scratch_vgpr);
+  EXPECT_TRUE(contains_subsequence(trampoline_words, reserve_record));
+  EXPECT_FALSE(contains_subsequence(
       trampoline_words,
       make_expected_literal_store_words(base + offsetof(ConSanMoiReportHeader, atomic_record_count),
                                         1u, *options.scratch_vgpr)));
-  const auto materialize_record = build_v_mov_b32_e64_literal(
-      *options.scratch_vgpr, static_cast<uint32_t>(atomic_record_base), ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_TRUE(materialize_record);
-  EXPECT_TRUE(contains_subsequence(trampoline_words, *materialize_record));
-  const auto expect_vgpr = [&](uint32_t offset, uint16_t value_vgpr) {
-    EXPECT_TRUE(contains_subsequence(
-        trampoline_words,
-        make_expected_offset_store_words(offset, value_vgpr, *options.scratch_vgpr)));
+  const auto mov_capacity = build_v_mov_b32_e64_literal(
+      *options.scratch_vgpr, layout.atomic_record_capacity, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto compare_capacity = build_v_cmp_gt_u32_e32_vcc(
+      vector_source_vgpr(*options.scratch_vgpr), static_cast<uint16_t>(*options.scratch_vgpr + 2u),
+      ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(mov_capacity && compare_capacity && result.resolved_moi_exec_save_sgpr);
+  EXPECT_TRUE(contains_subsequence(trampoline_words, *mov_capacity));
+  EXPECT_NE(std::find(trampoline_words.begin(), trampoline_words.end(), *compare_capacity),
+            trampoline_words.end());
+  const auto narrow_exec = build_s_and_saveexec_b64(*result.resolved_moi_exec_save_sgpr,
+                                                    kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto restore_exec =
+      build_s_mov_b64(kRdna4ExecLo, *result.resolved_moi_exec_save_sgpr, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(narrow_exec && restore_exec);
+  EXPECT_NE(std::find(trampoline_words.begin(), trampoline_words.end(), *narrow_exec),
+            trampoline_words.end());
+  EXPECT_NE(std::find(trampoline_words.begin(), trampoline_words.end(), *restore_exec),
+            trampoline_words.end());
+  const auto lane_rank_lo =
+      build_v_mbcnt_lo_u32_b32(*options.scratch_vgpr, /*src0=*/0xC1, scalar_positive_inline_u32(0),
+                               ROCJITSU_CODE_ARCH_RDNA4);
+  const auto lane_rank_hi =
+      build_v_mbcnt_hi_u32_b32(*options.scratch_vgpr, /*src0=*/0xC1,
+                               vector_source_vgpr(*options.scratch_vgpr), ROCJITSU_CODE_ARCH_RDNA4);
+  const auto select_first_lane = build_v_cmp_eq_u32_e32_vcc(
+      scalar_positive_inline_u32(0), *options.scratch_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(lane_rank_lo && lane_rank_hi && select_first_lane);
+  EXPECT_TRUE(contains_subsequence(trampoline_words, *lane_rank_lo));
+  EXPECT_TRUE(contains_subsequence(trampoline_words, *lane_rank_hi));
+  const auto selected =
+      std::find(trampoline_words.begin(), trampoline_words.end(), *select_first_lane);
+  const auto reserved = std::search(trampoline_words.begin(), trampoline_words.end(),
+                                    reserve_record.begin(), reserve_record.end());
+  ASSERT_NE(selected, trampoline_words.end());
+  ASSERT_NE(reserved, trampoline_words.end());
+  EXPECT_LT(selected, reserved);
+
+  const auto expect_dynamic_field_address = [&](uint32_t offset) {
+    const auto materialize = build_v_mov_b32_e64_literal(
+        *options.scratch_vgpr, static_cast<uint32_t>(atomic_record_base + offset),
+        ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_TRUE(materialize);
+    EXPECT_TRUE(contains_subsequence(trampoline_words, *materialize));
   };
-  const auto expect_literal = [&](uint32_t offset, uint32_t value) {
-    EXPECT_TRUE(contains_subsequence(trampoline_words,
-                                     make_expected_literal_offset_store_words(
-                                         offset, value, *options.scratch_vgpr,
-                                         static_cast<uint16_t>(*options.scratch_vgpr + 2u))));
-  };
-  expect_vgpr(offsetof(ConSanMoiAtomicRecord, owner_id), *options.moi_owner_vgpr);
-  expect_vgpr(offsetof(ConSanMoiAtomicRecord, epoch), *options.moi_epoch_vgpr);
-  expect_vgpr(offsetof(ConSanMoiAtomicRecord, atomic_address), 2);
-  expect_vgpr(offsetof(ConSanMoiAtomicRecord, atomic_address) + sizeof(uint32_t), 3);
-  expect_literal(offsetof(ConSanMoiAtomicRecord, kind),
-                 static_cast<uint32_t>(ConSanMoiAtomicEventKind::Release));
-  expect_literal(offsetof(ConSanMoiAtomicRecord, scope), 2u);
-  expect_literal(offsetof(ConSanMoiAtomicRecord, operation),
-                 static_cast<uint32_t>(ConSanMoiAtomicOperation::Rmw));
-  expect_literal(offsetof(ConSanMoiAtomicRecord, outcome),
-                 static_cast<uint32_t>(ConSanMoiAtomicOutcome::NotApplicable));
-  EXPECT_FALSE(contains_subsequence(
-      trampoline_words,
-      make_expected_offset_store_words(offsetof(ConSanMoiAtomicRecord, lane_mask),
-                                       static_cast<uint16_t>(*options.scratch_vgpr + 2u),
-                                       *options.scratch_vgpr)));
-  EXPECT_FALSE(contains_subsequence(
-      trampoline_words,
-      make_expected_offset_store_words(offsetof(ConSanMoiAtomicRecord, success_lane_mask),
-                                       static_cast<uint16_t>(*options.scratch_vgpr + 2u),
-                                       *options.scratch_vgpr)));
+  expect_dynamic_field_address(offsetof(ConSanMoiAtomicRecord, owner_id));
+  expect_dynamic_field_address(offsetof(ConSanMoiAtomicRecord, epoch));
+  expect_dynamic_field_address(offsetof(ConSanMoiAtomicRecord, atomic_address));
+  expect_dynamic_field_address(offsetof(ConSanMoiAtomicRecord, kind));
+  expect_dynamic_field_address(offsetof(ConSanMoiAtomicRecord, operation));
+  expect_dynamic_field_address(offsetof(ConSanMoiAtomicRecord, outcome));
+  EXPECT_EQ(
+      std::ranges::count(trampoline_words,
+                         build_v_mov_b32_e32(static_cast<uint16_t>(*options.scratch_vgpr + 5u),
+                                             vector_source_vgpr(2), ROCJITSU_CODE_ARCH_RDNA4)),
+      1u);
+  EXPECT_EQ(
+      std::ranges::count(trampoline_words,
+                         build_v_mov_b32_e32(static_cast<uint16_t>(*options.scratch_vgpr + 6u),
+                                             vector_source_vgpr(3), ROCJITSU_CODE_ARCH_RDNA4)),
+      1u);
 }
 
 TEST(ConSanMoi, Gfx1250AtomicRecordPatchesOrderedFlatAtomic) {
@@ -2924,8 +2956,8 @@ TEST(ConSanMoi, Gfx1250AtomicRecordPatchesOrderedFlatAtomic) {
   ConSanOptions options = moi_options();
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 13;
-  options.moi_epoch_vgpr = 14;
+  options.moi_owner_vgpr = 15;
+  options.moi_epoch_vgpr = 16;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -3037,8 +3069,8 @@ TEST(ConSanMoi, Gfx1250IsolatedLdsReleaseIsRetainedWithAccessReplay) {
   ConSanOptions options = moi_options();
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 13;
-  options.moi_epoch_vgpr = 14;
+  options.moi_owner_vgpr = 15;
+  options.moi_epoch_vgpr = 16;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0, 0, 1, 1);
   options.max_patches = 2;
@@ -3324,8 +3356,8 @@ TEST(ConSanMoi, AtomicRecordUsesLocalIndirectIslandForFarAppendedHelper) {
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 30;
-  options.moi_owner_vgpr = 14;
-  options.moi_epoch_vgpr = 15;
+  options.moi_owner_vgpr = 16;
+  options.moi_epoch_vgpr = 17;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -3355,8 +3387,8 @@ TEST(ConSanMoi, AtomicRecordKeepsAcquireResultBeforeReporting) {
   options.moi_track_atomics = true;
   options.max_patches = 2;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 13;
-  options.moi_epoch_vgpr = 14;
+  options.moi_owner_vgpr = 15;
+  options.moi_epoch_vgpr = 16;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0, 0, 2, 2);
 
@@ -3392,8 +3424,8 @@ TEST(ConSanMoi, AtomicRecordKeepsReturningReleaseAtEndOfProbe) {
   ConSanOptions options = moi_options();
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 11;
-  options.moi_epoch_vgpr = 12;
+  options.moi_owner_vgpr = 15;
+  options.moi_epoch_vgpr = 16;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -3423,8 +3455,8 @@ TEST(ConSanMoi, FenceRecordPatchCardinalityIsBoundedAndPrefixComplete) {
   options.moi_track_atomics = true;
   options.max_patches = 1;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 11;
-  options.moi_epoch_vgpr = 12;
+  options.moi_owner_vgpr = 15;
+  options.moi_epoch_vgpr = 16;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0, 0, 2, 2);
 
@@ -3585,8 +3617,8 @@ TEST(ConSanMoi, AtomicRecordMarksCompareExchangeOutcomeUnavailableUntilCaptured)
   ConSanOptions options = moi_options();
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 11;
-  options.moi_epoch_vgpr = 12;
+  options.moi_owner_vgpr = 15;
+  options.moi_epoch_vgpr = 16;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -3596,7 +3628,9 @@ TEST(ConSanMoi, AtomicRecordMarksCompareExchangeOutcomeUnavailableUntilCaptured)
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   const auto atomic_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord, &ConSanPatchInfo::kind);
-  ASSERT_NE(atomic_patch, result.patches.end());
+  ASSERT_NE(atomic_patch, result.patches.end())
+      << testing::PrintToString(result.warnings) << testing::PrintToString(result.errors)
+      << testing::PrintToString(result.resource_plans);
   const ConSanPatchInfo &patch = *atomic_patch;
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -3605,21 +3639,22 @@ TEST(ConSanMoi, AtomicRecordMarksCompareExchangeOutcomeUnavailableUntilCaptured)
   const ConSanMoiReportBufferLayout layout = consan_moi_report_buffer_layout_for_bytes(
       options.moi_report_buffer_size, /*include_barriers=*/false, /*include_atomics=*/true,
       /*include_fences=*/true);
-  const uint64_t record = *options.moi_report_buffer_address + layout.atomic_records_offset;
-  const auto materialize_record = build_v_mov_b32_e64_literal(
-      *options.scratch_vgpr, static_cast<uint32_t>(record), ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_TRUE(materialize_record);
-  EXPECT_TRUE(contains_subsequence(words, *materialize_record));
-  const auto expect_literal = [&](uint32_t offset, uint32_t value) {
-    EXPECT_TRUE(
-        contains_subsequence(words, make_expected_literal_offset_store_words(
-                                        offset, value, *options.scratch_vgpr,
-                                        static_cast<uint16_t>(*options.scratch_vgpr + 2u))));
+  const uint64_t base = *options.moi_report_buffer_address;
+  const uint64_t record = base + layout.atomic_records_offset;
+  EXPECT_TRUE(contains_subsequence(
+      words, make_expected_fetch_add_one_words(
+                 base + offsetof(ConSanMoiReportHeader, atomic_record_count),
+                 static_cast<uint16_t>(*options.scratch_vgpr + 2u), *options.scratch_vgpr)));
+  const auto expect_dynamic_field_address = [&](uint32_t offset) {
+    const auto materialize = build_v_mov_b32_e64_literal(
+        *options.scratch_vgpr, static_cast<uint32_t>(record + offset), ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_TRUE(materialize);
+    EXPECT_TRUE(contains_subsequence(words, *materialize));
   };
-  expect_literal(offsetof(ConSanMoiAtomicRecord, operation),
-                 static_cast<uint32_t>(ConSanMoiAtomicOperation::CompareExchange));
-  expect_literal(offsetof(ConSanMoiAtomicRecord, outcome),
-                 static_cast<uint32_t>(ConSanMoiAtomicOutcome::Unavailable));
+  expect_dynamic_field_address(offsetof(ConSanMoiAtomicRecord, operation));
+  expect_dynamic_field_address(offsetof(ConSanMoiAtomicRecord, outcome));
+  expect_dynamic_field_address(offsetof(ConSanMoiAtomicRecord, lane_mask));
+  expect_dynamic_field_address(offsetof(ConSanMoiAtomicRecord, success_lane_mask));
   const auto compare = build_v_cmp_eq_u32_e32_vcc(vector_source_vgpr(/*compare_vgpr=*/2),
                                                   /*old_value_vgpr=*/0, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(compare);
@@ -3633,12 +3668,30 @@ TEST(ConSanMoi, AtomicRecordMarksCompareExchangeOutcomeUnavailableUntilCaptured)
   ASSERT_NE(guest, words.end());
   ASSERT_NE(outcome_compare, words.end());
   EXPECT_LT(guest + original_cas->size(), outcome_compare);
-  EXPECT_TRUE(contains_subsequence(
-      words, make_expected_scalar_offset_store_words(offsetof(ConSanMoiAtomicRecord, lane_mask),
-                                                     kRdna4ExecLo, *options.scratch_vgpr)));
-  EXPECT_TRUE(contains_subsequence(words, make_expected_scalar_offset_store_words(
-                                              offsetof(ConSanMoiAtomicRecord, success_lane_mask),
-                                              kRdna4VccLo, *options.scratch_vgpr)));
+  const uint32_t capture_success_lo = build_v_mov_b32_e32(
+      static_cast<uint16_t>(*options.scratch_vgpr + 3u), kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+  const uint32_t capture_success_hi =
+      build_v_mov_b32_e32(static_cast<uint16_t>(*options.scratch_vgpr + 4u), kRdna4VccLo + 1u,
+                          ROCJITSU_CODE_ARCH_RDNA4);
+  const auto captured_lo = std::find(outcome_compare, words.end(), capture_success_lo);
+  const auto captured_hi = std::find(outcome_compare, words.end(), capture_success_hi);
+  ASSERT_NE(captured_lo, words.end());
+  ASSERT_NE(captured_hi, words.end());
+  EXPECT_LT(outcome_compare, captured_lo);
+  EXPECT_LT(captured_lo, captured_hi);
+  const auto store_success_lo = instrumentation::build_flat_store_b32(
+      *options.scratch_vgpr, static_cast<uint16_t>(*options.scratch_vgpr + 3u),
+      ROCJITSU_CODE_ARCH_RDNA4);
+  const auto store_success_hi = instrumentation::build_flat_store_b32(
+      *options.scratch_vgpr, static_cast<uint16_t>(*options.scratch_vgpr + 4u),
+      ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(store_success_lo && store_success_hi);
+  EXPECT_NE(
+      std::search(captured_hi, words.end(), store_success_lo->begin(), store_success_lo->end()),
+      words.end());
+  EXPECT_NE(
+      std::search(captured_hi, words.end(), store_success_hi->begin(), store_success_hi->end()),
+      words.end());
 }
 
 TEST(ConSanMoi, AtomicRecordRejectsNoReturnCasWithTypedOutcomeReason) {
@@ -3714,7 +3767,7 @@ TEST(ConSanMoi, AtomicRecordForcedSpillUsesPlannedPrivateWindow) {
     return item.kind == ConSanPatchKind::TrampolineMoiAtomicRecord;
   });
   ASSERT_NE(patch, result.patches.end());
-  EXPECT_EQ(patch->spilled_vgpr_count, 3u);
+  EXPECT_EQ(patch->spilled_vgpr_count, 7u);
   EXPECT_GT(patch->required_private_segment_size, 0u);
   const auto fence_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
     return item.kind == ConSanPatchKind::TrampolineMoiFenceRecord;
@@ -3734,7 +3787,7 @@ TEST(ConSanMoi, AtomicRecordForcedSpillUsesPlannedPrivateWindow) {
   }));
   EXPECT_EQ(result.resource_plan_summary.spill_plans, 2u);
   EXPECT_EQ(result.resource_plan_summary.emitted_spill_patches, 2u);
-  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 24u);
+  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 40u);
 }
 
 TEST(ConSanMoi, Cdna4AtomicRecordForcedSpillUsesNativePrivateWindow) {
@@ -3778,20 +3831,20 @@ TEST(ConSanMoi, Cdna4AtomicRecordForcedSpillUsesNativePrivateWindow) {
   });
   ASSERT_NE(patch, result.patches.end()) << "patches=" << testing::PrintToString(result.patches)
                                          << " warnings=" << testing::PrintToString(result.warnings);
-  EXPECT_EQ(patch->spilled_vgpr_count, 3u);
-  EXPECT_EQ(patch->required_private_segment_size, 16u);
+  EXPECT_EQ(patch->spilled_vgpr_count, 7u);
+  EXPECT_EQ(patch->required_private_segment_size, 32u);
   const auto plan = std::ranges::find_if(result.resource_plans, [](const auto &item) {
     return item.site_kind == ConSanResourceSiteKind::Atomic;
   });
   ASSERT_NE(plan, result.resource_plans.end());
   EXPECT_EQ(plan->source, ConSanRegisterAllocationSource::SpillRequired);
   EXPECT_EQ(plan->reason, ConSanRegisterPlanReason::None);
-  EXPECT_EQ(plan->scratch_vgpr_count, 3u);
+  EXPECT_EQ(plan->scratch_vgpr_count, 7u);
   ASSERT_TRUE(plan->scratch_vgpr);
   EXPECT_EQ(*plan->scratch_vgpr % 2u, 0u);
   EXPECT_EQ(result.resource_plan_summary.spill_plans, 3u);
   EXPECT_EQ(result.resource_plan_summary.emitted_spill_patches, 2u);
-  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 24u);
+  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 40u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
                                &ConSanPatchInfo::kind),
             1u);
