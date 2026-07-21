@@ -809,15 +809,17 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPU(void *MemoryAddress,
 
   HSAuint64 NumberOfNodes = 1;
   HSAuint32 NodeArray[] = {dxg_runtime->default_node};
-  HsaMemMapFlags MemMapFlags;
-  MemMapFlags.Value = 0;
+  HsaMemFlags MemFlags;
+  MemFlags.Value = 0;
+  MemFlags.ui32.CoarseGrain = 1;
 
   return hsaKmtMapMemoryToGPUNodes(MemoryAddress, MemorySizeInBytes, AlternateVAGPU,
-    MemMapFlags, NumberOfNodes, NodeArray);
+    MemFlags, NumberOfNodes, NodeArray);
 }
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
     void *MemoryAddress, HSAuint64 MemorySizeInBytes, HSAuint64 *AlternateVAGPU,
-    HsaMemMapFlags MemMapFlags, HSAuint64 NumberOfNodes, HSAuint32 *NodeArray) {
+    HsaMemFlags MemFlags, HSAuint64 NumberOfNodes, HSAuint32 *NodeArray) {
   CHECK_DXG_OPEN();
 
   if (!MemoryAddress || !AlternateVAGPU) {
@@ -900,7 +902,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
   create_info.size = aligned_size;
   create_info.user_ptr = aligned_ptr;
   // create_info.mem_flags = 0 means coarse grain by default
-  if (MemMapFlags.ui32.CachePolicy == HSA_CACHING_NONCACHED) {
+  if (!MemFlags.ui32.CoarseGrain) {
     create_info.mem_flags = Wkmi::kFineGrain;
   }
   auto code = dev->CreateGpuMemory(create_info, &gpu_mem);

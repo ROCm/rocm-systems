@@ -80,14 +80,12 @@ MemoryRegion::MemoryRegion(bool fine_grain, bool kernarg, bool full_profile,
   assert(!(fine_grain && extended_scope_fine_grain));
 
   mem_flag_.Value = 0;
-  map_flag_.Value = 0;
   static const HSAuint64 kGpuVmSize = (1ULL << 40);
 
   // Bind the memory region based on whether it is
   // coarse or fine grain or extended scope fine grain.
   mem_flag_.ui32.CoarseGrain = (fine_grain || extended_scope_fine_grain) ? 0 : 1;
-  map_flag_.ui32.CachePolicy =
-      (fine_grain || extended_scope_fine_grain) ? HSA_CACHING_NONCACHED : HSA_CACHING_CACHED;
+
   // Extended scope fine-grained memory: Device scope atomics are promoted
   // to system scope atomics. Non-compliant systems may require the
   // application to perform device-specific actions, like HDP flushes,
@@ -517,14 +515,14 @@ hsa_status_t MemoryRegion::AllowAccess(uint32_t num_agents,
     whitelist_nodes.push_back(owner()->node_id());
   }
 
-  HsaMemMapFlags map_flag = map_flag_;
-  map_flag.ui32.HostAccess |= (cpu_in_list) ? 1 : 0;
+  HsaMemFlags mem_flags = mem_flag_;
+  mem_flags.ui32.HostAccess |= (cpu_in_list) ? 1 : 0;
 
   {  // Sequence with pointer info since queries to other fragments of the block may be adjusted by
      // this call.
     std::shared_lock<std::shared_mutex> lock(core::Runtime::runtime_singleton_->memory_lock_);
     uint64_t alternate_va = 0;
-    if (owner()->driver().MakeMemoryResident(ptr, size, &alternate_va, &map_flag,
+    if (owner()->driver().MakeMemoryResident(ptr, size, &alternate_va, &mem_flags,
                                              whitelist_nodes.size(),
                                              whitelist_nodes.data()) != HSA_STATUS_SUCCESS) {
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -601,7 +599,7 @@ hsa_status_t MemoryRegion::Lock(uint32_t num_agents, const hsa_agent_t* agents,
   if (owner()->driver().RegisterMemory(host_ptr, size, local_mem_flag) ==
       HSA_STATUS_SUCCESS) {
     uint64_t alternate_va = 0;
-    if (owner()->driver().MakeMemoryResident(host_ptr, size, &alternate_va, &map_flag_,
+    if (owner()->driver().MakeMemoryResident(host_ptr, size, &alternate_va, &local_mem_flag,
                                              whitelist_nodes.size(),
                                              whitelist_nodes.data()) == HSA_STATUS_SUCCESS) {
       if (alternate_va != 0) {
