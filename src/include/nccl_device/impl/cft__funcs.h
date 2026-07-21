@@ -379,7 +379,7 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::submit(Coop coop) {
                  :
                  : "r"(nccl::cft::internal::smemAddr(this->cftSmem)), "r"(this->txCount)
                  : "memory");
-    this->txCount=0;
+    this->txCount = 0;
   }
 #else
   (void)coop;
@@ -431,6 +431,11 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::put(Coop coop, ncclCftLeId leId, size_t l
 #if NCCL_CFT_ENABLE
   coop.sync();
   if (nccl::cft::internal::elected(coop)) {
+#ifdef NCCL_DEVICE_CFT_ENABLE_DEBUG
+    assert(reinterpret_cast<uintptr_t>(smemSource) % 16 == 0 &&
+           "ncclCft::put requires 'smemSource' to be 16 bytes aligned.");
+    assert(bytes % 16 == 0 && "ncclCft::put requires 'bytes' to be a multiple of 16.");
+#endif
     uint32_t srcSmemPtr = nccl::cft::internal::smemAddr(smemSource);
     uint32_t mbarPtr = nccl::cft::internal::smemAddr(this->cftSmem);
     asm volatile(
@@ -457,6 +462,11 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::putCpMask(Coop coop, ncclCftLeId leId, si
 #if NCCL_CFT_ENABLE
   coop.sync();
   if (nccl::cft::internal::elected(coop)) {
+#ifdef NCCL_DEVICE_CFT_ENABLE_DEBUG
+    assert(reinterpret_cast<uintptr_t>(smemSource) % 16 == 0 &&
+           "ncclCft::putCpMask requires 'smemSource' to be 16 bytes aligned.");
+    assert(bytes % 16 == 0 && "ncclCft::putCpMask requires 'bytes' to be a multiple of 16.");
+#endif
     uint32_t srcSmemPtr = nccl::cft::internal::smemAddr(smemSource);
     uint32_t mbarPtr = nccl::cft::internal::smemAddr(this->cftSmem);
     asm volatile("fabric.try_put.async.shared::cta.mbarrier::complete_tx::16B.mbarrier::report::fabric.cp_mask."
@@ -483,6 +493,11 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::putMultimem(Coop coop, ncclCftLeId leId, 
 #if NCCL_CFT_ENABLE
   coop.sync();
   if (nccl::cft::internal::elected(coop)) {
+#ifdef NCCL_DEVICE_CFT_ENABLE_DEBUG
+    assert(reinterpret_cast<uintptr_t>(smemSource) % 16 == 0 &&
+           "ncclCft::putMultimem requires 'smemSource' to be 16 bytes aligned.");
+    assert(bytes % 16 == 0 && "ncclCft::putMultimem requires 'bytes' to be a multiple of 16.");
+#endif
     uint32_t srcSmemPtr = nccl::cft::internal::smemAddr(smemSource);
     uint32_t mbarPtr = nccl::cft::internal::smemAddr(this->cftSmem);
     asm volatile(
@@ -509,6 +524,11 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::putMultimemCpMask(Coop coop, ncclCftLeId 
 #if NCCL_CFT_ENABLE
   coop.sync();
   if (nccl::cft::internal::elected(coop)) {
+#ifdef NCCL_DEVICE_CFT_ENABLE_DEBUG
+    assert(reinterpret_cast<uintptr_t>(smemSource) % 16 == 0 &&
+           "ncclCft::putMultimemCpMask requires 'smemSource' to be 16 bytes aligned.");
+    assert(bytes % 16 == 0 && "ncclCft::putMultimemCpMask requires 'bytes' to be a multiple of 16.");
+#endif
     uint32_t srcSmemPtr = nccl::cft::internal::smemAddr(smemSource);
     uint32_t mbarPtr = nccl::cft::internal::smemAddr(this->cftSmem);
     asm volatile(
@@ -536,6 +556,11 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::get(Coop coop, ncclCftLeId leId, size_t l
 #if NCCL_CFT_ENABLE
   coop.sync();
   if (nccl::cft::internal::elected(coop)) {
+#ifdef NCCL_DEVICE_CFT_ENABLE_DEBUG
+    assert(reinterpret_cast<uintptr_t>(smemDestination) % 16 == 0 &&
+           "ncclCft::get requires 'smemDestination' to be 16 bytes aligned.");
+    assert(bytes % 16 == 0 && "ncclCft::get requires 'bytes' to be a multiple of 16.");
+#endif
     uint32_t dstSmemPtr = nccl::cft::internal::smemAddr(smemDestination);
     uint32_t mbarPtr = nccl::cft::internal::smemAddr(this->cftSmem);
     asm volatile(
@@ -563,6 +588,11 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::red(Coop coop, ncclCftLeId leId, size_t l
 #if NCCL_CFT_ENABLE
   coop.sync();
   if (nccl::cft::internal::elected(coop)) {
+#ifdef NCCL_DEVICE_CFT_ENABLE_DEBUG
+    assert(reinterpret_cast<uintptr_t>(smemSource) % 16 == 0 &&
+           "ncclCft::red requires 'smemSource' to be 16 bytes aligned.");
+    assert(bytes % 16 == 0 && "ncclCft::red requires 'bytes' to be a multiple of 16.");
+#endif
     nccl::cft::internal::Red<RedOp>::red(leId, leOffset, smemSource, bytes, this->cftSmem);
     this->txCount += (bytes / 16);
   }
@@ -585,6 +615,11 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::redCpMask(Coop coop, ncclCftLeId leId, si
 #if NCCL_CFT_ENABLE
   coop.sync();
   if (nccl::cft::internal::elected(coop)) {
+#ifdef NCCL_DEVICE_CFT_ENABLE_DEBUG
+    assert(reinterpret_cast<uintptr_t>(smemSource) % 16 == 0 &&
+           "ncclCft::redCpMask requires 'smemSource' to be 16 bytes aligned.");
+    assert(bytes % 16 == 0 && "ncclCft::redCpMask requires 'bytes' to be a multiple of 16.");
+#endif
     nccl::cft::internal::Red<RedOp>::redCpMask(leId, leOffset, smemSource, bytes, this->cftSmem, cpMask);
     this->txCount += (bytes / 16);
   }
@@ -608,6 +643,11 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::redMultimem(Coop coop, ncclCftLeId leId, 
 #if NCCL_CFT_ENABLE
   coop.sync();
   if (nccl::cft::internal::elected(coop)) {
+#ifdef NCCL_DEVICE_CFT_ENABLE_DEBUG
+    assert(reinterpret_cast<uintptr_t>(smemSource) % 16 == 0 &&
+           "ncclCft::redMultimem requires 'smemSource' to be 16 bytes aligned.");
+    assert(bytes % 16 == 0 && "ncclCft::redMultimem requires 'bytes' to be a multiple of 16.");
+#endif
     nccl::cft::internal::Red<RedOp>::redMultimem(leId, leOffset, smemSource, bytes, this->cftSmem);
     this->txCount += (bytes / 16);
   }
@@ -630,6 +670,11 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::redMultimemCpMask(Coop coop, ncclCftLeId 
 #if NCCL_CFT_ENABLE
   coop.sync();
   if (nccl::cft::internal::elected(coop)) {
+#ifdef NCCL_DEVICE_CFT_ENABLE_DEBUG
+    assert(reinterpret_cast<uintptr_t>(smemSource) % 16 == 0 &&
+           "ncclCft::redMultimemCpMask requires 'smemSource' to be 16 bytes aligned.");
+    assert(bytes % 16 == 0 && "ncclCft::redMultimemCpMask requires 'bytes' to be a multiple of 16.");
+#endif
     nccl::cft::internal::Red<RedOp>::redMultimemCpMask(leId, leOffset, smemSource, bytes, this->cftSmem, cpMask);
     this->txCount += (bytes / 16);
   }
@@ -653,6 +698,11 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::pullRed(Coop coop, ncclCftLeId leId, size
 #if NCCL_CFT_ENABLE
   coop.sync();
   if (nccl::cft::internal::elected(coop)) {
+#ifdef NCCL_DEVICE_CFT_ENABLE_DEBUG
+    assert(reinterpret_cast<uintptr_t>(smemDestination) % 16 == 0 &&
+           "ncclCft::pullRed requires 'smemDestination' to be 16 bytes aligned.");
+    assert(bytes % 16 == 0 && "ncclCft::pullRed requires 'bytes' to be a multiple of 16.");
+#endif
     nccl::cft::internal::Red<RedOp>::pullred(leId, leOffset, smemDestination, bytes, this->cftSmem);
     this->txCount += bytes;
   }
