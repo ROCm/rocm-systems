@@ -130,7 +130,7 @@ flowchart TD
     XP3A["XP3A DONE<br/>SuperCollider scalar spill plus bidirectional continuation<br/>synthetic exact; real relay capacity bounded"]
     XP3D["XP3D DONE<br/>SuperCollider site-paired spill continuations recover<br/>all 85 rejected top-k accesses end to end"]
     XP3E["XP3E DONE<br/>top-k SC complete clean acceptance;<br/>160,956/160,956 accesses"]
-    XP3F["XP3F ACTIVE<br/>top-k SC paired and reviewed-fault refresh<br/>at frozen revision"]
+    XP3F["XP3F DONE<br/>top-k SC clean, paired, inventory, and reviewed fault<br/>green at frozen revision"]
     XP3B["XP3B DONE<br/>torch.sort Sampled clean plus paired accepted;<br/>two reviewed selectors remain noncausal"]
     XP3C["XP3C DONE<br/>torch.sort Sampled clean, paired, inventory, and<br/>reviewed noncausal fault bundle green"]
     XP9["XP9 DONE<br/>norm plus softmax Record/Replay clean, paired,<br/>and reviewed-fault bundle green"]
@@ -373,7 +373,7 @@ flowchart TD
   class XP3A done
   class XP3D done
   class XP3E done
-  class XP3F active
+  class XP3F done
   class XP5S,XP1A done
   class XP3C done
   class G0,V9,XP2D,XT2C2,XT2C3,XT3E,XT3I,XF,XG todo
@@ -424,6 +424,19 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP3F is DONE/green.  At clean revision `e60b5f0239`, paired
+  artifact `consan-green-expansion-20260721-pytorch-topk-sc-overhead-complete-178`
+  repeats both exact FP64/BF16 oracles with complete 160,956/160,956 access
+  coverage and measures 903.198x FP64 / 1.376x BF16 slowdown.  Fresh inventory
+  artifact `...-inventory-complete-179` freezes the selector set.  The first
+  precommitted fault in artifact `...-sc-fault-complete-181` correctly remains
+  rejected because its exact oracle passed instead of the frozen expected
+  failure.  Before another observation, that independent evidence justified a
+  fresh pass-oracle/no-diagnosis contract for the next double-gather barrier;
+  artifact `...-sc-fault-complete-182` then applies it exactly once, matches
+  the frozen outcome, retains complete surviving analysis, and passes target
+  health before and after.  The P0 top-k SuperCollider cell is green.
 
 - 2026-07-21: XP3E is DONE/green and XP3F is ACTIVE/blue.  One-repetition
   artifact `consan-green-expansion-20260721-pytorch-topk-sc-all-supported-177`
