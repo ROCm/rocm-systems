@@ -1132,7 +1132,7 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
   site.width_bits = 32;
   site.addr_vgpr = 2;
   site.data_vgpr = 4;
-  site.raw_saddr = 0x7c;
+  site.raw_saddr = rdna4::OPR_SREG_NULL;
   site.raw_ioffset = 0;
   site.raw_scope = 2;
   site.raw_th = 0;
@@ -1235,8 +1235,8 @@ TEST(ConSanMoi, SharedAtomicAddressPlanAliasesFlatAndMaterializesVglobal) {
   EXPECT_EQ(global_plan.result_address_vgpr_count, 2u);
 
   ConSanAtomicSite vector_only_global = global_site;
-  vector_only_global.raw_saddr = 0x7cu;
-  vector_only_global.saddr_sgpr = 0x7cu;
+  vector_only_global.raw_saddr = rdna4::OPR_SREG_NULL;
+  vector_only_global.saddr_sgpr = rdna4::OPR_SREG_NULL;
   vector_only_global.addr_vgpr = 2u;
   vector_only_global.raw_vaddr = 2u;
   const ConSanMoiAtomicAddressPlan vector_only_plan = plan_consan_moi_atomic_address(
@@ -1418,7 +1418,7 @@ TEST(ConSanMoi, DisplacedVectorOnlyVglobalMaterializesGuestPairAndSignedOffset) 
   ASSERT_EQ(inventory.kernels.size(), 1u);
   ASSERT_EQ(inventory.kernels.front().atomic_sites.size(), 2u);
   const ConSanAtomicSite &site = inventory.kernels.front().atomic_sites[1];
-  ASSERT_EQ(site.raw_saddr, 0x7cu);
+  ASSERT_EQ(site.raw_saddr, rdna4::OPR_SREG_NULL);
   ASSERT_EQ(site.raw_ioffset, 20);
 
   const ConSanMoiAtomicAddressPlan plan = plan_consan_moi_atomic_address(
@@ -1522,7 +1522,7 @@ TEST(ConSanMoi, AtomicAddressPlanFailsClosedForUnsupportedShapesAndAliases) {
   changed.width_bits = 64u;
   EXPECT_EQ(classify(changed), ConSanMoiAtomicAddressSupport::UnsupportedWidth);
   changed = base;
-  changed.raw_saddr = 0x7cu;
+  changed.raw_saddr = rdna4::OPR_SREG_NULL;
   changed.saddr_sgpr.reset();
   EXPECT_EQ(classify(changed), ConSanMoiAtomicAddressSupport::UnsupportedScratchShape);
   changed = base;
@@ -2600,10 +2600,10 @@ TEST(ConSanMoi, InlineAtomicOrderingAutomaticallyPlansAllRegisterState) {
 }
 
 TEST(ConSanMoi, Gfx1250InlineAtomicOrdersReleaseAndAcquire) {
-  const auto release = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+  const auto release = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/false, /*scope=*/2,
       ROCJITSU_CODE_ARCH_GFX1250);
-  const auto acquire = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+  const auto acquire = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/4, /*vsrc=*/1, /*vdst=*/4, /*return_old_value=*/true, /*scope=*/2,
       ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_TRUE(release && acquire);

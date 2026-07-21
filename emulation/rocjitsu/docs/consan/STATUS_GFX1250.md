@@ -53,12 +53,12 @@ preserve the earlier green claim.
 
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
-| **P0 Qwen3-0.6B prefill** | 🟦 Current exact oracle and 1000/1000 accesses pass; closing paired baseline interrupted | 🟦 Current exact oracle, 1000/1000 accesses, and 46/46 barriers pass; closing paired baseline interrupted | 🟨 Current rerun interrupted during execution; no verdict | 🟨 Current rerun not reached; prior frozen bundle retained |
+| **P0 Qwen3-0.6B prefill** | 🟩 Current paired 1.94x; exact oracle and 1000/1000 accesses | 🟩 Current paired 5.33x; exact oracle, 1000/1000 accesses, and 46/46 barriers | 🟧 Isolated Rocjitsu run signals at ~255 seconds; the independent software-GPU path has no verdict through 600 seconds, nor after a new runtime barrier gate at 180 seconds or with barrier tracking disabled at 120 seconds; no accepted overhead | 🟧 Current isolated run signals at the final large-output dispatch after 552 seconds; no verdict or accepted overhead |
 | **P1 Sharktank TP1 prefill** | 🟩 Exact prefill oracle; 352/352 accesses; current paired 1.17x | 🟩 Exact prefill oracle; 352/352 accesses, 37/37 barriers; current paired 1.25x | 🟩 Exact prefill oracle; 352/352 accesses, 64/64 applicable barriers; current paired 1.51x | 🟩 Exact prefill oracle; 352/352 accesses, 37/37 barriers; current paired 2.11x |
 | **P1 Sharktank TP1 decode/combined** | 🟩 Exact decode/combined oracles; 704/704 accesses; current paired 1.09x | 🟩 Exact decode/combined oracles; 704/704 accesses, 74/74 barriers; current paired 1.16x | 🟩 Exact decode/combined oracles; 704/704 accesses, 128/128 applicable barriers; current paired 1.28x | 🟧 Compute-active through 600 seconds; no verdict or accepted overhead |
 | **P2 Sharktank TP2 family** | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained |
 | **P4 hip-moi D128 block attention** | 🟩 Current paired 1.56x; 18/18 accesses | 🟩 Current paired 1.11x; 18/18 accesses, 4/4 barriers | 🟩 Current paired 1.13x; 18/18 accesses, 8/8 applicable barriers | 🟩 Current paired 1.09x; 18/18 accesses, 4/4 barriers |
-| **P4 hip-moi D128 pressure attention** | 🟩 Current paired 1.84x; 40/40 accesses | 🟩 Current paired 1.13x; 40/40 accesses, 4/4 barriers | 🟩 Current paired 1.12x; 40/40 accesses, 8/8 applicable barriers | 🟧 Current isolated run remained compute-active through 300 seconds; no verdict |
+| **P4 hip-moi D128 pressure attention** | 🟩 Current paired 1.84x; 40/40 accesses | 🟩 Current paired 1.13x; 40/40 accesses, 4/4 barriers | 🟩 Current paired 1.12x; 40/40 accesses, 8/8 applicable barriers | 🟩 Current paired 1.29x; 40/40 accesses, 4/4 barriers |
 | **P4 hip-moi WMMA attention** | 🟩 Current paired 1.78x; 18/18 accesses | 🟩 Current paired 1.17x; 18/18 accesses, 4/4 barriers | 🟩 Current paired 1.15x; 18/18 accesses, 8/8 applicable barriers | 🟩 Current paired 1.17x; 18/18 accesses, 4/4 barriers |
 | **P4 hip-moi Stream-K arrival** | 🟩 Current paired 7.38x; 4/4 accesses | 🟩 Current paired 2.41x; 4/4 accesses, 4/4 barriers, 10/10 atomics, 16/16 fences | 🟩 Current paired 2.72x; 4/4 accesses, 8/8 applicable barriers, 10/10 atomics | 🟩 Current paired 2.62x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
 | **P4 hip-moi tree atomic-OR** | 🟩 Current paired 6.55x; 4/4 accesses | 🟩 Current paired 2.04x; 4/4 accesses, 4/4 barriers, 10/10 atomics, 16/16 fences | 🟩 Current paired 2.57x; 4/4 accesses, 8/8 applicable barriers, 10/10 atomics | 🟩 Current paired 2.19x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
@@ -96,17 +96,17 @@ solution kernels while a numeric run selects only a subset.
 | P0 | `002_sk_mxf8gemm_explicit` | 🟩 70/70 accesses; current paired 1.04x | 🟩 70/70 accesses; 32/32 barriers; 4/4 fences; current paired 1.08x | 🟩 70/70 accesses; 28/28 barriers; current paired 1.06x | 🟩 70/70 accesses; 32/32 barriers; current paired 1.42x | Exact numeric oracle and complete analysis.  Current one-repetition paired measurements: `consan-revalidation-gfx1250-20260720-tensile-mxf8-exp-all-nullfix-011` and `consan-revalidation-gfx1250-20260720-tensile-mxf8-exp-rr-plannerfix-020`.  Prior artifacts: `consan-validation-gfx1250-tensile-mxf8-002`, `consan-validation-gfx1250-tensile-mxf8-rr-014`, `consan-validation-gfx1250-tensile-mxf8-sampled-016`, and `consan-validation-gfx1250-tensile-mxf8-inline-020`. |
 | P0 | `003_sk_mxf4gemm_explicit` | 🟩 42/42 accesses; current paired 1.04x | 🟩 42/42 accesses; 32/32 barriers; 4/4 fences; current paired 1.00x | 🟩 42/42 accesses; 28/28 barriers; current paired 1.08x | 🟩 42/42 accesses; 32/32 barriers; current paired 1.24x | Exact numeric oracle; current one-repetition paired measurements: `consan-revalidation-gfx1250-20260720-tensile-mxf4-exp-all-nullfix-012` and `consan-revalidation-gfx1250-20260720-tensile-mxf4-exp-rr-plannerfix-019`.  Prior bundle: `consan-validation-gfx1250-tensile-mxf4-all-021`. |
 | P1 | `037_spmm_tdm_f16_transposes` | 🟩 672/672 accesses; current paired 1.10x | 🟩 672/672 accesses; 176/176 barriers; current paired 1.19x | 🟩 672/672 accesses; 160/160 barriers; current paired 1.19x | 🟩 672/672 accesses; 176/176 barriers; current paired 1.79x | Four numeric clients cover tensor waits and 288 transpose LDS reads.  Current one-repetition paired artifact: `consan-revalidation-gfx1250-20260720-tensile-spmm-f16t-all-nullfix-013`.  Prior artifact: `consan-validation-gfx1250-tensile-spmm-transpose-all-027`. |
-| P1 | `016_spmm_tdm_all` | 🟩 1610/1610 accesses; current paired 1.15x | 🟩 1610/1610 accesses; 512/512 barriers; current paired 1.24x | 🟩 1610/1610 accesses; 494/494 barriers; current paired 1.19x | 🟥 Five of nine clients exceed the CU LDS limit after Inline Shadow growth (58,368 to 175,104 bytes); no accepted overhead | Multi-type exact numeric matrix covers both supported transpose widths.  Current one-repetition artifact `consan-revalidation-gfx1250-20260720-tensile-spmm-tdm-all-inline-shadow-rocjitsu-037` has stable passing baselines; four instrumented clients pass, while five abort at the modeled 163,840-byte CU limit.  Artifact `consan-revalidation-gfx1250-20260720-tensile-spmm-all-all-nullfix-014` accepts the first three profiles.  Prior artifact: `consan-validation-gfx1250-tensile-spmm-tdm-all-028`. |
+| P1 | `016_spmm_tdm_all` | 🟩 1610/1610 accesses; current paired 1.15x | 🟩 1610/1610 accesses; 512/512 barriers; current paired 1.24x | 🟩 1610/1610 accesses; 494/494 barriers; current paired 1.19x | 🟥 Corrected 160 KiB LDS topology and dense spill routing; focused exact cases pass, but full hot-loop coverage remains impractical on the software GPU; no accepted overhead | Multi-type exact numeric matrix covers both supported transpose widths.  Uninstrumented artifact `consan-revalidation-gfx1250-20260720-tensile-spmm-tdm-all-baseline-ldsfix-061` passes every numeric oracle in 25.10 seconds.  Clean Inline artifacts `consan-revalidation-gfx1250-20260721-tensile-spmm-tdm-all-inline-shadow-densefix-062` and `-063` report zero numeric failures and pass the formerly corrupt 16-workgroup MT32 case, but reach 300- and 900-second bounds at the same subsequent MT64 hot-loop dispatch.  Targeted one-repetition probes pass through 44 selected accesses, but identical solo runs vary from about three seconds to beyond 60 seconds.  Full 84-access execution is retained as a measured-negative software-runtime limitation rather than motivating gfx1250-specific semantic changes.  Artifact `consan-revalidation-gfx1250-20260720-tensile-spmm-all-all-nullfix-014` accepts the first three profiles. |
 | P1 | `001_sk_mxf8f4gemm_tdm` | 🟩 768/768 accesses; current paired 1.12x | 🟩 768/768 accesses; 204/204 barriers; 24/24 fences; current paired 1.27x | 🟩 768/768 accesses; 180/180 barriers; current paired 1.22x | 🟩 768/768 accesses; 204/204 barriers; current paired 14.44x | Exact numeric oracle in every profile.  Current one-repetition paired artifacts: `consan-revalidation-gfx1250-20260720-tensile-mxf8f4-tdm-all-nullfix-015` and `consan-revalidation-gfx1250-20260720-tensile-mxf8f4-tdm-rr-plannerfix-021`; prior artifacts `053`, `045`, `060`, `068`, and `069`. |
 | P1 | `004_sk_mxf8gemm_tdm` | 🟩 992/992 accesses; current paired 1.20x | 🟩 992/992 accesses; 204/204 barriers; 24/24 fences; current paired 1.30x | 🟩 992/992 accesses; 180/180 barriers; current paired 1.23x | 🟧 Compute-active through 600, 1200, and 1800 seconds; no verdict | Current one-repetition paired artifacts: `consan-revalidation-gfx1250-20260720-tensile-mxf8-tdm-supercollider-016`, `consan-revalidation-gfx1250-20260720-tensile-mxf8-tdm-sampled-016`, and `consan-revalidation-gfx1250-20260720-tensile-mxf8-tdm-rr-plannerfix-021`.  Preserve the full denominator.  Latest Inline duration artifact: `consan-gfx1250-sk-mxf8-inline-079`. |
 | P1 | `007_sk_mxf4gemm_tdm` | 🟩 2448/2448 accesses; current paired 1.35x | 🟩 2448/2448 accesses; 544/544 barriers; 64/64 fences; current paired 1.33x | 🟩 2448/2448 accesses; 480/480 barriers; current paired 1.38x | 🟧 Compute-active through 1800 seconds; no verdict | Current one-repetition paired artifacts: `consan-revalidation-gfx1250-20260720-tensile-mxf4-tdm-supercollider-018`, `consan-revalidation-gfx1250-20260720-tensile-mxf4-tdm-sampled-018`, and `consan-revalidation-gfx1250-20260720-tensile-mxf4-tdm-rr-plannerfix-021`.  The prior Record/Replay crash was a software-runtime call-displacement bug, not a ConSan encoding error.  Accepted artifacts: `073`, `075`, and `076`; Inline duration artifact: `078`. |
-| P2 | Reduced `sk_sgemm_runtime_smoke` | 🟩 Exact numeric oracle; 640/640 accesses; current paired 1.07x | 🟩 Exact numeric oracle; 640/640 accesses; 22/22 barriers; 8/8 fences; current paired 1.32x | 🟩 Exact numeric oracle; 640/640 accesses; 40/40 barriers; current paired 1.34x | 🟧 Backend-dependent after legal 92 KiB group growth; no verdict | Current one-repetition paired artifacts `consan-revalidation-gfx1250-20260720-tensile-sgemm-smoke-sc-022`, `consan-revalidation-gfx1250-20260720-tensile-sgemm-smoke-rr-022`, and `consan-revalidation-gfx1250-20260720-tensile-sgemm-smoke-sampled-022` accept.  The shared Tensile wrapper emits the machine-readable oracle required by fault acceptance.  Prior paired artifacts `313`, `315`, and `317` and reviewed exact-one barrier-drop artifacts `314`, `316`, and `326` retain fault and health evidence.  Inline artifact `085` segfaults immediately after legal resource growth, while an independent-software-backend cross-check accepts the same growth and remains compute-active to 120 seconds. |
-| P2 | `000_sk_sgemm_quick` | 🟨 Assessed; clean run pending | 🟦 First problem exact and fully covered; aggregate host analysis fixed; full client is intrinsically execution-bound | 🟨 Assessed; clean run pending | 🟨 Assessed; clean run pending | One-repetition Record/Replay artifact `consan-validation-gfx1250-tensile-sk-sgemm-quick-rr-agent-002` accepts the first benchmark problem with its numeric oracle and complete 640/640 accesses, 22/22 barriers, and 8/8 fences.  Commit `49df87def2` replaces quadratic owner annotation over 115,776 synchronization events with an identity index; artifact `consan-validation-gfx1250-tensile-sk-sgemm-quick-rr-indexed-359` then reaches aggregate execution.  Exact uninstrumented 300-second artifacts `consan-validation-gfx1250-tensile-sk-sgemm-quick-baseline-bounded-368` and `consan-validation-gfx1250-tensile-sk-sgemm-quick-rocjitsu-baseline-bounded-375` reach 1,104 and 1,105 passing rows respectively, proving that neither available software-emulation path materially accelerates the 648 solutions across six sizes.  The remaining acceptance route is a substantially longer unrestricted Record/Replay run.  No filters, caps, manual registers, or extra repetitions were used. |
-| P2 | `005_sk_f8gemm_quick` | 🟦 Exact oracle; 1772/1772 accesses; paired bundle accepted; reviewed fault loses postflight health | 🟩 Exact oracle; 1772/1772 accesses; 44/44 barriers; 16/16 fences; current paired 8.00x | 🟧 Current clean execution remains compute-active through 900 seconds; no verdict or measured overhead | 🟧 Patch analysis complete; launch fails after legal dispatch-resource growth | Current one-repetition Record/Replay artifact `consan-revalidation-gfx1250-20260720-tensile-f8-rr-serial-023` accepts its 729.69-second instrumented run between stable 91.45- and 91.02-second controls.  Current Sampled artifact `consan-revalidation-gfx1250-20260720-tensile-sk-f8gemm-quick-sampled-clean-rocjitsu-038` reaches its 900-second bound inside the instrumented client without a verdict.  The focused regression proves that `ds_bpermute_b32` is not raceable LDS traffic.  SuperCollider clean artifact `224` supersedes stale pre-fix artifact `081`; prior paired artifact `352` and reviewed exact-one attempt `353` leave that cell blue because postflight health fails.  Record/Replay reviewed fault artifact `331` accepts.  Sampled paired artifact `335` and reviewed exact-one barrier-drop artifact `334` retain the prior historical bundle.  Inline artifact `220` reaches the same software-backend resource-growth boundary as reduced SGEMM. |
-| P2 | `006_sk_hgemm_quick` | 🟨 Exact oracle for one of two applicable objects; compute-active through 150 seconds | 🟩 Exact oracle; 8162/8162 accesses; 292/292 barriers; 80/80 fences; current paired 2.42x | 🟩 Exact oracle; 8162/8162 accesses; 544/544 barriers; current paired 2.24x | 🟧 Patch analysis complete; launch fails after legal dispatch-resource growth | Current one-repetition paired artifacts `consan-revalidation-gfx1250-20260720-tensile-hgemm-rr-017` and `consan-revalidation-gfx1250-20260720-tensile-hgemm-sampled-017` accept.  SuperCollider artifact `225` reaches one of two applicable objects before its bound.  Record/Replay paired artifact `340` and reviewed fault `339` accept; early-barrier artifact `338` preserves the oracle but loses postflight health, while `337` is a zero-mutation preflight rejection.  Sampled paired artifact `342` and reviewed fault `341` retain prior acceptance.  Inline artifact `223` reaches the established software-backend resource-growth boundary. |
-| P3 | `015_spmm_f8_ml` stress | 🟨 First contraction exact numeric pass; 298/4316 accesses; second orientation active at 120 seconds | 🟦 19 exact passes; two objects fully covered; relay-window fix unit-complete | 🟨 Static stress inventory complete; clean run pending | 🟨 Static stress inventory complete; clean run pending | Dense transpose/sub-dword LDS and full-register stress.  Current-tip one-repetition artifact `consan-validation-gfx1250-tensile-spmm-f8-ml-rr-current-367` reaches 19 exact passes with zero failures before its 600-second bound.  Its two completed applicable objects are fully static/dynamic complete at 22,074/22,074 and 19,960/19,960 accesses plus 403/403 barriers each; all prior `missing_owner` and resource failures are gone.  The interrupted third object has zero resource failures but 1,875 access and one barrier `instrumentation_patch_missing` gaps.  The generic relay-window partition fix for its over-wide owner passes the focused 4/4 tests and the rebuilt full 692/692 ConSan suite; a rebuilt-hook unrestricted rerun remains required before promotion. |
-| P2 | `019_spmm_f16_sb` closure | 🟨 Selected `ds_store_b16` representative; clean run pending | 🟩 Four exact orientations; 31,265/31,265 accesses; current paired 2.48x | 🟨 Selected `ds_store_b16` representative; clean run pending | 🟨 Selected `ds_store_b16` representative; clean run pending | Current one-repetition paired artifact `consan-revalidation-gfx1250-20260720-tensile-spmm-f16-sb-rr-017` accepts.  Prior artifact `consan-validation-gfx1250-tensile-spmm-f16-sb-rr-inferred-all-365` accepts all four exact numeric orientations with complete static and dynamic analysis, 31,265/31,265 accesses, 1,141/1,141 barriers, all 35 `ds_store_b16` sites, and zero resource failures.  Frozen reviewed artifact `consan-validation-gfx1250-tensile-spmm-f16-sb-rr-fault-377` retains fault and health evidence. |
-| Survey | Remaining Tensile configurations | 🟨 Corpus surveyed; final selection pending | 🟩 Decoded opcode union covered by accepted selected rows, including full `019_spmm_f16_sb` bundle | 🟨 Corpus surveyed; final selection pending | 🟨 Corpus surveyed; final selection pending | No decoded atomics, asynchronous waits, or named-barrier forms were found.  The selected rows plus the now-accepted `019_spmm_f16_sb` bundle cover and freeze the decoded opcode union. |
+| P2 | Reduced `sk_sgemm_runtime_smoke` | 🟩 Exact numeric oracle; 640/640 accesses; current paired 1.07x | 🟩 Exact numeric oracle; 640/640 accesses; 22/22 barriers; 8/8 fences; current paired 1.32x | 🟩 Exact numeric oracle; 640/640 accesses; 40/40 barriers; current paired 1.34x | 🟩 Exact numeric oracle; 640/640 accesses; 22/22 barriers; paired 1.33x; causal fault diagnosed | Current one-repetition paired artifacts `consan-revalidation-gfx1250-20260720-tensile-sgemm-smoke-sc-022`, `consan-revalidation-gfx1250-20260720-tensile-sgemm-smoke-rr-022`, and `consan-revalidation-gfx1250-20260720-tensile-sgemm-smoke-sampled-022` accept.  The shared Tensile wrapper emits the machine-readable oracle required by fault acceptance.  Prior paired artifacts `313`, `315`, and `317` and reviewed exact-one barrier-drop artifacts `314`, `316`, and `326` retain fault and health evidence.  After the gfx1250 Inline barrier-bank fix, clean artifact `consan-green-expansion-20260721-sgemm-smoke-inline-bankfix-115` accepts the exact oracle with complete 640/640 access and 22/22 barrier coverage.  Paired artifact `consan-green-expansion-20260721-sgemm-smoke-inline-overhead-116` accepts at 1.33x against the mean of its two controls with the same complete coverage.  Fresh inventory `consan-green-expansion-20260721-sgemm-smoke-inventory-117` retains all reviewed selectors.  Late and entry fault artifacts `consan-green-expansion-20260721-sgemm-smoke-inline-fault-118` and `...-fault-early-119` apply exactly one logical mutation but preserve the oracle without a diagnostic, proving those barriers noncausal for the executed case.  The separately precommitted causal selector immediately before LDS consumption accepts in artifact `consan-green-expansion-20260721-sgemm-smoke-inline-fault-causal-121`: exactly one logical barrier mutation is applied as two final-byte rewrites, the independent numeric oracle fails, Inline emits one diagnostic, surviving coverage is complete at 640/640 accesses and 21/21 barriers, report evidence has no overflow or malformed state, and target health passes before and after.  The cell is green. |
+| P2 | `000_sk_sgemm_quick` | 🟦 First problem: 12/12 exact numeric rows; 640/640 accesses; static/dynamic complete | 🟦 First problem exact and fully covered; aggregate host analysis fixed; full client is intrinsically execution-bound | 🟦 First problem: 12/12 exact numeric rows; 640/640 accesses; 40/40 barrier members | 🟨 First problem: 12/12 exact rows and complete static coverage; interrupted second problem leaves dynamic analysis incomplete | One-repetition Record/Replay artifact `consan-validation-gfx1250-tensile-sk-sgemm-quick-rr-agent-002` accepts the first benchmark problem with its numeric oracle and complete 640/640 accesses, 22/22 barriers, and 8/8 fences.  Commit `49df87def2` replaces quadratic owner annotation over 115,776 synchronization events with an identity index; artifact `consan-validation-gfx1250-tensile-sk-sgemm-quick-rr-indexed-359` then reaches aggregate execution.  Exact uninstrumented 300-second artifacts `consan-validation-gfx1250-tensile-sk-sgemm-quick-baseline-bounded-368` and `consan-validation-gfx1250-tensile-sk-sgemm-quick-rocjitsu-baseline-bounded-375` reach 1,104 and 1,105 passing rows respectively, proving that neither available software-emulation path materially accelerates the 648 solutions across six sizes.  The remaining acceptance route is a substantially longer unrestricted Record/Replay run.  Clean-tree one-repetition SuperCollider artifact `consan-green-expansion-20260721-sgemm-quick-sc-100` completes all 12 exact numeric rows in the first benchmark problem, covers 640/640 accesses with static and dynamic completeness, reports zero mismatches, and completes report cleanup before the client begins its second problem and reaches the unchanged 120-second bound.  That is clean-partial blue evidence, not full-client acceptance.  Clean-tree one-repetition Sampled artifact `consan-green-expansion-20260721-sgemm-quick-sampled-101` reaches the same boundary: 12/12 exact numeric rows with zero failures, 640/640 accesses, all 40/40 barrier members, static and dynamic completeness, and report cleanup before the second problem reaches 120 seconds.  Inline artifact `consan-green-expansion-20260721-sgemm-quick-inline-102` also completes the first problem's 12/12 exact rows with zero failures and patches 640/640 accesses plus 22/22 barriers, but its interrupted second problem leaves 128,413,696 dynamic checks unresolved; aggregate analysis is therefore incomplete and the cell stays yellow.  No filters, caps, manual registers, or extra repetitions were used. |
+| P2 | `005_sk_f8gemm_quick` | 🟩 Exact oracle; 1772/1772 accesses; current paired 1.43x; reviewed fault and health accepted | 🟩 Exact oracle; 1772/1772 accesses; 44/44 barriers; 16/16 fences; current paired 8.00x | 🟧 Current clean execution remains compute-active through 900 seconds; no verdict or measured overhead | 🟨 Current tip executes 49 exact rows with zero failures before the fixed 180-second bound | Current one-repetition Record/Replay artifact `consan-revalidation-gfx1250-20260720-tensile-f8-rr-serial-023` accepts its 729.69-second instrumented run between stable 91.45- and 91.02-second controls.  Current Sampled artifact `consan-revalidation-gfx1250-20260720-tensile-sk-f8gemm-quick-sampled-clean-rocjitsu-038` reaches its 900-second bound inside the instrumented client without a verdict.  The focused regression proves that `ds_bpermute_b32` is not raceable LDS traffic.  SuperCollider clean artifact `224` supersedes stale pre-fix artifact `081`; prior paired artifact `352` and reviewed exact-one attempt `353` leave that cell blue because postflight health fails.  Bounded alternate-site artifact `consan-green-expansion-20260721-tensile-f8-sc-fault-alternate-independent-029` drops the later `0xd8c0`/`0xd8c4` logical pair, visibly corrupts multiple numeric rows without a SuperCollider diagnosis, and again loses postflight health.  This rules out a first-site-only explanation; the precommitted pass-oracle expectation is not changed after observation, and the cell rotates without a third site.  Record/Replay reviewed fault artifact `331` accepts.  Sampled paired artifact `335` and reviewed exact-one barrier-drop artifact `334` retain the prior historical bundle.  Current-tip SuperCollider fault artifact `consan-green-expansion-20260721-tensile-f8-sc-fault-current-125` applies the reviewed whole barrier mutation once, preserves the exact oracle with the precommitted no-diagnosis outcome, retains complete 1,772/1,772 access coverage, and passes health before and after.  Same-revision paired artifact `consan-green-expansion-20260721-tensile-f8-sc-overhead-current-126` accepts 43,458.36/65,509.16/47,846.30 ms, or 1.43x against the mean baseline, with complete coverage.  The SuperCollider cell is green.  Current-tip one-repetition Inline artifact `consan-green-expansion-20260721-tensile-f8-inline-current-123` clears that obsolete launch boundary and executes 49 exact numeric rows with zero failures before its fixed 180-second bound.  The full client has no verdict or accepted overhead, so the cell advances only to yellow and rotates. |
+| P2 | `006_sk_hgemm_quick` | 🟨 136 exact numeric passes with zero failures; first 143-solution problem remains active at 300 seconds | 🟩 Exact oracle; 8162/8162 accesses; 292/292 barriers; 80/80 fences; current paired 2.42x | 🟩 Exact oracle; 8162/8162 accesses; 544/544 barriers; current paired 2.24x | 🟨 Current tip executes 189 exact rows with zero failures before the fixed 180-second bound | Current one-repetition paired artifacts `consan-revalidation-gfx1250-20260720-tensile-hgemm-rr-017` and `consan-revalidation-gfx1250-20260720-tensile-hgemm-sampled-017` accept.  Clean-tree SuperCollider artifact `consan-green-expansion-20260721-tensile-hgemm-sc-clean-independent-053` reaches 136 exact passes with zero failures inside a fixed 300-second bound, but does not finish the first 143-solution problem or supply both applicable-object records.  It supersedes artifact `225`'s 150-second duration evidence and rotates without another timeout increase.  Record/Replay paired artifact `340` and reviewed fault `339` accept; early-barrier artifact `338` preserves the oracle but loses postflight health, while `337` is a zero-mutation preflight rejection.  Sampled paired artifact `342` and reviewed fault `341` retain prior acceptance.  Current-tip one-repetition Inline artifact `consan-green-expansion-20260721-tensile-hgemm-inline-current-124` clears that obsolete launch boundary and executes 189 exact numeric rows with zero failures before its fixed 180-second bound.  The full client has no verdict or accepted overhead, so the cell advances only to yellow and rotates. |
+| P3 | `015_spmm_f8_ml` stress | 🟨 First contraction exact numeric pass; 298/4316 accesses; second orientation active at 120 seconds | 🟦 19 exact passes; two objects fully covered; relay-window fix unit-complete | 🟦 Exact oracle; current second object covers 19,960/19,960 accesses and 806/806 barrier members | 🟨 Exact failing kernel fixed; standard run has 8 passes and zero failures before its bound | Dense transpose/sub-dword LDS and full-register stress.  Current-tip one-repetition artifact `consan-validation-gfx1250-tensile-spmm-f8-ml-rr-current-367` reaches 19 exact passes with zero failures before its 600-second bound.  Its two completed applicable objects are fully static/dynamic complete at 22,074/22,074 and 19,960/19,960 accesses plus 403/403 barriers each; all prior `missing_owner` and resource failures are gone.  The interrupted third object has zero resource failures but 1,875 access and one barrier `instrumentation_patch_missing` gaps.  The generic relay-window partition fix for its over-wide owner passes the focused 4/4 tests and the rebuilt full 692/692 ConSan suite.  Rebuilt-hook artifact `consan-green-expansion-20260721-spmm-f8-ml-rr-001` fully patches the first object at 22,074/22,074 accesses and 403/403 barriers with no resource or placement failures, but the software GPU remains inside that first client at 600 seconds without a numeric row; the cell therefore remains blue and rotates without widening the bound.  Current clean Sampled artifact `consan-green-expansion-20260721-spmm-f8-ml-sampled-independent-057` passes two exact rows before its 150-second validation bound.  Reusing its generated client removes generation time.  Two gfx1250 state-preservation fixes close the former assertion.  First, ConSan now distinguishes the instruction's packed previous/current VGPR-bank transition from its persistent low-byte mode.  Second, every gfx1250 Sampled barrier cave explicitly establishes the low bank before touching scratch VGPRs: the patched call can be immediately followed by a guest bank update that takes effect during control transfer, including when the replaced barrier's static mode was zero.  The focused 78-test Sampled/transition slice passes.  The unrestricted one-repetition exact client now returns normally with three numeric passes and complete 19,960/19,960 access plus 806/806 barrier-member coverage; the separately filtered 1,024-block variant also returns normally with three passes.  No patch cap, manual register, or kernel filter is used for the unrestricted result.  The cell is blue; paired overhead, reviewed fault, containment, and frozen provenance remain before green.  One-repetition paired attempt `consan-green-expansion-20260721-spmm-f8-ml-sampled-overhead-103` reaches its fixed 180-second instrumented bound with only one of two required applicable-object records, so it supplies no accepted overhead and rotates without a wider timeout.  Standard-profile Inline artifact `consan-green-expansion-20260721-spmm-f8-ml-inline-clean-108` fully patches the first applicable object at 22,074/22,074 accesses and 403/403 barriers, then records eight exact passes and five numeric failures before its fixed 180-second bound.  Patch-frontier diagnostics isolate the first failure to the ninth barrier, immediately before a guest VGPR-bank update; access-only instrumentation remains correct beyond that frontier.  Commit `e1bbd2608a` makes every gfx1250 Inline barrier cave establish its low scratch bank explicitly.  The formerly failing exact kernel then passes with complete 1,639/1,639 access and 25/25 barrier coverage.  Clean committed-tip standard artifact `consan-green-expansion-20260721-spmm-f8-ml-inline-fixed-clean-113` records eight exact passes, zero failures, and complete first-object static coverage before its unchanged 180-second bound.  Because the standard row still lacks a final verdict, the Inline cell advances from orange to yellow and rotates rather than claiming clean completion or widening the timeout. |
+| P2 | `019_spmm_f16_sb` closure | 🟧 9,546/9,546 accesses patched; first client exceeds 300 seconds without a numeric row | 🟩 Four exact orientations; 31,265/31,265 accesses; current paired 2.48x | 🟧 9,546/9,546 accesses and 646/646 applicable barriers patched; first client exceeds 300 seconds without a numeric row | 🟧 9,546/9,546 accesses and 323/323 barriers patched; first client exceeds 300 seconds without a numeric row | Current one-repetition clean artifacts `consan-green-expansion-20260721-spmm-f16-sb-supercollider-001`, `-sampled-001`, and `-inline-001` prove complete static lowering but each reaches its fixed 300-second bound before the first numeric result, so they rotate without overhead attempts.  Current one-repetition paired Record/Replay artifact `consan-revalidation-gfx1250-20260720-tensile-spmm-f16-sb-rr-017` accepts.  Prior artifact `consan-validation-gfx1250-tensile-spmm-f16-sb-rr-inferred-all-365` accepts all four exact numeric orientations with complete static and dynamic analysis, 31,265/31,265 accesses, 1,141/1,141 barriers, all 35 `ds_store_b16` sites, and zero resource failures.  Frozen reviewed artifact `consan-validation-gfx1250-tensile-spmm-f16-sb-rr-fault-377` retains fault and health evidence. |
+| Survey | Remaining Tensile configurations | 🟩 Architecture-level decoded opcode union covered by accepted selected rows | 🟩 Architecture-level decoded opcode union covered by accepted selected rows, including full `019_spmm_f16_sb` bundle | 🟩 Architecture-level decoded opcode union covered by accepted selected rows | 🟩 Architecture-level decoded opcode union covered by accepted selected rows | No decoded atomics, asynchronous waits, or named-barrier forms were found.  The accepted selected rows plus the complete `019_spmm_f16_sb` Record/Replay bundle cover and freeze the architecture-level decoded opcode union.  These green survey cells record corpus selection completeness, not four additional runtime-acceptance cells. |
 
 The retained P0 and first P1 artifacts confirm the tensor-data-mover control
 shape used by these configurations: tensor work is followed by
@@ -152,14 +152,14 @@ that remains a separate discovery target rather than an implied result.
 | Priority | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow | Shared evidence and next proof |
 |---|---|---|---|---|---|---|
 | P0 | PyTorch/Triton tensor-descriptor add, one-CTA and two-CTA variants | 🟩 Exact `a + b`; 29/29 accesses; current paired 1.19x | 🟩 Exact `a + b`; 29/29 accesses; 12/12 barriers; current paired 1.33x | 🟩 Exact `a + b`; 29/29 accesses; 20/20 applicable barriers; current paired 2.16x | 🟩 Exact `a + b`; 29/29 accesses; 12/12 barriers; current paired 4.16x | Same-tip SuperCollider clean artifact `199` and paired bundle `200` cover 29/29 accesses after adding byte-LDS checks; both baselines pass and the maximum measured slowdown is 1.05x.  Current one-repetition paired measurements are in `consan-revalidation-gfx1250-20260720-tdm-nullfix-009`.  Reviewed wait-drop bundle `201` applies exactly one mutation, observes the specified no-diagnosis/pass-oracle outcome, and passes containment health.  Its aggregate fault analysis still labels unrelated non-target code objects invalid because the exact-one mutation guard is evaluated per loaded object; the clean and paired runs establish complete instrumentation coverage.  MOI paired bundle `192` and reviewed bundle `194` retain the other three green cells.  This proves clustered dispatch, not cluster-memory instructions. |
-| P0 | `torch.mode`, large rows | 🟩 Exact values/indices; 28,195/28,195 accesses; current paired 120.67x | 🟩 Exact values/indices; 28,939/28,939 accesses and 4,446/4,446 barriers; current paired 232.20x | 🟧 Current-tip 42.3 MB report allocated; full-object patch construction exceeds 300 seconds | 🟧 Overlap fix covered; no standard clean verdict | Commit `dacb1d3b05` extends the shared-call dispatcher to large majority-stranded objects.  Frozen clean artifact `252` passes the unfiltered SuperCollider oracle with static/dynamic completeness.  Paired artifact `253` and reviewed fault `260` complete its bundle.  Current one-repetition paired measurements are in `consan-revalidation-gfx1250-20260720-mode-sc-004` and `consan-revalidation-gfx1250-20260720-mode-rr-nullfix-009`.  Current-tip one-repetition Record/Replay clean artifact `348` accepts the unfiltered exact oracle in 34.3 seconds with every supported access and barrier.  Paired artifact `349` accepts both baselines and the complete instrumented run, measuring 30,548 ms versus 104--108 ms baselines.  Reviewed barrier-drop artifact `351` applies exactly one mutation, preserves the exact oracle, matches the precommitted no-diagnosis outcome, covers 28,939/28,939 accesses and all 4,445 surviving barriers, and passes containment health.  The decoder and lowering preserve DS byte offsets and support tagged gfx1250 LDS address tokens; the two executed no-return releases have no compatible same-owner acquire consumer and are typed not applicable as ordering roles while remaining covered as ordinary accesses.  Sampled artifact `286` allocates its complete 42.3 MB report, enters patch construction for the 12.3 MB object, and remains there at 300 seconds; it rotates without a repeat.  Filters and smaller inputs remain diagnostic only. |
-| P0 | `torch.topk`, FP64 spill and BF16 coverage cases | 🟦 Exact FP64/BF16 values and indices; dynamically complete; 160,752/160,848 accesses | 🟦 Exact FP64/BF16 values and indices; dynamically complete; 160,345/161,136 accesses and 11,423/11,423 barriers | 🟧 Unrestricted 13 MB object remains in patch planning through 120 seconds | 🟧 Unrestricted 13 MB object remains in patch planning through 90 seconds | Current-tip one-repetition artifact `consan-validation-gfx1250-pytorch-topk-rr-collapsed-364` passes both exact BF16/FP64 value-and-index oracles in 308.3 seconds, is dynamically complete, and recovers every prior barrier plus 2,818 accesses versus artifact `361`.  The exact residual is 791 access resource failures, all `forbidden_overlap`, across eight `gatherTopK` containers; there are no placement/lowering failures, drops, diagnostics, unsupported replay, or metadata exhaustion.  An access-only liveness experiment reproduced the same residual and was withdrawn, proving the remaining need is site/subgroup-specific transient assignment across access anchors rather than synchronization-liveness contamination. |
-| P1 | `torch.sort` over segmented rows | 🟩 Exact values/indices; 48,224/48,224 accesses; current paired 184.68x | 🟩 Exact values/indices; 48,224/48,224 accesses and 6,032/6,032 barriers; current paired 370.29x | 🟧 Audited 75.8 MB growth admitted; unrestricted execution exceeds 300 seconds | 🟩 Exact values/indices; 48,224/48,224 accesses and 6,032/6,032 barriers; current paired 416.22x | SuperCollider commit `b00563cd31` replaces the impossible one-relay-per-site layout with one shared call dispatcher per kernel and covers every native LDS/VDS shape in this object.  Frozen clean artifact `241` passes the exact values/indices oracle with complete 48,224/48,224 access coverage.  Current one-repetition paired measurements are in artifacts `consan-revalidation-gfx1250-20260720-sort-sc-004`, `consan-revalidation-gfx1250-20260720-sort-rr-nullfix-009`, and `consan-revalidation-gfx1250-20260720-sort-inline-nullfix-010`.  Paired artifact `242` accepts both baselines and the profile run, measuring 27,003 ms versus a 121 ms paired baseline.  Reviewed barrier-drop artifact `246` applies exactly one mutation, observes the precommitted no-diagnosis/pass-oracle result, and passes both health gates.  Record/Replay and Inline evidence remains in clean artifacts `204`/`209`, paired artifacts `205`/`210`, and reviewed faults `208`/`211`.  Sampled debugger measurement `216` establishes 75,747,740 bytes of required growth; bounded artifact `217` advances past patch construction and remains in execution through 300 seconds. |
+| P0 | `torch.mode`, large rows | 🟩 Exact values/indices; 28,195/28,195 accesses; current paired 120.67x | 🟩 Exact values/indices; 28,939/28,939 accesses and 4,446/4,446 barriers; current paired 232.20x | 🟩 Exact values/indices; 28,939/28,939 accesses and 8,892/8,892 barrier members; current paired 203.53x | 🟩 Exact values/indices; 28,939/28,939 accesses and 4,446/4,446 barriers; current paired 341.90x | Commit `dacb1d3b05` extends the shared-call dispatcher to large majority-stranded objects.  Frozen clean artifact `252` passes the unfiltered SuperCollider oracle with static/dynamic completeness.  Paired artifact `253` and reviewed fault `260` complete its bundle.  Current one-repetition paired measurements are in `consan-revalidation-gfx1250-20260720-mode-sc-004` and `consan-revalidation-gfx1250-20260720-mode-rr-nullfix-009`.  Current-tip one-repetition Record/Replay clean artifact `348` accepts the unfiltered exact oracle in 34.3 seconds with every supported access and barrier.  Paired artifact `349` accepts both baselines and the complete instrumented run, measuring 30,548 ms versus 104--108 ms baselines.  Reviewed barrier-drop artifact `351` applies exactly one mutation, preserves the exact oracle, matches the precommitted no-diagnosis outcome, covers 28,939/28,939 accesses and all 4,445 surviving barriers, and passes containment health.  The decoder and lowering preserve DS byte offsets and support tagged gfx1250 LDS address tokens; the two executed no-return releases have no compatible same-owner acquire consumer and are typed not applicable as ordering roles while remaining covered as ordinary accesses.  Commit `a6721f8e76` corrects final semantic validation to recognize already-supported atomic access candidates in workgroup-local exact shadows.  Clean-tree one-repetition Inline artifact `consan-green-expansion-20260721-pytorch-mode-inline-atomic-validation-independent-055` passes the exact values/indices oracle in 32.26 seconds with complete 28,939/28,939 access and 4,446/4,446 barrier coverage.  A controlled 32-to-128 exact-bank experiment leaves all 13,342 undercoverage events unchanged, disproving publication contention.  Object and dispatch evidence instead identifies a dynamic-LDS sizing gap: the kernel descriptor declares 2 fixed bytes and the dispatch supplies 1,540 group bytes, while the descriptor-sized local mirror covers only the fixed allocation.  Commit `af3b46a020` inventories the hidden dynamic-LDS argument, selects the external exact-shadow table for those owners, and uses entry-snapshotted private owner/epoch state across guest VGPR-bank transitions.  Clean-tree one-repetition artifact `consan-green-expansion-20260721-pytorch-mode-inline-dynamic-clean-065` passes the exact oracle in 33.80 seconds with complete 28,939/28,939 access and 4,446/4,446 barrier coverage, zero dynamic undercoverage, and no diagnostics or overflow.  Paired artifact `consan-green-expansion-20260721-pytorch-mode-inline-dynamic-overhead-066` accepts 99.12/32,739.50/92.39 ms, or 341.90x against the mean baseline, while repeating complete coverage.  Fresh inventory `...-dynamic-inventory-067` retains the reviewed selector.  Fault artifact `...-dynamic-fault-068` applies exactly one whole barrier mutation, preserves the exact oracle with the precommitted no-diagnosis outcome, covers every supported access and all 4,445 surviving barriers without undercoverage, and passes target health before and after.  Commit `2dea78db37` makes Sampled planning near-linear and admits structurally proven long same-block split barriers.  Clean-tree artifact `consan-green-expansion-20260721-pytorch-mode-sampled-semantic-clean-071` passes the exact oracle in 21.72 seconds with static/dynamic completeness, 28,939/28,939 accesses, and 8,892/8,892 barrier members.  Paired artifact `consan-green-expansion-20260721-pytorch-mode-sampled-overhead-072` accepts 96.82/19,932.30/99.05 ms, or 203.53x against the mean baseline, with complete coverage.  Fresh inventory `...-sampled-inventory-073` retains the reviewed selector.  Fault artifact `...-sampled-fault-074` applies exactly one whole barrier mutation, preserves the exact oracle with the precommitted no-diagnosis outcome, covers every supported access and all 8,890 surviving barrier members, bounds peak report memory at 43.3 MB with complete cleanup, and passes target health before and after.  Filters and smaller inputs remain diagnostic only. |
+| P0 | `torch.topk`, FP64 spill and BF16 coverage cases | 🟦 Exact FP64/BF16 values and indices; dynamically complete; current object patches 112,528/112,616 supported accesses | 🟦 Exact FP64/BF16 values and indices; dynamically complete; 160,345/161,136 accesses and 11,423/11,423 barriers | 🟦 Exact FP64/BF16 values and indices; dynamically complete; 102,598/161,136 accesses and 15,182/15,182 barriers | 🟧 Both large objects now finish patching; client signals during execution after legal resource growth, before an oracle | Current-tip one-repetition Record/Replay artifact `consan-validation-gfx1250-pytorch-topk-rr-collapsed-364` passes both exact BF16/FP64 value-and-index oracles in 308.3 seconds, is dynamically complete, and recovers every prior barrier plus 2,818 accesses versus artifact `361`.  Its exact residual is 791 access resource failures, all `forbidden_overlap`, across eight `gatherTopK` containers.  Exact-object offline artifact `consan-topk-rr-offline-dumps-047` reproduces all 791 failures at 98--100 sites per kernel plus 44 successful owner-local assignments.  Excluding entry liveness leaves those counts unchanged, proving that the remaining constraint is the union of actual access/synchronization sites and needs site/subgroup scalar routing or scalar-spill continuation rather than an entry-only relaxation.  SuperCollider artifact `consan-gfx1250-pytorch-topk-sc-282` passes both exact oracles and covers the separate sort object completely.  Bounded current-tip capture `consan-topk-sc-current-dumps-056` retains the exact large object; standard-profile host-only patching covers 112,528/112,616 supported sites, closing eight of artifact `282`'s 96 gaps.  Exactly 84 of the remaining 88 lack a dead PC pair plus SCC/VCC save tuple.  The explicit-key dense route still needs those registers live through its return, so closing the residual requires a genuine SuperCollider scalar spill/continuation restore rather than a local owner-host allocation; the existing MOI-local scalar spill path is not that continuation primitive.  Commit `8074f5745d` reuses immutable CFG/liveness state across automatic register-selection iterations and fits automatic Sampled reports by reducing only redundant banks, never logical ranges.  Artifact `consan-green-expansion-20260721-topk-sampled-cfgreuse-independent-044` exits the former repeated-analysis stall in 32.865 seconds and types the original eight-bank inventory as 175,750,736 bytes.  Rebuilt artifact `...-sampled-adaptive-independent-045` retains all 135,610 logical ranges and 10,656 barrier events, selects four banks, allocates the complete 93,299,856-byte report, and enters patch construction; that construction remains active through the fixed 300-second bound, so the cell stays orange and rotates without a wider timeout.  Post-index commit `1004602238` artifact `consan-green-expansion-20260721-pytorch-topk-sampled-indexed-075` again allocates the complete report but remains between patch begin/end at the fixed 180-second bound.  This separates top-k's remaining construction bottleneck from the three near-linear indexes that reduced `torch.mode`; the cell rotates without a repeat.  Commit `71a333dccf` replaces the remaining dense-access, synchronization, barrier-placement, and final-accounting linear scans with indexed or ordered equivalents.  Clean-tree one-repetition artifact `consan-green-expansion-20260721-pytorch-topk-sampled-scaled-clean-095` exits normally in 80.30 seconds, passes both exact FP64/BF16 value-and-index oracles, is dynamically complete, covers 102,598/161,136 accesses and all 15,182 barriers, and emits neither forbidden diagnostics nor overflow.  The cell is blue: construction is no longer its boundary, while bounded executable growth leaves static access coverage incomplete.  Inline commits `0007d051bf`, `d3b3cd0df3`, and `a793e5db1a` index fault-to-synchronization annotation and automatic scalar-owner lookup, and reuse one relocation decoder.  The strengthened 8,192-site regression completes in 227 ms; six focused dense/shared-owner tests pass, and the broad 676-test ConSan/MOI sweep retains only its 13 pre-existing failures.  Clean-tree artifact `consan-green-expansion-20260721-pytorch-topk-inline-owner-indexed-106` now completes both large transformations with 72,766 and 55,482 patches, respectively.  It then signals after legal private/group resource growth at 118 seconds, before either exact oracle.  A bounded independent-software-path cross-check, artifact `consan-green-expansion-20260721-pytorch-topk-inline-rocjitsu-crosscheck-107`, completes the same transformations and signals at 115 seconds before an oracle.  Post-barrier-bank-fix artifact `consan-green-expansion-20260721-pytorch-topk-inline-bankfix-114` signals again at 116.7 seconds, excluding that newly fixed control-transfer defect as the top-k cause.  The backend-independent reproduction and same-boundary post-fix result keep this a distinct ConSan execution defect; the Inline cell remains orange rather than reopening the completed SPMM fix. |
+| P1 | `torch.sort` over segmented rows | 🟩 Exact values/indices; 48,224/48,224 accesses; current paired 184.68x | 🟩 Exact values/indices; 48,224/48,224 accesses and 6,032/6,032 barriers; current paired 370.29x | 🟦 Exact values/indices; 48,224/48,224 accesses and 12,064/12,064 barrier members; current paired 148.88x | 🟩 Exact values/indices; 48,224/48,224 accesses and 6,032/6,032 barriers; current paired 416.22x | SuperCollider commit `b00563cd31` replaces the impossible one-relay-per-site layout with one shared call dispatcher per kernel and covers every native LDS/VDS shape in this object.  Frozen clean artifact `241` passes the exact values/indices oracle with complete 48,224/48,224 access coverage.  Current one-repetition paired measurements are in artifacts `consan-revalidation-gfx1250-20260720-sort-sc-004`, `consan-revalidation-gfx1250-20260720-sort-rr-nullfix-009`, and `consan-revalidation-gfx1250-20260720-sort-inline-nullfix-010`.  Paired artifact `242` accepts both baselines and the profile run, measuring 27,003 ms versus a 121 ms paired baseline.  Reviewed barrier-drop artifact `246` applies exactly one mutation, observes the precommitted no-diagnosis/pass-oracle result, and passes both health gates.  Record/Replay and Inline evidence remains in clean artifacts `204`/`209`, paired artifacts `205`/`210`, and reviewed faults `208`/`211`.  Current-tip Sampled clean artifact `consan-green-expansion-20260721-pytorch-sort-sampled-gated-current-127` accepts in 21.51 seconds with the exact values/indices oracle, complete 48,224/48,224 access coverage, complete 12,064/12,064 barrier-member coverage, and complete analysis.  Same-revision one-repetition paired artifact `consan-green-expansion-20260721-pytorch-sort-sampled-overhead-current-128` accepts 134.44/19,985.76/134.04 ms, or 148.88x against the mean baseline, with the same complete coverage.  Reviewed current-tip barrier-drop artifacts `consan-green-expansion-20260721-pytorch-sort-sampled-fault-current-129` and `consan-green-expansion-20260721-pytorch-sort-sampled-fault-late-130` each apply exactly one distinct logical barrier mutation, preserve the exact oracle without a diagnostic, retain complete surviving coverage, and pass health before and after.  Both are rejected solely because their independently frozen contracts expected oracle failure; neither expectation is changed after observation.  The cell remains blue and rotates without selecting a third site. |
 | P1 | Collision-heavy `torch.scatter_reduce` (`sum`, BF16 and FP32) | 🟩 Exact collision sums; 23/23 accesses; current paired 24.37x | 🟩 Exact collision sums; 23/23 accesses; current paired 42.30x | 🟩 Exact collision sums; 23/23 accesses; current paired 41.91x | 🟩 Exact collision sums; 23/23 accesses; current paired 40.17x | Current-tip clean artifact `322` accepts all four profiles after making record visibility conditional for a workload with no applicable executed LDS events.  Current one-repetition paired measurements are in `consan-revalidation-gfx1250-20260720-scatter-004`.  Paired artifacts `305`, `306`, `323`, and `324` accept both baselines and complete instrumentation.  Reviewed artifacts `329` and `330` record atomic-order and atomic-scope weakening as typed N/A in all four profiles: inventory proves the relaxed singleton reduction atomics have no synchronization edge to weaken. |
 | P1 | `torch.histc` with a shared-memory-sized bin count | 🟩 Exact counts; 133/133 supported accesses; current paired 60.11x | 🟩 Exact counts; 175/175 accesses and 84/84 barriers; current paired 72.00x | 🟩 Exact counts; 175/175 accesses and 168/168 applicable barriers; current paired 67.37x | 🟩 Exact counts; 175/175 accesses and 84/84 barriers; current paired 85.86x | Current-tip clean artifacts `289`-`291` admit 42 relaxed LDS-atomic accesses while correctly typing their synchronization role as not applicable; every MOI engine is statically and dynamically complete.  Current one-repetition paired measurements are in artifacts `consan-revalidation-gfx1250-20260720-histc-004`, `consan-revalidation-gfx1250-20260720-histc-rr-nullfix-007`, `consan-revalidation-gfx1250-20260720-histc-sampled-nullfix-010`, and `consan-revalidation-gfx1250-20260720-histc-inline-nullfix-010`.  Frozen paired artifacts `296`, `300`, `302`, and `308` accept both baselines and complete instrumentation.  Reviewed barrier-drop artifacts `299`, `301`, `303`, and `309` each apply exactly one mutation, fail the exact oracle, retain complete supported-access plus all surviving-barrier coverage, and pass containment health; Inline emits 60 diagnostics while the other profiles preserve their precommitted no-diagnosis outcomes. |
-| P2 | `torch.linalg.vector_norm` and large-row `torch.softmax` | 🟧 Literal64 decode fixed; next object has 1,172/1,172 supported but 0 placed sites | 🟧 Current Rocjitsu clean run exceeds 600 seconds; alternate backend exits before verdict; prior full bundle retained | 🟦 Exact norm/softmax; 4,263/4,756 accesses and 4,216/4,478 barriers | 🟨 Exact norm/softmax; 3,945/4,756 accesses and 4,095/4,704 barriers; dynamic gap 1,022 | Current attempt `consan-revalidation-gfx1250-20260720-pytorch-norm-softmax-record-replay-clean-rocjitsu-038` remains compute-active to its 600-second bound.  The alternate-backend cross-check exits before a verdict.  Prior one-repetition Record/Replay clean artifact `352`, paired artifact `354`, and reviewed fault artifact `357` retain the historical full bundle.  The old artifact `116` residual was entirely placement-missing; subsequent shared/dense dispatch and owner/scalar planning fixes close it without a row-specific implementation change.  Current accounting coalesces qualified signal/wait pairs into ordering events.  Inline evidence remains in `122`; Sampled in `118`. |
-| P1 | PyTorch cluster synchronization | 🟨 Exact candidate executes; clean run pending | 🟧 Current Rocjitsu clean run exceeds 600 seconds; alternate backend exits before verdict; prior full bundle retained | 🟨 Exact candidate executes; clean run pending | 🟨 Exact candidate executes; clean run pending | Current attempt `consan-revalidation-gfx1250-20260720-pytorch-cluster-load-sync-record-replay-clean-rocjitsu-038` remains compute-active to its 600-second bound.  The alternate-backend cross-check exits before a verdict.  Prior one-repetition clean artifact `consan-validation-gfx1250-pytorch-cluster-rr-barrieronly-363`, paired artifact `consan-validation-gfx1250-pytorch-cluster-rr-overhead-364`, and reviewed fault artifact `consan-validation-gfx1250-pytorch-cluster-rr-fault-370` retain the historical full bundle.  Conservative CFG pairing admits the signal/wait as one sequence; commit `fa3085347e` retains barrier tracking for barrier-only objects, and commit `f2798173d3` retains logical mutation plans through successful standalone composition. |
-| Survey | Cluster-memory and inter-workgroup synchronization from PyTorch | 🟨 Survey complete; executable candidate selected | 🟩 Executable cluster-scope synchronization full bundle accepted | 🟨 Survey complete; executable candidate selected | 🟨 Survey complete; executable candidate selected | Clustered placement was already covered.  The concrete row above supplies callable cluster-scope synchronization with accepted clean, paired, reviewed-fault, containment, and provenance evidence.  The current clustered-copy lowering uses ordinary global loads, so it is not claimed as evidence for a distinct cluster-memory opcode. |
+| P2 | `torch.linalg.vector_norm` and large-row `torch.softmax` | 🟩 Exact norm/softmax; 4,756/4,756 accesses; current paired 315.57x | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 2,352/2,352 barriers; current paired 435.17x | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 4,572/4,572 barriers; current paired 534.97x | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 2,352/2,352 barriers; current paired 317.24x | Current one-repetition artifacts use the corrected software-GPU environment.  Clean-tree paired SuperCollider artifact `consan-green-expansion-20260721-norm-softmax-supercollider-overhead-independent-011` accepts 108.98/35,541.53/116.27 ms and repeats the exact oracle with complete access coverage.  Reviewed fault artifact `...-supercollider-fault-independent-010` applies exactly one whole barrier mutation, observes the precommitted no-diagnosis/pass-oracle result, and passes discovery plus exact target-dispatch health before and after.  Record/Replay clean artifact `consan-green-expansion-20260721-norm-softmax-rr-independent-012` accepts the exact oracle with complete 4,756/4,756 access and 2,352/2,352 barrier coverage in 43.30 seconds.  Clean-tree paired artifact `...-rr-overhead-independent-013` accepts 96.46/42,534.82/99.02 ms, or 435.17x against the mean baseline, and repeats complete coverage.  Reviewed artifact `...-rr-fault-independent-014` applies exactly one whole barrier mutation, observes the precommitted no-diagnosis/pass-oracle result, retains complete surviving-site coverage, and passes both exact target-dispatch health gates.  Sampled clean artifact `consan-green-expansion-20260721-norm-softmax-sampled-literal-dispatch-independent-048` accepts the exact oracle with complete 4,756/4,756 access and 4,572/4,572 barrier coverage in 70.14 seconds.  Clean-tree paired artifact `...-sampled-overhead-independent-050` accepts 131.65/67,498.39/120.69 ms, or 534.97x against the mean baseline, and repeats complete coverage.  Reviewed artifact `...-sampled-fault-independent-051` applies exactly one whole barrier mutation, observes the precommitted no-diagnosis/pass-oracle outcome, retains complete 4,756/4,756 surviving accesses and 4,570/4,570 barriers, bounds report memory at 9,295,520 bytes with complete cleanup, and passes exact target-dispatch health before and after.  Commit `19840819c2` uses the report's literal dispatch identity for gfx1250 Sampled probes when persistent scalar pressure leaves no pair; Inline Shadow and other architectures retain their existing persistent-register paths.  Commit `e2c1e026bc` extends that literal-identity strategy to non-atomic gfx1250 Inline probes.  Clean-tree one-repetition artifact `consan-green-expansion-20260721-norm-softmax-inline-literal-dispatch-independent-052` passes the exact oracle in 35.17 seconds and recovers 28 access plus 18 barrier sites.  The former 474 access and 189 barrier resource failures were scalar `forbidden_overlap` exclusions: Inline lacked component-scoped EXEC-save SGPR spill assignment.  They were not VGPR-allocation failures.  The component-scoped implementation now applies one owner assignment consistently to access, barrier, and entry lowering; local-LDS-shadow owners require spill-backed state, while safe site-dead windows remain available only to external-shadow owners.  Commit `4bfa285247` retains the fix.  Clean-tree one-repetition artifact `consan-green-expansion-20260721-norm-softmax-inline-component-spill-clean-079` passes the exact oracle in 37.19 seconds with static/dynamic completeness, all 4,756 accesses, all 2,352 barriers, and none of the prior 1,022 dynamic-undercoverage events.  Clean-tree paired artifact `consan-green-expansion-20260721-norm-softmax-inline-component-spill-overhead-clean-081` accepts 107.31/36,620.42/123.56 ms, or 317.24x against the mean baseline, while repeating complete coverage. Fresh inventory artifact `...-component-spill-inventory-082` retains the reviewed whole-barrier selector. Fault artifact `...-component-spill-fault-083` applies that selector but reaches its 120-second command bound, so it is not accepted. Reviewed fault artifact `...-component-spill-fault-084` applies exactly one logical barrier mutation as two instruction rewrites, observes the precommitted no-diagnosis/pass-oracle result, retains complete surviving coverage at 4,756/4,756 accesses and 2,351/2,351 barriers, cleans all 25,839,568 report bytes, and passes exact target health before and after. The cell is green.  Commit `8d0366b5a8` closes the separate undersized-descriptor Inline object, which now patches all 1,172 accesses and 624 barriers.  The slower-emulator Record/Replay attempt `consan-revalidation-gfx1250-20260720-pytorch-norm-softmax-record-replay-clean-rocjitsu-038` reaches its 600-second bound. |
+| P1 | PyTorch cluster synchronization | 🟩 Exact oracle; 25/25 applicable accesses; current paired 1.02x | 🟩 Exact oracle; 25/25 accesses and 2/2 barriers; current paired 1.03x | 🟩 Exact oracle; 25/25 accesses and 4/4 barrier members; current paired 1.07x | 🟩 Exact oracle; 25/25 accesses and 2/2 barriers; current paired 1.24x | Commit `b9af8082f7` gives each of 512 cluster threads a distinct LDS element, creating a causal LDS store/barrier/load window without intentional duplicate writers.  Clean all-profile artifact `consan-green-expansion-20260721-cluster-causal-all-clean-independent-034` accepts the exact oracle with complete static and dynamic evidence in all four modes.  Inventory `...-cluster-causal-inventory-independent-036` distinguishes the selected `barrier_id=-3`, cluster-scoped pair from a compiler-added workgroup pair.  SuperCollider, Record/Replay, and Inline Shadow retain clean, paired, reviewed-fault, and containment acceptance in artifacts `034`, `035`, and `037`.  Commit `a7d2128db3` prevents Sampled dense relay hosts from overlapping pre-applied fault ranges.  Same-revision clean artifact `...-cluster-causal-sampled-clean-fixed-independent-039` accepts 25/25 accesses and 4/4 barrier members.  One-repetition paired artifact `...-cluster-causal-sampled-paired-fixed-independent-040` accepts 464.07/499.42/468.20 ms, or 1.07x against the mean baseline.  Reviewed artifact `...-cluster-causal-sampled-fault-fixed-independent-038` applies the exact whole cluster pair once, preserves the exact oracle with the precommitted no-diagnosis outcome, and passes containment health before and after. |
+| Survey | Cluster-memory and inter-workgroup synchronization from PyTorch | 🟩 Executable cluster-scope synchronization full bundle accepted | 🟩 Executable cluster-scope synchronization full bundle accepted | 🟩 Executable cluster-scope synchronization full bundle accepted | 🟩 Executable cluster-scope synchronization full bundle accepted | Clustered placement was already covered.  The concrete row above now supplies a causal LDS access window around callable cluster-scope synchronization with complete clean, paired, reviewed-fault, containment, and provenance evidence in all four modes.  The lowering still uses ordinary LDS and global instructions, so it is not claimed as evidence for a distinct cluster-memory opcode. |
 
 ## Environment baseline
 
@@ -168,8 +168,8 @@ code.  It is not instrumentation acceptance evidence.
 
 | Item | Current evidence |
 |---|---|
-| Port branch | `users/bjacob/consan-gfx1250` |
-| Linear parent | `users/bjacob/consan-gfx950-take2` at `32e89eee9d` |
+| Port branch | `users/bjacob/consan` |
+| Rebased foundation | `origin/develop` merge-base `8bba8691911ad19ce58bef2ac252ac497331fc5f` |
 | ROCm distribution | `$WORKSPACE_ROOT/TheRock/build/dist/rocm` |
 | Toolchain | workspace TheRock HIP compiler targeting `gfx1250`; host Clang 21.1.8 |
 | Execution | software GPU environment initialized one gfx1250 node |
@@ -208,10 +208,438 @@ do not promote matrix cells without the end-to-end evidence above.
 | Generated gfx1250 decode | 🟦 Hook-integrated baseline | RocJitsu contains a generated gfx1250 decoder and instruction builders.  The ConSan hook now links that backend and reaches target code-object analysis; ConSan-specific shape and semantic qualification is active. |
 | ConSan instruction emission | 🟦 Active | Target-generated VDS/VFLAT tests prove SuperCollider LDS load and group-flat store readback, including signed and zero-extending byte loads, low/high-half byte and 16-bit stores, stride-64 two-address stores, target waits and compares, marker-report emission, and final validation.  Dense SuperCollider objects now use a structurally validated per-kernel call-return dispatcher and relocated entry host; the real 280-kernel `torch.sort` object reaches complete 48,224/48,224 coverage.  The sub-dword store path reserves one extra temporary without clobbering guest data; full-pressure regressions verify spill-private and descriptor updates.  Record/Replay lowers real VFLAT accesses, shared owner/epoch prologues, and inline barrier epoch updates.  Its gfx1250 dense-access path replaces each adjacent access with one `s_call_i64`, shares a return-PC dispatcher, and can relocate one kernel-entry host when no compiler NOP island exists; the real FP64 top-k kernel improves from 44/106 to 106/106 without changing other architectures.  Sampled and Inline Shadow now lower access publication, compare-and-swap, 64-bit atomics, carry-chain address arithmetic, and lane-read operations.  Inline local shadows initialize once per descriptor-declared workgroup dimensionality, omit external-only workgroup-key state, branch around empty cold paths, and reject read/read traffic before owner/epoch extraction.  A forced far-island gfx1250 test proves that a deferred guest load precedes its relocated continuation.  A packed 1000-site Sampled regression proves demand-sized gate reservations keep the full Qwen access inventory branch-reachable.  Ordinary and AMD extended dispatch packets now both propagate spill-private requirements with compile-time ABI-offset checks.  Remaining synchronization families remain open. |
 | Register allocation and spilling | 🟦 Active | Wave32 descriptor allocation uses 16-VGPR granules: field 4 yields an 80-VGPR boundary.  TP1 Inline Shadow executes all 72 spill-backed access patches, including an 18-VGPR live window, after growing a zero-private kernel to 152 bytes per lane; SuperCollider independently recovers its 72 high-pressure sites with seven-VGPR windows and grows private storage through 60 bytes per lane.  Qwen Record/Replay now shares spill-private epoch state across its entry, access, and barrier probes, replacing an unbounded dynamic barrier trace with bounded per-wave epochs while retaining 1000/1000 accesses and 92/92 barriers.  These profiles preserve their independent oracles and pass static/dynamic completeness.  The software GPU required an internal fix to honor descriptor-grown private size when its dispatch packet remained zero.  Partial-EXEC, shared-owner, standalone boundary, and remaining-site-kind evidence remain open. |
-| Validation target | 🟩 Matrix campaigns accepted | The registry resolves every gfx1250 workload artifact and the full doctor passes.  Every active-matrix workload has a frozen four-profile clean, fault, containment, resource, and provenance bundle.  The final same-tip audit accepts all 40 cells with their retained denominators. |
+| Validation target | 🟦 Green expansion active | The registry resolves every gfx1250 workload artifact and the full doctor passes.  Current-tip revalidation retains 92 accepted runnable cells with one-repetition paired overheads, while one attempted runnable cell remains explicitly non-green, no current runnable cell is typed N/A, and six green aggregate/survey indicators have no runtime denominator.  New bounded work is recorded in the matrix and `/tmp/CONSAN_GFX1250_REVALIDATION_PROGRESS.md`; no blanket four-profile acceptance is claimed. |
 | Four focused flavor verticals | 🟦 Four-engine bootstrap | A clean ping-pong cooperative-LDS workload passed its host-reference oracle with 4/4 accesses patched by SuperCollider.  Record/Replay passed with 4/4 accesses and 8/8 barriers patched and visible records.  Sampled passed with 4/4 accesses and two visible records, but 0/8 barriers.  Inline Shadow is statically and dynamically complete with 4/4 accesses, 8/8 barriers, and one visible record.  Fault/diagnostic behavior, replay qualification, and Sampled synchronization remain open. |
 
 ## Progress log
+
+- 2026-07-21: Bounded the P0 `torch.topk` SuperCollider continuation work.
+  Artifacts `consan-green-expansion-20260721-pytorch-topk-sc-branch-only-131`
+  and `...-132` return normally and pass both exact FP64/BF16 oracles, but
+  retain 160,752/160,848 aggregate coverage.  A full-pressure synthetic proves
+  scalar spilling plus disjoint forward/backward branch-only continuations and
+  rejects a corrupted return relay in final validation.  The real 84-site
+  admission now fails only because ordinary anchor relay capacity is
+  insufficient; additional proven relay reservoirs, not weaker liveness, are
+  the remaining boundary.  The cell stays blue.
+
+- 2026-07-21: Quick F8 SuperCollider promotes from blue to green and raises
+  the current-tip roll-up to 92/93.  Same-revision one-repetition paired
+  artifact `consan-green-expansion-20260721-tensile-f8-sc-overhead-current-126`
+  accepts 43,458.36/65,509.16/47,846.30 ms, or 1.43x against the mean
+  baseline, with exact numeric results and complete 1,772/1,772 access
+  coverage.  Reviewed artifact
+  `consan-green-expansion-20260721-tensile-f8-sc-fault-current-125` applies
+  the selected barrier mutation once, preserves the exact oracle with the
+  precommitted no-diagnosis policy, and passes health before and after.  This
+  supersedes the old device-loss containment result without changing its
+  expectation after observation.
+
+- 2026-07-21: Current-tip Inline Shadow clears the obsolete dispatch-resource
+  launch boundary on both quick F8 and HGEMM.  One-repetition artifacts
+  `consan-green-expansion-20260721-tensile-f8-inline-current-123` and
+  `consan-green-expansion-20260721-tensile-hgemm-inline-current-124` execute
+  49 and 189 exact numeric rows, respectively, with zero failures before their
+  fixed 180-second bounds.  Neither full client returns a final analysis
+  verdict or overhead, so both cells advance only from orange to yellow and
+  rotate.  The remaining-corpus survey cells are green in all four columns:
+  XT4 already froze the architecture-level decoded opcode union over accepted
+  selected rows.  Those survey indicators are not runtime denominator cells.
+
+- 2026-07-21: Qwen Sampled remains orange after two bounded current-tip
+  diagnostics.  A runtime residue gate now lets unsampled workgroups execute
+  the original guest barrier while bypassing causal-window metadata scans;
+  all 81 focused and broad Sampled tests pass, and the full Qwen inventory
+  remains 1000/1000 accesses and 90/90 barriers.  The independent software
+  GPU still has no workload verdict at 180 seconds.  Disabling Sampled barrier
+  tracking entirely also produces no verdict at 120 seconds, so barrier
+  metadata scanning is not the sole remaining cost.  No timeout is widened,
+  no acceptance is inferred, and the roll-up remains 91/93.
+
+- 2026-07-21: Reduced SGEMM is simultaneously green in all four profiles.
+  The fault parser first stopped treating `MOI auto report cleanup` as a
+  malformed second state summary; focused tests pin that evidence-integrity
+  fix, and prior artifacts `118` and `119` then reparse without false overflow
+  while retaining their genuine no-diagnosis outcomes.  A new selector was
+  precommitted from static structure before execution: the second signal/wait
+  pair immediately precedes LDS consumers, unlike the entry and final pairs
+  already shown noncausal.  One-repetition artifact
+  `consan-green-expansion-20260721-sgemm-smoke-inline-fault-causal-121` applies
+  that whole pair exactly once, fails the independent numeric oracle, emits
+  one Inline diagnostic, retains complete 640/640 access and 21/21 surviving
+  barrier coverage without overflow, and passes health before and after.  The
+  Inline cell promotes from blue to green; the current-tip roll-up is 91/93.
+
+- 2026-07-21: Current-tip atomic regression evidence remains green in all
+  four profiles.  After architecture-specific atomic fixtures were aligned
+  with the ISA-defined no-SADDR operand, the complete ConSan suite passes
+  711/711.  One-repetition Stream-K artifact
+  `consan-green-expansion-20260721-streamk-all-current-120` accepts the exact
+  workload oracle in all four profiles with 4/4 accesses; Record/Replay,
+  Sampled, and Inline additionally retain 10/10 ordered atomics and complete
+  4/4, 8/8, and 4/4 barrier coverage, respectively.  This refreshes existing
+  green evidence and does not conceal or promote an unrelated non-green cell.
+
+- 2026-07-21: Reduced SGEMM Inline advances from orange to blue.  Clean
+  committed-tip artifact `consan-green-expansion-20260721-sgemm-smoke-inline-bankfix-115`
+  accepts the exact numeric oracle with complete 640/640 access and 22/22
+  barrier coverage.  One-repetition paired artifact
+  `consan-green-expansion-20260721-sgemm-smoke-inline-overhead-116` accepts at
+  1.33x against the mean of its two controls with the same complete coverage.
+  Fresh inventory artifact `...-inventory-117` retains both reviewed barrier
+  selectors.  Late and early exact-one fault artifacts `...-fault-118` and
+  `...-fault-early-119` preserve the exact oracle, complete surviving-site
+  coverage, report cleanup, and health, but neither emits the precommitted
+  Inline diagnostic.  The cell therefore remains blue and rotates; its
+  expectation is not changed after observation.
+
+- 2026-07-21: The P0 top-k Inline signal is independent of the newly fixed
+  barrier-bank defect.  Clean committed-tip artifact
+  `consan-green-expansion-20260721-pytorch-topk-inline-bankfix-114` again
+  completes transformation and signals during execution at 116.7 seconds,
+  essentially matching the prior 118-second boundary.  It reaches no oracle
+  or final verdict, so the cell remains orange and rotates; the SPMM fix is not
+  weakened or generalized beyond its evidence.
+
+- 2026-07-21: P3 SPMM F8 Inline advances from orange to yellow after fixing a
+  concrete gfx1250 state-preservation defect.  Patch-frontier probes identify
+  the ninth barrier as the first corrupting addition; sixteen access probes
+  pass with barriers disabled.  That barrier is immediately followed by a
+  guest VGPR-bank update.  Commit `e1bbd2608a` makes every gfx1250 Inline
+  barrier cave establish its low scratch bank explicitly, matching the
+  already-correct Sampled invariant.  The exact formerly failing kernel then
+  passes at 1,639/1,639 accesses and 25/25 barriers.  Clean committed-tip
+  standard artifact
+  `consan-green-expansion-20260721-spmm-f8-ml-inline-fixed-clean-113` records
+  eight exact passes, zero failures, and complete 22,074/22,074 access plus
+  403/403 barrier coverage for its first object before the unchanged
+  180-second bound.  The missing final verdict prevents blue, but the former
+  correctness contradiction is closed.
+
+- 2026-07-21: An exact-kernel discriminator narrows the P3 SPMM F8 Inline
+  corruption without changing its acceptance color.  Artifact
+  `consan-green-expansion-20260721-spmm-f8-ml-inline-kernel-filter-111`
+  reproduces wrong numeric results with all 1,639 accesses and 25 barriers
+  patched.  Capped artifact `...-kernel-cap8-112` passes every numeric row in
+  the first orientation with eight accesses and eight barriers admitted; its
+  fixed bound expires during the second orientation.  This is not acceptance
+  evidence, but it excludes common entry state and the earliest probes as a
+  sufficient cause.  The active investigation is locating the first failing
+  patch frontier rather than widening the workload timeout.
+
+- 2026-07-21: P3 SPMM F8 Inline is now concretely orange rather than
+  pending-yellow.  Standard-profile artifact
+  `consan-green-expansion-20260721-spmm-f8-ml-inline-clean-108` fully patches
+  22,074/22,074 accesses and 403/403 barriers in its first applicable object,
+  but the client records eight exact passes and five wrong-result rows before
+  its fixed 180-second bound.  Every observed failure is an MT64x64 solution;
+  observed MT16x16 solutions pass.  A barrier-disabled control does not reach
+  those solutions in 150 seconds, while a one-patch control is rejected by
+  dense-relay reservation before execution.  The clean contradiction is
+  retained and the cell rotates without a broader bisection.
+
+- 2026-07-21: Rotated to a bounded, one-repetition P3 SPMM F8 Inline clean
+  assessment.  This cell currently has only static stress inventory, so its
+  first independent numeric and dynamic-coverage verdict can advance the
+  matrix without revisiting the resistant top-k execution path.
+
+- 2026-07-21: The bounded one-site top-k Inline discriminator did not reach
+  client execution.  Its sole admitted site failed the dense dispatcher's
+  reserved relay-space check, so zero relevant patches were applied and the
+  required-patch guard stopped the run before an oracle.  This is useful
+  construction evidence but cannot distinguish common Inline execution state
+  from a later-probe defect.  It is not acceptance evidence, does not change
+  the orange cell, and is not being repeated with a wider bound.
+
+- 2026-07-21: Top-k Inline's execution signal reproduces on an independent
+  software path.  Artifact
+  `consan-green-expansion-20260721-pytorch-topk-inline-rocjitsu-crosscheck-107`
+  completes the same two large transformations and signals at 115 seconds
+  before an oracle.  This rules out a backend-specific launch quirk and
+  classifies the new boundary as a ConSan execution defect.  A bounded
+  one-site discriminator was scheduled next; the newer entry above records
+  why it stopped before providing that distinction.  No broad patch cap is
+  acceptance evidence.
+
+- 2026-07-21: Advanced P0 `torch.topk` Inline Shadow from a construction
+  timeout to an execution-stage signal, without a color promotion.  Live
+  stacks found three generic scaling defects: quadratic fault-site/event and
+  event/sequence association, one heavyweight decoder construction per dense
+  relocation candidate, and a linear owner-scope search per automatic scalar
+  placement site.  Commits `0007d051bf`, `d3b3cd0df3`, and
+  `a793e5db1a` replace them with indexes and decoder reuse.  The strengthened
+  8,192-site regression completes in 227 ms, six focused Inline
+  dense/shared-owner tests pass, and the 676-test ConSan/MOI sweep retains
+  only its 13 pre-existing failures.  Clean-tree artifact
+  `consan-green-expansion-20260721-pytorch-topk-inline-owner-indexed-106`
+  finishes both large transformations at 72,766 and 55,482 patches, then
+  signals after legal resource growth at 118 seconds before an exact oracle.
+  The cell remains orange while a bounded independent execution cross-check
+  separates an instrumentation defect from a software-GPU limitation.
+
+- 2026-07-21: Bounded the already-blue P3 SPMM F8 Sampled paired attempt
+  without promotion.  One-repetition artifact
+  `consan-green-expansion-20260721-spmm-f8-ml-sampled-overhead-103`
+  reaches the fixed 180-second instrumented bound with only one of two
+  required applicable-object records.  The paired run therefore has no
+  accepted overhead value.  This is an execution-duration boundary rather
+  than a new oracle failure, and it rotates without extending the timeout.
+
+- 2026-07-21: Bounded P2 `000_sk_sgemm_quick` Inline Shadow without a
+  color promotion.  One-repetition artifact
+  `consan-green-expansion-20260721-sgemm-quick-inline-102` completes the
+  first problem's 12/12 exact rows with zero failures and complete static
+  640/640 access plus 22/22 barrier coverage.  Unlike the other profiles, its
+  second problem has begun dynamic reporting when the unchanged 120-second
+  bound expires, leaving aggregate analysis dynamically incomplete.  The
+  cell remains yellow and rotates.
+
+- 2026-07-21: Promoted P2 `000_sk_sgemm_quick` Sampled from yellow to
+  blue.  Clean-tree one-repetition artifact
+  `consan-green-expansion-20260721-sgemm-quick-sampled-101` completes the
+  first benchmark problem's 12/12 exact rows with zero failures, 640/640
+  accesses, all 40/40 barrier members, static and dynamic completeness, and
+  report cleanup.  It begins the second problem before reaching the unchanged
+  120-second bound, matching the SuperCollider boundary without extra
+  repetitions, filters, caps, or timeout growth.
+
+- 2026-07-21: Promoted P2 `000_sk_sgemm_quick` SuperCollider from yellow
+  to blue.  Clean-tree one-repetition artifact
+  `consan-green-expansion-20260721-sgemm-quick-sc-100` completes the first
+  benchmark problem's 12/12 exact numeric rows with zero mismatches,
+  640/640 accesses, static and dynamic completeness, and complete report
+  cleanup.  The client then begins its second problem and reaches the
+  unchanged 120-second bound, so this is a clean-partial promotion rather
+  than a full-client acceptance claim.
+
+- 2026-07-21: Bounded P0 `torch.topk` Inline Shadow after two generic
+  construction-scaling fixes.  Commits `5f73127cfa` and `8cbfcc43b3`
+  index owner-local host placement and cache immutable descriptor planning;
+  focused regressions pass and the broader Inline slice retains only four
+  pre-existing atomic-decoder expectation failures.  Clean-tree artifact
+  `consan-green-expansion-20260721-pytorch-topk-inline-cached-098` still
+  remains in patch construction at the fixed 120-second bound.  The cell
+  stays orange and rotates without widening that timeout.
+
+- 2026-07-21: Promoted P0 `torch.topk` Sampled from orange to blue.  Commit
+  `71a333dccf` replaces the remaining nested linear work in dense access and
+  barrier construction plus final byte accounting.  All 80 focused Sampled
+  tests and an 8,192-range validation regression pass.  Clean-tree,
+  one-repetition artifact
+  `consan-green-expansion-20260721-pytorch-topk-sampled-scaled-clean-095`
+  returns normally in 80.30 seconds, passes both exact FP64/BF16
+  value-and-index oracles, is dynamically complete, covers 102,598/161,136
+  accesses and all 15,182 barriers, and emits no forbidden diagnostic or
+  overflow.  Static access coverage remains incomplete because the bounded
+  executable-growth operating point cannot materialize every dense probe, so
+  green is not claimed.
+
+- 2026-07-21: Promoted `torch.mode` Sampled from blue to green.  Paired
+  artifact `consan-green-expansion-20260721-pytorch-mode-sampled-overhead-072`
+  accepts 96.82/19,932.30/99.05 ms, or 203.53x against the mean baseline, and
+  repeats complete coverage.  Fresh inventory `...-sampled-inventory-073`
+  retains the reviewed selector.  Fault artifact `...-sampled-fault-074`
+  applies exactly one whole barrier mutation, preserves the exact oracle with
+  the precommitted no-diagnosis outcome, covers 28,939/28,939 accesses and all
+  8,890 surviving barrier members, completely cleans its 43.3 MB peak report,
+  and passes target health before and after.
+
+- 2026-07-21: Promoted `torch.mode` Sampled from orange to blue at commit
+  `2dea78db37`.  Clean-tree one-repetition artifact
+  `consan-green-expansion-20260721-pytorch-mode-sampled-semantic-clean-071`
+  passes the exact oracle in 21.72 seconds with static/dynamic completeness,
+  28,939/28,939 accesses, and all 8,892 barrier members.  Paired overhead and
+  reviewed-fault evidence remain before green.
+
+- 2026-07-21: `torch.mode` Sampled dirty-tree artifact
+  `consan-green-expansion-20260721-pytorch-mode-sampled-semantic-dirty-070`
+  passes the exact oracle in 21.43 seconds with static and dynamic
+  completeness, 28,939/28,939 accesses, and 8,892/8,892 barrier members.
+  Structurally proven same-block split barriers are no longer bounded by a
+  corpus-sized instruction distance, while malformed and mismatched pairs
+  remain unsupported.  Two isolated no-return LDS releases with no acquire
+  consumer are typed not applicable while their ordinary accesses remain
+  covered.  The cell remains orange pending a committed-tree repetition.
+
+- 2026-07-21: Promoted `torch.mode` Inline Shadow from blue to green.  Paired
+  artifact `consan-green-expansion-20260721-pytorch-mode-inline-dynamic-overhead-066`
+  accepts 99.12/32,739.50/92.39 ms, or 341.90x against the mean baseline, and
+  repeats the complete exact oracle and coverage.  Fresh inventory artifact
+  `...-dynamic-inventory-067` retains the reviewed barrier selector.  Fault
+  artifact `...-dynamic-fault-068` applies it exactly once, preserves the
+  precommitted pass-oracle/no-diagnosis outcome, covers 28,939/28,939 accesses
+  and all 4,445 surviving barriers with zero undercoverage, and passes target
+  health before and after.
+
+- 2026-07-21: Promoted `torch.mode` Inline Shadow from yellow to blue.  Commit
+  `af3b46a020` inventories hidden dynamic LDS, selects the external exact-shadow
+  table for affected owners, and preserves owner/epoch state privately across
+  guest VGPR-bank transitions.  Clean-tree one-repetition artifact
+  `consan-green-expansion-20260721-pytorch-mode-inline-dynamic-clean-065`
+  passes exact values and indices in 33.80 seconds with 28,939/28,939 accesses,
+  4,446/4,446 barriers, zero dynamic undercoverage, and no diagnostics or
+  overflow.  Paired overhead and a reviewed fault remain before green.
+
+- 2026-07-21: Sampled SPMM F8 advances from yellow to blue.  The remaining
+  assertion was not a CFG-mode-discovery defect.  A dense barrier call can be
+  immediately followed by the guest's next `s_set_vgpr_msb`, whose update can
+  take effect as control transfers; mode-zero caves had omitted an explicit
+  low-bank selection and could therefore enter with the continuation's mode.
+  Every gfx1250 Sampled barrier cave now establishes the low bank before its
+  first scratch VGPR access.  The focused 78-test Sampled/transition slice and
+  the formerly failing filtered client pass.  The unrestricted one-repetition
+  exact client also returns normally with three numeric passes and complete
+  19,960/19,960 access plus 806/806 barrier-member coverage.  XT3C is DONE and
+  work rotates to SuperCollider quick-GEMM; final Sampled acceptance gates
+  remain explicit rather than being inferred from clean completion.
+
+- 2026-07-21: At an intermediate XT3C checkpoint, the Sampled SPMM
+  investigation found and fixed one real
+  gfx1250 VGPR-bank preservation bug.  The target instruction encodes the new
+  mode in its low byte and its previous mode in its high byte; ConSan had
+  retained the packed transition as persistent state and then emitted invalid
+  probe-entry and restoration transitions.  The transition-aware builder,
+  parser correction, and seven focused regressions pass.  The cached exact
+  client now accepts diagnostic caps through 1,024 probes, including the
+  formerly failing nine-probe case.  Unrestricted execution then still
+  asserted in
+  a software-GPU vector-source read after complete 19,960-access and
+  806-barrier-member patching.  That checkpoint's block-entry mode-discovery
+  hypothesis and yellow/ACTIVE disposition were subsequently disproved and
+  superseded by the unrestricted passing result above.
+
+- 2026-07-21: Sampled norm/softmax is green, raising the current-tip roll-up to
+  89 accepted runnable cells.  Clean-tree paired artifact
+  `consan-green-expansion-20260721-norm-softmax-sampled-overhead-independent-050`
+  accepts baseline-before/Sampled/baseline-after medians of
+  131.65/67,498.39/120.69 ms at one repetition, or 534.97x against the mean
+  baseline, while repeating complete 4,756/4,756 access and 4,572/4,572
+  barrier coverage.  Reviewed artifact
+  `...-norm-softmax-sampled-fault-independent-051` applies exactly one whole
+  barrier mutation, observes the precommitted no-diagnosis/pass-oracle result,
+  retains complete surviving-site coverage, bounds report memory at 9,295,520
+  bytes with complete cleanup, and passes target-dispatch health before and
+  after.  Work rotates to the Inline column's bounded publication-contention
+  residual rather than spending more effort on an already-green mode.
+
+- 2026-07-21: Sampled norm/softmax advances from yellow to blue.  Commit
+  `19840819c2` removes gfx1250 Sampled's code-object-wide persistent
+  dispatch-ID pair when scalar pressure reaches `s106`, using the stable
+  literal report identity for bank selection and report metadata instead.
+  Inline Shadow and other architectures retain their existing persistent
+  register paths.  All 96 focused Sampled/report-planning tests pass, including
+  a new full-pressure regression.  One-repetition artifact
+  `consan-green-expansion-20260721-norm-softmax-sampled-literal-dispatch-independent-048`
+  passes the exact oracle in 70.14 seconds with complete 4,756/4,756 access and
+  4,572/4,572 barrier coverage, no diagnostics or overflow, and clean source
+  provenance.  Paired overhead and reviewed fault evidence remain before green.
+
+- 2026-07-21: P0 `torch.topk` Record/Replay rotates with an exact-object
+  feasibility boundary rather than starting a broad scalar-spill subsystem.
+  Dump artifact `consan-topk-rr-offline-dumps-047` retains the current
+  13,255,032-byte object.  Bounded offline patching reproduces 112,912
+  candidates, all 791 `forbidden_overlap` access plans across eight independent
+  `gatherTopK` kernels, and 44 successful owner-local assignments.  Removing
+  kernel-entry liveness from the diagnostic allocator leaves those counts
+  unchanged, so the residual comes from the real access/synchronization-site
+  union.  The diagnostic source edit was removed; no weakened entry policy is
+  retained.  The blue cell remains dynamically complete with exact oracles and
+  rotates to a smaller implementation target.
+
+- 2026-07-21: P0 `torch.topk` Sampled advances past its stale analysis-bound
+  description without claiming acceptance.  Commit `8074f5745d` retains one
+  immutable CFG/liveness state across automatic register-selection iterations;
+  artifact `consan-green-expansion-20260721-topk-sampled-cfgreuse-independent-044`
+  reaches report planning in 32.865 seconds instead of rebuilding the
+  1,933,679-instruction graph on every iteration.  The complete eight-bank
+  inventory then requires 175,750,736 bytes, above the fixed 128 MiB ceiling.
+  Automatic Sampled inventory now retains all 135,610 logical ranges while
+  reducing only redundant independent banks by powers of two.  Rebuilt
+  artifact `...-sampled-adaptive-independent-045` selects four banks, allocates
+  its complete 93,299,856-byte report, and enters full-object patch
+  construction.  That construction exceeds the fixed 300-second bound, so the
+  orange cell rotates rather than widening its timeout.  The focused 95-test
+  Sampled/report-planning suite and all 43 validation-driver tests pass.
+
+- 2026-07-21: D128-pressure Inline Shadow returns to green on the current tip.
+  The superseded 120- and 300-second attempts composed two software-GPU
+  launch mechanisms.  Direct clean artifact
+  `consan-green-expansion-20260721-d128-pressure-inline-direct-independent-041`
+  passes the exact oracle with complete 40/40 access and 4/4 barrier coverage
+  in 40.13 seconds.  One-repetition paired artifact
+  `...-d128-pressure-inline-paired-independent-042` measures 11,586 ms against
+  bracketing 8,965 and 8,957 ms baselines, or 1.29x against their mean.
+
+- 2026-07-21: PyTorch cluster synchronization becomes green in Sampled and
+  completes the four-profile row.  Commit `a7d2128db3` prevents its dense
+  barrier relay planner from consuming pre-applied fault ranges as host code.
+  Same-revision clean artifact
+  `consan-green-expansion-20260721-cluster-causal-sampled-clean-fixed-independent-039`
+  accepts the exact oracle with complete 25/25 access and 4/4 barrier-member
+  coverage.  One-repetition paired artifact `...-paired-fixed-independent-040`
+  measures 1.07x against its bracketing baseline, and reviewed artifact
+  `...-fault-fixed-independent-038` applies exactly one whole cluster-pair
+  mutation, preserves the oracle with the precommitted no-diagnosis outcome,
+  and passes containment health before and after.
+
+- 2026-07-21: The causal PyTorch cluster workload replaces its superseded
+  barrier-only evidence in all four profiles.  Commits `5b7caa9982` and
+  `b9af8082f7` add Sampled cluster-scope metadata and give all 512 cluster
+  threads distinct LDS elements.  Clean artifact
+  `consan-green-expansion-20260721-cluster-causal-all-clean-independent-034`
+  and one-repetition paired artifact `...-all-overhead-independent-035`
+  accept all four exact-oracle runs with complete coverage.  Reviewed artifact
+  `...-cluster-causal-fault-all-independent-037` applies the exact cluster pair
+  once in each profile and passes containment health.  SuperCollider,
+  Record/Replay, and Inline Shadow preserve the oracle and remain green;
+  Sampled rejects the mutated object during final validation and advances from
+  typed N/A to blue with that fault-composition gap recorded.
+
+- 2026-07-21: The bounded alternate-site SuperCollider F8 GEMM fault trial
+  does not promote the blue cell.  Artifact
+  `consan-green-expansion-20260721-tensile-f8-sc-fault-alternate-independent-029`
+  applies exactly one later logical signal/wait mutation, but multiple exact
+  numeric rows fail without a ConSan diagnosis and postflight device health
+  fails again.  This rules out a first-barrier-only explanation; the reviewed
+  pass-oracle expectation remains unchanged and the cell rotates without a
+  third site.
+
+- 2026-07-21: PyTorch cluster synchronization promotes to green in Inline
+  Shadow after commit `61f98b14f4` gives barrier-only objects a minimal
+  aggregate execution marker.  Clean artifact
+  `consan-green-expansion-20260721-cluster-inline-clean-independent-025`
+  accepts the exact oracle with 23/23 accesses, 1/1 barrier, and complete
+  dynamic evidence.  Paired artifact `...-inline-paired-independent-027`
+  accepts 499.49/470.13/500.53 ms (0.94x against the mean baseline), and
+  reviewed artifact `...-inline-fault-independent-028` applies exactly one
+  logical barrier mutation, matches the precommitted no-diagnosis/pass-oracle
+  outcome, and passes target-dispatch health before and after.
+
+- 2026-07-20: Current-tip Qwen/Record-Replay paired artifact
+  `consan-revalidation-gfx1250-20260720-qwen-record-replay-paired-058`
+  accepts at 5.33x against a 64,016.01 ms bracketing baseline.  The opening
+  and closing controls are 63,800.54 and 64,231.47 ms; the instrumented row
+  is 340,994.41 ms and retains the exact oracle, 1000/1000 accesses, 46/46
+  barriers, and complete static and dynamic analysis.  The cell returns to
+  green.
+
+- 2026-07-20: Current-tip Qwen/SuperCollider paired artifact
+  `consan-revalidation-gfx1250-20260720-qwen-supercollider-paired-058`
+  accepts at 1.94x against a 63,955.46 ms bracketing baseline.  The opening
+  and closing controls are 64,040.32 and 63,870.60 ms; the instrumented row
+  is 123,953.85 ms and retains the exact oracle, 1000/1000 accesses, and
+  complete static and dynamic analysis.  The cell returns to green.
+
+- 2026-07-20: Current-tip Qwen revalidation replaces the interrupted Sampled
+  and Inline Shadow claims with measured contradictions.  Isolated Rocjitsu
+  Sampled artifacts `-052` and `-054` reproducibly receive signal 11 near 255
+  seconds at the final large-output dispatch; Inline Shadow artifact `-051`
+  receives the same signal there after 552 seconds.  A canonical Sampled
+  cross-check on an independent gfx1250 software GPU, artifact `-057`, passes
+  the Rocjitsu failure point but remains compute-active through the unchanged
+  600-second bound without an oracle or ConSan verdict.  This makes the crash
+  backend-specific evidence, but neither profile has current acceptance or a
+  paired overhead, so both cells are orange rather than inferred green.
 
 - 2026-07-20: Commit `e4df0064b1` closes the shared callable-barrier gap in
   Sampled without weakening coverage.  A physical callable now scans the
@@ -1625,3 +2053,50 @@ do not promote matrix cells without the end-to-end evidence above.
   `non_flat_atomic_address`.  Promoting this cell therefore requires a typed
   LDS communication token in Record/Replay, not relabeling the sites or
   reusing the flat/global effective-address representation.
+- 2026-07-21: SPMM-all Inline Shadow is reclassified from an obsolete LDS-
+  capacity failure to a measured software-execution limit.  The corrected
+  gfx1250 topology admits the architectural 160 KiB CU LDS capacity.  Commit
+  `00be0d6000` fixes spill-backed dense routing by keeping its pre-save return
+  pair and dispatch key in structurally fresh SGPRs, and the formerly corrupt
+  16-workgroup MT32 case now passes with zero numeric failures.  The next MT64
+  case remains impractical for complete all-site validation: focused
+  one-repetition probes pass numerically through 44 selected accesses, but
+  identical solo runs vary from about three seconds to beyond 60 seconds.
+  The 300- and 900-second full runs stop at the same boundary without a failure
+  or final verdict.  The cell remains red with no overhead rather than
+  treating containment expiry as detection or changing ConSan semantics to
+  accommodate unstable software-runtime cost.
+- 2026-07-21: Norm/softmax Inline Shadow improves without changing its yellow
+  status.  Commit `e2c1e026bc` replaces the persistent dispatch-ID SGPR pair
+  with the report's stable literal identity for non-atomic gfx1250 Inline
+  probes.  Clean-tree one-repetition artifact
+  `consan-green-expansion-20260721-norm-softmax-inline-literal-dispatch-independent-052`
+  passes the exact oracle in 35.17 seconds and improves coverage from
+  4,254/4,756 accesses plus 2,145/2,352 barriers to 4,282/4,756 plus
+  2,163/2,352.  The remaining 663 static plans need 16--19 temporary VGPRs
+  without enough site-local vector space, while the separate 1,022 bounded
+  publication-contention failures remain unchanged.  The cell rotates rather
+  than opening both a VGPR-spill mechanism and a publication redesign at once.
+- 2026-07-21: HGEMM SuperCollider remains yellow after a clean-tree,
+  one-repetition reassessment.  Artifact
+  `consan-green-expansion-20260721-tensile-hgemm-sc-clean-independent-053`
+  records 136 exact numeric passes and zero failures through a fixed
+  300-second bound, but the first 143-solution problem is still active and the
+  aggregate lacks its second applicable-object record.  This supersedes the
+  prior 150-second duration evidence without motivating another timeout
+  increase or a gfx1250-specific semantic change.
+- 2026-07-21: Torch.mode Inline Shadow advances from blocked orange to
+  assessed/partial yellow.  Artifact `054` exposes 744 fail-closed final-
+  validation errors: workgroup-local exact shadows emit the expected exchange
+  and claim for atomic access candidates, but the validator searches only read
+  and write candidates.  Commit `a6721f8e76` admits the already-supported
+  Atomic kind and adds focused coverage.  Clean-tree one-repetition artifact
+  `consan-green-expansion-20260721-pytorch-mode-inline-atomic-validation-independent-055`
+  then passes the exact values/indices oracle in 32.26 seconds with complete
+  28,939/28,939 access and 4,446/4,446 barrier lowering.  A subsequent
+  controlled 32-to-128 exact-bank experiment leaves all 13,342 undercoverage
+  events unchanged, superseding the initial publication-contention diagnosis.
+  Debug classification and captured object metadata instead locate them in
+  local-shadow bounds handling for a kernel whose 2-byte fixed LDS is extended
+  to 1,540 bytes dynamically at dispatch.  Dynamic-LDS-aware shadow selection
+  is active; no blue/clean-complete claim is made.

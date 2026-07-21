@@ -1,8 +1,8 @@
 # ConSan gfx1250 port plan
 
-This document tracks the `gfx1250` port of ConSan.  The work lives on
-`users/bjacob/consan-gfx1250` as a linear continuation of the gfx950 port, so
-shared fixes already proven on gfx950 remain in the history beneath this work.
+This document tracks the `gfx1250` port of ConSan.  The gfx950 and gfx1250 work
+is consolidated on `users/bjacob/consan` as a linear stack above the shared
+RocJITsu foundation.
 
 The primary success metric is [STATUS_GFX1250.md](STATUS_GFX1250.md): every
 applicable end-to-end workload must be accepted under SuperCollider,
@@ -80,7 +80,7 @@ flowchart TD
   end
 
   subgraph Q[Regression and safety gates]
-    Q0["Q0 DONE<br/>664 ConSan, MOI, spill, builder, patcher,<br/>resource, and malformed-input tests pass"]
+    Q0["Q0 DONE<br/>711 ConSan, MOI, spill, builder, patcher,<br/>resource, and malformed-input tests pass"]
   end
 
   subgraph V[Primary end-to-end campaign]
@@ -101,25 +101,35 @@ flowchart TD
     VW["VW DONE<br/>WMMA attention frozen clean, fault, resource,<br/>and provenance bundle accepted"]
     V6B["V6B DONE<br/>remaining rows' resource and timing gates"]
     V7["V7 DONE<br/>one committed tip reruns all 40<br/>non-omitted gfx1250 cells"]
-    G0["G0 DONE<br/>STATUS_GFX1250 completely green"]
+    V9["V9 TODO<br/>Qwen Sampled current-tip performance;<br/>broader runtime cost remains"]
+    G0["G0 TODO<br/>current STATUS_GFX1250 matrix<br/>simultaneously green"]
   end
 
   subgraph X[PyTorch and RocJITsu test-corpus expansion]
     X0["X0 DONE<br/>expansion corpus surveyed and<br/>aggregate four-profile contract defined"]
     XP0["XP0 DONE<br/>PyTorch/Triton TDM plus clustered-dispatch<br/>clean vertical passes all four profiles"]
     XP1["XP1 DONE<br/>torch.mode SuperCollider and Record/Replay<br/>full bundles accepted"]
-    XP1B["XP1B TODO<br/>torch.mode Sampled and Inline<br/>full-object execution bounds remain"]
+    XP1B["XP1B DONE<br/>torch.mode Inline dynamic-LDS clean, paired,<br/>and reviewed-fault bundle accepted"]
+    XP1C["XP1C DONE<br/>torch.mode Sampled clean, paired,<br/>and reviewed-fault bundle accepted"]
     XP4["XP4 DONE<br/>tagged LDS atomic address token plus isolated-release<br/>classification pass torch.mode clean"]
     XP5["XP5 DONE<br/>histogram Inline paired and reviewed-fault bundle<br/>green at 175-access denominator"]
     XP6["XP6 DONE<br/>histogram Record/Replay paired and fault bundle<br/>green at 175-access denominator"]
     XP7["XP7 DONE<br/>histogram Sampled paired and fault bundle<br/>green at 175-access denominator"]
     XP8["XP8 DONE<br/>scatter all four profiles green;<br/>inapplicable fault families recorded as typed N/A"]
     XP2A["XP2A DONE<br/>torch.topk exact oracles and dense Record/Replay<br/>106/106 diagnostic vertical"]
-    XP2B["XP2B TODO<br/>torch.topk Sampled/Inline spend bounds<br/>inside full-object patch planning"]
+    XP2B["XP2B DONE<br/>torch.topk Sampled exact client completes;<br/>construction indexes validated"]
     XP2C["XP2C DONE<br/>torch.topk unrestricted Record/Replay exact/dynamic;<br/>113,760/160,848 accesses, all barriers"]
-    XP2D["XP2D TODO<br/>torch.topk reaches 160,345/161,136 accesses and all barriers;<br/>site/subgroup transient assignment remains"]
-    XP3["XP3 TODO<br/>top-k SC at 160,752/160,848;<br/>96 remain after rotation"]
+    XP2D["XP2D TODO<br/>torch.topk Record/Replay 791-site residual;<br/>site/subgroup scalar routing required"]
+    XP2E["XP2E DONE<br/>torch.topk Inline construction scaled;<br/>both large objects finish patching"]
+    XP2F["XP2F DONE<br/>torch.topk Inline execution signal;<br/>reproduced on independent software path"]
+    XP2G["XP2G DONE<br/>torch.topk Inline one-site discriminator bounded;<br/>relay reservation rejects before execution"]
+    XP2H["XP2H DONE<br/>torch.topk Inline post-bank-fix retest;<br/>same execution signal excludes shared cause"]
+    XP3["XP3 DONE<br/>top-k SC 88-site residual bounded;<br/>scalar-continuation subsystem required"]
+    XP3A["XP3A DONE<br/>SuperCollider scalar spill plus bidirectional continuation<br/>synthetic exact; real relay capacity bounded"]
+    XP3B["XP3B DONE<br/>torch.sort Sampled clean plus paired accepted;<br/>two reviewed selectors remain noncausal"]
     XP9["XP9 DONE<br/>norm plus softmax Record/Replay clean, paired,<br/>and reviewed-fault bundle green"]
+    XP9B["XP9B DONE<br/>norm plus softmax Sampled clean, paired,<br/>and reviewed-fault bundle green"]
+    XP9C["XP9C DONE<br/>norm/softmax Inline clean, paired,<br/>and reviewed-fault bundle green"]
     XP10["XP10 DONE<br/>cluster Record/Replay clean, paired, and reviewed-fault<br/>bundle accepted at 23/23 accesses and 2/2 barriers"]
     XT0["XT0 DONE<br/>RocJITsu corpus runner, provenance,<br/>and one-repetition contract"]
     XT1["XT1 DONE<br/>both compact P0 kernels green<br/>in all four profiles"]
@@ -128,11 +138,19 @@ flowchart TD
     XT2C1["XT2C1 DONE<br/>001 Stream-K kernel green<br/>in all four profiles"]
     XT2C2["XT2C2 TODO<br/>004 Stream-K kernel 3/4;<br/>Inline long-bound completion remains"]
     XT2C3["XT2C3 TODO<br/>007 Stream-K kernel 3/4;<br/>Inline long-bound completion remains"]
-    XT3A["XT3A TODO<br/>reduced SGEMM SC/RR/Sampled green;<br/>Inline backend-dependent and long"]
-    XT3B["XT3B TODO<br/>F8 SuperCollider paired passes;<br/>fault loses postflight health"]
+    XT3A["XT3A DONE<br/>reduced SGEMM Inline clean and paired pass;<br/>two reviewed faults expose detection gap"]
+    XT3L["XT3L DONE<br/>causal reduced-SGEMM Inline fault<br/>diagnosed; four-profile row green"]
+    XT3M["XT3M DONE<br/>quick F8/HGEMM Inline resource retest;<br/>49/189 exact rows, zero failures"]
+    XT3N["XT3N DONE<br/>quick F8 SuperCollider current paired<br/>fault and containment bundle green"]
+    XT3B["XT3B DONE<br/>quick-GEMM SuperCollider assessed;<br/>SGEMM first problem 12/12 exact and fully covered"]
+    XT3G["XT3G DONE<br/>quick SGEMM Sampled first problem;<br/>12/12 exact, 640/640 accesses, 40/40 barriers"]
+    XT3H["XT3H DONE<br/>quick SGEMM Inline assessed;<br/>first problem exact, aggregate dynamic incomplete"]
+    XT3I["XT3I TODO<br/>SPMM F8 Sampled paired run;<br/>one of two objects at fixed 180-second bound"]
+    XT3J["XT3J DONE<br/>SPMM F8 Inline standard clean assessed;<br/>MT64x64 wrong-result rows isolate blocker"]
+    XT3K["XT3K DONE<br/>SPMM F8 Inline ninth-barrier bank defect fixed;<br/>exact kernel fully passes"]
     XT3D["XT3D DONE<br/>full SGEMM first problem complete;<br/>quadratic 115,776-event frontier isolated"]
     XT3E["XT3E TODO<br/>both emulator baselines prove intrinsic full-grid bound;<br/>substantially longer unrestricted RR run remains"]
-    XT3C["XT3C TODO<br/>SPMM F8 relay-window fix passes 692/692 tests;<br/>rebuilt-hook unrestricted rerun remains"]
+    XT3C["XT3C DONE<br/>SPMM F8 Sampled exact client passes;<br/>19,960 accesses and 806 barrier members covered"]
     XT4A["XT4A DONE<br/>019 F16 clean, paired, and reviewed-fault bundle<br/>accepted at 31,265/31,265 accesses"]
     XT4["XT4 DONE<br/>decoded opcode union frozen over accepted rows,<br/>including complete 019 bundle"]
     XF["XF TODO<br/>fault, resource, and frozen-tip bundles<br/>for every expansion row"]
@@ -232,12 +250,14 @@ flowchart TD
   V6B --> V7
   IS1 --> V7
   D0 --> V7
-  V7 --> G0
+  V7 --> V9
+  V9 --> G0
 
   G0 --> X0
   X0 --> XP0
   XP0 --> XP1
   XP0 --> XP1B
+  XP0 --> XP1C
   XP0 --> XP4
   XP4 --> XP5
   XP5 --> XP6
@@ -247,9 +267,16 @@ flowchart TD
   XP2A --> XP2B
   XP2A --> XP2C
   XP2C --> XP2D
+  XP0 --> XP2E
+  XP2E --> XP2F
+  XP2F --> XP2G
   XP0 --> XP9
+  XP9 --> XP9B
+  XP9 --> XP9C
   XP0 --> XP10
   XP0 --> XP3
+  XP3 --> XP3A
+  XP3 --> XP3B
   X0 --> XT0
   XT0 --> XT1
   XT1 --> XT2A
@@ -258,7 +285,13 @@ flowchart TD
   XT2C1 --> XT2C2
   XT2C1 --> XT2C3
   XT1 --> XT3A
+  XT3A --> XT3L
   XT1 --> XT3B
+  XT1 --> XT3G
+  XT1 --> XT3H
+  XT3C --> XT3I
+  XT3C --> XT3J
+  XT3J --> XT3K
   XT1 --> XT3D
   XT3D --> XT3E
   XT2B --> XT3C
@@ -266,6 +299,7 @@ flowchart TD
   XT4A --> XT4
   XP1 --> XF
   XP1B --> XF
+  XP1C --> XF
   XP4 --> XF
   XP5 --> XF
   XP6 --> XF
@@ -273,13 +307,29 @@ flowchart TD
   XP2B --> XF
   XP2C --> XF
   XP2D --> XF
+  XP2E --> XF
+  XP2F --> XF
+  XP2G --> XF
+  XP2G --> XP2H
+  XP2H --> XF
   XP9 --> XF
+  XP9B --> XF
+  XP9C --> XF
   XP10 --> XF
-  XP3 --> XF
+  XP3A --> XF
+  XP3B --> XF
   XT2C2 --> XF
   XT2C3 --> XF
   XT3A --> XF
+  XT3L --> XF
+  XT3M --> XF
+  XT3N --> XF
   XT3B --> XF
+  XT3G --> XF
+  XT3H --> XF
+  XT3I --> XF
+  XT3J --> XF
+  XT3K --> XF
   XT3E --> XF
   XT3C --> XF
   XT4 --> XF
@@ -290,8 +340,23 @@ flowchart TD
   classDef todo fill:#e8e8e8,stroke:#666666,color:#111111,stroke-width:1px
   classDef blocked fill:#9e2a2b,stroke:#ffd0d0,color:#ffffff,stroke-width:3px
 
-  class R0,E0,D0,C0,V0,B0,B1,B2,B3,B4,B5,S0,S1,S2,S3,S4,S5,S6,A0,A1,A2,A3A,A4A,SC0,RR0,SA0,IS0,IS1,F0,Q0,V1,V2,V3,V8,V4A,V4B,V4C,V4D,V5A,V5B,V6A,V6B,V7,G0,VT,VD,VP,VW,X0,XP0,XP1,XP2A,XP2C,XP4,XP5,XP6,XP7,XP8,XP9,XP10,XT1,XT2A,XT2B,XT2C1,XT3D,XT4A,XT4 done
-  class XP1B,XP2B,XP2D,XP3,XT2C2,XT2C3,XT3A,XT3B,XT3E,XT3C,XF,XG todo
+  class R0,E0,D0,C0,V0,B0,B1,B2,B3,B4,B5,S0,S1,S2,S3,S4,S5,S6,A0,A1,A2,A3A,A4A,SC0,RR0,SA0,IS0,IS1,F0,Q0,V1,V2,V3,V8,V4A,V4B,V4C,V4D,V5A,V5B,V6A,V6B,V7,VT,VD,VP,VW,X0,XP0,XP1,XP1B,XP1C,XP2A,XP2C,XP4,XP5,XP6,XP7,XP8,XP9,XP9C,XP10,XT1,XT2A,XT2B,XT2C1,XT3C,XT3D,XT4A,XT4 done
+  class XP9B done
+  class XT3B done
+  class XP2B done
+  class XT3G,XT3H done
+  class XP2E done
+  class XP2F done
+  class XP2G done
+  class XP2H done
+  class XT3J done
+  class XT3K done
+  class XT3A done
+  class XP3 done
+  class XT3L,XT3M,XT3N done
+  class XP3B done
+  class XP3A done
+  class G0,V9,XP2D,XT2C2,XT2C3,XT3E,XT3I,XF,XG todo
 ```
 
 Broader partial-EXEC, dynamic-stack, high-register, cache/fence-shape, and
@@ -339,6 +404,509 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP3A is DONE as a bounded subsystem result.  Full-pressure
+  synthetic coverage now preserves the VCC-save scalar through a scratch VGPR
+  and traverses disjoint, exactly validated forward and backward branch-only
+  relay chains; corruption of the return chain fails final validation.  All
+  83 SuperCollider/check-trap tests and all 299 `ConSan.*` tests pass.  Real
+  one-repetition artifacts `consan-green-expansion-20260721-pytorch-topk-sc-branch-only-131`
+  and `...-132` both return normally and pass the exact FP64/BF16 oracles, but
+  retain 160,752/160,848 aggregate access coverage.  The corrected admission
+  reaches all 84 missing-PC-tuple sites, then fails the all-site route proof
+  because ordinary anchor relay capacity is insufficient.  XP2D retains the
+  remaining real-object work; it requires additional proven relay reservoirs,
+  not another scalar-liveness relaxation.
+
+- 2026-07-21: XP3A's scalar-state half now passes a synthetic full-pressure
+  proof.  When every allocatable SGPR is live, gfx1250 SuperCollider reserves
+  one additional scratch VGPR, preserves the otherwise-live VCC-save scalar
+  through that VGPR, and composes the save/restore with existing scratch-VGPR
+  spilling and VGPR-bank transitions.  The new regression plus the complete
+  82-test SuperCollider/check-trap slice pass.  XP3A remains ACTIVE on the
+  final integration step: route far appended bodies back through the new
+  backward relay planner without allocating an indirect return pair.
+
+- 2026-07-21: XP3A gains the generic return-path primitive needed by its
+  branch-only continuation design.  The trampoline framework now plans
+  maximum-cardinality capacity-one backward `s_branch` routes, complementing
+  the existing forward planner and accounting for SOPP's asymmetric backward
+  reach exactly.  Eight focused forward/backward, boundary, cardinality, and
+  scaling tests pass.  XP3A remains ACTIVE while this primitive is integrated
+  with a synthetic full-pressure SuperCollider site before touching the real
+  top-k object.
+
+- 2026-07-21: XP3B is DONE as a bounded blue assessment and rotates to XP3A.
+  A second independently frozen `torch.sort` Sampled selector, the later
+  signal/wait pair immediately before a conditional LDS load, is applied
+  exactly once in artifact `130`.  It again preserves the exact oracle
+  without a diagnostic, retains complete 48,224/48,224 access and
+  12,062/12,062 surviving barrier-member coverage, and passes health before
+  and after, contradicting its precommitted fail-oracle expectation.  Neither
+  fault contract is changed after observation and no third selector is tried.
+  The status cell remains blue.  XP3A becomes the sole ACTIVE box for the
+  SuperCollider scalar-spill/branch-only continuation subsystem needed by the
+  88-site top-k residual.
+
+- 2026-07-21: XP3B advances `torch.sort` Sampled from orange to blue.
+  Current-tip artifact `127` accepts the exact values/indices oracle in 21.51
+  seconds with complete 48,224/48,224 access and 12,064/12,064 barrier-member
+  coverage.  Same-revision one-repetition paired artifact `128` accepts at
+  148.88x.  Reviewed fault artifact `129` applies exactly one mutation but
+  preserves the oracle, contradicting its frozen fail-oracle expectation; the
+  expectation is not changed after observation.  XP3B remains the sole ACTIVE
+  box for one separately precommitted reviewed-fault disposition.
+
+- 2026-07-21: XT3N is DONE/green and the current-tip roll-up reaches 92/93.
+  Quick F8 SuperCollider's same-revision paired artifact `126` accepts at
+  1.43x with 1,772/1,772 accesses; reviewed artifact `125` preserves the
+  precommitted pass-oracle/no-diagnosis outcome and passes both health gates,
+  superseding the prior device-loss result.  XP3A returns to TODO after the
+  top-k residual proved to need not merely scalar spilling but a bidirectional
+  branch-only continuation route that saves live state before any call can
+  overwrite it.  XP3B becomes the sole ACTIVE box for a bounded current-tip
+  `torch.sort` Sampled retest, where the newly added barrier metadata gate has
+  a credible opportunity to reduce the older 300-second execution bound.
+
+- 2026-07-21: XT3M is DONE/green as a bounded current-resource retest, not as
+  full-row acceptance.  Current-tip Inline artifacts `123` and `124` clear
+  the former launch failure and execute 49 F8 plus 189 HGEMM exact rows with
+  zero failures before fixed 180-second bounds; both STATUS cells advance
+  from orange to yellow and rotate without longer runs.  XT4's already-frozen
+  architecture-level opcode union also closes the three stale yellow survey
+  indicators.  V9 returns to TODO after barrier-disabled Qwen remained active
+  through 120 seconds.  XP3A is the sole ACTIVE box for the smallest genuine
+  SuperCollider scalar-continuation regression needed by top-k's 88-site
+  residual.
+
+- 2026-07-21: XP2D rotates from ACTIVE to TODO after its exact-object
+  assessment bounded all 791 remaining `torch.topk` Record/Replay gaps.
+  Removing entry-liveness constraints does not admit any of them; closing the
+  gap requires site/subgroup scalar routing or scalar-spill continuation, not
+  a local allocator relaxation.  V9 becomes the sole ACTIVE box.  A Sampled
+  barrier runtime gate passes 81/81 focused and broad tests, but current-tip
+  Qwen still has no verdict at a fixed 180-second bound.  A second bounded
+  run with barrier tracking disabled likewise has no verdict at 120 seconds,
+  proving barrier metadata scanning is not the sole remaining runtime cost.
+  Neither result changes the 91/93 roll-up.
+
+- 2026-07-21: XT3L is DONE/green.  A parser fix removes false Inline state
+  overflow caused by misclassifying report-cleanup records as summaries.
+  More importantly, the separately precommitted causal barrier selector in
+  artifact `consan-green-expansion-20260721-sgemm-smoke-inline-fault-causal-121`
+  applies once, fails the numeric oracle, emits one Inline diagnostic, retains
+  complete surviving coverage, and passes both health gates.  The reduced
+  SGEMM row is green in all four profiles and the roll-up advances to 91/93.
+  XP2D becomes the sole ACTIVE/blue box for a bounded Record/Replay top-k
+  scalar-routing assessment, restoring cross-engine rotation after the Inline
+  promotion.
+
+- 2026-07-21: Q0 refreshes to 711/711 passing ConSan tests after aligning
+  architecture-specific atomic fixtures with the ISA-defined no-SADDR operand
+  and the fault fixtures with the already-established exact long-pair rule.
+  Current-tip, one-repetition artifact
+  `consan-green-expansion-20260721-streamk-all-current-120` then accepts the
+  Stream-K clean oracle under all four profiles, including 10/10 ordered
+  atomics in every MOI engine.  XP3 is restored to DONE because its 88-site
+  scalar-continuation requirement was already bounded.  XT3L is the sole
+  ACTIVE/blue box for host-side diagnosis of reduced-SGEMM Inline's small,
+  reproducible reviewed-fault detection gap.
+
+- 2026-07-21: XT3A is DONE as a bounded assessment and XP3 becomes the sole
+  ACTIVE/blue box.  Fresh inventory artifact
+  `consan-green-expansion-20260721-sgemm-smoke-inventory-117` retains both
+  previously reviewed barrier selectors.  Late and early artifacts
+  `consan-green-expansion-20260721-sgemm-smoke-inline-fault-118` and
+  `...-fault-early-119` each apply exactly one logical mutation, preserve the
+  exact oracle and complete surviving-site coverage, clean all report memory,
+  and pass health before and after.  Neither emits the precommitted Inline
+  diagnostic, so the STATUS cell remains blue and the campaign rotates to the
+  smaller 88-site top-k SuperCollider residual rather than changing an
+  expectation after observation.
+
+- 2026-07-21: XT3A advances within ACTIVE/blue.  Clean committed-tip artifact
+  `consan-green-expansion-20260721-sgemm-smoke-inline-bankfix-115` accepts the
+  exact numeric oracle with complete 640/640 access and 22/22 barrier coverage.
+  Paired artifact `consan-green-expansion-20260721-sgemm-smoke-inline-overhead-116`
+  accepts at 1.33x against the mean of its two one-repetition controls and
+  repeats complete coverage.  Only a fresh reviewed-fault gate remains before
+  this fourth cell and the full row turn green.
+
+- 2026-07-21: XT3A is the sole ACTIVE box for a bounded post-fix reduced-SGEMM
+  Inline rerun.  The prior primary-path run signaled immediately after legal
+  resource growth, while an independent path remained compute-active.  This
+  compact row can cheaply determine whether the newly fixed barrier-bank
+  transfer removes that signal; it does not justify widening the existing
+  execution bound.
+
+- 2026-07-21: XP2H is DONE as a bounded discriminator.  Clean committed-tip
+  artifact `consan-green-expansion-20260721-pytorch-topk-inline-bankfix-114`
+  again signals during execution at 116.7 seconds, matching the prior
+  118-second boundary despite the SPMM barrier-bank fix.  Top-k therefore has
+  a distinct execution defect; its cell remains orange and rotates.  No box
+  remains falsely ACTIVE.
+
+- 2026-07-21: XP2H is the sole ACTIVE box.  The newly fixed gfx1250 Inline
+  barrier control-transfer invariant is shared by P0 `torch.topk`, whose prior
+  standard run completed both transformations and then signaled during
+  execution.  A bounded committed-tip standard rerun will determine whether
+  that signal was another manifestation of the same defect; no patch cap,
+  manual register, or kernel filter is used.
+
+- 2026-07-21: XT3K is DONE.  Bounded frontier probes identify the ninth
+  barrier as the first corrupting addition, while sixteen access probes alone
+  pass.  The site is immediately followed by a guest VGPR-bank update.  Commit
+  `e1bbd2608a` makes every gfx1250 Inline barrier cave explicitly establish the
+  low scratch bank before touching VGPR state.  The formerly failing exact
+  kernel passes with 1,639/1,639 accesses and 25/25 barriers; clean standard
+  artifact `113` records eight exact passes and zero failures before its fixed
+  bound.  STATUS advances from orange to yellow.  No engineering box remains
+  falsely ACTIVE while the campaign rotates to the next cell.
+
+- 2026-07-21: XT3K is the sole ACTIVE box.  Exact-kernel artifact `111`
+  reproduces SPMM F8 Inline wrong results with 1,639/1,639 accesses and 25/25
+  barriers, while capped artifact `112` passes the complete first orientation
+  with the earliest eight accesses and eight barriers before its bound expires
+  in the second orientation.  The next bounded step is to locate the first
+  failing patch frontier and connect it to one concrete preservation path;
+  neither the cap nor the partial run changes the orange acceptance cell.
+
+- 2026-07-21: XT3J is DONE as an assessment node.  Standard-profile artifact
+  `consan-green-expansion-20260721-spmm-f8-ml-inline-clean-108` fully patches
+  the first applicable object at 22,074/22,074 accesses and 403/403 barriers,
+  then yields eight exact passes and five wrong-result rows before 180
+  seconds.  Failures are confined to the observed MT64x64 solutions; observed
+  MT16x16 rows pass.  Two bounded diagnostics are inconclusive rather than
+  exculpatory, so STATUS advances from pending yellow to a precise orange
+  clean-oracle blocker and the campaign rotates.  No node remains falsely
+  ACTIVE during that rotation.
+
+- 2026-07-21: XT3J is the sole ACTIVE box.  The campaign rotates from the
+  resistant top-k Inline execution defect to P3 SPMM F8 Inline, whose static
+  stress inventory exists but whose standard clean run is still pending.  A
+  one-repetition bounded run will seek the first exact numeric and dynamic
+  coverage verdict; it will not inherit the Sampled cell's evidence.
+
+- 2026-07-21: XP2G is DONE as a bounded attempt.  The one-site top-k Inline
+  run does not reach execution: its sole admitted site exceeds the dense
+  dispatcher's reserved relay space, leaving zero relevant patches, after
+  which the required-patch guard stops the client before an oracle.  It
+  therefore cannot classify the execution signal and does not promote the
+  orange cell.  No engineering node is marked ACTIVE while this completed
+  result is recorded and the campaign rotates.
+
+- 2026-07-21: XP2F is DONE as a bounded discriminator.  Independent-path
+  artifact
+  `consan-green-expansion-20260721-pytorch-topk-inline-rocjitsu-crosscheck-107`
+  completes both transformed objects and reproduces the pre-oracle signal at
+  115 seconds.  The failure is therefore a ConSan execution defect, not one
+  software GPU's launch quirk.  XP2G is the sole ACTIVE box for one
+  diagnostic one-site run that separates common Inline state from a later
+  probe; it is not acceptance evidence.
+
+- 2026-07-21: XP2E is DONE after three measured generic scaling fixes.
+  Commits `0007d051bf`, `d3b3cd0df3`, and `a793e5db1a` index
+  fault/synchronization annotation and automatic scalar-owner lookup, and
+  reuse one Inline relocation decoder.  Artifact
+  `consan-green-expansion-20260721-pytorch-topk-inline-owner-indexed-106`
+  completes the formerly stalled 13 MB and 3.6 MB objects with 72,766 and
+  55,482 patches.  It then signals during execution after legal resource
+  growth, before an oracle.  New node XP2F is the sole ACTIVE box for one
+  bounded independent execution cross-check; the cell remains orange.
+
+- 2026-07-21: XT3I rotates to TODO after its one-repetition Sampled paired
+  attempt reaches the fixed 180-second instrumented bound with one of two
+  required applicable-object records.  No overhead is accepted and the
+  timeout is not widened.  XP2E becomes the sole ACTIVE box so the next effort
+  profiles and removes host-side top-k Inline construction work rather than
+  waiting on software-GPU execution.
+
+- 2026-07-21: XT3H is DONE as a bounded assessment without a STATUS color
+  promotion.  Quick SGEMM Inline artifact
+  `consan-green-expansion-20260721-sgemm-quick-inline-102` completes the
+  first problem's 12/12 exact rows and patches 640/640 accesses plus 22/22
+  barriers, but the interrupted second problem leaves aggregate dynamic
+  analysis incomplete at the fixed 120-second bound.  The sole ACTIVE box
+  rotates to XT3I, the already-blue SPMM F8 Sampled cell's paired and
+  reviewed-fault acceptance work.
+
+- 2026-07-21: XT3G is DONE after quick SGEMM Sampled matches the bounded
+  SuperCollider promotion.  One-repetition artifact
+  `consan-green-expansion-20260721-sgemm-quick-sampled-101` completes the
+  first problem's 12/12 exact rows with zero failures, 640/640 accesses, all
+  40/40 barrier members, and complete static/dynamic analysis before the
+  second problem reaches the unchanged 120-second bound.  The STATUS cell is
+  blue, not green.  XT3H becomes the sole ACTIVE box for an equivalent
+  bounded Inline Shadow assessment.
+
+- 2026-07-21: XT3B records a bounded clean-partial promotion for quick SGEMM
+  SuperCollider.  One-repetition artifact
+  `consan-green-expansion-20260721-sgemm-quick-sc-100` completes the first
+  problem's 12/12 exact numeric rows with zero failures, 640/640 accesses,
+  static and dynamic completeness, and complete report cleanup.  It begins
+  the second problem before reaching the unchanged 120-second bound, so the
+  STATUS cell is blue rather than green.  XT3G is the sole ACTIVE box for
+  the equivalent bounded Sampled assessment.
+
+- 2026-07-21: XP3 and new node XP2E rotate to TODO after bounded top-k
+  assessments.  SuperCollider's remaining 88 sites require a real scalar
+  spill-before-jump and restore-at-continuation subsystem.  Inline commits
+  `5f73127cfa` and `8cbfcc43b3` remove object-wide quadratic host placement
+  and descriptor-planning work, but clean artifact
+  `consan-green-expansion-20260721-pytorch-topk-inline-cached-098` still
+  remains in patch construction at 120 seconds.  Both are explicit TODO
+  frontiers rather than misleading long-lived ACTIVE boxes.
+
+- 2026-07-21: XP2B is DONE/green and XP3 becomes the sole ACTIVE/blue box.
+  Commit `71a333dccf` replaces four nested linear searches in Sampled dense
+  access placement, barrier placement, synchronization identity lookup, and
+  final patch-byte accounting with indexed or ordered equivalents.  The
+  8,192-range final-validation regression and all 80 focused Sampled tests
+  pass.  Clean-tree one-repetition artifact
+  `consan-green-expansion-20260721-pytorch-topk-sampled-scaled-clean-095`
+  finishes in 80.30 seconds, passes both exact FP64/BF16 value-and-index
+  oracles, remains dynamically complete, patches 102,598/161,136 accesses and
+  all 15,182 barriers, and emits no forbidden diagnostic or overflow.  The
+  Sampled cell advances from orange to blue; bounded executable growth keeps
+  it from green.  Work rotates to SuperCollider's smaller 88-site top-k scalar
+  continuation residual.
+
+- 2026-07-21: XP9C is DONE/green.  Reviewed fault artifact
+  `consan-green-expansion-20260721-norm-softmax-inline-component-spill-fault-084`
+  applies exactly one logical barrier mutation as two instruction rewrites,
+  observes the precommitted no-diagnosis/pass-oracle result, retains complete
+  surviving coverage at 4,756/4,756 accesses and 2,351/2,351 barriers, cleans
+  all 25,839,568 report bytes, and passes exact target health before and after.
+  The norm/softmax row is now green in all four columns.  The sole ACTIVE/blue
+  box rotates across engines to XP2B, the P0 top-k Sampled post-index patch-
+  construction bottleneck.
+
+- 2026-07-21: XP9C remains the sole ACTIVE/blue box with implementation,
+  clean correctness, and paired overhead complete.  Clean-tree paired artifact
+  `consan-green-expansion-20260721-norm-softmax-inline-component-spill-overhead-clean-081`
+  accepts 107.31/36,620.42/123.56 ms, or 317.24x against the mean baseline,
+  with complete 4,756-access and 2,352-barrier coverage.  Fresh inventory
+  artifact `...-component-spill-inventory-082` retains the reviewed selector.
+  Fault attempt `...-component-spill-fault-083` applies it but reaches the
+  120-second command bound; one evidence-based 180-second retry is active,
+  with no further timeout widening planned.
+
+- 2026-07-21: XP9C remains ACTIVE/blue after commit `4bfa285247` and clean-tree
+  artifact
+  `consan-green-expansion-20260721-norm-softmax-inline-component-spill-clean-079`
+  repeat the exact oracle, static/dynamic completeness, 4,756/4,756 accesses,
+  and 2,352/2,352 barriers in 37.19 seconds.  The STATUS cell advances from
+  yellow to blue; only paired overhead and reviewed-fault gates remain.
+
+- 2026-07-21: XP9C advances within ACTIVE/blue.  Component-scoped Inline
+  scalar state now covers accesses, barriers, and owner-entry initialization;
+  local-LDS-shadow owners require a private-memory-backed 30-SGPR save while
+  external-shadow owners may use a proven site-dead window.  The new
+  mixed-pressure regression and the existing dense barrier regression pass,
+  as do 73/73 Record/Replay tests.  Dirty-tree artifact
+  `consan-green-expansion-20260721-norm-softmax-inline-component-spill-dirty-078`
+  passes the exact oracle with static/dynamic completeness, 4,756/4,756
+  accesses, and 2,352/2,352 barriers.  XP9C remains ACTIVE for a committed
+  clean rerun, paired overhead, and reviewed-fault gates.
+
+- 2026-07-21: XP9C's source-level diagnosis is corrected while its ACTIVE/blue
+  disposition remains unchanged.  The 474 access and 189 barrier
+  `forbidden_overlap` failures are scalar EXEC-save-window exclusions, not a
+  shortage of 16--19 temporary VGPRs.  Record/Replay already supports
+  component-scoped transient SGPR spill assignments; the active implementation
+  work is to generalize that path correctly to Inline access and barrier
+  lowering.  The separate 1,022 bounded publication-contention events remain.
+
+- 2026-07-21: XP9C becomes the sole ACTIVE/blue Mermaid box after the bounded
+  XP2B rotation.  The next Inline Shadow target is the already-isolated
+  `torch.linalg.vector_norm`/large-row `torch.softmax` residual: 474 access and
+  189 barrier sites require 16--19 temporary VGPRs.  Work starts from the
+  captured object and resource plans rather than another blind long run.
+
+- 2026-07-21: XP2B receives one bounded post-index reassessment and remains
+  TODO/gray.  Current-tip one-repetition artifact
+  `consan-green-expansion-20260721-pytorch-topk-sampled-indexed-075` allocates
+  the complete 93.3 MB report but remains between patch begin/end at 180
+  seconds.  The three indexes that reduced `torch.mode` do not close this
+  distinct top-k construction bottleneck.  The run is not repeated or widened;
+  XP2B rotates while preserving its TODO box color.
+
+- 2026-07-21: XP1C is DONE/green.  Paired artifact
+  `consan-green-expansion-20260721-pytorch-mode-sampled-overhead-072`
+  accepts 96.82/19,932.30/99.05 ms, or 203.53x against the mean baseline,
+  while repeating complete coverage.  Fresh inventory `...-073` retains the
+  reviewed selector.  Fault artifact `...-074` applies exactly one whole
+  barrier mutation, preserves the exact oracle with the precommitted
+  no-diagnosis outcome, covers all 28,939 accesses and 8,890 surviving barrier
+  members, completely cleans its 43.3 MB peak report, and passes target health
+  before and after.  Its Mermaid box is green; no XP1C box remains active.
+
+- 2026-07-21: XP1C advances to clean-complete/blue at commit `2dea78db37`.
+  Clean-tree artifact
+  `consan-green-expansion-20260721-pytorch-mode-sampled-semantic-clean-071`
+  accepts in 21.72 seconds with the exact oracle, static/dynamic completeness,
+  all 28,939 accesses, and all 8,892 barrier members.  XP1C remains the sole
+  ACTIVE/blue Mermaid box for paired overhead and reviewed-fault gates.
+
+- 2026-07-21: XP1C remains ACTIVE/blue, but its bottleneck has moved.  Reverse
+  CFG-distance, interval, and final-lowering indexes reduce host-only
+  `torch.mode` Sampled patch construction from beyond 120 seconds to 16.35
+  seconds.  A one-repetition dirty-tree end-to-end run returns in 21.25
+  seconds with the exact oracle, 28,939/28,939 accesses, and 8,776/8,776
+  barrier members.  The cell remains orange because final static-analysis
+  completeness is false; that classification is the current investigation.
+
+- 2026-07-21: XP1C's dirty-tree one-repetition end-to-end run now accepts in
+  21.43 seconds with the exact oracle, static/dynamic completeness, all 28,939
+  accesses, and all 8,892 barrier members.  The semantic fix uses exact CFG
+  structure instead of a fixed signal/wait distance and types two isolated
+  release-only LDS atomics not applicable.  XP1C remains ACTIVE/blue pending a
+  committed-tree repetition; its Mermaid box text reflects that gate.
+
+- 2026-07-21: XP1B is DONE/green after the committed dynamic-LDS fix, clean
+  exact run, paired 341.90x measurement, fresh inventory, and reviewed
+  exact-one barrier mutation all accept with complete coverage and target
+  health.  Its Mermaid box is green.  Work rotates across engines to XP1C,
+  where the P0 `torch.mode` Sampled full-object construction bound is the sole
+  blue/ACTIVE investigation.  XT3C retains its completed bounded assessment.
+
+- 2026-07-21: XP1B advances within ACTIVE after commit `af3b46a020` closes the
+  dynamic-LDS Inline gap.  Hidden dynamic LDS now selects the external exact
+  shadow and private owner/epoch state automatically.  Clean-tree artifact
+  `consan-green-expansion-20260721-pytorch-mode-inline-dynamic-clean-065`
+  passes exact values and indices with 28,939/28,939 accesses, 4,446/4,446
+  barriers, zero dynamic undercoverage, and no diagnostics.  The STATUS cell
+  is blue; the Mermaid box remains blue/ACTIVE only for paired overhead and
+  reviewed-fault completion.
+
+- 2026-07-21: XP1B returns to ACTIVE after the latest `torch.mode` Inline
+  experiment replaced its earlier contention hypothesis with an actionable
+  cause.  Increasing the exact-shadow bank count from 32 to 128 leaves all
+  13,342 undercoverage events unchanged and is fully reverted.  The captured
+  object declares a 2-byte fixed group segment and a hidden dynamic-LDS
+  argument, while the executed dispatch supplies 1,540 group bytes; the
+  current local mirror is sized from the descriptor alone.  Dynamic-LDS-aware
+  local/external shadow selection is now the active fix.  XT3B is DONE as a
+  bounded assessment: HGEMM's clean duration boundary and two independently
+  selected F8 barrier-drop sites are recorded, with both F8 mutations losing
+  postflight device health and no third-site repetition justified.
+
+- 2026-07-21: XT3C is DONE and its Sampled matrix cell advances to blue.  The
+  former unrestricted assertion came from a mode-zero barrier cave entering
+  after a call adjacent to the guest's next VGPR-bank update.  Explicitly
+  establishing the low bank at every gfx1250 Sampled barrier-cave entry fixes
+  the exact client: three numeric passes, 19,960/19,960 accesses, and 806/806
+  barrier members complete without a cap or filter.  The focused 78-test slice
+  passes.  The Mermaid box is green; XT3B becomes the sole ACTIVE box for a
+  bounded SuperCollider quick-GEMM assessment before returning to Sampled's
+  remaining blue-to-green gates.
+
+- 2026-07-21: At an intermediate checkpoint, XT3C remained ACTIVE after
+  separating the first of two gfx1250 VGPR-bank preservation defects.  A
+  transition-aware encoder and corrected persistent-
+  mode parser fix the first: seven focused regressions pass, and the exact
+  Sampled SPMM client now accepts diagnostic caps through 1,024 probes.  The
+  unrestricted fully patched client still reaches a software-GPU vector-
+  source assertion.  Control-flow-aware bank-mode discovery was the next
+  hypothesis, but the later instruction-level audit and unrestricted passing
+  result above disproved and superseded it.
+
+- 2026-07-21: XT3C advances its Sampled assessment from static inventory to a
+  concrete execution boundary.  One-repetition artifact
+  `consan-green-expansion-20260721-spmm-f8-ml-sampled-independent-057` passes
+  two exact rows before the validation bound.  Its cached second client
+  removes generation time, patches all 19,960 accesses and all 806 barrier
+  members with no resource or placement gaps, and produces six exact numeric
+  passes before a software-GPU assertion.  The identical uninstrumented client
+  completes normally with five exact passes and no failures, making the
+  boundary instrumentation-dependent.  XT3C remains blue/ACTIVE while the
+  exact kernel descriptor and state-preservation path are checked; the matrix
+  cell remains yellow because this is progress evidence, not acceptance.
+
+- 2026-07-21: XP3 rotates to TODO after a current-tip exact-object audit
+  sharpened the SuperCollider `torch.topk` boundary without starting a broad
+  scalar-spill project.  A bounded startup capture in
+  `consan-topk-sc-current-dumps-056` retains the exact 13,255,032-byte object;
+  host-only standard-profile patching covers 112,528/112,616 supported sites.
+  Eight gaps present in artifact `282` have therefore closed on the current
+  tip.  Of the remaining 88, exactly 84 lack the four-word scalar tuple needed
+  by the long appended-cave entry and return.  RocJITsu has no shared SGPR
+  spill encoder; the MOI-local spill path depends on a VGPR intermediary and
+  does not directly preserve this SuperCollider continuation shape.  The four
+  other gaps do not justify a new subsystem while the clean oracle already
+  passes.  The Mermaid box returns to gray/TODO, and XT3C becomes ACTIVE for a
+  bounded Sampled assessment of the SPMM F8 stress row.
+
+- 2026-07-21: XP1B rotates to TODO after a real Inline bug fix and an orange-
+  to-yellow promotion.  Artifact `054` shows that all 744 workgroup-local
+  atomic access probes emit the expected exact transaction but fail final
+  validation because its candidate lookup omits Atomic.  Commit `a6721f8e76`
+  fixes that lookup; the focused regression and broad Inline suite pass 91/91.
+  Clean-tree one-repetition artifact
+  `consan-green-expansion-20260721-pytorch-mode-inline-atomic-validation-independent-055`
+  passes the exact oracle in 32.26 seconds with complete 28,939/28,939 access
+  and 4,446/4,446 barrier lowering.  Its 13,342 bounded publication failures
+  remain, so the Mermaid box returns to gray/TODO rather than blue/DONE.  XP3
+  becomes the sole blue/ACTIVE box for top-k SuperCollider's 96 bounded scalar-
+  continuation gaps.
+
+- 2026-07-21: XT3B rotates to TODO after a clean-tree SuperCollider HGEMM
+  reassessment.  One-repetition artifact
+  `consan-green-expansion-20260721-tensile-hgemm-sc-clean-independent-053`
+  produces 136 exact numeric passes with zero failures through 300 seconds,
+  but does not finish the first 143-solution problem or supply both applicable
+  coverage records.  That doubles the prior duration evidence without
+  exposing a ConSan correctness defect, so the Mermaid box returns to gray
+  rather than widening the timeout.  XP1B becomes the sole blue/ACTIVE box for
+  the higher-priority torch.mode Sampled/Inline full-object frontier.
+
+- 2026-07-21: XP9C rotates to TODO after a bounded scalar-pressure improvement.
+  Commit `e2c1e026bc` lets non-atomic gfx1250 Inline probes embed the stable
+  report dispatch identity instead of reserving a code-object-wide SGPR pair;
+  atomic-ordering probes and other architectures are unchanged.  The focused
+  Inline suite passes 90/90, and clean one-repetition artifact
+  `consan-green-expansion-20260721-norm-softmax-inline-literal-dispatch-independent-052`
+  passes the exact oracle while recovering 28 access and 18 barrier sites.
+  The remaining 474 access plus 189 barrier plans require 16--19 temporary
+  VGPRs without enough site-local vector space, and the independent 1,022
+  publication-contention failures remain.  The Mermaid box is gray/TODO, and
+  the sole blue/ACTIVE box moves to XT3B's SuperCollider quick-GEMM frontier
+  for instrumentation-mode balance rather than starting two hard subsystems.
+
+- 2026-07-21: XP9B is DONE/green.  Its one-repetition clean, paired, exact
+  mutation, containment, report-memory, cleanup, and frozen-provenance gates
+  all accept in artifacts `048`, `050`, and `051`; paired Sampled overhead is
+  534.97x on the software GPU.  The Mermaid box is green and the sole ACTIVE
+  box moves to XP9C, the adjacent Inline norm/softmax undercoverage caused by
+  1,022 bounded compare/exchange publication retries.
+
+- 2026-07-21: XP9B stays ACTIVE/blue but clears its implementation and clean
+  coverage gates.  Commit `19840819c2` replaces gfx1250 Sampled's persistent
+  dispatch-ID pair with the report's stable literal identity when scalar
+  pressure consumes the full ordinary SGPR range.  The focused suite passes
+  96/96, and one-repetition artifact
+  `consan-green-expansion-20260721-norm-softmax-sampled-literal-dispatch-independent-048`
+  accepts the exact norm/softmax oracle with complete 4,756/4,756 access and
+  4,572/4,572 barrier coverage.  The Mermaid box remains blue/ACTIVE for paired
+  overhead and reviewed-fault acceptance rather than falsely turning green.
+
+- 2026-07-21: XP2D rotates from ACTIVE to TODO after an exact-object offline
+  experiment reproduces all 791 Record/Replay top-k gaps and proves that
+  excluding kernel-entry liveness does not recover any of them.  The remaining
+  eight owner components need site/subgroup scalar routing or scalar-spill
+  continuation, not a local relaxation.  XP9B is the sole ACTIVE/blue box for
+  the smaller 130-site Sampled norm/softmax residual caused by five owners
+  reaching the code-object-wide persistent dispatch-ID pair.
+
+- 2026-07-21: XP2B rotates to TODO after current-tip Sampled top-k stops
+  rebuilding immutable CFG/liveness state, fits all 135,610 logical ranges in
+  a 93.3 MB four-bank report, and reaches full-object patch construction.  That
+  construction remains active through the fixed 300-second bound, so another
+  timeout increase is not useful.  XP2D becomes the sole ACTIVE/blue box for
+  the next Record/Replay rotation: its exact-oracle run is dynamically complete
+  and misses only 791 of 161,136 accesses, all typed `forbidden_overlap` across
+  eight `gatherTopK` containers.  G0 returns to TODO/light gray because the
+  current authoritative matrix is not simultaneously green.
 
 - 2026-07-20: XT4A and XT4 are DONE/green after F16 reviewed artifact `377`
   accepts exact-one barrier-pair mutation, its frozen pass-oracle/no-diagnosis

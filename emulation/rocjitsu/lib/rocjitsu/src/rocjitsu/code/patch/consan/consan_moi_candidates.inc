@@ -133,8 +133,14 @@ namespace kd = rocr::llvm::amdhsa;
 
 [[nodiscard]] std::optional<std::vector<uint32_t>>
 decode_relocatable_entry_instruction(std::span<const uint8_t> text, uint64_t offset,
-                                     rj_code_arch_t arch, std::vector<std::string> &errors) {
-  std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+                                     rj_code_arch_t arch, std::vector<std::string> &errors,
+                                     Decoder *reusable_decoder = nullptr) {
+  std::unique_ptr<Decoder> owned_decoder;
+  Decoder *decoder = reusable_decoder;
+  if (decoder == nullptr) {
+    owned_decoder = Decoder::create(arch);
+    decoder = owned_decoder.get();
+  }
   if (!decoder) {
     errors.emplace_back("ConSan MOI could not create an entry-instruction decoder");
     return std::nullopt;

@@ -344,6 +344,33 @@ ConSanMoiAutoReportPlan plan_consan_moi_auto_report(const ConSanMoiAutoReportInv
   return plan;
 }
 
+ConSanMoiAutoReportInventory
+fit_consan_moi_sampled_auto_report_inventory(ConSanMoiAutoReportInventory inventory) {
+  if (inventory.engine != ConSanMoiEngine::Sampled || !inventory.sampled_bank_count_adaptive ||
+      inventory.access_range_count == 0u ||
+      inventory.sampled_range_bank_count != inventory.sampled_watchpoint_count ||
+      inventory.sampled_range_bank_count % inventory.access_range_count != 0u) {
+    return inventory;
+  }
+
+  uint64_t bank_count = inventory.sampled_range_bank_count / inventory.access_range_count;
+  if (bank_count == 0u || bank_count > 8u || (bank_count & (bank_count - 1u)) != 0u)
+    return inventory;
+
+  while (bank_count > 1u) {
+    const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(inventory);
+    if (plan.complete() ||
+        plan.outcome != ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity ||
+        plan.reason != ConSanMoiAutoReportPlanReason::PerBufferCeiling) {
+      return inventory;
+    }
+    bank_count /= 2u;
+    inventory.sampled_range_bank_count = inventory.access_range_count * bank_count;
+    inventory.sampled_watchpoint_count = inventory.sampled_range_bank_count;
+  }
+  return inventory;
+}
+
 std::optional<ConSanMoiReportLayoutOverride>
 consan_moi_auto_report_layout_override(const ConSanMoiAutoReportPlan &plan) {
   if (!plan.complete() || !plan.layout.valid || plan.required_bytes != plan.layout.required_bytes)

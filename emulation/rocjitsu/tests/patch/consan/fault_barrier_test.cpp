@@ -873,7 +873,7 @@ TEST(ConSan, FaultDropBarrierExactSequenceAcceptsBoundedQwenStylePairOnlyInFault
   EXPECT_EQ(execution.patches[1].anchor_offset, 15u * sizeof(uint32_t));
 }
 
-TEST(ConSan, FaultDropBarrierExactSequenceRejectsUnsafeBroadPairShapes) {
+TEST(ConSan, FaultDropBarrierExactSequenceAcceptsLongExactPairsAndRejectsUnsafeShapes) {
   const auto full_pair_count = [](std::span<const uint32_t> words) {
     ConSanOptions options;
     options.flavor = ConSanFlavor::SuperCollider;
@@ -884,13 +884,21 @@ TEST(ConSan, FaultDropBarrierExactSequenceRejectsUnsafeBroadPairShapes) {
                               &ConSanSyncSequence::operation);
   };
 
+  std::array<uint32_t, 20> long_straight_line_pair{};
+  long_straight_line_pair[0] = 0xBE804EC1u;
+  std::fill(long_straight_line_pair.begin() + 1, long_straight_line_pair.begin() + 18,
+            build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  long_straight_line_pair[18] = 0xBF94FFFFu;
+  long_straight_line_pair[19] = 0xBFB00000u;
+  EXPECT_EQ(full_pair_count(long_straight_line_pair), 1u);
+
   std::array<uint32_t, 36> excessive_distance{};
   excessive_distance[0] = 0xBE804EC1u;
   std::fill(excessive_distance.begin() + 1, excessive_distance.begin() + 34,
             build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   excessive_distance[34] = 0xBF94FFFFu;
   excessive_distance[35] = 0xBFB00000u;
-  EXPECT_EQ(full_pair_count(excessive_distance), 0u);
+  EXPECT_EQ(full_pair_count(excessive_distance), 1u);
 
   const std::array<uint32_t, 4> intervening_barrier = {
       0xBE804EC1u, // s_barrier_signal -1

@@ -165,6 +165,26 @@ TEST(ConSanMoi, DynamicStackMetadataOverridesZeroValuedMarker) {
     EXPECT_EQ(plan.max_referenced_sgpr_count, 83u);
 }
 
+TEST(ConSanMoi, InventoriesHiddenDynamicLdsArgument) {
+  constexpr std::string_view kernel_name = "dynamic_lds_kernel";
+  const std::array<uint32_t, 3> text_words = {
+      0xD8340000u,
+      0x00000000u, // ds_store_b32 v0, v0
+      0xBFB00000u, // s_endpgm
+  };
+  std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, kernel_name, kRdna4Wave64AllVgprsGranulated, /*wave32=*/false);
+  append_kernel_metadata_note(bytes, kernel_name, /*uses_dynamic_stack=*/false,
+                              /*sgpr_count=*/0u, std::nullopt, std::nullopt,
+                              /*has_dynamic_lds=*/true);
+
+  const ConSanResult result = try_patch_consan(bytes, moi_options());
+
+  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_EQ(result.kernels.size(), 1u);
+  EXPECT_TRUE(result.kernels.front().has_dynamic_lds);
+}
+
 TEST(ConSanMoi, InventoryIncludesLikelyGroupFlatSitesFromLocalFunctions) {
   const std::array<uint32_t, 1> kernel_words = {
       0xBFB00000u, // s_endpgm
@@ -1152,6 +1172,25 @@ TEST(ConSanMoi, Gfx1250AutoReportUsesExternalApertureForDescriptorOpaqueLds) {
                                               build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "opaque_lds", /*vgpr_granulated=*/4);
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result));
+  const ConSanMoiAutoReportInventory inventory =
+      inventory_consan_moi_auto_report(result, options, bytes);
+  EXPECT_EQ(inventory.inline_lds_bytes, kConSanMoiInlineShadowConservativeExactShadowEntries *
+                                            consan_moi_exact_shadow::granule_bytes);
+  EXPECT_TRUE(plan_consan_moi_auto_report(inventory).complete());
+}
+
+TEST(ConSanMoi, Gfx1250AutoReportRejectsUndersizedDynamicLdsPlaceholder) {
+  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
+  const std::array<uint32_t, 3> text_words = {store[0], store[1],
+                                              build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
+  std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "dynamic_lds_placeholder");
+  mutate_first_kernel_descriptor(bytes,
+                                 [](KD &descriptor) { descriptor.group_segment_fixed_size = 1u; });
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
 
   const ConSanResult result = try_patch_consan(bytes, options);

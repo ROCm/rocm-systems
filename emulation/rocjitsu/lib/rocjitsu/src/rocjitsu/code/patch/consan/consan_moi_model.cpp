@@ -111,7 +111,7 @@ classify_consan_moi_sampled_sync_metadata(const ConSanMoiSampledSyncMetadata &me
   if (role > static_cast<uint32_t>(ConSanMoiSampledSyncRole::RmwAcquireRelease) || role == 0)
     return Classification::UnsupportedRole;
   if (scope < static_cast<uint32_t>(ConSanMoiSampledSyncScope::Wavefront) ||
-      scope > static_cast<uint32_t>(ConSanMoiSampledSyncScope::System))
+      scope > static_cast<uint32_t>(ConSanMoiSampledSyncScope::Cluster))
     return Classification::UnsupportedScope;
   if (outcome > static_cast<uint32_t>(ConSanMoiSampledSyncOutcome::CasFailure))
     return Classification::UnsupportedOutcome;
@@ -140,7 +140,8 @@ classify_consan_moi_sampled_sync_metadata(const ConSanMoiSampledSyncMetadata &me
   if (metadata.address != 0 || metadata.byte_count != 0)
     return Classification::InvalidRange;
   if (metadata.role != ConSanMoiSampledSyncRole::AcquireRelease ||
-      metadata.scope != ConSanMoiSampledSyncScope::Workgroup ||
+      (metadata.scope != ConSanMoiSampledSyncScope::Workgroup &&
+       metadata.scope != ConSanMoiSampledSyncScope::Cluster) ||
       metadata.outcome != ConSanMoiSampledSyncOutcome::NotApplicable)
     return Classification::UnsupportedSequence;
   if (metadata.epoch_before == std::numeric_limits<uint32_t>::max())
@@ -298,7 +299,8 @@ bool consan_moi_sampled_qualifies_barrier_sequence(const ConSanSyncSequence &seq
                                       ConSanSemanticConfidence::Conservative) &&
          sequence.basic_block_index && !sequence.inside_scalar_clause && owner_proven &&
          static_id && sequence.barrier_id &&
-         sequence.barrier_scope == ConSanBarrierSite::Scope::Workgroup &&
+         (sequence.barrier_scope == ConSanBarrierSite::Scope::Workgroup ||
+          sequence.barrier_scope == ConSanBarrierSite::Scope::Cluster) &&
          (sequence.member_event_identities.size() == 1u ||
           sequence.member_event_identities.size() == 2u) &&
          sequence.begin_text_offset < sequence.end_text_offset;

@@ -503,7 +503,8 @@ build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSan
                                       ? static_cast<uint16_t>(*compare_vgpr / 256u)
                                       : 0u;
     if (compare_mode != 0u) {
-      auto select_compare_bank = instrumentation::build_s_set_vgpr_msb(compare_mode, arch);
+      auto select_compare_bank = instrumentation::build_s_set_vgpr_msb_transition(
+          0u, static_cast<uint8_t>(compare_mode), arch);
       if (!select_compare_bank) {
         errors.emplace_back("ConSan LDS check/trap proof could not select compare VGPR bank");
         return std::nullopt;
@@ -523,8 +524,8 @@ build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSan
     }
     words.push_back(*chunk_cmp_ne);
     if (compare_mode != 0u) {
-      auto restore_low_bank =
-          instrumentation::build_s_set_vgpr_msb(static_cast<uint16_t>(compare_mode << 8u), arch);
+      auto restore_low_bank = instrumentation::build_s_set_vgpr_msb_transition(
+          static_cast<uint8_t>(compare_mode), 0u, arch);
       if (!restore_low_bank) {
         errors.emplace_back("ConSan LDS check/trap proof could not restore compare VGPR bank");
         return std::nullopt;

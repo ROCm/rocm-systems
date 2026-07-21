@@ -84,6 +84,7 @@ struct ConSanResult {
   std::vector<ConSanMoiTransientSgprAssignment> resolved_moi_transient_sgpr_assignments;
   std::optional<uint16_t> resolved_moi_owner_sgpr;
   std::optional<uint16_t> resolved_moi_dispatch_id_sgpr;
+  uint64_t moi_report_dispatch_id = 0;
   bool moi_persistent_vgprs_automatic = false;
   bool moi_persistent_sgprs_automatic = false;
   bool moi_private_epoch_automatic = false;

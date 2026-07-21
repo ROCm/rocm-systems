@@ -1809,13 +1809,15 @@ TEST(ConSan, SyncInventoryMarksMaybeGroupFlatAtomicAmbiguous) {
 }
 
 TEST(ConSan, Gfx1250AtomicInventoryPreservesAddressAndOrderingFields) {
-  const auto atomic = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+  const auto atomic = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/2, /*vsrc=*/4, /*vdst=*/2, /*return_old_value=*/true, /*scope=*/2,
       ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_TRUE(atomic);
   EXPECT_EQ(*atomic, (std::array<uint32_t, 3>{0xEC0D407Cu, 0x02180002u, 0x00000002u}));
   const std::array<uint32_t, 4> text_words = {
-      (*atomic)[0], (*atomic)[1], (*atomic)[2],
+      (*atomic)[0],
+      (*atomic)[1],
+      (*atomic)[2],
       0xBFB00000u, // s_endpgm
   };
   ConSanOptions options;

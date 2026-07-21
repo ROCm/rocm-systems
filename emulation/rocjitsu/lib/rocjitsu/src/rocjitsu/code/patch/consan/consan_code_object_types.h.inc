@@ -344,6 +344,7 @@ struct ConSanKernelInfo {
   uint64_t code_size = 0;
   bool code_size_inferred_from_zero = false;
   bool has_text_range = false;
+  bool has_dynamic_lds = false;
   std::optional<bool> uses_dynamic_stack;
   std::optional<uint16_t> sgpr_count;
   std::optional<std::array<uint32_t, 3>> required_workgroup_size;
@@ -388,6 +389,13 @@ struct ConSanPatchInfo {
   /// trampoline body. Relay-reservoir validation uses this exact provenance
   /// when proving routes through appended text.
   std::vector<uint64_t> branch_relay_offsets;
+  /// Exact forward and return relay chains for a SuperCollider body whose
+  /// anchor and continuation use branch-only control flow.  These routes do
+  /// not borrow an indirect PC pair: the forward chain terminates at the
+  /// trampoline and the return chain terminates after the displaced anchor.
+  bool sc_branch_only_continuation = false;
+  std::vector<uint64_t> sc_branch_only_entry_relay_offsets;
+  std::vector<uint64_t> sc_branch_only_return_relay_offsets;
   /// Full dispatch-ID initialization bodies reached through paired
   /// kernarg-preload entry relays. Absent when initialization is inline in
   /// the two 256-byte hardware entry slots.

@@ -162,6 +162,7 @@ struct InventoryRange {
   ByteRange bytes;
   ConSanPatchPhase phase = ConSanPatchPhase::Instrumentation;
   ConSanPatchKind kind = ConSanPatchKind::InlineNopRewrite;
+  bool must_be_original = false;
   bool is_trampoline = false;
 };
 
@@ -194,51 +195,7 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
       errors.emplace_back("ConSan final validation found a stale or unaligned patch range");
       return;
     }
-    const ByteRange next{begin, begin + size};
-    const bool nested_in_mutation =
-        std::ranges::any_of(ranges, [&](const InventoryRange &existing) {
-          return existing.phase == ConSanPatchPhase::Mutation &&
-                 existing.bytes.begin <= next.begin && next.end <= existing.bytes.end;
-        });
-    if (must_be_original &&
-        (begin > original_bytes.size() || size > original_bytes.size() - begin) &&
-        !nested_in_mutation) {
-      errors.emplace_back("ConSan final validation found a stale or unaligned patch range");
-      return;
-    }
-    for (const InventoryRange &existing : ranges) {
-      if (!ranges_overlap(existing.bytes, next))
-        continue;
-      const bool exact_alias = existing.bytes.begin == next.begin && existing.bytes.end == next.end;
-      const bool nested_cross_phase =
-          existing.phase != phase &&
-          ((existing.bytes.begin <= next.begin && next.end <= existing.bytes.end) ||
-           (next.begin <= existing.bytes.begin && existing.bytes.end <= next.end));
-      const bool nested_sc_relay_donor =
-          existing.kind == ConSanPatchKind::TrampolineScBranchRelayDonor &&
-          kind == ConSanPatchKind::TrampolineScBranchRelayDonor &&
-          ((existing.is_trampoline &&
-            existing.bytes.end - existing.bytes.begin == 3u * sizeof(uint32_t) && !is_trampoline &&
-            size >= 6u * sizeof(uint32_t) &&
-            existing.bytes.begin == next.begin + sizeof(uint32_t) &&
-            existing.bytes.end == next.begin + 4u * sizeof(uint32_t)) ||
-           (is_trampoline && size == 3u * sizeof(uint32_t) && !existing.is_trampoline &&
-            existing.bytes.end - existing.bytes.begin >= 6u * sizeof(uint32_t) &&
-            next.begin == existing.bytes.begin + sizeof(uint32_t) &&
-            next.end == existing.bytes.begin + 4u * sizeof(uint32_t)));
-      if (!exact_alias && !nested_cross_phase && !nested_sc_relay_donor) {
-        errors.emplace_back(
-            "ConSan final validation found partially overlapping patch ranges: existing=" +
-            std::to_string(existing.bytes.begin) + "-" + std::to_string(existing.bytes.end) +
-            " kind=" + std::to_string(static_cast<unsigned>(existing.kind)) +
-            " next=" + std::to_string(next.begin) + "-" + std::to_string(next.end) +
-            " kind=" + std::to_string(static_cast<unsigned>(kind)));
-        return;
-      }
-    }
-    ranges.push_back({next, phase, kind, is_trampoline});
-    std::fill(accounted.begin() + static_cast<ptrdiff_t>(begin),
-              accounted.begin() + static_cast<ptrdiff_t>(begin + size), true);
+    ranges.push_back({{begin, begin + size}, phase, kind, must_be_original, is_trampoline});
   };
 
   for (const ConSanPatchInfo &patch : result.patches) {
@@ -249,6 +206,66 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
   }
   if (!errors.empty())
     return errors;
+
+  std::ranges::sort(ranges, [](const InventoryRange &lhs, const InventoryRange &rhs) {
+    if (lhs.bytes.begin != rhs.bytes.begin)
+      return lhs.bytes.begin < rhs.bytes.begin;
+    if (lhs.bytes.end != rhs.bytes.end)
+      return lhs.bytes.end > rhs.bytes.end;
+    return lhs.phase == ConSanPatchPhase::Mutation && rhs.phase != ConSanPatchPhase::Mutation;
+  });
+  std::vector<const InventoryRange *> active;
+  for (const InventoryRange &next : ranges) {
+    std::erase_if(active, [&](const InventoryRange *existing) {
+      return existing->bytes.end <= next.bytes.begin;
+    });
+    const bool nested_in_mutation = std::ranges::any_of(active, [&](const auto *existing) {
+      return existing->phase == ConSanPatchPhase::Mutation &&
+             existing->bytes.begin <= next.bytes.begin && next.bytes.end <= existing->bytes.end;
+    });
+    const uint64_t size = next.bytes.end - next.bytes.begin;
+    if (next.must_be_original &&
+        (next.bytes.begin > original_bytes.size() ||
+         size > original_bytes.size() - next.bytes.begin) &&
+        !nested_in_mutation) {
+      errors.emplace_back("ConSan final validation found a stale or unaligned patch range");
+      return errors;
+    }
+    for (const InventoryRange *existing : active) {
+      if (!ranges_overlap(existing->bytes, next.bytes))
+        continue;
+      const bool exact_alias =
+          existing->bytes.begin == next.bytes.begin && existing->bytes.end == next.bytes.end;
+      const bool nested_cross_phase =
+          existing->phase != next.phase &&
+          ((existing->bytes.begin <= next.bytes.begin && next.bytes.end <= existing->bytes.end) ||
+           (next.bytes.begin <= existing->bytes.begin && existing->bytes.end <= next.bytes.end));
+      const bool nested_sc_relay_donor =
+          existing->kind == ConSanPatchKind::TrampolineScBranchRelayDonor &&
+          next.kind == ConSanPatchKind::TrampolineScBranchRelayDonor &&
+          ((existing->is_trampoline &&
+            existing->bytes.end - existing->bytes.begin == 3u * sizeof(uint32_t) &&
+            !next.is_trampoline && size >= 6u * sizeof(uint32_t) &&
+            existing->bytes.begin == next.bytes.begin + sizeof(uint32_t) &&
+            existing->bytes.end == next.bytes.begin + 4u * sizeof(uint32_t)) ||
+           (next.is_trampoline && size == 3u * sizeof(uint32_t) && !existing->is_trampoline &&
+            existing->bytes.end - existing->bytes.begin >= 6u * sizeof(uint32_t) &&
+            next.bytes.begin == existing->bytes.begin + sizeof(uint32_t) &&
+            next.bytes.end == existing->bytes.begin + 4u * sizeof(uint32_t)));
+      if (!exact_alias && !nested_cross_phase && !nested_sc_relay_donor) {
+        errors.emplace_back(
+            "ConSan final validation found partially overlapping patch ranges: existing=" +
+            std::to_string(existing->bytes.begin) + "-" + std::to_string(existing->bytes.end) +
+            " kind=" + std::to_string(static_cast<unsigned>(existing->kind)) +
+            " next=" + std::to_string(next.bytes.begin) + "-" + std::to_string(next.bytes.end) +
+            " kind=" + std::to_string(static_cast<unsigned>(next.kind)));
+        return errors;
+      }
+    }
+    active.push_back(&next);
+    std::fill(accounted.begin() + static_cast<ptrdiff_t>(next.bytes.begin),
+              accounted.begin() + static_cast<ptrdiff_t>(next.bytes.end), true);
+  }
 
   const size_t common_size = std::min(original_bytes.size(), replacement_bytes.size());
   for (size_t i = 0; i < common_size; ++i) {
@@ -460,6 +477,91 @@ validate_sc_indirect_island_semantics(const AmdGpuCodeObject &replacement,
         !matches(*body->indirect_return_offset, expected_return)) {
       errors.emplace_back(
           "ConSan indirect-island proof found corrupted SCC preservation or scalar resources");
+    }
+  }
+  return errors;
+}
+
+[[nodiscard]] std::vector<std::string>
+validate_sc_branch_only_continuation_semantics(const AmdGpuCodeObject &replacement,
+                                               const ConSanResult &result) {
+  std::vector<std::string> errors;
+  const bool has_branch_only =
+      std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+        return patch.sc_branch_only_continuation;
+      });
+  if (!has_branch_only)
+    return errors;
+  if (replacement.text_sections().size() != 1) {
+    errors.emplace_back("ConSan branch-only continuation proof requires one executable section");
+    return errors;
+  }
+  const auto text = std::span<const uint8_t>(
+      reinterpret_cast<const uint8_t *>(replacement.text_sections().front()->data()),
+      replacement.text_sections().front()->size());
+  const rj_code_arch_t arch = arch_for_target(replacement.target_id());
+  const auto read_word = [&](uint64_t offset) -> std::optional<uint32_t> {
+    if (offset > text.size() || sizeof(uint32_t) > text.size() - offset)
+      return std::nullopt;
+    uint32_t word = 0;
+    std::memcpy(&word, text.data() + offset, sizeof(word));
+    return word;
+  };
+
+  std::unordered_set<uint64_t> owned_relay_slots;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if ((patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap ||
+         patch.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap) &&
+        patch.original_size == 2u * sizeof(uint32_t))
+      owned_relay_slots.insert(patch.anchor_offset + sizeof(uint32_t));
+  }
+  std::unordered_set<uint64_t> used_relay_slots;
+  const auto validate_hop = [&](uint64_t source, uint64_t target) {
+    const auto delta = compute_sopp_branch_simm16(source, target);
+    const auto word = read_word(source);
+    return delta && word && *word == build_s_branch(*delta, arch);
+  };
+
+  for (const ConSanPatchInfo &patch : result.patches) {
+    const bool has_route_metadata = !patch.sc_branch_only_entry_relay_offsets.empty() ||
+                                    !patch.sc_branch_only_return_relay_offsets.empty();
+    if (!patch.sc_branch_only_continuation) {
+      if (has_route_metadata) {
+        errors.emplace_back(
+            "ConSan branch-only continuation proof found route metadata on another patch");
+        return errors;
+      }
+      continue;
+    }
+    if ((patch.kind != ConSanPatchKind::LocalCaveLdsLoadCheckTrap &&
+         patch.kind != ConSanPatchKind::LocalCaveLdsStoreCheckTrap) ||
+        patch.original_size != 2u * sizeof(uint32_t) || patch.trampoline_size < sizeof(uint32_t) ||
+        patch.trampoline_offset > text.size() ||
+        patch.trampoline_size > text.size() - patch.trampoline_offset) {
+      errors.emplace_back("ConSan branch-only continuation proof found invalid geometry");
+      return errors;
+    }
+
+    const auto validate_route = [&](uint64_t source, std::span<const uint64_t> relays,
+                                    uint64_t target) {
+      uint64_t cursor = source;
+      for (uint64_t relay : relays) {
+        if (!owned_relay_slots.contains(relay) || !used_relay_slots.insert(relay).second ||
+            !validate_hop(cursor, relay))
+          return false;
+        cursor = relay;
+      }
+      return validate_hop(cursor, target);
+    };
+    const uint64_t return_source =
+        patch.trampoline_offset + patch.trampoline_size - sizeof(uint32_t);
+    if (!validate_route(patch.anchor_offset, patch.sc_branch_only_entry_relay_offsets,
+                        patch.trampoline_offset) ||
+        !validate_route(return_source, patch.sc_branch_only_return_relay_offsets,
+                        patch.anchor_offset + patch.original_size)) {
+      errors.emplace_back(
+          "ConSan branch-only continuation proof found a stale, shared, or corrupted route");
+      return errors;
     }
   }
   return errors;
@@ -1321,7 +1423,10 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       if (!decodes_as_barrier(original_text, patch.anchor_offset, *decoder) ||
           replacement_word != nop) {
         errors.emplace_back(
-            "ConSan mutation proof did not replace the selected barrier with s_nop 0");
+            "ConSan mutation proof did not replace the selected barrier with s_nop 0 at text "
+            "offset " +
+            std::to_string(patch.anchor_offset) +
+            " (replacement=" + std::to_string(replacement_word) + ")");
       }
       continue;
     }
@@ -2391,14 +2496,15 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
       std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
         return is_exact_patch(patch) && patch.workgroup_shadow_size == 0u;
       });
+  const rj_code_arch_t arch = arch_for_target(replacement.target_id());
   if (replacement.text_sections().size() != 1 ||
-      (has_global_exact_patch && !result.resolved_moi_dispatch_id_sgpr)) {
+      (has_global_exact_patch && !result.resolved_moi_dispatch_id_sgpr &&
+       arch != ROCJITSU_CODE_ARCH_GFX1250)) {
     errors.emplace_back(
         "ConSan final validation found exact-shadow publication without dispatch-ID state");
     return errors;
   }
 
-  const rj_code_arch_t arch = arch_for_target(replacement.target_id());
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   if (!decoder) {
     errors.emplace_back(
@@ -2487,7 +2593,8 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
     if (patch.workgroup_shadow_size != 0u) {
       const auto candidate = std::ranges::find_if(result.moi_candidates, [&](const auto &item) {
         return item.text_offset == patch.anchor_offset &&
-               (item.kind == ConSanLdsAccessKind::Read || item.kind == ConSanLdsAccessKind::Write);
+               (item.kind == ConSanLdsAccessKind::Read || item.kind == ConSanLdsAccessKind::Write ||
+                item.kind == ConSanLdsAccessKind::Atomic);
       });
       const uint32_t minimum_cell_count =
           candidate == result.moi_candidates.end()
@@ -2553,7 +2660,6 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
       continue;
     }
 
-    const uint16_t dispatch = *result.resolved_moi_dispatch_id_sgpr;
     const auto expected_cas = instrumentation::build_flat_atomic_cmpswap_b32(
         scratch, static_cast<uint16_t>(scratch + 14u), static_cast<uint16_t>(scratch + 14u),
         /*return_old_value=*/true, /*scope=*/2, arch);
@@ -2571,10 +2677,29 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
 
     const size_t exact_cas_count = count_pattern(*expected_cas);
     const size_t transaction_count = exact_cas_count / 2u;
-    const std::array<uint32_t, 1> capture_low = {
-        build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 2u), dispatch, arch)};
-    const std::array<uint32_t, 1> capture_high = {build_v_mov_b32_e32(
-        static_cast<uint16_t>(scratch + 3u), static_cast<uint16_t>(dispatch + 1u), arch)};
+    std::vector<uint32_t> capture_low;
+    std::vector<uint32_t> capture_high;
+    if (result.resolved_moi_dispatch_id_sgpr) {
+      capture_low.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 2u),
+                                                *result.resolved_moi_dispatch_id_sgpr, arch));
+      capture_high.push_back(build_v_mov_b32_e32(
+          static_cast<uint16_t>(scratch + 3u),
+          static_cast<uint16_t>(*result.resolved_moi_dispatch_id_sgpr + 1u), arch));
+    } else {
+      const auto low = instrumentation::build_v_mov_b32_literal(
+          static_cast<uint16_t>(scratch + 2u), static_cast<uint32_t>(result.moi_report_dispatch_id),
+          arch);
+      const auto high = instrumentation::build_v_mov_b32_literal(
+          static_cast<uint16_t>(scratch + 3u),
+          static_cast<uint32_t>(result.moi_report_dispatch_id >> 32u), arch);
+      if (!low || !high) {
+        errors.emplace_back(
+            "ConSan final validation could not encode literal dispatch-ID expectations");
+        continue;
+      }
+      capture_low = *low;
+      capture_high = *high;
+    }
     if (decoded_legacy_swap || decoded_cas_count < 4u || decoded_cas_count % 4u != 0u ||
         exact_cas_count != decoded_cas_count ||
         count_pattern(*expected_dispatch_low_store) != transaction_count ||
@@ -3244,6 +3369,10 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
       validate_sc_indirect_island_semantics(replacement, result);
   errors.insert(errors.end(), std::make_move_iterator(indirect_island_errors.begin()),
                 std::make_move_iterator(indirect_island_errors.end()));
+  std::vector<std::string> branch_only_errors =
+      validate_sc_branch_only_continuation_semantics(replacement, result);
+  errors.insert(errors.end(), std::make_move_iterator(branch_only_errors.begin()),
+                std::make_move_iterator(branch_only_errors.end()));
   std::vector<std::string> dense_call_errors =
       validate_sc_dense_call_semantics(original, replacement, result);
   errors.insert(errors.end(), std::make_move_iterator(dense_call_errors.begin()),

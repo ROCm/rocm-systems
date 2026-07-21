@@ -440,5 +440,37 @@ TEST(ConSan, FinalStructuralValidationRediscoversReplacementIdentity) {
   }
 }
 
+TEST(ConSan, FinalValidationScalesAcrossManyDisjointPatchRanges) {
+  constexpr size_t kPatchCount = 8192u;
+  std::vector<uint32_t> text_words(kPatchCount + 1u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "many_disjoint_patch_ranges");
+
+  ConSanResult result;
+  result.visited_code_object = true;
+  result.input_size = bytes.size();
+  result.flavor = ConSanFlavor::SuperCollider;
+  result.modified = true;
+  result.elf_bytes = bytes;
+  AmdGpuCodeObject replacement(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_EQ(replacement.text_sections().size(), 1u);
+  const uint64_t text_file_offset = replacement.text_sections().front()->sectionOffset();
+  const uint32_t replacement_word = build_s_nop(1, ROCJITSU_CODE_ARCH_RDNA4);
+  result.patches.reserve(kPatchCount);
+  for (size_t index = 0; index < kPatchCount; ++index) {
+    const uint64_t anchor = index * sizeof(uint32_t);
+    std::memcpy(result.elf_bytes.data() + text_file_offset + anchor, &replacement_word,
+                sizeof(replacement_word));
+    ConSanPatchInfo patch;
+    patch.kind = ConSanPatchKind::InlineNopRewrite;
+    patch.anchor_offset = anchor;
+    patch.original_size = sizeof(uint32_t);
+    result.patches.push_back(std::move(patch));
+  }
+
+  EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
+}
+
 } // namespace
 } // namespace rocjitsu

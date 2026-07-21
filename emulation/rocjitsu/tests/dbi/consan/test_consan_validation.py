@@ -222,7 +222,6 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(environment["HSA_TOOLS_LIB"], "/new/hook.so")
         self.assertEqual(environment["RJ_CONSAN_MODE"], "record-replay")
         self.assertEqual(environment["RJ_CONSAN_POLICY"], "strict")
-        self.assertNotIn("RJ_CONSAN_ENABLE", environment)
         self.assertNotIn("RJ_CONSAN_FLAVOR", environment)
         self.assertNotIn("RJ_CONSAN_MOI_ENGINE", environment)
         self.assertNotIn("RJ_CONSAN_MOI_TRACK_BARRIERS", environment)

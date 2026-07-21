@@ -952,7 +952,6 @@ void reset_core_memory_observations() {
 }
 
 void configure_consan_profile(const ConSanHookProfile &profile, bool fail_closed) {
-  unsetenv("RJ_CONSAN_ENABLE");
   setenv("RJ_CONSAN_MODE", profile.mode, 1);
   unsetenv("RJ_CONSAN_POLICY");
   unsetenv("RJ_CONSAN_FLAVOR");
@@ -976,7 +975,6 @@ void configure_consan_profile(const ConSanHookProfile &profile, bool fail_closed
 }
 
 TEST(HsaHooksUnitTest, ConSanLoadedWithoutConfigurationDefaultsToMoiRecordReplay) {
-  ScopedEnvVar enable("RJ_CONSAN_ENABLE", nullptr);
   ScopedEnvVar mode("RJ_CONSAN_MODE", nullptr);
   ScopedEnvVar policy("RJ_CONSAN_POLICY", nullptr);
   ScopedEnvVar flavor("RJ_CONSAN_FLAVOR", nullptr);
@@ -1009,35 +1007,7 @@ TEST(HsaHooksUnitTest, ConSanLoadedWithoutConfigurationDefaultsToMoiRecordReplay
   EXPECT_EQ(g_transform_override_engines.front(), rocjitsu::ConSanMoiEngine::RecordReplay);
 }
 
-TEST(HsaHooksUnitTest, ConSanExplicitDisableKeepsFlavorInert) {
-  ScopedEnvVar enable("RJ_CONSAN_ENABLE", "0");
-  ScopedEnvVar flavor("RJ_CONSAN_FLAVOR", "moi");
-  ScopedEnvVar engine("RJ_CONSAN_MOI_ENGINE", "inline_shadow");
-
-  reset_code_object_observations();
-  FakeApiTable api;
-  const auto original_load = api.core.hsa_executable_load_agent_code_object_fn;
-  InstalledDbiHook hook(api);
-  ASSERT_TRUE(hook.installed()) << hook.error();
-  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn, original_load);
-  EXPECT_TRUE(g_transform_override_flavors.empty());
-}
-
-TEST(HsaHooksUnitTest, ConSanRejectsInvalidEnableValue) {
-  ScopedEnvVar enable("RJ_CONSAN_ENABLE", "sometimes");
-  ScopedEnvVar flavor("RJ_CONSAN_FLAVOR", nullptr);
-
-  reset_code_object_observations();
-  FakeApiTable api;
-  const auto original_load = api.core.hsa_executable_load_agent_code_object_fn;
-  InstalledDbiHook hook(api);
-  EXPECT_FALSE(hook.installed());
-  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn, original_load);
-  EXPECT_TRUE(g_transform_override_flavors.empty());
-}
-
-TEST(HsaHooksUnitTest, ConSanLegacySelectionWithoutEnableRemainsActive) {
-  ScopedEnvVar enable("RJ_CONSAN_ENABLE", nullptr);
+TEST(HsaHooksUnitTest, ConSanLegacySelectionRemainsActive) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", nullptr);
   ScopedEnvVar flavor("RJ_CONSAN_FLAVOR", "moi");
   ScopedEnvVar engine("RJ_CONSAN_MOI_ENGINE", "record_replay");
@@ -1066,7 +1036,6 @@ TEST(HsaHooksUnitTest, ConSanLegacySelectionWithoutEnableRemainsActive) {
 }
 
 TEST(HsaHooksUnitTest, ConSanRejectsInvalidMode) {
-  ScopedEnvVar enable("RJ_CONSAN_ENABLE", nullptr);
   ScopedEnvVar mode("RJ_CONSAN_MODE", "magic");
   ScopedEnvVar flavor("RJ_CONSAN_FLAVOR", nullptr);
   ScopedEnvVar engine("RJ_CONSAN_MOI_ENGINE", nullptr);
@@ -1081,7 +1050,6 @@ TEST(HsaHooksUnitTest, ConSanRejectsInvalidMode) {
 }
 
 TEST(HsaHooksUnitTest, ConSanRejectsInvalidPolicy) {
-  ScopedEnvVar enable("RJ_CONSAN_ENABLE", nullptr);
   ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
   ScopedEnvVar policy("RJ_CONSAN_POLICY", "fatal-races");
   ScopedEnvVar flavor("RJ_CONSAN_FLAVOR", nullptr);
@@ -1097,7 +1065,6 @@ TEST(HsaHooksUnitTest, ConSanRejectsInvalidPolicy) {
 }
 
 TEST(HsaHooksUnitTest, ConSanRejectsModeCombinedWithLegacySelection) {
-  ScopedEnvVar enable("RJ_CONSAN_ENABLE", nullptr);
   ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
   ScopedEnvVar flavor("RJ_CONSAN_FLAVOR", "moi");
   ScopedEnvVar engine("RJ_CONSAN_MOI_ENGINE", nullptr);
@@ -1266,7 +1233,6 @@ sampled_atomic(rocjitsu::ConSanMoiSampledSyncRole role, rocjitsu::ConSanMoiSampl
 TEST(HsaHooksUnitTest, ConSanLoaderHonorsAllTypedOutcomesAcrossAllProfiles) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", nullptr);
   ScopedEnvVar policy("RJ_CONSAN_POLICY", nullptr);
-  ScopedEnvVar enable("RJ_CONSAN_ENABLE", nullptr);
   ScopedEnvVar flavor("RJ_CONSAN_FLAVOR", nullptr);
   ScopedEnvVar engine("RJ_CONSAN_MOI_ENGINE", nullptr);
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", nullptr);
