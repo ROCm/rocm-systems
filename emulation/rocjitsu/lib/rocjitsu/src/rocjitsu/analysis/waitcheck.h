@@ -127,8 +127,8 @@ struct WaitcheckOptions {
   /// @brief Compare intact emitted waits with waitcheck's pre-wait requirements.
   ///
   /// @details This opt-in analysis does not alter ordinary hazard diagnostics
-  /// or WaitcheckReport::passed(). The first implementation covers gfx950's
-  /// legacy vmcnt, lgkmcnt, and expcnt model.
+  /// or WaitcheckReport::passed(). It normalizes every supported target's
+  /// legacy, split, combined, embedded, and implied counter fields.
   bool check_counter_parity = false;
   /// @brief Maximum counter-underaccounting diagnostics to retain.
   size_t max_counter_parity_diagnostics = std::numeric_limits<size_t>::max();
