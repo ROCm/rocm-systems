@@ -324,7 +324,9 @@ private:
 
     // Serializes updates to the process-lifetime factory cache
     static mutex_t mutex_;
-    // Process-lifetime factory cache; intentionally not destroyed during library unload.
+    // Process-lifetime cache. Both the map and cached Pm4Factory instances are
+    // intentionally left allocated until process termination; no static
+    // destructor owns these raw pointers.
     static instances_t* instances_;
     // Block info container
     const BlockInfoMap block_map_;
