@@ -553,6 +553,46 @@ TEST(ConSan, FlatStoreCheckTrapProofRewritesPaddedLocalFunctionSite) {
   EXPECT_EQ(rewritten_words, expected_words);
 }
 
+TEST(ConSan, FlatStoreB16CheckTrapProofEncodesRdna4Readback) {
+  const std::array<uint32_t, 1> kernel_words = {
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  constexpr auto store =
+      rdna4::build_vflat(rdna4::kFlatStoreB16Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
+  std::vector<uint32_t> function_words = {
+      0xBE8001EBu,              // s_mov_b64 s[0:1], src_shared_base
+      0xD5810000u, 0x00000000u, // v_mov_b32_e64 v0, s0
+      0xD5810001u, 0x00000001u, // v_mov_b32_e64 v1, s1
+      store[0],    store[1],    store[2],
+  };
+  function_words.resize(32, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  function_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+  const std::vector<uint8_t> bytes =
+      make_rdna4_code_object_with_local_function(kernel_words, function_words);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_flat_check_trap = true;
+  options.delay_nops = 1;
+  options.scratch_vgpr = 5;
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineFlatStoreCheckTrap);
+  EXPECT_TRUE(result.final_validation_passed);
+  const auto rewritten_words = patched_words_at_file_offset<7>(result, 0x118);
+  EXPECT_EQ(rewritten_words[0], store[0]);
+  EXPECT_EQ(rewritten_words[1], store[1]);
+  EXPECT_EQ(rewritten_words[2], store[2]);
+  constexpr auto readback =
+      rdna4::build_vflat(rdna4::kFlatLoadU16Vflat, {.saddr = 124, .vdst = 5, .vaddr = 0});
+  EXPECT_EQ(rewritten_words[4], readback[0]);
+  EXPECT_EQ(rewritten_words[5], readback[1]);
+  EXPECT_EQ(rewritten_words[6], readback[2]);
+}
+
 TEST(ConSan, FlatStoreCheckTrapProofRewritesGfx1250VflatStore) {
   const std::array<uint32_t, 1> kernel_words = {
       build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),

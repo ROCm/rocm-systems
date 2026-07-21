@@ -1737,9 +1737,8 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, const Con
         release_wait_info->anchor_offset = *release_wait_text_offset;
         release_wait_info->trampoline_offset = *release_wait_text_offset;
         release_wait_info->original_size = sizeof(uint32_t);
-        removed_boundary += wait_word == *expected_combined
-                                ? "/s_wait_storecnt_dscnt"
-                                : "/s_wait_storecnt";
+        removed_boundary +=
+            wait_word == *expected_combined ? "/s_wait_storecnt_dscnt" : "/s_wait_storecnt";
       }
       result.warnings.emplace_back("ConSan atomic fault removed associated " + removed_boundary +
                                    " while preserving " + selected->mnemonic);
@@ -2175,12 +2174,14 @@ retarget_flat_load_vdst(std::array<uint32_t, 3> words, uint16_t vdst, rj_code_ar
 
 [[nodiscard]] std::optional<uint8_t> flat_load_op_for_width(uint32_t width_bits) {
   switch (width_bits) {
+  case 16:
+    return rdna4::kFlatLoadU16Vflat;
   case 32:
-    return 0x14;
+    return rdna4::kFlatLoadB32Vflat;
   case 64:
-    return 0x15;
+    return rdna4::kFlatLoadB64Vflat;
   case 128:
-    return 0x17;
+    return rdna4::kFlatLoadB128Vflat;
   default:
     return std::nullopt;
   }

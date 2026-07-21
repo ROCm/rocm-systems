@@ -408,6 +408,18 @@ build_v_cmp_ne_u32_e32_vcc(uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {
                            {.src0 = src0, .vsrc1 = static_cast<uint8_t>(vsrc1)})[0];
 }
 
+/// @brief Encode RDNA4-family `v_cmp_ne_u16_e32 vcc_lo, src0, vsrc1`.
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+build_v_cmp_ne_u16_e32_vcc(uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {
+  if (!is_rdna4_family_arch(arch) || src0 > 511 || vsrc1 > 255)
+    return std::nullopt;
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return gfx1250::build_vopc(gfx1250::kVCmpNeU16Vopc,
+                               {.src0 = src0, .vsrc1 = static_cast<uint8_t>(vsrc1)})[0];
+  return rdna4::build_vopc(rdna4::kVCmpNeU16Vopc,
+                           {.src0 = src0, .vsrc1 = static_cast<uint8_t>(vsrc1)})[0];
+}
+
 /// @brief Encode RDNA4 `v_cmp_gt_u32_e32 vcc_lo, src0, vsrc1`.
 ///
 /// Useful as `src0=capacity, vsrc1=slot`, which tests `slot < capacity` while
