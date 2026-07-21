@@ -268,35 +268,54 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           constexpr size_t kHostWords = kIndirectIslandWords + 1u;
           constexpr uint64_t kHostBytes = kHostWords * sizeof(uint32_t);
           const uint64_t kernel_end = kernel->entry_text_offset + kernel->code_size;
-          const auto overlaps_range = [](uint64_t begin, uint64_t end, uint64_t other_begin,
-                                         uint64_t other_size) {
-            return other_begin < end && other_begin + other_size > begin;
+          std::vector<std::pair<uint64_t, uint64_t>> occupied_ranges;
+          occupied_ranges.reserve(group.candidates.size() + kernel->barrier_sites.size() +
+                                  kernel->fence_sites.size() + kernel->atomic_sites.size());
+          const auto append_occupied_range = [&](uint64_t begin, uint64_t size) {
+            if (size != 0u)
+              occupied_ranges.emplace_back(begin, begin + size);
           };
+          for (const ConSanMoiCandidate *candidate : group.candidates)
+            append_occupied_range(candidate->text_offset, candidate->size);
+          for (const ConSanBarrierSite &site : kernel->barrier_sites)
+            append_occupied_range(site.text_offset, site.size);
+          for (const ConSanFenceSite &site : kernel->fence_sites)
+            append_occupied_range(site.text_offset, site.size);
+          for (const ConSanAtomicSite &site : kernel->atomic_sites)
+            append_occupied_range(site.text_offset, site.size);
+          std::ranges::sort(occupied_ranges);
+          size_t merged_range_count = 0u;
+          for (const auto &range : occupied_ranges) {
+            if (merged_range_count != 0u &&
+                occupied_ranges[merged_range_count - 1u].second >= range.first) {
+              occupied_ranges[merged_range_count - 1u].second =
+                  std::max(occupied_ranges[merged_range_count - 1u].second, range.second);
+            } else {
+              occupied_ranges[merged_range_count++] = range;
+            }
+          }
+          occupied_ranges.resize(merged_range_count);
           const auto overlaps_instrumented_site = [&](uint64_t begin, uint64_t end) {
-            if (std::ranges::any_of(candidates, [&](const ConSanMoiCandidate *candidate) {
-                  return overlaps_range(begin, end, candidate->text_offset, candidate->size);
-                }))
-              return true;
-            const auto container_has_overlap = [&](const auto &container) {
-              const auto site_overlaps = [&](const auto &site) {
-                return overlaps_range(begin, end, site.text_offset, site.size);
-              };
-              return std::ranges::any_of(container.barrier_sites, site_overlaps) ||
-                     std::ranges::any_of(container.fence_sites, site_overlaps) ||
-                     std::ranges::any_of(container.atomic_sites, site_overlaps);
-            };
-            return container_has_overlap(*kernel);
+            const auto after = std::ranges::lower_bound(
+                occupied_ranges, end, {}, [](const auto &range) { return range.first; });
+            return after != occupied_ranges.begin() && std::prev(after)->second > begin;
           };
 
           std::optional<DenseEntryHost> best_host;
           uint64_t best_max_distance = std::numeric_limits<uint64_t>::max();
-          for (const std::unique_ptr<BasicBlock> &block : dense_host_blocks) {
-            if (block->start_offset() < kernel->entry_text_offset ||
-                block->end_offset() > kernel_end || block->size() < kHostBytes)
+          auto block = std::lower_bound(
+              dense_host_blocks.begin(), dense_host_blocks.end(), kernel->entry_text_offset,
+              [](const std::unique_ptr<BasicBlock> &candidate, uint64_t entry) {
+                return candidate->end_offset() <= entry;
+              });
+          for (; block != dense_host_blocks.end() && (*block)->start_offset() < kernel_end;
+               ++block) {
+            if ((*block)->start_offset() < kernel->entry_text_offset ||
+                (*block)->end_offset() > kernel_end || (*block)->size() < kHostBytes)
               continue;
-            for (const Instruction &instruction : block->instructions()) {
+            for (const Instruction &instruction : (*block)->instructions()) {
               const uint64_t host_offset = instruction.src_loc();
-              if (host_offset + kHostBytes > block->end_offset() ||
+              if (host_offset + kHostBytes > (*block)->end_offset() ||
                   overlaps_instrumented_site(host_offset, host_offset + kHostBytes))
                 continue;
               const uint64_t relay_offset = host_offset + sizeof(uint32_t);
