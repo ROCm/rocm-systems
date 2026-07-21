@@ -56,7 +56,7 @@ on:
         description: "Workflow run ID to copy prebuilt stage artifacts from; required when prebuilt_stages is set"
       stage_reuse_mode:
         type: string
-        default: "dry-run"
+        default: "reuse-stage"
         description: "Stage reuse mode: 'dry-run' (report only) or 'reuse-stage' (actually skip unaffected stages)"
 
 permissions:
@@ -119,9 +119,9 @@ jobs:
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       # Stage reuse: automatically skip unaffected stages when baseline artifacts exist
-      # - dry-run (default): reports which stages could be reused without skipping
-      # - reuse-stage: actually reuses stages from baseline when safe
-      stage_reuse_mode: ${{ inputs.stage_reuse_mode || 'dry-run' }}
+      # - reuse-stage (default): reuses stages from baseline when safe
+      # - dry-run: reports which stages could be reused without skipping
+      stage_reuse_mode: ${{ inputs.stage_reuse_mode || 'reuse-stage' }}
       repository: ROCm/TheRock
       ref: main
       # TEMPORARY: MI455 bringup - pass family_overrides to configure test runner and limited tests
