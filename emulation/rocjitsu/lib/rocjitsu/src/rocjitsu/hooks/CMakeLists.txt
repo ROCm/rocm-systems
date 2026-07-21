@@ -18,27 +18,11 @@ target_include_directories(
     rocjitsu_comgr
     PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR} ${GENERATED_DIR}
 )
-target_link_libraries(
-    rocjitsu_comgr
-    PRIVATE
-        rocjitsu_analysis
-        rocjitsu_code
-        rocjitsu_isa
-        rocjitsu_isa_cdna1
-        rocjitsu_isa_cdna2
-        rocjitsu_isa_cdna3
-        rocjitsu_isa_cdna4
-        rocjitsu_isa_rdna1
-        rocjitsu_isa_rdna2
-        rocjitsu_isa_rdna3
-        rocjitsu_isa_rdna3_5
-        rocjitsu_isa_rdna4
-        rocjitsu_isa_gfx1250
-        rocjitsu_vm_amdgpu
-        util
-        simdojo
-        Threads::Threads
-)
+target_link_libraries(rocjitsu_comgr PRIVATE rocjitsu_dbt_internal)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(rocjitsu_comgr PRIVATE "LINKER:-z,defs")
+endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_library(rocjitsu_hotswap_select SHARED rj_hotswap_dlopen_select.cpp)
@@ -105,11 +89,13 @@ if(MSVC)
     target_compile_options(rocjitsu_comgr PRIVATE /W4 /WX)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     target_compile_options(
-        rocjitsu_comgr PRIVATE -Wall -Wextra -Wpedantic -Werror
+        rocjitsu_comgr
+        PRIVATE -Wall -Wextra -Wpedantic -Werror
     )
     if(TARGET rocjitsu_hotswap_select)
         target_compile_options(
-            rocjitsu_hotswap_select PRIVATE -Wall -Wextra -Wpedantic -Werror
+            rocjitsu_hotswap_select
+            PRIVATE -Wall -Wextra -Wpedantic -Werror
         )
     endif()
 endif()
