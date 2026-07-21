@@ -98,7 +98,8 @@ copy_data_sync(void*         dst,
     // Workaround for ROCM-25606
     if(dependency) signal_wait(*dependency);
 
-    // A 0-byte async copy can wedge on gfx11.5 (completion signal never raised); skip it.
+    // The final drain can legitimately be empty when the last full buffer was already consumed.
+    // Treat a zero-byte transfer as a no-op; gfx11.5 may not raise its async-copy completion signal.
     if(size == 0) return;
 
     signal_reset(signal.sig);
