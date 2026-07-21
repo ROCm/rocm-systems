@@ -26,6 +26,22 @@ from utils.metrics.aggregation import (
     to_sum,
 )
 from utils.metrics.noise_clamper import to_noise_clamp
+from utils.metrics.safe_expression import evaluate_expression
+
+_METRIC_FUNCTIONS = {
+    "to_min": to_min,
+    "to_max": to_max,
+    "to_avg": to_avg,
+    "to_median": to_median,
+    "to_std": to_std,
+    "to_int": to_int,
+    "to_sum": to_sum,
+    "to_round": to_round,
+    "to_quantile": to_quantile,
+    "to_mod": to_mod,
+    "to_concat": to_concat,
+    "to_noise_clamp": to_noise_clamp,
+}
 
 
 class MetricEvaluator:
@@ -50,28 +66,13 @@ class MetricEvaluator:
             local_expr_context.update(self.sys_vars)
             local_expr_context.update(self.empirical_peaks)
 
-            # Add utility functions to local context
-            local_expr_context.update({
-                "to_min": to_min,
-                "to_max": to_max,
-                "to_avg": to_avg,
-                "to_median": to_median,
-                "to_std": to_std,
-                "to_int": to_int,
-                "to_sum": to_sum,
-                "to_round": to_round,
-                "to_quantile": to_quantile,
-                "to_mod": to_mod,
-                "to_concat": to_concat,
-                "to_noise_clamp": to_noise_clamp,
-            })
-
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always", RuntimeWarning)
-                eval_result = eval(
-                    compile(expr, "<string>", "eval"),
-                    {},
-                    local_expr_context,
+                eval_result = evaluate_expression(
+                    expr,
+                    variables=local_expr_context,
+                    functions=_METRIC_FUNCTIONS,
+                    subscriptable_names={"raw_pmc_df"},
                 )
             # RuntimeWarnings (e.g. divide-by-zero) are surfaced only under --verbose
             for w in caught:

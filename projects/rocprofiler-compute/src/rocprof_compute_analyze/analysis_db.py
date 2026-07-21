@@ -46,6 +46,7 @@ from utils.metrics.noise_clamper import (
     print_noise_clamp_summary,
     to_noise_clamp,
 )
+from utils.metrics.safe_expression import evaluate_expression
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.pc_sampling_analysis import load_aggregated_pc_sampling
 from utils.roofline_calc import (
@@ -474,13 +475,13 @@ class db_analysis(OmniAnalyze_Base):
             prev_noise_clamp_count = get_noise_clamp_warnings()["count"]
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always", RuntimeWarning)
-                eval_result = eval(
-                    compile(value, "<string>", "eval"),
-                    {},  # no globals
-                    {
-                        # only locals
+                eval_result = evaluate_expression(
+                    value,
+                    variables={
                         "pmc_df": pmc_df,
                         "sys_info": sys_info,
+                    },
+                    functions={
                         "to_avg": to_avg,
                         "to_concat": to_concat,
                         "to_int": to_int,
@@ -494,6 +495,7 @@ class db_analysis(OmniAnalyze_Base):
                         "to_sum": to_sum,
                         "to_noise_clamp": to_noise_clamp,
                     },
+                    subscriptable_names={"pmc_df", "sys_info"},
                 )
             # RuntimeWarnings (e.g. divide-by-zero) are surfaced only under --verbose
             for w in caught:

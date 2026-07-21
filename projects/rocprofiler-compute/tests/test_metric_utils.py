@@ -40,8 +40,46 @@ from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
 )
+from utils.metrics.safe_expression import UnsafeExpressionError, evaluate_expression
 from utils.utils_analysis import add_unit_counter
 from utils.utils_counter_defs import SUPPORTED_DENOM, UNIT_COUNTER
+
+# =============================================================================
+# Tests for utils.metrics.safe_expression
+# =============================================================================
+
+
+class TestSafeExpression:
+    """Tests for the restricted metric expression language."""
+
+    @pytest.mark.parametrize(
+        "expression",
+        [
+            "__import__('os')",
+            "(1).__class__",
+            "(lambda: 1)()",
+            "[value for value in raw_pmc_df]",
+            "raw_pmc_df.get('COUNTER')",
+        ],
+    )
+    def test_rejects_python_execution_features(self, expression):
+        with pytest.raises(UnsafeExpressionError):
+            evaluate_expression(
+                expression,
+                variables={"raw_pmc_df": pd.DataFrame({"COUNTER": [1]})},
+                functions={},
+                subscriptable_names={"raw_pmc_df"},
+            )
+
+    def test_runtime_callable_is_not_implicitly_allowed(self):
+        with pytest.raises(UnsafeExpressionError):
+            evaluate_expression(
+                "runtime_callable()",
+                variables={"runtime_callable": lambda: 1},
+                functions={},
+                subscriptable_names=set(),
+            )
+
 
 # =============================================================================
 # Tests for utils.metrics.aggregation
@@ -746,22 +784,26 @@ class TestMetricEvaluator:
     def test_eval_expression_returns_na_when_eval_returns_none(self):
         """eval_expression returns 'N/A' when the evaluated expression yields None."""
         metric_evaluator = MetricEvaluator({}, {}, {})
-        with patch("builtins.eval") as mock_eval, patch("builtins.compile"):
-            mock_eval.return_value = None
+        with patch(
+            "utils.metrics.metric_evaluator.evaluate_expression", return_value=None
+        ):
             assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
 
     def test_eval_expression_returns_na_when_eval_returns_nan(self):
         """eval_expression returns 'N/A' when the evaluated expression yields NaN."""
         metric_evaluator = MetricEvaluator({}, {}, {})
-        with patch("builtins.eval") as mock_eval, patch("builtins.compile"):
-            mock_eval.return_value = np.nan
+        with patch(
+            "utils.metrics.metric_evaluator.evaluate_expression", return_value=np.nan
+        ):
             assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
 
     def test_eval_expression_returns_na_when_eval_raises_type_error(self):
         """eval_expression returns 'N/A' when eval raises a TypeError."""
         metric_evaluator = MetricEvaluator({}, {}, {})
-        with patch("builtins.eval") as mock_eval, patch("builtins.compile"):
-            mock_eval.side_effect = TypeError("Mock exception")
+        with patch(
+            "utils.metrics.metric_evaluator.evaluate_expression",
+            side_effect=TypeError("Mock exception"),
+        ):
             assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
 
     def test_eval_expression_returns_na_when_eval_raises_name_error_empirical_peak(
@@ -769,24 +811,28 @@ class TestMetricEvaluator:
     ):
         """eval_expression returns 'N/A' for empirical_peak NameError lookups."""
         metric_evaluator = MetricEvaluator({}, {}, {})
-        with patch("builtins.eval") as mock_eval, patch("builtins.compile"):
-            mock_eval.side_effect = NameError("empirical_peak")
+        with patch(
+            "utils.metrics.metric_evaluator.evaluate_expression",
+            side_effect=NameError("empirical_peak"),
+        ):
             assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
 
     def test_eval_expression_returns_na_when_eval_raises_key_error(self):
         """eval_expression returns 'N/A' when eval raises a KeyError."""
         metric_evaluator = MetricEvaluator({}, {}, {})
-        with patch("builtins.eval") as mock_eval, patch("builtins.compile"):
-            mock_eval.side_effect = KeyError("Some KeyError")
+        with patch(
+            "utils.metrics.metric_evaluator.evaluate_expression",
+            side_effect=KeyError("Some KeyError"),
+        ):
             assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
 
     def test_eval_expression_returns_na_when_eval_raises_attribute_error(self):
         """eval_expression returns 'N/A' for a generic AttributeError."""
         metric_evaluator = MetricEvaluator({}, {}, {})
-        with patch("builtins.eval") as mock_eval, patch("builtins.compile"), patch(
-            "sys.exit"
-        ):
-            mock_eval.side_effect = AttributeError("Some AttributeError")
+        with patch(
+            "utils.metrics.metric_evaluator.evaluate_expression",
+            side_effect=AttributeError("Some AttributeError"),
+        ), patch("sys.exit"):
             assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
 
     def test_eval_expression_returns_na_when_eval_raises_nonetype_attribute_error(
@@ -794,11 +840,20 @@ class TestMetricEvaluator:
     ):
         """eval_expression returns 'N/A' for a NoneType.get AttributeError."""
         metric_evaluator = MetricEvaluator({}, {}, {})
-        with patch("builtins.eval") as mock_eval, patch("builtins.compile"):
-            mock_eval.side_effect = AttributeError(
-                "'NoneType' object has no attribute 'get'"
-            )
+        with patch(
+            "utils.metrics.metric_evaluator.evaluate_expression",
+            side_effect=AttributeError("'NoneType' object has no attribute 'get'"),
+        ):
             assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
+
+    def test_eval_expression_rejects_code_execution(self, tmp_path):
+        """Metric expressions cannot import modules or invoke arbitrary methods."""
+        output = tmp_path / "executed"
+        metric_evaluator = MetricEvaluator({}, {}, {})
+        payload = f"__import__('os').system('touch {output}') or 0"
+
+        assert metric_evaluator.eval_expression(payload) == "N/A"
+        assert not output.exists()
 
     def _make_evaluator(self, columns, sys_vars=None):
         """Build a MetricEvaluator from the given raw_pmc columns and sys_vars."""

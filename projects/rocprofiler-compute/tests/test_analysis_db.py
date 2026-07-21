@@ -79,6 +79,23 @@ def test_evaluate_parse_false_basic_expressions():
     assert result == 60
 
 
+def test_evaluate_rejects_code_execution(tmp_path):
+    """Database analysis expressions cannot execute Python payloads."""
+    output = tmp_path / "executed"
+    payload = f"__import__('os').system('touch {output}')"
+
+    result = db_analysis.evaluate(
+        "malicious_metric",
+        payload,
+        pd.DataFrame(),
+        {},
+        parse=False,
+    )
+
+    assert result is None
+    assert not output.exists()
+
+
 def test_evaluate_parse_true_basic_expressions():
     """Test parse=True mode with $ substitution and AST transformation."""
     pmc_df = pd.DataFrame({

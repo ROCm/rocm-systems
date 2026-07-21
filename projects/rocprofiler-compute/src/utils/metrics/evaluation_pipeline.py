@@ -219,12 +219,6 @@ def eval_metric(
     exprs_to_eval = []
     debug_tracker = DebugRowTracker() if debug else None
 
-    # Hmmm... apply + lambda should just work
-    # df['Value'] = df['Value'].apply(
-    #     lambda s: eval(
-    #         compile(str(s), '<string>', 'eval')
-    #     )
-    # )
     for df_id, df in dfs.items():
         if dfs_type[df_id] == "metric_table":
             for row_id, row in df.iterrows():
