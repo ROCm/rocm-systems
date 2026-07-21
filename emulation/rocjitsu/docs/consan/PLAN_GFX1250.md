@@ -119,7 +119,8 @@ flowchart TD
     XP2B["XP2B DONE<br/>torch.topk Sampled exact client completes;<br/>construction indexes validated"]
     XP2C["XP2C DONE<br/>torch.topk unrestricted Record/Replay exact/dynamic;<br/>113,760/160,848 accesses, all barriers"]
     XP2D["XP2D TODO<br/>torch.topk Record/Replay residual needs<br/>site/subgroup scalar routing"]
-    XP3["XP3 ACTIVE<br/>top-k SC oracle passes;<br/>close 88 bounded scalar-continuation gaps"]
+    XP2E["XP2E TODO<br/>torch.topk Inline construction indexed;<br/>exact object still exceeds fixed bound"]
+    XP3["XP3 TODO<br/>top-k SC oracle passes;<br/>88-site residual needs scalar continuation spills"]
     XP9["XP9 DONE<br/>norm plus softmax Record/Replay clean, paired,<br/>and reviewed-fault bundle green"]
     XP9B["XP9B DONE<br/>norm plus softmax Sampled clean, paired,<br/>and reviewed-fault bundle green"]
     XP9C["XP9C DONE<br/>norm/softmax Inline clean, paired,<br/>and reviewed-fault bundle green"]
@@ -132,7 +133,8 @@ flowchart TD
     XT2C2["XT2C2 TODO<br/>004 Stream-K kernel 3/4;<br/>Inline long-bound completion remains"]
     XT2C3["XT2C3 TODO<br/>007 Stream-K kernel 3/4;<br/>Inline long-bound completion remains"]
     XT3A["XT3A TODO<br/>reduced SGEMM SC/RR/Sampled green;<br/>Inline backend-dependent and long"]
-    XT3B["XT3B DONE<br/>quick-GEMM SuperCollider assessment bounded;<br/>HGEMM duration and two F8 fault-health sites recorded"]
+    XT3B["XT3B DONE<br/>quick-GEMM SuperCollider assessed;<br/>SGEMM first problem 12/12 exact and fully covered"]
+    XT3G["XT3G ACTIVE<br/>quick SGEMM Sampled;<br/>bounded first-problem clean assessment"]
     XT3D["XT3D DONE<br/>full SGEMM first problem complete;<br/>quadratic 115,776-event frontier isolated"]
     XT3E["XT3E TODO<br/>both emulator baselines prove intrinsic full-grid bound;<br/>substantially longer unrestricted RR run remains"]
     XT3C["XT3C DONE<br/>SPMM F8 Sampled exact client passes;<br/>19,960 accesses and 806 barrier members covered"]
@@ -251,6 +253,7 @@ flowchart TD
   XP2A --> XP2B
   XP2A --> XP2C
   XP2C --> XP2D
+  XP0 --> XP2E
   XP0 --> XP9
   XP9 --> XP9B
   XP9 --> XP9C
@@ -265,6 +268,7 @@ flowchart TD
   XT2C1 --> XT2C3
   XT1 --> XT3A
   XT1 --> XT3B
+  XT1 --> XT3G
   XT1 --> XT3D
   XT3D --> XT3E
   XT2B --> XT3C
@@ -280,6 +284,7 @@ flowchart TD
   XP2B --> XF
   XP2C --> XF
   XP2D --> XF
+  XP2E --> XF
   XP9 --> XF
   XP9B --> XF
   XP9C --> XF
@@ -289,6 +294,7 @@ flowchart TD
   XT2C3 --> XF
   XT3A --> XF
   XT3B --> XF
+  XT3G --> XF
   XT3E --> XF
   XT3C --> XF
   XT4 --> XF
@@ -303,8 +309,8 @@ flowchart TD
   class XP9B done
   class XT3B done
   class XP2B done
-  class XP3 active
-  class G0,XP2D,XT2C2,XT2C3,XT3A,XT3E,XF,XG todo
+  class XT3G active
+  class G0,XP2D,XP2E,XP3,XT2C2,XT2C3,XT3A,XT3E,XF,XG todo
 ```
 
 Broader partial-EXEC, dynamic-stack, high-register, cache/fence-shape, and
@@ -352,6 +358,24 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XT3B records a bounded clean-partial promotion for quick SGEMM
+  SuperCollider.  One-repetition artifact
+  `consan-green-expansion-20260721-sgemm-quick-sc-100` completes the first
+  problem's 12/12 exact numeric rows with zero failures, 640/640 accesses,
+  static and dynamic completeness, and complete report cleanup.  It begins
+  the second problem before reaching the unchanged 120-second bound, so the
+  STATUS cell is blue rather than green.  XT3G is the sole ACTIVE box for
+  the equivalent bounded Sampled assessment.
+
+- 2026-07-21: XP3 and new node XP2E rotate to TODO after bounded top-k
+  assessments.  SuperCollider's remaining 88 sites require a real scalar
+  spill-before-jump and restore-at-continuation subsystem.  Inline commits
+  `5f73127cfa` and `8cbfcc43b3` remove object-wide quadratic host placement
+  and descriptor-planning work, but clean artifact
+  `consan-green-expansion-20260721-pytorch-topk-inline-cached-098` still
+  remains in patch construction at 120 seconds.  Both are explicit TODO
+  frontiers rather than misleading long-lived ACTIVE boxes.
 
 - 2026-07-21: XP2B is DONE/green and XP3 becomes the sole ACTIVE/blue box.
   Commit `71a333dccf` replaces four nested linear searches in Sampled dense
