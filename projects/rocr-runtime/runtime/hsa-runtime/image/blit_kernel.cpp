@@ -264,7 +264,10 @@ hsa_status_t BlitKernel::CopyBufferToImage(
     return status;
   }
 
-  assert(dst_image_view != NULL);
+  if (dst_image_view == nullptr) {
+    assert(false && "dst_image_view is NULL");
+    return HSA_STATUS_ERROR;
+  }
 
   hsa_kernel_dispatch_packet_t packet = { };
 
@@ -294,7 +297,10 @@ hsa_status_t BlitKernel::CopyBufferToImage(
   };
 
   KernelArgs* args = (KernelArgs*)Allocate(dst_image_view->component, sizeof(KernelArgs));
-  assert(args != NULL);
+  if (args == nullptr) {
+    assert(false && "Failed to allocate kernel args");
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
   memset(args, 0, sizeof(KernelArgs));
   args->buffer = src_memory;
   for(auto& img : args->image)
@@ -365,14 +371,17 @@ hsa_status_t BlitKernel::CopyImageToBuffer(
     return HSA::hsa_memory_copy(dst_memory, src_memory, size);
   }
 
-  const Image* src_image_view = NULL;
+  const Image* src_image_view = nullptr;
 
   hsa_status_t status = ConvertImage(src_image, &src_image_view);
   if (HSA_STATUS_SUCCESS != status) {
     return status;
   }
 
-  assert(src_image_view != NULL);
+  if (src_image_view == nullptr) {
+    assert(false && "src_image_view is NULL");
+    return HSA_STATUS_ERROR;
+  }
 
   hsa_kernel_dispatch_packet_t packet = { };
 
@@ -402,7 +411,10 @@ hsa_status_t BlitKernel::CopyImageToBuffer(
   };
 
   KernelArgs* args = (KernelArgs*)Allocate(src_image_view->component, sizeof(KernelArgs));
-  assert(args != NULL);
+  if (args == nullptr) {
+    assert(false && "Failed to allocate kernel args");
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
   memset(args, 0, sizeof(KernelArgs));
   for(auto &img : args->image)
     img = src_image_view->Convert();
@@ -463,7 +475,7 @@ hsa_status_t BlitKernel::CopyImage(
 
   const Image* src_image_view = &src_image;
   const Image* dst_image_view = &dst_image;
-  const BlitCodeInfo* blit_code = NULL;
+  const BlitCodeInfo* blit_code = nullptr;
 
   if (copy_type == KERNEL_OP_COPY_IMAGE_DEFAULT) {
     // Linear to linear image copy.
@@ -473,14 +485,20 @@ hsa_status_t BlitKernel::CopyImage(
       return status;
     }
 
-    assert(src_image_view != NULL);
+    if (src_image_view == nullptr) {
+      assert(false && "src_image_view is NULL");
+      return HSA_STATUS_ERROR;
+    }
 
     status = ConvertImage(dst_image, &dst_image_view);
     if (HSA_STATUS_SUCCESS != status) {
       return status;
     }
 
-    assert(dst_image_view != NULL);
+    if (dst_image_view == nullptr) {
+      assert(false && "dst_image_view is NULL");
+      return HSA_STATUS_ERROR;
+    }
 
     const hsa_ext_image_geometry_t src_geometry = src_image_view->desc.geometry;
     const hsa_ext_image_geometry_t dst_geometry = dst_image_view->desc.geometry;
@@ -519,7 +537,10 @@ hsa_status_t BlitKernel::CopyImage(
   };
 
   KernelArgs* args = (KernelArgs*)Allocate(dst_image_view->component, sizeof(KernelArgs));
-  assert(args != NULL);
+  if (args == nullptr) {
+    assert(false && "Failed to allocate kernel args");
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
   memset(args, 0, sizeof(KernelArgs));
 
   for(auto& img : args->src)
@@ -581,7 +602,10 @@ hsa_status_t BlitKernel::FillImage(
   };
 
   KernelArgs* args = (KernelArgs*)Allocate(image.component, sizeof(KernelArgs));
-  assert(args != NULL);
+  if (args == nullptr) {
+    assert(false && "Failed to allocate kernel args");
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
   memset(args, 0, sizeof(KernelArgs));
 
   for(auto &img : args->image)
