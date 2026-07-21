@@ -1,0 +1,370 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include "rocjitsu/code/patch/consan/consan_moi.h"
+
+#include <gtest/gtest.h>
+
+#include <cstdint>
+#include <limits>
+
+namespace rocjitsu {
+namespace {
+
+TEST(ConSanMoiAutoReportPlan, EmptyRecordReplayIsExactlyOneHeader) {
+  const auto plan = plan_consan_moi_auto_report({});
+  EXPECT_TRUE(plan.complete());
+  EXPECT_EQ(plan.outcome, ConSanMoiAutoReportPlanOutcome::Complete);
+  EXPECT_EQ(plan.reason, ConSanMoiAutoReportPlanReason::None);
+  EXPECT_EQ(plan.required_bytes, sizeof(ConSanMoiReportHeader));
+  EXPECT_EQ(plan.layout.required_bytes, sizeof(ConSanMoiReportHeader));
+  EXPECT_TRUE(plan.layout.valid);
+  EXPECT_EQ(consan_moi_auto_report_plan_outcome_name(plan.outcome), "complete");
+}
+
+TEST(ConSanMoiAutoReportPlan, RecordReplayUsesIndependentExactRegionCounts) {
+  const ConSanMoiAutoReportInventory inventory{.engine = ConSanMoiEngine::RecordReplay,
+                                               .access_range_count = 3,
+                                               .barrier_event_count = 5,
+                                               .atomic_event_count = 7,
+                                               .fence_event_count = 11,
+                                               .diagnostic_count = 13};
+  const auto plan = plan_consan_moi_auto_report(inventory);
+  ASSERT_TRUE(plan.complete());
+  EXPECT_EQ(plan.layout.access_record_capacity, 3u);
+  EXPECT_EQ(plan.layout.barrier_record_capacity, 5u);
+  EXPECT_EQ(plan.layout.atomic_record_capacity, 7u);
+  EXPECT_EQ(plan.layout.fence_record_capacity, 11u);
+  EXPECT_EQ(plan.layout.diagnostic_capacity, 13u);
+  EXPECT_EQ(plan.layout.access_records_offset, sizeof(ConSanMoiReportHeader));
+  EXPECT_EQ(plan.layout.barrier_records_offset,
+            plan.layout.access_records_offset + 3 * sizeof(ConSanMoiAccessRecord));
+  EXPECT_EQ(plan.layout.atomic_records_offset,
+            plan.layout.barrier_records_offset + 5 * sizeof(ConSanMoiBarrierRecord));
+  EXPECT_EQ(plan.layout.fence_records_offset,
+            plan.layout.atomic_records_offset + 7 * sizeof(ConSanMoiAtomicRecord));
+  EXPECT_EQ(plan.layout.diagnostic_records_offset,
+            plan.layout.fence_records_offset + 11 * sizeof(ConSanMoiFenceRecord));
+  EXPECT_EQ(plan.required_bytes,
+            plan.layout.diagnostic_records_offset + 13 * sizeof(ConSanMoiDiagnosticRecord));
+}
+
+TEST(ConSanMoiAutoReportPlan, SampledSeparatesBanksFromMultiCellWatchpoints) {
+  const ConSanMoiAutoReportInventory inventory{.engine = ConSanMoiEngine::Sampled,
+                                               .diagnostic_count = 4,
+                                               .sampled_range_bank_count = 17,
+                                               .sampled_watchpoint_count = 53};
+  const auto plan = plan_consan_moi_auto_report(inventory);
+  ASSERT_TRUE(plan.complete());
+  EXPECT_EQ(plan.layout.diagnostic_capacity, 4u);
+  EXPECT_EQ(plan.layout.sampled_causal_window_capacity, 17u);
+  EXPECT_EQ(plan.layout.sampled_watchpoint_capacity, 53u);
+  EXPECT_EQ(plan.layout.sampled_sync_metadata_capacity, 17u);
+  EXPECT_EQ(plan.layout.sampled_pending_acquire_capacity, 17u);
+  EXPECT_EQ(plan.layout.diagnostic_records_offset, sizeof(ConSanMoiReportHeader));
+  EXPECT_EQ(plan.layout.sampled_causal_windows_offset,
+            plan.layout.diagnostic_records_offset + 4 * sizeof(ConSanMoiDiagnosticRecord));
+  EXPECT_EQ(plan.layout.sampled_watchpoints_offset,
+            plan.layout.sampled_causal_windows_offset + 17 * sizeof(ConSanMoiSampledCausalWindow));
+  EXPECT_EQ(plan.layout.sampled_sync_metadata_offset,
+            plan.layout.sampled_watchpoints_offset + 53 * sizeof(uint64_t));
+  EXPECT_EQ(plan.layout.sampled_pending_acquires_offset,
+            plan.layout.sampled_sync_metadata_offset +
+                17 * sizeof(ConSanMoiSampledSyncMetadataPacked));
+  EXPECT_EQ(plan.required_bytes, plan.layout.sampled_pending_acquires_offset +
+                                     17 * sizeof(ConSanMoiSampledPendingAcquireSlot));
+}
+
+TEST(ConSanMoiAutoReportPlan, InlineRoundsDeclaredLdsAndKeepsOrderingTablesIndependent) {
+  const ConSanMoiAutoReportInventory inventory{
+      .engine = ConSanMoiEngine::InlineShadow,
+      .diagnostic_count = 4,
+      .inline_lds_bytes = 4097,
+      .inline_atomic_release_count = 3,
+      .inline_causal_snapshot_count = 5,
+      .inline_acquired_epoch_token_count = 7,
+      .inline_compact_token_mapping_count = 6,
+  };
+  const auto plan = plan_consan_moi_auto_report(inventory);
+  ASSERT_TRUE(plan.complete());
+  constexpr uint64_t kExpectedExactShadowEntries = 1025u * kConSanMoiInlineExactDispatchBankCount;
+  EXPECT_EQ(plan.layout.exact_shadow_entry_capacity, kExpectedExactShadowEntries);
+  EXPECT_EQ(plan.layout.inline_atomic_release_capacity, 3u);
+  EXPECT_EQ(plan.layout.inline_causal_snapshot_capacity, 5u);
+  EXPECT_EQ(plan.layout.inline_acquired_epoch_token_capacity, 7u);
+  EXPECT_EQ(plan.layout.inline_compact_token_mapping_capacity, 6u);
+  EXPECT_EQ(plan.layout.exact_shadow_entries_offset,
+            sizeof(ConSanMoiReportHeader) + 4 * sizeof(ConSanMoiDiagnosticRecord));
+  EXPECT_EQ(plan.layout.inline_atomic_release_slots_offset,
+            plan.layout.exact_shadow_entries_offset +
+                kExpectedExactShadowEntries * sizeof(ConSanMoiInlineExactShadowSlot));
+  EXPECT_EQ(plan.layout.inline_causal_snapshots_offset,
+            plan.layout.inline_atomic_release_slots_offset +
+                3 * sizeof(ConSanMoiInlineAtomicReleaseSlot));
+  EXPECT_EQ(plan.layout.inline_compact_token_mappings_offset,
+            plan.layout.inline_causal_snapshots_offset + 5 * sizeof(ConSanMoiInlineCausalSnapshot));
+  EXPECT_EQ(plan.layout.inline_acquired_epoch_token_slots_offset,
+            plan.layout.inline_compact_token_mappings_offset +
+                6 * sizeof(ConSanMoiCompactDiagnosticTokenMapping));
+  EXPECT_EQ(plan.required_bytes, plan.layout.inline_acquired_epoch_token_slots_offset +
+                                     7 * sizeof(ConSanMoiInlineAcquiredEpochTokenSlot));
+}
+
+TEST(ConSanMoiAutoReportPlan, InlineExactOverrideRoundTripsDispatchBankedLayout) {
+  const ConSanMoiAutoReportInventory inventory{
+      .engine = ConSanMoiEngine::InlineShadow,
+      .diagnostic_count = 4,
+      .inline_lds_bytes = 4097,
+      .inline_atomic_release_count = 3,
+      .inline_causal_snapshot_count = 5,
+      .inline_acquired_epoch_token_count = 7,
+      .inline_compact_token_mapping_count = 6,
+  };
+  const auto plan = plan_consan_moi_auto_report(inventory);
+  ASSERT_TRUE(plan.complete());
+  const auto override_layout = consan_moi_auto_report_layout_override(plan);
+  ASSERT_TRUE(override_layout);
+
+  const auto restored = consan_moi_report_layout_from_override(
+      *override_layout, ConSanMoiEngine::InlineShadow, plan.required_bytes);
+  EXPECT_TRUE(restored.valid);
+  EXPECT_EQ(restored.exact_shadow_entry_capacity, plan.layout.exact_shadow_entry_capacity);
+  EXPECT_EQ(restored.diagnostic_capacity, plan.layout.diagnostic_capacity);
+  EXPECT_EQ(restored.inline_compact_token_mapping_capacity, 6u);
+  EXPECT_EQ(restored.inline_compact_token_mappings_offset,
+            plan.layout.inline_compact_token_mappings_offset);
+  EXPECT_EQ(restored.required_bytes, plan.required_bytes);
+
+  auto corrupt = *override_layout;
+  --corrupt.exact_shadow_entry_capacity;
+  EXPECT_FALSE(consan_moi_report_layout_from_override(corrupt, ConSanMoiEngine::InlineShadow,
+                                                      plan.required_bytes)
+                   .valid);
+  corrupt = *override_layout;
+  ++corrupt.inline_compact_token_mappings_offset;
+  EXPECT_FALSE(consan_moi_report_layout_from_override(corrupt, ConSanMoiEngine::InlineShadow,
+                                                      plan.required_bytes)
+                   .valid);
+}
+
+TEST(ConSanMoiAutoReportPlan, PerBufferCeilingIsInclusiveAndRetainsRequiredBytes) {
+  // Solve a small two-region Diophantine boundary instead of assuming the
+  // header happens to divide the access-record stride.
+  uint64_t access_count = 0;
+  uint64_t fence_count = 0;
+  for (uint64_t candidate_fences = 0; candidate_fences <= sizeof(ConSanMoiAccessRecord);
+       ++candidate_fences) {
+    const uint64_t fence_bytes = candidate_fences * sizeof(ConSanMoiFenceRecord);
+    if (sizeof(ConSanMoiReportHeader) + fence_bytes > kConSanMoiAutoReportBufferCeilingBytes)
+      break;
+    const uint64_t remaining =
+        kConSanMoiAutoReportBufferCeilingBytes - sizeof(ConSanMoiReportHeader) - fence_bytes;
+    if (remaining % sizeof(ConSanMoiAccessRecord) == 0) {
+      access_count = remaining / sizeof(ConSanMoiAccessRecord);
+      fence_count = candidate_fences;
+      break;
+    }
+  }
+  ASSERT_NE(access_count, 0u);
+  const ConSanMoiAutoReportInventory fitting{.engine = ConSanMoiEngine::RecordReplay,
+                                             .access_range_count = access_count,
+                                             .fence_event_count = fence_count};
+  const auto accepted = plan_consan_moi_auto_report(fitting);
+  ASSERT_TRUE(accepted.complete());
+  EXPECT_EQ(accepted.required_bytes, kConSanMoiAutoReportBufferCeilingBytes);
+
+  auto too_large = fitting;
+  ++too_large.access_range_count;
+  const auto rejected = plan_consan_moi_auto_report(too_large);
+  EXPECT_FALSE(rejected.complete());
+  EXPECT_EQ(rejected.outcome, ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity);
+  EXPECT_EQ(rejected.reason, ConSanMoiAutoReportPlanReason::PerBufferCeiling);
+  EXPECT_GT(rejected.required_bytes, kConSanMoiAutoReportBufferCeilingBytes);
+  EXPECT_FALSE(rejected.layout.valid);
+  EXPECT_EQ(rejected.layout.access_record_capacity, too_large.access_range_count);
+  EXPECT_EQ(consan_moi_auto_report_plan_outcome_name(rejected.outcome),
+            "insufficient_report_capacity");
+}
+
+TEST(ConSanMoiAutoReportPlan, SampledBoundaryIsExactAndOneWatchpointFails) {
+  ASSERT_EQ((kConSanMoiAutoReportBufferCeilingBytes - sizeof(ConSanMoiReportHeader)) %
+                sizeof(uint64_t),
+            0u);
+  const uint64_t watchpoint_count =
+      (kConSanMoiAutoReportBufferCeilingBytes - sizeof(ConSanMoiReportHeader)) / sizeof(uint64_t);
+  ConSanMoiAutoReportInventory inventory{.engine = ConSanMoiEngine::Sampled,
+                                         .sampled_watchpoint_count = watchpoint_count};
+  const auto accepted = plan_consan_moi_auto_report(inventory);
+  ASSERT_TRUE(accepted.complete());
+  EXPECT_EQ(accepted.required_bytes, kConSanMoiAutoReportBufferCeilingBytes);
+
+  ++inventory.sampled_watchpoint_count;
+  const auto rejected = plan_consan_moi_auto_report(inventory);
+  EXPECT_EQ(rejected.outcome, ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity);
+  EXPECT_EQ(rejected.reason, ConSanMoiAutoReportPlanReason::PerBufferCeiling);
+  EXPECT_EQ(rejected.required_bytes, kConSanMoiAutoReportBufferCeilingBytes + sizeof(uint64_t));
+}
+
+TEST(ConSanMoiAutoReportPlan, InlineBoundaryChangesOnlyAtWholeLdsCells) {
+  const uint64_t available = kConSanMoiAutoReportBufferCeilingBytes - sizeof(ConSanMoiReportHeader);
+  const uint64_t fitting_cells =
+      available / (sizeof(ConSanMoiInlineExactShadowSlot) * kConSanMoiInlineExactDispatchBankCount);
+  ConSanMoiAutoReportInventory inventory{
+      .engine = ConSanMoiEngine::InlineShadow,
+      .inline_lds_bytes = fitting_cells * consan_moi_exact_shadow::granule_bytes,
+  };
+  const auto accepted = plan_consan_moi_auto_report(inventory);
+  ASSERT_TRUE(accepted.complete());
+  EXPECT_LE(accepted.required_bytes, kConSanMoiAutoReportBufferCeilingBytes);
+  EXPECT_LT(kConSanMoiAutoReportBufferCeilingBytes - accepted.required_bytes,
+            sizeof(ConSanMoiInlineExactShadowSlot) * kConSanMoiInlineExactDispatchBankCount);
+
+  inventory.inline_lds_bytes += consan_moi_exact_shadow::granule_bytes;
+  const auto rejected = plan_consan_moi_auto_report(inventory);
+  EXPECT_EQ(rejected.outcome, ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity);
+  EXPECT_EQ(rejected.reason, ConSanMoiAutoReportPlanReason::PerBufferCeiling);
+  EXPECT_GT(rejected.required_bytes, kConSanMoiAutoReportBufferCeilingBytes);
+}
+
+TEST(ConSanMoiAutoReportPlan, EveryAbiCapacityRejectsOnePastUint32) {
+  constexpr uint64_t overflow = uint64_t{std::numeric_limits<uint32_t>::max()} + 1u;
+  const ConSanMoiAutoReportInventory inventories[] = {
+      {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = overflow},
+      {.engine = ConSanMoiEngine::RecordReplay, .barrier_event_count = overflow},
+      {.engine = ConSanMoiEngine::RecordReplay, .atomic_event_count = overflow},
+      {.engine = ConSanMoiEngine::RecordReplay, .fence_event_count = overflow},
+      {.engine = ConSanMoiEngine::RecordReplay, .diagnostic_count = overflow},
+      {.engine = ConSanMoiEngine::Sampled, .sampled_range_bank_count = overflow},
+      {.engine = ConSanMoiEngine::Sampled, .sampled_watchpoint_count = overflow},
+      {.engine = ConSanMoiEngine::InlineShadow, .inline_atomic_release_count = overflow},
+      {.engine = ConSanMoiEngine::InlineShadow, .inline_causal_snapshot_count = overflow},
+      {.engine = ConSanMoiEngine::InlineShadow, .inline_acquired_epoch_token_count = overflow},
+      {.engine = ConSanMoiEngine::InlineShadow,
+       .inline_lds_bytes = overflow * consan_moi_exact_shadow::granule_bytes},
+  };
+  for (const auto &inventory : inventories) {
+    const auto plan = plan_consan_moi_auto_report(inventory);
+    EXPECT_EQ(plan.outcome, ConSanMoiAutoReportPlanOutcome::Overflow);
+    EXPECT_EQ(plan.reason, ConSanMoiAutoReportPlanReason::AbiCapacityOverflow);
+    EXPECT_EQ(plan.required_bytes, 0u);
+    EXPECT_FALSE(plan.layout.valid);
+  }
+}
+
+TEST(ConSanMoiAutoReportPlan, InlineLdsRoundingOverflowIsTyped) {
+  const ConSanMoiAutoReportInventory inventory{
+      .engine = ConSanMoiEngine::InlineShadow,
+      .inline_lds_bytes = std::numeric_limits<uint64_t>::max(),
+  };
+  const auto plan = plan_consan_moi_auto_report(inventory);
+  EXPECT_EQ(plan.outcome, ConSanMoiAutoReportPlanOutcome::Overflow);
+  EXPECT_EQ(plan.reason, ConSanMoiAutoReportPlanReason::ByteSizeOverflow);
+  EXPECT_EQ(consan_moi_auto_report_plan_outcome_name(plan.outcome), "overflow");
+  EXPECT_FALSE(plan.layout.valid);
+}
+
+TEST(ConSanMoiAutoReportPlan, RepresentableHugeCountsAreCapacityInsufficientNotOverflow) {
+  const ConSanMoiAutoReportInventory inventory{
+      .engine = ConSanMoiEngine::Sampled,
+      .sampled_range_bank_count = std::numeric_limits<uint32_t>::max(),
+      .sampled_watchpoint_count = std::numeric_limits<uint32_t>::max(),
+  };
+  const auto plan = plan_consan_moi_auto_report(inventory);
+  EXPECT_EQ(plan.outcome, ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity);
+  EXPECT_EQ(plan.reason, ConSanMoiAutoReportPlanReason::PerBufferCeiling);
+  EXPECT_GT(plan.required_bytes, kConSanMoiAutoReportBufferCeilingBytes);
+  EXPECT_FALSE(plan.layout.valid);
+}
+
+TEST(ConSanMoiAutoReportPlan, FrozenSafetyCeilingsRemainDistinct) {
+  EXPECT_EQ(kConSanMoiAutoReportBufferCeilingBytes, 128u * 1024u * 1024u);
+  EXPECT_EQ(kConSanMoiAutoReportProcessCeilingBytes, 256u * 1024u * 1024u);
+  EXPECT_GT(kConSanMoiAutoReportProcessCeilingBytes, kConSanMoiAutoReportBufferCeilingBytes);
+  EXPECT_EQ(
+      consan_moi_auto_report_plan_reason_name(ConSanMoiAutoReportPlanReason::PerBufferCeiling),
+      "per_buffer_ceiling");
+}
+
+TEST(ConSanMoiAutoReportPlan, ProcessBudgetIsInclusiveAcrossObjectsAndReleaseIsChecked) {
+  ConSanMoiAutoReportProcessBudget budget;
+  constexpr uint64_t first = 16u * 1024u * 1024u;
+  ASSERT_TRUE(reserve_consan_moi_auto_report_bytes(budget, first));
+  ASSERT_TRUE(reserve_consan_moi_auto_report_bytes(budget, kConSanMoiAutoReportProcessCeilingBytes -
+                                                               first));
+  EXPECT_EQ(budget.current_live_bytes, kConSanMoiAutoReportProcessCeilingBytes);
+  EXPECT_EQ(budget.peak_live_bytes, kConSanMoiAutoReportProcessCeilingBytes);
+  EXPECT_FALSE(reserve_consan_moi_auto_report_bytes(budget, 1u));
+  EXPECT_FALSE(
+      release_consan_moi_auto_report_bytes(budget, kConSanMoiAutoReportProcessCeilingBytes + 1u));
+  ASSERT_TRUE(release_consan_moi_auto_report_bytes(budget, first));
+  ASSERT_TRUE(release_consan_moi_auto_report_bytes(budget, kConSanMoiAutoReportProcessCeilingBytes -
+                                                               first));
+  EXPECT_EQ(budget.current_live_bytes, 0u);
+  EXPECT_EQ(budget.peak_live_bytes, kConSanMoiAutoReportProcessCeilingBytes);
+}
+
+TEST(ConSanMoiAutoReportPlan, ExactOverrideRoundTripsHeterogeneousSampledLayout) {
+  const ConSanMoiAutoReportInventory inventory{.engine = ConSanMoiEngine::Sampled,
+                                               .diagnostic_count = 3,
+                                               .sampled_range_bank_count = 5,
+                                               .sampled_watchpoint_count = 17};
+  const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(inventory);
+  ASSERT_TRUE(plan.complete());
+  const auto override_layout = consan_moi_auto_report_layout_override(plan);
+  ASSERT_TRUE(override_layout);
+  EXPECT_EQ(override_layout->sampled_causal_window_capacity, 5u);
+  EXPECT_EQ(override_layout->sampled_watchpoint_capacity, 17u);
+
+  const ConSanMoiReportBufferLayout resolved = consan_moi_report_layout_from_override(
+      *override_layout, ConSanMoiEngine::Sampled, plan.required_bytes);
+  EXPECT_TRUE(resolved.valid);
+  EXPECT_EQ(resolved.required_bytes, plan.layout.required_bytes);
+  EXPECT_EQ(resolved.diagnostic_records_offset, plan.layout.diagnostic_records_offset);
+  EXPECT_EQ(resolved.sampled_causal_windows_offset, plan.layout.sampled_causal_windows_offset);
+  EXPECT_EQ(resolved.sampled_watchpoints_offset, plan.layout.sampled_watchpoints_offset);
+  EXPECT_EQ(resolved.sampled_pending_acquires_offset, plan.layout.sampled_pending_acquires_offset);
+  const ConSanMoiReportHeader header = make_consan_moi_report_header_for_layout(
+      /*generation=*/7, /*dispatch_id=*/9, resolved, ConSanMoiEngine::Sampled);
+  EXPECT_EQ(header.sampled_watchpoint_capacity, 17u);
+  EXPECT_EQ(header.sampled_causal_window_capacity, 5u);
+  EXPECT_EQ(header.sampled_sync_metadata_capacity, 5u);
+  EXPECT_EQ(header.sampled_pending_acquire_capacity, 5u);
+  EXPECT_TRUE(consan_moi_report_layout_matches_header(header, resolved, ConSanMoiEngine::Sampled,
+                                                      plan.required_bytes));
+}
+
+TEST(ConSanMoiAutoReportPlan, ExactOverrideRejectsCorruptOffsetWrongEngineAndShortAllocation) {
+  const ConSanMoiAutoReportPlan plan =
+      plan_consan_moi_auto_report({.engine = ConSanMoiEngine::RecordReplay,
+                                   .access_range_count = 2,
+                                   .barrier_event_count = 3,
+                                   .atomic_event_count = 1,
+                                   .fence_event_count = 4,
+                                   .diagnostic_count = 2});
+  ASSERT_TRUE(plan.complete());
+  auto override_layout = consan_moi_auto_report_layout_override(plan);
+  ASSERT_TRUE(override_layout);
+
+  ++override_layout->atomic_records_offset;
+  EXPECT_FALSE(consan_moi_report_layout_from_override(
+                   *override_layout, ConSanMoiEngine::RecordReplay, plan.required_bytes)
+                   .valid);
+  --override_layout->atomic_records_offset;
+  EXPECT_FALSE(consan_moi_report_layout_from_override(
+                   *override_layout, ConSanMoiEngine::InlineShadow, plan.required_bytes)
+                   .valid);
+  EXPECT_FALSE(consan_moi_report_layout_from_override(
+                   *override_layout, ConSanMoiEngine::RecordReplay, plan.required_bytes - 1u)
+                   .valid);
+}
+
+TEST(ConSanMoiAutoReportPlan, IncompletePlanCannotProduceAnOverride) {
+  const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(
+      {.engine = ConSanMoiEngine::Sampled,
+       .sampled_range_bank_count = kConSanMoiAutoReportBufferCeilingBytes});
+  ASSERT_FALSE(plan.complete());
+  EXPECT_FALSE(consan_moi_auto_report_layout_override(plan));
+}
+
+} // namespace
+} // namespace rocjitsu

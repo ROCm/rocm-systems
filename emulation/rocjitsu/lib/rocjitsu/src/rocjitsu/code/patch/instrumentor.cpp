@@ -32,6 +32,12 @@ namespace rocjitsu {
 
 namespace {
 
+// Instrumentation can add probe bodies, trampolines, and alignment padding to
+// one code object. Keep that resource policy at this caller rather than inside
+// the generic ELF patcher, where a fixed ceiling would reject otherwise valid
+// callers with different requirements.
+constexpr size_t kMaxInstrumentedFileGrowth = size_t{64} * 1024 * 1024;
+
 // PC-reading / PC-relative instructions to reject as anchors: relocating any of
 // them into a trampoline changes the PC value they read (s_getpc) or the target
 // they branch to. s_getpc and the s_rfe_ family carry no control-flow flag or
@@ -445,7 +451,6 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       out.errors.push_back(std::move(perr));
       continue;
     }
-
     if (clause_blocked_offsets_.contains(pt.anchor_offset)) {
       out.errors.emplace_back("anchor is inside an s_clause run, anchor_offset = " +
                               std::to_string(pt.anchor_offset));
@@ -674,7 +679,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     append_words(new_text, probe.body_words);
   for (const auto &a : applied)
     append_words(new_text, a.bytes.trampoline_words);
-  if (!patcher.replace_text(new_text)) {
+  if (!patcher.replace_text(new_text, kMaxInstrumentedFileGrowth)) {
     result.errors.emplace_back("failed to replace .text with the instrumented code");
     return result;
   }
@@ -686,6 +691,8 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     patch.anchor_offset = a.site->anchor_offset;
     patch.original_size = a.site->original_size;
     patch.trampoline_offset = a.trampoline_offset;
+    patch.trampoline_size =
+        static_cast<uint32_t>(a.bytes.trampoline_words.size() * sizeof(uint32_t));
     patch.return_target = a.site->anchor_offset + a.site->original_size;
     patch.original_bytes = a.site->original_bytes;
     patch.patched_anchor_bytes = a.bytes.patched_anchor_bytes;

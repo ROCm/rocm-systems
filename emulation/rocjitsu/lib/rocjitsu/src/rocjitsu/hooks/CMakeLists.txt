@@ -14,7 +14,6 @@ target_include_directories(
     rocjitsu_hooks
     PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR} ${GENERATED_DIR}
 )
-
 target_include_directories(rocjitsu_hooks SYSTEM PRIVATE ${HSA_INCLUDE_DIR})
 
 target_include_directories(
@@ -87,3 +86,5 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
         PRIVATE -Wall -Wextra -Wpedantic -Werror
     )
 endif()
+
+add_subdirectory(consan)

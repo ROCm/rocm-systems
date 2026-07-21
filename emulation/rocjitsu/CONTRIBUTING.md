@@ -53,7 +53,8 @@ Before writing new infrastructure, check these existing libraries:
 - **Register sets** — `isa/register_set.h` for ISA-independent register
   file modeling (SGPR/VGPR/AccVGPR bitsets).
 - **Spill manager** — `code/patch/spill_manager.h` for scratch layout
-  planning (DBI spill/fill slots).
+  planning and gfx1201 VGPR save/restore sequences. See
+  [docs/spilling.md](docs/spilling.md).
 - **Instruction builder** — `code/patch/instruction_builder.h` for
   encoding common instructions (`s_branch`, `s_nop`, etc.).
 

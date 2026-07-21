@@ -1,0 +1,396 @@
+{
+  "schema_version": 1,
+  "target": "gfx1250",
+  "evidence_model": "reviewed against fresh target-specific inventories",
+  "review_required": false,
+  "workloads": {
+    "tp1-prefill": {
+      "faults": [
+        {
+          "id": "barrier-move",
+          "family": "barrier-move",
+          "environment": {
+            "RJ_CONSAN_FAULT_MOVE_BARRIER": "1",
+            "RJ_CONSAN_FAULT_BARRIER_MOVE_DIRECTION": "later",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:72bac70efa2b56a5|kernel=prefill_bs1$async_dispatch_12_attention_4x2xDx32x32xD|kind=barrier|pc=0x0000000000008cdc|mnemonic=s_barrier_signal|occurrence=10",
+            "RJ_CONSAN_FAULT_BARRIER_DESTINATION_IDENTITY": "fnv1a64:72bac70efa2b56a5|kernel=prefill_bs1$async_dispatch_12_attention_4x2xDx32x32xD|destination=instruction|pc=0x0000000000008ce4|mnemonic=ds_load_2addr_b64|size=8"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "record-replay": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "sampled": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "inline-shadow": {
+              "detector": "detected",
+              "oracle": "fail",
+              "environment": {
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1",
+                "RJ_CONSAN_TEST_KERNEL_FILTER": "prefill_bs1$async_dispatch_12_attention_4x2xDx32x32xD"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "tp1-decode-combined": {
+      "faults": [
+        {
+          "id": "barrier-move",
+          "family": "barrier-move",
+          "environment": {
+            "RJ_CONSAN_FAULT_MOVE_BARRIER": "1",
+            "RJ_CONSAN_FAULT_BARRIER_MOVE_DIRECTION": "later",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:72bac70efa2b56a5|kernel=decode_bs1$async_dispatch_30_matmul_1x23x256_f16xf16xf32|kind=barrier|pc=0x0000000000014c40|mnemonic=s_barrier_signal|occurrence=6",
+            "RJ_CONSAN_FAULT_BARRIER_DESTINATION_IDENTITY": "fnv1a64:72bac70efa2b56a5|kernel=decode_bs1$async_dispatch_30_matmul_1x23x256_f16xf16xf32|destination=instruction|pc=0x0000000000014cc0|mnemonic=ds_load_2addr_b64|size=8"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "record-replay": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "sampled": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "inline-shadow": {
+              "detector": "detected",
+              "oracle": "fail",
+              "environment": {
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1",
+                "RJ_CONSAN_TEST_KERNEL_FILTER": "decode_bs1$async_dispatch_30_matmul_1x23x256_f16xf16xf32"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "tp2-family": {
+      "faults": [
+        {
+          "id": "barrier-drop",
+          "family": "barrier-drop",
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:a78b10652108d8d6|kernel=prefill_bs1$async_dispatch_5_matmul_Dx128x256_f16xf16xf32|kind=barrier|pc=0x00000000000011a4|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:a78b10652108d8d6|kernel=prefill_bs1$async_dispatch_5_matmul_Dx128x256_f16xf16xf32|event=barrier|pc=0x00000000000011a4|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:a78b10652108d8d6|kernel=prefill_bs1$async_dispatch_5_matmul_Dx128x256_f16xf16xf32|event=barrier|pc=0x00000000000011a8|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "record-replay": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "sampled": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "inline-shadow": {
+              "detector": "detected",
+              "oracle": "fail",
+              "environment": {
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "qwen-prefill": {
+      "faults": [
+        {
+          "id": "barrier-drop",
+          "family": "barrier-drop",
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:67f68fe983674919|kernel=_initializer_11_dispatch_0_transpose_1024x3072_f32|kind=barrier|pc=0x0000000000002d10|mnemonic=s_barrier_wait|occurrence=1",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:67f68fe983674919|kernel=_initializer_11_dispatch_0_transpose_1024x3072_f32|event=barrier|pc=0x0000000000002d0c|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:67f68fe983674919|kernel=_initializer_11_dispatch_0_transpose_1024x3072_f32|event=barrier|pc=0x0000000000002d10|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "record-replay": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "sampled": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "inline-shadow": {
+              "detector": "detected",
+              "oracle": "fail",
+              "environment": {
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1",
+                "RJ_CONSAN_TEST_KERNEL_FILTER": "_initializer_11_dispatch_0_transpose_1024x3072_f32"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "d128-block": {
+      "faults": [
+        {
+          "id": "barrier-drop",
+          "family": "barrier-drop",
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:9c0ba0babb69dfd2|function=_ZL20__work_group_barrierj|kind=barrier|pc=0x000000000000918c|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:9c0ba0babb69dfd2|function=_ZL20__work_group_barrierj|event=barrier|pc=0x000000000000918c|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:9c0ba0babb69dfd2|function=_ZL20__work_group_barrierj|event=barrier|pc=0x0000000000009190|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "record-replay": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "sampled": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "inline-shadow": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            }
+          }
+        }
+      ]
+    },
+    "d128-pressure": {
+      "faults": [
+        {
+          "id": "barrier-drop",
+          "family": "barrier-drop",
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:194e3de66ffe28a8|function=_ZL20__work_group_barrierj|kind=barrier|pc=0x000000000000918c|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:194e3de66ffe28a8|function=_ZL20__work_group_barrierj|event=barrier|pc=0x000000000000918c|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:194e3de66ffe28a8|function=_ZL20__work_group_barrierj|event=barrier|pc=0x0000000000009190|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "record-replay": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "sampled": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "inline-shadow": {
+              "detector": "detected",
+              "oracle": "fail"
+            }
+          }
+        }
+      ]
+    },
+    "wmma-attention": {
+      "faults": [
+        {
+          "id": "barrier-drop",
+          "family": "barrier-drop",
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:fd2fc2a236f84b02|function=_ZL20__work_group_barrierj|kind=barrier|pc=0x000000000000918c|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:fd2fc2a236f84b02|function=_ZL20__work_group_barrierj|event=barrier|pc=0x000000000000918c|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:fd2fc2a236f84b02|function=_ZL20__work_group_barrierj|event=barrier|pc=0x0000000000009190|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "record-replay": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "sampled": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "inline-shadow": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            }
+          }
+        }
+      ]
+    },
+    "jakub-attention": {
+      "faults": [
+        {
+          "id": "barrier-drop",
+          "family": "barrier-drop",
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:5a15eb7d119ed588|function=_ZL20__work_group_barrierj|kind=barrier|pc=0x000000000000af90|mnemonic=s_barrier_wait|occurrence=1",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:5a15eb7d119ed588|function=_ZL20__work_group_barrierj|event=barrier|pc=0x000000000000af8c|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:5a15eb7d119ed588|function=_ZL20__work_group_barrierj|event=barrier|pc=0x000000000000af90|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "record-replay": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "sampled": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "inline-shadow": {
+              "detector": "detected",
+              "oracle": "fail",
+              "environment": {
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "streamk-arrival": {
+      "faults": [
+        {
+          "id": "atomic-weaken-order",
+          "family": "atomic-weaken-order",
+          "environment": {
+            "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_ORDER": "1",
+            "RJ_CONSAN_FAULT_ATOMIC_ORDER_EDGE": "release",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:9011b964d409f5d1|function=_ZN7hip_moi6detail27atomic_fetch_add_with_scopeILi4EiEET0_PS2_S2_NS_19atomic_memory_orderE|kind=atomic|pc=0x0000000000025508|mnemonic=flat_atomic_add_u32|occurrence=3"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "not_detected",
+              "oracle": "pass"
+            },
+            "record-replay": {
+              "detector": "not_detected",
+              "oracle": "pass"
+            },
+            "sampled": {
+              "detector": "not_detected",
+              "oracle": "pass"
+            },
+            "inline-shadow": {
+              "detector": "not_detected",
+              "oracle": "pass"
+            }
+          }
+        },
+        {
+          "id": "atomic-weaken-scope",
+          "family": "atomic-weaken-scope",
+          "environment": {
+            "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_SCOPE": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:9011b964d409f5d1|function=_ZN7hip_moi6detail27atomic_fetch_add_with_scopeILi4EiEET0_PS2_S2_NS_19atomic_memory_orderE|kind=atomic|pc=0x0000000000025508|mnemonic=flat_atomic_add_u32|occurrence=3"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "not_detected",
+              "oracle": "pass"
+            },
+            "record-replay": {
+              "detector": "not_detected",
+              "oracle": "pass"
+            },
+            "sampled": {
+              "detector": "not_detected",
+              "oracle": "pass"
+            },
+            "inline-shadow": {
+              "detector": "detected",
+              "oracle": "fail",
+              "environment": {
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "tree-atomic-or": {
+      "faults": [
+        {
+          "id": "atomic-weaken-order",
+          "family": "atomic-weaken-order",
+          "environment": {
+            "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_ORDER": "1",
+            "RJ_CONSAN_FAULT_ATOMIC_ORDER_EDGE": "release",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:7876aba16cb8e3c7|function=_ZN7hip_moi6detail26atomic_fetch_or_with_scopeILi4EiEET0_PS2_S2_NS_19atomic_memory_orderE|kind=atomic|pc=0x0000000000025688|mnemonic=flat_atomic_or_b32|occurrence=3"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "not_detected",
+              "oracle": "pass"
+            },
+            "record-replay": {
+              "detector": "not_detected",
+              "oracle": "pass"
+            },
+            "sampled": {
+              "detector": "not_detected",
+              "oracle": "pass"
+            },
+            "inline-shadow": {
+              "detector": "not_detected",
+              "oracle": "pass"
+            }
+          }
+        },
+        {
+          "id": "atomic-weaken-scope",
+          "family": "atomic-weaken-scope",
+          "environment": {
+            "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_SCOPE": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:7876aba16cb8e3c7|function=_ZN7hip_moi6detail26atomic_fetch_or_with_scopeILi4EiEET0_PS2_S2_NS_19atomic_memory_orderE|kind=atomic|pc=0x0000000000025688|mnemonic=flat_atomic_or_b32|occurrence=3"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "not_detected",
+              "oracle": "pass"
+            },
+            "record-replay": {
+              "detector": "not_detected",
+              "oracle": "pass"
+            },
+            "sampled": {
+              "detector": "not_detected",
+              "oracle": "pass"
+            },
+            "inline-shadow": {
+              "detector": "detected",
+              "oracle": "pass",
+              "environment": {
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -86,6 +86,7 @@ RJ_DIAGNOSTIC_POP
 #include <cstring>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -243,6 +244,21 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_text_and_rodata() {
   return image;
 }
 
+constexpr size_t kTestFileGrowthBudget = size_t{16} * 1024 * 1024;
+
+void expect_text_growth_rejected_without_mutation(std::vector<uint8_t> image,
+                                                  size_t max_file_growth = kTestFileGrowthBudget) {
+  AmdGpuCodeObject co(image.data(), image.size());
+  ASSERT_TRUE(co.is_valid());
+  ASSERT_EQ(co.text_sections().size(), 1u);
+  const auto original = image;
+  std::vector<uint8_t> replacement(co.text_sections().front()->size() + sizeof(uint32_t), 0);
+
+  CodeObjectPatcher patcher(co);
+  EXPECT_FALSE(patcher.replace_text(replacement, max_file_growth));
+  EXPECT_EQ(patcher.emit(), original);
+}
+
 std::vector<uint8_t> make_minimal_amdgpu_elf_with_load_segments() {
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_vaddr = 0x1100;
@@ -259,13 +275,14 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_load_segments() {
 
   std::vector<uint8_t> strtab{'\0'};
   const uint32_t rodata_symbol_name = add_elf_name(strtab, "rodata_object");
-  const uint32_t text_symbol_name = add_elf_name(strtab, "text_start");
+  const uint32_t text_interior_symbol_name = add_elf_name(strtab, "text_interior");
+  const uint32_t text_tail_symbol_name = add_elf_name(strtab, "text_tail");
 
   const uint64_t rodata_offset = text_offset + text_size;
   const uint64_t rodata_vaddr = text_vaddr + text_size + load_align;
   const uint64_t strtab_offset = rodata_offset + rodata_size;
   const uint64_t symtab_offset = align_up_for_test(strtab_offset + strtab.size(), 8);
-  constexpr size_t sym_count = 3;
+  constexpr size_t sym_count = 4;
   const uint64_t shstrtab_offset = symtab_offset + sym_count * sizeof(Elf64_Sym);
   const uint64_t shoff = align_up_for_test(shstrtab_offset + shstrtab.size(), 8);
   constexpr uint16_t section_count = 6;
@@ -323,11 +340,16 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_load_segments() {
   syms[1].st_shndx = 2;
   syms[1].st_value = rodata_vaddr;
   syms[1].st_size = rodata_size;
-  syms[2].st_name = text_symbol_name;
+  syms[2].st_name = text_interior_symbol_name;
   syms[2].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc);
   syms[2].st_shndx = 1;
   syms[2].st_value = text_vaddr;
-  syms[2].st_size = text_size;
+  syms[2].st_size = sizeof(uint32_t);
+  syms[3].st_name = text_tail_symbol_name;
+  syms[3].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc);
+  syms[3].st_shndx = 1;
+  syms[3].st_value = text_vaddr + sizeof(uint32_t);
+  syms[3].st_size = sizeof(uint32_t);
   std::memcpy(image.data() + symtab_offset, syms.data(), syms.size() * sizeof(Elf64_Sym));
 
   std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
@@ -1163,7 +1185,8 @@ TEST(CodeObjectPatcher, ReplaceTextGrowsTextAndShiftsFollowingSections) {
   CodeObjectPatcher patcher(co);
   const std::array<uint32_t, 4> text_words = {0xBF800000u, 0xBF800000u, 0xDEADBEEFu, 0xCAFEBABEu};
   const auto *text_bytes = reinterpret_cast<const uint8_t *>(text_words.data());
-  ASSERT_TRUE(patcher.replace_text({text_bytes, text_words.size() * sizeof(uint32_t)}));
+  ASSERT_TRUE(patcher.replace_text({text_bytes, text_words.size() * sizeof(uint32_t)},
+                                   kTestFileGrowthBudget));
 
   auto patched_bytes = patcher.emit();
   AmdGpuCodeObject patched(patched_bytes.data(), patched_bytes.size());
@@ -1186,6 +1209,159 @@ TEST(CodeObjectPatcher, ReplaceTextGrowsTextAndShiftsFollowingSections) {
   std::memcpy(&rodata_word, rodata->data(), sizeof(rodata_word));
   EXPECT_EQ(rodata_word, 0xA5A55A5Au);
 }
+
+TEST(CodeObjectPatcher, RejectsMalformedElfTablesWithoutMutation) {
+  enum class Malformation {
+    InconsistentProgramHeaderOffset,
+    InconsistentProgramHeaderCount,
+    SmallProgramHeaderEntry,
+    OutOfRangeProgramHeaderOffset,
+    TruncatedProgramHeaderTable,
+    SmallSectionHeaderEntry,
+  };
+  constexpr std::array cases{
+      Malformation::InconsistentProgramHeaderOffset, Malformation::InconsistentProgramHeaderCount,
+      Malformation::SmallProgramHeaderEntry,         Malformation::OutOfRangeProgramHeaderOffset,
+      Malformation::TruncatedProgramHeaderTable,     Malformation::SmallSectionHeaderEntry,
+  };
+
+  for (const Malformation malformed : cases) {
+    SCOPED_TRACE(static_cast<int>(malformed));
+    auto image = make_minimal_amdgpu_elf_with_text_and_rodata();
+    auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+    switch (malformed) {
+    case Malformation::InconsistentProgramHeaderOffset:
+      ehdr.e_phoff = 0;
+      ehdr.e_phnum = 1;
+      ehdr.e_phentsize = sizeof(Elf64_Phdr);
+      break;
+    case Malformation::InconsistentProgramHeaderCount:
+      ehdr.e_phoff = sizeof(Elf64_Ehdr);
+      ehdr.e_phnum = 0;
+      ehdr.e_phentsize = sizeof(Elf64_Phdr);
+      break;
+    case Malformation::SmallProgramHeaderEntry:
+      ehdr.e_phoff = sizeof(Elf64_Ehdr);
+      ehdr.e_phnum = 1;
+      ehdr.e_phentsize = sizeof(Elf64_Phdr) - 1;
+      break;
+    case Malformation::OutOfRangeProgramHeaderOffset:
+      ehdr.e_phoff = image.size() + 1;
+      ehdr.e_phnum = 1;
+      ehdr.e_phentsize = sizeof(Elf64_Phdr);
+      break;
+    case Malformation::TruncatedProgramHeaderTable:
+      ehdr.e_phoff = image.size() - sizeof(Elf64_Phdr) + 1;
+      ehdr.e_phnum = 1;
+      ehdr.e_phentsize = sizeof(Elf64_Phdr);
+      break;
+    case Malformation::SmallSectionHeaderEntry:
+      ehdr.e_shentsize = sizeof(Elf64_Shdr) - 1;
+      break;
+    }
+    write_elf_struct_for_test(image, 0, ehdr);
+    expect_text_growth_rejected_without_mutation(std::move(image));
+  }
+}
+
+TEST(CodeObjectPatcher, RejectsDeltaAdditionOverflowWithoutMutation) {
+  enum class OverflowField {
+    SectionAddress,
+    ProgramOffset,
+    ProgramFileSize,
+    ProgramVaddr,
+    ProgramPaddr,
+    SymbolValue,
+    KernelDescriptorEntryOffset,
+  };
+  constexpr std::array cases{
+      OverflowField::SectionAddress,
+      OverflowField::ProgramOffset,
+      OverflowField::ProgramFileSize,
+      OverflowField::ProgramVaddr,
+      OverflowField::ProgramPaddr,
+      OverflowField::SymbolValue,
+      OverflowField::KernelDescriptorEntryOffset,
+  };
+
+  for (const OverflowField field : cases) {
+    SCOPED_TRACE(static_cast<int>(field));
+    auto image = field == OverflowField::SectionAddress
+                     ? make_minimal_amdgpu_elf_with_text_and_rodata()
+                 : field == OverflowField::KernelDescriptorEntryOffset
+                     ? make_minimal_amdgpu_elf_with_descriptor_after_text()
+                     : make_minimal_amdgpu_elf_with_load_segments();
+    const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+    if (field == OverflowField::SectionAddress) {
+      auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+      shdrs[2].sh_addr = std::numeric_limits<uint64_t>::max();
+      write_bytes_for_test(image, ehdr.e_shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+    } else if (field == OverflowField::SymbolValue) {
+      const auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+      auto symbols = read_elf_array_for_test<Elf64_Sym>(image, shdrs[3].sh_offset,
+                                                        shdrs[3].sh_size / sizeof(Elf64_Sym));
+      ASSERT_GE(symbols.size(), 2u);
+      symbols[1].st_value = std::numeric_limits<uint64_t>::max();
+      write_bytes_for_test(image, shdrs[3].sh_offset, symbols.data(),
+                           symbols.size() * sizeof(Elf64_Sym));
+    } else if (field == OverflowField::KernelDescriptorEntryOffset) {
+      const auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+      ASSERT_GE(shdrs.size(), 3u);
+      write_kernel_descriptor_entry_offset(image.data() + shdrs[2].sh_offset,
+                                           std::numeric_limits<int64_t>::min());
+    } else {
+      auto phdrs = read_elf_array_for_test<Elf64_Phdr>(image, ehdr.e_phoff, ehdr.e_phnum);
+      switch (field) {
+      case OverflowField::ProgramOffset:
+        phdrs[1].p_offset = std::numeric_limits<uint64_t>::max();
+        break;
+      case OverflowField::ProgramFileSize:
+        phdrs[0].p_filesz = std::numeric_limits<uint64_t>::max();
+        break;
+      case OverflowField::ProgramVaddr:
+        phdrs[1].p_vaddr = std::numeric_limits<uint64_t>::max();
+        break;
+      case OverflowField::ProgramPaddr:
+        phdrs[1].p_paddr = std::numeric_limits<uint64_t>::max();
+        break;
+      case OverflowField::SectionAddress:
+      case OverflowField::SymbolValue:
+      case OverflowField::KernelDescriptorEntryOffset:
+        FAIL() << "handled above";
+      }
+      write_bytes_for_test(image, ehdr.e_phoff, phdrs.data(), phdrs.size() * sizeof(Elf64_Phdr));
+    }
+    expect_text_growth_rejected_without_mutation(std::move(image));
+  }
+}
+
+TEST(CodeObjectPatcher, RejectsAlignmentLcmOverflowWithoutMutation) {
+  auto image = make_minimal_amdgpu_elf_with_text_and_rodata();
+  const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+  ASSERT_GE(shdrs.size(), 4u);
+  shdrs[2].sh_addralign = uint64_t{1} << 63u;
+  shdrs[3].sh_addralign = 3;
+  write_bytes_for_test(image, ehdr.e_shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+
+  expect_text_growth_rejected_without_mutation(std::move(image));
+}
+
+TEST(CodeObjectPatcher, RejectsAlignmentPaddingBeyondCallerBudgetWithoutMutation) {
+  auto image = make_minimal_amdgpu_elf_with_text_and_rodata();
+  const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+  ASSERT_GE(shdrs.size(), 3u);
+  shdrs[2].sh_addralign = uint64_t{1} << 38u;
+  write_bytes_for_test(image, ehdr.e_shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+
+  // The alignment is arithmetically representable but would otherwise request
+  // hundreds of GiB of eagerly zeroed padding for this small input.
+  expect_text_growth_rejected_without_mutation(std::move(image), 1024 * 1024);
+}
+
+static_assert(noexcept(std::declval<CodeObjectPatcher &>().replace_text(
+    std::declval<std::span<const uint8_t>>(), size_t{})));
 
 TEST(CodeObjectPatcher, AppliesArchSpecificWgpModeBit) {
   using namespace rocr::llvm::amdhsa;
@@ -1271,7 +1447,8 @@ TEST(CodeObjectPatcher, ReplaceTextPreservesLoadSegmentAlignment) {
   CodeObjectPatcher patcher(co);
   const std::vector<uint32_t> text_words(load_align / sizeof(uint32_t) + 3, 0xDEADBEEFu);
   const auto *text_bytes = reinterpret_cast<const uint8_t *>(text_words.data());
-  ASSERT_TRUE(patcher.replace_text({text_bytes, text_words.size() * sizeof(uint32_t)}));
+  ASSERT_TRUE(patcher.replace_text({text_bytes, text_words.size() * sizeof(uint32_t)},
+                                   kTestFileGrowthBudget));
 
   auto patched_bytes = patcher.emit();
   AmdGpuCodeObject patched(patched_bytes.data(), patched_bytes.size());
@@ -1311,15 +1488,18 @@ TEST(CodeObjectPatcher, ReplaceTextPreservesLoadSegmentAlignment) {
   });
   ASSERT_NE(symtab, shdrs.end());
   ASSERT_EQ(symtab->sh_entsize, sizeof(Elf64_Sym));
-  ASSERT_GE(symtab->sh_size / symtab->sh_entsize, 3u);
+  ASSERT_GE(symtab->sh_size / symtab->sh_entsize, 4u);
   const auto symbols = read_elf_array_for_test<Elf64_Sym>(patched_bytes, symtab->sh_offset,
                                                           symtab->sh_size / symtab->sh_entsize);
   EXPECT_EQ(symbols[1].st_value, rodata->vaddr())
       << "defined symbols in moved sections must track the section virtual address";
   EXPECT_EQ(symbols[2].st_value, text->vaddr())
       << "symbols in unmoved .text must keep their original virtual address";
-  EXPECT_EQ(symbols[2].st_size, text->size())
-      << "function symbols spanning old .text must cover appended translated cave code";
+  EXPECT_EQ(symbols[2].st_size, sizeof(uint32_t))
+      << "an interior function must not grow into another function or the appended cave";
+  EXPECT_EQ(symbols[3].st_value, text->vaddr() + sizeof(uint32_t));
+  EXPECT_EQ(symbols[3].st_size, text->size() - sizeof(uint32_t))
+      << "only the function reaching old .text end must cover appended cave code";
 }
 
 TEST(CodeObjectPatcher, ReplaceTextPreservesMovedKernelDescriptorEntryAddress) {
@@ -1338,7 +1518,8 @@ TEST(CodeObjectPatcher, ReplaceTextPreservesMovedKernelDescriptorEntryAddress) {
   CodeObjectPatcher patcher(co);
   const std::vector<uint32_t> text_words(load_align / sizeof(uint32_t) + 3, 0xDEADBEEFu);
   const auto *text_bytes = reinterpret_cast<const uint8_t *>(text_words.data());
-  ASSERT_TRUE(patcher.replace_text({text_bytes, text_words.size() * sizeof(uint32_t)}));
+  ASSERT_TRUE(patcher.replace_text({text_bytes, text_words.size() * sizeof(uint32_t)},
+                                   kTestFileGrowthBudget));
 
   auto patched_bytes = patcher.emit();
   AmdGpuCodeObject patched(patched_bytes.data(), patched_bytes.size());
@@ -1367,7 +1548,8 @@ TEST(CodeObjectPatcher, ReplaceTextUpdatesRelocationOffsetsIntoMovedSections) {
   CodeObjectPatcher patcher(co);
   const std::vector<uint32_t> text_words(load_align / sizeof(uint32_t) + 3, 0xDEADBEEFu);
   const auto *text_bytes = reinterpret_cast<const uint8_t *>(text_words.data());
-  ASSERT_TRUE(patcher.replace_text({text_bytes, text_words.size() * sizeof(uint32_t)}));
+  ASSERT_TRUE(patcher.replace_text({text_bytes, text_words.size() * sizeof(uint32_t)},
+                                   kTestFileGrowthBudget));
 
   auto patched_bytes = patcher.emit();
   AmdGpuCodeObject patched(patched_bytes.data(), patched_bytes.size());
@@ -2507,6 +2689,33 @@ TEST(BinaryTranslatorE2E, Rdna4ScratchAllocationDoesNotWrapPastV255) {
   EXPECT_TRUE(rocjitsu::has_error_containing(
       result, rocjitsu::DiagnosticKind::ExpandFailed,
       "MFMA lowering could not find a free VGPR for ds_bpermute addresses"));
+}
+
+TEST(BinaryTranslatorE2E, Rdna4MfmaLoweringDrainsScalarLoadsBeforeScratchSgprs) {
+  const auto words = make_cdna4_mfma_words(cdna4::kVMfmaF3216x16x16F16Vop3pMfma, 0, 256, 260);
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({words[0], words[1]});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *text = translated.text_sections()[0];
+  const auto *target_words = reinterpret_cast<const uint32_t *>(text->data());
+  const size_t word_count = text->size() / sizeof(uint32_t);
+
+  constexpr std::array<uint32_t, 2> kExpansionWaits = {
+      0xBFC00000u, // s_wait_loadcnt 0
+      0xBFC70000u, // s_wait_kmcnt 0
+  };
+  EXPECT_NE(std::search(target_words, target_words + word_count, kExpansionWaits.begin(),
+                        kExpansionWaits.end()),
+            target_words + word_count)
+      << "MFMA expansion scratch SGPRs must not overwrite pending scalar-load destinations";
 }
 
 TEST(BinaryTranslatorE2E, RelocatedKernelCompactsReachableBodyAndPatchesBranches) {

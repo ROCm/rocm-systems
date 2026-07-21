@@ -38,7 +38,6 @@ struct AmdLoaderTablePrefix {
 
 uint64_t g_next_reader = 1;
 int g_load_calls = 0;
-int g_destroy_calls = 0;
 int g_first_tool_memory_calls = 0;
 int g_first_tool_load_calls = 0;
 int g_writer_calls = 0;
@@ -104,10 +103,7 @@ hsa_status_t HSA_API fake_get_major_extension_table(uint16_t extension, uint16_t
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t HSA_API fake_reader_destroy(hsa_code_object_reader_t) {
-  ++g_destroy_calls;
-  return HSA_STATUS_SUCCESS;
-}
+hsa_status_t HSA_API fake_reader_destroy(hsa_code_object_reader_t) { return HSA_STATUS_SUCCESS; }
 
 hsa_status_t HSA_API fake_load(hsa_executable_t, hsa_agent_t, hsa_code_object_reader_t,
                                const char *, hsa_loaded_code_object_t *loaded) {
@@ -314,7 +310,6 @@ protected:
   void SetUp() override {
     g_next_reader = 1;
     g_load_calls = 0;
-    g_destroy_calls = 0;
     g_first_tool_memory_calls = 0;
     g_first_tool_load_calls = 0;
     g_writer_calls = 0;

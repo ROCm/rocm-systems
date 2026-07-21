@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/analysis/kernel_scope.h"
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
@@ -484,6 +485,110 @@ TEST(CfgAnalysis, RecoveredIndirectBranchEdgeStartsAtConsumerBlock) {
   EXPECT_FALSE(has_predecessor(*fallthrough, consumer));
 }
 
+TEST(CfgAnalysis, RecoversRdna4CanonicalizedGetpcCall) {
+  constexpr uint16_t kPcSreg = 2;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kTargetDelta = static_cast<uint32_t>(-20);
+
+  // Clang's RDNA4 device-call sequence canonicalizes the high 32-bit getpc
+  // half to a signed 16-bit value before adding the low/high text delta.
+  std::vector<uint32_t> words = {
+      pack_sop1(0x48, 0, kReturnSreg),                         // 0x00: callee return.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),                // 0x04: padding.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),                // 0x08: padding.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),                // 0x0c: padding.
+      pack_sop1(0x47, kPcSreg, 0),                             // 0x10: s_getpc_b64.
+      pack_sop1(0x0f, kPcSreg + 1, kPcSreg + 1),               // 0x14: s_sext_i32_i16.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),         // 0x18: s_add_co_u32.
+      kTargetDelta,                                            // 0x1c: target delta.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kLiteralOperand), // 0x20: s_add_co_ci_u32.
+      UINT32_MAX,                                              // 0x24: high delta.
+      pack_sop1(0x49, kReturnSreg, kPcSreg),                   // 0x28: s_swappc_b64.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),                // 0x2c: continuation.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 2> extra_leaders{0, 16};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_RDNA4, extra_leaders);
+
+  auto *builder = block_starting_at(blocks, 16);
+  auto *caller = block_starting_at(blocks, 40);
+  auto *continuation = block_starting_at(blocks, 44);
+  auto *callee = block_starting_at(blocks, 0);
+  ASSERT_NE(builder, nullptr);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(callee, nullptr);
+  const std::array<std::string_view, 4> expected_mnemonics = {"s_getpc_b64", "s_sext_i32_i16",
+                                                              "s_add_co_u32", "s_add_co_ci_u32"};
+  size_t mnemonic_index = 0;
+  for (const Instruction &inst : builder->instructions()) {
+    ASSERT_LT(mnemonic_index, expected_mnemonics.size());
+    EXPECT_EQ(inst.mnemonic(), expected_mnemonics[mnemonic_index++]);
+  }
+  EXPECT_EQ(mnemonic_index, expected_mnemonics.size());
+  ASSERT_EQ(caller->num_instructions(), 1u);
+  ASSERT_NE(caller->terminator(), nullptr);
+  EXPECT_EQ(caller->terminator()->mnemonic(), "s_swappc_b64");
+  ASSERT_EQ(caller->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(caller->static_indirect_call_fixups()[0].source_target_offset, 0u);
+  ASSERT_EQ(caller->call_edges().size(), 1u);
+  EXPECT_EQ(caller->call_edges()[0].kind, BasicBlock::CallEdgeKind::IndirectSwapPc);
+  EXPECT_EQ(caller->call_edges()[0].callee, callee);
+  EXPECT_EQ(caller->call_edges()[0].continuation, continuation);
+}
+
+TEST(CfgAnalysis, RejectsNoncanonicalRdna4GetpcSignExtensions) {
+  constexpr uint16_t kPcSreg = 2;
+  constexpr uint16_t kOtherSreg = 8;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kTargetDelta = static_cast<uint32_t>(-20);
+
+  struct SignExtensionOperands {
+    uint16_t dst;
+    uint16_t src;
+  };
+  constexpr std::array<SignExtensionOperands, 2> cases{{
+      // The low half is not a valid sign-extension destination.
+      {kPcSreg, kPcSreg},
+      // The high half is overwritten from an unrelated register.
+      {kPcSreg + 1, kOtherSreg},
+  }};
+
+  for (const auto [sext_dst, sext_src] : cases) {
+    SCOPED_TRACE(testing::Message() << "sext_src=" << sext_src << " sext_dst=" << sext_dst);
+    std::vector<uint32_t> words = {
+        pack_sop1(0x48, 0, kReturnSreg),
+        build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),
+        build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),
+        build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),
+        pack_sop1(0x47, kPcSreg, 0),
+        pack_sop1(0x0f, sext_dst, sext_src),
+        pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),
+        kTargetDelta,
+        pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kLiteralOperand),
+        UINT32_MAX,
+        pack_sop1(0x49, kReturnSreg, kPcSreg),
+        build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+    };
+
+    TestCodeObject co(std::move(words));
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_NE(decoder, nullptr);
+    constexpr std::array<uint64_t, 2> extra_leaders{0, 16};
+    auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_RDNA4, extra_leaders);
+
+    for (const auto &block : blocks) {
+      EXPECT_TRUE(block->static_indirect_call_fixups().empty());
+      EXPECT_TRUE(block->call_edges().empty());
+    }
+  }
+}
+
 TEST(CfgAnalysis, DirectCallEdgeUsesTerminatorOffset) {
   constexpr uint16_t kReturnSreg = 30;
 
@@ -552,6 +657,127 @@ TEST(CfgAnalysis, DirectCallKillsCarriedPcBuilderFacts) {
 
   EXPECT_TRUE(continuation->static_indirect_call_fixups().empty());
   EXPECT_FALSE(has_successor_start(*continuation, stale_target->start_offset()));
+}
+
+TEST(KernelScopeAnalysis, SeparatesAdjacentKernelEntries) {
+  std::vector<uint32_t> words = {
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  TestCodeObject co(words);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 2> entries{0, 4};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, entries);
+  const auto index = build_block_offset_index(blocks);
+  const auto text = std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(words.data()),
+                                             words.size() * sizeof(uint32_t));
+
+  const auto first = build_kernel_cfg_scope(
+      blocks, index, KernelScopeRequest{.entry_offset = 0, .additional_entry_offsets = {}}, entries,
+      text);
+  const auto second = build_kernel_cfg_scope(
+      blocks, index, KernelScopeRequest{.entry_offset = 4, .additional_entry_offsets = {}}, entries,
+      text);
+  ASSERT_TRUE(first.has_value());
+  ASSERT_TRUE(second.has_value());
+  ASSERT_EQ(first->blocks.size(), 1u);
+  ASSERT_EQ(second->blocks.size(), 1u);
+  EXPECT_EQ(first->blocks[0]->start_offset(), 0u);
+  EXPECT_EQ(second->blocks[0]->start_offset(), 4u);
+  EXPECT_EQ(first->entry, block_for_offset(index, 0));
+  EXPECT_EQ(second->entry, block_for_offset(index, 4));
+}
+
+TEST(KernelScopeAnalysis, SymbolRangesExcludeTextPadding) {
+  std::vector<uint32_t> words = {
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+      0,
+      0,
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  TestCodeObject co(words);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 2> entries{0, 12};
+  constexpr std::array<BasicBlock::CodeRange, 2> ranges{{{0, 4}, {12, 4}}};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, entries, ranges);
+
+  ASSERT_EQ(blocks.size(), 2u);
+  EXPECT_EQ(blocks[0]->start_offset(), 0u);
+  EXPECT_EQ(blocks[1]->start_offset(), 12u);
+  EXPECT_TRUE(blocks[0]->successors().empty());
+  EXPECT_TRUE(blocks[1]->predecessors().empty());
+}
+
+TEST(KernelScopeAnalysis, SeedsAdditionalDescriptorEntryWithoutClaimingNextKernel) {
+  std::vector<uint32_t> words = {
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  TestCodeObject co(words);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 3> leaders{0, 4, 8};
+  constexpr std::array<uint64_t, 2> kernel_entries{0, 8};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, leaders);
+  const auto index = build_block_offset_index(blocks);
+  const auto text = std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(words.data()),
+                                             words.size() * sizeof(uint32_t));
+
+  KernelScopeRequest request{.entry_offset = 0, .additional_entry_offsets = {4}};
+  const auto scope = build_kernel_cfg_scope(blocks, index, request, kernel_entries, text);
+  ASSERT_TRUE(scope.has_value());
+  ASSERT_EQ(scope->blocks.size(), 2u);
+  EXPECT_EQ(scope->blocks[0]->start_offset(), 0u);
+  EXPECT_EQ(scope->blocks[1]->start_offset(), 4u);
+
+  request.additional_entry_offsets = {12};
+  EXPECT_FALSE(build_kernel_cfg_scope(blocks, index, request, kernel_entries, text).has_value());
+}
+
+TEST(KernelScopeAnalysis, SharedHelperGetsContextSpecificReturnEdges) {
+  constexpr uint16_t kReturnSreg = 30;
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kReturnSreg, 3),         // 0x00 -> helper at 0x10.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x04 kernel 0 continuation.
+      build_s_call_b64(kReturnSreg, 1),         // 0x08 -> helper at 0x10.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x0c kernel 1 continuation.
+      pack_sop1(0x1d, 0, kReturnSreg),          // 0x10 shared helper return.
+  };
+  TestCodeObject co(words);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 2> kernel_entries{0, 8};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, kernel_entries);
+  const auto index = build_block_offset_index(blocks);
+  const auto text = std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(words.data()),
+                                             words.size() * sizeof(uint32_t));
+
+  const auto first = build_kernel_cfg_scope(
+      blocks, index, KernelScopeRequest{.entry_offset = 0, .additional_entry_offsets = {}},
+      kernel_entries, text);
+  const auto second = build_kernel_cfg_scope(
+      blocks, index, KernelScopeRequest{.entry_offset = 8, .additional_entry_offsets = {}},
+      kernel_entries, text);
+  ASSERT_TRUE(first.has_value());
+  ASSERT_TRUE(second.has_value());
+  EXPECT_EQ(first->blocks.size(), 3u);
+  EXPECT_EQ(second->blocks.size(), 3u);
+  EXPECT_TRUE(first->call_return_offsets.contains(16));
+  EXPECT_TRUE(second->call_return_offsets.contains(16));
+  ASSERT_EQ(first->liveness_edges.size(), 2u);
+  ASSERT_EQ(second->liveness_edges.size(), 2u);
+
+  BasicBlock *helper = block_for_offset(index, 16);
+  BasicBlock *first_continuation = block_for_offset(index, 4);
+  BasicBlock *second_continuation = block_for_offset(index, 12);
+  ASSERT_NE(helper, nullptr);
+  EXPECT_EQ(first->liveness_edges[1].from, helper);
+  EXPECT_EQ(first->liveness_edges[1].to, first_continuation);
+  EXPECT_EQ(second->liveness_edges[1].from, helper);
+  EXPECT_EQ(second->liveness_edges[1].to, second_continuation);
 }
 
 TEST(CfgAnalysis, KillPredecessorPreventsRecoveredConsumer) {
@@ -1230,6 +1456,20 @@ TEST(GeneratedInstDefUse, Vop3SdstEncDppPartialRowMaskReadsOnlyVgprResult) {
   EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 8, 2}));
   EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 6, 1}));
   EXPECT_FALSE(idu.uses.contains({RegClass::SGPR, 8, 2}));
+}
+
+TEST(InstDefUse, Rdna4Vop3ScalarSource) {
+  constexpr std::array<uint32_t, 2> words = {
+      0xD7001141u,
+      0x0202821Eu,
+  }; // v_add_co_u32 v65, s17, s30, v65
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
+  ASSERT_NE(instruction, nullptr);
+
+  const InstDefUse def_use(*instruction);
+  EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, 30, 1}));
 }
 
 } // namespace

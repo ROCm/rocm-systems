@@ -22,6 +22,7 @@ rj_add_object_library(rocjitsu_code
     patch/code_object_patcher.cpp
     patch/kernel_text_layout.cpp
     patch/instruction_builder.cpp
+    patch/instruction_sequence.cpp
     patch/instrumentor.cpp
     patch/probe_callable.cpp
     patch/probe_clobber.cpp
@@ -29,5 +30,7 @@ rj_add_object_library(rocjitsu_code
     patch/spill_manager.cpp
     patch/trampoline_builder.cpp
 )
+
+add_subdirectory(patch/consan)
 
 target_link_libraries(rocjitsu_code PUBLIC ZLIB::ZLIB zstd::libzstd)

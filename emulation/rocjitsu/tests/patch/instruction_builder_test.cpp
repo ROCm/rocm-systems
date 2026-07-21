@@ -123,6 +123,22 @@ TEST(InstructionBuilder, BuildSEndpgm) {
   EXPECT_EQ(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4), SOPP_S_ENDPGM_RDNA4);
 }
 
+TEST(InstructionBuilder, AddressFreeScratchPrivateLimitIsArchitectureSpecific) {
+  EXPECT_EQ(address_free_scratch_private_limit(ROCJITSU_CODE_ARCH_RDNA4),
+            kMaxAddressFreeScratchPrivateBytes);
+  EXPECT_EQ(address_free_scratch_private_limit(ROCJITSU_CODE_ARCH_CDNA4),
+            kMaxCdna4AddressFreeScratchPrivateBytes);
+  EXPECT_FALSE(address_free_scratch_private_limit(ROCJITSU_CODE_ARCH_CDNA3));
+}
+
+TEST(InstructionBuilder, AddressFreeScratchPrivateSizeUsesTargetGranularity) {
+  EXPECT_EQ(normalize_address_free_scratch_private_size(ROCJITSU_CODE_ARCH_RDNA4, 20), 20u);
+  EXPECT_EQ(normalize_address_free_scratch_private_size(ROCJITSU_CODE_ARCH_CDNA4, 20), 32u);
+  EXPECT_EQ(normalize_address_free_scratch_private_size(ROCJITSU_CODE_ARCH_CDNA4, 4096), 4096u);
+  EXPECT_FALSE(normalize_address_free_scratch_private_size(ROCJITSU_CODE_ARCH_CDNA4, 4097));
+  EXPECT_FALSE(normalize_address_free_scratch_private_size(ROCJITSU_CODE_ARCH_CDNA3, 16));
+}
+
 TEST(InstructionBuilder, BuildSMovB32UsesRdna1AndRdna2Opcodes) {
   constexpr uint16_t kDst = 4;
   constexpr uint16_t kSrc = 8;
@@ -185,6 +201,12 @@ TEST(InstructionBuilder, BuildSGetpcB64) {
   EXPECT_EQ(build_s_getpc_b64(0, ROCJITSU_CODE_ARCH_RDNA4), 0xBE804700u);
   // gfx1250 renames the family (s_get_pc_i64) but keeps opcode 0x47.
   EXPECT_EQ(build_s_getpc_b64(0, ROCJITSU_CODE_ARCH_GFX1250), 0xBE804700u);
+}
+
+TEST(InstructionBuilder, BuildSSetpcB64) {
+  EXPECT_EQ(build_s_setpc_b64(/*ssrc0_target_base=*/30, ROCJITSU_CODE_ARCH_CDNA4), 0xBE801D1Eu);
+  EXPECT_EQ(build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_RDNA4), 0xBE80481Eu);
+  EXPECT_EQ(build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_GFX1250), 0xBE80481Eu);
 }
 
 TEST(InstructionBuilder, BuildSAddU32) {

@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -47,6 +48,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
+#include "util/bit.h"
 
 namespace rocjitsu {
 
@@ -55,13 +57,73 @@ class Instruction;
 /// @brief SOPP encoding prefix, consistent across all AMDGPU ISA generations.
 inline constexpr uint32_t kSoppEncodingPrefix = cdna4::encoding::kSopp;
 inline constexpr uint32_t kSop1EncodingPrefix = cdna4::encoding::kSop1;
+inline constexpr uint32_t kSopcEncodingPrefix = cdna4::encoding::kSopc;
 // SOP2 stores only a two-bit fixed prefix in MachineInst::encoding. Generated
 // encoding::kSop2 is instead the wider primary-decode selector (word0 >> 23),
 // so using it directly here would conflate two different representations.
 inline constexpr uint32_t kSop2EncodingPrefix = 0x2;
-inline constexpr uint32_t kSopcEncodingPrefix = 0x17E;
+inline constexpr uint32_t kSopkEncodingPrefix = 0xB;
 inline constexpr uint16_t kScalarPositiveInlineBase = 128;
 inline constexpr uint16_t kDelayAluSaluDep1 = 9;
+inline constexpr uint16_t kVectorSourceVgprBase = 256;
+inline constexpr uint16_t kVopLiteralSource = 255;
+/// Largest non-negative, dword-aligned offset in VSCRATCH's signed 24-bit
+/// immediate field.
+inline constexpr uint32_t kMaxAddressFreeScratchDwordOffset = 0x7ffffcu;
+/// Largest per-lane private segment whose last dword starts at an encodable
+/// address-free VSCRATCH offset.
+inline constexpr uint32_t kMaxAddressFreeScratchPrivateBytes = 0x800000u;
+/// Largest non-negative, dword-aligned offset in CDNA4 FLAT_SCRATCH's signed
+/// 13-bit byte offset field, and the corresponding per-lane private extent.
+inline constexpr uint32_t kMaxCdna4AddressFreeScratchDwordOffset = 0xffcu;
+inline constexpr uint32_t kMaxCdna4AddressFreeScratchPrivateBytes = 0x1000u;
+
+/// @brief Return the per-lane private extent addressable by the architecture's
+/// address-free scratch form.
+///
+/// Keeping this query next to the encoding limits prevents shared DBI policy
+/// from accidentally planning a gfx12-sized layout for CDNA4's narrower
+/// FLAT_SCRATCH immediate. Architectures without a qualified address-free
+/// spill encoding return std::nullopt.
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+address_free_scratch_private_limit(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return kMaxAddressFreeScratchPrivateBytes;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return kMaxCdna4AddressFreeScratchPrivateBytes;
+  default:
+    return std::nullopt;
+  }
+}
+
+/// @brief Normalize a requested private extent to the target's runtime
+/// allocation granularity and reject an unencodable result.
+///
+/// CDNA4 scratch instructions address dwords, but gfx950 dispatch backing must
+/// be a multiple of 16 bytes. Slot offsets remain unchanged; only the final
+/// descriptor/AQL requirement is rounded.
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+normalize_address_free_scratch_private_size(rj_code_arch_t arch, uint32_t requested_bytes) {
+  const auto limit = address_free_scratch_private_limit(arch);
+  if (!limit)
+    return std::nullopt;
+  const uint64_t normalized =
+      arch == ROCJITSU_CODE_ARCH_CDNA4
+          ? util::align_up(static_cast<uint64_t>(requested_bytes), static_cast<uint64_t>(16u))
+          : requested_bytes;
+  if (normalized > *limit)
+    return std::nullopt;
+  return static_cast<uint32_t>(normalized);
+}
+
+/// GFX12 and GFX12.5 share the encodings used by these RDNA4-family
+/// instrumentation recipes. Generated opcode tables and decoder fixtures are
+/// the authority for each builder enabled through this predicate.
+[[nodiscard]] inline constexpr bool is_rdna4_family_arch(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250;
+}
 
 /// @brief Pack a SOPP instruction word from its constituent fields.
 ///
@@ -250,9 +312,25 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   }
 }
 
+/// @brief Pack a SOPK instruction word from its constituent fields.
+[[nodiscard]] inline constexpr uint32_t pack_sopk(uint32_t op, uint32_t sdst, uint16_t simm16) {
+  return (kSopkEncodingPrefix << 28) | ((op & 0x1Fu) << 23) | ((sdst & 0x7Fu) << 16) | simm16;
+}
+
+/// @brief Pack a VOP2 instruction word from its constituent fields.
+[[nodiscard]] inline constexpr uint32_t pack_vop2(uint32_t op, uint32_t vdst, uint32_t src0,
+                                                  uint32_t vsrc1) {
+  return (src0 & 0x1FFu) | ((vsrc1 & 0xFFu) << 9) | ((vdst & 0xFFu) << 17) | ((op & 0x3Fu) << 25);
+}
+
 /// @brief Scalar source operand encoding for a non-negative inline integer.
 [[nodiscard]] inline constexpr uint16_t scalar_positive_inline_u32(uint16_t value) {
   return static_cast<uint16_t>(kScalarPositiveInlineBase + value);
+}
+
+/// @brief Vector source operand encoding for a VGPR.
+[[nodiscard]] inline constexpr uint16_t vector_source_vgpr(uint16_t vgpr) {
+  return static_cast<uint16_t>(kVectorSourceVgprBase + vgpr);
 }
 
 /// @brief Compute the SOPP simm16 dword field for a branch from @p branch_pc
@@ -370,6 +448,25 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   default:
     return cdna4::kSNopSopp;
   }
+}
+
+/// @brief Get the s_sleep opcode for a target ISA.
+[[nodiscard]] inline constexpr uint32_t sopp_op_sleep(rj_code_arch_t arch) {
+  // GFX9/RDNA1/RDNA2: opcode 14; GFX12-class ISA: opcode 3.
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return 3;
+  default:
+    return 14;
+  }
+}
+
+/// @brief Get the s_sleep_var opcode for a target ISA.
+[[nodiscard]] inline constexpr uint32_t sop1_op_sleep_var([[maybe_unused]] rj_code_arch_t arch) {
+  return 0x58;
 }
 
 /// @brief Get the s_lshl_b32 opcode for a target ISA.
@@ -500,6 +597,34 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   }
 }
 
+/// @brief SOP1 opcode for s_setpc_b64 on @p arch.
+[[nodiscard]] inline constexpr uint32_t sop1_op_setpc_b64(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::kSSetPcB64Sop1;
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::kSSetPcB64Sop1;
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::kSSetPcB64Sop1;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::kSSetPcB64Sop1;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::kSSetPcB64Sop1;
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::kSSetPcB64Sop1;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::kSSetPcB64Sop1;
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::kSSetPcB64Sop1;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::kSSetPcB64Sop1;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::kSSetPcI64Sop1;
+  default:
+    return cdna4::kSSetPcB64Sop1;
+  }
+}
+
 /// @brief SOP1 opcode for s_swappc_b64 on @p arch.
 [[nodiscard]] inline constexpr uint32_t sop1_op_swappc_b64(rj_code_arch_t arch) {
   switch (arch) {
@@ -584,6 +709,86 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   }
 }
 
+/// @brief Get the VOP2 v_lshrrev_b32 opcode for a target ISA.
+[[nodiscard]] inline constexpr std::optional<uint32_t> vop2_op_lshrrev_b32(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return 16;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return 22;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return 25;
+  case ROCJITSU_CODE_ARCH_RV32I:
+  case ROCJITSU_CODE_ARCH_RV64I:
+  case ROCJITSU_CODE_ARCH_NUM_ARCHS:
+    return std::nullopt;
+  }
+  return std::nullopt;
+}
+
+/// @brief Get the VOP2 v_lshlrev_b32 opcode for a target ISA.
+[[nodiscard]] inline constexpr std::optional<uint32_t> vop2_op_lshlrev_b32(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return 24;
+  default:
+    return std::nullopt;
+  }
+}
+
+/// @brief Get the VOP2 v_add_nc_u32 opcode for a target ISA.
+[[nodiscard]] inline constexpr std::optional<uint32_t> vop2_op_add_nc_u32(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return 37;
+  default:
+    return std::nullopt;
+  }
+}
+
+/// @brief Get the VOP2 v_min_u32 opcode for a target ISA.
+[[nodiscard]] inline constexpr std::optional<uint32_t> vop2_op_min_u32(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::kVMinU32Vop2;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::kVMinU32Vop2;
+  default:
+    return std::nullopt;
+  }
+}
+
+/// @brief Get the VOP2 v_and_b32 opcode for a target ISA.
+[[nodiscard]] inline constexpr std::optional<uint32_t> vop2_op_and_b32(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return 27;
+  default:
+    return std::nullopt;
+  }
+}
+
+/// @brief Get the VOP2 v_xor_b32 opcode for a target ISA.
+[[nodiscard]] inline constexpr std::optional<uint32_t> vop2_op_xor_b32(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return 29;
+  default:
+    return std::nullopt;
+  }
+}
+
 /// @brief Encode an s_branch instruction for the given target ISA.
 ///
 /// @param offset_dwords  Signed offset in dwords from (PC + 4).
@@ -660,6 +865,12 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4)
 [[nodiscard]] inline constexpr uint32_t build_s_getpc_b64(uint16_t sdst_pair_base,
                                                           rj_code_arch_t arch) {
   return build_sop1_encoding(arch, sop1_op_getpc_b64(arch), sdst_pair_base, /*ssrc0=*/0);
+}
+
+/// @brief Encode s_setpc_b64 for the given target ISA.
+[[nodiscard]] inline constexpr uint32_t build_s_setpc_b64(uint16_t ssrc0_target_base,
+                                                          rj_code_arch_t arch) {
+  return build_sop1_encoding(arch, sop1_op_setpc_b64(arch), /*sdst=*/0, ssrc0_target_base);
 }
 
 /// @brief Encode s_add_u32 for the given target ISA (SOP2 opcode 0, all gens).

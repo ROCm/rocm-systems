@@ -127,6 +127,7 @@ struct InstrumentationPatch {
   uint64_t anchor_offset;
   uint32_t original_size;
   uint64_t trampoline_offset; // .text-relative.
+  uint32_t trampoline_size;
   uint64_t return_target;
   std::vector<uint8_t> original_bytes;
   std::vector<uint8_t> patched_anchor_bytes;

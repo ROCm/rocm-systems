@@ -4,6 +4,7 @@
 rj_add_object_library(rocjitsu_analysis
     def_use_chain.cpp
     indirect_branch_discovery.cpp
+    kernel_scope.cpp
     liveness.cpp
     rj_waitcheck.cpp
     waitcheck.cpp

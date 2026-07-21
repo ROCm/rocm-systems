@@ -27,6 +27,12 @@ def test_gfx12_flat_vaddr_width_follows_saddr_mode():
     assert 'inst->saddr == OPR_SREG_NULL' in CodeGenerator._emit_vflat_helpers()
 
 
+def test_gfx12_flat_vaddr_helper_uses_generated_null_selector():
+    helper = CodeGenerator._emit_vflat_helpers()
+    assert 'static_cast<uint32_t>(OPR_SREG_NULL)' in helper
+    assert '0x7F' not in helper
+
+
 def test_buffer_vaddr_helper_maps_address_modes_to_zero_one_or_two_vgprs():
     helper = CodeGenerator._emit_buffer_vaddr_helpers(
         'buffer_vaddr_bits', 'BufferMachineInst', templated=True

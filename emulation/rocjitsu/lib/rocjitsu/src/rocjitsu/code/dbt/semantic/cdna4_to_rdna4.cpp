@@ -186,7 +186,12 @@ ExpandResult lower_mfma_f32_16x16x16_f16(const Instruction &inst, const Liveness
 
   std::vector<uint32_t> words;
 
+  // The lowering introduces temporary SGPR definitions that were not present
+  // in the source MFMA. A source path can legitimately bypass its earlier
+  // scalar-memory wait when those SGPRs were dead there, so drain KMCNT before
+  // any expansion scratch register is overwritten.
   words.push_back(make_gfx12_sopp(rdna4::kSWaitLoadcnt, 0));
+  words.push_back(make_gfx12_sopp(rdna4::kSWaitKmcnt, 0));
   words.push_back(build_s_mov_b64(kExecSave, kExecLo));
 
   // Compute bpermute byte addresses as lane_id * 4. HazardTracker inserts the

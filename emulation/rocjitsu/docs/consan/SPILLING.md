@@ -1,0 +1,186 @@
+# ConSan Register Allocation and Spilling
+
+This document describes how ConSan selects temporary registers, proves that a
+choice is valid for every owning kernel, and integrates RocJitsu's spill
+backend with code-object loading and dispatch.
+
+The reusable allocator, target-specific save/restore sequences, descriptor
+helper, support boundary, and provenance are documented in
+[AMDGPU register spilling](../spilling.md). This guide covers only the
+ConSan-specific policy layered on that backend.
+
+## Allocation policy
+
+Native DBI probes run inside an already allocated kernel. Choosing a convenient
+register number globally is unsafe: the guest may use it, and shared helper
+text may be reached by kernels with different register and private-segment
+layouts.
+
+For each ConSan probe request, the resource planner tries these outcomes in
+order:
+
+| Outcome | Meaning |
+|---|---|
+| Explicit override | Use a requested debug register window only when it does not overlap instruction operands, persistent state, or live guest values. |
+| Liveness-dead | Reuse a window inside the current descriptor allocation that is dead before the instrumented instruction. |
+| Descriptor growth | Allocate a fresh window above every guest reference and grow each owning descriptor to cover it. |
+| Spill required | Borrow an allowed live window, save it to per-lane private scratch, run the probe, and restore it before guest execution resumes. |
+| Unsupported | Do not patch; retain a typed reason such as missing ownership, forbidden overlap, a full scalar file, unsupported dynamic-stack use, or an unencodable private layout. |
+
+Explicit environment variables are encoding and debugging controls. They do
+not bypass liveness, ownership, or overlap checks, and ordinary runs do not
+require them.
+
+The ordinary-VGPR architectural limit is 256. Scalar preservation uses fresh
+descriptor-backed SGPR windows; ConSan does not implement an SGPR spill stack.
+A probe requiring new scalar state fails explicitly when no safe window exists.
+
+SuperCollider's indirect path reserves disjoint scalar state above the owning
+kernel's maximum referenced SGPR: VCC preservation, an SCC save, and an aligned
+PC pair. It captures SCC before the cave and restores it after return-PC
+arithmetic. Final validation checks ownership, allocation, disjointness, and
+the exact entry and return encodings.
+
+## Site ownership
+
+ConSan decodes symbol-backed ranges into basic blocks, builds a CFG scope from
+each kernel entry, and runs liveness within that scope. Call edges associate a
+helper block with every kernel that can reach it.
+
+For a direct-kernel site there is one owner. For shared text, one plan must be
+valid for all owners. It uses:
+
+- the union of owner live-before sets, so a dead window is dead for every
+  caller;
+- the smallest current VGPR allocation, so an in-allocation window exists in
+  every caller;
+- the largest referenced VGPR and SGPR indices, so fresh growth is above all
+  guest state;
+- the maximum original private size as the base for a common spill layout; and
+- one register assignment and instruction sequence for the shared bytes.
+
+Every descriptor that can reach the helper receives the required register and
+private extent. Unrelated descriptors remain unchanged. Unreachable or
+unresolved indirect text is a missing-owner result; even an explicit override
+does not guess that every descriptor owns it.
+
+Persistent InlineShadow state follows the same rule. Shared text either uses
+one owner/epoch VGPR representation for every owner or one common private-state
+layout. Work-item-ID-derived private ownership additionally requires all owners
+to agree on wave size.
+
+## ConSan private layout
+
+The shared backend appends stable spill slots after the maximum original
+per-lane private extent. ConSan may reserve a persistent prefix inside that
+DBI-owned region before allocating ephemeral spill slots:
+
+```text
+guest private | alignment | persistent epoch/owner state | spill leases
+```
+
+InlineShadow prefers two descriptor-backed VGPRs for owner and epoch state,
+even when that requires safe descriptor growth. Keeping hot-path state in
+registers is cheaper than reloading it at every access. If the pair cannot fit,
+the persistent epoch dword precedes the entry-captured owner dword in private
+memory. Access, prologue, barrier, and atomic spill leases start above that
+prefix so temporary state cannot overlap persistent state.
+
+For a shared spill, every owner uses the same slot offsets and grows to the same
+required private extent. Mixed fixed/dynamic ownership and unknown owners fail
+closed.
+
+## Dynamic-stack integration
+
+The supported dynamic-stack path uses a target-specific compiler convention in
+which `s32` is the stack top and `s33` is the current frame base. InlineShadow
+access probes use the shared backend's site-local dynamic frame only after
+ownership analysis establishes that this recipe applies.
+
+ConSan supplies safe scalar save registers, preserves SCC and the incoming
+frame, borrows the VGPR window, and restores all state before resuming guest
+code. Automatic scalar allocation excludes `s32:s33`, whose implicit stack
+roles need not appear as decoded operands.
+
+The descriptor and dispatch packet grow by the maximum added frame depth so
+the runtime allocates backing storage. The emitted scratch accesses remain
+relative to the runtime frame. The supported recipe currently applies only to
+InlineShadow access probes; other dynamic-stack spill consumers and mixed
+fixed/dynamic shared ownership are rejected.
+
+## Code-object and dispatch transaction
+
+ConSan coordinates the static spill helpers with its HSA runtime integration:
+
+1. Plan ownership, registers, private layout, and encodings without mutating
+   the code object.
+2. Grow only owning kernel descriptors and enable private storage when a
+   zero-private kernel first needs it.
+3. Leave AMDGPU MessagePack notes untouched; ROCR does not use their duplicated
+   private-size entries as runtime authority.
+4. Commit descriptor and text changes through `CodeObjectPatcher`.
+5. Associate the private requirement with the loaded kernel object.
+6. Rewrite the AQL dispatch packet's private-segment size before submission.
+
+When text growth moves later ELF contents, ConSan resolves the active
+descriptor by kernel name instead of retaining a stale pre-growth file offset.
+A failed plan does not intentionally leave a partially instrumented image for
+loading.
+
+Separately from spill storage, ConSan currently combines the compiler-emitted
+`.sgpr_count` analysis hint with decoded references before placing dispatch
+state or transient EXEC/VCC/SCC windows. It never uses that hint to reduce a
+decoded bound, and it does not rewrite the note. Replacing all analysis-note
+inputs with descriptor- and instruction-derived facts is a distinct follow-up
+from removing private-size mutation.
+
+## Current ConSan support
+
+| Probe family | Current resource path |
+|---|---|
+| Record/replay access probes | Dead, fresh-growth, and spill-backed VGPR windows. |
+| Sampled access probes | Dead, fresh-growth, and spill-backed VGPR windows. |
+| InlineShadow access probes | Dead, fresh-growth, and spill-backed VGPR windows, including private-epoch fallback. |
+| Reachable shared helpers | One all-owner-compatible dead, fresh, or common spill plan. |
+| Private-epoch entry/barrier temporaries | Saved and restored through the target-specific private path. |
+| Dynamic scalar state | Automatic descriptor-backed SGPR windows with EXEC, VCC, and SCC preservation. |
+| Barrier and atomic VGPR temporaries | Dead, fresh-growth, and spill-backed common plans. |
+| SGPR or AccVGPR spilling | Not implemented. |
+| Dynamic-stack kernels | Supported InlineShadow access recipe; other spill consumers fail closed. |
+| Unresolved indirect ownership | Not instrumented. |
+
+This is narrower than a compiler register allocator. It is the semantically
+safe resource path needed by the implemented probes while keeping the shared
+backend replaceable and independently reusable.
+
+## Failure reporting
+
+ConSan preserves backend and policy failures as typed outcomes. Important
+examples include:
+
+- missing ownership or unresolved indirect control flow;
+- no assignment valid across all owners;
+- overlap with an instruction operand or persistent state;
+- invalid descriptor or private-segment growth;
+- dynamic-stack use outside the supported recipe;
+- incompatible owner wave sizes;
+- branch, cave, or relocated-prefix placement failure; and
+- unsupported target or register class.
+
+The HSA log distinguishes explicit, dead, descriptor-growth, spill, and
+unsupported plans. It reports planned and emitted spill bytes, site kind,
+typed reason, and a bounded owner list. A resource rejection is therefore
+distinguishable from a successfully instrumented run that found no race.
+
+## ConSan source map
+
+- `lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_resource.*`: request,
+  allocation-source, and typed-failure policy.
+- `lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi.cpp` and its feature
+  fragments: owner-scoped planning and probe integration.
+- `lib/rocjitsu/src/rocjitsu/hooks/consan/`: load interception, resource
+  reporting, kernel-object association, and dispatch private-size rewriting.
+
+For the backend API and its provenance, return to
+[AMDGPU register spilling](../spilling.md). For the overall sanitizer, continue
+with [DESIGN.md](DESIGN.md); for user-facing controls, see [USAGE.md](USAGE.md).

@@ -7,15 +7,67 @@
 #ifndef ROCJITSU_CODE_PATCH_SPILL_MANAGER_H_
 #define ROCJITSU_CODE_PATCH_SPILL_MANAGER_H_
 
+#include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/register_set.h"
+#include "util/bit.h"
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
+#include <span>
 #include <unordered_map>
 #include <utility> // for std::pair
+#include <vector>
 
 namespace rocjitsu {
+
+/// @brief Monotonic byte-range allocator for one kernel's private segment.
+///
+/// @details This deliberately knows nothing about register identity or spill
+/// lifetime. DBI layers stable register-to-slot mapping on top; semantic DBT
+/// creates short-lived frames on top. Keeping the common range arithmetic next
+/// to SpillManager avoids a separate one-struct allocator header while both
+/// users retain their independent allocation policies.
+class PrivateSegmentCursor final {
+public:
+  /// @brief Begin allocation at the first byte not owned by an earlier policy.
+  explicit PrivateSegmentCursor(uint32_t first_byte) : cursor_(first_byte) {}
+
+  /// @brief Compute the next aligned allocation without advancing the cursor.
+  /// @param byte_count Number of contiguous bytes requested.
+  /// @param alignment Required power-of-two byte alignment for the returned base.
+  /// @param limit Exclusive upper bound for the allocation.
+  /// @returns The aligned base, or std::nullopt for an invalid or overflowing range.
+  [[nodiscard]] std::optional<uint32_t>
+  preview(uint32_t byte_count, uint32_t alignment,
+          uint32_t limit = std::numeric_limits<uint32_t>::max()) const {
+    if (byte_count == 0 || alignment == 0)
+      return std::nullopt;
+    const uint64_t base =
+        util::align_up(static_cast<uint64_t>(cursor_), static_cast<uint64_t>(alignment));
+    if (base + byte_count > limit)
+      return std::nullopt;
+    return static_cast<uint32_t>(base);
+  }
+
+  /// @brief Allocate the next aligned range and advance the high-water mark.
+  [[nodiscard]] std::optional<uint32_t>
+  allocate(uint32_t byte_count, uint32_t alignment,
+           uint32_t limit = std::numeric_limits<uint32_t>::max()) {
+    auto base = preview(byte_count, alignment, limit);
+    if (!base)
+      return std::nullopt;
+    cursor_ = *base + byte_count;
+    return base;
+  }
+
+  /// @brief One-past-end byte of all successfully allocated ranges.
+  [[nodiscard]] uint32_t high_water_mark() const { return cursor_; }
+
+private:
+  uint32_t cursor_ = 0;
+};
 
 /// @brief Per-kernel scratch reservation for DBI spill/fill slots.
 ///
@@ -75,7 +127,7 @@ public:
   [[nodiscard]] bool reserve(const RegisterSet &set);
 
   /// @returns The bumped total per-lane scratch bytes.
-  [[nodiscard]] uint32_t total_private_bytes() const { return total_bytes_; }
+  [[nodiscard]] uint32_t total_private_bytes() const { return slots_.high_water_mark(); }
 
   /// @returns Slot offset previously allocated for @p reg, or nullopt.
   [[nodiscard]] std::optional<uint32_t> offset_for(RegisterRef reg) const;
@@ -89,12 +141,68 @@ private:
     }
   };
 
-  uint32_t base_offset_; ///< First DBI slot. align_up(orig, 16).
-  uint32_t total_bytes_; ///< Bumped private_segment_fixed_size.
-  uint32_t limit_;       ///< Hard per-lane scratch cap (inclusive: offset+kSlotBytes <= limit OK).
-  uint32_t next_offset_; ///< Next free byte within DBI zone.
+  uint32_t limit_;             ///< Hard per-lane scratch cap (end <= limit is valid).
+  PrivateSegmentCursor slots_; ///< Shared range arithmetic; DBI owns stable slot identity.
   std::unordered_map<std::pair<RegClass, uint16_t>, uint32_t, RegKeyHash> reg_to_offset_;
 };
+
+/// @brief Standalone save/restore program for one ordinary VGPR window.
+///
+/// @details Each register receives one stable B32 per-lane slot. Save and
+/// restore end in zero-threshold waits so callers can safely clobber the
+/// window after save and resume guest code after restore. The instructions
+/// run under the caller's current EXEC mask and do not modify EXEC. These
+/// conservative waits also drain older wave scratch stores/loads; relaxing
+/// that ordering requires a hardware-backed same-address ordering proof.
+struct VgprSpillSequence {
+  uint16_t vgpr_base = 0;
+  uint16_t vgpr_count = 0;
+  std::vector<uint32_t> slot_offsets;
+  std::vector<uint32_t> save_words;
+  std::vector<uint32_t> restore_words;
+  uint32_t total_private_bytes = 0;
+  bool uses_dynamic_stack_frame = false;
+};
+
+/// @brief Reserve slots and encode a gfx1201 VGPR spill/fill sequence.
+///
+/// @returns A complete sequence, or nullopt for an unsupported architecture,
+/// invalid VGPR range, unencodable slot, or capacity failure. On failure
+/// @p manager is unchanged.
+[[nodiscard]] std::optional<VgprSpillSequence> build_vgpr_spill_sequence(SpillManager &manager,
+                                                                         uint16_t vgpr_base,
+                                                                         uint16_t vgpr_count,
+                                                                         rj_code_arch_t arch);
+
+/// @brief Encode a site-local dynamic-stack frame around one VGPR spill window.
+///
+/// @details Follows the AMDGPU callable-function convention used by dynamic
+/// stack kernels: save the current frame base, set it to the stack top,
+/// advance the top by the temporary frame size, then reverse those operations
+/// after filling the VGPRs. The SCC value is restored before guest code runs.
+/// No descriptor growth is needed because the loader already
+/// allocates the kernel's dynamic stack.
+[[nodiscard]] std::optional<VgprSpillSequence> build_dynamic_stack_vgpr_spill_sequence(
+    uint16_t vgpr_base, uint16_t vgpr_count, uint16_t stack_top_sgpr, uint16_t frame_base_sgpr,
+    uint16_t saved_frame_base_sgpr, uint16_t saved_scc_sgpr, rj_code_arch_t arch);
+
+enum class SpillDescriptorUpdate : uint8_t {
+  Updated,
+  Unchanged,
+  InvalidDescriptor,
+  InvalidPrivateSize,
+  DynamicStack,
+};
+
+/// @brief Grow one kernel descriptor's fixed private segment for spill slots.
+///
+/// @details Sets ENABLE_PRIVATE_SEGMENT when needed and preserves all other
+/// descriptor fields. For a dynamic-stack spill frame, @p required_private_bytes
+/// is the compiler maximum plus the instrumentation frame depth; the emitted
+/// accesses remain relative to the runtime frame base.
+[[nodiscard]] SpillDescriptorUpdate
+update_kernel_descriptor_for_spills(std::span<uint8_t> image, uint64_t descriptor_file_offset,
+                                    uint32_t required_private_bytes, bool uses_dynamic_stack);
 
 } // namespace rocjitsu
 

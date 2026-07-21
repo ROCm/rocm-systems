@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/rj_code.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -34,7 +35,15 @@ public:
   /// the executable LOAD segment that contains .text, preserves LOAD alignment,
   /// updates moved symbols and relocation places, and keeps descriptor-relative
   /// entries coherent with explicit descriptor patches applied by DBT.
-  [[nodiscard]] bool replace_text(std::span<const uint8_t> new_text);
+  ///
+  /// @param max_file_growth Maximum number of bytes that this caller permits
+  /// the ELF image to grow. This includes both the new text and any padding
+  /// required to preserve section and segment alignment. Keeping the budget at
+  /// the call site lets each transformation choose its own resource policy.
+  /// @returns false, without changing this patcher, when the replacement is
+  /// malformed, exceeds @p max_file_growth, or cannot be allocated.
+  [[nodiscard]] bool replace_text(std::span<const uint8_t> new_text,
+                                  size_t max_file_growth) noexcept;
 
   void update_elf_flags(uint32_t new_flags);
 
@@ -63,6 +72,8 @@ public:
   std::vector<uint8_t> emit() const;
 
 private:
+  [[nodiscard]] bool replace_text_impl(std::span<const uint8_t> new_text, size_t max_file_growth);
+
   std::vector<uint8_t> image_;
   uint64_t text_offset_;
   uint64_t text_size_;

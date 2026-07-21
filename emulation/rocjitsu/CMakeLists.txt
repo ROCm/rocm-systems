@@ -102,6 +102,14 @@ option(
     OFF
 )
 option(RJ_INSTALL_TESTS "Install rocjitsu test binaries" OFF)
+option(RJ_BUILD_FUZZERS "Build persistent libFuzzer targets" OFF)
+if(RJ_BUILD_FUZZERS)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "RJ_BUILD_FUZZERS requires a Clang-family compiler")
+    endif()
+    add_compile_options(-fsanitize=fuzzer-no-link)
+    add_link_options(-fsanitize=fuzzer-no-link)
+endif()
 option(
     LTO
     "Enable link-time optimization (IPO) for Release / RelWithDebInfo"
@@ -460,6 +468,7 @@ install(
         rocjitsu_waitcheck
         rocjitsu_hooks
         rocjitsu_waitcheck_hooks
+        rocjitsu_dbi_hooks
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
