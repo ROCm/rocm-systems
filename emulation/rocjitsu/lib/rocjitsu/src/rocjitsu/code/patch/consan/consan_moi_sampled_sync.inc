@@ -19,6 +19,12 @@ struct SampledCfgDistance {
   auto operator<=>(const SampledCfgDistance &) const = default;
 };
 
+struct SampledCfgForwardDistanceIndex {
+  BasicBlock *target = nullptr;
+  uint64_t target_text_offset = 0;
+  std::unordered_map<BasicBlock *, uint32_t> block_edges;
+};
+
 [[nodiscard]] bool append_sampled_indexed_address(std::vector<uint32_t> &words,
                                                   uint64_t first_address, uint32_t element_size,
                                                   uint16_t index_vgpr, uint16_t address_vgpr,
@@ -39,53 +45,80 @@ struct SampledCfgDistance {
   return true;
 }
 
+[[nodiscard]] std::optional<SampledCfgForwardDistanceIndex>
+build_sampled_cfg_forward_distance_index(const MoiResourcePlanningState &state,
+                                         const MoiKernelResourceContext &context,
+                                         uint64_t target_text_offset) {
+  BasicBlock *target = block_for_offset(state.block_index, target_text_offset);
+  if (target == nullptr)
+    return std::nullopt;
+  const std::unordered_set<BasicBlock *> scope(context.scope.blocks.begin(),
+                                               context.scope.blocks.end());
+  if (!scope.contains(target))
+    return std::nullopt;
+
+  std::unordered_map<BasicBlock *, std::vector<BasicBlock *>> predecessors;
+  predecessors.reserve(scope.size());
+  for (BasicBlock *block : context.scope.blocks) {
+    for (BasicBlock *successor : block->successors()) {
+      if (scope.contains(successor))
+        predecessors[successor].push_back(block);
+    }
+  }
+  for (const ScopedCfgEdge &edge : context.scope.liveness_edges) {
+    if (edge.from != nullptr && edge.to != nullptr && scope.contains(edge.from) &&
+        scope.contains(edge.to))
+      predecessors[edge.to].push_back(edge.from);
+  }
+
+  SampledCfgForwardDistanceIndex index;
+  index.target = target;
+  index.target_text_offset = target_text_offset;
+  index.block_edges.reserve(scope.size());
+  std::vector<BasicBlock *> pending{target};
+  index.block_edges.emplace(target, 0u);
+  for (size_t cursor = 0; cursor < pending.size(); ++cursor) {
+    BasicBlock *block = pending[cursor];
+    const uint32_t next_distance = index.block_edges.at(block) + 1u;
+    auto found = predecessors.find(block);
+    if (found == predecessors.end())
+      continue;
+    std::ranges::sort(found->second);
+    found->second.erase(std::ranges::unique(found->second).begin(), found->second.end());
+    for (BasicBlock *predecessor : found->second) {
+      if (index.block_edges.emplace(predecessor, next_distance).second)
+        pending.push_back(predecessor);
+    }
+  }
+  return index;
+}
+
+[[nodiscard]] std::optional<SampledCfgDistance>
+sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
+                             const SampledCfgForwardDistanceIndex &index,
+                             uint64_t from_text_offset) {
+  BasicBlock *from = block_for_offset(state.block_index, from_text_offset);
+  if (from == nullptr)
+    return std::nullopt;
+  if (from == index.target && from_text_offset > index.target_text_offset)
+    return std::nullopt;
+  const auto found = index.block_edges.find(from);
+  if (found == index.block_edges.end())
+    return std::nullopt;
+  const uint64_t text_distance = from_text_offset < index.target_text_offset
+                                     ? index.target_text_offset - from_text_offset
+                                     : from_text_offset - index.target_text_offset;
+  return SampledCfgDistance{found->second, text_distance};
+}
+
 [[nodiscard]] std::optional<SampledCfgDistance>
 sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
                              const MoiKernelResourceContext &context, uint64_t from_text_offset,
                              uint64_t to_text_offset) {
-  BasicBlock *from = block_for_offset(state.block_index, from_text_offset);
-  BasicBlock *to = block_for_offset(state.block_index, to_text_offset);
-  if (from == nullptr || to == nullptr)
+  const auto index = build_sampled_cfg_forward_distance_index(state, context, to_text_offset);
+  if (!index)
     return std::nullopt;
-  const std::unordered_set<BasicBlock *> scope(context.scope.blocks.begin(),
-                                               context.scope.blocks.end());
-  if (!scope.contains(from) || !scope.contains(to))
-    return std::nullopt;
-  if (from == to) {
-    if (from_text_offset > to_text_offset)
-      return std::nullopt;
-    return SampledCfgDistance{0, to_text_offset - from_text_offset};
-  }
-
-  std::unordered_map<BasicBlock *, uint32_t> distance;
-  std::vector<BasicBlock *> pending{from};
-  distance.emplace(from, 0u);
-  for (size_t cursor = 0; cursor < pending.size(); ++cursor) {
-    BasicBlock *block = pending[cursor];
-    const uint32_t next_distance = distance.at(block) + 1u;
-    std::vector<BasicBlock *> successors;
-    for (BasicBlock *successor : block->successors()) {
-      if (scope.contains(successor))
-        successors.push_back(successor);
-    }
-    for (const ScopedCfgEdge &edge : context.scope.liveness_edges) {
-      if (edge.from == block && edge.to != nullptr && scope.contains(edge.to))
-        successors.push_back(edge.to);
-    }
-    std::ranges::sort(successors);
-    successors.erase(std::ranges::unique(successors).begin(), successors.end());
-    for (BasicBlock *successor : successors) {
-      if (distance.emplace(successor, next_distance).second)
-        pending.push_back(successor);
-    }
-  }
-  const auto found = distance.find(to);
-  if (found == distance.end())
-    return std::nullopt;
-  const uint64_t text_distance = from_text_offset < to_text_offset
-                                     ? to_text_offset - from_text_offset
-                                     : from_text_offset - to_text_offset;
-  return SampledCfgDistance{found->second, text_distance};
+  return sampled_cfg_forward_distance(state, *index, from_text_offset);
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_barrier_sync_cave_words(
@@ -708,14 +741,20 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       }
       common_workgroup_sources = *workgroup_sources;
       common_owner_shift = *owner_shift;
+      const auto distance_index = build_sampled_cfg_forward_distance_index(
+          resource_state, *context, sequence.begin_text_offset);
+      if (!distance_index) {
+        every_owner_has_window = false;
+        break;
+      }
       std::optional<SampledBarrierWindow> selected_window;
       std::optional<SampledCfgDistance> closest;
       for (const SelectedWindow &window : selected_windows) {
         const ConSanPatchInfo &patch = *window.patch;
         if (!window.access || !kernel_owns_patch(*context->kernel, patch))
           continue;
-        const auto distance = sampled_cfg_forward_distance(
-            resource_state, *context, patch.anchor_offset, sequence.begin_text_offset);
+        const auto distance =
+            sampled_cfg_forward_distance(resource_state, *distance_index, patch.anchor_offset);
         if (!distance || (closest && *closest <= *distance))
           continue;
         closest = *distance;
@@ -940,31 +979,45 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       groups[{candidate.sequence->in_kernel, candidate.sequence->container_name}].push_back(index);
     }
     std::vector<std::pair<uint64_t, uint64_t>> claimed_hosts;
-    const auto overlaps_range = [](uint64_t begin, uint64_t end, uint64_t other_begin,
-                                   uint64_t other_size) {
-      return other_begin < end && other_begin + other_size > begin;
+    std::vector<std::pair<uint64_t, uint64_t>> fixed_claims;
+    fixed_claims.reserve(result.patches.size() + options.preapplied_reserved_ranges.size() +
+                         selected.size());
+    for (const ConSanPatchInfo &patch : result.patches) {
+      if (patch.original_size != 0u)
+        fixed_claims.emplace_back(patch.anchor_offset, patch.anchor_offset + patch.original_size);
+    }
+    for (const auto &reserved : options.preapplied_reserved_ranges) {
+      if (reserved.size != 0u)
+        fixed_claims.emplace_back(reserved.text_offset, reserved.text_offset + reserved.size);
+    }
+    for (const Planned &planned : selected) {
+      const ConSanBarrierSite &site = planned.candidate.barrier.site;
+      if (site.size != 0u)
+        fixed_claims.emplace_back(site.text_offset, site.text_offset + site.size);
+    }
+    std::ranges::sort(fixed_claims);
+    size_t merged_claim_count = 0u;
+    for (const auto &claim : fixed_claims) {
+      if (merged_claim_count != 0u && fixed_claims[merged_claim_count - 1u].second >= claim.first) {
+        fixed_claims[merged_claim_count - 1u].second =
+            std::max(fixed_claims[merged_claim_count - 1u].second, claim.second);
+      } else {
+        fixed_claims[merged_claim_count++] = claim;
+      }
+    }
+    fixed_claims.resize(merged_claim_count);
+    const auto overlaps_fixed_claim = [&](uint64_t begin, uint64_t end) {
+      const auto found = std::ranges::lower_bound(fixed_claims, begin, {},
+                                                  [](const auto &range) { return range.second; });
+      return found != fixed_claims.end() && found->first < end;
     };
     const auto overlaps_existing = [&](uint64_t begin, uint64_t end) {
-      if (std::ranges::any_of(result.patches,
-                              [&](const ConSanPatchInfo &patch) {
-                                return patch.original_size != 0u &&
-                                       overlaps_range(begin, end, patch.anchor_offset,
-                                                      patch.original_size);
-                              }) ||
-          std::ranges::any_of(options.preapplied_reserved_ranges,
-                              [&](const auto &reserved) {
-                                return reserved.size != 0u &&
-                                       overlaps_range(begin, end, reserved.text_offset,
-                                                      reserved.size);
-                              }) ||
+      if (overlaps_fixed_claim(begin, end) ||
           std::ranges::any_of(claimed_hosts, [&](const auto &range) {
             return range.first < end && range.second > begin;
           }))
         return true;
-      return std::ranges::any_of(selected, [&](const Planned &planned) {
-        const ConSanBarrierSite &site = planned.candidate.barrier.site;
-        return overlaps_range(begin, end, site.text_offset, site.size);
-      });
+      return false;
     };
 
     for (const auto &[container, indices] : groups) {

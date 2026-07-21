@@ -593,16 +593,16 @@ is_safe_bounded_barrier_pair(const ConSanSyncSequence &signal, const ConSanSyncS
   // the useful work between a signal and its completing wait. Keep that
   // relaxation local to those consumers: other synchronization semantics
   // retain the closed bookkeeping pattern above.
-  // gfx1250 compiler barrier lowering can retain up to 30 straight-line useful
-  // instructions between the signal and completing wait in the current E2E
-  // corpus. Keep the extension narrowly bounded while admitting that emitted
-  // form.
-  constexpr uint32_t kMaximumExactFaultPairInstructions = 32u;
-  constexpr uint64_t kMaximumExactFaultPairBytes = 128u;
+  // Extended consumers already require the signal and wait to be consecutive
+  // synchronization events in one exact decoded basic block, with the same
+  // static ID/scope and no call edge or intervening barrier.  Those structural
+  // checks prove the pair independently of how much straight-line useful work
+  // the compiler schedules between its members.  Do not impose a corpus-sized
+  // byte/instruction cap on that otherwise exact shape.
   const uint32_t maximum_instructions =
-      allow_extended_pair ? kMaximumExactFaultPairInstructions : kMaximumBookkeepingInstructions;
+      allow_extended_pair ? std::numeric_limits<uint32_t>::max() : kMaximumBookkeepingInstructions;
   const uint64_t maximum_bytes =
-      allow_extended_pair ? kMaximumExactFaultPairBytes : kMaximumBookkeepingBytes;
+      allow_extended_pair ? std::numeric_limits<uint64_t>::max() : kMaximumBookkeepingBytes;
   if (!compatible_barrier_pair_metadata(signal, wait) ||
       signal.end_text_offset > wait.begin_text_offset ||
       wait.begin_text_offset - signal.end_text_offset > maximum_bytes) {

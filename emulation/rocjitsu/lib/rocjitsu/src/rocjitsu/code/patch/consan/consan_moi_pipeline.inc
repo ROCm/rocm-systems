@@ -598,13 +598,15 @@ void append_moi_atomic_site_dispositions(const Container &container, const ConSa
       reason = ConSanSiteDispositionReason::UnqualifiedSyncSequence;
     } else if (!event_kind) {
       reason = ConSanSiteDispositionReason::UnqualifiedSyncSequence;
-    } else if (options.moi_engine == ConSanMoiEngine::RecordReplay &&
+    } else if ((options.moi_engine == ConSanMoiEngine::RecordReplay ||
+                options.moi_engine == ConSanMoiEngine::Sampled) &&
                *event_kind == ConSanMoiAtomicEventKind::Release &&
                site.mnemonic.starts_with("ds_") && site.returns_old_value &&
                !*site.returns_old_value && !has_atomic_acquire_consumer &&
                !semantic_result.moi_candidates.empty()) {
-      // Record/replay deliberately prunes a no-return release when no atomic
-      // acquire can consume it and ordinary access replay remains active.
+      // Record/replay and Sampled deliberately prune a no-return release when
+      // no atomic acquire can consume it and ordinary access tracking remains
+      // active.
       // Mirror that operational rule in the static ledger instead of
       // demanding a synchronization record that lowering will not emit.
       reason = ConSanSiteDispositionReason::NoAtomicAcquireConsumer;
@@ -763,31 +765,75 @@ moi_instrumentation_patch_site_kind(const ConSanPatchInfo &patch, const ConSanRe
   }
 }
 
-[[nodiscard]] bool sampled_barrier_patch_covers_site(const ConSanSiteDispositionRecord &site,
-                                                     const ConSanPatchInfo &patch,
-                                                     const ConSanResult &result) {
-  if (site.site_kind != ConSanResourceSiteKind::Barrier ||
-      patch.kind != ConSanPatchKind::TrampolineMoiSampledSyncMetadata ||
-      patch.covered_sync_event_count == 0)
-    return false;
-  const auto event = std::ranges::find_if(result.sync_events, [&](const ConSanSyncEvent &item) {
-    return item.kind == ConSanSyncEventKind::Barrier &&
-           item.container_name == site.container_name && item.in_kernel == site.in_kernel &&
-           item.text_offset == site.text_offset;
-  });
-  if (event == result.sync_events.end())
-    return false;
-  const ConSanSyncSequence *sequence = find_consan_sync_sequence_for_event(result, event->identity);
-  if (!sequence || sequence->member_event_identities.size() != patch.covered_sync_event_count)
-    return false;
-  return std::ranges::any_of(result.sync_events, [&](const ConSanSyncEvent &member) {
-    return member.text_offset == patch.anchor_offset &&
-           std::ranges::find(sequence->member_event_identities, member.identity) !=
-               sequence->member_event_identities.end();
-  });
-}
-
 void finalize_moi_site_lowering_outcomes(ConSanResult &result) {
+  struct SiteKey {
+    ConSanResourceSiteKind kind = ConSanResourceSiteKind::Access;
+    uint64_t text_offset = 0;
+
+    bool operator==(const SiteKey &) const = default;
+  };
+  struct SiteKeyHash {
+    size_t operator()(const SiteKey &key) const {
+      const size_t offset_hash = std::hash<uint64_t>{}(key.text_offset);
+      return offset_hash ^ (static_cast<size_t>(key.kind) + 0x9e3779b9u + (offset_hash << 6u) +
+                            (offset_hash >> 2u));
+    }
+  };
+
+  std::unordered_map<uint64_t, ConSanResourceSiteKind> resource_kind_by_offset;
+  std::unordered_set<SiteKey, SiteKeyHash> failed_sites;
+  for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+    resource_kind_by_offset.try_emplace(plan.text_offset, plan.site_kind);
+    if (plan.source == ConSanRegisterAllocationSource::Unsupported)
+      failed_sites.insert({plan.site_kind, plan.text_offset});
+  }
+
+  std::unordered_map<std::string_view, const ConSanSyncEvent *> event_by_identity;
+  event_by_identity.reserve(result.sync_events.size());
+  for (const ConSanSyncEvent &event : result.sync_events)
+    event_by_identity.try_emplace(event.identity, &event);
+  std::unordered_map<std::string_view, const ConSanSyncSequence *> sequence_by_member;
+  for (const ConSanSyncSequence &sequence : result.sync_sequences) {
+    for (const std::string &identity : sequence.member_event_identities) {
+      const auto [found, inserted] = sequence_by_member.try_emplace(identity, &sequence);
+      if (!inserted)
+        found->second = nullptr;
+    }
+  }
+
+  std::unordered_set<SiteKey, SiteKeyHash> patched_sites;
+  patched_sites.reserve(result.patches.size());
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.phase != ConSanPatchPhase::Instrumentation)
+      continue;
+    if (patch.kind != ConSanPatchKind::TrampolineMoiSampledSyncMetadata) {
+      const auto patch_kind = moi_instrumentation_patch_site_kind(patch, result);
+      if (patch_kind)
+        patched_sites.insert({*patch_kind, patch.anchor_offset});
+      continue;
+    }
+
+    const auto resource_kind = resource_kind_by_offset.find(patch.anchor_offset);
+    if (resource_kind != resource_kind_by_offset.end())
+      patched_sites.insert({resource_kind->second, patch.anchor_offset});
+    if (patch.covered_sync_event_count == 0)
+      continue;
+    const auto anchor_event = std::ranges::find_if(result.sync_events, [&](const auto &event) {
+      return event.kind == ConSanSyncEventKind::Barrier && event.text_offset == patch.anchor_offset;
+    });
+    if (anchor_event == result.sync_events.end())
+      continue;
+    const auto sequence = sequence_by_member.find(anchor_event->identity);
+    if (sequence == sequence_by_member.end() || sequence->second == nullptr ||
+        sequence->second->member_event_identities.size() != patch.covered_sync_event_count)
+      continue;
+    for (const std::string &identity : sequence->second->member_event_identities) {
+      const auto event = event_by_identity.find(identity);
+      if (event != event_by_identity.end() && event->second->kind == ConSanSyncEventKind::Barrier)
+        patched_sites.insert({ConSanResourceSiteKind::Barrier, event->second->text_offset});
+    }
+  }
+
   for (ConSanSiteDispositionRecord &site : result.site_dispositions) {
     if (site.disposition == ConSanSiteDisposition::NotApplicable) {
       site.lowering_outcome = ConSanSiteLoweringOutcome::NotApplicable;
@@ -800,30 +846,25 @@ void finalize_moi_site_lowering_outcomes(ConSanResult &result) {
       continue;
     }
 
-    const bool patched = std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
-      if (patch.phase != ConSanPatchPhase::Instrumentation)
-        return false;
-      const auto patch_kind = moi_instrumentation_patch_site_kind(patch, result);
-      return (patch_kind && *patch_kind == site.site_kind &&
-              patch.anchor_offset == site.text_offset) ||
-             sampled_barrier_patch_covers_site(site, patch, result);
-    });
-    if (patched) {
+    const SiteKey key{site.site_kind, site.text_offset};
+    if (patched_sites.contains(key)) {
       site.lowering_outcome = ConSanSiteLoweringOutcome::Patched;
       site.lowering_reason = ConSanSiteLoweringReason::None;
       site.resource_reason = ConSanRegisterPlanReason::None;
       continue;
     }
 
-    const auto failed_plan =
-        std::ranges::find_if(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
-          return plan.site_kind == site.site_kind && plan.text_offset == site.text_offset &&
-                 plan.source == ConSanRegisterAllocationSource::Unsupported;
-        });
-    if (failed_plan != result.resource_plans.end()) {
+    if (failed_sites.contains(key)) {
       site.lowering_outcome = ConSanSiteLoweringOutcome::ResourceFailed;
       site.lowering_reason = ConSanSiteLoweringReason::UnsupportedResourcePlan;
-      site.resource_reason = failed_plan->reason;
+      const auto failed_plan =
+          std::ranges::find_if(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+            return plan.site_kind == site.site_kind && plan.text_offset == site.text_offset &&
+                   plan.source == ConSanRegisterAllocationSource::Unsupported;
+          });
+      site.resource_reason = failed_plan == result.resource_plans.end()
+                                 ? ConSanRegisterPlanReason::None
+                                 : failed_plan->reason;
       continue;
     }
 
