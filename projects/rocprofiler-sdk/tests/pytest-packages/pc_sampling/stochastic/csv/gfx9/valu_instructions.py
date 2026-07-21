@@ -24,6 +24,13 @@
 from __future__ import absolute_import
 
 
+# f64 transcendentals (rcp/rsq/sqrt) issue via the scalar/transcendental unit on gfx9,
+# so the hardware reports inst_type SCALAR for them even though the mnemonic starts with
+# 'v_' (authoritative data read bit-for-bit from perf_snapshot_data). Any OTHER v_
+# instruction reported as non-VALU is still treated as an error.
+_SCALAR_ISSUED_VALU_PREFIXES = ("v_rcp_f64", "v_rsq_f64", "v_sqrt_f64")
+
+
 def validate_valu_instructions_issued(samples_issued):
     # issued instruction with type == VALU -> instruction starts with v_
     issued_type_valu = samples_issued[
@@ -32,18 +39,33 @@ def validate_valu_instructions_issued(samples_issued):
     ]
     assert issued_type_valu["Instruction"].apply(lambda x: x.startswith("v_")).all()
 
-    # issued instruction starts with v_ and is not matrix instruction -> it must be VALU
+    # issued instruction starts with v_ and is not a matrix instruction -> it must be
+    # VALU, EXCEPT the known f64 transcendentals which gfx9 issues via the scalar unit
+    # and reports as SCALAR (see note above).
     issued_v = samples_issued[
         samples_issued["Instruction"].apply(
             lambda x: x.startswith("v_") and ("mfma" not in x)
         )
     ]
-    _v_not_valu_typed = issued_v[
+    # Exclude ONLY the known scalar-issued f64 transcendentals; every other v_ (non-mfma)
+    # instruction must still be VALU-typed.
+    issued_v = issued_v[
+        ~(
+            (
+                issued_v["Instruction_Type"]
+                == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_SCALAR"
+            )
+            & issued_v["Instruction"].apply(
+                lambda x: x.startswith(_SCALAR_ISSUED_VALU_PREFIXES)
+            )
+        )
+    ]
+    _v_unexpected_type = issued_v[
         issued_v["Instruction_Type"] != "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_VALU"
     ][["Instruction", "Instruction_Type"]].drop_duplicates()
     assert (
         issued_v["Instruction_Type"] == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_VALU"
-    ).all(), f"issued v_ (non-mfma) instructions NOT typed VALU:\n{_v_not_valu_typed.to_string()}"
+    ).all(), f"issued v_ (non-mfma) instructions with unexpected type:\n{_v_unexpected_type.to_string()}"
 
 
 def validate_valu_instructions_stalled(samples):

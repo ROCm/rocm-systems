@@ -24,6 +24,13 @@
 from __future__ import absolute_import
 
 
+# f64 transcendentals (rcp/rsq/sqrt) issue via the scalar/transcendental unit on gfx9,
+# so the hardware reports inst_type SCALAR for them even though the mnemonic starts with
+# 'v_' (authoritative data read bit-for-bit from perf_snapshot_data). Any OTHER v_
+# instruction reported as non-VALU is still treated as an error.
+_SCALAR_ISSUED_VALU_PREFIXES = ("v_rcp_f64", "v_rsq_f64", "v_sqrt_f64")
+
+
 def validate_valu_instructions(sample_records):
     allowed_stall_reasons = set(
         [
@@ -40,10 +47,16 @@ def validate_valu_instructions(sample_records):
 
         snapshot = record["snapshot"]
         if record["wave_issued"] == 1:
+            # Accept ONLY the known f64 transcendentals being scalar-issued (see note
+            # above). Any other v_ instruction reported as non-VALU is still an error.
+            if record["inst_type"] == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_SCALAR" and record[
+                "inst"
+            ].startswith(_SCALAR_ISSUED_VALU_PREFIXES):
+                continue
             # wave issued a VALU instruction
             assert (
                 record["inst_type"] == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_VALU"
-            ), f"issued v_ instruction {record['inst']!r} has non-VALU inst_type {record['inst_type']!r}"
+            ), f"issued v_ instruction {record['inst']!r} has unexpected inst_type {record['inst_type']!r}"
             assert snapshot["arb_state_issue_valu"] == 1
             assert snapshot["arb_state_stall_valu"] == 0
         else:

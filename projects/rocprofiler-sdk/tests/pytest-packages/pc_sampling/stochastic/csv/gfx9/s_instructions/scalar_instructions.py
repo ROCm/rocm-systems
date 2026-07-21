@@ -24,6 +24,12 @@
 from __future__ import absolute_import
 
 
+# f64 transcendentals (rcp/rsq/sqrt) issue via the scalar/transcendental unit on gfx9,
+# so the hardware reports inst_type SCALAR for them even though the mnemonic starts with
+# 'v_' (authoritative data read bit-for-bit from perf_snapshot_data).
+_SCALAR_ISSUED_VALU_PREFIXES = ("v_rcp_f64", "v_rsq_f64", "v_sqrt_f64")
+
+
 def validate_scalar_instructions_issued(all_samples, scalar_samples):
     # From all samples, extract samples with SCALAR type
     scalar_type_samples_issued = all_samples[
@@ -36,21 +42,29 @@ def validate_scalar_instructions_issued(all_samples, scalar_samples):
 
     # scalar_samples contains instructions starting with `s_`
     scalar_samples_issued = scalar_samples[scalar_samples["Wave_Issued_Instruction"]]
-    # sanity check
-    _s_not_scalar_typed = scalar_samples_issued[
-        scalar_samples_issued["Instruction_Type"]
-        != "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_SCALAR"
-    ][["Instruction", "Instruction_Type"]].drop_duplicates()
-    assert len(scalar_type_samples_issued) == len(scalar_samples_issued), (
-        f"SCALAR text/type mismatch: s_-prefixed issued={len(scalar_samples_issued)}, "
-        f"hardware-SCALAR issued={len(scalar_type_samples_issued)}; "
-        f"issued s_ instructions NOT typed SCALAR:\n{_s_not_scalar_typed.to_string()}"
-    )
-    # same checks as above
+
+    # Every issued s_-prefixed instruction must be hardware-typed SCALAR.
     assert (
         scalar_samples_issued["Instruction_Type"]
         == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_SCALAR"
     ).all()
+
+    # The hardware also reports the known f64 transcendentals (v_rcp_f64/v_rsq_f64/
+    # v_sqrt_f64) as SCALAR since they issue via the scalar unit, so hardware-SCALAR can
+    # exceed the s_-prefixed count (this replaced an over-strict `len == len` check). That
+    # is expected; require that any SCALAR-typed instruction which is not s_-prefixed is
+    # one of those known transcendentals and nothing else.
+    non_s_scalar_typed = scalar_type_samples_issued[
+        ~scalar_type_samples_issued["Instruction"].apply(lambda x: x.startswith("s_"))
+    ]
+    _unexpected = non_s_scalar_typed[
+        ~non_s_scalar_typed["Instruction"].apply(
+            lambda x: x.startswith(_SCALAR_ISSUED_VALU_PREFIXES)
+        )
+    ][["Instruction", "Instruction_Type"]].drop_duplicates()
+    assert (
+        _unexpected.empty
+    ), f"SCALAR-typed issued instructions that are not s_ or a known f64 transcendental:\n{_unexpected.to_string()}"
 
 
 def validate_scalar_instructions_stalled(scalar_samples):
