@@ -3851,6 +3851,9 @@ hipError_t capturehipStreamWaitValue32(hipStream_t& stream, void*& ptr, uint32_t
                                        unsigned int& flags, uint32_t& /*mask*/) {
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
           "[hipGraph] Current capture node StreamWaitValue32 on stream : %p", stream);
+  // mask is not captured: hipStreamBatchMemOpParams has no mask field. CUDA ignores
+  // mask universally (cuStreamWaitValue32/64 do not support it — mask is AMD-only).
+  // The non-capture path passes mask to ihipStreamOperation directly.
   hipStreamBatchMemOpParams op{};
   op.operation = hipStreamMemOpWaitValue32;
   op.waitValue.address = reinterpret_cast<hipDeviceptr_t>(ptr);
@@ -3863,6 +3866,9 @@ hipError_t capturehipStreamWaitValue64(hipStream_t& stream, void*& ptr, uint64_t
                                        unsigned int& flags, uint64_t& /*mask*/) {
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
           "[hipGraph] Current capture node StreamWaitValue64 on stream : %p", stream);
+  // mask is not captured: hipStreamBatchMemOpParams has no mask field. CUDA ignores
+  // mask universally (cuStreamWaitValue32/64 do not support it — mask is AMD-only).
+  // The non-capture path passes mask to ihipStreamOperation directly.
   hipStreamBatchMemOpParams op{};
   op.operation = hipStreamMemOpWaitValue64;
   op.waitValue.address = reinterpret_cast<hipDeviceptr_t>(ptr);

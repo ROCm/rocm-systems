@@ -415,6 +415,10 @@ stream:
   Unit_hipStreamBatchMemOp_Negative_Tests:
     <<: *level_2
     tags: [memory]
+  Unit_hipStreamBatchMemOp_SequentialOrdering:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl, nvidia]
+    tags: [synchronization, memory]
   Unit_hipStreamWaitWriteValue32_Capture:
     <<: *level_2
     disabled: [amd_windows, amd_wsl, nvidia]

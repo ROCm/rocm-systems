@@ -7,6 +7,22 @@
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
 
+static bool streamWaitValueSupported() {
+  int device_num = 0;
+  HIP_CHECK(hipGetDeviceCount(&device_num));
+  for (int device_id = 0; device_id < device_num; ++device_id) {
+    HIP_CHECK(hipSetDevice(device_id));
+    int waitValueSupport = 0;
+    auto getAttributeError = hipDeviceGetAttribute(
+        &waitValueSupport, hipDeviceAttributeCanUseStreamWaitValue, device_id);
+    if (getAttributeError != hipSuccess) {
+      return false;
+    }
+    if (waitValueSupport == 1) return true;
+  }
+  return false;
+}
+
 /**
  * @addtogroup hipStreamWaitValue32 hipStreamWaitValue32
  * @{
@@ -37,7 +53,8 @@ HIP_TEST_CASE(Unit_hipStreamWaitWriteValue32_Capture) {
   hipDeviceptr_t devPtr = 0;
   HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&devPtr), sizeof(uint64_t),
                                   hipMallocSignalMemory));
-  HIP_CHECK(hipMemset(reinterpret_cast<void*>(devPtr), 0, sizeof(uint64_t)));
+  *reinterpret_cast<uint64_t*>(devPtr) = 0;
+  HIP_CHECK(hipDeviceSynchronize());
 
   hipStream_t captureStream;
   HIP_CHECK(hipStreamCreate(&captureStream));
@@ -92,7 +109,8 @@ HIP_TEST_CASE(Unit_hipStreamWaitWriteValue64_Capture) {
   hipDeviceptr_t devPtr = 0;
   HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&devPtr), sizeof(uint64_t),
                                   hipMallocSignalMemory));
-  HIP_CHECK(hipMemset(reinterpret_cast<void*>(devPtr), 0, sizeof(uint64_t)));
+  *reinterpret_cast<uint64_t*>(devPtr) = 0;
+  HIP_CHECK(hipDeviceSynchronize());
 
   hipStream_t captureStream;
   HIP_CHECK(hipStreamCreate(&captureStream));
@@ -152,7 +170,8 @@ HIP_TEST_CASE(Unit_hipStreamBatchMemOp_Capture) {
   hipDeviceptr_t devPtr = 0;
   HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&devPtr), sizeof(uint64_t),
                                   hipMallocSignalMemory));
-  HIP_CHECK(hipMemset(reinterpret_cast<void*>(devPtr), 0, sizeof(uint64_t)));
+  *reinterpret_cast<uint64_t*>(devPtr) = 0;
+  HIP_CHECK(hipDeviceSynchronize());
 
   // Batch: WriteValue32(0x1234) then WaitValue32(== 0x1234)
   hipStreamBatchMemOpParams params[2] = {};
