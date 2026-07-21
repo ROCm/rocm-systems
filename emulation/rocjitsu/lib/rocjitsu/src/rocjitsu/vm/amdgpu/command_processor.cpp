@@ -31,7 +31,6 @@ RJ_DIAGNOSTIC_POP
 #include <optional>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <sys/mman.h>
 #include <thread>
 
@@ -71,10 +70,6 @@ struct PlannedWorkgroup {
 };
 
 uint32_t nonzero_or_one(uint32_t v) { return v == 0 ? 1 : v; }
-
-std::string unknown_if_empty(std::string_view value) {
-  return value.empty() ? "?" : std::string(value);
-}
 
 uint32_t checked_ext_dispatch_grid_size(uint32_t cluster_count, uint32_t cluster_size,
                                         uint32_t workgroup_size, const char *axis) {
@@ -1284,8 +1279,6 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
     }
   }
   std::string kernel_name = kernel_display_name(kernel_symbol);
-  std::string kernel_name_log = unknown_if_empty(kernel_name);
-  std::string kernel_symbol_log = unknown_if_empty(kernel_symbol);
   ++total_dispatched_;
 
   KernelDispatchInfo dispatch_info{};
@@ -1309,18 +1302,20 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   util::Logger::vm([&](auto &os) {
     os << std::format("dispatch #{} d={} \"{}\" symbol=\"{}\" grid=[{},{},{}] wg=[{},{},{}] wgs={} "
                       "lds={} mode={} sgpr={} vgpr={} sig={:#x}",
-                      total_dispatched_, dp.dispatch_id, kernel_name_log, kernel_symbol_log,
-                      pkt.grid_size_x, pkt.grid_size_y, pkt.grid_size_z, pkt.workgroup_size_x,
-                      pkt.workgroup_size_y, pkt.workgroup_size_z, total_wgs,
-                      kd.group_segment_fixed_size, dp.wgp_mode ? "WGP" : "CU", dp.sgprs_per_wf,
-                      dp.vgprs_per_wf, dp.completion_signal);
+                      total_dispatched_, dp.dispatch_id, dispatch_info.kernelNameOrUnknown(),
+                      dispatch_info.kernelSymbolOrUnknown(), pkt.grid_size_x, pkt.grid_size_y,
+                      pkt.grid_size_z, pkt.workgroup_size_x, pkt.workgroup_size_y,
+                      pkt.workgroup_size_z, total_wgs, kd.group_segment_fixed_size,
+                      dp.wgp_mode ? "WGP" : "CU", dp.sgprs_per_wf, dp.vgprs_per_wf,
+                      dp.completion_signal);
   });
   util::Logger::cp([&](auto &os) {
     os << std::format("DISPATCH #{} d={} \"{}\" symbol=\"{}\" wgs={} wfs/wg={} sig={:#x} pid={} "
                       "ko={:#x} pc={:#x} kernarg={:#x} user_sgprs={}",
-                      total_dispatched_, dp.dispatch_id, kernel_name_log, kernel_symbol_log,
-                      total_wgs, wfs_per_wg, dp.completion_signal, dp.process_id, pkt.kernel_object,
-                      entry_pc, dp.kernarg_addr, dp.num_user_sgprs);
+                      total_dispatched_, dp.dispatch_id, dispatch_info.kernelNameOrUnknown(),
+                      dispatch_info.kernelSymbolOrUnknown(), total_wgs, wfs_per_wg,
+                      dp.completion_signal, dp.process_id, pkt.kernel_object, entry_pc,
+                      dp.kernarg_addr, dp.num_user_sgprs);
     if (memory_) {
       auto *ko_ptr = memory_->translate_debug(pkt.kernel_object, queue.process_id);
       auto *pc_ptr = memory_->translate_debug(entry_pc, queue.process_id);

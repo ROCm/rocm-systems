@@ -232,9 +232,10 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
                             : v.space == RaceViolation::Space::SGPR ? "SGPR"
                                                                     : "LDS";
         auto kernel_name_iter = dispatch_kernel_names_.find(dispatch_id);
-        const KernelNames kernel_names = kernel_name_iter == dispatch_kernel_names_.end()
-                                             ? KernelNames{"?", "?"}
-                                             : kernel_name_iter->second;
+        const KernelNames kernel_names =
+            kernel_name_iter == dispatch_kernel_names_.end()
+                ? KernelNames{kUnknownKernelIdentity, kUnknownKernelIdentity}
+                : kernel_name_iter->second;
         sink().write(
             std::format("RACE kernel={} symbol={} dispatch={} type={} reg={} wave={} lane={} "
                         "wg={},{},{} "

@@ -8,6 +8,8 @@
 
 namespace rocjitsu {
 
+inline constexpr char kUnknownKernelIdentity[] = "?";
+
 /// @brief Metadata for an AMDGPU kernel dispatch, passed to plugins.
 struct KernelDispatchInfo {
   uint32_t dispatch_id = 0;
@@ -22,8 +24,12 @@ struct KernelDispatchInfo {
   uint32_t sgprs_per_wf = 0;
   uint32_t vgprs_per_wf = 0;
 
-  std::string kernelNameOrUnknown() const { return kernel_name.empty() ? "?" : kernel_name; }
-  std::string kernelSymbolOrUnknown() const { return kernel_symbol.empty() ? "?" : kernel_symbol; }
+  std::string kernelNameOrUnknown() const {
+    return kernel_name.empty() ? kUnknownKernelIdentity : kernel_name;
+  }
+  std::string kernelSymbolOrUnknown() const {
+    return kernel_symbol.empty() ? kUnknownKernelIdentity : kernel_symbol;
+  }
 };
 
 } // namespace rocjitsu
