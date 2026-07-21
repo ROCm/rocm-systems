@@ -87,12 +87,12 @@ hipError_t Function::GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod) {
     // Compare and swap as two threads could race to build the kernel
     amd::Kernel* built_kernel = BuildKernel(hmod);
     amd::Kernel* expected = nullptr;
-    if (!dFunc_[dev].compare_exchange_strong(expected, built, std::memory_order_release,
+    if (!dFunc_[dev].compare_exchange_strong(expected, built_kernel, std::memory_order_release,
                                              std::memory_order_acquire)) {
-      built->release();
-      k = expected
+      built_kernel->release();
+      k = expected;
     } else {
-      k = built;
+      k = built_kernel;
     }
   }
   *hfunc = asHipFunction(k);
