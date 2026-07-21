@@ -472,6 +472,38 @@ TEST(SoppBranchRelayPlanner, ReachesLongTextThroughCapacityOneRelayWords) {
   EXPECT_NE(plan->routes[0].island_offset, plan->routes[1].island_offset);
 }
 
+TEST(SoppBranchRelayPlanner, RoutesBackwardThroughCapacityOneRelayWords) {
+  constexpr uint64_t kMaximumBackwardHop = 32768u * 4u - 4u;
+  const std::vector<uint64_t> sources = {2u * kMaximumBackwardHop + 16u, 2u * kMaximumBackwardHop};
+  const std::vector<uint64_t> relays = {kMaximumBackwardHop + 16u, kMaximumBackwardHop};
+  const std::vector<uint64_t> islands = {16u, 0u};
+  const auto plan = plan_backward_sopp_branch_relays(sources, relays, islands);
+
+  ASSERT_TRUE(plan);
+  ASSERT_EQ(plan->routes.size(), 2u);
+  EXPECT_TRUE(plan->rejected_source_indices.empty());
+  for (const SoppBranchRelayRoute &route : plan->routes) {
+    ASSERT_EQ(route.relay_offsets.size(), 1u);
+    ASSERT_TRUE(compute_sopp_branch_simm16(sources[route.source_index], route.relay_offsets[0]));
+    EXPECT_TRUE(compute_sopp_branch_simm16(route.relay_offsets[0], route.island_offset));
+  }
+  EXPECT_NE(plan->routes[0].relay_offsets[0], plan->routes[1].relay_offsets[0]);
+}
+
+TEST(SoppBranchRelayPlanner, HonorsAsymmetricBackwardReachBoundary) {
+  constexpr uint64_t kMaximumBackwardHop = 32768u * 4u - 4u;
+  const auto accepted = plan_backward_sopp_branch_relays(std::vector<uint64_t>{kMaximumBackwardHop},
+                                                         {}, std::vector<uint64_t>{0});
+  const auto rejected = plan_backward_sopp_branch_relays(
+      std::vector<uint64_t>{kMaximumBackwardHop + sizeof(uint32_t)}, {}, std::vector<uint64_t>{0});
+
+  ASSERT_TRUE(accepted);
+  EXPECT_EQ(accepted->routes.size(), 1u);
+  ASSERT_TRUE(rejected);
+  EXPECT_TRUE(rejected->routes.empty());
+  EXPECT_EQ(rejected->rejected_source_indices, std::vector<size_t>({0}));
+}
+
 TEST(SoppBranchRelayPlanner, UsesDistinctRelaysToAdmitAllFeasibleSources) {
   constexpr uint64_t kHop = 4u + 32767u * 4u;
   const std::vector<uint64_t> sources = {0, 8};

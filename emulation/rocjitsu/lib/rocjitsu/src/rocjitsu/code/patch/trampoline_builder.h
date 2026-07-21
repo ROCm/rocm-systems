@@ -181,6 +181,17 @@ struct SoppBranchRelayPlan {
     std::span<const uint64_t> source_offsets, std::span<const uint64_t> relay_offsets,
     std::span<const uint64_t> island_offsets, std::string *error_out = nullptr);
 
+/// @brief Plan backward-only s_branch routes through one-word relay slots.
+///
+/// This is the direction-reversed counterpart of
+/// `plan_forward_sopp_branch_relays`. Every adjacent pair in source -> relays
+/// -> island is a valid backward `s_branch` hop and every relay/island still
+/// has capacity one. Returned relay offsets are in execution order, from the
+/// higher source toward the lower island.
+[[nodiscard]] std::optional<SoppBranchRelayPlan> plan_backward_sopp_branch_relays(
+    std::span<const uint64_t> source_offsets, std::span<const uint64_t> relay_offsets,
+    std::span<const uint64_t> island_offsets, std::string *error_out = nullptr);
+
 /// @brief Physical placement selected for one DBI patch body.
 enum class DbiPatchPlacementKind : uint8_t {
   Inline,

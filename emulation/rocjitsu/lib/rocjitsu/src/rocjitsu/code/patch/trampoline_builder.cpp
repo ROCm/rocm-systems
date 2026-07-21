@@ -273,10 +273,9 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   return build(emit_plan, error_out);
 }
 
-std::optional<SoppBranchRelayPlan>
-plan_forward_sopp_branch_relays(std::span<const uint64_t> source_offsets,
-                                std::span<const uint64_t> relay_offsets,
-                                std::span<const uint64_t> island_offsets, std::string *error_out) {
+static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
+    std::span<const uint64_t> source_offsets, std::span<const uint64_t> relay_offsets,
+    std::span<const uint64_t> island_offsets, uint64_t maximum_hop_bytes, std::string *error_out) {
   struct Coordinate {
     uint64_t offset = 0;
     uint8_t kind = 0; // 0 = source, 1 = relay, 2 = island.
@@ -335,8 +334,7 @@ plan_forward_sopp_branch_relays(std::span<const uint64_t> source_offsets,
         active.emplace(coordinate.offset, coordinate.input_index);
         continue;
       }
-      while (!active.empty() &&
-             !compute_sopp_branch_simm16(active.top().first, coordinate.offset)) {
+      while (!active.empty() && coordinate.offset - active.top().first > maximum_hop_bytes) {
         cut_hops.emplace_back(active.top().first, coordinate.offset);
         active.pop();
       }
@@ -483,14 +481,13 @@ plan_forward_sopp_branch_relays(std::span<const uint64_t> source_offsets,
     self(self, origin_node, query_begin, query_end, tree_node.left);
     self(self, origin_node, query_begin, query_end, tree_node.right);
   };
-  constexpr uint64_t kMaximumForwardSoppBranchBytes = 4u + 32767u * 4u;
   const auto connect_origin = [&](size_t origin_node, uint64_t offset) {
     if (!target_tree_root)
       return;
     const uint64_t maximum_target =
-        offset > std::numeric_limits<uint64_t>::max() - kMaximumForwardSoppBranchBytes
+        offset > std::numeric_limits<uint64_t>::max() - maximum_hop_bytes
             ? std::numeric_limits<uint64_t>::max()
-            : offset + kMaximumForwardSoppBranchBytes;
+            : offset + maximum_hop_bytes;
     const size_t begin =
         static_cast<size_t>(std::ranges::upper_bound(hop_targets, offset, {}, &HopTarget::offset) -
                             hop_targets.begin());
@@ -655,6 +652,72 @@ plan_forward_sopp_branch_relays(std::span<const uint64_t> source_offsets,
   }
   std::ranges::sort(plan.routes, {}, &SoppBranchRelayRoute::source_index);
   std::ranges::sort(plan.rejected_source_indices);
+  return plan;
+}
+
+std::optional<SoppBranchRelayPlan>
+plan_forward_sopp_branch_relays(std::span<const uint64_t> source_offsets,
+                                std::span<const uint64_t> relay_offsets,
+                                std::span<const uint64_t> island_offsets, std::string *error_out) {
+  constexpr uint64_t kMaximumForwardSoppBranchBytes = 4u + 32767u * 4u;
+  return plan_monotonic_sopp_branch_relays(source_offsets, relay_offsets, island_offsets,
+                                           kMaximumForwardSoppBranchBytes, error_out);
+}
+
+std::optional<SoppBranchRelayPlan>
+plan_backward_sopp_branch_relays(std::span<const uint64_t> source_offsets,
+                                 std::span<const uint64_t> relay_offsets,
+                                 std::span<const uint64_t> island_offsets, std::string *error_out) {
+  uint64_t mirror = 0;
+  const auto include_offsets = [&](std::span<const uint64_t> offsets) {
+    if (!offsets.empty())
+      mirror = std::max(mirror, *std::ranges::max_element(offsets));
+  };
+  include_offsets(source_offsets);
+  include_offsets(relay_offsets);
+  include_offsets(island_offsets);
+  const auto mirror_offsets = [&](std::span<const uint64_t> offsets) {
+    std::vector<uint64_t> mirrored;
+    mirrored.reserve(offsets.size());
+    for (uint64_t offset : offsets)
+      mirrored.push_back(mirror - offset);
+    return mirrored;
+  };
+  const std::vector<uint64_t> mirrored_sources = mirror_offsets(source_offsets);
+  const std::vector<uint64_t> mirrored_relays = mirror_offsets(relay_offsets);
+  const std::vector<uint64_t> mirrored_islands = mirror_offsets(island_offsets);
+  // The most-negative SOPP displacement reaches 131,068 bytes backward from
+  // an instruction address: target = source + 4 - 32,768 * 4.
+  constexpr uint64_t kMaximumBackwardSoppBranchBytes = 32768u * 4u - 4u;
+  auto plan = plan_monotonic_sopp_branch_relays(mirrored_sources, mirrored_relays, mirrored_islands,
+                                                kMaximumBackwardSoppBranchBytes, error_out);
+  if (!plan)
+    return std::nullopt;
+  for (SoppBranchRelayRoute &route : plan->routes) {
+    route.island_offset = mirror - route.island_offset;
+    for (uint64_t &relay_offset : route.relay_offsets)
+      relay_offset = mirror - relay_offset;
+    uint64_t from = source_offsets[route.source_index];
+    for (uint64_t relay_offset : route.relay_offsets) {
+      if (!compute_sopp_branch_simm16(from, relay_offset)) {
+        report(error_out, "SOPP backward relay planner produced an unreachable relay hop");
+        return std::nullopt;
+      }
+      from = relay_offset;
+    }
+    if (!compute_sopp_branch_simm16(from, route.island_offset)) {
+      report(error_out, "SOPP backward relay planner produced an unreachable island hop");
+      return std::nullopt;
+    }
+  }
+  for (uint64_t &offset : plan->min_cut_relay_offsets)
+    offset = mirror - offset;
+  for (auto &[from, to] : plan->min_cut_hops) {
+    from = mirror - from;
+    to = mirror - to;
+  }
+  std::ranges::sort(plan->min_cut_relay_offsets);
+  std::ranges::sort(plan->min_cut_hops);
   return plan;
 }
 
