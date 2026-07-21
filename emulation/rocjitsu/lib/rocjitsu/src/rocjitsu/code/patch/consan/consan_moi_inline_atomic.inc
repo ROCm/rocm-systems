@@ -559,6 +559,15 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
        !append_dynamic_atomic_store_u32_vgpr(
            record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, owner_id),
            *derived_owner_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+      (options.moi_dispatch_id_sgpr &&
+       (!append_dynamic_atomic_store_u32_scalar_src(
+            record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, generation),
+            *options.moi_dispatch_id_sgpr, slot_vgpr, *options.scratch_vgpr, arch) ||
+        !append_dynamic_atomic_store_u32_scalar_src(
+            record_words,
+            atomic_record_base + offsetof(ConSanMoiAtomicRecord, generation) + sizeof(uint32_t),
+            static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u), slot_vgpr,
+            *options.scratch_vgpr, arch))) ||
       !append_dynamic_atomic_event_index_store(
           record_words, base + offsetof(ConSanMoiReportHeader, event_counter),
           atomic_record_base + offsetof(ConSanMoiAtomicRecord, event_index), slot_vgpr,

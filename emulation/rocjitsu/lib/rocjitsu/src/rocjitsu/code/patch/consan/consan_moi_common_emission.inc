@@ -774,6 +774,16 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
            !append_dynamic_access_store_u32_vgpr(
                words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id),
                *derived_owner_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+          (options.moi_dispatch_id_sgpr &&
+           (!append_dynamic_access_store_u32_scalar_src(
+                words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, generation),
+                *options.moi_dispatch_id_sgpr, slot_vgpr, *options.scratch_vgpr, arch) ||
+            !append_dynamic_access_store_u32_scalar_src(
+                words,
+                dynamic_record_base + offsetof(ConSanMoiAccessRecord, generation) +
+                    sizeof(uint32_t),
+                static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u), slot_vgpr,
+                *options.scratch_vgpr, arch))) ||
           !append_dynamic_access_event_index_store(
               words, base + offsetof(ConSanMoiReportHeader, event_counter),
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, event_index), slot_vgpr,
@@ -966,6 +976,11 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
                                          record_value_vgpr, record_address_vgpr, arch) ||
         !record.materialize_address(access_record_base) ||
         !record.store_vgpr(offsetof(ConSanMoiAccessRecord, event_index), record_value_vgpr) ||
+        (options.moi_dispatch_id_sgpr &&
+         (!record.store_sgpr(offsetof(ConSanMoiAccessRecord, generation),
+                             *options.moi_dispatch_id_sgpr) ||
+          !record.store_sgpr(offsetof(ConSanMoiAccessRecord, generation) + sizeof(uint32_t),
+                             static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u)))) ||
         !record.store_workgroup(offsetof(ConSanMoiAccessRecord, workgroup_x),
                                 workgroup_sources.x) ||
         !record.store_workgroup(offsetof(ConSanMoiAccessRecord, workgroup_y),

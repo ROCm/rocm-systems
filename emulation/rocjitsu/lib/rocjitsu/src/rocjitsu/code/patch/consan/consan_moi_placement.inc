@@ -761,6 +761,7 @@ apply_moi_transient_sgpr_assignment(ConSanOptions &options,
       continue;
     }
     if (selected && (selected->exec_save_sgpr != assignment->exec_save_sgpr ||
+                     selected->dispatch_id_sgpr != assignment->dispatch_id_sgpr ||
                      selected->spill_backed != assignment->spill_backed ||
                      selected->indirect_pc_sgpr != assignment->indirect_pc_sgpr ||
                      selected->indirect_scc_sgpr != assignment->indirect_scc_sgpr ||
@@ -780,6 +781,7 @@ apply_moi_transient_sgpr_assignment(ConSanOptions &options,
   if (saw_unassigned_owner)
     return false;
   options.moi_exec_save_sgpr = selected->exec_save_sgpr;
+  options.moi_dispatch_id_sgpr = selected->dispatch_id_sgpr;
   options.moi_inline_indirect_pc_sgpr = selected->indirect_pc_sgpr;
   options.moi_inline_indirect_scc_sgpr = selected->indirect_scc_sgpr;
   if (options.moi_engine == ConSanMoiEngine::InlineShadow) {
@@ -1858,10 +1860,26 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     }
     if (!selected)
       continue;
-    const bool spill_backed = spill_pc && spill_scc && spill_key && spill_call_return;
+    const bool spill_backed =
+        spill_pc && spill_scc && spill_key && spill_call_return &&
+        (options.moi_engine != ConSanMoiEngine::InlineShadow || spill_visible);
+    uint32_t component_max_referenced_sgpr_count = 0u;
+    for (uint64_t owner : owners) {
+      const MoiKernelResourceContext *context = context_for_owner(owner);
+      if (context) {
+        component_max_referenced_sgpr_count = std::max<uint32_t>(
+            component_max_referenced_sgpr_count, context->max_referenced_sgpr_count);
+      }
+    }
+    const std::optional<uint16_t> dispatch_id_sgpr =
+        options.moi_dispatch_id_sgpr &&
+                component_max_referenced_sgpr_count <= *options.moi_dispatch_id_sgpr
+            ? options.moi_dispatch_id_sgpr
+            : std::nullopt;
     for (uint64_t owner : owners) {
       options.moi_transient_sgpr_assignments.push_back({.descriptor_file_offset = owner,
                                                         .exec_save_sgpr = *selected,
+                                                        .dispatch_id_sgpr = dispatch_id_sgpr,
                                                         .spill_backed = spill_backed,
                                                         .indirect_pc_sgpr = spill_pc,
                                                         .indirect_scc_sgpr = spill_scc,
@@ -2329,6 +2347,8 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       });
   const bool needs_dispatch_id =
       has_inline_dispatch_consumer ||
+      (options.moi_engine == ConSanMoiEngine::RecordReplay &&
+       arch == ROCJITSU_CODE_ARCH_GFX1250) ||
       (options.moi_engine == ConSanMoiEngine::Sampled && options.moi_runtime_sample_stride > 1u &&
        arch != ROCJITSU_CODE_ARCH_GFX1250);
   if (!needs_dispatch_id || !options.moi_report_buffer_address || options.moi_dispatch_id_sgpr) {
@@ -2353,6 +2373,25 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     return false;
   }
 
+  const auto qualify_owner_local_assignments = [&](uint16_t dispatch_base) {
+    for (ConSanMoiTransientSgprAssignment &assignment :
+         options.moi_transient_sgpr_assignments) {
+      uint32_t max_referenced_sgpr_count = 0u;
+      for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+        if (std::ranges::find(plan.owner_descriptor_file_offsets,
+                              assignment.descriptor_file_offset) ==
+            plan.owner_descriptor_file_offsets.end()) {
+          continue;
+        }
+        max_referenced_sgpr_count =
+            std::max<uint32_t>(max_referenced_sgpr_count, plan.max_referenced_sgpr_count);
+      }
+      assignment.dispatch_id_sgpr =
+          max_referenced_sgpr_count <= dispatch_base ? std::optional(dispatch_base) : std::nullopt;
+    }
+    result.resolved_moi_transient_sgpr_assignments = options.moi_transient_sgpr_assignments;
+  };
+
   first = util::align_up(first, 2u);
   const uint16_t dispatch_state_count = moi_dispatch_state_sgpr_count(options);
   const uint16_t ordinary_sgpr_limit = moi_ordinary_sgpr_limit(arch);
@@ -2370,6 +2409,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     options.automatic_moi_dispatch_id_sgprs = true;
     result.resolved_moi_dispatch_id_sgpr = options.moi_dispatch_id_sgpr;
     result.moi_dispatch_id_sgprs_automatic = true;
+    qualify_owner_local_assignments(static_cast<uint16_t>(base));
     result.warnings.emplace_back("ConSan MOI automatically assigned persistent dispatch-ID "
                                  "state SGPRs s" +
                                  std::to_string(base) + ":s" +
@@ -2402,6 +2442,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       options.automatic_moi_dispatch_id_sgprs = true;
       result.resolved_moi_dispatch_id_sgpr = options.moi_dispatch_id_sgpr;
       result.moi_dispatch_id_sgprs_automatic = true;
+      qualify_owner_local_assignments(static_cast<uint16_t>(base));
       result.warnings.emplace_back(
           "ConSan MOI reserved a high dispatch-ID SGPR pair and excluded only "
           "incompatible full-pressure owner groups");

@@ -1000,8 +1000,16 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
   append_moi_operational_resource_plans(state, options, result);
   if (state.arch == ROCJITSU_CODE_ARCH_GFX1250 && options.automatic_moi_dispatch_id_sgprs &&
       options.moi_dispatch_id_sgpr) {
-    const uint16_t dispatch_base = *options.moi_dispatch_id_sgpr;
     for (ConSanCandidateResourcePlan &plan : result.resource_plans) {
+      ConSanOptions owner_options = options;
+      if (!options.moi_transient_sgpr_assignments.empty() &&
+          !apply_moi_transient_sgpr_assignment(owner_options,
+                                               plan.owner_descriptor_file_offsets)) {
+        continue;
+      }
+      if (!owner_options.moi_dispatch_id_sgpr)
+        continue;
+      const uint16_t dispatch_base = *owner_options.moi_dispatch_id_sgpr;
       // max_referenced_sgpr_count is a count: equality means every guest
       // reference is below dispatch_base, while a greater count reaches or
       // crosses persistent dispatch state and cannot share this global pair.

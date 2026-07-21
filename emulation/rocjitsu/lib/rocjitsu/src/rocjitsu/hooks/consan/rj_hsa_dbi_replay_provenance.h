@@ -34,6 +34,7 @@ struct ConSanMoiReplayProvenanceRepair {
   ConSanMoiReplayProvenanceRepair result;
 
   struct WorkgroupState {
+    uint64_t generation = 0;
     uint32_t x = 0;
     uint32_t y = 0;
     uint32_t z = 0;
@@ -44,8 +45,8 @@ struct ConSanMoiReplayProvenanceRepair {
   auto workgroup_for = [&](const ConSanMoiAccessRecord &record,
                            uint32_t required_cells) -> WorkgroupState * {
     for (WorkgroupState &state : workgroups) {
-      if (state.x == record.workgroup_x && state.y == record.workgroup_y &&
-          state.z == record.workgroup_z) {
+      if (state.generation == record.generation && state.x == record.workgroup_x &&
+          state.y == record.workgroup_y && state.z == record.workgroup_z) {
         if (state.cells.size() < required_cells) {
           const uint64_t growth = required_cells - state.cells.size();
           if (growth > kMaxCompanionCells - allocated_cells)
@@ -58,7 +59,8 @@ struct ConSanMoiReplayProvenanceRepair {
     }
     if (required_cells > kMaxCompanionCells - allocated_cells)
       return nullptr;
-    workgroups.push_back({record.workgroup_x, record.workgroup_y, record.workgroup_z,
+    workgroups.push_back({record.generation, record.workgroup_x, record.workgroup_y,
+                          record.workgroup_z,
                           std::vector<const ConSanMoiAccessRecord *>(required_cells)});
     allocated_cells += required_cells;
     return &workgroups.back();

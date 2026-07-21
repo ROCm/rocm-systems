@@ -148,6 +148,7 @@ flowchart TD
     XT3L["XT3L DONE<br/>causal reduced-SGEMM Inline fault<br/>diagnosed; four-profile row green"]
     XT3M["XT3M DONE<br/>quick F8/HGEMM Inline resource retest;<br/>49/189 exact rows, zero failures"]
     XT3N["XT3N DONE<br/>quick F8 SuperCollider current paired<br/>fault and containment bundle green"]
+    XT3O["XT3O ACTIVE<br/>HGEMM Record/Replay cross-dispatch isolation;<br/>four false conflicts block stale-green refresh"]
     XT3B["XT3B DONE<br/>quick-GEMM SuperCollider assessed;<br/>SGEMM first problem 12/12 exact and fully covered"]
     XT3G["XT3G DONE<br/>quick SGEMM Sampled first problem;<br/>12/12 exact, 640/640 accesses, 40/40 barriers"]
     XT3H["XT3H DONE<br/>quick SGEMM Inline assessed;<br/>first problem exact, aggregate dynamic incomplete"]
@@ -339,6 +340,7 @@ flowchart TD
   XT3L --> XF
   XT3M --> XF
   XT3N --> XF
+  XT3O --> XF
   XT3B --> XF
   XT3G --> XF
   XT3H --> XF
@@ -369,6 +371,7 @@ flowchart TD
   class XT3A done
   class XP3 done
   class XT3L,XT3M,XT3N done
+  class XT3O active
   class XP3B done
   class XP3A done
   class XP3D done
@@ -425,6 +428,18 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XT3O is ACTIVE/blue on the stale-orange HGEMM
+  Record/Replay override.  The current exact client already completes with
+  full 8,162/8,162 access, 292/292 barrier, and 80/80 fence coverage; only
+  four replay conflicts make its analysis dynamically incomplete.  All four
+  compare a later kernel's LDS write with an earlier kernel's LDS read while
+  sharing report generation, workgroup coordinates, and epoch.  Record slots
+  currently leave their existing 64-bit generation field zero, so host replay
+  falls back to the report-allocation generation and aliases independent
+  dispatches.  The bounded implementation target is to publish the already
+  captured runtime dispatch identity in every Record/Replay event and add a
+  focused cross-dispatch regression before rerunning the one-repetition row.
 
 - 2026-07-21: XT2C1 is DONE/green.  At clean revision `9b9b12fc8c`, current
   inventory `...-current-inventory-188` retains the selected tensor-pipeline

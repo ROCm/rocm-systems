@@ -194,6 +194,15 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
        !append_dynamic_barrier_store_u32_vgpr(
            record_words, barrier_record_base + offsetof(ConSanMoiBarrierRecord, wave_id),
            *derived_owner_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+      (options.moi_dispatch_id_sgpr &&
+       (!append_dynamic_barrier_store_u32_scalar_src(
+            record_words, barrier_record_base + offsetof(ConSanMoiBarrierRecord, generation),
+            *options.moi_dispatch_id_sgpr, slot_vgpr, *options.scratch_vgpr, arch) ||
+        !append_dynamic_barrier_store_u32_scalar_src(
+            record_words,
+            barrier_record_base + offsetof(ConSanMoiBarrierRecord, generation) + sizeof(uint32_t),
+            static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u), slot_vgpr,
+            *options.scratch_vgpr, arch))) ||
       !append_dynamic_barrier_event_index_store(
           record_words, base + offsetof(ConSanMoiReportHeader, event_counter),
           barrier_record_base + offsetof(ConSanMoiBarrierRecord, event_index), slot_vgpr,

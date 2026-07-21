@@ -216,6 +216,10 @@ struct ConSanMoiPrologueScratchVgprAssignment {
 struct ConSanMoiTransientSgprAssignment {
   uint64_t descriptor_file_offset = 0;
   uint16_t exec_save_sgpr = 0;
+  /// A code-object-wide dispatch pair can be unavailable to an otherwise
+  /// patchable full-pressure owner. Such an owner keeps its instrumentation
+  /// and records zero generation rather than clobbering guest scalar state.
+  std::optional<uint16_t> dispatch_id_sgpr;
   bool spill_backed = false;
   std::optional<uint16_t> indirect_pc_sgpr;
   std::optional<uint16_t> indirect_scc_sgpr;
@@ -355,7 +359,7 @@ struct ConSanOptions {
   /// Internal marker set after ConSan assigns the hw_id owner temporary SGPR.
   bool automatic_moi_owner_sgpr = false;
   /// Internal marker set after ConSan assigns the persistent hardware
-  /// dispatch-ID SGPR pair used by dispatch-qualified Inline metadata.
+  /// dispatch-ID SGPR pair used by dispatch-qualified engine metadata.
   bool automatic_moi_dispatch_id_sgprs = false;
   /// Internal metadata used only by the mutation-then-instrument composition
   /// path. It prevents appended fault code from being attributed to an

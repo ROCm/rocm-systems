@@ -2111,6 +2111,11 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       !append_store_u32_literal(words, base + offsetof(ConSanMoiReportHeader, fence_record_count),
                                 record_count, *options.scratch_vgpr, arch) ||
       !record.materialize_address(record_base) ||
+      (options.moi_dispatch_id_sgpr &&
+       (!record.store_sgpr(offsetof(ConSanMoiFenceRecord, generation),
+                           *options.moi_dispatch_id_sgpr) ||
+        !record.store_sgpr(offsetof(ConSanMoiFenceRecord, generation) + sizeof(uint32_t),
+                           static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u)))) ||
       !record.store_workgroup(offsetof(ConSanMoiFenceRecord, workgroup_x), workgroup_sources.x) ||
       !record.store_workgroup(offsetof(ConSanMoiFenceRecord, workgroup_y), workgroup_sources.y) ||
       !record.store_workgroup(offsetof(ConSanMoiFenceRecord, workgroup_z), workgroup_sources.z) ||

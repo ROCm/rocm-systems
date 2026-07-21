@@ -1882,9 +1882,13 @@ TEST(ConSanMoi, RecordReplayAutomaticExecSaveUsesDistinctOwnerLocalWindows) {
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
-  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
-  EXPECT_NE(result.resolved_moi_transient_sgpr_assignments.front().exec_save_sgpr,
-            *result.resolved_moi_exec_save_sgpr);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 2u);
+  EXPECT_NE(result.resolved_moi_transient_sgpr_assignments[0].descriptor_file_offset,
+            result.resolved_moi_transient_sgpr_assignments[1].descriptor_file_offset);
+  EXPECT_EQ(std::ranges::count_if(
+                result.resolved_moi_transient_sgpr_assignments,
+                [](const auto &assignment) { return assignment.dispatch_id_sgpr.has_value(); }),
+            1u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             2u);
@@ -2887,6 +2891,16 @@ TEST(ConSanMoi, Gfx1250FullVgprRecordReplayUsesScalarEpochCoalescing) {
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> access_words =
       text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
+  ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
+  EXPECT_TRUE(contains_subsequence(access_words, make_expected_scalar_offset_store_words(
+                                                     offsetof(ConSanMoiAccessRecord, generation),
+                                                     *result.resolved_moi_dispatch_id_sgpr,
+                                                     *access->scratch_vgpr)));
+  EXPECT_TRUE(contains_subsequence(
+      access_words, make_expected_scalar_offset_store_words(
+                        offsetof(ConSanMoiAccessRecord, generation) + sizeof(uint32_t),
+                        static_cast<uint16_t>(*result.resolved_moi_dispatch_id_sgpr + 1u),
+                        *access->scratch_vgpr)));
   const uint16_t record_value_vgpr = static_cast<uint16_t>(*access->scratch_vgpr + 2u);
   EXPECT_NE(std::ranges::find(access_words,
                               build_v_mov_b32_e32(record_value_vgpr,

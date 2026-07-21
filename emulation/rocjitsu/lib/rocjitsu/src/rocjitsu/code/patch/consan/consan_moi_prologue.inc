@@ -1515,7 +1515,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     }
     if (active.descriptor_file_offset > active_bytes.size() ||
         sizeof(KD) > active_bytes.size() - active.descriptor_file_offset) {
-      if (options.moi_dispatch_id_sgpr) {
+      if (kernel_options.moi_dispatch_id_sgpr) {
         rollback_moi_dispatch_id_as_unsupported(result, "owner descriptor exceeds ELF bytes");
         return;
       }
@@ -1526,10 +1526,10 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     std::memcpy(&descriptor, active_bytes.data() + active.descriptor_file_offset,
                 sizeof(descriptor));
     std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan;
-    if (options.moi_dispatch_id_sgpr) {
+    if (kernel_options.moi_dispatch_id_sgpr) {
       dispatch_plan = moi_descriptor_dispatch_id_preload_plan(descriptor, arch);
       if (!dispatch_plan->supported() ||
-          *options.moi_dispatch_id_sgpr < dispatch_plan->required_sgpr_count) {
+          *kernel_options.moi_dispatch_id_sgpr < dispatch_plan->required_sgpr_count) {
         rollback_moi_dispatch_id_as_unsupported(
             result, "kernel '" + kernel.name + "' has an invalid or overlapping preload layout");
         return;
@@ -1537,7 +1537,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     }
     const bool has_kernarg_preload = moi_descriptor_has_kernarg_preload(descriptor);
     if (has_kernarg_preload && kernel.code_size <= kAmdhsaKernelEntryAlignment) {
-      if (options.moi_dispatch_id_sgpr) {
+      if (kernel_options.moi_dispatch_id_sgpr) {
         rollback_moi_dispatch_id_as_unsupported(
             result, "kernel '" + kernel.name + "' has no valid secondary hardware entry");
       } else {
@@ -1633,10 +1633,10 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       required_vgpr_count =
           std::max<uint32_t>(required_vgpr_count, *kernel_options.moi_workgroup_key_vgpr + 1u);
     uint32_t required_sgpr_count = owner_required_sgpr_count;
-    if (options.moi_dispatch_id_sgpr) {
+    if (kernel_options.moi_dispatch_id_sgpr) {
       required_sgpr_count = std::max<uint32_t>(
-          required_sgpr_count, static_cast<uint32_t>(*options.moi_dispatch_id_sgpr) +
-                                   moi_dispatch_state_sgpr_count(options));
+          required_sgpr_count, static_cast<uint32_t>(*kernel_options.moi_dispatch_id_sgpr) +
+                                   moi_dispatch_state_sgpr_count(kernel_options));
     }
     if (options.moi_persistent_owner_sgpr)
       required_sgpr_count = std::max<uint32_t>(
@@ -1653,9 +1653,10 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
                                               result.errors)) {
       return;
     }
-    if (item.dispatch_plan && options.moi_dispatch_id_sgpr &&
+    if (item.dispatch_plan && kernel_options.moi_dispatch_id_sgpr &&
         !apply_moi_dispatch_id_descriptor(patcher, item.kernel.descriptor_file_offset,
-                                          *item.dispatch_plan, *options.moi_dispatch_id_sgpr, arch,
+                                          *item.dispatch_plan,
+                                          *kernel_options.moi_dispatch_id_sgpr, arch,
                                           result.errors)) {
       return;
     }
@@ -1924,8 +1925,9 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       info.workgroup_shadow_compact = item.workgroup_shadow->compact;
       info.required_group_segment_size = item.workgroup_shadow->required_group_segment_size;
     }
-    if (item.dispatch_plan && options.moi_dispatch_id_sgpr)
-      note_dispatch_id_patch_info(info, *item.dispatch_plan, *options.moi_dispatch_id_sgpr);
+    if (item.dispatch_plan && kernel_options.moi_dispatch_id_sgpr)
+      note_dispatch_id_patch_info(info, *item.dispatch_plan,
+                                  *kernel_options.moi_dispatch_id_sgpr);
     const auto canonical_kernel =
         std::ranges::find(result.kernels, kernel.name, &ConSanKernelInfo::name);
     if (canonical_kernel == result.kernels.end()) {
