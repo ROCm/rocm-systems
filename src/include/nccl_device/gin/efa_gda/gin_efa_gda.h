@@ -662,14 +662,7 @@ NCCL_DEVICE_INLINE static ncclResult_t flushImplMode(ncclGinCtx ctx, Coop coop, 
     }
   }
 done:
-  // Broadcast result from thread_rank()==0 to all participants.
-  // Use shared memory — safe for all coop types including ncclCoopAny.
-  {
-    __shared__ int sharedResult;
-    if (coop.thread_rank() == 0) sharedResult = (int)result;
-    coop.sync();
-    result = (ncclResult_t)sharedResult;
-  }
+  coop.sync();
   return (result == ncclInProgress) ? ncclSuccess : result;
 }
 
