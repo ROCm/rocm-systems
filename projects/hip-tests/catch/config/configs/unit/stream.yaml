@@ -419,6 +419,10 @@ stream:
     <<: *level_2
     disabled: [amd_windows, amd_wsl, nvidia]
     tags: [synchronization, memory]
+  Unit_hipStreamBatchMemOp_SequentialOrdering_MultiGPU:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl, nvidia]
+    tags: [synchronization, memory, multigpu]
   Unit_hipStreamWaitWriteValue32_Capture:
     <<: *level_2
     disabled: [amd_windows, amd_wsl, nvidia]

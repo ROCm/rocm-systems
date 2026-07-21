@@ -20,11 +20,8 @@
 /**
  * Test Description
  * ------------------------
- * - Verify that hipGraphBatchMemOpNode (WriteValue32 + WaitValue32) is AQL-captured
- *   during hipGraphInstantiate and produces the correct result after hipGraphLaunch.
- *   This validates that GraphCaptureEnabled() returns true for hipGraphBatchMemOpNode
- *   so the blit kernel packet is pre-built at instantiation time and dispatched via
- *   the flat AQL packet path at launch.
+ * - Verify that hipGraphBatchMemOpNode with WriteValue32 + WaitValue32 produces the
+ *   correct result after hipGraphInstantiate and hipGraphLaunch.
  * Test source
  * ------------------------
  *    - unit/graph/hipGraphBatchMemOpNodeCapture.cc
@@ -32,7 +29,7 @@
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-HIP_TEST_CASE(Unit_hipGraphBatchMemOpNode_AQLCapture) {
+HIP_TEST_CASE(Unit_hipGraphBatchMemOpNode_WriteAndWait) {
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
 
