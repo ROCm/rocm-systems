@@ -20,6 +20,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpEqF16Vopc : public Vopc {
@@ -28,6 +29,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpLeF16Vopc : public Vopc {
@@ -36,6 +38,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpGtF16Vopc : public Vopc {
@@ -44,6 +47,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpLgF16Vopc : public Vopc {
@@ -52,6 +56,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpGeF16Vopc : public Vopc {
@@ -60,6 +65,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpOF16Vopc : public Vopc {
@@ -68,6 +74,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpUF16Vopc : public Vopc {
@@ -76,6 +83,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNgeF16Vopc : public Vopc {
@@ -84,6 +92,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNlgF16Vopc : public Vopc {
@@ -92,6 +101,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNgtF16Vopc : public Vopc {
@@ -100,6 +110,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNleF16Vopc : public Vopc {
@@ -108,6 +119,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNeqF16Vopc : public Vopc {
@@ -116,6 +128,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNltF16Vopc : public Vopc {
@@ -124,6 +137,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpLtF32Vopc : public Vopc {
@@ -132,6 +146,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpEqF32Vopc : public Vopc {
@@ -140,6 +155,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpLeF32Vopc : public Vopc {
@@ -148,6 +164,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpGtF32Vopc : public Vopc {
@@ -156,6 +173,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpLgF32Vopc : public Vopc {
@@ -164,6 +182,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpGeF32Vopc : public Vopc {
@@ -172,6 +191,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpOF32Vopc : public Vopc {
@@ -180,6 +200,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpUF32Vopc : public Vopc {
@@ -188,6 +209,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNgeF32Vopc : public Vopc {
@@ -196,6 +218,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNlgF32Vopc : public Vopc {
@@ -204,6 +227,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNgtF32Vopc : public Vopc {
@@ -212,6 +236,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNleF32Vopc : public Vopc {
@@ -220,6 +245,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNeqF32Vopc : public Vopc {
@@ -228,6 +254,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNltF32Vopc : public Vopc {
@@ -236,6 +263,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpLtF64Vopc : public Vopc {
@@ -244,6 +272,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpEqF64Vopc : public Vopc {
@@ -252,6 +281,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpLeF64Vopc : public Vopc {
@@ -260,6 +290,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpGtF64Vopc : public Vopc {
@@ -268,6 +299,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpLgF64Vopc : public Vopc {
@@ -276,6 +308,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpGeF64Vopc : public Vopc {
@@ -284,6 +317,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpOF64Vopc : public Vopc {
@@ -292,6 +326,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpUF64Vopc : public Vopc {
@@ -300,6 +335,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNgeF64Vopc : public Vopc {
@@ -308,6 +344,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNlgF64Vopc : public Vopc {
@@ -316,6 +353,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNgtF64Vopc : public Vopc {
@@ -324,6 +362,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNleF64Vopc : public Vopc {
@@ -332,6 +371,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNeqF64Vopc : public Vopc {
@@ -340,6 +380,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNltF64Vopc : public Vopc {
@@ -348,6 +389,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpLtI16Vopc : public Vopc {
@@ -356,6 +398,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpEqI16Vopc : public Vopc {
@@ -364,6 +407,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpLeI16Vopc : public Vopc {
@@ -372,6 +416,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpGtI16Vopc : public Vopc {
@@ -380,6 +425,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNeI16Vopc : public Vopc {
@@ -388,6 +434,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpGeI16Vopc : public Vopc {
@@ -396,6 +443,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpLtU16Vopc : public Vopc {
@@ -404,6 +452,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpEqU16Vopc : public Vopc {
@@ -412,6 +461,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpLeU16Vopc : public Vopc {
@@ -420,6 +470,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpGtU16Vopc : public Vopc {
@@ -428,6 +479,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNeU16Vopc : public Vopc {
@@ -436,6 +488,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpGeU16Vopc : public Vopc {
@@ -444,6 +497,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpLtI32Vopc : public Vopc {
@@ -452,6 +506,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpEqI32Vopc : public Vopc {
@@ -460,6 +515,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpLeI32Vopc : public Vopc {
@@ -468,6 +524,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpGtI32Vopc : public Vopc {
@@ -476,6 +533,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNeI32Vopc : public Vopc {
@@ -484,6 +542,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpGeI32Vopc : public Vopc {
@@ -492,6 +551,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpLtU32Vopc : public Vopc {
@@ -500,6 +560,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpEqU32Vopc : public Vopc {
@@ -508,6 +569,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpLeU32Vopc : public Vopc {
@@ -516,6 +578,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpGtU32Vopc : public Vopc {
@@ -524,6 +587,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNeU32Vopc : public Vopc {
@@ -532,6 +596,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpGeU32Vopc : public Vopc {
@@ -540,6 +605,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpLtI64Vopc : public Vopc {
@@ -548,6 +614,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpEqI64Vopc : public Vopc {
@@ -556,6 +623,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpLeI64Vopc : public Vopc {
@@ -564,6 +632,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpGtI64Vopc : public Vopc {
@@ -572,6 +641,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNeI64Vopc : public Vopc {
@@ -580,6 +650,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpGeI64Vopc : public Vopc {
@@ -588,6 +659,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpLtU64Vopc : public Vopc {
@@ -596,6 +668,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpEqU64Vopc : public Vopc {
@@ -604,6 +677,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpLeU64Vopc : public Vopc {
@@ -612,6 +686,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpGtU64Vopc : public Vopc {
@@ -620,6 +695,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpNeU64Vopc : public Vopc {
@@ -628,6 +704,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpGeU64Vopc : public Vopc {
@@ -636,6 +713,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpClassF16Vopc : public Vopc {
@@ -644,6 +722,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpClassF32Vopc : public Vopc {
@@ -652,6 +731,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpClassF64Vopc : public Vopc {
@@ -660,6 +740,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxLtF16Vopc : public Vopc {
@@ -668,6 +749,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxEqF16Vopc : public Vopc {
@@ -676,6 +758,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxLeF16Vopc : public Vopc {
@@ -684,6 +767,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxGtF16Vopc : public Vopc {
@@ -692,6 +776,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxLgF16Vopc : public Vopc {
@@ -700,6 +785,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxGeF16Vopc : public Vopc {
@@ -708,6 +794,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxOF16Vopc : public Vopc {
@@ -716,6 +803,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxUF16Vopc : public Vopc {
@@ -724,6 +812,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNgeF16Vopc : public Vopc {
@@ -732,6 +821,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNlgF16Vopc : public Vopc {
@@ -740,6 +830,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNgtF16Vopc : public Vopc {
@@ -748,6 +839,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNleF16Vopc : public Vopc {
@@ -756,6 +848,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNeqF16Vopc : public Vopc {
@@ -764,6 +857,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNltF16Vopc : public Vopc {
@@ -772,6 +866,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxLtF32Vopc : public Vopc {
@@ -780,6 +875,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxEqF32Vopc : public Vopc {
@@ -788,6 +884,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxLeF32Vopc : public Vopc {
@@ -796,6 +893,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxGtF32Vopc : public Vopc {
@@ -804,6 +902,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxLgF32Vopc : public Vopc {
@@ -812,6 +911,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxGeF32Vopc : public Vopc {
@@ -820,6 +920,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxOF32Vopc : public Vopc {
@@ -828,6 +929,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxUF32Vopc : public Vopc {
@@ -836,6 +938,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNgeF32Vopc : public Vopc {
@@ -844,6 +947,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNlgF32Vopc : public Vopc {
@@ -852,6 +956,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNgtF32Vopc : public Vopc {
@@ -860,6 +965,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNleF32Vopc : public Vopc {
@@ -868,6 +974,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNeqF32Vopc : public Vopc {
@@ -876,6 +983,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNltF32Vopc : public Vopc {
@@ -884,6 +992,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxLtF64Vopc : public Vopc {
@@ -892,6 +1001,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxEqF64Vopc : public Vopc {
@@ -900,6 +1010,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxLeF64Vopc : public Vopc {
@@ -908,6 +1019,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxGtF64Vopc : public Vopc {
@@ -916,6 +1028,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxLgF64Vopc : public Vopc {
@@ -924,6 +1037,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxGeF64Vopc : public Vopc {
@@ -932,6 +1046,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxOF64Vopc : public Vopc {
@@ -940,6 +1055,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxUF64Vopc : public Vopc {
@@ -948,6 +1064,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNgeF64Vopc : public Vopc {
@@ -956,6 +1073,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNlgF64Vopc : public Vopc {
@@ -964,6 +1082,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNgtF64Vopc : public Vopc {
@@ -972,6 +1091,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNleF64Vopc : public Vopc {
@@ -980,6 +1100,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNeqF64Vopc : public Vopc {
@@ -988,6 +1109,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNltF64Vopc : public Vopc {
@@ -996,6 +1118,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxLtI16Vopc : public Vopc {
@@ -1004,6 +1127,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxEqI16Vopc : public Vopc {
@@ -1012,6 +1136,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxLeI16Vopc : public Vopc {
@@ -1020,6 +1145,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxGtI16Vopc : public Vopc {
@@ -1028,6 +1154,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNeI16Vopc : public Vopc {
@@ -1036,6 +1163,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxGeI16Vopc : public Vopc {
@@ -1044,6 +1172,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxLtU16Vopc : public Vopc {
@@ -1052,6 +1181,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxEqU16Vopc : public Vopc {
@@ -1060,6 +1190,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxLeU16Vopc : public Vopc {
@@ -1068,6 +1199,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxGtU16Vopc : public Vopc {
@@ -1076,6 +1208,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNeU16Vopc : public Vopc {
@@ -1084,6 +1217,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxGeU16Vopc : public Vopc {
@@ -1092,6 +1226,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxLtI32Vopc : public Vopc {
@@ -1100,6 +1235,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxEqI32Vopc : public Vopc {
@@ -1108,6 +1244,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxLeI32Vopc : public Vopc {
@@ -1116,6 +1253,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxGtI32Vopc : public Vopc {
@@ -1124,6 +1262,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNeI32Vopc : public Vopc {
@@ -1132,6 +1271,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxGeI32Vopc : public Vopc {
@@ -1140,6 +1280,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxLtU32Vopc : public Vopc {
@@ -1148,6 +1289,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxEqU32Vopc : public Vopc {
@@ -1156,6 +1298,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxLeU32Vopc : public Vopc {
@@ -1164,6 +1307,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxGtU32Vopc : public Vopc {
@@ -1172,6 +1316,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNeU32Vopc : public Vopc {
@@ -1180,6 +1325,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxGeU32Vopc : public Vopc {
@@ -1188,6 +1334,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxLtI64Vopc : public Vopc {
@@ -1196,6 +1343,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxEqI64Vopc : public Vopc {
@@ -1204,6 +1352,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxLeI64Vopc : public Vopc {
@@ -1212,6 +1361,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxGtI64Vopc : public Vopc {
@@ -1220,6 +1370,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNeI64Vopc : public Vopc {
@@ -1228,6 +1379,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxGeI64Vopc : public Vopc {
@@ -1236,6 +1388,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxLtU64Vopc : public Vopc {
@@ -1244,6 +1397,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxEqU64Vopc : public Vopc {
@@ -1252,6 +1406,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxLeU64Vopc : public Vopc {
@@ -1260,6 +1415,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxGtU64Vopc : public Vopc {
@@ -1268,6 +1424,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxNeU64Vopc : public Vopc {
@@ -1276,6 +1433,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxGeU64Vopc : public Vopc {
@@ -1284,6 +1442,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxClassF16Vopc : public Vopc {
@@ -1292,6 +1451,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxClassF32Vopc : public Vopc {
@@ -1300,6 +1460,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 class VCmpxClassF64Vopc : public Vopc {
@@ -1308,6 +1469,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand src0;
   Operand vsrc1;
+  static const bool execute_registered_;
 };
 
 } // namespace gfx1250

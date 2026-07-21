@@ -20,6 +20,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsSubU32Vds : public Vds {
@@ -28,6 +29,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsRsubU32Vds : public Vds {
@@ -36,6 +38,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsIncU32Vds : public Vds {
@@ -44,6 +47,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsDecU32Vds : public Vds {
@@ -52,6 +56,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMinI32Vds : public Vds {
@@ -60,6 +65,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMaxI32Vds : public Vds {
@@ -68,6 +74,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMinU32Vds : public Vds {
@@ -76,6 +83,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMaxU32Vds : public Vds {
@@ -84,6 +92,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsAndB32Vds : public Vds {
@@ -92,6 +101,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsOrB32Vds : public Vds {
@@ -100,6 +110,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsXorB32Vds : public Vds {
@@ -108,6 +119,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMskorB32Vds : public Vds {
@@ -117,6 +129,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  static const bool execute_registered_;
 };
 
 class DsStoreB32Vds : public Vds {
@@ -125,6 +138,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsStore2addrB32Vds : public Vds {
@@ -134,6 +148,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  static const bool execute_registered_;
 };
 
 class DsStore2addrStride64B32Vds : public Vds {
@@ -143,6 +158,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  static const bool execute_registered_;
 };
 
 class DsCmpstoreB32Vds : public Vds {
@@ -152,6 +168,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  static const bool execute_registered_;
 };
 
 class DsMinNumF32Vds : public Vds {
@@ -160,6 +177,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMaxNumF32Vds : public Vds {
@@ -168,12 +186,14 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsNopVds : public Vds {
 public:
   DsNopVds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  static const bool execute_registered_;
 };
 
 class DsAddF32Vds : public Vds {
@@ -182,6 +202,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsStoreB8Vds : public Vds {
@@ -190,6 +211,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsStoreB16Vds : public Vds {
@@ -198,6 +220,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsAddRtnU32Vds : public Vds {
@@ -207,6 +230,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsSubRtnU32Vds : public Vds {
@@ -216,6 +240,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsRsubRtnU32Vds : public Vds {
@@ -225,6 +250,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsIncRtnU32Vds : public Vds {
@@ -234,6 +260,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsDecRtnU32Vds : public Vds {
@@ -243,6 +270,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMinRtnI32Vds : public Vds {
@@ -252,6 +280,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMaxRtnI32Vds : public Vds {
@@ -261,6 +290,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMinRtnU32Vds : public Vds {
@@ -270,6 +300,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMaxRtnU32Vds : public Vds {
@@ -279,6 +310,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsAndRtnB32Vds : public Vds {
@@ -288,6 +320,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsOrRtnB32Vds : public Vds {
@@ -297,6 +330,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsXorRtnB32Vds : public Vds {
@@ -306,6 +340,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMskorRtnB32Vds : public Vds {
@@ -316,6 +351,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  static const bool execute_registered_;
 };
 
 class DsStorexchgRtnB32Vds : public Vds {
@@ -325,6 +361,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsStorexchg2addrRtnB32Vds : public Vds {
@@ -335,6 +372,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  static const bool execute_registered_;
 };
 
 class DsStorexchg2addrStride64RtnB32Vds : public Vds {
@@ -345,6 +383,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  static const bool execute_registered_;
 };
 
 class DsCmpstoreRtnB32Vds : public Vds {
@@ -355,6 +394,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  static const bool execute_registered_;
 };
 
 class DsMinNumRtnF32Vds : public Vds {
@@ -364,6 +404,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMaxNumRtnF32Vds : public Vds {
@@ -373,6 +414,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsSwizzleB32Vds : public Vds {
@@ -381,6 +423,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  static const bool execute_registered_;
 };
 
 class DsLoadB32Vds : public Vds {
@@ -389,6 +432,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  static const bool execute_registered_;
 };
 
 class DsLoad2addrB32Vds : public Vds {
@@ -397,6 +441,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  static const bool execute_registered_;
 };
 
 class DsLoad2addrStride64B32Vds : public Vds {
@@ -405,6 +450,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  static const bool execute_registered_;
 };
 
 class DsLoadI8Vds : public Vds {
@@ -413,6 +459,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  static const bool execute_registered_;
 };
 
 class DsLoadU8Vds : public Vds {
@@ -421,6 +468,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  static const bool execute_registered_;
 };
 
 class DsLoadI16Vds : public Vds {
@@ -429,6 +477,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  static const bool execute_registered_;
 };
 
 class DsLoadU16Vds : public Vds {
@@ -437,6 +486,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  static const bool execute_registered_;
 };
 
 class DsConsumeVds : public Vds {
@@ -444,6 +494,7 @@ public:
   DsConsumeVds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
+  static const bool execute_registered_;
 };
 
 class DsAppendVds : public Vds {
@@ -451,6 +502,7 @@ public:
   DsAppendVds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
+  static const bool execute_registered_;
 };
 
 class DsAddU64Vds : public Vds {
@@ -459,6 +511,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsSubU64Vds : public Vds {
@@ -467,6 +520,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsRsubU64Vds : public Vds {
@@ -475,6 +529,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsIncU64Vds : public Vds {
@@ -483,6 +538,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsDecU64Vds : public Vds {
@@ -491,6 +547,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMinI64Vds : public Vds {
@@ -499,6 +556,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMaxI64Vds : public Vds {
@@ -507,6 +565,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMinU64Vds : public Vds {
@@ -515,6 +574,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMaxU64Vds : public Vds {
@@ -523,6 +583,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsAndB64Vds : public Vds {
@@ -531,6 +592,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsOrB64Vds : public Vds {
@@ -539,6 +601,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsXorB64Vds : public Vds {
@@ -547,6 +610,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMskorB64Vds : public Vds {
@@ -556,6 +620,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  static const bool execute_registered_;
 };
 
 class DsStoreB64Vds : public Vds {
@@ -564,6 +629,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsStore2addrB64Vds : public Vds {
@@ -573,6 +639,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  static const bool execute_registered_;
 };
 
 class DsStore2addrStride64B64Vds : public Vds {
@@ -582,6 +649,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  static const bool execute_registered_;
 };
 
 class DsCmpstoreB64Vds : public Vds {
@@ -591,6 +659,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  static const bool execute_registered_;
 };
 
 class DsMinNumF64Vds : public Vds {
@@ -599,6 +668,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMaxNumF64Vds : public Vds {
@@ -607,6 +677,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsAddF64Vds : public Vds {
@@ -615,6 +686,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsAtomicAsyncBarrierArriveB64Vds : public Vds {
@@ -622,6 +694,7 @@ public:
   DsAtomicAsyncBarrierArriveB64Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
+  static const bool execute_registered_;
 };
 
 class DsAddRtnU64Vds : public Vds {
@@ -631,6 +704,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsSubRtnU64Vds : public Vds {
@@ -640,6 +714,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsRsubRtnU64Vds : public Vds {
@@ -649,6 +724,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsIncRtnU64Vds : public Vds {
@@ -658,6 +734,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsDecRtnU64Vds : public Vds {
@@ -667,6 +744,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMinRtnI64Vds : public Vds {
@@ -676,6 +754,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMaxRtnI64Vds : public Vds {
@@ -685,6 +764,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMinRtnU64Vds : public Vds {
@@ -694,6 +774,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMaxRtnU64Vds : public Vds {
@@ -703,6 +784,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsAndRtnB64Vds : public Vds {
@@ -712,6 +794,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsOrRtnB64Vds : public Vds {
@@ -721,6 +804,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsXorRtnB64Vds : public Vds {
@@ -730,6 +814,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMskorRtnB64Vds : public Vds {
@@ -740,6 +825,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  static const bool execute_registered_;
 };
 
 class DsStorexchgRtnB64Vds : public Vds {
@@ -749,6 +835,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsStorexchg2addrRtnB64Vds : public Vds {
@@ -759,6 +846,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  static const bool execute_registered_;
 };
 
 class DsStorexchg2addrStride64RtnB64Vds : public Vds {
@@ -769,6 +857,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  static const bool execute_registered_;
 };
 
 class DsCmpstoreRtnB64Vds : public Vds {
@@ -779,6 +868,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  static const bool execute_registered_;
 };
 
 class DsMinNumRtnF64Vds : public Vds {
@@ -788,6 +878,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsMaxNumRtnF64Vds : public Vds {
@@ -797,6 +888,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsAddRtnF64Vds : public Vds {
@@ -806,6 +898,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsAtomicBarrierArriveRtnB64Vds : public Vds {
@@ -815,6 +908,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsLoadB64Vds : public Vds {
@@ -823,6 +917,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  static const bool execute_registered_;
 };
 
 class DsLoad2addrB64Vds : public Vds {
@@ -831,6 +926,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  static const bool execute_registered_;
 };
 
 class DsLoad2addrStride64B64Vds : public Vds {
@@ -839,6 +935,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  static const bool execute_registered_;
 };
 
 class DsAddRtnF32Vds : public Vds {
@@ -848,6 +945,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsCondxchg32RtnB64Vds : public Vds {
@@ -857,6 +955,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsCondSubU32Vds : public Vds {
@@ -865,6 +964,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsSubClampU32Vds : public Vds {
@@ -873,6 +973,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsPkAddF16Vds : public Vds {
@@ -881,6 +982,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsPkAddBf16Vds : public Vds {
@@ -889,6 +991,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsStoreB8D16HiVds : public Vds {
@@ -897,6 +1000,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsStoreB16D16HiVds : public Vds {
@@ -905,6 +1009,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsLoadU8D16Vds : public Vds {
@@ -913,6 +1018,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  static const bool execute_registered_;
 };
 
 class DsLoadU8D16HiVds : public Vds {
@@ -921,6 +1027,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  static const bool execute_registered_;
 };
 
 class DsLoadI8D16Vds : public Vds {
@@ -929,6 +1036,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  static const bool execute_registered_;
 };
 
 class DsLoadI8D16HiVds : public Vds {
@@ -937,6 +1045,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  static const bool execute_registered_;
 };
 
 class DsLoadU16D16Vds : public Vds {
@@ -945,6 +1054,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  static const bool execute_registered_;
 };
 
 class DsLoadU16D16HiVds : public Vds {
@@ -953,6 +1063,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  static const bool execute_registered_;
 };
 
 class DsCondSubRtnU32Vds : public Vds {
@@ -962,6 +1073,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsSubClampRtnU32Vds : public Vds {
@@ -971,6 +1083,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsPkAddRtnF16Vds : public Vds {
@@ -980,6 +1093,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsPkAddRtnBf16Vds : public Vds {
@@ -989,6 +1103,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsStoreAddtidB32Vds : public Vds {
@@ -996,6 +1111,7 @@ public:
   DsStoreAddtidB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsLoadAddtidB32Vds : public Vds {
@@ -1003,6 +1119,7 @@ public:
   DsLoadAddtidB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
+  static const bool execute_registered_;
 };
 
 class DsPermuteB32Vds : public Vds {
@@ -1012,6 +1129,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsBpermuteB32Vds : public Vds {
@@ -1021,6 +1139,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsBpermuteFiB32Vds : public Vds {
@@ -1030,6 +1149,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsStoreB96Vds : public Vds {
@@ -1038,6 +1158,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsStoreB128Vds : public Vds {
@@ -1046,6 +1167,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  static const bool execute_registered_;
 };
 
 class DsLoadTr4B64Vds : public Vds {
@@ -1054,6 +1176,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  static const bool execute_registered_;
 };
 
 class DsLoadTr6B96Vds : public Vds {
@@ -1062,6 +1185,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  static const bool execute_registered_;
 };
 
 class DsLoadTr16B128Vds : public Vds {
@@ -1070,6 +1194,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  static const bool execute_registered_;
 };
 
 class DsLoadTr8B64Vds : public Vds {
@@ -1078,6 +1203,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  static const bool execute_registered_;
 };
 
 class DsLoadB96Vds : public Vds {
@@ -1086,6 +1212,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  static const bool execute_registered_;
 };
 
 class DsLoadB128Vds : public Vds {
@@ -1094,6 +1221,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  static const bool execute_registered_;
 };
 
 } // namespace gfx1250
