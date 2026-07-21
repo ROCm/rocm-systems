@@ -928,6 +928,121 @@ std::vector<uint8_t> make_amdgpu_elf_with_symbol_relocation(uint8_t sym_type,
   return image;
 }
 
+// Build an ET_DYN object with a symbol-less relocation of the given type in
+// .rela.dyn (symbol index 0), placed in .data, with the supplied addend. Used to
+// prove the text-symbol guard also catches an R_AMDGPU_RELATIVE64 whose addend
+// lands in the source .text virtual-address interval (the loader forms the stored
+// value from load_bias + r_addend, which DBT would leave pointing at stale PC).
+// text_vaddr is 0x1100 with size 8, so an addend of 0x1100 is in-text and 0x2108
+// (the .data vaddr) is out-of-text.
+std::vector<uint8_t> make_amdgpu_elf_with_relative_relocation(uint32_t reloc_type, int64_t addend) {
+  constexpr uint64_t text_offset = 0x100;
+  constexpr uint64_t text_vaddr = 0x1100;
+  constexpr uint64_t text_size = 8;
+  constexpr uint64_t data_size = 8;
+  constexpr uint64_t load_align = 0x1000;
+
+  std::vector<uint8_t> shstrtab{'\0'};
+  const uint32_t text_name = add_elf_name(shstrtab, ".text");
+  const uint32_t data_name = add_elf_name(shstrtab, ".data");
+  const uint32_t rela_name = add_elf_name(shstrtab, ".rela.dyn");
+  const uint32_t shstrtab_name = add_elf_name(shstrtab, ".shstrtab");
+
+  const uint64_t data_offset = text_offset + text_size;
+  const uint64_t data_vaddr = text_vaddr + text_size + load_align;
+  const uint64_t rela_offset = align_up_for_test(data_offset + data_size, 8);
+  constexpr size_t rela_count = 1;
+  const uint64_t shstrtab_offset = rela_offset + rela_count * sizeof(Elf64_Rela);
+  const uint64_t shoff = align_up_for_test(shstrtab_offset + shstrtab.size(), 8);
+  constexpr uint16_t section_count = 5;
+  constexpr uint16_t phdr_count = 2;
+
+  std::vector<uint8_t> image(shoff + section_count * sizeof(Elf64_Shdr), 0);
+
+  Elf64_Ehdr ehdr{};
+  std::memcpy(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
+  ehdr.e_ident[EI_CLASS] = ELFCLASS64;
+  ehdr.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
+  ehdr.e_type = ET_DYN;
+  ehdr.e_machine = EM_AMDGPU;
+  ehdr.e_version = 1;
+  ehdr.e_phoff = sizeof(Elf64_Ehdr);
+  ehdr.e_shoff = shoff;
+  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
+  ehdr.e_ehsize = sizeof(Elf64_Ehdr);
+  ehdr.e_phentsize = sizeof(Elf64_Phdr);
+  ehdr.e_phnum = phdr_count;
+  ehdr.e_shentsize = sizeof(Elf64_Shdr);
+  ehdr.e_shnum = section_count;
+  ehdr.e_shstrndx = 4;
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+
+  std::array<Elf64_Phdr, phdr_count> phdrs{};
+  phdrs[0].p_type = PT_LOAD;
+  phdrs[0].p_flags = 0x5; // PF_R | PF_X
+  phdrs[0].p_offset = text_offset;
+  phdrs[0].p_vaddr = text_vaddr;
+  phdrs[0].p_paddr = text_vaddr;
+  phdrs[0].p_filesz = text_size;
+  phdrs[0].p_memsz = text_size;
+  phdrs[0].p_align = load_align;
+
+  phdrs[1].p_type = PT_LOAD;
+  phdrs[1].p_flags = 0x6; // PF_R | PF_W
+  phdrs[1].p_offset = data_offset;
+  phdrs[1].p_vaddr = data_vaddr;
+  phdrs[1].p_paddr = data_vaddr;
+  phdrs[1].p_filesz = data_size;
+  phdrs[1].p_memsz = data_size;
+  phdrs[1].p_align = load_align;
+  std::memcpy(image.data() + ehdr.e_phoff, phdrs.data(), phdrs.size() * sizeof(Elf64_Phdr));
+
+  const std::array<uint32_t, 2> text_words = {0xBF800000u, 0xBF800000u};
+  std::memcpy(image.data() + text_offset, text_words.data(), text_size);
+
+  Elf64_Rela rela{};
+  rela.r_offset = data_vaddr; // place in .data, safely shifted with the section
+  rela.r_info = static_cast<uint64_t>(reloc_type); // symbol index 0, low 32 bits type
+  rela.r_addend = addend;
+  std::memcpy(image.data() + rela_offset, &rela, sizeof(rela));
+
+  std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
+
+  std::array<Elf64_Shdr, section_count> shdrs{};
+  shdrs[1].sh_name = text_name;
+  shdrs[1].sh_type = SHT_PROGBITS;
+  shdrs[1].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
+  shdrs[1].sh_addr = text_vaddr;
+  shdrs[1].sh_offset = text_offset;
+  shdrs[1].sh_size = text_size;
+  shdrs[1].sh_addralign = sizeof(uint32_t);
+
+  shdrs[2].sh_name = data_name;
+  shdrs[2].sh_type = SHT_PROGBITS;
+  shdrs[2].sh_flags = SHF_ALLOC | SHF_WRITE;
+  shdrs[2].sh_addr = data_vaddr;
+  shdrs[2].sh_offset = data_offset;
+  shdrs[2].sh_size = data_size;
+  shdrs[2].sh_addralign = sizeof(uint64_t);
+
+  shdrs[3].sh_name = rela_name;
+  shdrs[3].sh_type = SHT_RELA;
+  shdrs[3].sh_offset = rela_offset;
+  shdrs[3].sh_size = rela_count * sizeof(Elf64_Rela);
+  shdrs[3].sh_link = 0; // no symtab needed for symbol-zero relocations
+  shdrs[3].sh_addralign = 8;
+  shdrs[3].sh_entsize = sizeof(Elf64_Rela);
+
+  shdrs[4].sh_name = shstrtab_name;
+  shdrs[4].sh_type = SHT_STRTAB;
+  shdrs[4].sh_offset = shstrtab_offset;
+  shdrs[4].sh_size = shstrtab.size();
+  shdrs[4].sh_addralign = 1;
+
+  std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+  return image;
+}
+
 std::vector<uint8_t> make_large_amdgpu_elf_with_waitcnt_entry() {
   constexpr uint64_t rodata_offset = 0x100;
   constexpr uint64_t rodata_vaddr = 0x100;
@@ -1705,6 +1820,48 @@ TEST(BinaryTranslatorE2E, RejectsRelocationToTextNotypeSymbol) {
   // The pre-move guard only recognized STT_FUNC; this proves the broadened guard
   // rejects untyped text labels too, leaving the object unchanged.
   auto image = make_amdgpu_elf_with_symbol_relocation(kElfSymbolTypeNone, /*defined_in_text=*/true);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  auto result = translator.translate(source);
+
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
+                                             "symbol defined in .text"));
+}
+
+// R_AMDGPU_RELATIVE64 carries symbol index 0, so the st_shndx-based text-symbol
+// check cannot see it; the loader forms the stored value from load_bias +
+// r_addend. An addend inside the source .text interval must be rejected (DBT
+// moves the text without remapping the addend), while an addend outside .text
+// (e.g. the .data vaddr) is safely shifted with its section and must be accepted.
+TEST(CodeObjectPatcher, DetectsRelative64AddendIntoText) {
+  constexpr uint32_t kRelative64 = 10;
+  constexpr int64_t kInTextAddend = 0x1100;    // == text_vaddr
+  constexpr int64_t kOutOfTextAddend = 0x2108; // == data_vaddr
+
+  auto in_text = make_amdgpu_elf_with_relative_relocation(kRelative64, kInTextAddend);
+  AmdGpuCodeObject in_text_co(in_text.data(), in_text.size());
+  ASSERT_TRUE(in_text_co.is_valid());
+  CodeObjectPatcher in_text_patcher(in_text_co);
+  EXPECT_TRUE(in_text_patcher.has_relocation_to_text_symbol())
+      << "RELATIVE64 addend inside .text must be rejected";
+  // The addend place is in .data, so the in-text-place guard must NOT be what
+  // catches it -- the symbol-zero addend check is the code path under test.
+  EXPECT_FALSE(in_text_patcher.has_relocations_within_text());
+
+  auto out_of_text = make_amdgpu_elf_with_relative_relocation(kRelative64, kOutOfTextAddend);
+  AmdGpuCodeObject out_co(out_of_text.data(), out_of_text.size());
+  ASSERT_TRUE(out_co.is_valid());
+  CodeObjectPatcher out_patcher(out_co);
+  EXPECT_FALSE(out_patcher.has_relocation_to_text_symbol())
+      << "RELATIVE64 addend outside .text must be accepted";
+}
+
+TEST(BinaryTranslatorE2E, RejectsRelative64AddendIntoText) {
+  constexpr uint32_t kRelative64 = 10;
+  auto image = make_amdgpu_elf_with_relative_relocation(kRelative64, /*addend=*/0x1100);
   AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
 

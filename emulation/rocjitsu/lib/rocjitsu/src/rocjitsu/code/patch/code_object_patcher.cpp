@@ -607,6 +607,8 @@ std::span<const uint8_t> CodeObjectPatcher::text_bytes() const {
 bool CodeObjectPatcher::has_relocations_within_text() const {
   if (text_size_ == 0)
     return false;
+  if (image_.size() < sizeof(Elf64_Ehdr))
+    return false;
 
   auto header = *reinterpret_cast<const Elf64_Ehdr *>(image_.data());
   const auto shdrs = read_section_headers(image_, header);
@@ -663,12 +665,21 @@ bool CodeObjectPatcher::has_relocations_within_text() const {
 bool CodeObjectPatcher::has_relocation_to_text_symbol() const {
   if (text_size_ == 0)
     return false;
+  if (image_.size() < sizeof(Elf64_Ehdr))
+    return false;
 
   auto header = *reinterpret_cast<const Elf64_Ehdr *>(image_.data());
   const auto shdrs = read_section_headers(image_, header);
   const auto text_index = find_text_section(shdrs, text_offset_, text_size_);
   if (!text_index)
     return false;
+
+  // The virtual-address interval of the source .text, used to catch symbol-less
+  // relocations whose addend names an in-.text address (see the RELATIVE64 check
+  // below). find_text_section only guarantees offset/size, so read sh_addr here.
+  const Elf64_Shdr &text = shdrs[*text_index];
+  const uint64_t text_addr_lo = text.sh_addr;
+  const uint64_t text_addr_hi = text.sh_addr + text_size_;
 
   // True if the referenced symbol is *defined in .text*, regardless of type. DBT
   // does not remap text-defined st_value, so any such reference resolves to a
@@ -707,18 +718,33 @@ bool CodeObjectPatcher::has_relocation_to_text_symbol() const {
     for (size_t i = 0; i < count; ++i) {
       const uint64_t offset = relocs.sh_offset + i * entsize;
       uint64_t r_info = 0;
+      int64_t r_addend = 0;
       if (is_rela) {
         Elf64_Rela rela{};
         std::memcpy(&rela, image_.data() + offset, sizeof(rela));
         r_info = rela.r_info;
+        r_addend = rela.r_addend;
       } else {
         Elf64_Rel rel{};
         std::memcpy(&rel, image_.data() + offset, sizeof(rel));
         r_info = rel.r_info;
       }
-      const uint32_t sym_index = static_cast<uint32_t>(r_info >> 32); // ELF64_R_SYM
-      if (sym_index != 0 && symbol_is_defined_in_text(symtab, sym_index))
-        return true;
+      const uint32_t sym_index = elf_reloc_sym(r_info);
+      if (sym_index != 0) {
+        if (symbol_is_defined_in_text(symtab, sym_index))
+          return true;
+        continue;
+      }
+      // Symbol index 0: no owning symbol, so the st_shndx check above cannot see
+      // it. R_AMDGPU_RELATIVE64 forms its stored value from the load bias plus
+      // r_addend, so an addend inside the source .text virtual-address interval
+      // aliases code DBT moves without remapping the addend. Fail closed on that
+      // form; other symbol-zero types have no addend->text derivation to check.
+      if (is_rela && elf_reloc_type(r_info) == R_AMDGPU_RELATIVE64) {
+        const uint64_t target = static_cast<uint64_t>(r_addend);
+        if (target >= text_addr_lo && target < text_addr_hi)
+          return true;
+      }
     }
   }
   return false;

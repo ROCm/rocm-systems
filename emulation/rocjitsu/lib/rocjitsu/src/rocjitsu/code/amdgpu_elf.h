@@ -183,6 +183,18 @@ inline constexpr uint8_t elf_symbol_info(uint8_t bind, uint8_t type) {
   return static_cast<uint8_t>((bind << 4) | (type & 0xf));
 }
 
+// ELF64 relocation info accessors (r_info packs symbol index in the high 32 bits
+// and the relocation type in the low 32 bits).
+inline constexpr uint32_t elf_reloc_sym(uint64_t info) { return static_cast<uint32_t>(info >> 32); }
+inline constexpr uint32_t elf_reloc_type(uint64_t info) {
+  return static_cast<uint32_t>(info & 0xffffffffu);
+}
+
+// AMDGPU relocation types (subset). R_AMDGPU_RELATIVE64 uses symbol index 0 and
+// forms its value from the load bias plus r_addend, so its addend can name an
+// in-.text virtual address with no owning symbol.
+inline constexpr uint32_t R_AMDGPU_RELATIVE64 = 10;
+
 inline constexpr uint64_t SHF_WRITE = 1u << 0;
 inline constexpr uint64_t SHF_ALLOC = 1u << 1;
 inline constexpr uint64_t SHF_EXECINSTR = 1u << 2;

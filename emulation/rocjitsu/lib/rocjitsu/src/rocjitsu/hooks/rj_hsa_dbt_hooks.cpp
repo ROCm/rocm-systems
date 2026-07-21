@@ -2369,13 +2369,10 @@ public:
         const uint64_t packet_id = user_pkt_index + index;
         auto prepared = prepare_virtual_lds_dispatch(state, packet, packet_id, "intercept");
         if (!prepared) {
-          // Leave the packet on its normal descriptor. Metadata-unsupportable
-          // kernels were already rejected at code-object load
-          // (first_unsupportable_virtual_lds_kernel), and a required-sidecar
-          // kernel whose static LDS exceeds the host limit has its normal
-          // descriptor redirected to a skipped-kernel trap stub at translation
-          // time, so the normal path is always safe to dispatch here: either a
-          // legitimate below-threshold launch or a self-halting trap. (Do NOT
+          // nullopt here means KeepNormal: no virtual-LDS plan or a below-threshold
+          // launch whose normal descriptor is safe. Any sidecar-required dispatch
+          // that could not be prepared aborts inside prepare_virtual_lds_dispatch,
+          // so this never silently submits an oversized normal packet. (Do NOT
           // publish an INVALID header: the command processor treats INVALID as
           // "producer has not finished writing this slot" and stalls the queue.)
           continue;
@@ -2493,6 +2490,11 @@ private:
     if (descriptor_private <= packet.private_segment_size)
       return;
 
+    // Unlike ensure_queue_packet_private_size (the ring path), no INVALID header
+    // toggle is needed here: the intercept path edits a private std::vector copy
+    // that is handed to the CP via writer(...) only after the whole batch is
+    // rewritten, so no consumer can observe a half-written packet. Do not add a
+    // header fence to "match" the ring path.
     const uint32_t original_private = packet.private_segment_size;
     packet.private_segment_size = descriptor_private;
     trace_virtual_lds_dispatch("patched intercept private packet=%llu object=0x%llx private=%u->%u",
@@ -2554,18 +2556,40 @@ private:
         packet.kernarg_address, original_kernarg_pointer, std::span{&payload, 1});
   }
 
+  /// @brief Abort the process after a virtual-LDS sidecar dispatch cannot be prepared.
+  ///
+  /// @details Once plan_virtual_lds_dispatch selects UseSidecar (or Reject), the
+  /// requested LDS exceeds the host limit, so the normal descriptor is unsafe for
+  /// THIS dispatch even when it is a live (non-stubbed) descriptor -- e.g. a kernel
+  /// whose static LDS fits but whose dynamic (packet) group segment overflows.
+  /// Falling back to the normal descriptor would submit a host-faulting oversized
+  /// launch, and a persistent INVALID header would stall the queue forever. Neither
+  /// is acceptable, and there is no per-dispatch recovery, so fail loudly and stop.
+  [[noreturn]] static void abort_virtual_lds_dispatch(const char *reason, const char *delivery,
+                                                      uint64_t packet_id, const char *kernel_name,
+                                                      uint64_t requested_lds,
+                                                      uint32_t host_lds_bytes) {
+    std::fprintf(stderr,
+                 "[rocjitsu-hooks] fatal: virtual-LDS sidecar dispatch could not be prepared "
+                 "(%s) delivery=%s packet=%llu kernel=%s requested_lds=%llu host_lds=%u; the "
+                 "normal descriptor is oversized for this launch and cannot be dispatched\n",
+                 reason, delivery, static_cast<unsigned long long>(packet_id),
+                 kernel_name ? kernel_name : "<unknown>",
+                 static_cast<unsigned long long>(requested_lds), host_lds_bytes);
+    std::abort();
+  }
+
   /// @brief Prepare a virtual-LDS rewrite without publishing packet fields.
   ///
   /// @details This is the single policy path shared by ROCR intercept batches and
   /// direct queue scanning. The returned buffers transfer to the delivery adapter,
   /// which publishes fields using the synchronization required by its packet source.
-  /// A nullopt result means "dispatch the packet on its normal descriptor": either
-  /// there is no virtual-LDS plan, the request is below threshold (KeepNormal), or
-  /// the rewrite could not be prepared. The last case is safe because a required
-  /// virtual-LDS kernel whose metadata is unsupportable is rejected at code-object
-  /// load, and a required-sidecar kernel's oversized normal descriptor is redirected
-  /// to a self-halting trap stub at translation time, so the normal path never
-  /// dispatches a host-faulting oversized launch.
+  /// A nullopt result means "dispatch the packet on its normal descriptor" and is
+  /// returned ONLY when the normal descriptor is safe: there is no virtual-LDS plan,
+  /// or the request is below threshold (KeepNormal). Once the plan selects a sidecar
+  /// (UseSidecar/Reject) the normal descriptor is oversized for this dispatch, so any
+  /// preparation failure past that point calls abort_virtual_lds_dispatch rather than
+  /// returning nullopt -- it never silently falls back to a host-faulting launch.
   [[nodiscard]] static std::optional<PreparedVirtualLdsDispatch>
   prepare_virtual_lds_dispatch(QueueState &state, const hsa_kernel_dispatch_packet_t &packet,
                                uint64_t packet_id, const char *delivery) {
@@ -2614,18 +2638,25 @@ private:
     if (rewrite.decision == VirtualLdsDispatchDecision::Reject) {
       // A dispatch-time-only rejection (per-packet grid geometry overflowing the
       // runtime-state ABI). The load-time check cannot see packet dimensions, so
-      // this is reachable; fall back to the normal descriptor (the required
-      // oversized normal descriptor was stubbed to a trap at translation time).
-      trace_virtual_lds_dispatch(
-          "virtual-LDS plan rejected delivery=%s packet=%llu kernel=%s requested=%llu reason=%s",
-          delivery, static_cast<unsigned long long>(packet_id), metadata.kernel_name.c_str(),
-          static_cast<unsigned long long>(rewrite.requested_lds), rewrite.diagnostic.c_str());
-      return std::nullopt;
+      // this is reachable. The request exceeds the host LDS limit, so the normal
+      // descriptor cannot service this launch either -- abort rather than fault.
+      abort_virtual_lds_dispatch(rewrite.diagnostic.c_str(), delivery, packet_id,
+                                 metadata.kernel_name.c_str(), rewrite.requested_lds,
+                                 state.host_lds_bytes);
     }
 
     if ((metadata.flags & kVirtualLdsFlagRuntimeStateBlock) == 0 ||
         (metadata.kernarg_size != 0 && packet.kernarg_address == nullptr)) {
-      return std::nullopt;
+      // Sidecar is required (requested LDS exceeds host) but the runtime-state ABI
+      // is missing or the app supplied no kernarg buffer to wrap. These are fixed
+      // per kernel and validated at load, but the null-kernarg case is packet
+      // data; either way the normal descriptor is oversized, so fail closed.
+      abort_virtual_lds_dispatch(
+          (metadata.flags & kVirtualLdsFlagRuntimeStateBlock) == 0
+              ? "kernel lacks the runtime-state-block ABI required for a sidecar dispatch"
+              : "dispatch supplied no kernarg buffer to wrap for the sidecar",
+          delivery, packet_id, metadata.kernel_name.c_str(), rewrite.requested_lds,
+          state.host_lds_bytes);
     }
     const KernargExtensionPayloadLayout payload{
         .size = static_cast<uint32_t>(sizeof(VirtualLdsDispatchState)),
@@ -2635,7 +2666,12 @@ private:
         make_kernarg_extension_layout(metadata.kernarg_size, std::span{&payload, 1});
     if (!wrapper_layout || wrapper_layout->payload_offsets.size() != 1 ||
         wrapper_layout->payload_offsets.front() != metadata.backing_pointer_kernarg_offset) {
-      return std::nullopt;
+      // The wrapper layout is fixed per kernel and validated at load; a mismatch
+      // here means the descriptor and metadata disagree, so the sidecar cannot be
+      // built and the normal descriptor is oversized for this launch.
+      abort_virtual_lds_dispatch("sidecar kernarg wrapper layout does not match the descriptor",
+                                 delivery, packet_id, metadata.kernel_name.c_str(),
+                                 rewrite.requested_lds, state.host_lds_bytes);
     }
 
     release_completed_retired_buffers(state);
@@ -2643,11 +2679,12 @@ private:
     if (!VirtualLdsDispatchAllocator::instance().allocate(state.host_agent,
                                                           rewrite.geometry.backing_bytes,
                                                           wrapper_layout->wrapper_size, buffers)) {
-      trace_virtual_lds_dispatch(
-          "virtual-LDS allocation failed delivery=%s packet=%llu kernel=%s backing=%zu kernarg=%u",
-          delivery, static_cast<unsigned long long>(packet_id), metadata.kernel_name.c_str(),
-          rewrite.geometry.backing_bytes, wrapper_layout->wrapper_size);
-      return std::nullopt;
+      // Backing/kernarg allocation is a genuinely dispatch-time-only failure (OOM
+      // or pool discovery). There is no per-dispatch recovery and the normal
+      // descriptor is oversized, so abort rather than fault the GPU.
+      abort_virtual_lds_dispatch("sidecar backing/kernarg allocation failed", delivery, packet_id,
+                                 metadata.kernel_name.c_str(), rewrite.requested_lds,
+                                 state.host_lds_bytes);
     }
 
     const VirtualLdsDispatchState dispatch_state = make_virtual_lds_dispatch_state(
@@ -2655,7 +2692,9 @@ private:
     if (!write_virtual_lds_kernarg_wrapper(buffers.kernarg, *wrapper_layout, packet,
                                            dispatch_state)) {
       release_virtual_lds_buffers(buffers);
-      return std::nullopt;
+      abort_virtual_lds_dispatch("sidecar kernarg wrapper could not be written", delivery,
+                                 packet_id, metadata.kernel_name.c_str(), rewrite.requested_lds,
+                                 state.host_lds_bytes);
     }
     trace_virtual_lds_kernarg(packet_id, buffers.kernarg, metadata.kernarg_size);
 
@@ -2747,13 +2786,12 @@ private:
     ensure_queue_packet_private_size(packet, packet_id, slot, header);
     auto prepared = prepare_virtual_lds_dispatch(state, packet, packet_id, "queue");
     if (!prepared) {
-      // Leave the packet on its normal descriptor. Metadata-unsupportable kernels
-      // were already rejected at code-object load, and a required-sidecar kernel
-      // whose static LDS exceeds the host limit has its normal descriptor
-      // redirected to a skipped-kernel trap stub at translation time, so the
-      // normal path is always safe here. Do NOT publish an INVALID header: the
-      // command processor treats INVALID as "producer has not finished writing
-      // this slot" and stalls the queue permanently rather than skipping it.
+      // nullopt here means KeepNormal: no virtual-LDS plan or a below-threshold
+      // launch whose normal descriptor is safe. Any sidecar-required dispatch that
+      // could not be prepared aborts inside prepare_virtual_lds_dispatch, so this
+      // never silently submits an oversized normal packet. Do NOT publish an
+      // INVALID header: the command processor treats INVALID as "producer has not
+      // finished writing this slot" and stalls the queue permanently.
       return true;
     }
     publish_packet_header(packet, make_invalid_packet_header(header));
@@ -2827,6 +2865,13 @@ private:
     });
   }
 
+  // Guards the queue maps and the whole doorbell/intercept rewrite path. The HSA
+  // runtime calls made under this lock (memory-pool allocate, agents_allow_access,
+  // signal_create/load in prepare_virtual_lds_dispatch and
+  // record_virtual_lds_completion_signal) are the *saved original* ROCr entry
+  // points captured in set_virtual_lds_runtime_api, NOT the rocjitsu wrappers, so
+  // they cannot re-enter this mutex. Future changes MUST keep routing those calls
+  // through the saved originals; routing them through the wrappers would deadlock.
   std::mutex mutex_;
   std::unordered_map<uint64_t, QueueState> queues_by_ptr_;
   std::unordered_map<uint64_t, uint64_t> queues_by_doorbell_;

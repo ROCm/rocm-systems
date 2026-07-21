@@ -812,12 +812,13 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   }
 
   // Likewise, DBT moves (and can duplicate) .text blocks but does not remap the
-  // st_value of anything defined in .text. A relocation elsewhere (e.g. a
-  // function-pointer table in .data) that resolves against a text-defined symbol
-  // -- STT_FUNC helper, STT_NOTYPE label, or an STT_SECTION(.text)+addend -- would
-  // point at its stale pre-move PC. Kernel entries are dispatched via the
-  // descriptor (not address-taken through relocations), so this rejects only
-  // genuinely address-taken text locations we cannot relocate yet.
+  // st_value of anything defined in .text, nor a relocation addend. A relocation
+  // elsewhere (e.g. a function-pointer table in .data) that resolves against a
+  // text-defined symbol -- STT_FUNC helper, STT_NOTYPE label, or an
+  // STT_SECTION(.text)+addend -- or a symbol-less R_AMDGPU_RELATIVE64 whose addend
+  // lands in .text would point at its stale pre-move PC. Kernel entries are
+  // dispatched via the descriptor (not address-taken through relocations), so this
+  // rejects only genuinely address-taken text locations we cannot relocate yet.
   if (patcher.has_relocation_to_text_symbol()) {
     append_error(result.diagnostics, DiagnosticKind::Legalization,
                  "code object has a relocation referencing a symbol defined in .text; DBT does not "

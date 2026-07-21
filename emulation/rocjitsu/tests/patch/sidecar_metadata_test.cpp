@@ -96,5 +96,29 @@ TEST(SidecarMetadata, RejectsStringBytesExceedingBuffer) {
   EXPECT_FALSE(parse_sidecar_metadata(bytes).has_value());
 }
 
+TEST(SidecarMetadata, RejectsNonZeroReservedField) {
+  const std::vector<SidecarVariantMetadata> input = {{.kernel_name = "k", .variant_name = "v"}};
+  auto bytes = serialize_sidecar_metadata(input);
+  ASSERT_GE(bytes.size(), 24u);
+  // reserved lives at header offset 20. A non-zero value must be rejected so the
+  // field stays available for a forward-compatible extension.
+  const uint32_t bogus_reserved = 1;
+  std::memcpy(bytes.data() + 20, &bogus_reserved, sizeof(bogus_reserved));
+  EXPECT_FALSE(parse_sidecar_metadata(bytes).has_value());
+}
+
+TEST(SidecarMetadata, RejectsRecordCountExceedingBuffer) {
+  const std::vector<SidecarVariantMetadata> input = {
+      {.kernel_name = "kernel", .variant_name = "virtual-lds"}};
+  auto bytes = serialize_sidecar_metadata(input);
+  ASSERT_GE(bytes.size(), 24u);
+  // record_count lives at header offset 12. Inflate it so records_bytes pushes
+  // strings_offset past the buffer; the strings-subspan bounds check must reject
+  // it without integer overflow (records_bytes is computed in uint64_t).
+  const uint32_t bogus_record_count = 0x10000u;
+  std::memcpy(bytes.data() + 12, &bogus_record_count, sizeof(bogus_record_count));
+  EXPECT_FALSE(parse_sidecar_metadata(bytes).has_value());
+}
+
 } // namespace
 } // namespace rocjitsu
