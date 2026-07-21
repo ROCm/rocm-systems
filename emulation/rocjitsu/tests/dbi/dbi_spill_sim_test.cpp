@@ -80,22 +80,23 @@ constexpr uint32_t kSentinel = 7; // Inline-const value placed into v2 (1..64).
 class Cdna4Sim {
 public:
   Cdna4Sim() {
-    const std::string json = R"({"max_ticks":100000,"num_threads":1,"vm":{"arch":"cdna4"},)"
-                             R"("topology":{"root":{"name":"soc","type":"soc","children":[)"
-                             R"({"name":"vram","type":"gpu_memory"},)"
-                             R"({"name":"xcd0","type":"xcd","children":[)"
-                             R"({"name":"l2","type":"l2_cache"},)"
-                             R"({"name":"cp","type":"command_processor"},)"
-                             R"({"name":"se0","type":"shader_engine","children":[)"
-                             R"({"name":"cu[0:1]","type":"compute_unit","config":[)"
-                             R"({"key":"num_wf_slots","value":"10"},)"
-                             R"({"key":"sgprs_per_wf","value":"800"},)"
-                             R"({"key":"vgprs_per_wf","value":"256"},)"
-                             R"({"key":"lds_size_kb","value":"64"})"
-                             R"(]}]}]}]},"links":[)"
-                             R"({"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},)"
-                             R"({"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10})"
-                             R"(]}})";
+    const std::string json =
+        R"({"max_ticks":100000,"num_threads":1,"vm":{"arch":"cdna4"},)"
+        R"("topology":{"root":{"name":"soc","type":"soc","children":[)"
+        R"({"name":"vram","type":"gpu_memory"},)"
+        R"({"name":"xcd0","type":"xcd","children":[)"
+        R"({"name":"l2","type":"l2_cache"},)"
+        R"({"name":"cp","type":"command_processor"},)"
+        R"({"name":"se0","type":"shader_engine","children":[)"
+        R"({"name":"cu[0:1]","type":"compute_unit","config":[)"
+        R"({"key":"num_wf_slots","value":"10"},)"
+        R"({"key":"sgprs_per_wf","value":"800"},)"
+        R"({"key":"vgprs_per_wf","value":"256"},)"
+        R"({"key":"lds_size_kb","value":"64"})"
+        R"(]}]}]}]},"links":[)"
+        R"({"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},)"
+        R"({"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10})"
+        R"(]}})";
     loaded_ = config::load_config_from_string(json, kEmbeddedSchema);
     soc_ = loaded_.soc();
     mem_ = loaded_.memory();
@@ -126,8 +127,8 @@ public:
     kd.private_segment_fixed_size = private_bytes;
 
     mem_->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);
-    mem_->load_image(reinterpret_cast<const uint8_t *>(code.data()),
-                     code.size() * sizeof(uint32_t), addr + sizeof(kernel_descriptor_t));
+    mem_->load_image(reinterpret_cast<const uint8_t *>(code.data()), code.size() * sizeof(uint32_t),
+                     addr + sizeof(kernel_descriptor_t));
     return addr;
   }
 
@@ -208,7 +209,8 @@ TEST_F(DbiSpillSimFixture, SpilledVgprSurvivesClobberingProbe) {
   EXPECT_EQ(patched_scratch_, 68u) << "descriptor scratch must grow to cover the spill slot";
 
   Cdna4Sim sim;
-  const std::vector<uint32_t> v3 = sim.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
+  const std::vector<uint32_t> v3 =
+      sim.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
   ASSERT_EQ(v3.size(), kWaveSize) << "kernel did not run to completion (no dispatched wavefront)";
   for (uint32_t lane = 0; lane < kWaveSize; ++lane)
     EXPECT_EQ(v3[lane], kSentinel)
@@ -243,7 +245,8 @@ TEST_F(DbiSpillSimFixture, MissingRestoreLeavesVgprClobbered) {
       intact.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
   ASSERT_EQ(v3_intact.size(), kWaveSize);
   for (uint32_t lane = 0; lane < kWaveSize; ++lane)
-    EXPECT_EQ(v3_intact[lane], kSentinel) << "lane " << lane << ": intact restore should recover v2";
+    EXPECT_EQ(v3_intact[lane], kSentinel)
+        << "lane " << lane << ": intact restore should recover v2";
 }
 
 //==============================================================================
@@ -259,8 +262,8 @@ class DbiSgprSpillSimFixture : public ::testing::Test {
 protected:
   void SetUp() override {
     const uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
-    const uint32_t mov_s8_k =
-        build_s_mov_b32(kSpilledSgpr, static_cast<uint16_t>(128 + kSentinel), ROCJITSU_CODE_ARCH_CDNA4);
+    const uint32_t mov_s8_k = build_s_mov_b32(kSpilledSgpr, static_cast<uint16_t>(128 + kSentinel),
+                                              ROCJITSU_CODE_ARCH_CDNA4);
     const uint32_t mov_s8_0 = build_s_mov_b32(kSpilledSgpr, 128, ROCJITSU_CODE_ARCH_CDNA4);
     // s_mov_b32 s8, K ; v_mov_b32 v3, s8 ; s_endpgm. Anchor at offset 4 so s8 is
     // live across the anchor and its restored value flows into the observable v3.
@@ -302,7 +305,8 @@ TEST_F(DbiSgprSpillSimFixture, SpilledSgprSurvivesClobberingProbe) {
   EXPECT_EQ(patched_scratch_, 68u) << "descriptor scratch must grow to cover the spill slot";
 
   Cdna4Sim sim;
-  const std::vector<uint32_t> v3 = sim.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
+  const std::vector<uint32_t> v3 =
+      sim.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
   ASSERT_EQ(v3.size(), kWaveSize) << "kernel did not run to completion (no dispatched wavefront)";
   for (uint32_t lane = 0; lane < kWaveSize; ++lane)
     EXPECT_EQ(v3[lane], kSentinel)
@@ -336,7 +340,8 @@ TEST_F(DbiSgprSpillSimFixture, MissingReadlaneLeavesSgprClobbered) {
       intact.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
   ASSERT_EQ(v3_intact.size(), kWaveSize);
   for (uint32_t lane = 0; lane < kWaveSize; ++lane)
-    EXPECT_EQ(v3_intact[lane], kSentinel) << "lane " << lane << ": intact restore should recover s8";
+    EXPECT_EQ(v3_intact[lane], kSentinel)
+        << "lane " << lane << ": intact restore should recover s8";
 }
 
 } // namespace

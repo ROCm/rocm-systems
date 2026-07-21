@@ -1128,7 +1128,7 @@ bool CodeObjectPatcher::patch_kernel_descriptor(uint64_t file_offset,
 }
 
 bool CodeObjectPatcher::set_private_segment_fixed_size(uint64_t descriptor_file_offset,
-                                                      uint32_t bytes) {
+                                                       uint32_t bytes) {
   if (!image_contains_range(image_.size(), descriptor_file_offset, sizeof(KD)))
     return false;
 
