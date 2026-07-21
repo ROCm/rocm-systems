@@ -80,6 +80,11 @@ def pytest_addoption(parser):
         action="store",
         help="Path to ATT marker trace output directory.",
     )
+    parser.addoption(
+        "--att-no-intercept-out-dir",
+        action="store",
+        help="Path to ATT no-intercept output directory.",
+    )
 
 
 @pytest.fixture
@@ -149,4 +154,12 @@ def att_marker_trace_out_dir_path(request):
     output_dir_path = request.config.getoption("--att-marker-trace-out-dir")
     if not output_dir_path:
         pytest.skip("--att-marker-trace-out-dir not provided")
+    return output_dir_path
+
+
+@pytest.fixture
+def att_no_intercept_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-no-intercept-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-no-intercept-out-dir not provided")
     return output_dir_path

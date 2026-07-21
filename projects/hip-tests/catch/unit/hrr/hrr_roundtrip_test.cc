@@ -35,8 +35,12 @@
 #include "hrr_reader.h"
 #include "hrr_api_args.h"
 
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -81,6 +85,101 @@ static fs::path hrr_single_process_archive(const fs::path& root) {
   INFO("Process archive count: " << archives.size());
   REQUIRE(archives.size() == 1);
   return archives.front();
+}
+
+static std::string read_text_file(const fs::path& path) {
+  std::ifstream in(path, std::ios::binary);
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  return ss.str();
+}
+
+static size_t find_string_end(const std::string& json, size_t quote_pos) {
+  bool escape = false;
+  for (size_t i = quote_pos + 1; i < json.size(); ++i) {
+    const char c = json[i];
+    if (escape) {
+      escape = false;
+    } else if (c == '\\') {
+      escape = true;
+    } else if (c == '"') {
+      return i;
+    }
+  }
+  return std::string::npos;
+}
+
+static size_t find_key_value(const std::string& json, const std::string& key) {
+  size_t pos = 0;
+  while ((pos = json.find('"', pos)) != std::string::npos) {
+    const size_t end = find_string_end(json, pos);
+    if (end == std::string::npos) return std::string::npos;
+    if (json.compare(pos + 1, end - pos - 1, key) == 0) {
+      size_t colon = end + 1;
+      while (colon < json.size() && std::isspace(static_cast<unsigned char>(json[colon]))) ++colon;
+      if (colon < json.size() && json[colon] == ':') {
+        size_t value = colon + 1;
+        while (value < json.size() && std::isspace(static_cast<unsigned char>(json[value]))) ++value;
+        return value;
+      }
+    }
+    pos = end + 1;
+  }
+  return std::string::npos;
+}
+
+static std::string json_string_value(const std::string& json, const std::string& key) {
+  size_t pos = find_key_value(json, key);
+  if (pos == std::string::npos || pos >= json.size() || json[pos] != '"') return {};
+  size_t end = find_string_end(json, pos);
+  if (end == std::string::npos) return {};
+  return json.substr(pos + 1, end - pos - 1);
+}
+
+static long long json_integer_value(const std::string& json, const std::string& key,
+                                    long long missing = -1) {
+  size_t pos = find_key_value(json, key);
+  if (pos == std::string::npos) return missing;
+  while (pos < json.size() && std::isspace(static_cast<unsigned char>(json[pos]))) ++pos;
+  char* end = nullptr;
+  long long value = std::strtoll(json.c_str() + pos, &end, 10);
+  return (end == json.c_str() + pos) ? missing : value;
+}
+
+static std::string json_object_value(const std::string& json, const std::string& key) {
+  size_t pos = find_key_value(json, key);
+  if (pos == std::string::npos || pos >= json.size() || json[pos] != '{') return {};
+
+  int depth = 0;
+  bool in_string = false;
+  bool escape = false;
+  for (size_t i = pos; i < json.size(); ++i) {
+    const char c = json[i];
+    if (in_string) {
+      if (escape) {
+        escape = false;
+      } else if (c == '\\') {
+        escape = true;
+      } else if (c == '"') {
+        in_string = false;
+      }
+      continue;
+    }
+    if (c == '"') {
+      in_string = true;
+    } else if (c == '{') {
+      ++depth;
+    } else if (c == '}') {
+      --depth;
+      if (depth == 0) return json.substr(pos, i - pos + 1);
+    }
+  }
+  return {};
+}
+
+static bool json_array_exists(const std::string& json, const std::string& key) {
+  size_t pos = find_key_value(json, key);
+  return pos != std::string::npos && pos < json.size() && json[pos] == '[';
 }
 
 // ---------------------------------------------------------------------------
@@ -676,6 +775,70 @@ HIP_TEST_CASE(Unit_HRR_MemsetVariantsRoundtrip) {
 HIP_TEST_CASE(Unit_HRR_DeviceInfoRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_deviceinfo"};
   hrr_run_roundtrip("Unit_HRR_DeviceInfo_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_MetadataManifest) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_metadata_manifest"};
+
+  {
+    hip::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_DeviceInfo_Direct\"");
+    INFO("Metadata capture subprocess exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  fs::path archive_path = hrr_single_process_archive(cap.path);
+  REQUIRE(fs::exists(archive_path / "manifest.json"));
+
+  const std::string proc_manifest = read_text_file(archive_path / "manifest.json");
+  const std::string metadata = json_object_value(proc_manifest, "metadata");
+
+  INFO("Process manifest:\n" << proc_manifest);
+  INFO("Metadata:\n" << metadata);
+
+  REQUIRE_FALSE(metadata.empty());
+
+  CHECK(json_integer_value(metadata, "schema_version") == 1);
+  const std::string runtime_version = json_string_value(metadata, "hip_runtime_version");
+  const std::string comgr_version = json_string_value(metadata, "comgr_version");
+  INFO("hip_runtime_version=" << runtime_version);
+  INFO("comgr_version=" << comgr_version);
+  CHECK_FALSE(runtime_version.empty());
+  CHECK_FALSE(comgr_version.empty());
+  CHECK(std::count(runtime_version.begin(), runtime_version.end(), '.') == 2);
+  CHECK(std::count(comgr_version.begin(), comgr_version.end(), '.') == 1);
+
+  const long long device_count = json_integer_value(metadata, "device_count");
+  const long long captured_device_count = json_integer_value(metadata, "captured_device_count");
+  CHECK(device_count >= 1);
+  CHECK(captured_device_count >= 1);
+  CHECK(captured_device_count <= device_count);
+  CHECK(json_array_exists(metadata, "devices"));
+
+  const long long ordinal = json_integer_value(metadata, "ordinal");
+  const long long total_global_mem = json_integer_value(metadata, "total_global_mem");
+  const long long multi_processor_count = json_integer_value(metadata, "multi_processor_count");
+  const long long compute_mode = json_integer_value(metadata, "compute_mode");
+  const std::string name = json_string_value(metadata, "name");
+  const std::string gcn_arch_name = json_string_value(metadata, "gcn_arch_name");
+  const std::string compute_capability = json_string_value(metadata, "compute_capability");
+  const std::string pci = json_string_value(metadata, "pci");
+  const std::string uuid = json_string_value(metadata, "uuid");
+
+  CHECK(ordinal >= 0);
+  CHECK_FALSE(json_object_value(metadata, "properties").empty());
+  CHECK_FALSE(name.empty());
+  CHECK_FALSE(gcn_arch_name.empty());
+  CHECK(total_global_mem > 0);
+  CHECK(multi_processor_count > 0);
+  CHECK(compute_mode >= 0);
+  CHECK_FALSE(compute_capability.empty());
+  CHECK(std::count(compute_capability.begin(), compute_capability.end(), '.') == 1);
+  CHECK_FALSE(pci.empty());
+  CHECK(std::count(pci.begin(), pci.end(), ':') == 2);
+  CHECK_FALSE(uuid.empty());
 }
 
 HIP_TEST_CASE(Unit_HRR_StreamAdvancedRoundtrip) {

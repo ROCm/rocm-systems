@@ -504,6 +504,11 @@
           "test_filter": "ParamTests.*"
         },
         {
+          "name": "ParameterApiTests",
+          "description": "Public ncclParam C API tests",
+          "test_filter": "ParameterApiTests.*"
+        },
+        {
           "name": "ArgCheck",
           "description": "Argument validation tests",
           "test_filter": "ArgCheckTest.*"

@@ -181,6 +181,26 @@ def validate_dispatch_event(dispatch, dispatches, occupancy_file):
     assert dispatches[dispatch_id] == dispatch["kernel_name"]
 
 
+def read_att_stats_kernel_names(output_path):
+    traced_kernel_names = set()
+    stats_files = list(Path(output_path).glob("stats_*.csv"))
+    assert len(stats_files) > 0, f"No stats_*.csv files found in {output_path}"
+
+    for stats_file in stats_files:
+        with open(stats_file, "r") as f:
+            reader = csv.reader(f)
+            header = next(reader, None)
+            assert header is not None, f"Empty stats CSV: {stats_file}"
+            for row in reader:
+                if len(row) >= 3 and row[2].startswith("; "):
+                    traced_kernel_names.add(row[2][2:].strip())
+                if len(row) >= 8 and row[7].strip():
+                    traced_kernel_names.add(row[7].strip())
+
+    assert len(traced_kernel_names) > 0, "No kernel names found in stats CSV files"
+    return traced_kernel_names
+
+
 def test_json_data(json_data):
     data = json_data["rocprofiler-sdk-tool"]
     strings = data["strings"]
@@ -686,29 +706,7 @@ def test_att_marker_trace(json_data, att_marker_trace_out_dir_path):
     ]
     assert len(att_ui_dirs) > 0, "No ui_output_agent_* directories found"
 
-    # Parse stats_*.csv files for kernel names.
-    # stats_*.csv are written to the PARENT of ui_output_* dirs (see code.cpp).
-    # The CSV has rows where the Instruction column is "; <mangled_name>" for
-    # kernel entry points and the Source column holds the demangled name.
-    traced_kernel_names = set()
-    stats_files = list(Path(att_marker_trace_out_dir_path).glob("stats_*.csv"))
-    assert (
-        len(stats_files) > 0
-    ), f"No stats_*.csv files found in {att_marker_trace_out_dir_path}"
-    for stats_file in stats_files:
-        with open(stats_file, "r") as f:
-            reader = csv.reader(f)
-            header = next(reader, None)
-            assert header is not None, f"Empty stats CSV: {stats_file}"
-            for row in reader:
-                # Instruction column (index 2) starts with "; " for kernel names
-                if len(row) >= 3 and row[2].startswith("; "):
-                    traced_kernel_names.add(row[2][2:].strip())
-                # Also check demangled name in Source column (index 7)
-                if len(row) >= 8 and row[7].strip():
-                    traced_kernel_names.add(row[7].strip())
-
-    assert len(traced_kernel_names) > 0, "No kernel names found in stats CSV files"
+    traced_kernel_names = read_att_stats_kernel_names(att_marker_trace_out_dir_path)
 
     # Verify traced_kernel_first and traced_kernel_second were traced
     for expected in ("traced_kernel_first", "traced_kernel_second"):
@@ -725,6 +723,19 @@ def test_att_marker_trace(json_data, att_marker_trace_out_dir_path):
             f"Expected '{not_expected}' to NOT be in ATT trace but it was. "
             f"Traced kernels: {traced_kernel_names}"
         )
+
+
+def test_att_no_intercept_target_kernel(att_no_intercept_out_dir_path):
+    out_dir = Path(att_no_intercept_out_dir_path)
+    att_ui_dirs = [p for p in out_dir.glob("ui_output_agent_*") if p.is_dir()]
+    assert len(att_ui_dirs) > 0, "No ui_output_agent_* directories found"
+
+    traced_kernel_names = read_att_stats_kernel_names(out_dir)
+    expected = "looping_lds_kernel"
+    assert any(expected in name for name in traced_kernel_names), (
+        f"Expected '{expected}' to be in ATT no-intercept trace. "
+        f"Traced kernels: {traced_kernel_names}"
+    )
 
 
 if __name__ == "__main__":

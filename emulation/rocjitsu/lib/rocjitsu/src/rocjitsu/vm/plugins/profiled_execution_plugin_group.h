@@ -120,11 +120,10 @@ public:
                       [&]() { ExecutionPluginGroup::onAmdgpuWavefrontHalted(wf); });
   }
 
-  void onAmdgpuReadVgprs(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint32_t lane_begin,
-                         uint32_t lane_end,
-                         uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override {
+  void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint64_t lane_mask,
+                             uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override {
     profiled_dispatch(prof_read_vgpr_, [&]() {
-      ExecutionPluginGroup::onAmdgpuReadVgprs(wf, physical_reg, lane_begin, lane_end, byte_mask);
+      ExecutionPluginGroup::onAmdgpuReadVgprLanes(wf, physical_reg, lane_mask, byte_mask);
     });
   }
 

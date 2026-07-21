@@ -215,8 +215,11 @@ static bool run_symm_variant(const char *label, void *dest_buf,
 
   size_t nbytes = static_cast<size_t>(nelem) * npes * sizeof(int);
 
-  /* Initialize the destination to -1 (0xff bytes) before any remote writes. */
+  /*
+   * Initialize the destination to -1 (0xff bytes) before any remote writes.
+   */
   CHECK_HIP(hipMemset(dest, 0xff, nbytes));
+  CHECK_HIP(hipDeviceSynchronize());
   rocshmem_barrier_all();
 
   user_mem_symm_test<<<dim3(1), dim3(256), 0, 0>>>(source, dest, nelem, team);

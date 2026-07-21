@@ -17,12 +17,14 @@ VirtualMachine::VirtualMachine(const Config &config)
   set_weight(0);
   auto soc = std::make_unique<SoC>("gpu_soc", config.soc);
   soc_ = soc.get();
+  socs_.push_back(soc_);
   add_child(std::move(soc));
 }
 
 VirtualMachine::VirtualMachine(std::unique_ptr<SoC> soc, bool daemon_mode)
     : simdojo::CompositeComponent(soc->name()), soc_(soc.get()) {
   set_weight(0);
+  socs_.push_back(soc_);
   adopt_children(*soc);
   add_child(std::move(soc));
   driver_ = std::make_unique<SimulatedKfd>(*soc_, daemon_mode);
@@ -37,10 +39,18 @@ VirtualMachine::VirtualMachine(std::vector<std::unique_ptr<SoC>> socs,
   for (size_t i = 0; i < socs.size(); ++i) {
     auto *p = socs[i].get();
     ptrs.push_back(p);
+    socs_.push_back(p);
     if (i == 0)
       soc_ = p;
-    adopt_children(*socs[i]);
-    add_child(std::move(socs[i]));
+    auto wrapper = std::make_unique<simdojo::CompositeComponent>("gpu" + std::to_string(i));
+    wrapper->set_weight(0);
+    wrapper->adopt_children(*socs[i]);
+    // Keep the now-emptied SoC alive/owned under its own uniquely-named gpuN
+    // wrapper rather than directly under the VM: every SoC is named "soc" from
+    // the config, so adding them at the VM level would recreate the duplicate-
+    // name-in-tree hazard this change fixes (find_child returns the first match).
+    wrapper->add_child(std::move(socs[i]));
+    add_child(std::move(wrapper));
   }
   driver_ = std::make_unique<SimulatedKfd>(ptrs, std::move(gpu_ids), daemon_mode);
 }

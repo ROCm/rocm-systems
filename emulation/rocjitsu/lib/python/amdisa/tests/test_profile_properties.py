@@ -37,6 +37,51 @@ def test_supports_wgp_mode(profile, expected):
     assert profile.supports_wgp_mode is expected
 
 
+@pytest.mark.parametrize(
+    ('profile', 'uses_ttmp', 'uses_cluster_ttmp'),
+    [
+        (CdnaProfile(), False, False),
+        (Rdna4Profile(), True, False),
+        (Gfx1250Profile(), True, True),
+    ],
+)
+def test_ttmp_workgroup_id_properties(profile, uses_ttmp, uses_cluster_ttmp):
+    assert profile.uses_ttmp_workgroup_ids is uses_ttmp
+    assert profile.uses_cluster_ttmp_workgroup_ids is uses_cluster_ttmp
+
+
+@pytest.mark.parametrize(
+    ('profile', 'expected'),
+    [
+        (CdnaProfile(), 256),
+        (Rdna4Profile(), 256),
+        (Gfx1250Profile(), 1024),
+    ],
+)
+def test_max_addressable_vgprs_per_wf(profile, expected):
+    assert profile.max_addressable_vgprs_per_wf == expected
+
+
+@pytest.mark.parametrize(
+    ('profile', 'enc_name', 'expected'),
+    [
+        (CdnaProfile(), 'ENC_FLAT', '0x7F'),
+        (Rdna3Profile(), 'ENC_FLAT', '0x7F'),
+        (Rdna4Profile(), 'ENC_VFLAT', 'OPR_SREG_NULL'),
+        (Rdna4Profile(), 'ENC_VGLOBAL', 'OPR_SREG_NULL'),
+        (Gfx1250Profile(), 'ENC_VFLAT', 'OPR_SREG_NULL'),
+        (Gfx1250Profile(), 'ENC_VGLOBAL', 'OPR_SREG_NULL'),
+    ],
+)
+def test_saddr_null_selector_is_encoding_specific(profile, enc_name, expected):
+    assert profile.saddr_null_selector_expr(enc_name) == expected
+
+
+def test_saddr_null_selector_rejects_unrelated_encodings():
+    assert Rdna3Profile().saddr_null_selector_expr('ENC_VOP3') is None
+    assert Rdna4Profile().saddr_null_selector_expr('ENC_VSCRATCH') is None
+
+
 def test_isa_properties_codegen_uses_profile_values(tmp_path):
     specs = [
         ('cdna3', SimpleNamespace(profile=CdnaProfile()), None),
@@ -46,9 +91,17 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
 
     output = emit_isa_properties(str(tmp_path), specs).read_text()
 
-    assert 'case ROCJITSU_CODE_ARCH_CDNA3:\n    return {false};' in output
-    assert 'case ROCJITSU_CODE_ARCH_RDNA4:\n    return {true};' in output
-    assert 'case ROCJITSU_CODE_ARCH_GFX1250:\n    return {false};' in output
+    assert 'uint32_t max_addressable_vgprs_per_wf = 0;' in output
+    assert 'MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;' in output
+    assert (
+        'case ROCJITSU_CODE_ARCH_CDNA3:\n' '    return {false, false, false, 256};'
+    ) in output
+    assert (
+        'case ROCJITSU_CODE_ARCH_RDNA4:\n' '    return {true, true, false, 256};'
+    ) in output
+    assert (
+        'case ROCJITSU_CODE_ARCH_GFX1250:\n' '    return {false, true, true, 1024};'
+    ) in output
 
 
 @pytest.mark.parametrize(
