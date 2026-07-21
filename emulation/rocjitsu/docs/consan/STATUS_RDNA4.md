@@ -10,7 +10,7 @@ commit `640e575da2`, with hook SHA-256
 `c45aa0fece5a9aa7ef8b3ad24bcbb2077e477586df6b4eecf12990f7fafa693d`.  It is
 retained below as historical evidence, but it does not qualify the current
 branch.  After rebasing onto the 2026-07-21 sanitizer tip, the current
-certificate has advanced through validation checkpoint `cde553c12c`, using
+certificate has advanced through validation checkpoint `0a7b607134`, using
 rebuilt hook SHA-256
 `20334d0f54d3ed9223925ea3c75c04a5b5ab84014f4231bc0e572488d1f88d35`.
 Current-tip qualification is in progress; cells below name retained artifacts
@@ -50,8 +50,8 @@ it does not assert that the implementation has regressed.
 
 ## Catch-up snapshot
 
-- **Immediate requalification:** the portable manifest now has 14 workloads ×
-  4 profiles = 56 current-tip cells, including three independently selected
+- **Immediate requalification:** the portable manifest now has 15 workloads ×
+  4 profiles = 60 current-tip cells, including four independently selected
   native gfx1201 PyTorch workloads.  Rebuild the exact hook, run
   clean and paired rows, regenerate target identities, review fault specs,
   execute contained faults, and freeze one provenance bundle.
@@ -70,14 +70,15 @@ it does not assert that the implementation has regressed.
   model, but do not port its configurations, shapes, selectors, denominators,
   or expected outcomes to RDNA4.
 
-Thus the immediate regression campaign contains 56 cells.  The expanded
+Thus the immediate regression campaign contains 60 cells.  The expanded
 gfx1201 denominator is intentionally unknown until discovery produces concrete
 native workloads with independent oracles.  Survey rows and baselines are not
 counted as instrumentation cells.
 
 The current `gfx1201 manifest --json` exposes the original 11 workloads plus
-`pytorch-rdna4-compiled-softmax`, `pytorch-rdna4-llm-topk`, and
-`pytorch-rdna4-sdpa`.  All other
+`pytorch-rdna4-compiled-softmax`, `pytorch-rdna4-llm-topk`,
+`pytorch-rdna4-sdpa`, and the independently inventoried target-native
+`pytorch-torch-histc`.  All other
 expanded PyTorch and Tensile
 workloads remain declared with `targets=("gfx1250",)`.  Their configuration
 paths, generated kernels, and in one case intrinsic are target-specific; they
@@ -101,6 +102,7 @@ tip; a successful smoke or an old artifact is insufficient.
 | **P2 PyTorch causal SDPA** | 🟨 Independent CPU oracle and clean-complete 158/158 LDS accesses; overhead and reviewed fault pending | 🟨 Independent CPU oracle; clean-complete 158/158 accesses + 22/22 barriers + 2/2 atomics + 2/2 fences; overhead and reviewed fault pending | 🟥 Full-pressure attention kernel has no persistent dispatch-ID SGPR pair or fresh automatic EXEC-save window; only 14/27 accesses in a separate bundled fill kernel patch | 🟥 Same full-pressure SGPR blockers; strict fail-closed exit after only the separate fill kernel patches 14/27 accesses | Checkpoint `ccf7172b39`, hook `8b5d0ac7…`: doctor proves numeric dispatch and exact-hook loading; serial four-profile clean artifact `rdna4-pytorch-sdpa-clean-final`. Record/Replay uses automatic RDNA4 scalar spilling and no user tuning knobs |
 | **P2 Sharktank TP2 family** | 🟩 Exact oracle; clean 2976/2976; exact drop is a precommitted qualified miss; overhead 1.28x | 🟩 Exact oracle; clean 2976/2976 + 228/228; exact drop emits a replay diagnostic; overhead 1.83x | 🟩 Exact oracle; clean 2976/2976 + 420/420; exact drop is a precommitted qualified miss; overhead 1.24x | 🟩 Exact oracle; clean 2976/2976 + 228/228; exact drop detected 16/16; overhead 2.17x | One-tip checkpoint `08b15c6d91`: clean `...-048`, overhead `...-049`, inventory `...-050`, accepted fault rows `...-053` through `...-056`; historical expectations remain as failed discovery rows `...-051` and `...-052` |
 | **P3 CLIP BF16** | 🟩 Exact oracle; clean 85/85; exact drop and move are precommitted qualified misses; overhead 0.98x | 🟥 Correct-workload execution times out at the standard 30-second gate before an analysis verdict | 🟩 Exact oracle; clean 85/85 + 72/72; exact drop and move are precommitted qualified misses; overhead 0.97x | 🟩 Exact oracle; clean 85/85 + 36/36; exact move emits an attributed diagnostic while exact drop is a qualified miss; overhead 1.51x | Checkpoint `3033f30f2a`: clean `...-057`, overhead `...-058` through `...-060`, inventory `...-061`, accepted fault rows `...-064` through `...-066` and `...-068` through `...-070`; initial SuperCollider and Inline expectations remain failed discovery evidence in `...-062`, `...-063`, and `...-067` |
+| **P3 PyTorch native histogram** | 🟥 Exact baseline passes, but strict SuperCollider safely rejects 42 atomic-containing kernel variants and the PyTorch failure path exits with `SIGSEGV` before the final verdict | 🟧 Exact oracle and complete 135/135 ordinary LDS accesses; 42/84 supported barriers patch, with the rest lacking reachable entry islands | 🟥 Exact baseline passes, but the third precompiled object produces an invalid sampled transformation and the PyTorch failure path exits with `SIGSEGV` before the final verdict | 🟧 Exact oracle; 100/135 accesses and 43/84 barriers patch with no clean diagnostic | Target-native checkpoint `0a7b607134`, hook `20334d0f…`: baseline and SuperCollider artifact `rdna4-pytorch-histc-clean-002`, Record/Replay `...-001`, Sampled `...-003`, Inline `...-004`. The emitted gfx1201 histogram object contains LDS atomics, but these relaxed accumulations are not qualified MOI ordering events and correctly remain `atomic=0/0` |
 | **P4 hip-moi D128 block attention** | 🟩 Exact oracle; clean 12/12; exact barrier drop is a precommitted qualified miss and breaks the oracle; overhead 164.77x | 🟩 Exact oracle; clean 12/12 + 4/4; exact barrier drop emits an attributed diagnostic and breaks the oracle; overhead 11.21x | 🟨 Exact oracle and clean-complete 12/12 accesses + 8/8 barrier members; overhead and reviewed fault pending | 🟧 Complete 12/12 accesses + 4/4 barriers, but a diagnostic rejects the correct workload | Sampled checkpoint `e96efba818`: clean `...-140` uses a reachable local relay after the end-of-text island became unreachable. SuperCollider checkpoint `ca1eb5456e`: `...-132` through `...-135`. Record/Replay checkpoint `baed32a85e`: `...-114` through `...-118` |
 | **P4 hip-moi D128 pressure attention** | 🟨 Exact oracle and clean-complete 12/12 accesses in 3.48 seconds; overhead and reviewed fault pending | 🟩 Exact oracle; clean 12/12 + 4/4; exact barrier drop emits an attributed diagnostic and breaks the oracle; overhead 14.30x | 🟧 Exact oracle and complete 12/12 accesses + 8/8 barrier members, but four sampled conflicts reject the correct workload | 🟩 Exact oracle; clean 12/12 + 4/4; exact barrier drop emits an attributed diagnostic; overhead 13.72x | SuperCollider checkpoint `cde553c12c`, hook `20334d0f…`, artifact `rdna4-d128-pressure-sc-maxrefs-cache`: caching immutable owner register bounds removes a quadratic shared-function scan and replaces the prior 30-second planner timeout. Sampled checkpoint `e96efba818`: clean `...-141`. Record/Replay checkpoint `baed32a85e`; Inline checkpoint `79aea7420c` |
 | **P4 hip-moi WMMA attention** | 🟩 Exact oracle; clean 12/12; exact barrier drop is a precommitted qualified miss and breaks the oracle; overhead 158.07x | 🟩 Exact oracle; clean 12/12 + 4/4; exact barrier drop emits an attributed diagnostic and breaks the oracle; overhead 11.99x | 🟨 Exact oracle and clean-complete 12/12 accesses + 8/8 barrier members; overhead and reviewed fault pending | 🟧 Complete 12/12 + 4/4 and one clean run passes, but two of three repeated correct-workload runs emit false diagnostics | Sampled checkpoint `e96efba818`: clean `...-142`. SuperCollider checkpoint `ca1eb5456e`: `...-128` through `...-131`. Record/Replay checkpoint `baed32a85e`: `...-114`, `...-115`, `...-116`, `...-120`, and `...-125`. Inline repeated attempt `...-078` retains its intermittent false positive |
@@ -145,7 +147,7 @@ environment now provides `torch 2.14.0.dev20260720+rocm7.1`, HIP 7.1.52802,
 and Triton 3.8.0.  It imports Triton Gluon, sees the Radeon RX 9070 as
 `gfx1201`, and passes an exact elementwise device oracle.  A direct ordinary
 `torch.topk` setup smoke also passes exact BF16 and FP64 values-and-indices
-oracles.  The runner now carries three independently selected gfx1201 clients.
+oracles.  The runner now carries four independently selected gfx1201 clients.
 Ordinary `torch.softmax` compiled by Inductor at shape `128x256`
 generates a compact Triton kernel with four supported LDS accesses and three
 split-barrier pairs, and records both the source revision and installed
@@ -155,7 +157,9 @@ values-and-indices oracle passes, while its native rocPRIM implementation
 exposes the large precompiled-object gate recorded below.  Ordinary causal
 `torch.nn.functional.scaled_dot_product_attention` selects a full-pressure
 native attention kernel; its output is checked against an independent CPU
-implementation rather than against a second GPU path.
+implementation rather than against a second GPU path.  Ordinary `torch.histc`
+selects a native precompiled histogram object whose actual gfx1201 machine code
+contains LDS loads/stores, split barriers, and relaxed LDS atomics.
 
 The official wheel bundles its own modern HSA runtime.  That runtime skips
 legacy `HSA_TOOLS_LIB` loading after successful rocprofiler registration unless
@@ -177,6 +181,7 @@ after seeing what the RDNA4 stack actually dispatches.
 | **D0** `test/test_sort_and_select.py` and `test/test_reductions.py` | 🟥 Promoted; fat-object rejection ends in `SIGSEGV` | 🟥 Promoted; 30-second fat-object gate | 🟥 Promoted; 30-second fat-object gate | 🟥 Promoted; 30-second fat-object gate | A decode-style `topk` over one 151,936-element Qwen vocabulary row with `k=50` is now in the main matrix. Its exact baseline passes. The native rocPRIM path loads 3,153 kernels and exposes shared whole-code-object scalability and unsupported-site handling that the compact Inductor client does not. |
 | **D0** Attention and model paths, including `test/inductor/test_fused_attention.py` and `test/nn/test_multihead_attention.py` | 🟨 Promoted: independent oracle; clean 158/158 | 🟨 Promoted: clean 158/158 + 22/22 + 2/2 + 2/2 | 🟥 Promoted: full-pressure persistent/transient SGPR placement | 🟥 Promoted: same full-pressure SGPR placement | Ordinary causal `torch.nn.functional.scaled_dot_product_attention` is now in the main matrix.  It selects a real native attention kernel and exposed the RDNA4 scalar-spilling and relay-placement work needed to make default Record/Replay clean-complete. |
 | **D1** `test/test_scatter_gather_ops.py` | 🩶 Atomic inventory pending | 🩶 Atomic inventory pending | 🩶 Atomic inventory pending | 🩶 Atomic inventory pending | Select a collision-heavy reduction only if gfx1201 inventory proves a meaningful atomic synchronization role; retain exact collision results. |
+| **D1** `test/test_reductions.py` histogram | 🟥 Promoted: strict atomic-containing-object rejection ends in `SIGSEGV` | 🟧 Promoted: exact oracle, 135/135 accesses, 42/84 barriers | 🟥 Promoted: invalid third-object transform ends in `SIGSEGV` | 🟧 Promoted: exact oracle, 100/135 accesses, 43/84 barriers | Ordinary `torch.histc` is now in the main matrix. Its native object adds a real precompiled-library placement and relaxed-atomic difficulty class; the relaxed LDS atomics are accesses, not qualified memory-ordering events. |
 | **D1** `torch.compile` softmax selected from the reduction/softmax survey | 🟩 Promoted: clean 4/4; exact drop qualified miss; 0.960x | 🟩 Promoted: clean 4/4 + 3/3; exact drop detected; 1.052x | 🟧 Promoted but clean false conflict | 🟧 Promoted: static 4/4 + 3/3; dynamic workgroup-bank limit | The `128x256` exact client is in the main matrix.  Record/Replay detects the third exact barrier-pair drop even though the numeric oracle remains schedule-masked. Inline now instruments every site and exposes a distinct 32-bank external-shadow scalability limit; a different native shape remains desirable for Sampled. |
 | **D2** `test/inductor/test_cooperative_reductions.py` and `test/inductor/test_online_softmax.py` | 🩶 Native case pending | 🩶 Native case pending | 🩶 Native case pending | 🩶 Native case pending | Admit only target-native generated kernels that terminate reliably and add dynamic/shared-memory or multi-stage coverage absent from D0/D1. |
 | **D3** Broader PyTorch model/test survey | 🩶 Survey pending | 🩶 Survey pending | 🩶 Survey pending | 🩶 Survey pending | Inventory first, then cluster by executed event, resource shape, and engine applicability to prevent a large redundant matrix. |
