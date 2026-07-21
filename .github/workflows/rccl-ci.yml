@@ -15,7 +15,7 @@ on:
         description: 'ROCm version to fetch, matched as a prefix (e.g. "7.14" = newest 7.14.*; "7.14.0rc1" pins exactly). Empty = per-cluster default.'
         type: string
         required: false
-        default: '7.14.0a20260612'
+        default: '7.15'
       rocm_amdgpu_family:
         description: 'Specific GPU family fallback if no multi-arch tarball is found.'
         type: string
@@ -57,7 +57,7 @@ jobs:
       # P2P regression (HIP 'invalid argument' at p2p_tmp.cc:358). Unpin once the
       # cuMem fix ("[Bytedance][MI355x] cuMem regression in RCCL CE collective")
       # lands in a nightly/RC.
-      rocm_release: ${{ inputs.rocm_release || '7.14.0a20260612' }}
+      rocm_release: ${{ inputs.rocm_release || '7.15' }}
       rocm_amdgpu_family: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
 
   provision-tw:
@@ -69,7 +69,7 @@ jobs:
       partition: amd-tw
       # Dedicated RCCL CI nodes on Tensorwave (mia1-p01-g[22,26,28,32]).
       reservation: rccl_ci
-      rocm_release: ${{ inputs.rocm_release || '7.14.0a20260612' }}
+      rocm_release: ${{ inputs.rocm_release || '7.15' }}
       rocm_amdgpu_family: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
 
   # --- Suites: each `needs` its cluster's provision and reuses that warm cache.
