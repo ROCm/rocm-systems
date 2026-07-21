@@ -55,6 +55,24 @@ For compatibility with the original gfx1201 workspace, it also recognizes
 The Python used to launch the runner must be able to import the IREE Python
 bindings needed by the Sharktank tests.
 
+PyTorch validation deliberately uses a separate, prebuilt-wheel interpreter;
+the workspace `pytorch/` checkout is for workload discovery and source
+provenance, not for building PyTorch.  Point the runner at that interpreter:
+
+```sh
+python3 -m venv "$CONSAN_VALIDATION_WORKSPACE_DIR/consan-pytorch-venv"
+"$CONSAN_VALIDATION_WORKSPACE_DIR/consan-pytorch-venv/bin/python" -m pip \
+  install 'torch==2.14.0.dev20260720+rocm7.1' 'numpy==2.5.1' \
+  --index-url https://download.pytorch.org/whl/nightly/rocm7.1
+export CONSAN_VALIDATION_PYTORCH_PYTHON="$CONSAN_VALIDATION_WORKSPACE_DIR/consan-pytorch-venv/bin/python"
+```
+
+Freeze the exact wheel and bundled Triton versions in the campaign artifacts.
+The example index matches the current ROCm 7.1 validation stack; choose an
+official prebuilt wheel compatible with the machine's runtime and target when
+reproducing elsewhere.  The doctor requires this interpreter only when the
+selected target manifest contains a PyTorch workload.
+
 Run the preflight before GPU work:
 
 ```sh

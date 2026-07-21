@@ -9,11 +9,14 @@ The last complete gfx1201 certificate was produced on 2026-07-16 at executable
 commit `640e575da2`, with hook SHA-256
 `c45aa0fece5a9aa7ef8b3ad24bcbb2077e477586df6b4eecf12990f7fafa693d`.  It is
 retained below as historical evidence, but it does not qualify the current
-branch.  The current certificate is being assembled for executable revision
-`aff4853917`, using hook SHA-256
-`876765e78818db9026f3670f1b48a920c9d784fda9c61b496f95dad79ff56272`.
+branch.  After rebasing onto the 2026-07-21 sanitizer tip, the current
+certificate is being assembled from validation checkpoint `54aae692e4`, using
+rebuilt hook SHA-256
+`40655ee40ccd28fac2cce7d4a24a1d37b5aa9a2aeee285bbb6dd84a3e3744d0f`.
 Current-tip qualification is in progress; cells below name retained artifacts
-when execution evidence has replaced the initial gray state.
+when post-rebase execution evidence has replaced the initial gray state.
+Intermediate `aff4853917` and `da7af06ef7` artifacts predate that rebase and
+remain diagnostic evidence only; they cannot promote a current cell.
 
 The executable authority is
 [`consan_validation.py`](../../tests/dbi/consan/consan_validation.py), with the
@@ -89,17 +92,17 @@ tip; a successful smoke or an old artifact is insufficient.
 
 | Priority workload | SuperCollider | Record/Replay | Sampled | Inline Shadow | First current-tip gate |
 |---|---|---|---|---|---|
-| **P0 Qwen3-0.6B prefill** | 🟩 Clean 20/20; 1.004x; exact barrier drop detected and oracle fails | 🟩 Clean 20/20 + 14/14 barriers; 0.998x; exact drop is a qualified diagnostic miss and oracle fails | 🟩 Clean 20/20 + 26/26 applicable barriers; 1.001x; declared 32-offset sweep detects 15/32 and every oracle fails | 🟧 Complete 20/20 + 14/14, but a false-positive diagnostic rejects clean execution, preventing paired timing and fault qualification | Clean `rdna4-aff4853917-clean-llm-013`; overhead `-overhead-007`; inventory `-inventory-008`; faults `-fault-qwen-*-011` and `-012` |
-| **P1 Sharktank TP1 prefill** | 🟨 Clean 352/352; 1.238x; exact drop leaves oracle correct but expected instability diagnostic is absent | 🟨 Clean 352/352 + 46/46 barriers; 2.127x; exact drop unexpectedly diagnoses while oracle stays correct | 🟩 Clean 352/352 + 86/86 applicable barriers; 1.143x; exact drop is the precommitted qualified miss and oracle passes | 🟩 Clean 352/352 + 46/46 barriers; 2.735x; exact drop produces the precommitted diagnostic and oracle passes | Clean `rdna4-aff4853917-clean-llm-013`; overhead `-overhead-007`; inventory `-inventory-008`; fault `-fault-tp1-prefill-009` |
-| **P1 Sharktank TP1 decode/combined** | 🟨 Clean 704/704; 1.180x; exact drop leaves oracle correct but expected instability diagnostic is absent | 🟨 Clean 704/704 + 92/92 barriers; 1.580x; diagnostic miss matches but expected oracle corruption is absent | 🟩 Clean 704/704 + 172/172 applicable barriers; 1.132x; exact drop is the precommitted qualified miss and both oracles pass | 🟨 Clean 704/704 + 92/92 barriers; 1.841x; exact drop diagnoses where the frozen policy expected a qualified miss | Clean `rdna4-aff4853917-clean-llm-013`; overhead `-overhead-007`; inventory `-inventory-008`; fault `-fault-tp1-decode-010` |
+| **P0 Qwen3-0.6B prefill** | 🟨 Clean accepted at 20/20 accesses; paired timing and fresh fault pending | 🟨 Clean accepted at 20/20 accesses + 14/14 barriers; paired timing and fresh fault pending | 🟨 Clean accepted at 20/20 accesses + 26/26 applicable barriers; paired timing and fresh sensitivity sweep pending | 🟧 Complete 20/20 accesses + 14/14 barriers, but a diagnostic rejects the correct workload | Clean `rdna4-54aae692e4-clean-qwen-021`; next run paired timing, inventory, and reviewed faults |
+| **P1 Sharktank TP1 prefill** | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | Establish clean completeness at the rebuilt hook before reusing any earlier selector or expectation |
+| **P1 Sharktank TP1 decode/combined** | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | Establish clean completeness at the rebuilt hook before reusing any earlier selector or expectation |
 | **P2 Sharktank TP2 family** | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | Establish an untuned current baseline, then retain all-mode clean completeness and paired timing |
 | **P3 CLIP BF16** | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | 🩶 Rerun required | Confirm the baseline remains practical on hardware; inventory both barrier-drop and barrier-move identities anew |
-| **P4 hip-moi D128 block attention** | 🟥 Clean patching crashes after `flat check/trap proof could not encode readback` | 🟧 Both exact host-reference tests pass and 12/12 accesses + 4/4 barriers patch; static analysis remains incomplete after wait-hazard preflight | 🟥 Clean patching crashes because sampled barrier sync cannot use its reserved entry island | 🟧 Both exact host-reference tests pass with complete 12/12 accesses + 4/4 barriers, but a false-positive diagnostic rejects the clean workload | `rdna4-c91323fc27-clean-001`; fix or qualify each distinct failure, then paired timing and contained barrier drop |
-| **P4 hip-moi D128 pressure attention** | 🟥 Clean patching crashes | 🟧 Oracle passes and 12/12 accesses + 4/4 barriers patch; static analysis incomplete | 🟥 Clean patching crashes | 🟨 Clean accepted with complete 12/12 accesses + 4/4 barriers | `rdna4-c91323fc27-clean-p4-002`; retain spill/resource proof, then timing and fault |
-| **P4 hip-moi WMMA attention** | 🟥 Clean patching crashes | 🟧 Oracle passes and 12/12 accesses + 4/4 barriers patch; static analysis incomplete | 🟥 Clean patching crashes | 🟧 Complete 12/12 accesses + 4/4 barriers, but a clean diagnostic rejects execution | `rdna4-c91323fc27-clean-p4-002`; then timing and fault |
-| **P4 hip-moi Stream-K arrival** | 🟨 Clean accepted with complete 4/4 applicable accesses | 🟧 Oracle passes and 4/4 accesses + 4/4 barriers + 15/15 atomics + 16/16 fences patch; static analysis incomplete | 🟥 Clean patching crashes | 🟧 Complete 4/4 accesses + 4/4 barriers + 15/15 atomics, but a clean diagnostic rejects execution | `rdna4-c91323fc27-clean-p4-002`; then timing and atomic fault inventory |
-| **P4 hip-moi tree atomic-OR** | 🟨 Clean accepted with complete 4/4 applicable accesses | 🟧 All 4/4 accesses + 4/4 barriers + 15/15 atomics + 16/16 fences patch, but static incompleteness and a clean diagnostic reject execution | 🟥 Clean patching crashes | 🟧 Complete 4/4 accesses + 4/4 barriers + 15/15 atomics, but a clean diagnostic rejects execution | `rdna4-c91323fc27-clean-p4-002`; then timing and atomic fault inventory |
-| **P4 Jakub attention variants** | 🟨 Clean accepted with complete 31/31 applicable accesses | 🟧 Oracle passes and 31/31 accesses + 4/4 barriers patch; static analysis incomplete | 🟥 Clean patching crashes | 🟨 Clean accepted with complete 31/31 accesses + 4/4 barriers | `rdna4-c91323fc27-clean-p4-002`; retain dynamic-stack spill proof, then timing and fault |
+| **P4 hip-moi D128 block attention** | 🟥 Clean process crashes before an analysis verdict | 🟧 Oracle passes and 12/12 accesses + 4/4 barriers patch dynamically; static analysis is incomplete | 🟥 Clean process crashes before an analysis verdict | 🟧 Complete 12/12 accesses + 4/4 barriers, but a diagnostic rejects the correct workload | `rdna4-54aae692e4-clean-d128-block-020`; shared post-rebase fixes did not remove these four distinct caveats |
+| **P4 hip-moi D128 pressure attention** | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | Run the clean four-mode discriminator, then move on from resistant modes |
+| **P4 hip-moi WMMA attention** | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | Run the clean four-mode discriminator, then move on from resistant modes |
+| **P4 hip-moi Stream-K arrival** | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | Run clean, then inventory atomic faults only for usable modes |
+| **P4 hip-moi tree atomic-OR** | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | Run clean, then inventory atomic faults only for usable modes |
+| **P4 Jakub attention variants** | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | 🩶 Post-rebase rerun required | Run the clean four-mode discriminator, retaining spill evidence |
 
 ## Native gfx1201 corpus discovery
 
@@ -133,10 +136,15 @@ independently: evidence from one engine never promotes another.
 
 PyTorch is checked out separately at
 `$CONSAN_VALIDATION_WORKSPACE_DIR/pytorch`, revision `50779302a8fd`.  It is not
-vendored by RocJITsu or `rocjitsu-test-corpus`, and it is not yet a required
-path in the validation doctor.  The eventual validation client should use the
-workspace checkout and record both its revision and the installed PyTorch/ROCm
-build identity.
+vendored by RocJITsu or `rocjitsu-test-corpus`.  A separate prebuilt-wheel
+environment now provides `torch 2.14.0.dev20260720+rocm7.1`, HIP 7.1.52802,
+and Triton 3.8.0.  It imports Triton Gluon, sees the Radeon RX 9070 as
+`gfx1201`, and passes an exact elementwise device oracle.  A direct ordinary
+`torch.topk` setup smoke also passes exact BF16 and FP64 values-and-indices
+oracles.  These prove the local execution setup, but do not promote a cell:
+the tested client shapes originated in the gfx1250 harness and have not been
+selected by native gfx1201 inventory.  The eventual admitted client must
+record both the source revision and installed PyTorch/ROCm build identity.
 
 The gfx1250 PyTorch rows demonstrate useful selection principles—dense
 control flow, spill pressure, barriers, atomics, dynamic LDS, and exact
