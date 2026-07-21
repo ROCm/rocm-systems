@@ -344,6 +344,7 @@ struct ConSanKernelInfo {
   uint64_t code_size = 0;
   bool code_size_inferred_from_zero = false;
   bool has_text_range = false;
+  bool has_dynamic_lds = false;
   std::optional<bool> uses_dynamic_stack;
   std::optional<uint16_t> sgpr_count;
   std::optional<std::array<uint32_t, 3>> required_workgroup_size;

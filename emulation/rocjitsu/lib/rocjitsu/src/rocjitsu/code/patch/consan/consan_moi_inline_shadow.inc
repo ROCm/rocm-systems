@@ -153,6 +153,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   const bool has_function_candidate = std::ranges::any_of(
       candidates, [](const ConSanMoiCandidate *candidate) { return !candidate->in_kernel; });
   std::unordered_map<uint64_t, size_t> candidate_count_by_descriptor;
+  bool warned_dynamic_lds_external_shadow = false;
   for (const ConSanMoiCandidate *candidate : candidates) {
     // Direct-kernel compact tokens live in descriptor-local domains. Shared
     // function candidates remain on the external table because one helper may
@@ -376,9 +377,23 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           next_compact_token <= consan_moi_exact_shadow::max_compact_token &&
           candidate_count_by_descriptor[*candidate.kernel_descriptor_file_offset] <=
               consan_moi_exact_shadow::max_compact_token;
-      workgroup_shadow = common_moi_workgroup_shadow_layout(
-          bytes, *resources, arch, result.warnings, compact_token_available);
-      if (!workgroup_shadow) {
+      const bool has_dynamic_lds_owner = std::ranges::any_of(
+          resources->owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
+            const auto kernel =
+                std::ranges::find_if(code_object.kernels(), [&](const AmdGpuKernelInfo &item) {
+                  return item.descriptor_file_offset == descriptor_offset;
+                });
+            return kernel != code_object.kernels().end() && kernel->has_dynamic_lds;
+          });
+      if (!has_dynamic_lds_owner) {
+        workgroup_shadow = common_moi_workgroup_shadow_layout(
+            bytes, *resources, arch, result.warnings, compact_token_available);
+      }
+      if (has_dynamic_lds_owner && !warned_dynamic_lds_external_shadow) {
+        result.warnings.emplace_back(
+            "ConSan MOI inline-shadow dynamic-LDS owner uses the external exact-shadow table");
+        warned_dynamic_lds_external_shadow = true;
+      } else if (!workgroup_shadow) {
         result.warnings.emplace_back(
             "ConSan MOI inline-shadow access falls back to the external exact-shadow table");
       } else if (workgroup_shadow->compact) {

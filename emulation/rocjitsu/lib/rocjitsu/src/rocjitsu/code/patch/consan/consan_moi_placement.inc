@@ -2505,6 +2505,19 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
                          plan.owner_descriptor_file_offsets.end();
             });
       });
+  const bool has_dynamic_lds_owner =
+      options.moi_engine == ConSanMoiEngine::InlineShadow &&
+      std::ranges::any_of(result.kernels, [&](const ConSanKernelInfo &kernel) {
+        if (!kernel.has_dynamic_lds)
+          return false;
+        return std::ranges::any_of(
+            result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+              return plan.source != ConSanRegisterAllocationSource::Unsupported &&
+                     std::ranges::find(plan.owner_descriptor_file_offsets,
+                                       kernel.descriptor_file_offset) !=
+                         plan.owner_descriptor_file_offsets.end();
+            });
+      });
   const size_t record_replay_barrier_sites =
       options.moi_engine == ConSanMoiEngine::RecordReplay && options.moi_track_barriers
           ? std::ranges::count_if(result.resource_plans,
@@ -2557,11 +2570,16 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   // more than a minute repeatedly loading that state, whereas two persistent
   // tail VGPRs complete the same clean row in about 1.5 seconds. Prefer the
   // descriptor-backed representation whenever it fits; private state remains
-  // the capacity fallback for near-full VGPR files.
-  const bool prefer_private_epoch = would_grow_descriptor && !has_dynamic_stack_owner &&
-                                    !prefer_compact_record_replay_barriers &&
-                                    !needs_workgroup_key && !sampled_requires_persistent_owner &&
-                                    options.moi_engine != ConSanMoiEngine::InlineShadow;
+  // the capacity fallback for near-full VGPR files. Dynamic-LDS kernels are an
+  // exception: their external exact-shadow path exercises arbitrary guest
+  // VGPR-bank transitions, so entry-snapshotted private state avoids treating
+  // a remapped tail VGPR as a different owner while retaining the same exact
+  // shadow semantics.
+  const bool prefer_private_epoch =
+      !has_dynamic_stack_owner && !prefer_compact_record_replay_barriers && !needs_workgroup_key &&
+      !sampled_requires_persistent_owner &&
+      (has_dynamic_lds_owner ||
+       (would_grow_descriptor && options.moi_engine != ConSanMoiEngine::InlineShadow));
   const bool gfx1250_record_replay_needs_scalar_epoch =
       arch == ROCJITSU_CODE_ARCH_GFX1250 && options.moi_engine == ConSanMoiEngine::RecordReplay &&
       !options.force_private_epoch && (persistent_end > kMaxVgprs || prefer_private_epoch);

@@ -562,6 +562,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     info.code_size = kernel.code_size;
     info.code_size_inferred_from_zero = kernel.code_size_inferred_from_zero;
     info.has_text_range = kernel.has_text_range;
+    info.has_dynamic_lds = kernel.has_dynamic_lds;
     info.uses_dynamic_stack = kernel.uses_dynamic_stack;
     info.sgpr_count = kernel.sgpr_count;
     info.required_workgroup_size = kernel.required_workgroup_size;

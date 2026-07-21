@@ -709,6 +709,47 @@ TEST(ConSanMoi, InlineShadowFallsBackToExternalMirrorWhenLocalMirrorDoesNotFit) 
             result.warnings.end());
 }
 
+TEST(ConSanMoi, InlineShadowUsesExternalMirrorForDynamicLdsKernel) {
+  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
+  const std::array<uint32_t, 3> text_words = {
+      store[0],
+      store[1],
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+  };
+  constexpr std::string_view kernel_name = "dynamic_lds_external_shadow";
+  std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, kernel_name);
+  mutate_first_kernel_descriptor(bytes,
+                                 [](KD &descriptor) { descriptor.group_segment_fixed_size = 2u; });
+  append_kernel_metadata_note(bytes, kernel_name, /*uses_dynamic_stack=*/false,
+                              /*sgpr_count=*/0u, std::nullopt, std::array<uint8_t, 3>{64u, 1u, 1u},
+                              /*has_dynamic_lds=*/true);
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_inline_workgroup_shadow = true;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.kernels.size(), 1u);
+  EXPECT_TRUE(result.kernels.front().has_dynamic_lds);
+  EXPECT_TRUE(result.moi_private_epoch_automatic);
+  EXPECT_FALSE(result.resolved_moi_owner_vgpr);
+  const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
+  });
+  ASSERT_NE(access, result.patches.end());
+  EXPECT_TRUE(access->persistent_epoch_private_offset);
+  EXPECT_TRUE(access->persistent_owner_private_offset);
+  EXPECT_EQ(access->workgroup_shadow_size, 0u);
+  EXPECT_EQ(access->required_group_segment_size, 0u);
+  EXPECT_NE(std::ranges::find(
+                result.warnings,
+                "ConSan MOI inline-shadow dynamic-LDS owner uses the external exact-shadow table"),
+            result.warnings.end());
+}
+
 TEST(ConSanMoi, InlineShadowLoopsOverEveryWideWorkgroupLocalCellCompactly) {
   const std::array<uint32_t, 3> text_words = {
       0xDB7C0000u,
