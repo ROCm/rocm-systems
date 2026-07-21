@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -196,11 +196,14 @@ executable_destroy(hsa_executable_t executable)
     // Fire callbacks after erasing from the collection but before calling the real destroy.
     // Erasing first prevents double-destroy races. Calling the real destroy last ensures the
     // handle remains valid during callbacks, and that any handle still in code_objects is live.
-    for(auto& entry : snapshot)
+    // Iterate in reverse (LIFO) to mirror the SDK chaining convention: the most recently registered
+    // handler runs first and calls the chained destroy callback after its own work, effectively
+    // reversing the order of callbacks from freeze/create
+    for(auto it = snapshot.rbegin(); it != snapshot.rend(); ++it)
     {
-        if(entry.cb)
+        if(it->cb)
         {
-            entry.cb(executable, ROCPROFILER_ATTACH_CODE_OBJECT_DESTROYED, entry.data);
+            it->cb(executable, ROCPROFILER_ATTACH_CODE_OBJECT_DESTROYED, it->data);
         }
     }
 

@@ -4,13 +4,13 @@
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
-#include "rocjitsu/vm/amdgpu/amd_ext_aql_packet.h"
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/amd_ext_aql_packet.h"
 #include "hsa/amd_hsa_queue.h"
 RJ_DIAGNOSTIC_POP
 
@@ -42,6 +42,26 @@ namespace {
 // The supported cluster size must fit the M0 multicast mask captured at issue time.
 constexpr uint32_t kMaxClusterWorkgroups = kClusterMulticastMaskBits;
 static_assert(kMaxClusterWorkgroups <= kClusterMulticastMaskBits);
+static_assert(kMaxClusterWorkgroups <= 16,
+              "TTMP6 cluster max and max-flat-ID fields are 4 bits wide");
+
+// GFX12 launch-state scalar selectors used by compiler-generated workgroup
+// and cluster identity sequences.
+constexpr uint32_t kGfx12Ttmp6 = 114;
+constexpr uint32_t kGfx12Ttmp7 = 115;
+constexpr uint32_t kGfx12Ttmp9 = 117;
+
+// LLVM's gfx1250 architected-SGPR ABI maps TTMP6 as seven 4-bit fields:
+// cluster-local XYZ, cluster-max XYZ, and max-flat-ID from low to high bits.
+// TTMP7 holds 16-bit cluster-grid Y/Z IDs, while TTMP9 holds cluster-grid X.
+constexpr uint32_t kGfx12Ttmp6ClusterLocalXShift = 0;
+constexpr uint32_t kGfx12Ttmp6ClusterLocalYShift = 4;
+constexpr uint32_t kGfx12Ttmp6ClusterLocalZShift = 8;
+constexpr uint32_t kGfx12Ttmp6ClusterMaxXShift = 12;
+constexpr uint32_t kGfx12Ttmp6ClusterMaxYShift = 16;
+constexpr uint32_t kGfx12Ttmp6ClusterMaxZShift = 20;
+constexpr uint32_t kGfx12Ttmp6ClusterMaxFlatIdShift = 24;
+constexpr uint32_t kGfx12Ttmp7ClusterGridDimensionMask = 0xFFFFu;
 
 struct PlannedWorkgroup {
   uint32_t local_wg_id = 0;
@@ -75,6 +95,7 @@ void validate_cluster_shape(const DispatchEntry &dp) {
     return;
   auto cluster_size =
       static_cast<uint64_t>(dp.cluster_size_x) * dp.cluster_size_y * dp.cluster_size_z;
+  // This also keeps every TTMP6 cluster dimension/max field within 4 bits.
   if (cluster_size == 0 || cluster_size > kMaxClusterWorkgroups) {
     throw std::runtime_error(
         std::format("unsupported workgroup cluster size {}x{}x{} ({} workgroups)",
@@ -85,6 +106,13 @@ void validate_cluster_shape(const DispatchEntry &dp) {
         "workgroup cluster shape {}x{}x{} count {}x{}x{} does not cover grid {}x{}x{} exactly",
         dp.cluster_size_x, dp.cluster_size_y, dp.cluster_size_z, dp.cluster_count_x,
         dp.cluster_count_y, dp.cluster_count_z, dp.grid_wgs_x, dp.grid_wgs_y, dp.grid_wgs_z));
+  }
+  const uint64_t rank_period = dp.cluster_rank_period();
+  if (dp.workgroup_id_offset % rank_period != 0) {
+    throw std::runtime_error(std::format(
+        "clustered workgroup ID offset {} does not preserve cluster-local ranks; expected a "
+        "multiple of {}",
+        dp.workgroup_id_offset, rank_period));
   }
 }
 
@@ -149,22 +177,7 @@ bool plan_cluster_workgroups(const DispatchEntry &entry, uint32_t cluster_base_l
 bool sgpr_count_is_descriptor_encoded(rj_code_arch_t arch, uint32_t sgpr_gran) {
   if (sgpr_gran != 0)
     return true;
-
-  /*
-   * \NPI new ISA family: classify the new arch for CP-visible behavior here \
-   * (RDNA-style encodings return false; CDNA-style fall through to the default).
-   */
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-  case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
-    return false;
-  default:
-    return true;
-  }
+  return isa_properties(arch).descriptor_sgpr_count_encoded;
 }
 
 } // namespace
@@ -281,18 +294,48 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     if (pkt.enable_wg_id_z)
       cu->write_sgpr(sbase + sys_idx++, wg_id_z);
   }
-
-  if (cu->arch() == ROCJITSU_CODE_ARCH_GFX1250 || cu->arch() == ROCJITSU_CODE_ARCH_RDNA4) {
-    constexpr uint32_t ttmp7 = 115;
-    constexpr uint32_t ttmp9 = 117;
+  const auto properties = isa_properties(cu->arch());
+  if (properties.uses_ttmp_workgroup_ids) {
     // The simulator aliases TTMP scalar selectors into the wavefront SGPR
     // block, so the block must include slots through TTMP9.
-    if (cu->config().sgprs_per_wf <= ttmp9) {
-      throw std::runtime_error("RDNA4/gfx1250 TTMP launch payload requires at least 118 SGPR "
+    if (cu->config().sgprs_per_wf <= kGfx12Ttmp9) {
+      throw std::runtime_error("TTMP workgroup-ID launch payload requires at least 118 SGPR "
                                "slots per wavefront");
     }
-    cu->write_sgpr(sbase + ttmp7, ((wg_id_z & 0xFFFFu) << 16) | (wg_id_y & 0xFFFFu));
-    cu->write_sgpr(sbase + ttmp9, grid_wg_id_x);
+
+    // The ordinary TTMP ABI uses grid coordinates. Targets advertising the
+    // clustered extension reinterpret these fields below.
+    uint32_t ttmp6 = 0;
+    uint32_t ttmp7 = ((wg_id_z & kGfx12Ttmp7ClusterGridDimensionMask) << 16) |
+                     (wg_id_y & kGfx12Ttmp7ClusterGridDimensionMask);
+    uint32_t ttmp9 = grid_wg_id_x;
+    if (properties.uses_cluster_ttmp_workgroup_ids) {
+      const uint32_t cluster_size_x = nonzero_or_one(pkt.cluster_size_x);
+      const uint32_t cluster_size_y = nonzero_or_one(pkt.cluster_size_y);
+      const uint32_t cluster_size_z = nonzero_or_one(pkt.cluster_size_z);
+      const WorkgroupCoord cluster_local = pkt.cluster_local_wg_coord_for_flat_wg_id(global_wg_id);
+      const uint32_t cluster_max_x = cluster_size_x - 1;
+      const uint32_t cluster_max_y = cluster_size_y - 1;
+      const uint32_t cluster_max_z = cluster_size_z - 1;
+      const uint32_t cluster_max_flat_id = cluster_size_x * cluster_size_y * cluster_size_z - 1;
+
+      ttmp6 = (cluster_local.x << kGfx12Ttmp6ClusterLocalXShift) |
+              (cluster_local.y << kGfx12Ttmp6ClusterLocalYShift) |
+              (cluster_local.z << kGfx12Ttmp6ClusterLocalZShift) |
+              (cluster_max_x << kGfx12Ttmp6ClusterMaxXShift) |
+              (cluster_max_y << kGfx12Ttmp6ClusterMaxYShift) |
+              (cluster_max_z << kGfx12Ttmp6ClusterMaxZShift) |
+              (cluster_max_flat_id << kGfx12Ttmp6ClusterMaxFlatIdShift);
+      const uint32_t cluster_grid_y =
+          (wg_id_y / cluster_size_y) & kGfx12Ttmp7ClusterGridDimensionMask;
+      const uint32_t cluster_grid_z =
+          (wg_id_z / cluster_size_z) & kGfx12Ttmp7ClusterGridDimensionMask;
+      ttmp7 = (cluster_grid_z << 16) | cluster_grid_y;
+      ttmp9 = grid_wg_id_x / cluster_size_x;
+    }
+    cu->write_sgpr(sbase + kGfx12Ttmp6, ttmp6);
+    cu->write_sgpr(sbase + kGfx12Ttmp7, ttmp7);
+    cu->write_sgpr(sbase + kGfx12Ttmp9, ttmp9);
   }
 
   // Workitem IDs per AMDHSA ABI. The SPI decomposes the flat thread index
@@ -662,7 +705,7 @@ void CommandProcessor::register_cluster_workgroup(const DispatchEntry &entry, ui
   placement.cu = cu;
   placement.lds_base = lds_base;
   placement.cluster_key = cluster_key;
-  placement.cluster_rank = entry.cluster_rank_for_local_wg(local_wg_id);
+  placement.cluster_rank = entry.cluster_rank_for_flat_wg_id(global_wg_id);
   placement.cluster_size = entry.cluster_size();
   placement.peer_wg_ids.reserve(placement.cluster_size);
   for (uint32_t rank = 0; rank < placement.cluster_size; ++rank) {
@@ -842,7 +885,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       wf->set_dispatch_id(entry.dispatch_id);
       wf->set_process_id(entry.process_id);
       wf->set_exec(initial_exec_mask_for_wave(entry, global_wg_id, w, cu->wf_size()));
-      wf->set_cluster_info(entry.cluster_rank_for_local_wg(local_wg_id), entry.cluster_size());
+      wf->set_cluster_info(entry.cluster_rank_for_flat_wg_id(global_wg_id), entry.cluster_size());
       try {
         init_wavefront_regs(cu, wf, entry, global_wg_id, w);
       } catch (...) {
