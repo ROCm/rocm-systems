@@ -131,6 +131,55 @@ class TestSafeExpression:
             pd.Series([2, 4], name="COUNTER", dtype=object),
         )
 
+    @pytest.mark.parametrize(
+        "condition",
+        [
+            pd.Series([True]),
+            np.array([True]),
+            [True],
+            {"enabled": True},
+        ],
+    )
+    def test_conditional_rejects_non_scalar_tests(self, condition):
+        with pytest.raises(UnsafeExpressionError, match="scalar value"):
+            evaluate_expression(
+                "1 if condition else 0",
+                variables={"condition": condition},
+                functions={},
+                subscriptable_names=set(),
+            )
+
+    def test_conditional_rejects_ambiguous_scalar_test(self):
+        with pytest.raises(UnsafeExpressionError, match="unambiguous truth value"):
+            evaluate_expression(
+                "1 if condition else 0",
+                variables={"condition": pd.NA},
+                functions={},
+                subscriptable_names=set(),
+            )
+
+    @pytest.mark.parametrize(
+        ("condition", "expected"),
+        [
+            (True, 1),
+            (False, 0),
+            (2, 1),
+            (0, 0),
+            (None, 0),
+            (np.bool_(True), 1),
+        ],
+    )
+    def test_conditional_allows_scalar_truth_values(self, condition, expected):
+        assert (
+            evaluate_expression(
+                "1 if condition else 0",
+                variables={"condition": condition},
+                functions={},
+                subscriptable_names=set(),
+            )
+            == expected
+        )
+
     def test_where_rejects_side_effect_arguments(self):
         raw_pmc_df = pd.DataFrame({"COUNTER": [1, -1]})
         original = raw_pmc_df.copy()

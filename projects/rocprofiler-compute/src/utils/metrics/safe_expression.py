@@ -115,7 +115,19 @@ class _ExpressionEvaluator:
         return function(self.evaluate(node.left), self.evaluate(node.comparators[0]))
 
     def _evaluate_IfExp(self, node: ast.IfExp) -> object:
-        branch = node.body if bool(self.evaluate(node.test)) else node.orelse
+        test_value = self.evaluate(node.test)
+        if not pd.api.types.is_scalar(test_value):
+            raise UnsafeExpressionError(
+                "Conditional tests must evaluate to a scalar value"
+            )
+        try:
+            test_bool = bool(test_value)
+        except (TypeError, ValueError) as error:
+            raise UnsafeExpressionError(
+                "Conditional test has no unambiguous truth value"
+            ) from error
+
+        branch = node.body if test_bool else node.orelse
         return self.evaluate(branch)
 
     def _evaluate_Subscript(self, node: ast.Subscript) -> object:
