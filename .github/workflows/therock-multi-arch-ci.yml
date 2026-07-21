@@ -75,31 +75,30 @@ jobs:
       run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
       skip_tests: ${{ steps.configure.outputs.skip_tests }}
     steps:
-      - name: Checkout repository
+      - name: Checkout repository config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 0
-          sparse-checkout: .github
+          sparse-checkout: .github/repos-config.json
+          sparse-checkout-cone-mode: false
+
+      - name: Checkout TheRock for configure script
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/TheRock
+          ref: main
+          path: _therock
+          sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
-      # pydantic is required by repo_config_model.py (used by config_loader.py)
-      - name: Install dependencies
-        run: pip install pydantic
-
-      - name: Determine changed projects from git diff
+      - name: Configure CI
         id: configure
         run: |
-          if [ -n "${{ github.event.pull_request.base.sha }}" ]; then
-            # For PRs, compute the merge-base to match the actual PR diff
-            BASE_REF=$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
-            echo "Using merge-base for PR: $BASE_REF"
-          else
-            # For pushes, compare against the previous commit
-            BASE_REF="HEAD^"
-            echo "Using HEAD^ for push"
-          fi
-          export BASE_REF
-          python3 .github/scripts/get_changed_projects.py
+          python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
+            --event-name "${{ github.event_name }}" \
+            --github-repo "${{ github.repository }}" \
+            --base-sha "${{ github.event.pull_request.base.sha }}" \
+            --head-sha "${{ github.event.pull_request.head.sha }}" \
+            --config-path ".github/repos-config.json"
 
   setup:
     needs: configure
