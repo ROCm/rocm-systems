@@ -11,6 +11,11 @@ from profiler_hub_db import ProfilerHubDb
 
 pytestmark = pytest.mark.timeout(120)
 
+# Values below are hand-transcribed from the record built by
+# examples/schema_v3/pmc_event_writer.cpp (see its make_node/make_process/
+# make_thread/make_agent/make_track/make_pmc_info/make_event/make_sample/
+# make_pmc_event functions). If that writer changes, update this dict to
+# match.
 EXPECTED = {
     "value": 1234.5,
     "extdata": "{test data pmc event}",

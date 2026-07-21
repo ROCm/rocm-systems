@@ -11,6 +11,11 @@ from profiler_hub_db import ProfilerHubDb
 
 pytestmark = pytest.mark.timeout(120)
 
+# Values below are hand-transcribed from the record built by
+# examples/schema_v3/memory_copy_writer.cpp (see its make_node/make_process/
+# make_thread/make_agent (called once per src/dst agent)/make_queue/
+# make_stream/make_memory_copy/make_env functions). If that writer changes,
+# update this dict to match.
 EXPECTED = {
     "start_timestamp": 1200000,
     "end_timestamp": 1300000,

@@ -11,6 +11,11 @@ from profiler_hub_db import ProfilerHubDb
 
 pytestmark = pytest.mark.timeout(120)
 
+# Values below are hand-transcribed from the record built by
+# examples/schema_v3/kernel_dispatch_writer.cpp (see its make_node/make_process/
+# make_thread/make_agent/make_queue/make_stream/make_code_object/
+# make_kernel_symbol/make_kernel/make_env functions). If that writer changes,
+# update this dict to match.
 EXPECTED = {
     "dispatch_id": 7,
     "start_timestamp": 1000000,
