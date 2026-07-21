@@ -109,7 +109,7 @@ flowchart TD
     X0["X0 DONE<br/>expansion corpus surveyed and<br/>aggregate four-profile contract defined"]
     XP0["XP0 DONE<br/>PyTorch/Triton TDM plus clustered-dispatch<br/>clean vertical passes all four profiles"]
     XP1["XP1 DONE<br/>torch.mode Record/Replay composes ordinary-access<br/>and atomic-ordering probes; full bundle restored"]
-    XP1A["XP1A ACTIVE<br/>torch.mode SuperCollider current execution signal;<br/>apply histogram admission result, then isolate residual"]
+    XP1A["XP1A DONE<br/>torch.mode SuperCollider strict admission restored;<br/>clean, paired, and reviewed-fault bundle green"]
     XP1B["XP1B DONE<br/>torch.mode Inline dynamic-LDS clean, paired,<br/>and reviewed-fault bundle accepted"]
     XP1C["XP1C DONE<br/>torch.mode Sampled access-plus-ordering composition;<br/>full 2/2-atomic bundle restored"]
     XP4["XP4 DONE<br/>tagged LDS atomic address token plus isolated-release<br/>classification pass torch.mode clean"]
@@ -362,8 +362,7 @@ flowchart TD
   class XT3L,XT3M,XT3N done
   class XP3B done
   class XP3A done
-  class XP5S done
-  class XP1A active
+  class XP5S,XP1A done
   class G0,V9,XP2D,XT2C2,XT2C3,XT3E,XT3I,XF,XG todo
 ```
 
@@ -412,6 +411,15 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP1A is DONE/green.  The XP5S atomic-exclusion admission fix
+  also closes the `torch.mode` SuperCollider override with no residual emitter
+  defect.  Strict one-repetition clean and paired artifacts accept the exact
+  oracle with complete 28,195/28,195 ordinary-access coverage at 116.51x.
+  Fresh inventory plus the reviewed exact-one barrier mutation accept the
+  precommitted qualified-miss outcome and both target-health gates.  No DAG
+  node remains ACTIVE after this completed bundle; the next cell is selected
+  directly from the non-green STATUS matrix.
 
 - 2026-07-21: XP5S is DONE/green at `502b286cfc`.  The strict-policy
   `torch.histc` failure was an all-or-nothing SuperCollider preflight defect:

@@ -182,7 +182,7 @@ have since advanced name their newer committed revision and retained evidence.
 
 | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
-| `torch.mode` | 🟥 Signals after replacement, before oracle | 🟩 At `6491647e31`: exact oracle; 28,939/28,939 accesses, 2/2 atomics, and 4,446/4,446 barriers; paired 208.78x; reviewed exact-one qualified miss and both health gates accepted | 🟩 At `96ecd9024a`: exact oracle; 28,939/28,939 accesses, 2/2 atomics, and 8,892/8,892 barrier members; paired 120.09x; reviewed exact-one qualified miss and both health gates accepted | 🟩 Exact oracle; 28,939/28,939 accesses and 4,446/4,446 barriers |
+| `torch.mode` | 🟩 At `23236d897d`: strict exact oracle; 28,195/28,195 ordinary accesses; paired 116.51x; reviewed exact-one qualified miss and both health gates accepted | 🟩 At `6491647e31`: exact oracle; 28,939/28,939 accesses, 2/2 atomics, and 4,446/4,446 barriers; paired 208.78x; reviewed exact-one qualified miss and both health gates accepted | 🟩 At `96ecd9024a`: exact oracle; 28,939/28,939 accesses, 2/2 atomics, and 8,892/8,892 barrier members; paired 120.09x; reviewed exact-one qualified miss and both health gates accepted | 🟩 Exact oracle; 28,939/28,939 accesses and 4,446/4,446 barriers |
 | `torch.histc` | 🟩 At `502b286cfc`: strict exact oracle; 133/133 ordinary accesses; paired 85.67x; reviewed exact-one causal barrier mutation and both health gates accepted | 🟩 Exact oracle; 175/175 accesses and 84/84 barriers | 🟩 Exact oracle; 175/175 accesses and 168/168 barriers | 🟩 Exact oracle; 175/175 accesses and 84/84 barriers |
 | `001_sk_mxf8f4gemm_tdm` | 🟩 Exact oracle; 768/768 accesses | 🟩 Exact oracle; 768/768 accesses, 204/204 barriers, and 24/24 fences | 🟩 Exact oracle; 768/768 accesses and 180/180 barriers | 🟨 Seventeen exact rows pass, but the final solution remains active at the 300-second bound; no final verdict |
 | `006_sk_hgemm_quick` | 🟧 Existing bounded result retained | 🟧 Exact numeric rows and complete 8,162/8,162 access, 292/292 barrier, and 80/80 fence coverage, but replay emits four conflicts and marks analysis dynamically incomplete | 🟩 Exact oracle; 8,162/8,162 accesses and 544/544 barriers | 🟧 Existing bounded result retained |
@@ -256,6 +256,21 @@ do not promote matrix cells without the end-to-end evidence above.
 | Four focused flavor verticals | 🟨 Four-engine bootstrap | A clean ping-pong cooperative-LDS workload passed its host-reference oracle with 4/4 accesses patched by SuperCollider.  Record/Replay passed with 4/4 accesses and 8/8 barriers patched and visible records.  Sampled passed with 4/4 accesses and two visible records, but 0/8 barriers.  Inline Shadow is statically and dynamically complete with 4/4 accesses, 8/8 barriers, and one visible record.  Fault/diagnostic behavior, replay qualification, and Sampled synchronization remain open. |
 
 ## Progress log
+
+- 2026-07-21: Restored `torch.mode` SuperCollider to green under strict policy.
+  The same atomic-exclusion admission fix that closed histogram also removes
+  mode's apparent post-replacement signal.  Committed-tip clean artifact
+  `consan-green-expansion-20260721-mode-sc-post-admission-154` accepts the
+  exact values/indices oracle with complete 28,195/28,195 ordinary-access
+  coverage in 17.70 seconds.  Paired artifact
+  `...-post-admission-overhead-155` accepts 15,429.77 ms against 138.84- and
+  126.02-ms controls, or 116.51x against their mean.  Fresh inventory
+  `...-post-admission-inventory-156` retains the reviewed barrier identity.
+  Fault artifact `...-post-admission-fault-158` applies it exactly once,
+  observes the precommitted passing-oracle/no-diagnosis qualified miss, and
+  passes target health before and after.  The 60-second attempt `157` ended in
+  host-side patch construction before mutation; the accepted 120-second retry
+  is retained rather than widening the bound further.
 
 - 2026-07-21: Restored `torch.histc` SuperCollider to green under the current
   strict policy at `502b286cfc`.  SuperCollider now keeps LDS atomics as typed
