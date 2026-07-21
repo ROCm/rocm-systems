@@ -68,8 +68,8 @@ struct ncclDevComm {
   uint32_t ginConnectionStride_rcp32;
 
   // CFT
-  ncclTeam_t cftTeam;
-  ncclTeam_t cftMultimemTeam;
+  int cftRank, cftSize;
+  int cftMultimemRank, cftMultimemSize;
   uint32_t cftMultimemSize_rcp32;
   ncclCftLeId ucLeId;
   ncclCftLeId mcLeId;

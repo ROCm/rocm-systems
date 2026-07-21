@@ -21,7 +21,7 @@ NCCL_DEVICE_INLINE ncclCftBarrierSession<Coop>::ncclCftBarrierSession(Coop coop,
                                                                       uint32_t index, bool multimem)
   : ncclCftBarrierSession_internal<Coop>{coop,
                                          comm,
-                                         multimem ? comm.cftMultimemTeam : comm.cftTeam,
+                                         multimem ? ncclTeamCftMultimem(comm) : ncclTeamCft(comm),
                                          multimem ? comm.cftMultimemBarrier : comm.cftBarrier,
                                          index,
                                          multimem,

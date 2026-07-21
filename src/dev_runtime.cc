@@ -1164,8 +1164,8 @@ void ncclDevCommDump(struct ncclDevComm* devComm) {
   printf("**** Dev Comm Dump %p ****\n", devComm);
   printf(" Rank %d/%d CPC32 %d\n", devComm->rank, devComm->nRanks, devComm->nRanks_rcp32);
   printf(" LSA Rank %d/%d CPC32 %d\n", devComm->lsaRank, devComm->lsaSize, devComm->lsaSize_rcp32);
-  printf(" CFT Rank %d/%d, CFT-MM Rank %d/%d\n", devComm->cftTeam.rank, devComm->cftTeam.nRanks,
-         devComm->cftMultimemTeam.rank, devComm->cftMultimemTeam.nRanks);
+  printf(" CFT Rank %d/%d, CFT-MM Rank %d/%d\n", devComm->cftRank, devComm->cftSize, devComm->cftMultimemRank,
+         devComm->cftMultimemSize);
   printf("\n");
   printf(" GIN\n");
   printf("  Connection stride %d\n", devComm->ginConnectionStride);
@@ -1298,8 +1298,10 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
 
   ucTeam = ncclTeamCft(comm);
   mcTeam = ncclTeamCftMultimem(comm);
-  outDevComm->cftTeam = ucTeam;
-  outDevComm->cftMultimemTeam = mcTeam;
+  outDevComm->cftRank = ucTeam.rank;
+  outDevComm->cftSize = ucTeam.nRanks;
+  outDevComm->cftMultimemRank = mcTeam.rank;
+  outDevComm->cftMultimemSize = mcTeam.nRanks;
   outDevComm->cftMultimemSize_rcp32 = idivRcp32(devr->cftMcSize);
 
   if (comm->gpuCftSupport && (reqs->cftCaps & NCCL_CFT)) {
