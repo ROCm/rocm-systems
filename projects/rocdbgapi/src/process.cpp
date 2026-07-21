@@ -450,8 +450,18 @@ process_t::set_wave_launch_mode (os_wave_launch_mode_t wave_launch_mode)
         if (wave.visibility ()
             == wave_t::visibility_t::hidden_halted_at_launch)
           {
-            wave.set_state (AMD_DBGAPI_WAVE_STATE_RUN);
-            wave.set_visibility (wave_t::visibility_t::visible);
+            if (wave.stop_reason () != AMD_DBGAPI_WAVE_STOP_REASON_NONE)
+              {
+                /* keep state as stop, make visible and report exceptions  */
+                wave.report_stop_at_launch ();
+              }
+            else
+              {
+                /* The wave was halted at launch with no exception, it can now
+                   be resumed and reported to the client.  */
+                wave.set_state (AMD_DBGAPI_WAVE_STATE_RUN);
+                wave.set_visibility (wave_t::visibility_t::visible);
+              }
           }
 
       /* Changing the launch mode before resuming the queues ensures that none

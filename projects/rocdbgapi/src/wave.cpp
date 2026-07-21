@@ -1040,6 +1040,24 @@ wave_t::get_info (amd_dbgapi_wave_info_t query, size_t value_size,
   throw api_error_t (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT);
 }
 
+void
+wave_t::report_stop_at_launch ()
+{
+  dbgapi_assert (state () == AMD_DBGAPI_WAVE_STATE_RUN);
+  dbgapi_assert (visibility () != visibility_t::visible);
+  dbgapi_assert (m_stop_reason != AMD_DBGAPI_WAVE_STOP_REASON_NONE);
+
+  /* set_state (STOP) clears the stop reason, so save and restore it.  */
+  auto stop_reason = m_stop_reason;
+
+  set_halted (false);                     /* drop the launch halt */
+  set_state (AMD_DBGAPI_WAVE_STATE_STOP); /* hidden => no event */
+  m_stop_reason = stop_reason;
+
+  set_visibility (visibility_t::visible);
+  raise_event (AMD_DBGAPI_EVENT_KIND_WAVE_STOP);
+}
+
 } /* namespace amd::dbgapi */
 
 using namespace amd::dbgapi;

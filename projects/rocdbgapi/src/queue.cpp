@@ -354,7 +354,7 @@ compute_queue_t::update_waves ()
        changed since the queue was last suspended (or the wave is new).  */
     wave->update (std::move (cwsr_record));
 
-    if (wave->state () != AMD_DBGAPI_WAVE_STATE_STOP)
+    if (wave->state () != AMD_DBGAPI_WAVE_STATE_STOP && ! wave->is_halted ())
       ++*m_waves_running;
 
     /* Hide new waves halted at launch until the process' wave creation mode is
@@ -370,8 +370,16 @@ compute_queue_t::update_waves ()
         log_verbose ("%s is halted at launch", to_cstring (wave->id ()));
 
         wave->set_visibility (wave_t::visibility_t::hidden_halted_at_launch);
-        wave->set_halted (false);
-        wave->set_state (AMD_DBGAPI_WAVE_STATE_STOP);
+
+        /* The wave may be spawned with exceptions, in which case we do not
+           want to report them.  The process will trigger
+           wave_t::report_stop_at_launch () when resuming a wave that is hidden
+           at launch.  */
+        if (wave->stop_reason () == AMD_DBGAPI_WAVE_STOP_REASON_NONE)
+          {
+            wave->set_halted (false);
+            wave->set_state (AMD_DBGAPI_WAVE_STATE_STOP);
+          }
       }
 
     /* This was the last wave in the group. Make sure we have a new group
