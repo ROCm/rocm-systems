@@ -3273,6 +3273,12 @@
       "enabled": true
     },
     {
+      "name": "Plugin Compat v11 - Lazy Init",
+      "description": "AICOMRCCL-1532: v11 net/collnet plugin compat layer lazy initialization (Debug only)",
+      "config": "plugin_compat_v11",
+      "enabled": true
+    },
+    {
       "name": "Asymmetric Visibility",
       "description": "Comm init + AllReduce under asymmetric HIP_VISIBLE_DEVICES",
       "config": "asymmetric_visibility",
