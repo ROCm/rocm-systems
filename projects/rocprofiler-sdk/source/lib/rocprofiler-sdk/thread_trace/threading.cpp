@@ -99,7 +99,8 @@ copy_data_sync(void*         dst,
     if(dependency) signal_wait(*dependency);
 
     // The final drain can legitimately be empty when the last full buffer was already consumed.
-    // Treat a zero-byte transfer as a no-op; gfx11.5 may not raise its async-copy completion signal.
+    // Treat a zero-byte transfer as a no-op; gfx11.5 may not raise its async-copy completion
+    // signal.
     if(size == 0) return;
 
     signal_reset(signal.sig);

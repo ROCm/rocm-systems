@@ -453,7 +453,8 @@ public:
                             // gfx11 packs BASE_HI into the SIZE register, so SIZE is the latch that
                             // commits the base address. Mirror the Swapbuffer()/BUF1 order (and
                             // gfx12's BASE_HI-last order): write BASE (low bits) first, then SIZE
-                            // (size + BASE_HI) last, otherwise the hardware latches a stale BASE_LO.
+                            // (size + BASE_HI) last, otherwise the hardware latches a stale
+                            // BASE_LO.
                             WriteConfigPacket(
                                 cmd_buffer, Primitives::SQ_THREAD_TRACE_BASE_ADDR, baddr_lo);
                             WriteConfigPacket(
@@ -493,8 +494,7 @@ public:
                     // masked-in SEs have an entry in buffer_data.
                     if(bMaskedIn && !config->buffer_data.empty())
                     {
-                        if(Primitives::GFXIP_LEVEL == 10)
-                            throw std::runtime_error("Not supported");
+                        if(Primitives::GFXIP_LEVEL == 10) throw std::runtime_error("Not supported");
 
                         uint64_t buf1_addr =
                             reinterpret_cast<uint64_t>(config->buffer_data.at(global_se).at(0));
@@ -508,9 +508,8 @@ public:
 
                         // BASE_LO and the ordering barrier are common. The final write is the
                         // address latch: BASE_HI on gfx12, SIZE (which contains BASE_HI) on gfx11.
-                        WriteConfigPacket(cmd_buffer,
-                                          Primitives::SQ_THREAD_TRACE_BUF1_BASE_LO_ADDR,
-                                          buff1_lo);
+                        WriteConfigPacket(
+                            cmd_buffer, Primitives::SQ_THREAD_TRACE_BUF1_BASE_LO_ADDR, buff1_lo);
                         builder.BuildWriteWaitIdlePacket(cmd_buffer);
 
                         if(Primitives::GFXIP_LEVEL == 12)
