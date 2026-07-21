@@ -142,6 +142,25 @@ are PyTorch tensors.  It does not yet prove cluster-memory or inter-workgroup
 synchronization: the prototype contains no `cluster_load_*` instruction, so
 that remains a separate discovery target rather than an implied result.
 
+### Post-merge revalidation exceptions
+
+This small override ledger takes precedence over stale green cells in the
+larger table below while the current-tip audit is in progress.  Every entry is
+from a one-repetition run at `66586a47b2`.  The same failures were reproduced
+with the pre-rebase `58379f3c1a` hook, so they are current defects but not
+regressions introduced by the shared-branch rebase.
+
+| Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow |
+|---|---|---|---|---|
+| `torch.mode` | 🟥 Signals after replacement, before oracle | 🟧 Exact oracle and 28,939/28,939 accesses plus 4,446/4,446 barriers, but 0/2 newly inventoried atomics patched | 🟧 Exact oracle and complete access/barrier coverage, but two newly inventoried atomics are unsupported and analysis is incomplete | 🟩 Exact oracle; 28,939/28,939 accesses and 4,446/4,446 barriers |
+| `torch.histc` | 🟥 Signals after replacement, before oracle | 🟩 Exact oracle; 175/175 accesses and 84/84 barriers | 🟩 Exact oracle; 175/175 accesses and 168/168 barriers | 🟩 Exact oracle; 175/175 accesses and 84/84 barriers |
+
+The initial PyTorch agent-discovery and baseline-copy failures were setup
+issues rather than ConSan regressions.  Staging the matching runtime first in
+`LD_LIBRARY_PATH` restores discovery; disabling software-model SDMA avoids a
+baseline-only host-to-device-copy crash.  Accepted PyTorch revalidation uses
+that workaround consistently.
+
 | Priority | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow | Shared evidence and next proof |
 |---|---|---|---|---|---|---|
 | P0 | PyTorch/Triton tensor-descriptor add, one-CTA and two-CTA variants | 🟩 Exact `a + b`; 29/29 accesses; current paired 1.19x | 🟩 Exact `a + b`; 29/29 accesses; 12/12 barriers; current paired 1.33x | 🟩 Exact `a + b`; 29/29 accesses; 20/20 applicable barriers; current paired 2.16x | 🟩 Exact `a + b`; 29/29 accesses; 12/12 barriers; current paired 4.16x | Same-tip SuperCollider clean artifact `199` and paired bundle `200` cover 29/29 accesses after adding byte-LDS checks; both baselines pass and the maximum measured slowdown is 1.05x.  Current one-repetition paired measurements are in `consan-revalidation-gfx1250-20260720-tdm-nullfix-009`.  Reviewed wait-drop bundle `201` applies exactly one mutation, observes the specified no-diagnosis/pass-oracle outcome, and passes containment health.  Its aggregate fault analysis still labels unrelated non-target code objects invalid because the exact-one mutation guard is evaluated per loaded object; the clean and paired runs establish complete instrumentation coverage.  MOI paired bundle `192` and reviewed bundle `194` retain the other three green cells.  This proves clustered dispatch, not cluster-memory instructions. |
