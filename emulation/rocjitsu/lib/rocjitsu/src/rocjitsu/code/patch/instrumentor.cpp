@@ -296,21 +296,6 @@ RegisterSet compute_spill_set(const RegisterSet &live_at_anchor,
   return live_at_anchor & instrumentation_clobbers;
 }
 
-bool check_spill_policy(const RegisterSet &spill_set, SpillPolicy policy, std::string *error_out) {
-  if (policy == SpillPolicy::NoSpillsSupported && !spill_set.none()) {
-    std::string msg = "probe-call requires spilling live registers, not yet supported:";
-    bool first = true;
-    spill_set.for_each([&](RegisterRef ref) {
-      msg += first ? " " : ", ";
-      msg += reg_name(ref);
-      first = false;
-    });
-    report(error_out, msg.c_str());
-    return false;
-  }
-  return true;
-}
-
 bool plan_vgpr_spills(const RegisterSet &spill_set, SpillManager &spills, rj_code_arch_t arch,
                       std::vector<SpillSlot> &out, std::string *error_out) {
   out.clear();

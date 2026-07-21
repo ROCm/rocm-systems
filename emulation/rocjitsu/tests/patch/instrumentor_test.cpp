@@ -1539,24 +1539,6 @@ TEST(InstrumentorSpill, SpillSetIsLiveIntersectClobbers) {
   EXPECT_FALSE(has_sgpr(spill, 31));
 }
 
-// An empty spill set passes the no-spill policy.
-TEST(InstrumentorSpill, EmptySpillSetPassesPolicy) {
-  const RegisterSet spill; // empty
-  std::string err;
-  EXPECT_TRUE(check_spill_policy(spill, SpillPolicy::NoSpillsSupported, &err));
-  EXPECT_TRUE(err.empty());
-}
-
-// A non-empty spill set fails closed under NoSpillsSupported and names the
-// live, clobbered registers in the diagnostic.
-TEST(InstrumentorSpill, NonEmptySpillSetFailsPolicy) {
-  const RegisterSet spill = make_sgpr_set({8, 30});
-  std::string err;
-  EXPECT_FALSE(check_spill_policy(spill, SpillPolicy::NoSpillsSupported, &err));
-  EXPECT_NE(err.find("s8"), std::string::npos);
-  EXPECT_NE(err.find("s30"), std::string::npos);
-}
-
 // Coarse SGPR-allocation gate for probe calls: a kernel must allocate through
 // the fixed return-link pair s[link_base:link_base+1] to own it.
 TEST(InstrumentorSgprGate, LinkPairFitsRequiresAllocationThroughPair) {
@@ -1590,13 +1572,10 @@ TEST(InstrumentorSpill, BuilderPlanFeedsSpillFormula) {
   // A live value outside the envelope's registers does not spill.
   const RegisterSet spill_clear = compute_spill_set(make_sgpr_set({5}), clobbers);
   EXPECT_TRUE(spill_clear.none());
-  EXPECT_TRUE(check_spill_policy(spill_clear, SpillPolicy::NoSpillsSupported, &err));
 
-  // A live value that collides with the chosen target pair spills, and the
-  // no-spill policy rejects it naming that register.
+  // A live value that collides with the chosen target pair spills.
   const RegisterSet spill_hit = compute_spill_set(make_sgpr_set({plan.target_pair_base}), clobbers);
   EXPECT_TRUE(has_sgpr(spill_hit, plan.target_pair_base));
-  EXPECT_FALSE(check_spill_policy(spill_hit, SpillPolicy::NoSpillsSupported, &err));
 }
 
 RegisterSet make_vgpr_set(std::initializer_list<uint16_t> indices) {
@@ -1658,7 +1637,8 @@ TEST(InstrumentorSpill, PlanVgprSpillsFailsPastScratchLimit) {
   SpillManager spills(/*original_private_bytes=*/0, /*per_lane_scratch_limit=*/4); // one slot
   std::vector<SpillSlot> out;
   std::string err;
-  EXPECT_FALSE(plan_vgpr_spills(make_vgpr_set({1, 2}), spills, ROCJITSU_CODE_ARCH_CDNA4, out, &err));
+  EXPECT_FALSE(
+      plan_vgpr_spills(make_vgpr_set({1, 2}), spills, ROCJITSU_CODE_ARCH_CDNA4, out, &err));
   EXPECT_TRUE(out.empty());
   EXPECT_NE(err.find("scratch limit"), std::string::npos);
 }
@@ -1694,8 +1674,8 @@ TEST(InstrumentorSpill, PlanSgprSpillsPicksLowestDeadBridge) {
   // v0,v1 live; v2 already a VGPR spill -> bridge must be v3.
   const RegisterSet live = make_vgpr_set({0, 1});
   const std::vector<SpillSlot> vgpr_spills{SpillSlot{2, 0}};
-  ASSERT_TRUE(plan_sgpr_spills(make_sgpr_set({7}), live, vgpr_spills, /*kernel_vgpr_count=*/8, spills,
-                              ROCJITSU_CODE_ARCH_CDNA4, out, bridge, &err))
+  ASSERT_TRUE(plan_sgpr_spills(make_sgpr_set({7}), live, vgpr_spills, /*kernel_vgpr_count=*/8,
+                               spills, ROCJITSU_CODE_ARCH_CDNA4, out, bridge, &err))
       << err;
   ASSERT_EQ(out.size(), 1u);
   EXPECT_EQ(out[0].sgpr, 7u);
@@ -1712,7 +1692,7 @@ TEST(InstrumentorSpill, PlanSgprSpillsFailsWhenNoBridgeWithinVgprCount) {
   std::string err;
   const RegisterSet live = make_vgpr_set({0, 1}); // both allocated VGPRs live.
   ASSERT_FALSE(plan_sgpr_spills(make_sgpr_set({7}), live, {}, /*kernel_vgpr_count=*/2, spills,
-                               ROCJITSU_CODE_ARCH_CDNA4, out, bridge, &err));
+                                ROCJITSU_CODE_ARCH_CDNA4, out, bridge, &err));
   EXPECT_TRUE(out.empty());
   EXPECT_NE(err.find("bridge VGPR"), std::string::npos) << "error was: " << err;
 }
@@ -1724,7 +1704,7 @@ TEST(InstrumentorSpill, PlanSgprSpillsRejectsNonSgpr) {
   uint16_t bridge = 0xFFFF;
   std::string err;
   ASSERT_FALSE(plan_sgpr_spills(make_vgpr_set({2}), RegisterSet{}, {}, /*kernel_vgpr_count=*/8,
-                               spills, ROCJITSU_CODE_ARCH_CDNA4, out, bridge, &err));
+                                spills, ROCJITSU_CODE_ARCH_CDNA4, out, bridge, &err));
   EXPECT_TRUE(out.empty());
   EXPECT_NE(err.find("v2"), std::string::npos) << "error was: " << err;
 }
@@ -2381,13 +2361,13 @@ TEST(InstrumentorProbeSpill, Cdna4SpillsLiveClobberedSgpr) {
   ASSERT_GT(text.size(), kOriginalTextWords);
   const std::vector<uint32_t> cave(text.begin() + kOriginalTextWords, text.end());
 
-  const auto writelane = build_v_writelane_b32(/*bridge=*/0, /*sgpr=*/8, /*lane=*/0,
-                                               ROCJITSU_CODE_ARCH_CDNA4);
+  const auto writelane =
+      build_v_writelane_b32(/*bridge=*/0, /*sgpr=*/8, /*lane=*/0, ROCJITSU_CODE_ARCH_CDNA4);
   const auto store = build_scratch_store_dword(/*bridge=*/0, 64, ROCJITSU_CODE_ARCH_CDNA4);
   const auto load = build_scratch_load_dword(/*bridge=*/0, 64, ROCJITSU_CODE_ARCH_CDNA4);
   const uint32_t wait = build_wait_loads_complete(ROCJITSU_CODE_ARCH_CDNA4);
-  const auto readlane = build_v_readlane_b32(/*sgpr=*/8, /*bridge=*/0, /*lane=*/0,
-                                             ROCJITSU_CODE_ARCH_CDNA4);
+  const auto readlane =
+      build_v_readlane_b32(/*sgpr=*/8, /*bridge=*/0, /*lane=*/0, ROCJITSU_CODE_ARCH_CDNA4);
   EXPECT_NE(std::search(cave.begin(), cave.end(), writelane.begin(), writelane.end()), cave.end());
   EXPECT_NE(std::search(cave.begin(), cave.end(), store.begin(), store.end()), cave.end());
   EXPECT_NE(std::search(cave.begin(), cave.end(), load.begin(), load.end()), cave.end());

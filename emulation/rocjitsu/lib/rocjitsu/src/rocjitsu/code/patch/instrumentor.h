@@ -246,14 +246,6 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 // than in the callee-only probe_clobber unit.
 //==============================================================================
 
-/// @brief What the builder will do about registers that are simultaneously live
-///        at the anchor and clobbered by instrumentation.
-enum class SpillPolicy {
-  NoSpillsSupported,   ///< Any non-empty spill set is a hard failure.
-  VgprSpillsSupported, ///< VGPRs spill to scratch; SGPRs/AccVGPRs still fail closed.
-  GprSpillsSupported,  ///< VGPRs + SGPRs spill (SGPRs via a bridge VGPR); AccVGPRs fail closed.
-};
-
 /// @brief instrument_clobbers = probe body clobbers | builder envelope clobbers.
 [[nodiscard]] RegisterSet compute_instrumentation_clobbers(const ProbeClobberSummary &probe_summary,
                                                            const RegisterSet &builder_clobbers);
@@ -261,14 +253,6 @@ enum class SpillPolicy {
 /// @brief spill_set = live_at_anchor & instrumentation_clobbers.
 [[nodiscard]] RegisterSet compute_spill_set(const RegisterSet &live_at_anchor,
                                             const RegisterSet &instrumentation_clobbers);
-
-/// @brief Enforce the current spill policy, NoSpillsSupported.
-///
-/// Under @ref SpillPolicy::NoSpillsSupported a non-empty @p spill_set fails
-/// closed: returns false and writes a diagnostic naming the live, clobbered
-/// registers. An empty spill set always succeeds.
-[[nodiscard]] bool check_spill_policy(const RegisterSet &spill_set, SpillPolicy policy,
-                                      std::string *error_out = nullptr);
 
 /// @brief Reserve a scratch slot per VGPR in @p spill_set and fill @p out.
 ///
@@ -287,8 +271,7 @@ enum class SpillPolicy {
 /// Fails closed (returns false, @p out empty) on a non-SGPR register, no free
 /// bridge VGPR within the kernel's allocation, an arch with no scratch emitter, a
 /// slot past the scratch limit, or an offset that does not fit the offset field.
-[[nodiscard]] bool plan_sgpr_spills(const RegisterSet &spill_set,
-                                    const RegisterSet &live_at_anchor,
+[[nodiscard]] bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &live_at_anchor,
                                     const std::vector<SpillSlot> &vgpr_spills,
                                     uint32_t kernel_vgpr_count, SpillManager &spills,
                                     rj_code_arch_t arch, std::vector<SgprSpillSlot> &out,
