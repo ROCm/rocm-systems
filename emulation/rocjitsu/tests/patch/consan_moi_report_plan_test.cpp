@@ -205,6 +205,32 @@ TEST(ConSanMoiAutoReportPlan, SampledBoundaryIsExactAndOneWatchpointFails) {
   EXPECT_EQ(rejected.required_bytes, kConSanMoiAutoReportBufferCeilingBytes + sizeof(uint64_t));
 }
 
+TEST(ConSanMoiAutoReportPlan, AdaptiveSampledBanksFitWithoutDroppingLogicalRanges) {
+  constexpr uint64_t kLogicalRanges = 135610u;
+  const ConSanMoiAutoReportInventory requested{
+      .engine = ConSanMoiEngine::Sampled,
+      .access_range_count = kLogicalRanges,
+      .diagnostic_count = kLogicalRanges,
+      .sampled_range_bank_count = 8u * kLogicalRanges,
+      .sampled_watchpoint_count = 8u * kLogicalRanges,
+      .sampled_bank_count_adaptive = true,
+  };
+  ASSERT_EQ(plan_consan_moi_auto_report(requested).outcome,
+            ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity);
+
+  const auto fitted = fit_consan_moi_sampled_auto_report_inventory(requested);
+  EXPECT_EQ(fitted.access_range_count, kLogicalRanges);
+  EXPECT_EQ(fitted.diagnostic_count, kLogicalRanges);
+  EXPECT_EQ(fitted.sampled_range_bank_count, 4u * kLogicalRanges);
+  EXPECT_EQ(fitted.sampled_watchpoint_count, 4u * kLogicalRanges);
+  EXPECT_TRUE(plan_consan_moi_auto_report(fitted).complete());
+
+  auto exact = requested;
+  exact.sampled_bank_count_adaptive = false;
+  EXPECT_EQ(fit_consan_moi_sampled_auto_report_inventory(exact).sampled_range_bank_count,
+            8u * kLogicalRanges);
+}
+
 TEST(ConSanMoiAutoReportPlan, InlineBoundaryChangesOnlyAtWholeLdsCells) {
   const uint64_t available = kConSanMoiAutoReportBufferCeilingBytes - sizeof(ConSanMoiReportHeader);
   const uint64_t fitting_cells =

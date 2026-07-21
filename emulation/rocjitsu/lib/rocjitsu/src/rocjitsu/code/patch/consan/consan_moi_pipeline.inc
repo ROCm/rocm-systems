@@ -371,10 +371,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
   result.modified = true;
 }
 
-void append_moi_operational_resource_plans(std::span<const uint8_t> bytes,
-                                           const ConSanOptions &options, rj_code_arch_t arch,
-                                           ConSanResult &result) {
-  MoiResourcePlanningState state(bytes, arch, options, result);
+void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
+                                           const ConSanOptions &options, ConSanResult &result) {
   if (options.moi_track_barriers) {
     std::vector<BarrierRecordCandidate> candidates;
     for (const ConSanKernelInfo &kernel : result.kernels)
@@ -431,7 +429,7 @@ void append_moi_operational_resource_plans(std::span<const uint8_t> bytes,
       const uint16_t scratch_count =
           options.moi_engine == ConSanMoiEngine::Sampled ? 10u
           : options.moi_engine == ConSanMoiEngine::InlineShadow
-              ? inline_shadow_atomic_scratch_count(candidate.site, candidate.event_kind, arch)
+              ? inline_shadow_atomic_scratch_count(candidate.site, candidate.event_kind, state.arch)
               : inline_atomic_scratch_count(candidate.site);
       result.resource_plans.push_back(plan_moi_resource_site(
           state, options, ConSanResourceSiteKind::Atomic, index, candidate.site.text_offset,
@@ -835,11 +833,11 @@ void finalize_moi_site_lowering_outcomes(ConSanResult &result) {
   }
 }
 
-void rebuild_moi_resource_plans(std::span<const uint8_t> bytes, const ConSanOptions &options,
-                                rj_code_arch_t arch, ConSanResult &result) {
-  append_moi_resource_plans(bytes, options, arch, result);
-  append_moi_operational_resource_plans(bytes, options, arch, result);
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250 && options.automatic_moi_dispatch_id_sgprs &&
+void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOptions &options,
+                                ConSanResult &result) {
+  append_moi_resource_plans(state, options, result);
+  append_moi_operational_resource_plans(state, options, result);
+  if (state.arch == ROCJITSU_CODE_ARCH_GFX1250 && options.automatic_moi_dispatch_id_sgprs &&
       options.moi_dispatch_id_sgpr) {
     const uint16_t dispatch_base = *options.moi_dispatch_id_sgpr;
     for (ConSanCandidateResourcePlan &plan : result.resource_plans) {
@@ -855,7 +853,7 @@ void rebuild_moi_resource_plans(std::span<const uint8_t> bytes, const ConSanOpti
       }
     }
   }
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250 && options.automatic_moi_partial_exec_save_sgprs &&
+  if (state.arch == ROCJITSU_CODE_ARCH_GFX1250 && options.automatic_moi_partial_exec_save_sgprs &&
       options.moi_exec_save_sgpr) {
     const uint16_t exec_base = *options.moi_exec_save_sgpr;
     for (ConSanCandidateResourcePlan &plan : result.resource_plans) {

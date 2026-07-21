@@ -212,7 +212,13 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
           "ConSan MOI inline shadow omitted unused access-only workgroup-filter state");
     }
   }
-  rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
+  // Register selection iterates as automatic persistent and transient state is
+  // chosen. The code bytes, decoded CFG, ownership scopes, and liveness facts
+  // do not change during those iterations; retain one analysis state instead
+  // of rebuilding the full instruction graph for every option refinement.
+  MoiResourcePlanningState resource_planning_state(code_object_bytes, arch, effective_options,
+                                                   result);
+  rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   effective_options.moi_dynamic_stack_spill =
       effective_options.moi_engine == ConSanMoiEngine::InlineShadow &&
       std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
@@ -224,16 +230,16 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
         });
       });
   if (configure_automatic_moi_owner_sgpr(effective_options, result, arch))
-    rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
+    rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   // Dispatch identity is persistent across every instrumented site, whereas
   // the larger EXEC/VCC/SCC save window is needed only while a probe runs and
   // can use CFG-proven dead registers. Reserve the persistent pair first so a
   // high referenced SGPR does not let the transient window consume the last
   // fresh registers and make dispatch identity spuriously impossible.
   if (configure_automatic_moi_dispatch_id_sgprs(effective_options, result, arch))
-    rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
+    rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   if (configure_automatic_moi_exec_save_sgprs(effective_options, result, code_object_bytes, arch))
-    rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
+    rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported ||
       !validate_moi_dispatch_id_sgprs(effective_options, result, arch) ||
       !validate_moi_ordinary_scalar_state(effective_options, result, arch)) {
@@ -248,7 +254,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   if (effective_options.moi_engine == ConSanMoiEngine::Sampled)
     append_moi_sync_site_dispositions(effective_options, result);
   if (configure_automatic_moi_persistent_vgprs(effective_options, result, code_object_bytes, arch))
-    rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
+    rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported) {
     finalize_moi_site_lowering_outcomes(result);
     summarize_moi_resource_plans(result);
@@ -511,13 +517,17 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
 
   if (options.moi_engine == ConSanMoiEngine::Sampled) {
     const uint64_t bank_count = options.moi_runtime_sample_stride > 1u ? 8u : 1u;
-    const uint64_t access_banks = inventory.access_range_count * bank_count;
+    const uint64_t access_banks =
+        inventory.access_range_count > std::numeric_limits<uint64_t>::max() / bank_count
+            ? std::numeric_limits<uint64_t>::max()
+            : inventory.access_range_count * bank_count;
     // Synchronization metadata is attached to an already selected access
     // window; atomics do not create independent sampled windows. Sizing from
     // atomic inventory alone otherwise provisions vacuous capacity for code
     // objects with no admissible LDS access.
     inventory.sampled_range_bank_count = access_banks;
     inventory.sampled_watchpoint_count = inventory.sampled_range_bank_count;
+    inventory.sampled_bank_count_adaptive = bank_count > 1u;
     if (options.moi_track_barriers) {
       inventory.barrier_event_count = 0;
       for (const ConSanSyncSequence &sequence : result.sync_sequences) {
@@ -571,7 +581,7 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     inventory.diagnostic_count = std::max<uint64_t>(
         inventory.diagnostic_count, kConSanMoiInlineShadowDefaultDiagnosticCapacity);
   }
-  return inventory;
+  return fit_consan_moi_sampled_auto_report_inventory(inventory);
 }
 
 } // namespace rocjitsu

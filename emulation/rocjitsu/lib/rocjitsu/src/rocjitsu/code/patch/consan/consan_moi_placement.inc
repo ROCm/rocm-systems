@@ -1145,15 +1145,14 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
   return plan;
 }
 
-void append_moi_resource_plans(std::span<const uint8_t> bytes, const ConSanOptions &options,
-                               rj_code_arch_t arch, ConSanResult &result) {
+void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOptions &options,
+                               ConSanResult &result) {
   result.resource_plans.clear();
   result.resource_plans.reserve(result.moi_candidates.size());
-  MoiResourcePlanningState state(bytes, arch, options, result);
   for (size_t candidate_index = 0; candidate_index < result.moi_candidates.size();
        ++candidate_index) {
     const ConSanMoiCandidate &candidate = result.moi_candidates[candidate_index];
-    const uint16_t scratch_count = moi_access_scratch_vgpr_count(options, candidate, arch);
+    const uint16_t scratch_count = moi_access_scratch_vgpr_count(options, candidate, state.arch);
     result.resource_plans.push_back(plan_moi_resource_site(
         state, options, ConSanResourceSiteKind::Access, candidate_index, candidate.text_offset,
         candidate.kernel_descriptor_file_offset, scratch_count, &candidate));
@@ -1852,8 +1851,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
           if (!unavailable_or_reserved(static_cast<uint16_t>(reg), 1u) &&
               (!visible || reg != *visible) &&
               (!pc || !range_overlaps(static_cast<uint16_t>(reg), 1u, *pc, 2u)) &&
-              (!call_return ||
-               !range_overlaps(static_cast<uint16_t>(reg), 1u, *call_return, 2u))) {
+              (!call_return || !range_overlaps(static_cast<uint16_t>(reg), 1u, *call_return, 2u))) {
             dispatch_key = static_cast<uint16_t>(reg);
             break;
           }
@@ -1865,8 +1863,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
         if (!unavailable_or_reserved(static_cast<uint16_t>(reg), 1u) &&
             (!visible || reg != *visible) &&
             (!pc || !range_overlaps(static_cast<uint16_t>(reg), 1u, *pc, 2u)) &&
-            (!call_return ||
-             !range_overlaps(static_cast<uint16_t>(reg), 1u, *call_return, 2u)) &&
+            (!call_return || !range_overlaps(static_cast<uint16_t>(reg), 1u, *call_return, 2u)) &&
             (!dispatch_key || reg != *dispatch_key)) {
           scc = static_cast<uint16_t>(reg);
           break;
@@ -2138,8 +2135,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
        static_cast<uint32_t>(*options.moi_inline_indirect_pc_sgpr) + 2u > limit) ||
       (options.moi_inline_call_return_sgpr &&
        static_cast<uint32_t>(*options.moi_inline_call_return_sgpr) + 2u > limit) ||
-      (options.moi_inline_dispatch_key_sgpr &&
-       *options.moi_inline_dispatch_key_sgpr >= limit) ||
+      (options.moi_inline_dispatch_key_sgpr && *options.moi_inline_dispatch_key_sgpr >= limit) ||
       (options.moi_inline_indirect_scc_sgpr && *options.moi_inline_indirect_scc_sgpr >= limit) ||
       (options.moi_inline_visible_evidence_sgpr &&
        *options.moi_inline_visible_evidence_sgpr >= limit) ||
