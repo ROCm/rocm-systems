@@ -384,6 +384,19 @@ def _run_topk(repetitions: int) -> dict[str, object]:
     }
 
 
+def _run_rdna4_llm_topk(repetitions: int) -> dict[str, object]:
+    """Runs decode-style top-k selection over a Qwen-sized vocabulary."""
+    return {
+        "qwen-vocabulary": _run_topk_case(
+            repetitions,
+            dtype=torch.float32,
+            rows=1,
+            columns=151936,
+            k=50,
+        )
+    }
+
+
 def _run_sort(repetitions: int) -> dict[str, object]:
     rows = 4
     columns = 256
@@ -584,6 +597,7 @@ def _parse_args() -> argparse.Namespace:
             "vector-norm",
             "softmax",
             "rdna4-compiled-softmax",
+            "rdna4-llm-topk",
         ),
         required=True,
     )
@@ -637,12 +651,14 @@ def main() -> int:
             }
         elif args.workload == "softmax":
             result = {"softmax": _run_norm_softmax(args.repetitions, run_norm=False)}
-        else:
+        elif args.workload == "rdna4-compiled-softmax":
             result = {
                 "rdna4-compiled-softmax": _run_rdna4_compiled_softmax(
                     args.repetitions
                 )
             }
+        else:
+            result = _run_rdna4_llm_topk(args.repetitions)
     except Exception as exc:
         _write_oracle_result(
             "fail", {"workload": args.workload, "reason": str(exc)}
