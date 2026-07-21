@@ -40,7 +40,8 @@ constexpr int kInputError = 2;
 constexpr int kHazardDetected = 4;
 constexpr uint32_t kMaxJobs = 16;
 constexpr uint32_t kMaxSlowestKernels = 1000;
-constexpr size_t kKernelBatchSize = 8;
+constexpr size_t kKernelBatchSize = 4;
+constexpr size_t kAllocatorTrimKernelCadence = 8;
 
 enum class ProgressMode : uint8_t { Auto, Always, Never };
 
@@ -72,6 +73,7 @@ struct CliOptions {
   std::optional<std::string> counter_parity_jsonl_path;
   bool all_code_objects = false;
   bool list_code_objects = false;
+  bool list_kernels = false;
   bool recursive = false;
   bool exhaustive = false;
   bool skip_unsupported = false;
@@ -292,6 +294,7 @@ void print_help() {
             << "  --kernel-entry OFFSET    Analyze only the kernel at this .text byte offset\n"
             << "  --all-code-objects       Analyze all supported code objects\n"
             << "  --list-code-objects      List supported code objects and exit\n"
+            << "  --list-kernels           List code objects and kernels as JSONL and exit\n"
             << "  --recursive              Expand directory inputs into recursive file sweeps\n"
             << "  --exhaustive             Strict recursive target sweep with completeness totals\n"
             << "  --progress               Show exhaustive kernel progress even without a TTY\n"
@@ -302,10 +305,10 @@ void print_help() {
             << "  --max-diagnostics N      Limit collected and printed diagnostics (default: 32)\n"
             << "  --diagnostics-jsonl PATH Losslessly write per-kernel diagnostics as JSONL\n"
             << "  --counter-parity-jsonl PATH\n"
-            << "                           Write lossless gfx950 counter-parity findings as JSONL\n"
+            << "                           Write lossless counter-parity findings as JSONL\n"
             << "  --stop-after-first-diagnostic\n"
             << "                           Stop each code object after the first observed hazard\n"
-            << "  --check-counter-parity   Compare gfx950 emitted waits with modeled requirements\n"
+            << "  --check-counter-parity   Compare emitted waits with modeled requirements\n"
             << "  --summary-only           Print only final batch totals\n"
             << "  --no-fail                Return success even when hazards are reported\n"
             << "  --help                   Show this help\n\n"
@@ -765,6 +768,10 @@ private:
       options.list_code_objects = true;
       continue;
     }
+    if (arg == "--list-kernels") {
+      options.list_kernels = true;
+      continue;
+    }
     if (arg == "--all-code-objects") {
       options.all_code_objects = true;
       continue;
@@ -939,6 +946,14 @@ private:
     std::cerr << "--list-code-objects cannot be used with --exhaustive\n";
     return false;
   }
+  if (options.exhaustive && options.list_kernels) {
+    std::cerr << "--list-kernels cannot be used with --exhaustive\n";
+    return false;
+  }
+  if (options.list_code_objects && options.list_kernels) {
+    std::cerr << "--list-code-objects cannot be used with --list-kernels\n";
+    return false;
+  }
   if (!options.exhaustive && options.progress == ProgressMode::Always) {
     std::cerr << "--progress requires --exhaustive\n";
     return false;
@@ -1067,6 +1082,46 @@ void list_code_objects(const Executable &executable, std::string_view input_path
     if (include_path)
       std::cout << input_path << ":";
     std::cout << info.name << ": " << count << "\n";
+  }
+}
+
+void list_kernels(const Executable &executable, std::string_view input_path,
+                  const CliOptions &options) {
+  for (const TargetInfo &info : kSupportedTargets) {
+    if (options.target && *options.target != info.target)
+      continue;
+    const uint32_t count = executable.num_code_objects(info.target);
+    for (uint32_t index = 0; index < count; ++index) {
+      if (options.code_object_index_set && index != options.code_object_index)
+        continue;
+      const AmdGpuCodeObject *code_object = executable.code_object(info.target, index);
+      if (!code_object)
+        continue;
+      const std::vector<WaitcheckKernelInfo> kernels = waitcheck_kernels(*code_object);
+      std::cout << "{\"schema\":\"rj-waitcheck-corpus-inventory-v1\",\"kind\":";
+      write_json_string(std::cout, "code-object");
+      std::cout << ",\"input\":";
+      write_json_string(std::cout, input_path);
+      std::cout << ",\"target\":";
+      write_json_string(std::cout, info.name);
+      std::cout << ",\"code_object_index\":" << index << ",\"kernel_count\":" << kernels.size()
+                << "}\n";
+      for (const WaitcheckKernelInfo &kernel : kernels) {
+        std::cout << "{\"schema\":\"rj-waitcheck-corpus-inventory-v1\",\"kind\":";
+        write_json_string(std::cout, "kernel");
+        std::cout << ",\"input\":";
+        write_json_string(std::cout, input_path);
+        std::cout << ",\"target\":";
+        write_json_string(std::cout, info.name);
+        std::cout << ",\"code_object_index\":" << index << ",\"kernel_name\":";
+        write_json_string(std::cout, kernel.name);
+        std::cout << ",\"descriptor_vaddr\":" << kernel.descriptor_vaddr
+                  << ",\"kernel_entry\":" << kernel.entry_offset << ",\"kernel_entry_hex\":";
+        write_json_string(std::cout, hex_offset(kernel.entry_offset));
+        std::cout << ",\"code_size\":" << kernel.code_size
+                  << ",\"wavefront_size\":" << kernel.wavefront_size << "}\n";
+      }
+    }
   }
 }
 
@@ -1544,11 +1599,16 @@ void print_slowest_kernels(const ScanTotals &totals) {
     return false;
   }
 
-  // Interleave bounded kernel batches from different code objects. Each batch
-  // reuses one analyzer and decoder, while enough independent work remains for
-  // a slow kernel to pin only its current worker.
+  // Interleave small bounded kernel batches from different code objects.
+  // Generated libraries often place many pathological special-function
+  // kernels next to one another, so a large adjacent batch can pin every
+  // worker. Four kernels retain analyzer/decoder reuse while bounding that
+  // imbalance. Lossless writers use one kernel per item for unambiguous
+  // identity.
   const size_t kernel_batch_size =
       diagnostic_writer || counter_parity_writer ? 1 : kKernelBatchSize;
+  const size_t allocator_trim_work_cadence =
+      std::max<size_t>(1, kAllocatorTrimKernelCadence / kernel_batch_size);
   size_t max_batch_count = 0;
   for (size_t task_index = 0; task_index < code_object_tasks.size(); ++task_index) {
     CodeObjectTask &task = code_object_tasks[task_index];
@@ -1618,7 +1678,11 @@ void print_slowest_kernels(const ScanTotals &totals) {
       // another batch so glibc arenas do not retain a pathological high-water
       // mark per thread.
 #if defined(__GLIBC__)
-      if (work.kernel_count != 0)
+      // malloc_trim takes the process-wide allocator lock. Trimming after
+      // every small work item serializes the worker pool. A bounded
+      // kernel-count cadence still returns pathological CFG arenas during a
+      // sweep without putting allocator maintenance on the hot path.
+      if (work.kernel_count != 0 && work_index % allocator_trim_work_cadence == 0)
         malloc_trim(0);
 #endif
       const bool code_object_completed =
@@ -1724,6 +1788,24 @@ int main(int argc, char **argv) {
         return kInputError;
       }
       list_code_objects(executable, input_path, include_path);
+    }
+    return 0;
+  }
+
+  if (options.list_kernels) {
+    ScanTotals totals;
+    for (const std::string &input_path : options.input_paths) {
+      ++totals.inputs;
+      Executable executable(input_path);
+      if (!executable.is_valid()) {
+        if (options.skip_unsupported) {
+          skip_input(input_path, "failed to parse input executable or code object", totals);
+          continue;
+        }
+        std::cerr << input_path << ": failed to parse input executable or code object\n";
+        return kInputError;
+      }
+      list_kernels(executable, input_path, options);
     }
     return 0;
   }

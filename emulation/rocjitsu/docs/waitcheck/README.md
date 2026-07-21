@@ -24,7 +24,7 @@ Both the offline CLI and HSA tools hook support every target below.
 | Target | ISA family | Validation |
 |---|---|---|
 | `gfx942` | CDNA3 | PyTorch corpus |
-| `gfx950` | CDNA4 | PyTorch samples, Tensile, IREE |
+| `gfx950` | CDNA4 | PyTorch corpus, Tensile, IREE |
 | `gfx1100` | RDNA3 | PyTorch corpus |
 | `gfx1150` | RDNA3.5 | PyTorch corpus |
 | `gfx1151` | RDNA3.5 | Focused tests |
@@ -305,6 +305,33 @@ objects remain single analysis units. The default is `-j1`, and the maximum is
 with each kernel's wall time, input, target, code-object index, name, and entry
 offset for follow-up optimization.
 
+### Audit LLVM-emitted counter strength
+
+For intact kernels known to come from an LLVM-based compiler pipeline,
+counter-parity mode compares each emitted counter value with waitcheck's
+pre-wait requirement in the same analysis pass:
+
+```sh
+build/tools/rj_waitcheck /path/to/llvm-produced-code-objects \
+  --target gfx950 --exhaustive --check-counter-parity \
+  --counter-parity-jsonl gfx950-counter-parity.jsonl \
+  --diagnostics-jsonl gfx950-hazards.jsonl \
+  --summary-only --progress -j12 --slowest-kernels 20 --no-fail
+```
+
+Lower counter values are stronger. If the model requires `N` but LLVM emitted
+`M` with `N > M`, LLVM waited more strongly than waitcheck believes necessary;
+that is an under-accounting and potential false-negative candidate. Exact
+agreement is counted separately. Stronger emitted waits for which final ISA has
+no attributable dependency are retained as unmodeled rows rather than treated
+as agreement. Do not use generated assembly merely assembled by LLVM as the
+oracle—the generator, not LLVM, selected those waits.
+
+The JSONL record includes a stable catalog key, kernel identity, normalized
+counter values, producer/consumer evidence, and a replay command. See the
+[`LLVM parity map`](../waitcheck-llvm-parity.md) for the full contract, corpus
+inventory command, current finding classes, and triage requirements.
+
 Useful options:
 
 | Option | Meaning |
@@ -313,6 +340,7 @@ Useful options:
 | `--code-object-index N` | Select the Nth code object for the selected target. |
 | `--kernel-entry OFFSET` | Analyze only the descriptor whose `.text` entry byte offset matches `OFFSET`. Use this to mirror dispatch-lazy runtime checking on a massive code object. |
 | `--all-code-objects` | Analyze all supported code objects in each input. |
+| `--list-kernels` | List selected code objects and all descriptor-backed kernels as JSONL, then exit. |
 | `--recursive` | Expand directory inputs into recursive file sweeps. |
 | `--exhaustive` | Strict target-specific recursive sweep with code-object and kernel completeness totals. Requires `--target`. |
 | `--progress` | Show exhaustive kernel progress even when standard error is not an interactive terminal. |
@@ -320,6 +348,8 @@ Useful options:
 | `-j N`, `--jobs N` | Analyze up to N kernels concurrently. The default is 1 and the maximum is 16. |
 | `--slowest-kernels N` | Report the N slowest kernels after an all-code-object or exhaustive sweep. |
 | `--diagnostics-jsonl PATH` | Losslessly write one JSON object per retained per-kernel diagnostic. Requires `--all-code-objects` or `--exhaustive`. |
+| `--check-counter-parity` | Compare intact emitted wait fields with waitcheck's pre-wait counter requirements. |
+| `--counter-parity-jsonl PATH` | Losslessly write modeled under-accounting and unmodeled emitted-wait findings as JSONL. |
 | `--skip-unsupported` | Skip unparsable inputs, inputs with no supported code object, or unsupported analysis failures. |
 | `--max-diagnostics N` | Limit collected and printed diagnostics. Use `0` to suppress diagnostic payloads while preserving counts. |
 | `--stop-after-first-diagnostic` | Stop each code object after the first observed hazard. Useful for large sweeps. |

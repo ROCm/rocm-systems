@@ -257,6 +257,42 @@ TEST(RjWaitcheck, ListsAndScansConcatenatedCompressedGfx950Bundles) {
       << stdout_text;
 }
 
+TEST(RjWaitcheck, ListsCodeObjectsAndKernelsAsJsonl) {
+  const TempDir temp_dir(
+      std::filesystem::temp_directory_path() /
+      ("rj_waitcheck_smoke_" + std::to_string(static_cast<long long>(getpid()))));
+
+  const auto input = temp_dir.path / "inventory_gfx950.co";
+  const auto output = temp_dir.path / "stdout.txt";
+  const auto error = temp_dir.path / "stderr.txt";
+  const auto image = rocjitsu::waitcheck_test::make_gfx_multi_kernel_code_object(
+      {{"first", {0xBF810000u}}, {"second", {0xBF810000u}}},
+      rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ASSERT_TRUE(write_binary_file(input, image));
+
+  const std::string command = shell_quote(g_waitcheck_tool.string()) + " --list-kernels " +
+                              shell_quote(input.string()) + " > " + shell_quote(output.string()) +
+                              " 2> " + shell_quote(error.string());
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
+                                         << stderr_text << "\nstdout:\n"
+                                         << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+  EXPECT_EQ(std::count(stdout_text.begin(), stdout_text.end(), '\n'), 3);
+  EXPECT_TRUE(contains(stdout_text, "\"schema\":\"rj-waitcheck-corpus-inventory-v1\""))
+      << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "\"kind\":\"code-object\"")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "\"target\":\"gfx950\"")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "\"kernel_count\":2")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "\"kernel_name\":\"first\"")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "\"kernel_entry_hex\":\"0x0\"")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "\"kernel_name\":\"second\"")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "\"kernel_entry_hex\":\"0x4\"")) << stdout_text;
+}
+
 TEST(RjWaitcheck, KernelEntryChecksOnlySelectedDescriptor) {
   const TempDir temp_dir(
       std::filesystem::temp_directory_path() /
