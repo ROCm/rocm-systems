@@ -173,8 +173,10 @@ std::string RaceDetectorPlugin::getSummary() const {
 
 void RaceDetectorPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) {
   std::lock_guard<std::mutex> lock(report_mutex_);
-  sink().write(std::format("[rocjitsu] Kernel dispatch: \"{}\"\n",
-                           info.kernel_name.empty() ? "?" : info.kernel_name));
+  KernelNames kernel_names{info.kernelNameOrUnknown(), info.kernelSymbolOrUnknown()};
+  dispatch_kernel_names_[info.dispatch_id] = kernel_names;
+  sink().write(std::format("[rocjitsu] Kernel dispatch: \"{}\" symbol=\"{}\"\n", kernel_names.name,
+                           kernel_names.symbol));
 }
 
 void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
@@ -229,9 +231,17 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
         const char *space = v.space == RaceViolation::Space::VGPR   ? "VGPR"
                             : v.space == RaceViolation::Space::SGPR ? "SGPR"
                                                                     : "LDS";
-        sink().write(std::format(
-            "RACE type={} reg={} wave={} lane={} wg={},{},{} conflict=unknown\n{}END_RACE\n", space,
-            v.index, v.wave, v.lane, v.workgroupId.x, v.workgroupId.y, v.workgroupId.z, oss.str()));
+        auto kernel_name_iter = dispatch_kernel_names_.find(dispatch_id);
+        const KernelNames kernel_names =
+            kernel_name_iter == dispatch_kernel_names_.end()
+                ? KernelNames{kUnknownKernelIdentity, kUnknownKernelIdentity}
+                : kernel_name_iter->second;
+        sink().write(
+            std::format("RACE kernel={} symbol={} dispatch={} type={} reg={} wave={} lane={} "
+                        "wg={},{},{} "
+                        "conflict=unknown\n{}END_RACE\n",
+                        kernel_names.name, kernel_names.symbol, dispatch_id, space, v.index, v.wave,
+                        v.lane, v.workgroupId.x, v.workgroupId.y, v.workgroupId.z, oss.str()));
       }
     }
   };

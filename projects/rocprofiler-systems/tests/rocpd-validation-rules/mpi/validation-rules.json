@@ -1,0 +1,46 @@
+{
+    "required_tables": [
+        {
+            "name_prefix": "rocpd_string",
+            "required_columns": [
+                "id",
+                "string"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify that MPI function name strings are present in the table",
+                    "error_message": "No 'MPI_' strings found in the table rocpd_string",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM {table_name} WHERE string LIKE 'MPI\\_%' ESCAPE '\\';"
+                }
+            ]
+        },
+        {
+            "name": "regions",
+            "required_columns": [
+                "tid",
+                "start",
+                "end",
+                "name",
+                "category"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Verify entries have non-zero start times",
+                    "error_message": "Found entries with zero start times in regions table",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM {table_name} WHERE start = 0"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify that 'mpi' appears in category at least once in table regions",
+                    "error_message": "'mpi' category entries are fewer than expected in regions",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM {table_name} WHERE category = 'mpi';"
+                }
+            ]
+        }
+    ]
+}

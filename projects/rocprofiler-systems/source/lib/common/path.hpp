@@ -9,6 +9,7 @@
 #include "common/environment.hpp"
 #include <spdlog/fmt/fmt.h>
 
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
@@ -91,8 +92,8 @@ inline std::string
 find_path(const std::string& _path, int _verbose,
           const std::string& _search_paths = {}) ROCPROFSYS_INTERNAL_API;
 
-inline std::string
-dirname(const std::string& _fname) ROCPROFSYS_INTERNAL_API;
+[[nodiscard]] inline std::string
+parent_path(std::string_view fpath, std::uint16_t levels = 1) ROCPROFSYS_INTERNAL_API;
 
 [[nodiscard]] inline std::string
 realpath(const std::string& path) ROCPROFSYS_INTERNAL_API;
@@ -215,11 +216,11 @@ find_path(const std::string& _path, int _verbose, const std::string& _search_pat
     {
         if(std::string_view{ ::basename(itr.c_str()) }.find("lib") ==
                std::string_view::npos &&
-           !dirname(itr).empty())
+           !parent_path(itr).empty())
         {
             for(const auto* sitr : { "lib", "lib64", "../lib", "../lib64" })
             {
-                auto _f = fmt::format("{}/{}/{}", dirname(itr), sitr, _path);
+                auto _f = fmt::format("{}/{}/{}", parent_path(itr), sitr, _path);
                 ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl + 1,
                                     "searching for '%s' in '%s' ...\n", _path.c_str(),
                                     fmt::format("{}/{}", itr, sitr).c_str());
@@ -237,12 +238,26 @@ find_path(const std::string& _path, int _verbose, const std::string& _search_pat
     return _path;
 }
 
-std::string
-dirname(const std::string& _fname)
+/**
+ * Get parent directory of @p fpath, walking up @p levels times.
+ * Pure lexical operation: no filesystem access and no '.'/'..' resolution.
+ * Absolute paths clamp at "/"; relative paths bottom out at "".
+ * @code parent_path("/a/b/c", 2) @endcode returns "/a".
+ * @param fpath  the path to take the parent of
+ * @param levels number of components to strip (0 returns @p fpath unchanged)
+ * @return the parent path, or "" / "/" at the relative / absolute limit
+ */
+[[nodiscard]] std::string
+parent_path(std::string_view fpath, std::uint16_t levels)
 {
-    if(_fname.find('/') != std::string::npos)
-        return _fname.substr(0, _fname.find_last_of('/'));
-    return std::string{};
+    std::filesystem::path result{ fpath };
+    for(std::uint16_t i = 0; i < levels; ++i)
+    {
+        auto parent = result.parent_path();
+        if(parent == result) break;  // reached root ("/") or relative bottom ("")
+        result = std::move(parent);
+    }
+    return result.string();
 }
 
 bool
@@ -281,6 +296,15 @@ readlink(const std::string& _path)
     return _path;
 }
 
+/**
+ * Resolve @p path to its canonical absolute form.
+ * Filesystem operation: follows symlinks and collapses '.'/'..'; the path
+ * must exist. On any error (missing path, permission denied) @p path is
+ * returned unchanged.
+ * @code realpath("/a/./b/../c") @endcode returns "/a/c" (when it exists).
+ * @param path the path to canonicalize
+ * @return the canonical absolute path, or @p path unchanged on error
+ */
 [[nodiscard]] std::string
 realpath(const std::string& path)
 {
@@ -391,10 +415,8 @@ get_origin(const std::string& _filename, std::vector<int>&& _open_modes)
 std::string
 get_rocprofsys_root()
 {
-    auto _exe_rp  = realpath("/proc/self/exe");
-    auto _exe_dir = dirname(_exe_rp);
-    if(_exe_dir.empty()) _exe_dir = "./";
-    return fmt::format("{}/{}", _exe_dir, "..");
+    // strip 2 levels from exe filepath to reach root
+    return parent_path(realpath("/proc/self/exe"), 2);
 }
 
 std::string
