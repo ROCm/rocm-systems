@@ -3322,6 +3322,25 @@ hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse,
 }
 
 // ================================================================================================
+int Device::SharedHwQueueRefCount(hsa_queue_t* queue, amd::CommandQueue::Priority priority) {
+  if (queue == nullptr) {
+    return 0;
+  }
+  // A queue lives in exactly one priority pool; search only that one (mirrors acquireQueue).
+  uint qIndex = QueuePriority::Normal;
+  if (!DEBUG_HIP_IGNORE_STREAM_PRIORITY) {
+    if (priority == amd::CommandQueue::Priority::Low) {
+      qIndex = QueuePriority::Low;
+    } else if (priority == amd::CommandQueue::Priority::High) {
+      qIndex = QueuePriority::High;
+    }
+  }
+  amd::ScopedLock l(active_queue_access_);
+  auto it = queuePool_[qIndex].find(queue);
+  return (it != queuePool_[qIndex].end()) ? it->second.refCount : 0;
+}
+
+// ================================================================================================
 hsa_queue_t* Device::AcquireActiveQueue(amd::CommandQueue::Priority priority,
                                         hsa_queue_t* preferred,
                                         const std::unordered_set<uint64_t>* excluded_ids) {

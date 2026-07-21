@@ -815,6 +815,11 @@ class Device : public NullDevice {
   //! Populated at queue creation, erased when non-pooled queues are destroyed.
   std::unordered_map<hsa_queue_t*, QueueExtras> queue_extras_;
 
+ public:
+  //! Pool share count for a HW queue in its priority pool (0 if untracked); >1 means shared.
+  int SharedHwQueueRefCount(hsa_queue_t* queue, amd::CommandQueue::Priority priority);
+
+ private:
   //! returns value for corresponding LinkAttrbutes in a vector given Memory pool.
   virtual bool findLinkInfo(const hsa_amd_memory_pool_t& pool,
                             std::vector<LinkAttrType>* link_attr);

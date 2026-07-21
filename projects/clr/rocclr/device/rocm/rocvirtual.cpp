@@ -4879,7 +4879,18 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     auto aqlHeaderWithOrder = aqlHeader_;
 
   if (vcmd != nullptr) {
-    if (vcmd->getAnyOrderLaunchFlag()) {
+    bool clear_head_barrier = vcmd->getAnyOrderLaunchFlag();
+
+    // Shared-queue any-order overlap: clear the head barrier for a stream's first packet on an
+    // oversubscribed ring so it overlaps a prior tenant. Skip graph capture (relies on in-order ring).
+    if (!clear_head_barrier && DEBUG_HIP_SHARED_QUEUE_ANYORDER != 0 && !dedicated_queue_ &&
+        !isGraphCapture && last_write_index_ == kInvalidQueueIndex && vcmd->eventWaitList().empty() &&
+        !vcmd->cooperativeGroups() &&
+        roc_device_.SharedHwQueueRefCount(gpu_queue_, priority_) > 1) {
+      clear_head_barrier = true;
+    }
+
+    if (clear_head_barrier) {
       constexpr uint32_t kAqlHeaderMask = ~(1 << HSA_PACKET_HEADER_BARRIER);
       aqlHeaderWithOrder &= kAqlHeaderMask;
     }

@@ -265,6 +265,13 @@ release(bool, DEBUG_CLR_SYSMEM_POOL, false,                                   \
 release(uint, DEBUG_HIP_DYNAMIC_QUEUES, 1,                                    \
         "Dynamic queue management: 0=off, 1=Depth heuristic,"                 \
         " 2=1 + dedicated null-stream queue")                                 \
+release(uint, DEBUG_HIP_SHARED_QUEUE_ANYORDER, 0,                             \
+        "Any-order overlap for oversubscribed HW queues on non-graph "        \
+        "streams: clears the head barrier bit on the first kernel of a "      \
+        "stream that shares a pooled HW queue with another stream, letting "  \
+        "independent streams overlap on the same queue. 0=off, 1=on. "        \
+        "Opt-in/unsafe: the app must guarantee the sharing streams are "      \
+        "independent (no cross-stream data hazard).")                         \
 release(bool, DEBUG_HIP_IGNORE_STREAM_PRIORITY, false,                        \
         "Ignore priority streams")                                            \
 release(uint, HIP_SKIP_ABORT_ON_GPU_ERROR, true,                              \
