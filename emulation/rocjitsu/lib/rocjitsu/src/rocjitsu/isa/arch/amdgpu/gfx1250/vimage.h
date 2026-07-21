@@ -22,6 +22,7 @@ public:
   Operand vaddr1;
   Operand vaddr2;
   Operand vaddr3;
+  static const bool execute_registered_;
 };
 
 class TensorStoreFromLdsVimage : public Vimage {
@@ -32,6 +33,7 @@ public:
   Operand vaddr1;
   Operand vaddr2;
   Operand vaddr3;
+  static const bool execute_registered_;
 };
 
 } // namespace gfx1250

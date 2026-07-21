@@ -21,6 +21,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadI8Vglobal : public Vglobal {
@@ -30,6 +31,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadU16Vglobal : public Vglobal {
@@ -39,6 +41,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadI16Vglobal : public Vglobal {
@@ -48,6 +51,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadB32Vglobal : public Vglobal {
@@ -57,6 +61,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadB64Vglobal : public Vglobal {
@@ -66,6 +71,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadB96Vglobal : public Vglobal {
@@ -75,6 +81,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadB128Vglobal : public Vglobal {
@@ -84,6 +91,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalStoreB8Vglobal : public Vglobal {
@@ -93,6 +101,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalStoreB16Vglobal : public Vglobal {
@@ -102,6 +111,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalStoreB32Vglobal : public Vglobal {
@@ -111,6 +121,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalStoreB64Vglobal : public Vglobal {
@@ -120,6 +131,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalStoreB96Vglobal : public Vglobal {
@@ -129,6 +141,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalStoreB128Vglobal : public Vglobal {
@@ -138,6 +151,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadD16U8Vglobal : public Vglobal {
@@ -147,6 +161,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadD16I8Vglobal : public Vglobal {
@@ -156,6 +171,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadD16B16Vglobal : public Vglobal {
@@ -165,6 +181,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadD16HiU8Vglobal : public Vglobal {
@@ -174,6 +191,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadD16HiI8Vglobal : public Vglobal {
@@ -183,6 +201,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadD16HiB16Vglobal : public Vglobal {
@@ -192,6 +211,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalStoreD16HiB8Vglobal : public Vglobal {
@@ -201,6 +221,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalStoreD16HiB16Vglobal : public Vglobal {
@@ -210,6 +231,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadAddtidB32Vglobal : public Vglobal {
@@ -218,6 +240,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalStoreAddtidB32Vglobal : public Vglobal {
@@ -226,18 +249,21 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalInvVglobal : public Vglobal {
 public:
   GlobalInvVglobal(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  static const bool execute_registered_;
 };
 
 class GlobalWbVglobal : public Vglobal {
 public:
   GlobalWbVglobal(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicSwapB32Vglobal : public Vglobal {
@@ -248,6 +274,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicCmpswapB32Vglobal : public Vglobal {
@@ -258,6 +285,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicAddU32Vglobal : public Vglobal {
@@ -268,6 +296,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicSubU32Vglobal : public Vglobal {
@@ -278,6 +307,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicSubClampU32Vglobal : public Vglobal {
@@ -288,6 +318,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicMinI32Vglobal : public Vglobal {
@@ -298,6 +329,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicMinU32Vglobal : public Vglobal {
@@ -308,6 +340,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicMaxI32Vglobal : public Vglobal {
@@ -318,6 +351,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicMaxU32Vglobal : public Vglobal {
@@ -328,6 +362,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicAndB32Vglobal : public Vglobal {
@@ -338,6 +373,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicOrB32Vglobal : public Vglobal {
@@ -348,6 +384,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicXorB32Vglobal : public Vglobal {
@@ -358,6 +395,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicIncU32Vglobal : public Vglobal {
@@ -368,6 +406,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicDecU32Vglobal : public Vglobal {
@@ -378,6 +417,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicSwapB64Vglobal : public Vglobal {
@@ -388,6 +428,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicCmpswapB64Vglobal : public Vglobal {
@@ -398,6 +439,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicAddU64Vglobal : public Vglobal {
@@ -408,6 +450,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicSubU64Vglobal : public Vglobal {
@@ -418,6 +461,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicMinI64Vglobal : public Vglobal {
@@ -428,6 +472,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicMinU64Vglobal : public Vglobal {
@@ -438,6 +483,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicMaxI64Vglobal : public Vglobal {
@@ -448,6 +494,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicMaxU64Vglobal : public Vglobal {
@@ -458,6 +505,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicAndB64Vglobal : public Vglobal {
@@ -468,6 +516,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicOrB64Vglobal : public Vglobal {
@@ -478,6 +527,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicXorB64Vglobal : public Vglobal {
@@ -488,6 +538,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicIncU64Vglobal : public Vglobal {
@@ -498,6 +549,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicDecU64Vglobal : public Vglobal {
@@ -508,12 +560,14 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalWbinvVglobal : public Vglobal {
 public:
   GlobalWbinvVglobal(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicCondSubU32Vglobal : public Vglobal {
@@ -524,6 +578,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicMinNumF32Vglobal : public Vglobal {
@@ -534,6 +589,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicMaxNumF32Vglobal : public Vglobal {
@@ -544,6 +600,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadBlockVglobal : public Vglobal {
@@ -553,6 +610,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalStoreBlockVglobal : public Vglobal {
@@ -562,6 +620,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicAddF64Vglobal : public Vglobal {
@@ -572,6 +631,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicAddF32Vglobal : public Vglobal {
@@ -582,6 +642,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadTr16B128Vglobal : public Vglobal {
@@ -591,6 +652,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadTr8B64Vglobal : public Vglobal {
@@ -600,6 +662,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicPkAddF16Vglobal : public Vglobal {
@@ -610,6 +673,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicPkAddBf16Vglobal : public Vglobal {
@@ -620,6 +684,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicMinNumF64Vglobal : public Vglobal {
@@ -630,6 +695,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalAtomicMaxNumF64Vglobal : public Vglobal {
@@ -640,6 +706,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalPrefetchB8Vglobal : public Vglobal {
@@ -648,6 +715,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadAsyncToLdsB8Vglobal : public Vglobal {
@@ -657,6 +725,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadAsyncToLdsB32Vglobal : public Vglobal {
@@ -666,6 +735,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadAsyncToLdsB64Vglobal : public Vglobal {
@@ -675,6 +745,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadAsyncToLdsB128Vglobal : public Vglobal {
@@ -684,6 +755,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalStoreAsyncFromLdsB8Vglobal : public Vglobal {
@@ -693,6 +765,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalStoreAsyncFromLdsB32Vglobal : public Vglobal {
@@ -702,6 +775,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalStoreAsyncFromLdsB64Vglobal : public Vglobal {
@@ -711,6 +785,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalStoreAsyncFromLdsB128Vglobal : public Vglobal {
@@ -720,6 +795,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class ClusterLoadB32Vglobal : public Vglobal {
@@ -729,6 +805,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class ClusterLoadB64Vglobal : public Vglobal {
@@ -738,6 +815,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class ClusterLoadB128Vglobal : public Vglobal {
@@ -747,6 +825,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class ClusterLoadAsyncToLdsB8Vglobal : public Vglobal {
@@ -756,6 +835,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class ClusterLoadAsyncToLdsB32Vglobal : public Vglobal {
@@ -765,6 +845,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class ClusterLoadAsyncToLdsB64Vglobal : public Vglobal {
@@ -774,6 +855,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class ClusterLoadAsyncToLdsB128Vglobal : public Vglobal {
@@ -783,6 +865,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadMonitorB32Vglobal : public Vglobal {
@@ -792,6 +875,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadMonitorB64Vglobal : public Vglobal {
@@ -801,6 +885,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadMonitorB128Vglobal : public Vglobal {
@@ -810,6 +895,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadTr4B64Vglobal : public Vglobal {
@@ -819,6 +905,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 class GlobalLoadTr6B96Vglobal : public Vglobal {
@@ -828,6 +915,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  static const bool execute_registered_;
 };
 
 } // namespace gfx1250

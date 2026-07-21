@@ -163,6 +163,45 @@ These options are mutually exclusive. To use a non-default allocator, pass the c
   cmake .. -DUSE_HEAP_DEVICE_COARSEGRAIN=ON -DUSE_HEAP_DEVICE_FINEGRAIN=OFF
   cmake --build . --parallel 8
 
+Profiling and tracing support
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+rocSHMEM can register its host-side API tables with
+`rocprofiler-register <https://rocm.docs.amd.com/projects/rocprofiler-register/en/latest/>`_
+so that rocprofiler-sdk tools, such as ``rocprofv3``, can trace rocSHMEM
+host-stream API calls. This is controlled by the ``USE_ROCPROFILER_REGISTER``
+build option, which is enabled (``ON``) by default.
+
+When the option is enabled, the build searches for the ``rocprofiler-register``
+package. If it is found, rocSHMEM is compiled with tracing support and the
+following host-stream APIs are made visible to rocprofiler-sdk tools:
+
+* ``rocshmem_barrier_all_on_stream``
+* ``rocshmem_quiet_on_stream``
+* ``rocshmem_sync_all_on_stream``
+* ``rocshmem_alltoallmem_on_stream``
+* ``rocshmem_broadcastmem_on_stream``
+* ``rocshmem_getmem_on_stream``
+* ``rocshmem_putmem_on_stream``
+* ``rocshmem_putmem_signal_on_stream``
+* ``rocshmem_signal_wait_until_on_stream``
+
+If ``rocprofiler-register`` is not found, the build continues with tracing
+disabled and prints a status message. To build without tracing support, pass
+``-DUSE_ROCPROFILER_REGISTER=OFF`` to CMake:
+
+.. code-block:: bash
+
+  cd projects/rocshmem/build
+  cmake .. -DUSE_ROCPROFILER_REGISTER=OFF
+  cmake --build . --parallel 8
+
+Once rocSHMEM is built with tracing support, the host-stream APIs listed above
+become visible to rocprofiler-sdk tools such as ``rocprofv3``, which can then
+collect and report rocSHMEM API activity alongside the rest of the application's
+ROCm trace. For more information about capturing traces, see the
+`rocprofiler-sdk documentation <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/>`_.
+
 All backends build
 ^^^^^^^^^^^^^^^^^^
 
