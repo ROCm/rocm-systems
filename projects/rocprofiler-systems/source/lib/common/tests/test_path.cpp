@@ -48,7 +48,7 @@ protected:
     std::string create_symlink(const std::string& target, const std::string& link_name)
     {
         std::string link_path = m_test_dir + "/" + link_name;
-        symlink(target.c_str(), link_path.c_str());
+        EXPECT_EQ(symlink(target.c_str(), link_path.c_str()), 0);
         return link_path;
     }
 
@@ -309,7 +309,7 @@ TEST_F(PathTest, ChainedSymlinks)
     std::string target     = create_file("chain_target.txt");
     std::string link1      = create_symlink(target, "chain_link1");
     std::string link2_path = m_test_dir + "/chain_link2";
-    symlink("chain_link1", link2_path.c_str());
+    EXPECT_EQ(symlink("chain_link1", link2_path.c_str()), 0);
 
     // Verify that link1 and link2_path are actual links:
     // read_symlink() returns link target for real links
