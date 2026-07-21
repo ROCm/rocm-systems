@@ -362,6 +362,7 @@ class RocProfCompute_Base:
                 workload_dir=args.output_directory,
                 ml_api_trace_enabled=bool(getattr(self, "_selected_frameworks", set())),
                 retain_rocpd_output=args.retain_rocpd_output,
+                tool_path=getattr(args, "rocprofiler_sdk_tool_path", None),
             )
 
             end_time = time.time()

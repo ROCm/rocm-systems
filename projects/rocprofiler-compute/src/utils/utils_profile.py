@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import fcntl
+import functools
 import importlib
 import os
 import pkgutil
@@ -19,6 +20,7 @@ import utils.utils_profile_csv as csv_ops
 from utils import rocpd_data
 from utils.comgr_detect import (
     dedupe_comgr_paths,
+    detect_and_log_double_comgr,
     double_comgr_error_message,
     find_workload_comgr_by_imports,
     find_workload_comgr_dynamic,
@@ -71,6 +73,23 @@ def is_live_attach(
 def pc_sampling_unit(method: str) -> str:
     """Map a PC sampling method to its sampling unit."""
     return "time" if method == "host_trap" else "cycles"
+
+
+def _workload_cmd_from_options(options: list[str]) -> list[str]:
+    """Return the workload command that follows ``--`` in a rocprofv3 option list."""
+    if "--" in options:
+        return options[options.index("--") + 1 :]
+    return []
+
+
+@functools.lru_cache(maxsize=None)
+def _forced_workload_comgr(
+    app_cmd: tuple[str, ...],
+    tool_path: Optional[str],
+) -> Optional[str]:
+    """Return the workload comgr to preload for ``app_cmd``, or ``None``."""
+    forced = detect_and_log_double_comgr(list(app_cmd), tool_path, dict(os.environ))
+    return str(forced) if forced is not None else None
 
 
 @contextmanager
@@ -144,6 +163,7 @@ def run_prof(
     ml_api_trace_enabled: bool = False,
     retain_rocpd_output: bool = False,
     extra_env: Optional[dict[str, str]] = None,
+    tool_path: Optional[str] = None,
 ) -> None:
     multiple_files = isinstance(fnames, list)
     if multiple_files and (
@@ -250,6 +270,17 @@ def run_prof(
                 app_cmd, new_env=new_env, profileMode=True
             )
     else:
+        app_cmd = _workload_cmd_from_options(options)
+        if app_cmd and not is_live_attach(profiler_options):
+            forced_comgr = _forced_workload_comgr(tuple(app_cmd), tool_path)
+            if forced_comgr is not None:
+                existing = new_env.get("LD_PRELOAD")
+                new_env["LD_PRELOAD"] = ":".join(
+                    part for part in (forced_comgr, existing) if part
+                )
+                console_log(
+                    "comgr", f"Forcing single comgr via LD_PRELOAD: {forced_comgr}"
+                )
         # print in readable format using shlex
         console_debug(f"rocprof command: {shlex.join([get_rocprof_cmd()] + options)}")
         # profile the app

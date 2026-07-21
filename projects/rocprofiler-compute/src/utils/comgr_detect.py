@@ -413,11 +413,20 @@ def detect_and_log_double_comgr(
         if not workload_comgrs:
             console_debug("comgr", "no workload comgr found")
 
-        conflicting = _log_comgr_mismatch(tool_comgr, workload_comgrs)
-        if conflicting and tool_comgr is not None:
-            return conflicting[0]
+        forceable = _log_comgr_mismatch(tool_comgr, workload_comgrs)
+        if forceable and tool_comgr is not None:
+            return forceable[0]
     except Exception as err:  # noqa: BLE001
         console_debug("comgr", f"detection skipped: {err}")
+    return None
+
+
+def _comgr_soname_major(path: Path) -> Optional[int]:
+    """Return the soname major version of a ``libamd_comgr`` file, if present."""
+    for name in (path.name, Path(_real_path(path)).name):
+        match = re.search(re.escape(COMGR_LIB_STEM) + r"\.([0-9]+)", name)
+        if match:
+            return int(match.group(1))
     return None
 
 
@@ -425,22 +434,47 @@ def _log_comgr_mismatch(
     tool_comgr: Optional[Path],
     workload_comgrs: list[Path],
 ) -> list[Path]:
-    """Warn on and return the workload comgrs that differ from the tool comgr."""
+    """Warn on comgr mismatches and return the workload comgrs that can be
+    forced onto a single library via ``LD_PRELOAD``.
+
+    Only workload comgrs whose soname major matches the tool comgr are
+    returned; those with a different major are reported but not returned.
+    """
     if tool_comgr is None or not workload_comgrs:
         return []
     tool_real = _real_path(tool_comgr)
     conflicting = [p for p in workload_comgrs if _real_path(p) != tool_real]
-    if conflicting:
+    if not conflicting:
+        console_debug("comgr", "single comgr; workload matches tool")
+        return []
+
+    tool_major = _comgr_soname_major(tool_comgr)
+    forceable = [
+        p
+        for p in conflicting
+        if tool_major is None
+        or _comgr_soname_major(p) is None
+        or _comgr_soname_major(p) == tool_major
+    ]
+    incompatible = [p for p in conflicting if p not in forceable]
+
+    console_warning(
+        "comgr",
+        "Double comgr detected: the workload provides a different "
+        "'libamd_comgr' than the profiler tool.\n"
+        f"  Profiler tool comgr : {tool_comgr}\n"
+        + "\n".join(f"  Workload comgr      : {p}" for p in conflicting),
+    )
+    if incompatible:
         console_warning(
             "comgr",
-            "Double comgr detected: the workload provides a different "
-            "'libamd_comgr' than the profiler tool. The run may abort.\n"
-            f"  Profiler tool comgr : {tool_comgr}\n"
-            + "\n".join(f"  Workload comgr      : {p}" for p in conflicting),
+            "The workload comgr major differs from the profiler tool comgr "
+            "major; a single comgr cannot be forced and the run may abort. "
+            "Align the workload's bundled ROCm with the profiler's ROCm "
+            "(matching 'libamd_comgr' major), or run the workload against a "
+            "single ROCm stack.",
         )
-    else:
-        console_debug("comgr", "single comgr; workload matches tool")
-    return conflicting
+    return forceable
 
 
 def tool_path_from_preload(ld_preload: Optional[str]) -> Optional[str]:

@@ -940,6 +940,70 @@ def test_parse_pmc_perf_file_not_found():
 # =============================================================================
 
 
+def test_workload_cmd_from_options_extracts_after_separator():
+    assert utils_profile._workload_cmd_from_options([
+        "-A",
+        "absolute",
+        "--",
+        "python3",
+        "net.py",
+    ]) == ["python3", "net.py"]
+
+
+def test_workload_cmd_from_options_empty_without_separator():
+    options = ["-A", "absolute", "-i", "x.yaml"]
+    assert utils_profile._workload_cmd_from_options(options) == []
+
+
+def test_workload_cmd_from_options_keeps_nested_separator():
+    # Torch-trace wraps the app: python3 launch.py --frameworks torch -- net.py
+    assert utils_profile._workload_cmd_from_options([
+        "--",
+        "python3",
+        "launch.py",
+        "--frameworks",
+        "torch",
+        "--",
+        "net.py",
+    ]) == ["python3", "launch.py", "--frameworks", "torch", "--", "net.py"]
+
+
+def test_run_prof_v3_forces_workload_comgr(tmp_path, monkeypatch):
+    """rocprofv3: a detected workload comgr is prepended to LD_PRELOAD."""
+    fname = tmp_path / "pmc_perf_test.yaml"
+    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
+    workload_dir = str(tmp_path / "workload")
+
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
+    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "utils.utils_profile.detect_and_log_double_comgr",
+        lambda *a, **k: Path("/wheel/lib/libamd_comgr.so.3"),
+    )
+    utils_profile._forced_workload_comgr.cache_clear()
+
+    captured: dict[str, dict[str, str]] = {}
+
+    def fake_capture(cmd, new_env=None, profileMode=False):
+        captured["env"] = new_env
+        raise RuntimeError("stop after launch")
+
+    monkeypatch.setattr("utils.utils_profile.capture_subprocess_output", fake_capture)
+
+    with pytest.raises(RuntimeError, match="stop after launch"):
+        utils_profile.run_prof(
+            str(fname),
+            ["--kernel-trace", "--", "python3", "simple_net.py"],
+            workload_dir,
+            logging.INFO,
+            "csv",
+            tool_path="/tool.so",
+        )
+
+    assert captured["env"]["LD_PRELOAD"].split(":")[0] == "/wheel/lib/libamd_comgr.so.3"
+
+
 def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     """run_prof (rocprofiler-sdk backend) pops APP_CMD out of the options and
     runs it with the profiler-built environment, into which the resolved

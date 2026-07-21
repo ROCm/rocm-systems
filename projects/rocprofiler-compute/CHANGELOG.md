@@ -73,6 +73,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Fixed profiling aborts caused by two different ``libamd_comgr`` libraries loading in the same process (for example, a PyTorch wheel bundling its own ROCm alongside the profiler's ROCm). rocprof-compute now detects the workload's ``libamd_comgr`` and, when its soname major matches the profiler tool's ``libamd_comgr``, forces a single library through ``LD_PRELOAD`` so the run can proceed. When the majors differ (a conflict a single preload cannot resolve), it reports a clear, actionable error instead of a cryptic LLVM abort.
+
 * The Dual VALU (VOPD) instruction mix metric is now reported for gfx115x in the WGP panel.
 
 * Fixed multi-user roofline benchmarking on shared systems: the per-GPU lock file under `/tmp/rocprof-compute-benchmark/` is now created world-readable/writable (0666) so any user can acquire it, regardless of which user created it first or the active umask. Stale unreadable lock files left by older versions in a sticky `/tmp` cannot be repaired automatically and must be removed manually by their owner or an administrator.

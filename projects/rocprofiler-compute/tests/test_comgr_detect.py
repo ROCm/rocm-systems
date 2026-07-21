@@ -24,6 +24,7 @@ from utils.comgr_detect import (
     _python_import_names,
     _workload_script_path,
     detect_and_log_double_comgr,
+    double_comgr_error_message,
     find_workload_comgr_by_imports,
     output_indicates_double_comgr,
 )
@@ -51,6 +52,23 @@ class TestDoubleComgrSignatures:
 
     def test_benign_output_is_not_flagged(self) -> None:
         assert not output_indicates_double_comgr("Profiling completed successfully")
+
+
+class TestErrorMessage:
+    def test_message_lists_tool_and_workload_comgrs(self, tmp_path: Path) -> None:
+        tool = tmp_path / "opt/rocm/lib/libamd_comgr.so.3"
+        workload = tmp_path / "wheel/lib/libamd_comgr.so.2"
+        message = double_comgr_error_message(tool, [workload])
+        assert str(tool) in message
+        assert str(workload) in message
+        assert "libamd_comgr" in message
+        assert "major" in message
+
+    def test_message_without_tool_comgr(self) -> None:
+        workload = Path("/wheel/lib/libamd_comgr.so.2")
+        message = double_comgr_error_message(None, [workload])
+        assert str(workload) in message
+        assert "Profiler tool comgr" not in message
 
 
 class TestImportParsing:
@@ -151,6 +169,24 @@ class TestForcingDecision:
         with patches[0], patches[1], patches[2], patches[3]:
             forced = detect_and_log_double_comgr(["python3", "x.py"], "/tool.so", {})
         assert forced is None
+
+    def test_major_mismatch_does_not_force(self, tmp_path: Path) -> None:
+        # A single comgr cannot be forced across soname majors, so a workload
+        # comgr with a different major is reported but not preloaded.
+        tool = _make_comgr_file(tmp_path / "opt/rocm/lib", "libamd_comgr.so.3")
+        bundled = _make_comgr_file(tmp_path / "wheel/lib", "libamd_comgr.so.2")
+        patches = self._patch_sources(
+            tool=tool, dynamic=[], imports=[bundled], static=[]
+        )
+        with patches[0], patches[1], patches[2], patches[3], patch(
+            "utils.comgr_detect.console_warning"
+        ) as warn:
+            forced = detect_and_log_double_comgr(
+                ["python3", "simple_net.py"], "/tool.so", {}
+            )
+        assert forced is None
+        warnings = " ".join(str(call.args[1]) for call in warn.call_args_list)
+        assert "major" in warnings
 
 
 class TestImportProbe:
