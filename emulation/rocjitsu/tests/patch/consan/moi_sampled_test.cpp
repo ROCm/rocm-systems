@@ -2398,6 +2398,74 @@ TEST(ConSanMoi, Gfx1250SampledClusterBarrierPublishesClusterScope) {
   EXPECT_TRUE(contains_subsequence(trampoline, *descriptor_literal));
 }
 
+TEST(ConSanMoi, Gfx1250SampledComposesWithAdjacentClusterBarrierDrop) {
+  std::vector<uint32_t> words(43, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 1, .data0 = 2});
+  words[21] = store[0];
+  words[22] = store[1];
+  const auto bypass_signal = build_s_cbranch_scc1(/*offset_dwords=*/1, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(bypass_signal);
+  words[23] = *bypass_signal;
+  words[24] = 0xBE804EC3u; // s_barrier_signal -3
+  words[25] = 0xBF94FFFDu; // s_barrier_wait -3
+  words[26] = 0xBFC60000u; // s_wait_dscnt 0
+  words[27] = 0xBE804EC1u; // s_barrier_signal -1
+  words[33] = 0xBF94FFFFu; // s_barrier_wait -1
+  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 1, .vdst = 2});
+  words[34] = load[0];
+  words[35] = load[1];
+  words[42] = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  const std::vector<uint8_t> bytes =
+      make_gfx1250_code_object(words, "gfx1250_sampled_cluster_drop_composition");
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_track_barriers = true;
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_owner_vgpr = 20;
+  options.moi_epoch_vgpr = 21;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2);
+  options.max_patches = 8;
+  options.fault_dry_run = true;
+  const ConSanResult inventory = try_patch_consan(bytes, options);
+  const auto cluster_sequence =
+      std::ranges::find_if(inventory.sync_sequences, [](const ConSanSyncSequence &sequence) {
+        return sequence.operation == ConSanSyncOperation::BarrierFull &&
+               sequence.barrier_scope == ConSanBarrierSite::Scope::Cluster;
+      });
+  ASSERT_NE(cluster_sequence, inventory.sync_sequences.end());
+  const auto primary =
+      std::ranges::find_if(inventory.fault_sites, [&](const ConSanFaultSite &site) {
+        return site.sync_sequence_identity == cluster_sequence->identity &&
+               site.mnemonic == "s_barrier_signal";
+      });
+  ASSERT_NE(primary, inventory.fault_sites.end());
+
+  options.fault_drop_barrier = true;
+  options.fault_site_identity = primary->identity;
+  options.fault_barrier_sequence_identity = cluster_sequence->identity;
+  options.fault_require_exactly_one = true;
+  options.fault_dry_run = false;
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+      << testing::PrintToString(result.errors);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_TRUE(result.staged_composition_validated);
+  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  for (const ConSanPatchInfo &mutation : result.patches) {
+    if (mutation.phase != ConSanPatchPhase::Mutation)
+      continue;
+    EXPECT_TRUE(std::ranges::none_of(result.patches, [&](const ConSanPatchInfo &instrumentation) {
+      return instrumentation.phase == ConSanPatchPhase::Instrumentation &&
+             instrumentation.original_size != 0u &&
+             instrumentation.anchor_offset < mutation.anchor_offset + mutation.original_size &&
+             mutation.anchor_offset < instrumentation.anchor_offset + instrumentation.original_size;
+    }));
+  }
+}
+
 TEST(ConSanMoi, SampledQualifiedBarrierUsesSpillBackedPersistentEpoch) {
   std::vector<uint32_t> words(540, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   words[0] = 0xD8340000u;

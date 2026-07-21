@@ -1300,7 +1300,9 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       if (!decodes_as_barrier(original_text, patch.anchor_offset, *decoder) ||
           replacement_word != nop) {
         errors.emplace_back(
-            "ConSan mutation proof did not replace the selected barrier with s_nop 0");
+            "ConSan mutation proof did not replace the selected barrier at text offset " +
+            std::to_string(patch.anchor_offset) + " with s_nop 0 (replacement=" +
+            std::to_string(replacement_word) + ")");
       }
       continue;
     }

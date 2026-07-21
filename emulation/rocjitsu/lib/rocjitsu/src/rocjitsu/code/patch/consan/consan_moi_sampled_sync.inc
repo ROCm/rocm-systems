@@ -941,6 +941,12 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
                                        overlaps_range(begin, end, patch.anchor_offset,
                                                       patch.original_size);
                               }) ||
+          std::ranges::any_of(options.preapplied_reserved_ranges,
+                              [&](const auto &reserved) {
+                                return reserved.size != 0u &&
+                                       overlaps_range(begin, end, reserved.text_offset,
+                                                      reserved.size);
+                              }) ||
           std::ranges::any_of(claimed_hosts, [&](const auto &range) {
             return range.first < end && range.second > begin;
           }))
