@@ -51,6 +51,22 @@ def get_run_args(rocprof_config) -> list[str]:
     return ["-i", str(rocprof_config.rocprofsys_examples_dir / "videos"), "-t", "1"]
 
 
+@pytest.fixture
+def require_video_data(rocprof_config) -> None:
+    """Skip the test at runtime when the sample video data is not available.
+
+    The videodecode example is always built when rocDecode is present, but the
+    H26x sample videos are only shipped by test builds of ROCm. When they are
+    missing there is nothing to decode, so skip instead of failing.
+    """
+    videos_dir = rocprof_config.rocprofsys_examples_dir / "videos"
+    if not (videos_dir.is_dir() and any(videos_dir.iterdir())):
+        pytest.skip(
+            f"No rocDecode sample videos found in {videos_dir}; "
+            "possibly built against a non-test build which doesn't have those files."
+        )
+
+
 # =============================================================================
 # Video decode tests
 # =============================================================================
@@ -66,7 +82,15 @@ def get_run_args(rocprof_config) -> list[str]:
 @pytest.mark.class_name("video-decode")
 class TestVideoDecode(RocprofsysTest):
     @pytest.mark.timeout(120)
-    def test(self, mode, video_decode_env, gpu_info, video_decode_rules, get_run_args):
+    def test(
+        self,
+        mode,
+        video_decode_env,
+        gpu_info,
+        video_decode_rules,
+        get_run_args,
+        require_video_data,
+    ):
         result = self.run_test(
             mode,
             "videodecode",
