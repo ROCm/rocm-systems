@@ -11,6 +11,7 @@ target_compile_options(aqlprofile-pm4-tests-flags
 
 set(AQLPROFILE_PM4_TEST_SOURCES
     cmd_builder_tests.cpp gfx9_cmd_builder_tests.cpp pmc_builder_tests.cpp
+    pmc_builder_harvest_tests.cpp pmc_builder_harvest_gfx12_tests.cpp
     spm_builder_test.cpp sqtt_builder_tests.cpp trace_config_test.cpp)
 
 add_executable(aqlprofile-pm4-tests)

@@ -298,10 +298,11 @@ private:
     // gfx1151 active {0,1,2,4} -> span 5). GFX12 keeps its cu_num-derived count.
     //
     // Each logical (se, sa) maps to a raw bitmap slot: when logical SEs exceed
-    // the bitmap's SE dimension, upper SEs fold into higher SA columns (mirrors
-    // kernel mqd_symmetrically_map_cu_mask; else Navi31 SE 4-5 would miss the
-    // bitmap). Out-of-window or empty entries fall back to fully active
-    // (cu_bitmap.bits is fixed-size; out-of-window reads would be UB).
+    // the bitmap's SE dimension, upper SEs fold into higher SA columns, mirroring
+    // the kernel's gfx_v11_0_get_cu_info packing cu_bitmap[i%4][j+(i/4)*sh_per_se]
+    // (validated on Navi31, 6 SE; else SE 4-5 would miss the bitmap). Out-of-window
+    // or empty entries fall back to fully active (cu_bitmap.bits is fixed-size;
+    // out-of-window reads would be UB).
     void build_sa_cu_mask(const AgentInfo* agent_info)
     {
         // Fits Navi31 (6 x 2), MI200 (8 x 1), and any future SE x SA-per-SE
