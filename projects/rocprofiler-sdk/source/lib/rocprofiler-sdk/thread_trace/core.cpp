@@ -76,7 +76,7 @@ struct cbdata_t
 common::Synchronized<std::optional<int64_t>> client;
 
 // True once the HSA runtime is registered. Gates start_context() so pre-init
-// start requests are deferred and replayed by initialize().
+// start requests are deferred and replayed by start_active_contexts().
 std::atomic<bool>&
 hsa_inited()
 {
