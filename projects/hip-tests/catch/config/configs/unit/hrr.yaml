@@ -39,6 +39,9 @@ hrr:
   Unit_HRR_AllocKind_FreeDispatch:
     <<: *level_2
     tags: [format, cpu]
+  Unit_HRR_Playback_ReplayedH2DDrainGraphGuard:
+    <<: *level_2
+    tags: [playback, cpu]
   Unit_HRR_Recovery_CompleteArchive:
     <<: *level_2
     tags: [format, recovery, cpu]

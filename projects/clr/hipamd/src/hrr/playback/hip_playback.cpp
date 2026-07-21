@@ -112,7 +112,7 @@ static hipError_t hrr_sync_after_replayed_h2d(PlaybackContext& ctx,
     // Replay substitutes captured blobs for capture-time host pointers. Drain
     // the restore so following kernels see the replayed input bytes. This is
     // skipped during graph capture because device/stream sync is illegal there.
-    if (ctx.in_graph_capture) return hipSuccess;
+    if (!hrr_replayed_h2d_needs_drain(ctx.in_graph_capture)) return hipSuccess;
     hipError_t r = hrr_watchdog_device_sync(ctx, what);
     if (r == hipSuccess) r = hipGetLastError();
     return r;
