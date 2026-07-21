@@ -381,7 +381,9 @@ if __name__ == "__main__":
             if args.print:
                 print(f"Tracks matching '{counter_name}': {track_count}")
             if track_count == 0:
-                print(f"Fail: No counter tracks matching '{counter_name}' found in the traces")
+                print(
+                    f"Fail: No counter tracks matching '{counter_name}' found in the traces"
+                )
                 ret = 1
         else:
             sum_counter_values = tp.query(
