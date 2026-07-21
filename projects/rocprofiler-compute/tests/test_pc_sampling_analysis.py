@@ -44,6 +44,25 @@ PC_SAMPLING_WORKLOAD = "tests/workloads/vcopy_pc_sampling_only/MI300X_A1"
 
 PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
 INST_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_"
+HOST_TRAP_DISPLAY_COLUMNS = [
+    "source_line",
+    "instruction",
+    "code_object_id",
+    "offset",
+    "count",
+    "Kernel_Name",
+]
+STOCHASTIC_DISPLAY_COLUMNS = [
+    "source_line",
+    "instruction",
+    "code_object_id",
+    "offset",
+    "count",
+    "count_issued",
+    "count_stalled",
+    "stall_reason",
+    "Kernel_Name",
+]
 
 
 # ── Helpers for building synthetic JSON / records ────────────
@@ -185,6 +204,43 @@ def sample_tool_data_kwargs() -> dict:
         "kernel_symbols": [make_kernel_symbol(100, 5, "vecCopy")],
         "kernel_dispatch": [make_dispatch(0, 100)],
     }
+
+
+def make_display_row_tool_data(
+    method: str,
+    code_object_id: int,
+    kernel_name: str,
+    instruction: str | None,
+    source_line: str,
+    pid: int,
+    offset: int = 0x10,
+    sample_count: int = 1,
+) -> dict:
+    inst_index = 1 if instruction is None else 0
+    instructions = ["unused"] if instruction is None else [instruction]
+    comments = (
+        ["/src/unused.cpp:0", source_line] if instruction is None else [source_line]
+    )
+    if method == "host_trap":
+        samples = [
+            make_host_trap_record(code_object_id, offset, inst_index, dispatch_id=0)
+            for _ in range(sample_count)
+        ]
+    else:
+        samples = [
+            make_record(code_object_id, offset, inst_index, dispatch_id=0)
+            for _ in range(sample_count)
+        ]
+
+    return make_tool_data(
+        **{method: samples},
+        instructions=instructions,
+        comments=comments,
+        kernel_symbols=[make_kernel_symbol(100, code_object_id, kernel_name)],
+        kernel_dispatch=[make_dispatch(0, 100)],
+        code_objects=[make_code_object(code_object_id)],
+        pid=pid,
+    )
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -568,26 +624,11 @@ def test_load_per_kernel_schema_and_sort(
     sorting_type: str,
 ) -> None:
     """Column projection follows method; row order follows sorting_type."""
-    host_trap_cols = [
-        "source_line",
-        "instruction",
-        "code_object_id",
-        "offset",
-        "count",
-        "Kernel_Name",
-    ]
-    stochastic_cols = [
-        "source_line",
-        "instruction",
-        "code_object_id",
-        "offset",
-        "count",
-        "count_issued",
-        "count_stalled",
-        "stall_reason",
-        "Kernel_Name",
-    ]
-    expected_columns = host_trap_cols if method == "host_trap" else stochastic_cols
+    expected_columns = (
+        HOST_TRAP_DISPLAY_COLUMNS
+        if method == "host_trap"
+        else STOCHASTIC_DISPLAY_COLUMNS
+    )
     tool_data = setup_per_kernel_data(method=method)
     df = load_pc_sampling_data_per_kernel(
         method=method,
@@ -876,13 +917,23 @@ def test_load_pc_sampling_data_no_tool_data() -> None:
     assert df.empty
 
 
-def test_pc_sampling_single_result_preserves_legacy_analysis_table() -> None:
+@pytest.mark.parametrize("method", ["host_trap", "stochastic"])
+def test_pc_sampling_single_result_preserves_legacy_analysis_table(
+    method: str,
+) -> None:
     """A one-record collection produces the unchanged legacy display table."""
-    tool_data = make_tool_data(
-        stochastic=[
+    if method == "host_trap":
+        samples = [
+            make_host_trap_record(5, 0x10, 0, dispatch_id=0),
+            make_host_trap_record(6, 0x10, 1, dispatch_id=1),
+        ]
+    else:
+        samples = [
             make_record(5, 0x10, 0, dispatch_id=0),
             make_record(6, 0x10, 1, dispatch_id=1),
-        ],
+        ]
+    tool_data = make_tool_data(
+        **{method: samples},
         instructions=["v_mov", "v_add"],
         comments=["/s/a.cpp:1", "/s/b.cpp:1"],
         kernel_symbols=[
@@ -892,7 +943,7 @@ def test_pc_sampling_single_result_preserves_legacy_analysis_table() -> None:
         kernel_dispatch=[make_dispatch(0, 100), make_dispatch(1, 101)],
     )
     expected = load_pc_sampling_data_per_kernel(
-        "stochastic",
+        method,
         tool_data,
         "offset",
     )
@@ -905,17 +956,12 @@ def test_pc_sampling_single_result_preserves_legacy_analysis_table() -> None:
     )
 
     assert len(actual) == 2
-    assert list(actual.columns) == [
-        "source_line",
-        "instruction",
-        "code_object_id",
-        "offset",
-        "count",
-        "count_issued",
-        "count_stalled",
-        "stall_reason",
-        "Kernel_Name",
-    ]
+    expected_columns = (
+        HOST_TRAP_DISPLAY_COLUMNS
+        if method == "host_trap"
+        else STOCHASTIC_DISPLAY_COLUMNS
+    )
+    assert list(actual.columns) == expected_columns
     pd.testing.assert_frame_equal(
         actual.reset_index(drop=True),
         expected.reset_index(drop=True),
@@ -1071,6 +1117,142 @@ def test_load_pc_sampling_data_no_filter_instruction_out_of_range() -> None:
     assert df.iloc[0]["source_line"] == ".../a.cpp:2"
 
 
+@pytest.mark.parametrize(
+    "method, expected_columns",
+    [
+        pytest.param(
+            "host_trap",
+            HOST_TRAP_DISPLAY_COLUMNS,
+            id="host_trap",
+        ),
+        pytest.param(
+            "stochastic",
+            STOCHASTIC_DISPLAY_COLUMNS,
+            id="stochastic",
+        ),
+    ],
+)
+def test_load_pc_sampling_data_multi_process_preserves_legacy_column_order(
+    method: str,
+    expected_columns: list[str],
+) -> None:
+    tool_data_records = [
+        make_display_row_tool_data(
+            method,
+            code_object_id=5,
+            kernel_name="sharedKernel",
+            instruction="v_mov",
+            source_line="/src/shared.cpp:10",
+            pid=101,
+        ),
+        make_display_row_tool_data(
+            method,
+            code_object_id=7,
+            kernel_name="sharedKernel",
+            instruction="v_mov",
+            source_line="/src/shared.cpp:10",
+            pid=202,
+        ),
+    ]
+
+    df = load_pc_sampling_data(
+        schema.Workload(),
+        "ps_file",
+        "count",
+        tool_data_records,
+    )
+
+    assert list(df.columns) == expected_columns
+
+
+def test_load_pc_sampling_data_preserves_display_identity_boundaries() -> None:
+    tool_data_records = [
+        make_display_row_tool_data(
+            "host_trap",
+            code_object_id=5,
+            kernel_name="sharedKernel",
+            instruction="v_add",
+            source_line="/src/shared.cpp:10",
+            pid=101,
+        ),
+        make_display_row_tool_data(
+            "host_trap",
+            code_object_id=7,
+            kernel_name="sharedKernel",
+            instruction="v_mul",
+            source_line="/src/shared.cpp:10",
+            pid=202,
+        ),
+        make_display_row_tool_data(
+            "host_trap",
+            code_object_id=9,
+            kernel_name="sharedKernel",
+            instruction="v_add",
+            source_line="/src/other.cpp:20",
+            pid=303,
+        ),
+        make_display_row_tool_data(
+            "host_trap",
+            code_object_id=11,
+            kernel_name="otherKernel",
+            instruction="v_add",
+            source_line="/src/shared.cpp:10",
+            pid=404,
+        ),
+    ]
+
+    df = load_pc_sampling_data(
+        schema.Workload(),
+        "ps_file",
+        "offset",
+        tool_data_records,
+    )
+
+    actual_rows = set(
+        df[["Kernel_Name", "offset", "instruction", "source_line", "count"]].itertuples(
+            index=False, name=None
+        )
+    )
+    assert actual_rows == {
+        ("sharedKernel", "0x10", "v_add", ".../shared.cpp:10", 1),
+        ("sharedKernel", "0x10", "v_mul", ".../shared.cpp:10", 1),
+        ("sharedKernel", "0x10", "v_add", ".../other.cpp:20", 1),
+        ("otherKernel", "0x10", "v_add", ".../shared.cpp:10", 1),
+    }
+
+
+def test_load_pc_sampling_data_retains_missing_instruction_metadata() -> None:
+    tool_data_records = [
+        make_display_row_tool_data(
+            "host_trap",
+            code_object_id=5,
+            kernel_name="sharedKernel",
+            instruction=None,
+            source_line="/src/shared.cpp:10",
+            pid=101,
+        ),
+        make_display_row_tool_data(
+            "host_trap",
+            code_object_id=7,
+            kernel_name="sharedKernel",
+            instruction=None,
+            source_line="/src/shared.cpp:10",
+            pid=202,
+        ),
+    ]
+
+    df = load_pc_sampling_data(
+        schema.Workload(),
+        "ps_file",
+        "count",
+        tool_data_records,
+    )
+
+    assert len(df) == 1
+    assert df.iloc[0]["count"] == 2
+    assert pd.isna(df.iloc[0]["instruction"])
+
+
 def test_load_pc_sampling_data_stitches_multi_process_rows() -> None:
     """Rows from separate result records are summed by shared kernel and offset."""
     first_tool_data = make_tool_data(
@@ -1106,6 +1288,22 @@ def test_load_pc_sampling_data_stitches_multi_process_rows() -> None:
     second_tool_data = make_tool_data(
         stochastic=[
             make_record(7, 0x10, 0, dispatch_id=0, wave_issued=True),
+            make_record(
+                7,
+                0x10,
+                0,
+                dispatch_id=0,
+                wave_issued=False,
+                stall_reason=f"{PREFIX}ALU_DEPENDENCY",
+            ),
+            make_record(
+                7,
+                0x10,
+                0,
+                dispatch_id=0,
+                wave_issued=False,
+                stall_reason=f"{PREFIX}WAITCNT",
+            ),
         ],
         instructions=["v_mov"],
         comments=["/src/shared.cpp:10"],
@@ -1125,10 +1323,57 @@ def test_load_pc_sampling_data_stitches_multi_process_rows() -> None:
     assert set(df["Kernel_Name"]) == {"sharedKernel", "distinctKernel"}
     shared_row = df[df["Kernel_Name"] == "sharedKernel"].iloc[0]
     assert shared_row["offset"] == "0x10"
-    assert shared_row["count"] == 3
+    assert shared_row["code_object_id"] == 5
+    assert shared_row["count"] == 5
     assert shared_row["count_issued"] == 1
-    assert shared_row["count_stalled"] == 2
-    assert shared_row["stall_reason"] == [("WAITCNT", 2)]
+    assert shared_row["count_stalled"] == 4
+    assert shared_row["stall_reason"] == [
+        ("WAITCNT", 3),
+        ("ALU_DEPENDENCY", 1),
+    ]
+
+
+def test_load_pc_sampling_data_applies_top_n_after_global_aggregation() -> None:
+    first_tool_data = make_tool_data(
+        host_trap=[
+            *[make_host_trap_record(5, 0x10, 0, dispatch_id=0) for _ in range(3)],
+            *[make_host_trap_record(6, 0x20, 1, dispatch_id=1) for _ in range(5)],
+        ],
+        instructions=["shared", "first_leader"],
+        comments=["/src/shared.cpp:10", "/src/first.cpp:20"],
+        kernel_symbols=[
+            make_kernel_symbol(100, 5, "sharedKernel"),
+            make_kernel_symbol(101, 6, "firstLeader"),
+        ],
+        kernel_dispatch=[make_dispatch(0, 100), make_dispatch(1, 101)],
+        pid=101,
+    )
+    second_tool_data = make_tool_data(
+        host_trap=[
+            *[make_host_trap_record(7, 0x10, 0, dispatch_id=0) for _ in range(3)],
+            *[make_host_trap_record(8, 0x30, 1, dispatch_id=1) for _ in range(4)],
+        ],
+        instructions=["shared", "second_leader"],
+        comments=["/src/shared.cpp:10", "/src/second.cpp:30"],
+        kernel_symbols=[
+            make_kernel_symbol(200, 7, "sharedKernel"),
+            make_kernel_symbol(201, 8, "secondLeader"),
+        ],
+        kernel_dispatch=[make_dispatch(0, 200), make_dispatch(1, 201)],
+        pid=202,
+    )
+
+    df = load_pc_sampling_data(
+        schema.Workload(),
+        "ps_file",
+        "count",
+        [first_tool_data, second_tool_data],
+        num_rows=1,
+    )
+
+    assert len(df) == 1
+    assert df.iloc[0]["Kernel_Name"] == "sharedKernel"
+    assert df.iloc[0]["count"] == 6
 
 
 def test_merge_stall_reason_rows_sums_counts_and_skips_empty_rows() -> None:
@@ -2054,7 +2299,7 @@ def test_pc_sampling_single_result_preserves_legacy_csv(
         csv_kernel = pd.read_csv(csv_dir / "kernel.csv")
         assert len(csv_pc_sampling) == 14
         assert csv_pc_sampling["count"].sum() == 390
-        assert csv_pc_sampling["pid"].unique().tolist() == [1429079]
+        assert "pid" not in csv_pc_sampling.columns
         assert csv_kernel.iloc[0]["dispatch_count"] == 3
     finally:
         common.clean_output_dir(True, str(workload_dir))
