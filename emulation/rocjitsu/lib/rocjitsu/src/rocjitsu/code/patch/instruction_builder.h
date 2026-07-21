@@ -717,13 +717,13 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4)
 build_v_writelane_b32(uint16_t vgpr_dst, uint16_t sgpr_src, uint16_t lane, rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA4:
-    return cdna4::build_vop3(cdna4::kVWritelaneB32Vop3, {.vdst = static_cast<uint8_t>(vgpr_dst),
-                                                         .src0 = sgpr_src,
-                                                         .src1 = vop3_inline_uint(lane)});
+    return cdna4::build_vop3(
+        cdna4::kVWritelaneB32Vop3,
+        {.vdst = static_cast<uint8_t>(vgpr_dst), .src0 = sgpr_src, .src1 = vop3_inline_uint(lane)});
   case ROCJITSU_CODE_ARCH_RDNA4:
-    return rdna4::build_vop3(rdna4::kVWritelaneB32Vop3, {.vdst = static_cast<uint8_t>(vgpr_dst),
-                                                         .src0 = sgpr_src,
-                                                         .src1 = vop3_inline_uint(lane)});
+    return rdna4::build_vop3(
+        rdna4::kVWritelaneB32Vop3,
+        {.vdst = static_cast<uint8_t>(vgpr_dst), .src0 = sgpr_src, .src1 = vop3_inline_uint(lane)});
   default:
     throw util::UnimplementedInst("v_writelane_b32 for target architecture");
   }
@@ -760,10 +760,9 @@ build_scratch_store_dword(uint16_t vdata, uint32_t byte_offset, rj_code_arch_t a
     return {w.begin(), w.end()};
   }
   case ROCJITSU_CODE_ARCH_RDNA4: {
-    const auto w = rdna4::build_vscratch(rdna4::kScratchStoreB32Vscratch,
-                                         {.saddr = 0x7C,
-                                          .vsrc = static_cast<uint8_t>(vdata),
-                                          .ioffset = byte_offset & 0xFFFFFFu});
+    const auto w = rdna4::build_vscratch(
+        rdna4::kScratchStoreB32Vscratch,
+        {.saddr = 0x7C, .vsrc = static_cast<uint8_t>(vdata), .ioffset = byte_offset & 0xFFFFFFu});
     return {w.begin(), w.end()};
   }
   default:
@@ -785,10 +784,9 @@ build_scratch_load_dword(uint16_t vdst, uint32_t byte_offset, rj_code_arch_t arc
     return {w.begin(), w.end()};
   }
   case ROCJITSU_CODE_ARCH_RDNA4: {
-    const auto w = rdna4::build_vscratch(rdna4::kScratchLoadB32Vscratch,
-                                         {.saddr = 0x7C,
-                                          .vdst = static_cast<uint8_t>(vdst),
-                                          .ioffset = byte_offset & 0xFFFFFFu});
+    const auto w = rdna4::build_vscratch(
+        rdna4::kScratchLoadB32Vscratch,
+        {.saddr = 0x7C, .vdst = static_cast<uint8_t>(vdst), .ioffset = byte_offset & 0xFFFFFFu});
     return {w.begin(), w.end()};
   }
   default:
