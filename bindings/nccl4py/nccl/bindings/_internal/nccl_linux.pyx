@@ -141,6 +141,9 @@ cdef void* __ncclGetPeerDevicePointer = NULL
 cdef void* __ncclTeamWorld = NULL
 cdef void* __ncclTeamLsa = NULL
 cdef void* __ncclTeamRail = NULL
+cdef void* __ncclLsaBarrierCreateRequirement = NULL
+cdef void* __ncclGinBarrierCreateRequirement = NULL
+cdef void* __ncclLLA2ACreateRequirement = NULL
 
 
 cdef void* load_library() except* with gil:
@@ -664,6 +667,27 @@ cdef int _check_or_init_nccl() except -1 nogil:
             if handle == NULL:
                 handle = load_library()
             __ncclTeamRail = dlsym(handle, 'ncclTeamRail')
+
+        global __ncclLsaBarrierCreateRequirement
+        __ncclLsaBarrierCreateRequirement = dlsym(RTLD_DEFAULT, 'ncclLsaBarrierCreateRequirement')
+        if __ncclLsaBarrierCreateRequirement == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclLsaBarrierCreateRequirement = dlsym(handle, 'ncclLsaBarrierCreateRequirement')
+
+        global __ncclGinBarrierCreateRequirement
+        __ncclGinBarrierCreateRequirement = dlsym(RTLD_DEFAULT, 'ncclGinBarrierCreateRequirement')
+        if __ncclGinBarrierCreateRequirement == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclGinBarrierCreateRequirement = dlsym(handle, 'ncclGinBarrierCreateRequirement')
+
+        global __ncclLLA2ACreateRequirement
+        __ncclLLA2ACreateRequirement = dlsym(RTLD_DEFAULT, 'ncclLLA2ACreateRequirement')
+        if __ncclLLA2ACreateRequirement == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclLLA2ACreateRequirement = dlsym(handle, 'ncclLLA2ACreateRequirement')
         __py_nccl_init = True
         return 0
 
@@ -894,6 +918,15 @@ cpdef dict _inspect_function_pointers():
 
     global __ncclTeamRail
     data["__ncclTeamRail"] = <intptr_t>__ncclTeamRail
+
+    global __ncclLsaBarrierCreateRequirement
+    data["__ncclLsaBarrierCreateRequirement"] = <intptr_t>__ncclLsaBarrierCreateRequirement
+
+    global __ncclGinBarrierCreateRequirement
+    data["__ncclGinBarrierCreateRequirement"] = <intptr_t>__ncclGinBarrierCreateRequirement
+
+    global __ncclLLA2ACreateRequirement
+    data["__ncclLLA2ACreateRequirement"] = <intptr_t>__ncclLLA2ACreateRequirement
 
     func_ptrs = data
     return data
@@ -1655,3 +1688,33 @@ cdef ncclTeam_t _ncclTeamRail(ncclComm_t comm) except* nogil:
             raise FunctionNotFoundError("function ncclTeamRail is not found")
     return (<ncclTeam_t (*)(ncclComm_t) noexcept nogil>__ncclTeamRail)(
         comm)
+
+
+cdef ncclResult_t _ncclLsaBarrierCreateRequirement(ncclTeam_t team, int nBarriers, ncclLsaBarrierHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclLsaBarrierCreateRequirement
+    _check_or_init_nccl()
+    if __ncclLsaBarrierCreateRequirement == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclLsaBarrierCreateRequirement is not found")
+    return (<ncclResult_t (*)(ncclTeam_t, int, ncclLsaBarrierHandle_t*, ncclDevResourceRequirements_t*) noexcept nogil>__ncclLsaBarrierCreateRequirement)(
+        team, nBarriers, outHandle, outReq)
+
+
+cdef ncclResult_t _ncclGinBarrierCreateRequirement(ncclComm_t comm, ncclTeam_t team, int nBarriers, ncclGinBarrierHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclGinBarrierCreateRequirement
+    _check_or_init_nccl()
+    if __ncclGinBarrierCreateRequirement == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclGinBarrierCreateRequirement is not found")
+    return (<ncclResult_t (*)(ncclComm_t, ncclTeam_t, int, ncclGinBarrierHandle_t*, ncclDevResourceRequirements_t*) noexcept nogil>__ncclGinBarrierCreateRequirement)(
+        comm, team, nBarriers, outHandle, outReq)
+
+
+cdef ncclResult_t _ncclLLA2ACreateRequirement(int nBlocks, int nSlots, ncclLLA2AHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclLLA2ACreateRequirement
+    _check_or_init_nccl()
+    if __ncclLLA2ACreateRequirement == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclLLA2ACreateRequirement is not found")
+    return (<ncclResult_t (*)(int, int, ncclLLA2AHandle_t*, ncclDevResourceRequirements_t*) noexcept nogil>__ncclLLA2ACreateRequirement)(
+        nBlocks, nSlots, outHandle, outReq)

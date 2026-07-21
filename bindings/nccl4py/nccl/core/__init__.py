@@ -83,12 +83,19 @@ __all__ = [
     # Communicator
     "NCCLConfig",
     "WaitSignalDesc",
+    "TeamRequirement",
+    "LsaBarrierRequirement",
+    "GinBarrierRequirement",
+    "LLA2ARequirement",
     "NCCLDevCommRequirements",
     "Communicator",
     # Team
     "NCCLTeam",
     # Resources
     "MultimemHandle",
+    "LsaBarrierHandle",
+    "GinBarrierHandle",
+    "LLA2AHandle",
     "RegisteredBufferHandle",
     "RegisteredWindowHandle",
     "CustomRedOp",

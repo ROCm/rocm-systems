@@ -2194,6 +2194,149 @@ cdef class LsaBarrierHandle:
         return obj
 
 
+cdef _get_ll_a2a_handle_dtype_offsets():
+    cdef ncclLLA2AHandle_t pod = ncclLLA2AHandle_t()
+    return _numpy.dtype({
+        'names': ['buf_handle', 'n_slots'],
+        'formats': [_numpy.uint32, _numpy.uint32],
+        'offsets': [
+            (<intptr_t>&(pod.bufHandle)) - (<intptr_t>&pod),
+            (<intptr_t>&(pod.nSlots)) - (<intptr_t>&pod),
+        ],
+        'itemsize': sizeof(ncclLLA2AHandle_t),
+    })
+
+ll_a2a_handle_dtype = _get_ll_a2a_handle_dtype_offsets()
+
+cdef class LLA2AHandle:
+    """Empty-initialize an instance of `ncclLLA2AHandle_t`.
+
+
+    .. seealso:: `ncclLLA2AHandle_t`
+    """
+    cdef:
+        ncclLLA2AHandle_t *_ptr
+        object _owner
+        bint _owned
+        bint _readonly
+
+    def __init__(self):
+        self._ptr = <ncclLLA2AHandle_t *>calloc(1, sizeof(ncclLLA2AHandle_t))
+        if self._ptr == NULL:
+            raise MemoryError("Error allocating LLA2AHandle")
+        self._owner = None
+        self._owned = True
+        self._readonly = False
+
+    def __dealloc__(self):
+        cdef ncclLLA2AHandle_t *ptr
+        if self._owned and self._ptr != NULL:
+            ptr = self._ptr
+            self._ptr = NULL
+            free(ptr)
+
+    def __repr__(self):
+        return f"<{__name__}.LLA2AHandle object at {hex(id(self))}>"
+
+    @property
+    def ptr(self):
+        """Get the pointer address to the data as Python :class:`int`."""
+        return <intptr_t>(self._ptr)
+
+    cdef intptr_t _get_ptr(self):
+        return <intptr_t>(self._ptr)
+
+    def __int__(self):
+        return <intptr_t>(self._ptr)
+
+    def __eq__(self, other):
+        cdef LLA2AHandle other_
+        if not isinstance(other, LLA2AHandle):
+            return False
+        other_ = other
+        return (memcmp(<void *><intptr_t>(self._ptr), <void *><intptr_t>(other_._ptr), sizeof(ncclLLA2AHandle_t)) == 0)
+
+    def __getbuffer__(self, Py_buffer *buffer, int flags):
+        __getbuffer(self, buffer, <void *>self._ptr, sizeof(ncclLLA2AHandle_t), self._readonly)
+
+    def __releasebuffer__(self, Py_buffer *buffer):
+        pass
+
+    def __setitem__(self, key, val):
+        if key == 0 and isinstance(val, _numpy.ndarray):
+            self._ptr = <ncclLLA2AHandle_t *>malloc(sizeof(ncclLLA2AHandle_t))
+            if self._ptr == NULL:
+                raise MemoryError("Error allocating LLA2AHandle")
+            memcpy(<void*>self._ptr, <void*><intptr_t>val.ctypes.data, sizeof(ncclLLA2AHandle_t))
+            self._owner = None
+            self._owned = True
+            self._readonly = not val.flags.writeable
+        else:
+            setattr(self, key, val)
+
+    @property
+    def buf_handle(self):
+        """int: """
+        return <uint32_t>(self._ptr[0].bufHandle)
+
+    @buf_handle.setter
+    def buf_handle(self, val):
+        if self._readonly:
+            raise ValueError("This LLA2AHandle instance is read-only")
+        self._ptr[0].bufHandle = <ncclDevResourceHandle_t><uint32_t>val
+
+    @property
+    def n_slots(self):
+        """int: """
+        return self._ptr[0].nSlots
+
+    @n_slots.setter
+    def n_slots(self, val):
+        if self._readonly:
+            raise ValueError("This LLA2AHandle instance is read-only")
+        self._ptr[0].nSlots = val
+
+    @staticmethod
+    def from_buffer(buffer):
+        """Create an LLA2AHandle instance with the memory from the given buffer."""
+        return __from_buffer(buffer, sizeof(ncclLLA2AHandle_t), LLA2AHandle)
+
+    @staticmethod
+    def from_data(data):
+        """Create an LLA2AHandle instance wrapping the given NumPy array.
+
+        Args:
+            data (_numpy.ndarray): a single-element array of dtype `ll_a2a_handle_dtype` holding the data.
+        """
+        return __from_data(data, "ll_a2a_handle_dtype", ll_a2a_handle_dtype, LLA2AHandle)
+
+    @staticmethod
+    def from_ptr(intptr_t ptr, bint readonly=False, object owner=None):
+        """Create an LLA2AHandle instance wrapping the given pointer.
+
+        Args:
+            ptr (intptr_t): pointer address as Python :class:`int` to the data.
+            owner (object): The Python object that owns the pointer. If not provided, data will be copied.
+            readonly (bool): whether the data is read-only (to the user). default is `False`.
+        """
+        if ptr == 0:
+            raise ValueError("ptr must not be null (0)")
+        cdef LLA2AHandle obj = LLA2AHandle.__new__(LLA2AHandle)
+        if owner is None:
+            obj._ptr = <ncclLLA2AHandle_t *>malloc(sizeof(ncclLLA2AHandle_t))
+            if obj._ptr == NULL:
+                raise MemoryError("Error allocating LLA2AHandle")
+            memcpy(<void*>(obj._ptr), <void*>ptr, sizeof(ncclLLA2AHandle_t))
+            obj._owner = None
+            obj._owned = True
+        else:
+            obj._ptr = <ncclLLA2AHandle_t *>ptr
+            obj._owner = owner
+            obj._owned = False
+        obj._readonly = readonly
+        return obj
+
+
 cdef _get_team_requirements_dtype_offsets():
     cdef ncclTeamRequirements_t pod = ncclTeamRequirements_t()
     return _numpy.dtype({
@@ -3759,6 +3902,10 @@ cpdef intptr_t get_peer_device_pointer(intptr_t window, size_t offset, int peer)
     return <intptr_t>out_ptr
 
 
+cpdef ll_a2a_create_requirement(int n_blocks, int n_slots, intptr_t out_handle, intptr_t out_req):
+    with nogil:
+        __status__ = ncclLLA2ACreateRequirement(n_blocks, n_slots, <ncclLLA2AHandle_t*>out_handle, <ncclDevResourceRequirements_t*>out_req)
+    check_status(__status__)
 
 # Hand-written: cybind cannot emit by-value struct returns (ncclTeam_t).
 
@@ -3784,6 +3931,28 @@ cpdef object team_rail(intptr_t comm):
     with nogil:
         team[0] = ncclTeamRail(<Comm>comm)
     return team_py
+
+
+# Hand-written: LSA/GIN barrier requirement creators take ncclTeam_t by value
+# (SKIP_LOWPP in nccl.cybind.yaml; cybind cannot emit by-value structs). Each
+# fills the out-req node and wires it to write into the out-handle during
+# ncclDevCommCreate. ncclLLA2ACreateRequirement has no by-value struct and is
+# generated by cybind.
+
+cpdef lsa_barrier_create_requirement(intptr_t team, int n_barriers, intptr_t out_handle, intptr_t out_req):
+    with nogil:
+        __status__ = ncclLsaBarrierCreateRequirement(
+            (<ncclTeam_t*>team)[0], n_barriers,
+            <ncclLsaBarrierHandle_t*>out_handle, <ncclDevResourceRequirements_t*>out_req)
+    check_status(__status__)
+
+
+cpdef gin_barrier_create_requirement(intptr_t comm, intptr_t team, int n_barriers, intptr_t out_handle, intptr_t out_req):
+    with nogil:
+        __status__ = ncclGinBarrierCreateRequirement(
+            <Comm>comm, (<ncclTeam_t*>team)[0], n_barriers,
+            <ncclGinBarrierHandle_t*>out_handle, <ncclDevResourceRequirements_t*>out_req)
+    check_status(__status__)
 
 cpdef object get_library_path():
     from ._internal.nccl import _inspect_loaded_library_path

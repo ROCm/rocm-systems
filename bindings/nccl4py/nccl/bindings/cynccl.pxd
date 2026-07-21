@@ -177,6 +177,10 @@ ctypedef struct ncclLsaBarrierHandle_t 'ncclLsaBarrierHandle_t':
     ncclDevResourceHandle_t bufHandle
     int nBarriers
 
+ctypedef struct ncclLLA2AHandle_t 'ncclLLA2AHandle_t':
+    ncclDevResourceHandle_t bufHandle
+    uint32_t nSlots
+
 ctypedef struct ncclGinBarrierHandle_t 'ncclGinBarrierHandle_t':
     ncclGinSignal_t signal0
     ncclDevResourceHandle_t unused
@@ -329,3 +333,6 @@ cdef ncclResult_t ncclGetPeerDevicePointer(ncclWindow_t window, size_t offset, i
 cdef ncclTeam_t ncclTeamWorld(ncclComm_t comm) except* nogil
 cdef ncclTeam_t ncclTeamLsa(ncclComm_t comm) except* nogil
 cdef ncclTeam_t ncclTeamRail(ncclComm_t comm) except* nogil
+cdef ncclResult_t ncclLsaBarrierCreateRequirement(ncclTeam_t team, int nBarriers, ncclLsaBarrierHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
+cdef ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t comm, ncclTeam_t team, int nBarriers, ncclGinBarrierHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
+cdef ncclResult_t ncclLLA2ACreateRequirement(int nBlocks, int nSlots, ncclLLA2AHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil

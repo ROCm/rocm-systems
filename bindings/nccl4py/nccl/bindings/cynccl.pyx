@@ -297,3 +297,15 @@ cdef ncclTeam_t ncclTeamLsa(ncclComm_t comm) except* nogil:
 
 cdef ncclTeam_t ncclTeamRail(ncclComm_t comm) except* nogil:
     return _nccl._ncclTeamRail(comm)
+
+
+cdef ncclResult_t ncclLsaBarrierCreateRequirement(ncclTeam_t team, int nBarriers, ncclLsaBarrierHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclLsaBarrierCreateRequirement(team, nBarriers, outHandle, outReq)
+
+
+cdef ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t comm, ncclTeam_t team, int nBarriers, ncclGinBarrierHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclGinBarrierCreateRequirement(comm, team, nBarriers, outHandle, outReq)
+
+
+cdef ncclResult_t ncclLLA2ACreateRequirement(int nBlocks, int nSlots, ncclLLA2AHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclLLA2ACreateRequirement(nBlocks, nSlots, outHandle, outReq)

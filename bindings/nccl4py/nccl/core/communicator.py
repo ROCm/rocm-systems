@@ -60,6 +60,10 @@ _Result = _nccl_bindings.Result
 __all__ = [
     "NCCLConfig",
     "WaitSignalDesc",
+    "TeamRequirement",
+    "LsaBarrierRequirement",
+    "GinBarrierRequirement",
+    "LLA2ARequirement",
     "NCCLDevCommRequirements",
     "Communicator",
 ]
@@ -156,17 +160,77 @@ class WaitSignalDesc(LowppSpec, lowpp_cls=_nccl_bindings.WaitSignalDesc):
     """Context identifier. Currently must be 0. Defaults to 0."""
 
 
+@dataclass(frozen=True)
+class TeamRequirement:
+    """A per-team requirement for device communicator creation.
+
+    Pass a tuple of these as :py:attr:`NCCLDevCommRequirements.teams`. When
+    ``multimem`` is True, NCCL allocates a multicast handle for the team,
+    retrievable afterwards via
+    :py:meth:`~nccl.core.resources.DevCommResource.multimem_handle`.
+    """
+
+    team: NCCLTeam
+    multimem: bool = False
+
+
+@dataclass(frozen=True)
+class LsaBarrierRequirement:
+    """Requests an LSA barrier resource on ``team`` with ``n_barriers`` barriers.
+
+    Add to :py:attr:`NCCLDevCommRequirements.resources`; the finalized
+    :py:class:`~nccl.core.resources.LsaBarrierHandle` is returned in
+    :py:attr:`~nccl.core.resources.DevCommResource.resource_handles`.
+    """
+
+    team: NCCLTeam
+    n_barriers: int
+
+
+@dataclass(frozen=True)
+class GinBarrierRequirement:
+    """Requests a GIN barrier resource on ``team`` with ``n_barriers`` barriers.
+
+    Add to :py:attr:`NCCLDevCommRequirements.resources`; the finalized
+    :py:class:`~nccl.core.resources.GinBarrierHandle` is returned in
+    :py:attr:`~nccl.core.resources.DevCommResource.resource_handles`.
+    """
+
+    team: NCCLTeam
+    n_barriers: int
+
+
+@dataclass(frozen=True)
+class LLA2ARequirement:
+    """Requests a low-latency all-to-all resource with ``n_blocks`` blocks and
+    ``n_slots`` slots.
+
+    Add to :py:attr:`NCCLDevCommRequirements.resources`; the finalized
+    :py:class:`~nccl.core.resources.LLA2AHandle` is returned in
+    :py:attr:`~nccl.core.resources.DevCommResource.resource_handles`.
+    """
+
+    n_blocks: int
+    n_slots: int
+
+
 @dataclass(kw_only=True)
 class NCCLDevCommRequirements(
     LowppSpec, lowpp_cls=_nccl_bindings.DevCommRequirements
 ):
     """NCCL device communicator requirements configuration.
 
-    Provides configuration for device communicator creation, allowing
-    fine-tuning of resource allocation and device-side communication
-    behavior. Fields not set in the constructor remain at NCCL's internal
-    default; values are validated by the C library when the requirements
-    are consumed by :py:meth:`Communicator.create_dev_comm`.
+    This is a reusable high-level Python request consumed by
+    :py:meth:`Communicator.create_dev_comm`. Per-team requirements are
+    declared through the :py:attr:`teams` tuple. Each call snapshots the
+    request into independent low-level ``ncclDevCommRequirements_t`` and linked
+    ``ncclTeamRequirements_t`` storage, including separate multimem output
+    handles. NCCL copies the requirements and linked-list nodes before the call
+    returns; the resulting :class:`DevCommResource` retains the storage
+    referenced by each ``outMultimemHandle``. This object may therefore be
+    changed between calls without affecting device communicators that were
+    already created. Do not mutate it concurrently with
+    :meth:`Communicator.create_dev_comm`.
 
     See Also:
         :c:type:`ncclDevCommRequirements` for the description of each field.
@@ -224,6 +288,116 @@ class NCCLDevCommRequirements(
     gin_va_signals_required: bool | None = None
     """Whether GIN VA signals are required by kernels using this devComm.
     When False, using GIN VA signals results in undefined behavior. If unset, NCCL uses True."""
+
+    teams: tuple[TeamRequirement, ...] = ()
+    """Per-team requirements. Entries for the same team (by value) are merged,
+    keeping first-appearance order; multimem is requested for a team if any of
+    its entries sets it. A team requested with ``multimem=True`` yields a
+    multimem handle retrievable via
+    :py:meth:`~nccl.core.resources.DevCommResource.multimem_handle`."""
+
+    resources: tuple[
+        LsaBarrierRequirement | GinBarrierRequirement | LLA2ARequirement, ...
+    ] = ()
+    """Device resource requirements (LSA/GIN barriers, low-latency all-to-all).
+    Each entry yields, in order, a handle in
+    :py:attr:`~nccl.core.resources.DevCommResource.resource_handles`. Entries are
+    kept as-is (not merged): each is a distinct resource."""
+
+
+def _materialize_team_requirements(
+    teams: tuple[TeamRequirement, ...],
+) -> tuple[
+    tuple[_nccl_bindings.TeamRequirements, ...],
+    dict[NCCLTeam, _nccl_bindings.MultimemHandle],
+]:
+    """Builds the team-requirements linked list on ``reqs``.
+
+    Entries for the same team (by value) are merged into one node, keeping
+    first-appearance order; its multimem is requested if any entry sets it. This
+    matches NCCL, which allocates one multicast per unique team (``symTeamObtain``
+    caches per team) whenever any requirement for that team sets multimem.
+
+    Returns ``(team_nodes, multimem_handles)``. The caller must keep
+    ``team_nodes`` alive until ``ncclDevCommCreate`` returns (``reqs`` and each
+    node hold raw pointers to the next node); ``multimem_handles`` is the per-team
+    output storage NCCL writes into.
+    """
+    merged: dict[NCCLTeam, bool] = {}
+    for team_req in teams:
+        merged[team_req.team] = merged.get(team_req.team, False) or bool(team_req.multimem)
+
+    team_nodes: list[_nccl_bindings.TeamRequirements] = []
+    multimem_handles: dict[NCCLTeam, _nccl_bindings.MultimemHandle] = {}
+    previous: _nccl_bindings.TeamRequirements | None = None
+    for team, multimem in merged.items():
+        node = _nccl_bindings.TeamRequirements()
+        # The generated setter copies the team POD into this fresh node.
+        node.team = team._to_lowpp()
+        node.multimem = multimem
+
+        if multimem:
+            handle = _nccl_bindings.MultimemHandle()
+            node.out_multimem_handle = handle.ptr
+            multimem_handles[team] = handle
+
+        if previous is not None:
+            previous.next = node.ptr
+
+        team_nodes.append(node)
+        previous = node
+
+    return tuple(team_nodes), multimem_handles
+
+
+def _materialize_resource_requirements(
+    comm_ptr: int,
+    resources: tuple[LsaBarrierRequirement | GinBarrierRequirement | LLA2ARequirement, ...],
+) -> tuple[
+    tuple[_nccl_bindings.DevResourceRequirements, ...],
+    tuple[_nccl_bindings.LsaBarrierHandle | _nccl_bindings.GinBarrierHandle | _nccl_bindings.LLA2AHandle, ...],
+]:
+    """Builds the resource-requirements linked list and its output handles.
+
+    Each resource calls the matching NCCL ``*CreateRequirement`` helper, which
+    fills a node and wires it to write into the handle during
+    ``ncclDevCommCreate``. Returns ``(resource_nodes, handle_lowpps)`` in
+    requirement order; the caller keeps ``resource_nodes`` alive until
+    ``ncclDevCommCreate`` returns (each node holds a raw pointer to the next).
+    """
+    resource_nodes: list[_nccl_bindings.DevResourceRequirements] = []
+    resource_handles: list[_nccl_bindings.LsaBarrierHandle | _nccl_bindings.GinBarrierHandle | _nccl_bindings.LLA2AHandle] = []
+    previous: _nccl_bindings.DevResourceRequirements | None = None
+    for resource in resources:
+        node = _nccl_bindings.DevResourceRequirements()
+        if isinstance(resource, LsaBarrierRequirement):
+            handle = _nccl_bindings.LsaBarrierHandle()
+            team_lowpp = resource.team._to_lowpp()
+            _nccl_bindings.lsa_barrier_create_requirement(
+                team_lowpp.ptr, resource.n_barriers, handle.ptr, node.ptr
+            )
+        elif isinstance(resource, GinBarrierRequirement):
+            handle = _nccl_bindings.GinBarrierHandle()
+            team_lowpp = resource.team._to_lowpp()
+            _nccl_bindings.gin_barrier_create_requirement(
+                comm_ptr, team_lowpp.ptr, resource.n_barriers, handle.ptr, node.ptr
+            )
+        elif isinstance(resource, LLA2ARequirement):
+            handle = _nccl_bindings.LLA2AHandle()
+            _nccl_bindings.ll_a2a_create_requirement(
+                resource.n_blocks, resource.n_slots, handle.ptr, node.ptr
+            )
+        else:
+            raise TypeError(f"unknown resource requirement: {type(resource).__name__}")
+
+        if previous is not None:
+            previous.next = node.ptr
+
+        resource_nodes.append(node)
+        resource_handles.append(handle)
+        previous = node
+
+    return tuple(resource_nodes), tuple(resource_handles)
 
 
 class Communicator:
@@ -1873,14 +2047,29 @@ class Communicator:
         """
         self._check_valid("create_dev_comm")
 
-        # Create default requirements if none provided
-        if requirements is None:
-            requirements = NCCLDevCommRequirements()
+        requirements = requirements or NCCLDevCommRequirements()
+        multimem_handles: dict[NCCLTeam, _nccl_bindings.MultimemHandle] | None = None
+        resource_handles: tuple[_nccl_bindings.LsaBarrierHandle | _nccl_bindings.GinBarrierHandle | _nccl_bindings.LLA2AHandle, ...] | None = None
 
-        # Hold the materialized lowpp alive across DevCommResource construction,
-        # which reads the struct synchronously in dev_comm_create.
-        requirements_lowpp = requirements._to_lowpp()
-        resource = DevCommResource(self._comm, requirements_lowpp.ptr)
+        reqs = requirements._to_lowpp()
+        if (requirements.teams):
+            team_nodes, multimem_handles = _materialize_team_requirements(
+                requirements.teams
+            )
+            reqs.team_requirements_list = team_nodes[0].ptr
+
+        if (requirements.resources):
+            resource_nodes, resource_handles = _materialize_resource_requirements(
+                self._comm, requirements.resources
+            )
+            reqs.resource_requirements_list = resource_nodes[0].ptr
+
+        # team_nodes and resource_nodes keep the linked-list nodes alive through
+        # the resource constructor's synchronous ncclDevCommCreate; the resource
+        # nodes also point into the handle storage retained by the resource.
+        resource = DevCommResource(
+            self._comm, reqs, multimem_handles, resource_handles
+        )
         self._resources.append(resource)
         return resource
 
