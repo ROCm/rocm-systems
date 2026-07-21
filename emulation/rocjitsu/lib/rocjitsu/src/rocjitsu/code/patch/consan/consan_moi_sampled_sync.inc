@@ -1411,6 +1411,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     result.modified = true;
     return;
   }
+  MoiLocalNopIslandAllocator indirect_allocator(old_text, result, arch,
+                                                kMoiLocalIndirectIslandWords);
   for (size_t barrier_index = 0; barrier_index < selected.size(); ++barrier_index) {
     const Planned &planned = selected[barrier_index];
     const ConSanBarrierSite &site = planned.candidate.barrier.site;
@@ -1443,28 +1445,41 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     }
     auto fwd = compute_sopp_branch_simm16(site.text_offset, cave_offset);
     if (!fwd) {
-      fwd = compute_sopp_branch_simm16(site.text_offset, island_offset);
+      const auto reserved_fwd = compute_sopp_branch_simm16(site.text_offset, island_offset);
       const auto special_state = moi_special_state_sgprs(options);
       std::vector<uint32_t> island_words;
-      if (!fwd || !special_state ||
-          !append_moi_scc_preserving_indirect_jump(
+      const bool reserved_island_valid =
+          reserved_fwd && special_state && options.moi_exec_save_sgpr &&
+          append_moi_scc_preserving_indirect_jump(
               island_words, island_offset, cave_offset, *options.moi_exec_save_sgpr,
-              special_state->scc_save_sgpr, /*capture_scc=*/true, arch) ||
-          island_words.size() != kIndirectIslandWords || island_offset > new_text.size() ||
-          island_words.size() * sizeof(uint32_t) > new_text.size() - island_offset) {
-        result.errors.emplace_back(
-            "ConSan MOI sampled barrier sync could not use its reserved entry island");
-        return;
+              special_state->scc_save_sgpr, /*capture_scc=*/true, arch) &&
+          island_words.size() == kIndirectIslandWords && island_offset <= new_text.size() &&
+          island_words.size() * sizeof(uint32_t) <= new_text.size() - island_offset;
+      if (reserved_island_valid) {
+        fwd = reserved_fwd;
+        std::memcpy(new_text.data() + island_offset, island_words.data(),
+                    island_words.size() * sizeof(uint32_t));
+        ConSanPatchInfo island_info;
+        island_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
+        island_info.anchor_offset = site.text_offset;
+        island_info.trampoline_offset = island_offset;
+        island_info.trampoline_size = static_cast<uint32_t>(island_words.size() * sizeof(uint32_t));
+        island_info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
+        patches.push_back(std::move(island_info));
+      } else {
+        const auto local_island = indirect_allocator.claim_reachable(site.text_offset);
+        fwd = local_island ? compute_sopp_branch_simm16(site.text_offset, *local_island)
+                           : std::nullopt;
+        if (!local_island || !fwd ||
+            !emit_moi_local_indirect_entry_island(
+                new_text, *local_island, cave_offset, site.text_offset, options,
+                planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
+                "ConSan MOI sampled barrier sync patch")) {
+          result.errors.emplace_back(
+              "ConSan MOI sampled barrier sync found no reachable entry island");
+          return;
+        }
       }
-      std::memcpy(new_text.data() + island_offset, island_words.data(),
-                  island_words.size() * sizeof(uint32_t));
-      ConSanPatchInfo island_info;
-      island_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
-      island_info.anchor_offset = site.text_offset;
-      island_info.trampoline_offset = island_offset;
-      island_info.trampoline_size = static_cast<uint32_t>(island_words.size() * sizeof(uint32_t));
-      island_info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
-      patches.push_back(std::move(island_info));
     }
     std::vector<uint32_t> anchor(site.size / sizeof(uint32_t), build_s_nop(0, arch));
     anchor.front() = build_s_branch(*fwd, arch);

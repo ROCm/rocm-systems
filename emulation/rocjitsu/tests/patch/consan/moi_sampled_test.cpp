@@ -2368,6 +2368,52 @@ TEST(ConSanMoi, SampledQualifiedBarrierPersistsOwnerAcrossAccessAndSync) {
             result.patches.end());
 }
 
+TEST(ConSanMoi, SampledFarBarrierUsesReachableLocalIndirectEntryIsland) {
+  std::vector<uint32_t> kernel_words;
+  for (uint32_t i = 0; i < 9u; ++i) {
+    kernel_words.push_back(0xD8340000u); // ds_store_b32 v0, v0
+    kernel_words.push_back(0x00000000u);
+  }
+  const uint64_t barrier_offset = kernel_words.size() * sizeof(uint32_t);
+  kernel_words.push_back(0xBE804EC1u); // s_barrier_signal -1
+  kernel_words.push_back(0xBF94FFFFu); // s_barrier_wait -1
+  kernel_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+  const std::array function_words = {build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)};
+  std::vector<uint32_t> far_tail(40000u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  const std::vector<uint8_t> bytes =
+      make_rdna4_code_object_with_local_function(kernel_words, function_words, far_tail);
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_track_barriers = true;
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_dispatch_id_sgpr = 70;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(18);
+  options.moi_runtime_sample_stride = 16384;
+  options.max_patches = 20;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto sync_patch = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata &&
+           patch.anchor_offset == barrier_offset + sizeof(uint32_t);
+  });
+  ASSERT_NE(sync_patch, result.patches.end()) << testing::PrintToString(result.warnings);
+  const auto island = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.anchor_offset == sync_patch->anchor_offset;
+  });
+  ASSERT_NE(island, result.patches.end());
+  EXPECT_TRUE(compute_sopp_branch_simm16(sync_patch->anchor_offset, island->trampoline_offset));
+  EXPECT_FALSE(
+      compute_sopp_branch_simm16(sync_patch->anchor_offset, sync_patch->trampoline_offset));
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, SampledQualifiedBarrierAdmitsLongStraightLinePair) {
   std::vector<uint32_t> words(540, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
