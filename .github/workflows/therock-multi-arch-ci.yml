@@ -162,7 +162,7 @@ jobs:
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
-      affected_stages: ${{ needs.setup.outputs.affected_stages }}
+      expanded_projects: ${{ needs.setup.outputs.expanded_projects }}
       repository: ROCm/TheRock
       ref: users/geomin12/selection-workflow-checkin
     permissions:
@@ -188,6 +188,7 @@ jobs:
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
+      expanded_projects: ${{ needs.setup.outputs.expanded_projects }}
       repository: ROCm/TheRock
       ref: users/geomin12/selection-workflow-checkin
     permissions:
