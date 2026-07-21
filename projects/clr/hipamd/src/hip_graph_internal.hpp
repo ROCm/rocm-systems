@@ -3601,6 +3601,8 @@ class hipGraphBatchMemOpNode : public GraphNode {
 
   GraphNode* clone() const override { return new hipGraphBatchMemOpNode(*this); }
 
+  virtual bool GraphCaptureEnabled() override { return true; }
+
   hipError_t CreateCommand(hip::Stream* stream) override {
     hipError_t status = GraphNode::CreateCommand(stream);
     if (status != hipSuccess) {
