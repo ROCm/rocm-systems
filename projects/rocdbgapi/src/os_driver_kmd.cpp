@@ -1356,6 +1356,14 @@ kmd_driver_t::check_version () const
         }
     }
 
+  /* Multi-GPU configurations are not supported on Windows.  */
+  if (m_agents.size () > 1)
+    {
+      warning ("Multi-AMDGPU configurations are not supported for debugging "
+	       "(%zu AMD GPUs detected)", m_agents.size ());
+      return AMD_DBGAPI_STATUS_ERROR_RESTRICTION;
+    }
+
   return AMD_DBGAPI_STATUS_SUCCESS;
 }
 
