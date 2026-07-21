@@ -150,15 +150,32 @@ void SvmProfileControl::PollSmi() {
       HSA_SMI_EVENT_MASK_FROM_INDEX(HSA_SMI_EVENT_QUEUE_RESTORE) |
       HSA_SMI_EVENT_MASK_FROM_INDEX(HSA_SMI_EVENT_UNMAP_FROM_GPU);
 
+  // Track how many fds we've opened for cleanup on error
+  int opened_fds = 0;
+  auto cleanup_fds = [&]() {
+    for (int j = 1; j <= opened_fds; j++) {
+      close(files[j].fd);
+    }
+  };
+
   for (int i = 0; i < core::Runtime::runtime_singleton_->gpu_agents().size(); i++) {
     auto gpu_agent = core::Runtime::runtime_singleton_->gpu_agents()[i];
     auto err = gpu_agent->driver().OpenSMI(gpu_agent->node_id(), &files[i + 1].fd);
-    assert(err == HSA_STATUS_SUCCESS);
+    if (err != HSA_STATUS_SUCCESS) {
+      assert(false && "OpenSMI failed");
+      cleanup_fds();
+      return;  // Log and return instead of throwing to avoid process termination
+    }
+    opened_fds++;
     files[i + 1].events = POLLIN;
     files[i + 1].revents = 0;
     // Enable collecting masked events.
     auto wrote = write(files[i + 1].fd, &events, sizeof(events));
-    assert(wrote == sizeof(events));
+    if (wrote != sizeof(events)) {
+      assert(false && "write to SMI fd failed");
+      cleanup_fds();
+      return;  // Log and return instead of throwing to avoid process termination
+    }
   }
   MAKE_NAMED_SCOPE_GUARD(smiGuard, [&]() {
     for (int i = 1; i < files.size(); i++) {
