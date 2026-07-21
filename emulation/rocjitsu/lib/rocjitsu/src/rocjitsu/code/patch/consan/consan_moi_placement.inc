@@ -2002,6 +2002,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
                                                              rj_code_arch_t arch) {
   const bool has_inline_dispatch_consumer =
       options.moi_engine == ConSanMoiEngine::InlineShadow &&
+      !(arch == ROCJITSU_CODE_ARCH_GFX1250 && !options.moi_track_atomics) &&
       std::ranges::any_of(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
         return !plan.owner_descriptor_file_offsets.empty() &&
                (plan.site_kind == ConSanResourceSiteKind::Access ||

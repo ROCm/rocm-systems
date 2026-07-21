@@ -2371,14 +2371,15 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
       std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
         return is_exact_patch(patch) && patch.workgroup_shadow_size == 0u;
       });
+  const rj_code_arch_t arch = arch_for_target(replacement.target_id());
   if (replacement.text_sections().size() != 1 ||
-      (has_global_exact_patch && !result.resolved_moi_dispatch_id_sgpr)) {
+      (has_global_exact_patch && !result.resolved_moi_dispatch_id_sgpr &&
+       arch != ROCJITSU_CODE_ARCH_GFX1250)) {
     errors.emplace_back(
         "ConSan final validation found exact-shadow publication without dispatch-ID state");
     return errors;
   }
 
-  const rj_code_arch_t arch = arch_for_target(replacement.target_id());
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   if (!decoder) {
     errors.emplace_back(
@@ -2533,7 +2534,6 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
       continue;
     }
 
-    const uint16_t dispatch = *result.resolved_moi_dispatch_id_sgpr;
     const auto expected_cas = instrumentation::build_flat_atomic_cmpswap_b32(
         scratch, static_cast<uint16_t>(scratch + 14u), static_cast<uint16_t>(scratch + 14u),
         /*return_old_value=*/true, /*scope=*/2, arch);
@@ -2551,10 +2551,29 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
 
     const size_t exact_cas_count = count_pattern(*expected_cas);
     const size_t transaction_count = exact_cas_count / 2u;
-    const std::array<uint32_t, 1> capture_low = {
-        build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 2u), dispatch, arch)};
-    const std::array<uint32_t, 1> capture_high = {build_v_mov_b32_e32(
-        static_cast<uint16_t>(scratch + 3u), static_cast<uint16_t>(dispatch + 1u), arch)};
+    std::vector<uint32_t> capture_low;
+    std::vector<uint32_t> capture_high;
+    if (result.resolved_moi_dispatch_id_sgpr) {
+      capture_low.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 2u),
+                                                *result.resolved_moi_dispatch_id_sgpr, arch));
+      capture_high.push_back(build_v_mov_b32_e32(
+          static_cast<uint16_t>(scratch + 3u),
+          static_cast<uint16_t>(*result.resolved_moi_dispatch_id_sgpr + 1u), arch));
+    } else {
+      const auto low = instrumentation::build_v_mov_b32_literal(
+          static_cast<uint16_t>(scratch + 2u), static_cast<uint32_t>(result.moi_report_dispatch_id),
+          arch);
+      const auto high = instrumentation::build_v_mov_b32_literal(
+          static_cast<uint16_t>(scratch + 3u),
+          static_cast<uint32_t>(result.moi_report_dispatch_id >> 32u), arch);
+      if (!low || !high) {
+        errors.emplace_back(
+            "ConSan final validation could not encode literal dispatch-ID expectations");
+        continue;
+      }
+      capture_low = *low;
+      capture_high = *high;
+    }
     if (decoded_legacy_swap || decoded_cas_count < 4u || decoded_cas_count % 4u != 0u ||
         exact_cas_count != decoded_cas_count ||
         count_pattern(*expected_dispatch_low_store) != transaction_count ||

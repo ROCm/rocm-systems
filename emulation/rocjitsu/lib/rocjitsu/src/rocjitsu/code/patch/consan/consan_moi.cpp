@@ -87,6 +87,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   ConSanOptions effective_options = options;
   result.flavor = ConSanFlavor::Moi;
   result.moi_engine = effective_options.moi_engine;
+  result.moi_report_dispatch_id = effective_options.moi_report_dispatch_id;
   result.modified = false;
   result.elf_bytes.clear();
   result.moi_candidates.clear();
