@@ -80,6 +80,24 @@ class TestSafeExpression:
                 subscriptable_names=set(),
             )
 
+    def test_where_rejects_side_effect_arguments(self):
+        raw_pmc_df = pd.DataFrame({"COUNTER": [1, -1]})
+        original = raw_pmc_df.copy()
+        expression = "raw_pmc_df['COUNTER'].where(raw_pmc_df['COUNTER'] > 0, 0, True)"
+
+        with pytest.raises(
+            UnsafeExpressionError,
+            match="accepts only condition and other arguments",
+        ):
+            evaluate_expression(
+                expression,
+                variables={"raw_pmc_df": raw_pmc_df},
+                functions={},
+                subscriptable_names={"raw_pmc_df"},
+            )
+
+        pd.testing.assert_frame_equal(raw_pmc_df, original)
+
 
 # =============================================================================
 # Tests for utils.metrics.aggregation

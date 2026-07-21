@@ -139,6 +139,10 @@ class _ExpressionEvaluator:
             return function(*args)
 
         if isinstance(node.func, ast.Attribute) and node.func.attr == "where":
+            if not 1 <= len(node.args) <= 2:
+                raise UnsafeExpressionError(
+                    "The where method accepts only condition and other arguments"
+                )
             source = self.evaluate(node.func.value)
             if not isinstance(source, pd.Series):
                 raise UnsafeExpressionError(
@@ -147,7 +151,7 @@ class _ExpressionEvaluator:
             args = [self.evaluate(arg) for arg in node.args]
             if any(callable(arg) for arg in args):
                 raise UnsafeExpressionError("Callable where arguments are not allowed")
-            return pd.Series.where(source, *args)
+            return source.where(*args)
 
         raise UnsafeExpressionError("Only approved metric functions may be called")
 
