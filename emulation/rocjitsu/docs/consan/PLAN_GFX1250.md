@@ -119,7 +119,7 @@ flowchart TD
     XP2B["XP2B DONE<br/>torch.topk Sampled exact client completes;<br/>construction indexes validated"]
     XP2C["XP2C DONE<br/>torch.topk unrestricted Record/Replay exact/dynamic;<br/>113,760/160,848 accesses, all barriers"]
     XP2D["XP2D TODO<br/>torch.topk Record/Replay residual needs<br/>site/subgroup scalar routing"]
-    XP2E["XP2E TODO<br/>torch.topk Inline construction indexed;<br/>exact object still exceeds fixed bound"]
+    XP2E["XP2E ACTIVE<br/>torch.topk Inline construction indexed;<br/>profile next host-side scaling frontier"]
     XP3["XP3 TODO<br/>top-k SC oracle passes;<br/>88-site residual needs scalar continuation spills"]
     XP9["XP9 DONE<br/>norm plus softmax Record/Replay clean, paired,<br/>and reviewed-fault bundle green"]
     XP9B["XP9B DONE<br/>norm plus softmax Sampled clean, paired,<br/>and reviewed-fault bundle green"]
@@ -136,7 +136,7 @@ flowchart TD
     XT3B["XT3B DONE<br/>quick-GEMM SuperCollider assessed;<br/>SGEMM first problem 12/12 exact and fully covered"]
     XT3G["XT3G DONE<br/>quick SGEMM Sampled first problem;<br/>12/12 exact, 640/640 accesses, 40/40 barriers"]
     XT3H["XT3H DONE<br/>quick SGEMM Inline assessed;<br/>first problem exact, aggregate dynamic incomplete"]
-    XT3I["XT3I ACTIVE<br/>SPMM F8 Sampled;<br/>paired overhead and reviewed fault"]
+    XT3I["XT3I TODO<br/>SPMM F8 Sampled paired run;<br/>one of two objects at fixed 180-second bound"]
     XT3D["XT3D DONE<br/>full SGEMM first problem complete;<br/>quadratic 115,776-event frontier isolated"]
     XT3E["XT3E TODO<br/>both emulator baselines prove intrinsic full-grid bound;<br/>substantially longer unrestricted RR run remains"]
     XT3C["XT3C DONE<br/>SPMM F8 Sampled exact client passes;<br/>19,960 accesses and 806 barrier members covered"]
@@ -316,8 +316,8 @@ flowchart TD
   class XT3B done
   class XP2B done
   class XT3G,XT3H done
-  class XT3I active
-  class G0,XP2D,XP2E,XP3,XT2C2,XT2C3,XT3A,XT3E,XF,XG todo
+  class XP2E active
+  class G0,XP2D,XP3,XT2C2,XT2C3,XT3A,XT3E,XT3I,XF,XG todo
 ```
 
 Broader partial-EXEC, dynamic-stack, high-register, cache/fence-shape, and
@@ -365,6 +365,13 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XT3I rotates to TODO after its one-repetition Sampled paired
+  attempt reaches the fixed 180-second instrumented bound with one of two
+  required applicable-object records.  No overhead is accepted and the
+  timeout is not widened.  XP2E becomes the sole ACTIVE box so the next effort
+  profiles and removes host-side top-k Inline construction work rather than
+  waiting on software-GPU execution.
 
 - 2026-07-21: XT3H is DONE as a bounded assessment without a STATUS color
   promotion.  Quick SGEMM Inline artifact
