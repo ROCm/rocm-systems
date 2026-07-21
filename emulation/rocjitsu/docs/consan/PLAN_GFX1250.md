@@ -141,7 +141,7 @@ flowchart TD
     XT1["XT1 DONE<br/>both compact P0 kernels green<br/>in all four profiles"]
     XT2A["XT2A DONE<br/>four-client transpose/TDM P1 row green<br/>in all four profiles"]
     XT2B["XT2B DONE<br/>broad multi-type transpose/TDM P1 green<br/>in all four profiles at strict capacity"]
-    XT2C1["XT2C1 DONE<br/>001 Stream-K kernel green<br/>in all four profiles"]
+    XT2C1["XT2C1 ACTIVE<br/>001 Stream-K Inline post-merge<br/>paired and fault refresh"]
     XT2C2["XT2C2 TODO<br/>004 Stream-K kernel 3/4;<br/>Inline long-bound completion remains"]
     XT2C3["XT2C3 TODO<br/>007 Stream-K kernel 3/4;<br/>Inline long-bound completion remains"]
     XT3A["XT3A DONE<br/>reduced SGEMM Inline clean and paired pass;<br/>two reviewed faults expose detection gap"]
@@ -355,7 +355,7 @@ flowchart TD
   classDef todo fill:#e8e8e8,stroke:#666666,color:#111111,stroke-width:1px
   classDef blocked fill:#9e2a2b,stroke:#ffd0d0,color:#ffffff,stroke-width:3px
 
-  class R0,E0,D0,C0,V0,B0,B1,B2,B3,B4,B5,S0,S1,S2,S3,S4,S5,S6,A0,A1,A2,A3A,A4A,SC0,RR0,SA0,IS0,IS1,F0,Q0,V1,V2,V3,V8,V4A,V4B,V4C,V4D,V5A,V5B,V6A,V6B,V7,VT,VD,VP,VW,X0,XP0,XP1,XP1B,XP1C,XP2A,XP2C,XP4,XP5,XP6,XP7,XP8,XP9,XP9C,XP10,XT1,XT2A,XT2B,XT2C1,XT3C,XT3D,XT4A,XT4 done
+  class R0,E0,D0,C0,V0,B0,B1,B2,B3,B4,B5,S0,S1,S2,S3,S4,S5,S6,A0,A1,A2,A3A,A4A,SC0,RR0,SA0,IS0,IS1,F0,Q0,V1,V2,V3,V8,V4A,V4B,V4C,V4D,V5A,V5B,V6A,V6B,V7,VT,VD,VP,VW,X0,XP0,XP1,XP1B,XP1C,XP2A,XP2C,XP4,XP5,XP6,XP7,XP8,XP9,XP9C,XP10,XT1,XT2A,XT2B,XT3C,XT3D,XT4A,XT4 done
   class XP9B done
   class XT3B done
   class XP2B done
@@ -374,6 +374,7 @@ flowchart TD
   class XP3D done
   class XP3E done
   class XP3F done
+  class XT2C1 active
   class XP5S,XP1A done
   class XP3C done
   class G0,V9,XP2D,XT2C2,XT2C3,XT3E,XT3I,XF,XG todo
@@ -424,6 +425,13 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XT2C1 is ACTIVE/blue for the post-merge Inline Shadow
+  exception.  A retained one-repetition run already proves that the formerly
+  bounded final solution completes: all 18 exact rows pass in 363.06 seconds
+  with complete 768/768 access and 102/102 barrier coverage.  Because that
+  artifact used an older hook binary, a current-tip paired and reviewed-fault
+  refresh is required before removing the yellow override.
 
 - 2026-07-21: XP3F is DONE/green.  At clean revision `e60b5f0239`, paired
   artifact `consan-green-expansion-20260721-pytorch-topk-sc-overhead-complete-178`
