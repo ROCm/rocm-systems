@@ -52,6 +52,26 @@ except ImportError as _cli_import_error:
 
 from amdsmi import amdsmi_wrapper  # noqa: E402
 
+# The set-dispatch and parser tests below drive real CLI subcommand/parser
+# modules. Resolve them from the same env-var-discovered CLI dir (find_cli_dir,
+# which honors AMDSMI_PATH/ROCM_HOME/ROCM_PATH via common.py) and import them
+# guarded, so a missing or unimportable CLI SKIPS those tests with a message --
+# mirroring the metric-partition tests -- instead of erroring mid-test.
+_SUBCOMMANDS_DIR = os.path.join(_CLI_DIR, "subcommands") if _CLI_DIR else None
+if _SUBCOMMANDS_DIR and _SUBCOMMANDS_DIR not in sys.path:
+    sys.path.append(_SUBCOMMANDS_DIR)
+try:
+    import set_value as cli_set_value  # noqa: E402
+    from amdsmi_parser import AMDSMIParser  # noqa: E402
+
+    _CLI_DRIVE_SKIP = None
+except ImportError as _cli_drive_import_error:
+    cli_set_value = None
+    AMDSMIParser = None
+    _CLI_DRIVE_SKIP = (
+        f"amd-smi CLI drive modules not importable ({_CLI_DIR}): {_cli_drive_import_error}"
+    )
+
 
 def setUpModule():
     """Skip the suite if the amd-smi CLI couldn't be imported (CLI not installed)."""
@@ -571,6 +591,101 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
 
         # NO_PERM aborts the command; it must NOT be recorded as a device error.
         self.assertFalse(cmd.helpers.error_collector.has_errors)
+
+    # ---- combined device-class args guard (drives real set_value) ----
+    def test_set_value_combined_device_args_raise_invalid_parameter(self):
+        """Passing arguments for two device classes at once (e.g. a GPU arg and
+        a CPU arg) must raise AmdSmiInvalidParameterException (INVALID_PARAMETER
+        / 194), NOT a bare ValueError (which would exit 1). Drives the real
+        set_value combined-args guard, which runs before any device dispatch.
+        """
+        if _CLI_DRIVE_SKIP:
+            self.skipTest(_CLI_DRIVE_SKIP)
+        import argparse
+        from amdsmi_helpers import AMDSMIHelpers
+
+        class _NoneArgs(argparse.Namespace):
+            # argparse populates every dest; mirror that so set_value's attribute
+            # scans see None (not AttributeError) for options we didn't set.
+            def __getattr__(self, name):
+                return None
+
+        class _FakeLogger:
+            format = "human"
+
+        cmd = cli_set_value.SetValueCommands()
+        cmd.helpers = AMDSMIHelpers()
+        cmd.logger = _FakeLogger()
+
+        args = _NoneArgs()
+        args.power_cap = 100  # a GPU set arg
+        args.cpu_pwr_limit = [[100]]  # a CPU set arg
+        with self.assertRaises(cli_exc.AmdSmiInvalidParameterException) as ctx:
+            cmd.set_value(args)
+        self.assertEqual(ctx.exception.value, int(self.ExitCode.INVALID_PARAMETER))
+
+    # ---- parser: invalid --clk-level clock type (drives _level_select action) ----
+    def test_clk_level_invalid_clock_type_is_invalid_parameter_with_hint(self):
+        """An invalid --clk-level clock type must raise
+        AmdSmiInvalidParameterException (INVALID_PARAMETER / 194) and its message
+        must list the valid options (the hint). Exercises the real parser action
+        directly, without building the whole driver-backed parser.
+        """
+        if _CLI_DRIVE_SKIP:
+            self.skipTest(_CLI_DRIVE_SKIP)
+        import argparse
+
+        class _Host:
+            class helpers:
+                @staticmethod
+                def get_output_format():
+                    return "human"
+
+        action_cls = AMDSMIParser._level_select(_Host())
+        action = action_cls(option_strings=["-c", "--clk-level"], dest="clk_level")
+        with self.assertRaises(cli_exc.AmdSmiInvalidParameterException) as ctx:
+            action(None, argparse.Namespace(), ["badclk", "0"])
+        self.assertEqual(ctx.exception.value, int(self.ExitCode.INVALID_PARAMETER))
+        message = str(ctx.exception)
+        self.assertIn("badclk", message)
+        for valid in ("sclk", "mclk", "pcie", "fclk", "socclk"):
+            self.assertIn(valid, message)
+
+    # ---- direct-call guards: no target -> REQUIRED_COMMAND (201) ----
+    def test_set_cpu_without_target_raises_required_command(self):
+        """set_cpu with no CPU target raises AmdSmiRequiredCommandException
+        (REQUIRED_COMMAND / 201). Reachable only via a direct/programmatic call
+        (the dispatcher fills the target first), so this locks in the guard.
+        """
+        if _CLI_DRIVE_SKIP:
+            self.skipTest(_CLI_DRIVE_SKIP)
+        import argparse
+
+        class _FakeLogger:
+            format = "human"
+
+        cmd = cli_set_value.SetValueCommands()
+        cmd.logger = _FakeLogger()
+        with self.assertRaises(cli_exc.AmdSmiRequiredCommandException) as ctx:
+            cmd.set_cpu(argparse.Namespace(cpu=None))
+        self.assertEqual(ctx.exception.value, int(self.ExitCode.REQUIRED_COMMAND))
+
+    def test_set_core_without_target_raises_required_command(self):
+        """set_core with no core target raises AmdSmiRequiredCommandException
+        (REQUIRED_COMMAND / 201). Same direct-call rationale as set_cpu.
+        """
+        if _CLI_DRIVE_SKIP:
+            self.skipTest(_CLI_DRIVE_SKIP)
+        import argparse
+
+        class _FakeLogger:
+            format = "human"
+
+        cmd = cli_set_value.SetValueCommands()
+        cmd.logger = _FakeLogger()
+        with self.assertRaises(cli_exc.AmdSmiRequiredCommandException) as ctx:
+            cmd.set_core(argparse.Namespace(core=None))
+        self.assertEqual(ctx.exception.value, int(self.ExitCode.REQUIRED_COMMAND))
 
 
 # ---------------------------------------------------------------------------

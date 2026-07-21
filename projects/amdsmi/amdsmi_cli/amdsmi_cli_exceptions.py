@@ -218,7 +218,7 @@ class AmdSmiInvalidCommandException(AmdSmiException):
 
 
 class AmdSmiInvalidParameterException(AmdSmiException):
-    def __init__(self, command, arg, outputformat: str, message=None):
+    def __init__(self, command, arg, outputformat: str, message=None, hint=None):
         super().__init__()
         self.value = int(AmdSmiExitCode.INVALID_PARAMETER)
         self.command = command
@@ -230,6 +230,8 @@ class AmdSmiInvalidParameterException(AmdSmiException):
         )
         if message:
             common_message = message
+        if hint:
+            common_message += f" {hint}"
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value
