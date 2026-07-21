@@ -213,6 +213,11 @@ do not promote matrix cells without the end-to-end evidence above.
 
 ## Progress log
 
+- 2026-07-21: Rotated to a bounded, one-repetition P3 SPMM F8 Inline clean
+  assessment.  This cell currently has only static stress inventory, so its
+  first independent numeric and dynamic-coverage verdict can advance the
+  matrix without revisiting the resistant top-k execution path.
+
 - 2026-07-21: The bounded one-site top-k Inline discriminator did not reach
   client execution.  Its sole admitted site failed the dense dispatcher's
   reserved relay-space check, so zero relevant patches were applied and the
