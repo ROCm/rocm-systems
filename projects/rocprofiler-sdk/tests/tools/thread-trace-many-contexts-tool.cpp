@@ -20,13 +20,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 //
-// Stress test for the per-agent shared trace buffer and queue (AIPROFSDK-102).
-// Allocates hundreds of thread-trace contexts with varying parameters, each sized to
-// ~1GB. Because only one trace can be active per agent at a time, all contexts on an
-// agent share a single output buffer and a single HSA submission queue, so this fits
-// in memory and within the HSA per-agent queue limit; with a per-context buffer/queue
-// (the old implementation) ~400 contexts would exhaust device memory or the queue
-// limit at init.
+// Stress test for the per-agent shared trace buffer and queue. Allocates hundreds of
+// thread-trace contexts with varying parameters, each sized to ~1GB. Only one trace is
+// active per agent at a time, so all contexts on an agent share a single output buffer
+// and a single HSA submission queue, keeping hundreds of contexts within device memory
+// and the HSA per-agent queue limit (a separate buffer/queue per context would not fit).
 //
 // Each context's emitted trace is decoded to verify it holds real waves (not just a
 // non-empty header): most decoded instructions must resolve to a valid PC (a loaded code

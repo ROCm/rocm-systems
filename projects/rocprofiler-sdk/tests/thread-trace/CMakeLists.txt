@@ -74,11 +74,12 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "ATT_LARGE_BUFFER_TEST=1"
     DISABLED ${IS_DISABLED})
 
-# Shared-buffer/queue stress (AIPROFSDK-102): allocate hundreds of ~1GB contexts with
-# varying params and run each once, decoding each trace to verify real waves land in the
-# selected SIMDs with valid PCs. Only fits in memory / the HSA queue limit because all
-# contexts on an agent share one buffer and one queue; per-context (old impl) would need
-# ~400GB and exhaust the per-agent queue limit. Exercised in device and dispatch modes.
+# Shared-buffer/queue stress: allocate hundreds of ~1GB contexts with varying params and
+# run each once, decoding each trace to verify it holds real waves with valid PCs from the
+# shader engines the context selected. Only fits in memory / the HSA queue limit because
+# all contexts on an agent share one buffer and one queue; a per-context buffer/queue
+# would need ~400GB and exhaust the per-agent queue limit. Exercised in device and
+# dispatch modes.
 rocprofiler_add_integration_execute_test(
     thread-trace-api-many-contexts-test
     TARGET thread-trace-test-app
