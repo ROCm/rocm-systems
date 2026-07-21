@@ -5,7 +5,7 @@ on:
     branches:
       - develop
     paths:
-      - '.github/workflows/rocprofiler-compute-rhel-8.yml'
+      - '.github/workflows/rocprofiler-compute-rhel.yml'
       - 'projects/rocprofiler-compute/**'
       - '!**/*.md'
       - '!**/*.rtf'
@@ -18,7 +18,7 @@ on:
       - '!projects/rocprofiler-compute/docker/**'
   pull_request:
     paths:
-      - '.github/workflows/rocprofiler-compute-rhel-8.yml'
+      - '.github/workflows/rocprofiler-compute-rhel.yml'
       - 'projects/rocprofiler-compute/**'
       - '!**/*.md'
       - '!**/*.rtf'
