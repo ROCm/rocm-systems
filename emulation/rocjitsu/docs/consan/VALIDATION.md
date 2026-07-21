@@ -53,7 +53,9 @@ For compatibility with the original gfx1201 workspace, it also recognizes
 `iree-run-module`, `iree-benchmark-module`, and `rocminfo` are resolved from
 `PATH`; IREE is not vendored or found through a machine-specific build path.
 The Python used to launch the runner must be able to import the IREE Python
-bindings needed by the Sharktank tests.
+bindings and their `numpy`/`ml_dtypes` dependencies needed by the Sharktank
+tests.  Launch the runner with that configured interpreter; putting a bare
+system `python3` earlier in `PATH` can otherwise fail before any GPU dispatch.
 
 PyTorch validation deliberately uses a separate, prebuilt-wheel interpreter;
 the workspace `pytorch/` checkout is for workload discovery and source
