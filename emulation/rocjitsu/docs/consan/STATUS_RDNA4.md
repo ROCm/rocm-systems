@@ -1,5 +1,26 @@
 # ConSan RDNA4 status
 
+## Status legend
+
+Every cell uses the same maturity scale as the other architecture ledgers:
+
+- 🩶 **unseen / unassessed:** no useful gfx1201 execution evidence yet;
+- 🟥 **does not work:** current execution fails before establishing useful
+  workload/profile behavior;
+- 🟧 **some things work:** useful execution or instrumentation behavior is
+  demonstrated, but substantial correctness, coverage, completion, or
+  acceptance gaps remain;
+- 🟨 **most things work:** the clean workload and important instrumentation
+  path work, with limited coverage or final-acceptance evidence still missing;
+- 🟩 **everything works:** every required gate is retained at one frozen
+  revision, including clean, coverage, oracle, fault, containment, overhead,
+  memory, timeout, health, and provenance evidence.
+
+`N/A` is used only when a fresh gfx1201 inventory proves semantic absence and
+records a typed reason.  Every cell in the current matrix is green.
+
+## Current matrix
+
 | Priority workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 | --- | --- | --- | --- | --- |
 | **P0 Qwen3-0.6B prefill** | 🟩 20/20 clean; exact barrier drop corrupts the oracle and produces a measured mismatch diagnostic; overhead: 1.0x | 🟩 20/20 clean + 28/28 barriers; exact drop is a qualified replay miss; overhead: 1.0x | 🟩 20/20 clean + 26/26 applicable barriers; stride-256 sensitivity sweep detects 17/32 exact drops; overhead: 1.0x | 🟩 20/20 clean + 28/28 barriers; exact drop corrupts the oracle and emits an attributed diagnostic; overhead: 1.0x |

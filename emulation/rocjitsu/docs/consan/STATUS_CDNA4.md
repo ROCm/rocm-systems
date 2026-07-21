@@ -12,33 +12,42 @@ and dependencies are tracked in [PLAN_GFX950.md](PLAN_GFX950.md).
 
 ## Status legend
 
-- 🟩 accepted at the frozen revision with retained clean, coverage, oracle,
-  fault, containment, overhead, memory, timeout, and health evidence required
-  by that row;
-- 🟦 active evidence gathering or implementation;
-- ⬜ not yet run or not yet supported;
-- 🟥 contradicted by current evidence;
-- `N/A` only when a fresh gfx950 inventory proves the feature is semantically
-  absent and records a typed reason.
+Every cell uses the same maturity scale as the other architecture ledgers:
+
+- 🩶 **unseen / unassessed:** no useful gfx950 execution evidence yet;
+- 🟥 **does not work:** current execution fails before establishing useful
+  workload/profile behavior;
+- 🟧 **some things work:** useful execution or instrumentation behavior is
+  demonstrated, but substantial correctness, coverage, completion, or
+  acceptance gaps remain;
+- 🟨 **most things work:** the clean workload and important instrumentation
+  path work, with limited coverage or final-acceptance evidence still missing;
+- 🟩 **everything works:** every required gate is retained at one frozen
+  revision, including clean, coverage, oracle, fault, containment, overhead,
+  memory, timeout, health, and provenance evidence.
+
+`N/A` is used only when a fresh gfx950 inventory proves semantic absence and
+records a typed reason.
 
 ## Current matrix
 
-No cell is green yet.  Blue cells have retained target-native evidence but
-still await the remaining row requirements and frozen-tip rerun.
+No cell is green yet.  Yellow cells have a working clean instrumentation path
+but still await limited row requirements and a frozen-tip rerun; orange cells
+retain useful partial evidence with a more substantial gap.
 
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
-| **P0 Qwen3-0.6B prefill** | ⬜ Unknown | ⬜ Unknown | ⬜ Unknown | ⬜ Unknown |
-| **P1 Sharktank TP1 prefill** | 🟦 clean 120/120 native LDS access accepted | 🟦 clean 104/104 access + 31/31 barrier accepted | 🟦 clean 104/104 access + 7/7 qualified barrier accepted | 🟦 clean 104/104 access + 31/31 barrier accepted |
-| **P1 Sharktank TP1 decode/combined** | 🟦 clean 240/240 native LDS access accepted | 🟦 clean 208/208 access + 62/62 barrier accepted | 🟦 clean 208/208 access + 14/14 qualified barrier accepted | 🟦 clean 208/208 access + 62/62 barrier accepted across six sequential runs |
-| **P2 Sharktank TP2 family** | 🟦 clean 936/936 native LDS access accepted | 🟦 clean 840/840 access + 168/168 barrier accepted | 🟦 aggregate rejected: one 140-access + 10-barrier slice executes 0 | 🟦 aggregate rejected: one 140-access + 28-barrier slice lowers 0 |
-| **P3 CLIP BF16** | 🟦 clean 45/45 native LDS access accepted | 🟦 clean 39/39 access + 24/24 barrier accepted | 🟦 clean 39/39 access + 20/20 qualified barrier accepted | 🟦 clean 39/39 access + 24/24 barrier accepted |
-| **P4 hip-moi D128 block attention** | 🟦 clean 12/12 group-FLAT + barrier-drop accepted | 🟦 clean 12/12 access + 4/4 barrier + barrier-drop accepted | 🟦 clean 12/12 access + barrier-drop accepted | 🟦 clean 12/12 access + 4/4 barrier + barrier-drop accepted |
-| **P4 hip-moi D128 pressure attention** | 🟦 clean 12/12 group-FLAT accepted | 🟦 clean 12/12 access + 4/4 barrier accepted | 🟦 clean 12/12 access accepted | 🟦 clean 12/12 access + 4/4 barrier accepted |
-| **P4 hip-moi MFMA attention** | 🟦 clean 12/12 group-FLAT accepted | 🟦 clean 12/12 access + 4/4 barrier accepted | 🟦 clean 12/12 access accepted | 🟦 clean 12/12 access + 4/4 barrier accepted |
-| **P4 hip-moi Stream-K arrival** | 🟦 clean 4/4 access accepted | 🟦 clean 4/4 access + 10/10 atomic + 4/4 barrier + 16/16 fence accepted | 🟦 clean 4/4 access + 10/10 atomic accepted | 🟦 current tip safely rejects persistent identity at a full ordinary-VGPR/AccVGPR boundary; scalar persistent state open |
-| **P4 hip-moi tree atomic-OR** | 🟦 clean 4/4 access accepted | 🟦 clean 4/4 access + 10/10 atomic + 4/4 barrier + 16/16 fence accepted | 🟦 clean 4/4 access + 10/10 atomic accepted | 🟦 clean 4/4 access + 10/10 atomic + 4/4 barrier accepted |
-| **P4 hip-moi Jakub attention** | ⬜ Applicability inventory pending | ⬜ Applicability inventory pending | ⬜ Applicability inventory pending | ⬜ Applicability inventory pending |
+| **P0 Qwen3-0.6B prefill** | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown |
+| **P1 Sharktank TP1 prefill** | 🟨 clean 120/120 native LDS access accepted | 🟨 clean 104/104 access + 31/31 barrier accepted | 🟨 clean 104/104 access + 7/7 qualified barrier accepted | 🟨 clean 104/104 access + 31/31 barrier accepted |
+| **P1 Sharktank TP1 decode/combined** | 🟨 clean 240/240 native LDS access accepted | 🟨 clean 208/208 access + 62/62 barrier accepted | 🟨 clean 208/208 access + 14/14 qualified barrier accepted | 🟨 clean 208/208 access + 62/62 barrier accepted across six sequential runs |
+| **P2 Sharktank TP2 family** | 🟨 clean 936/936 native LDS access accepted | 🟨 clean 840/840 access + 168/168 barrier accepted | 🟧 aggregate rejected: one 140-access + 10-barrier slice executes 0 | 🟧 aggregate rejected: one 140-access + 28-barrier slice lowers 0 |
+| **P3 CLIP BF16** | 🟨 clean 45/45 native LDS access accepted | 🟨 clean 39/39 access + 24/24 barrier accepted | 🟨 clean 39/39 access + 20/20 qualified barrier accepted | 🟨 clean 39/39 access + 24/24 barrier accepted |
+| **P4 hip-moi D128 block attention** | 🟨 clean 12/12 group-FLAT + barrier-drop accepted | 🟨 clean 12/12 access + 4/4 barrier + barrier-drop accepted | 🟨 clean 12/12 access + barrier-drop accepted | 🟨 clean 12/12 access + 4/4 barrier + barrier-drop accepted |
+| **P4 hip-moi D128 pressure attention** | 🟨 clean 12/12 group-FLAT accepted | 🟨 clean 12/12 access + 4/4 barrier accepted | 🟨 clean 12/12 access accepted | 🟨 clean 12/12 access + 4/4 barrier accepted |
+| **P4 hip-moi MFMA attention** | 🟨 clean 12/12 group-FLAT accepted | 🟨 clean 12/12 access + 4/4 barrier accepted | 🟨 clean 12/12 access accepted | 🟨 clean 12/12 access + 4/4 barrier accepted |
+| **P4 hip-moi Stream-K arrival** | 🟨 clean 4/4 access accepted | 🟨 clean 4/4 access + 10/10 atomic + 4/4 barrier + 16/16 fence accepted | 🟨 clean 4/4 access + 10/10 atomic accepted | 🟧 current tip safely rejects persistent identity at a full ordinary-VGPR/AccVGPR boundary; scalar persistent state open |
+| **P4 hip-moi tree atomic-OR** | 🟨 clean 4/4 access accepted | 🟨 clean 4/4 access + 10/10 atomic + 4/4 barrier + 16/16 fence accepted | 🟨 clean 4/4 access + 10/10 atomic accepted | 🟨 clean 4/4 access + 10/10 atomic + 4/4 barrier accepted |
+| **P4 hip-moi Jakub attention** | 🩶 Applicability inventory pending | 🩶 Applicability inventory pending | 🩶 Applicability inventory pending | 🩶 Applicability inventory pending |
 
 ## Evidence baseline
 
@@ -72,23 +81,23 @@ workload/profile cell without the end-to-end evidence above.
 | CDNA4 DS/atomic builders | 🟩 Host-proven | `73241ff07f`: exact LLVM bytes and decoder round trips cover LDS store/exchange and B32/B64 FLAT atomics; tuple alignment, return forms, and device scope fail closed. |
 | CDNA4 synchronization/cache builders | 🟩 Host-proven | `f34be1ae72`: exact LLVM bytes and decoder round trips cover VM/LGKM drains, pre-drained workgroup barrier, trap, SALU dependency NOP, and scalar I/D-cache controls. |
 | Architecture-neutral builder dispatch | 🟩 Host-proven | `b21df67176` and `a0b96f50ce`: scalar control, EXEC/VCC/SCC, vector arithmetic, literal recipes, address arithmetic, SMEM/FLAT/DS publication, atomics, private scratch, semantic waits, and workgroup barriers select separate CDNA4/RDNA4 backends. Five dispatch tests cover fixed and variable instruction lengths plus unsupported-architecture rejection. Engine-level gfx950 emission remains the separate active node `B5B`. |
-| Native-shape CDNA4 analysis corpus | 🟦 Initial slice | `0cb03769ea`: a synthetic gfx950 ELF carries exact LLVM CDNA4 `ds_write_b32`/`ds_read_b32` encodings. ConSan decodes both eight-byte instructions, extracts the expected VGPR operands, classifies both as supported LDS sites, and marks the kernel as a preflight candidate. Wider DS, FLAT, atomic, barrier, and exclusion coverage remains in `A0-A4`. |
-| CDNA4 FLAT atomic inventory/address plan | 🟦 Initial slice | `1806f7c90d` and `089fdf0585`: a native two-word gfx950 `flat_atomic_add` retains exact address/data/result VGPRs, offset, return mode, normalized B32 width, and device scope. Its flat guest-pair address plan is supported without materialization, and the exact compiler `buffer_wbl2`/wait/returning-atomic/wait/`buffer_inv` shape associates as one conservative acquire-release event. Wider operations, global forms, fences, and fault mutation remain open in `A4`. |
-| CDNA4 group-FLAT access inventory/emission | 🟦 Native vertical | `6e997a6a39` and `31552da206`: CDNA4 raw FLAT decoding retains op, segment, address/data/result VGPRs, offset, and cache fields; explicit `SRC_SHARED_BASE` provenance admits native two-word D16/D32/D64/D128 group accesses without weakening strict provenance. The retained `d128-block` Record/Replay run at `consan-validation/gfx950-take2-d128-block-record-007` executes successfully with all 12/12 admitted accesses and all 4/4 shared-function barriers patched and dynamically complete. The newly exercised many-candidate path uses target-aware CDNA4 `s_getpc_b64`/`s_setpc_b64` indirect islands. Broader FLAT forms and campaign-level fault/performance evidence remain open, so `A2` is active and no workload cell is promoted. |
-| CDNA4 far shared-function ownership | 🟦 Native clean vertical | `b58799fda0` retains execution-owner descriptors directly on ordinary FLAT sites, allowing SuperCollider to construct far local indirect relays independently of MOI resource plans. A CDNA4 host regression exercises a recovered local call and liveness-proven dead-SGPR fallback; all 591 ConSan host tests pass. Retained artifact `consan-validation/gfx950-take2-d128-pressure-clean-005` accepts all four profiles with 12/12 accesses under each engine, 4/4 barriers under Record/Replay and Inline Shadow, passing workload oracles, and zero dynamic-incomplete encounters. `V5` is active pending the remaining application matrix, faults, overhead, and frozen-tip rerun. |
-| CDNA4 SuperCollider native LDS checks | 🟩 Native-proven | `afbca95de0` and `3e7c5bdf02` port native LDS check/trap emission without routing gfx950 through RDNA4 encodings. Exact host coverage includes B32/B64/B128 reads and writes, transpose B16, read2/read2st64, non-contiguous write2st64 operands, and even-aligned automatic-report address tuples. All 601 ConSan host tests pass. Retained CLIP, TP1 prefill, TP1 decode/combined, and TP2 artifacts accept 45/45, 120/120, 240/240, and 936/936 accesses respectively with passing workload oracles, analysis/static/dynamic completeness, and zero mismatches. `SC0` is green/DONE; campaign cells remain blue pending faults, overhead, and frozen-tip evidence. |
-| CDNA4 SuperCollider group-FLAT checks | 🟦 Native clean vertical | `c7ca36d375`: SuperCollider handles gfx950's two-word group-FLAT D16/D32/D64/D128 loads and stores, uses U16 comparison for short values, emits the CDNA4 VM/LGKM completion wait, preserves RDNA4's established bytes, and even-aligns the report address tuple. Retained artifact `consan-validation/gfx950-take2-d128-block-supercollider-006` is analysis-, static-, and dynamic-complete with 12/12 supported accesses patched and zero report mismatches. The coverage denominator excludes global, private, and provenance-unknown FLAT operations outside this shared-memory detector's semantics. Racy/fault detection, trap breadth, and campaign evidence remain open in `SC1`. |
-| CDNA4 singleton-barrier fault mutation | 🟦 First contained campaign | `8c8480e68f` makes the reviewed selector target-aware: gfx950's single full `s_barrier` is selected by exact site identity, while gfx1201 retains exact site-plus-sequence selection for its associated signal/wait pair. Retained artifact `consan-validation/gfx950-take2-d128-block-fault-003` is accepted for all four profiles with exact-one `requested=1`, `planned=1`, `applied=1` mutation accounting, the precommitted `not_detected` qualified miss and workload-oracle failure, bounded termination, and healthy before/after probes. This activates `A5` and the D128 slice of `V6`; other mutation families and workload campaigns remain open. |
-| D128 paired overhead | 🟦 First accepted timing row | `ecd529c017` selects the gfx950 `SampledFastContext` specialization whose native execution produces all admitted group-FLAT evidence; the superseded Exact-only attempt produced no Record/Replay records and was rejected. In retained artifact `consan-validation/gfx950-take2-d128-block-overhead-002`, baseline-before, all four three-process profile rows, and baseline-after are accepted. The paired baseline is 130.5 ms; process slowdowns are 6.61x SuperCollider, 8.35x Record/Replay, 8.31x Sampled, and 9.29x Inline Shadow. `V7` remains active pending peak-memory evidence and the broader matrix. |
-| CDNA4 Record/Replay access emission | 🟦 Native vertical | `4fdaee5298`, `44e7767b9b`, and `3a52aaee88`: a gfx950 DS-store candidate emits a `ModifiedValid` first-light access-record patch and passes final re-decode. The body retains the guest DS access and contains CDNA4 FLAT publication load/atomics, VM/LGKM completion waits, and two-word lane-rank recipes. A production-hook native dispatch now writes and validates the access record; replay breadth remains open in `RR0`. |
-| CDNA4 Sampled access emission | 🟦 Native vertical | `ec84cd7af7` and `2f9cc947b0`: a gfx950 DS-store candidate emits a `ModifiedValid` Sampled patch and passes final re-decode. The body contains CDNA4 FLAT swap-x2 publication, compare-swap claim, counter atomics, VM/LGKM completion waits, and the displaced guest DS access. A production-hook forced-spill dispatch preserves all live values and publishes a valid write entry plus ready causal window. Runtime selection and immediate/host-scan agreement remain open in `SA0-SA1`. |
+| Native-shape CDNA4 analysis corpus | 🟧 Initial slice | `0cb03769ea`: a synthetic gfx950 ELF carries exact LLVM CDNA4 `ds_write_b32`/`ds_read_b32` encodings. ConSan decodes both eight-byte instructions, extracts the expected VGPR operands, classifies both as supported LDS sites, and marks the kernel as a preflight candidate. Wider DS, FLAT, atomic, barrier, and exclusion coverage remains in `A0-A4`. |
+| CDNA4 FLAT atomic inventory/address plan | 🟧 Initial slice | `1806f7c90d` and `089fdf0585`: a native two-word gfx950 `flat_atomic_add` retains exact address/data/result VGPRs, offset, return mode, normalized B32 width, and device scope. Its flat guest-pair address plan is supported without materialization, and the exact compiler `buffer_wbl2`/wait/returning-atomic/wait/`buffer_inv` shape associates as one conservative acquire-release event. Wider operations, global forms, fences, and fault mutation remain open in `A4`. |
+| CDNA4 group-FLAT access inventory/emission | 🟧 Native vertical | `6e997a6a39` and `31552da206`: CDNA4 raw FLAT decoding retains op, segment, address/data/result VGPRs, offset, and cache fields; explicit `SRC_SHARED_BASE` provenance admits native two-word D16/D32/D64/D128 group accesses without weakening strict provenance. The retained `d128-block` Record/Replay run at `consan-validation/gfx950-take2-d128-block-record-007` executes successfully with all 12/12 admitted accesses and all 4/4 shared-function barriers patched and dynamically complete. The newly exercised many-candidate path uses target-aware CDNA4 `s_getpc_b64`/`s_setpc_b64` indirect islands. Broader FLAT forms and campaign-level fault/performance evidence remain open, so `A2` is active and no workload cell is promoted. |
+| CDNA4 far shared-function ownership | 🟧 Native clean vertical | `b58799fda0` retains execution-owner descriptors directly on ordinary FLAT sites, allowing SuperCollider to construct far local indirect relays independently of MOI resource plans. A CDNA4 host regression exercises a recovered local call and liveness-proven dead-SGPR fallback; all 591 ConSan host tests pass. Retained artifact `consan-validation/gfx950-take2-d128-pressure-clean-005` accepts all four profiles with 12/12 accesses under each engine, 4/4 barriers under Record/Replay and Inline Shadow, passing workload oracles, and zero dynamic-incomplete encounters. `V5` is active pending the remaining application matrix, faults, overhead, and frozen-tip rerun. |
+| CDNA4 SuperCollider native LDS checks | 🟩 Native-proven | `afbca95de0` and `3e7c5bdf02` port native LDS check/trap emission without routing gfx950 through RDNA4 encodings. Exact host coverage includes B32/B64/B128 reads and writes, transpose B16, read2/read2st64, non-contiguous write2st64 operands, and even-aligned automatic-report address tuples. All 601 ConSan host tests pass. Retained CLIP, TP1 prefill, TP1 decode/combined, and TP2 artifacts accept 45/45, 120/120, 240/240, and 936/936 accesses respectively with passing workload oracles, analysis/static/dynamic completeness, and zero mismatches. `SC0` is green/DONE; campaign cells remain orange pending faults, overhead, and frozen-tip evidence. |
+| CDNA4 SuperCollider group-FLAT checks | 🟧 Native clean vertical | `c7ca36d375`: SuperCollider handles gfx950's two-word group-FLAT D16/D32/D64/D128 loads and stores, uses U16 comparison for short values, emits the CDNA4 VM/LGKM completion wait, preserves RDNA4's established bytes, and even-aligns the report address tuple. Retained artifact `consan-validation/gfx950-take2-d128-block-supercollider-006` is analysis-, static-, and dynamic-complete with 12/12 supported accesses patched and zero report mismatches. The coverage denominator excludes global, private, and provenance-unknown FLAT operations outside this shared-memory detector's semantics. Racy/fault detection, trap breadth, and campaign evidence remain open in `SC1`. |
+| CDNA4 singleton-barrier fault mutation | 🟧 First contained campaign | `8c8480e68f` makes the reviewed selector target-aware: gfx950's single full `s_barrier` is selected by exact site identity, while gfx1201 retains exact site-plus-sequence selection for its associated signal/wait pair. Retained artifact `consan-validation/gfx950-take2-d128-block-fault-003` is accepted for all four profiles with exact-one `requested=1`, `planned=1`, `applied=1` mutation accounting, the precommitted `not_detected` qualified miss and workload-oracle failure, bounded termination, and healthy before/after probes. This activates `A5` and the D128 slice of `V6`; other mutation families and workload campaigns remain open. |
+| D128 paired overhead | 🟧 First accepted timing row | `ecd529c017` selects the gfx950 `SampledFastContext` specialization whose native execution produces all admitted group-FLAT evidence; the superseded Exact-only attempt produced no Record/Replay records and was rejected. In retained artifact `consan-validation/gfx950-take2-d128-block-overhead-002`, baseline-before, all four three-process profile rows, and baseline-after are accepted. The paired baseline is 130.5 ms; process slowdowns are 6.61x SuperCollider, 8.35x Record/Replay, 8.31x Sampled, and 9.29x Inline Shadow. `V7` remains active pending peak-memory evidence and the broader matrix. |
+| CDNA4 Record/Replay access emission | 🟧 Native vertical | `4fdaee5298`, `44e7767b9b`, and `3a52aaee88`: a gfx950 DS-store candidate emits a `ModifiedValid` first-light access-record patch and passes final re-decode. The body retains the guest DS access and contains CDNA4 FLAT publication load/atomics, VM/LGKM completion waits, and two-word lane-rank recipes. A production-hook native dispatch now writes and validates the access record; replay breadth remains open in `RR0`. |
+| CDNA4 Sampled access emission | 🟧 Native vertical | `ec84cd7af7` and `2f9cc947b0`: a gfx950 DS-store candidate emits a `ModifiedValid` Sampled patch and passes final re-decode. The body contains CDNA4 FLAT swap-x2 publication, compare-swap claim, counter atomics, VM/LGKM completion waits, and the displaced guest DS access. A production-hook forced-spill dispatch preserves all live values and publishes a valid write entry plus ready causal window. Runtime selection and immediate/host-scan agreement remain open in `SA0-SA1`. |
 | CDNA4 Sampled barrier lowering | 🟩 Native-proven vertical | The report-buffer target gate now admits both supported native architectures, with a CDNA4 host fixture proving a selected LDS causal window followed by singleton `s_barrier` metadata publication and final validation. Retained native artifacts `gfx950-take2-tp1-prefill-sampled-clean-004`, `gfx950-take2-tp1-decode-sampled-clean-002`, and `gfx950-take2-clip-bf16-sampled-clean-002` accept 104/104 + 7/7, 208/208 + 14/14, and 39/39 + 20/20 access/qualified-barrier coverage respectively, with passing workload oracles and zero dynamic-incomplete state. TP2 admission remains open in `SA0`. |
 | CDNA4 sampled scalar-state boundary | 🟩 Native-proven | `2da1350b8e`: gfx950 dump inspection proved that encoded `s102:s103` is architectural `flat_scratch`, not ordinary scalar storage. Automatic owner, dispatch, and temporary-state placement now stops below CDNA4's special aliases; explicit overlap fails closed. Removing the obsolete runtime-sample counter and unused sampled-atomic tail reservation fits the high-pressure Stream-K helper in `s92:s101`. All 594 ConSan host tests pass, and retained artifact `consan-validation/gfx950-take2-streamk-arrival-clean-005` accepts native Sampled execution with 4/4 accesses and 10/10 atomics instead of the prior `0x1000` GPU fault. |
 | CDNA4 Sampled forced spill | 🟩 Native-proven | `2f9cc947b0`: the production HSA hook forces a three-VGPR Sampled spill around native `ds_write_b32`, grows dispatch-private storage, and completes native AQL dispatch. Eight live values survive for all 64 lanes; the sampled entry and causal window agree on kind, epoch, generation, range, and 1D workgroup identity. |
 | CDNA4 InlineShadow access/barrier vertical | 🟩 Native-proven TP1 lifecycle | A gfx950 DS-store candidate emits `ModifiedValid` and passes final re-decode plus exact-shadow semantic validation; workgroup-local forced-spill publication and global versioned transactions both have host byte proof. The global table hashes dispatch plus stable workgroup identity across 32 banks, and metadata-distinct lanes sharing one address are serialized by the pending-mask loop. Sequential decode+combined stress localized the residual loss to stable-version snapshots of stale nonempty payload. CDNA4 retries now issue `buffer_inv sc1`, consume a coherent opening version, and leave the ordinary fast path unchanged. Artifacts `gfx950-take2-tp1-decode-combined-inline-invalidate-retry-026` through `-031` provide six consecutive accepted runs at 208/208 accesses, 62/62 barriers, passing oracles, and zero dynamic-incomplete state. Prefill artifact `gfx950-take2-tp1-prefill-inline-serialized-lanes-037` remains accepted at 104/104 + 31/31, and `gfx950-take2-d128-block-inline-004` at 12/12 + 4/4. Atomic semantics, faults, and broader campaign evidence remain open in `IS0-IS1` and validation nodes. |
 | Mixed CDNA4 AccVGPR/VCC persistent identity | 🟩 Native-proven | Moving compiler `ACCUM_OFFSET` remains prohibited because it changes existing MFMA operand meaning. Per-owner/component tuples avoid AccVGPR banks; private-state entry relays preserve kernarg preloads; persistent epoch/owner/workgroup-key slots remain disjoint from ephemeral spill storage; and appended probes snapshot displaced DS addresses. Automatic scalar state also excludes the original physical VCC pair at the top of each CDNA4 kernel's allocated user-SGPR bank. Full TP1 artifact `gfx950-take2-tp1-prefill-inline-vcc-safe-029` moves the attention kernel's Inline state from overlapping s70:s71 to s72 and changes a 533,757-incomplete oracle failure into a passing oracle with 27 broader undercoverage publications. A direct native run filtered to `prefill_bs1$async_dispatch_12_attention_4x2xDx32x32xD` accepts 4/4 accesses and 6/6 barriers with `dynamic_complete=true`, zero incomplete publications, and a passing oracle. Together with retained CLIP artifact `gfx950-take2-clip-bf16-inline-clean-021` at 39/39 + 24/24 and zero incomplete state, this closes `IS0A` and `I4`; the formerly separate full-workload publication residue is closed by the TP1 access/barrier row. |
 | CDNA4 InlineShadow forced spill | 🟩 Native-proven | `54673f205e`: a full-VGPR-file fixture forces the 16-register Inline Shadow window into private spill storage. The local exact-shadow path uses even CDNA4 `ds_wrxchg_rtn_b64` and diagnostic CAS tuples, passes final semantic validation, and completes native AQL dispatch with all live values intact and zero diagnostic, overflow, unsupported, or malformed counts. |
-| CDNA4 InlineShadow atomic ordering | 🟦 Native Stream-K vertical, AcqRel token import open | `089fdf0585` established compiler-shaped gfx950 acquire-release emission and structural validation. Checkpoint `255749430d` extends the CDNA4 reservation to 28 VGPRs so token producer state, scalar persistent owner/epoch materialization, and the even final address pair are disjoint; all 622 ConSan host tests pass there. Artifact `gfx950-take2-streamk-scalar-state-011` executes 4/4 accesses, 4/4 barriers, and 10/10 atomics but exposes the empty-release-slot race. Artifacts `gfx950-take2-streamk-claimed-acqrel-013` through `-016` localize lost VGPR and SGPR journals. In `-017`, scratch+8 seeding plus retention of the outer claim mask in the dead retry pair lets wave 1 stage and commit version 2; wave 2 then leaves a fully staged version-3 reservation. The remaining rejection is now the nonempty-predecessor token transaction: one malformed token, one overflow, no visible acquired token, and the old false diagnostic. Successor commit, repeated clean acceptance, fault detection, and full host semantic regression remain open in `IS1`. |
+| CDNA4 InlineShadow atomic ordering | 🟧 Native Stream-K vertical, AcqRel token import open | `089fdf0585` established compiler-shaped gfx950 acquire-release emission and structural validation. Checkpoint `255749430d` extends the CDNA4 reservation to 28 VGPRs so token producer state, scalar persistent owner/epoch materialization, and the even final address pair are disjoint; all 622 ConSan host tests pass there. Artifact `gfx950-take2-streamk-scalar-state-011` executes 4/4 accesses, 4/4 barriers, and 10/10 atomics but exposes the empty-release-slot race. Artifacts `gfx950-take2-streamk-claimed-acqrel-013` through `-016` localize lost VGPR and SGPR journals. In `-017`, scratch+8 seeding plus retention of the outer claim mask in the dead retry pair lets wave 1 stage and commit version 2; wave 2 then leaves a fully staged version-3 reservation. The remaining rejection is now the nonempty-predecessor token transaction: one malformed token, one overflow, no visible acquired token, and the old false diagnostic. Successor commit, repeated clean acceptance, fault detection, and full host semantic regression remain open in `IS1`. |
 | Transactional static VGPR spill plan | 🟩 Host-proven | `319950aacd`: stable four-byte slots, pre-save drain, 16-byte required-private alignment, 4 KiB bound, failure rollback, and unchanged RDNA4 behavior. |
 | CDNA4 MOI resource alignment/growth | 🟩 Host-proven | `44e7767b9b`: gfx950 descriptors decode and grow in eight-VGPR granules throughout planning and emission. Automatic first-light planning grows 8 to 16 VGPRs, all CDNA4 scratch windows use an even FLAT-address base, and odd explicit bases fail closed as `ExplicitMisaligned`. |
 | CDNA4 Record/Replay forced spill | 🟩 Native-proven | `44e7767b9b` and `3a52aaee88`: an integrated first-light patch spills three VGPRs around the emitted probe using exact native CDNA4 scratch save/restore words and VM_CNT waits, preserves the displaced guest DS instruction, and passes final validation. The production hook adds the CDNA4 owner/epoch entry prologue, grows the live kernel object's private segment from 0 to 16 bytes, and completes native AQL dispatch with all live values intact and a valid LDS-write record. |
@@ -139,10 +148,10 @@ a ConSan detection.
   allocating the old v112:v114 tuple would move `ACCUM_OFFSET` semantics and
   corrupt MFMA operands.  Artifact
   `gfx950-take2-streamk-inline-after-retry-001` records the typed planning
-  rejection.  `IS1` remains blue/ACTIVE while a scalar per-wave persistent
+  rejection.  `IS1` remains orange/ACTIVE while a scalar per-wave persistent
   representation is implemented; no unsafe VGPR growth is being restored.
 - 2026-07-18: The TP1 Inline Shadow lifecycle gap is closed while `IS0` and
-  `IS1` remain blue/ACTIVE for atomic breadth and campaign evidence.  Split
+  `IS1` remain orange/ACTIVE for atomic breadth and campaign evidence.  Split
   telemetry proved every residual sequential decode+combined miss was a
   stable-version rejection of stale nonempty payload; no claim, CAS, commit,
   changed-version, odd-version, or terminal-version failure was involved.
@@ -150,7 +159,7 @@ a ConSan detection.
   opening version, and preserve ordinary-load performance on the uncontended
   fast path.  Six consecutive retained authoritative runs (`-026` through
   `-031`) accept 208/208 accesses and 62/62 barriers with passing oracles and
-  `dynamic_incomplete=0`.  The synchronized plan box remains blue, and 606/606
+  `dynamic_incomplete=0`.  The synchronized plan box remains orange, and 606/606
   focused host tests pass.
 - 2026-07-17: CDNA4 Sampled barrier lowering is native-proven.  The prior
   architecture gate was the direct cause of TP1/CLIP's missing supported
@@ -160,7 +169,7 @@ a ConSan detection.
   and 39/39 + 20/20 access/qualified-barrier coverage with passing workload
   oracles and no dynamic-incomplete state.  The TP2 aggregate still rejects
   one 140-access slice because Sampled selects no applicable patch there, so
-  `SA0A` is green/DONE while `SA0` and `V5` remain blue/ACTIVE.  The Mermaid
+  `SA0A` is green/DONE while `SA0` and `V5` remain orange/ACTIVE.  The Mermaid
   class assignments are synchronized with those labels.
 - 2026-07-17: Commit `3e7c5bdf02` completes the native-LDS application
   breadth exposed after the CLIP vertical.  Automatic B32 reporting now pads
@@ -172,13 +181,13 @@ a ConSan detection.
   `consan-validation/gfx950-take2-tp2-family-sc-clean-003` are accepted at
   120/120, 240/240, and 936/936 native accesses with passing oracles and full
   static/dynamic coverage.  The synchronized `SC0` DAG node is green/DONE;
-  workload cells stay blue pending their remaining campaign requirements.
+  workload cells stay orange pending their remaining campaign requirements.
 - 2026-07-17: Immediate native Sharktank reruns after `afbca95de0` retain the
   earlier 0/120, 0/240, and 0/936 SuperCollider coverage.  They now expose a
   precise error rather than an architecture gate: a B32 check places the
   automatic report address pair at an odd CDNA4 VGPR.  The whole code object
   correctly rolls back on the unencodable report action.  The CLIP 45/45 row
-  remains accepted evidence, while synchronized `SC0` returns to blue/ACTIVE
+  remains accepted evidence, while synchronized `SC0` returns to orange/ACTIVE
   until report-scratch parity is fixed and the broader reruns pass.
 - 2026-07-17: Commit `afbca95de0` establishes the initial CDNA4 native-LDS
   SuperCollider CLIP vertical.  Exact host tests cover ordinary reads/writes,
@@ -187,7 +196,7 @@ a ConSan detection.
   `consan-validation/gfx950-take2-clip-bf16-sc-clean-005` accepts CLIP BF16
   with its independent oracle passing, all 45/45 supported native LDS accesses
   patched, analysis/static/dynamic completeness, and zero mismatches.  The
-  CLIP cell remains blue until its fault, overhead, and frozen-tip evidence is
+  CLIP cell remains orange until its fault, overhead, and frozen-tip evidence is
   complete.  The immediate Sharktank audit above subsequently broadened its
   implementation exit criterion.
 - 2026-07-17: Native TP1 decode/combined, TP2 family, and CLIP BF16
@@ -198,7 +207,7 @@ a ConSan detection.
   patches 0 supported accesses; Sampled consistently omits supported barriers
   and additionally misses one TP2 aggregate slice; Inline reports either
   undercoverage or dynamic-incomplete state.  All cells and synchronized DAG
-  nodes remain blue/ACTIVE pending fixes and authoritative reruns.
+  nodes remain orange/ACTIVE pending fixes and authoritative reruns.
 - 2026-07-17: Retained artifact
   `consan-validation/gfx950-take2-tp1-prefill-clean-002` runs native TP1
   prefill through the workspace's IREE Python venv.  Record/Replay is accepted
@@ -206,16 +215,16 @@ a ConSan detection.
   but patches 0/120 supported accesses; Sampled passes and patches 104/104
   accesses but 0/10 supported barriers; Inline patches 104/104 accesses and
   31/31 barriers but records 28 dynamic-incomplete encounters and exits 90.
-  These are blue active evidence cells, not green campaign completion; the
-  synchronized `V1` and `V5` DAG nodes are blue/ACTIVE.
+  These are orange active evidence cells, not green campaign completion; the
+  synchronized `V1` and `V5` DAG nodes are orange/ACTIVE.
 - 2026-07-17: Retained artifact
   `consan-validation/gfx950-take2-tree-atomic-or-clean-001` accepts tree
   atomic-OR under all four profiles with passing workload oracles and no
   unexpected diagnostics.  All profiles patch 4/4 accesses; Record/Replay
   additionally patches 10/10 atomics, 4/4 barriers, and 16/16 fences, Sampled
   patches 10/10 atomics, and Inline patches 10/10 atomics plus 4/4 barriers.
-  The four cells remain blue pending fault, overhead, and frozen-tip evidence,
-  and the synchronized `V5` node remains blue/ACTIVE.
+  The four cells remain orange pending fault, overhead, and frozen-tip evidence,
+  and the synchronized `V5` node remains orange/ACTIVE.
 - 2026-07-17: Stream-K Inline now lowers and dynamically executes all 4/4
   accesses alongside 10/10 atomics and 4/4 barriers, with zero ConSan
   diagnostics or incomplete state in accepted individual trials.  Sequential
@@ -224,7 +233,7 @@ a ConSan detection.
   after the hardware atomic and permits only four acquire retries; ConSan is
   instrumenting that nested atomic before control returns to the bookkeeping.
   The application output remains correct and ConSan remains clean.  The cell
-  and synchronized `V5` DAG node therefore stay blue/ACTIVE, not green.
+  and synchronized `V5` DAG node therefore stay orange/ACTIVE, not green.
 - 2026-07-17: Commit `2da1350b8e` fixes the native sampled Stream-K fault by
   excluding CDNA4 `flat_scratch`/`xnack_mask` aliases from ordinary scalar
   instrumentation state and removing two stale scalar reservations.  All 594
@@ -234,16 +243,16 @@ a ConSan detection.
   Record/Replay additionally covers 10/10 atomics, 4/4 barriers, and 16/16
   fences, while Sampled covers 10/10 atomics.  Inline Shadow passes the
   workload oracle and covers 10/10 atomics plus 4/4 barriers but is rejected
-  at 0/4 accesses.  All four cells are blue to distinguish three retained
+  at 0/4 accesses.  All four cells are orange to distinguish three retained
   clean acceptances and one active coverage gap from frozen green campaign
-  completion; the blue/ACTIVE `V5` Mermaid box names that same state.
+  completion; the orange/ACTIVE `V5` Mermaid box names that same state.
 - 2026-07-17: Retained artifact
   `consan-validation/gfx950-take2-mfma-attention-clean-001` accepts native
   MFMA attention under all four profiles.  Every row passes its independent
   workload oracle, covers 12/12 accesses, and records zero dynamic-incomplete
   encounters; Record/Replay and Inline Shadow also cover 4/4 barriers.  The
-  four MFMA-attention cells are blue pending faults, overhead, and frozen-tip
-  evidence, and the blue/ACTIVE `V5` box text names this added vertical.
+  four MFMA-attention cells are orange pending faults, overhead, and frozen-tip
+  evidence, and the orange/ACTIVE `V5` box text names this added vertical.
 - 2026-07-17: Commit `b58799fda0` closes the D128-pressure SuperCollider
   placement gap by retaining execution-owner descriptors on ordinary FLAT
   sites.  The focused CDNA4 far-call regression and all 591 ConSan host tests
@@ -252,7 +261,7 @@ a ConSan detection.
   Record/Replay, Sampled, and Inline Shadow all pass the workload oracle and
   patch 12/12 accesses; Record/Replay and Inline Shadow also patch 4/4
   barriers, and every row has zero dynamic-incomplete encounters.  The four
-  pressure cells and `V5` are blue/ACTIVE; faults, overhead, the remaining
+  pressure cells and `V5` are orange/ACTIVE; faults, overhead, the remaining
   application matrix, and frozen-tip evidence remain open.
 - 2026-07-17: Commit `ecd529c017` corrects the gfx950-only D128 overhead
   workload selection.  The initial retained `overhead-001` experiment proved
@@ -264,7 +273,7 @@ a ConSan detection.
   profiles, and baseline-after across three processes each.  The paired
   baseline is 130.5 ms, with 6.61x, 8.35x, 8.31x, and 9.29x process slowdown
   for SuperCollider, Record/Replay, Sampled, and Inline Shadow respectively.
-  The cells and `V7` remain blue pending peak-memory and frozen-tip evidence.
+  The cells and `V7` remain orange pending peak-memory and frozen-tip evidence.
 - 2026-07-17: Commit `8c8480e68f` corrects the gfx950 barrier-drop
   specification contract for CDNA4's single full `s_barrier`; RDNA4's paired
   signal/wait selector is unchanged.  The reviewed D128 selector was fixed
@@ -274,8 +283,8 @@ a ConSan detection.
   SuperCollider, Record/Replay, Sampled, and Inline Shadow.  Every row applies
   exactly one mutation, produces the expected independent oracle failure and
   qualified detector miss, terminates within its bound, and passes both GPU
-  health gates.  The D128 matrix cells remain blue pending overhead and a
-  frozen-tip rerun; `A5` and `V6` are now blue/ACTIVE in the plan.
+  health gates.  The D128 matrix cells remain orange pending overhead and a
+  frozen-tip rerun; `A5` and `V6` are now orange/ACTIVE in the plan.
 - 2026-07-17: Commit `c7ca36d375` ports SuperCollider's redundant
   group-FLAT check to CDNA4 without changing the established RDNA4 sequence.
   It supports two-word D16/D32/D64/D128 loads and stores, U16 short-value
@@ -285,7 +294,7 @@ a ConSan detection.
   with analysis/static/dynamic completeness, 12/12 accesses patched, and
   zero mismatches.  A permissive earlier 0/0 result is superseded rather than
   treated as evidence.  The focused, ConSan, and full gates pass 413/413,
-  590/590, and 2145/2145.  `SC1` is blue/ACTIVE pending a retained racy/fault
+  590/590, and 2145/2145.  `SC1` is orange/ACTIVE pending a retained racy/fault
   detection proof and the wider acceptance campaign.
 - 2026-07-17: Commit `125419056d` fixes the CDNA4 Inline Shadow identity
   lifetime exposed by group-FLAT D128 attention.  Workgroup identity needed by
@@ -296,7 +305,7 @@ a ConSan detection.
   12/12 accesses and 4/4 barriers are patched, analysis/static/dynamic
   coverage are complete, and dynamic-incomplete is zero.  The focused,
   ConSan, and full gates pass 413/413, 588/588, and 2143/2143.  This advances
-  `IS1` to blue/ACTIVE; it does not yet complete multidimensional identity,
+  `IS1` to orange/ACTIVE; it does not yet complete multidimensional identity,
   fault, overhead, or frozen-campaign requirements.
 - 2026-07-17: Retained four-profile artifact
   `consan-validation/gfx950-take2-d128-block-all-001` classifies the next
@@ -305,7 +314,7 @@ a ConSan detection.
   static-complete at 12/12 plus 4/4 but rejects the run after accounting
   47,360 unsupported dynamic lane-site encounters: CDNA4 function-time
   workgroup SGPR sources are not stable without the entry snapshot/restoration
-  transaction.  Identity nodes `I0-I3` are therefore active (blue), not TODO.
+  transaction.  Identity nodes `I0-I3` are therefore active (orange), not TODO.
   SuperCollider still finds no applicable gfx950 site and remains an open
   implementation node; its runner-side zero-site acceptance is not treated as
   evidence.
@@ -318,7 +327,7 @@ a ConSan detection.
   epoch advancement at barriers.  Retained artifact
   `consan-validation/gfx950-take2-d128-block-record-007` runs successfully
   with 12/12 access and 4/4 shared-function barrier sites patched and dynamic
-  evidence complete.  Nodes `A3`, `RR1`, and `Q0` are now active (blue) in
+  evidence complete.  Nodes `A3`, `RR1`, and `Q0` are now active (orange) in
   the DAG.  The focused, ConSan, and full gates pass 413/413, 588/588, and
   2143/2143.
 - 2026-07-17: Commit `6e997a6a39` started access-normalization node `A2`.
@@ -496,7 +505,7 @@ a ConSan detection.
   persistent and spill extents are now bounded at 4 KiB and their final
   descriptor/AQL requirement is rounded to 16 bytes without moving dword
   slots.  The expanded focused gate passes 379/379; integrated shared-owner
-  CDNA4 evidence is still pending, so this prerequisite remains blue.
+  CDNA4 evidence is still pending, so this prerequisite remains orange.
 - 2026-07-17: Commit `0ad99bd3ac` completed the standalone live CDNA4 scratch
   proof.  Both full-wave64 and partial-`EXEC` round trips pass serially on the
   MI355X using only the workspace TheRock runtime.  Disassembly confirms the
