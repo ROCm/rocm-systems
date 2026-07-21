@@ -122,14 +122,19 @@ export RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1  # predeclared positive MOI control
 ```
 
 Do not enable both diagnostic guards. Strict policy can be too restrictive for
-a broad application that loads helper code objects with no admitted sites.
+a broad application that loads helper code objects with no admitted sites. A
+strict code-object rejection terminates at the loader boundary with the typed
+`ConSan load rejection` diagnostic and exit code 92. This prevents HIP clients
+that ignore an HSA load error from retaining a null kernel symbol and crashing
+later during launch. Explicit `RJ_CONSAN_FAIL_CLOSED=1` under the default policy
+continues to return the HSA error to callers that correctly handle it.
 
 ## Core controls
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `RJ_CONSAN_MODE=record-replay|inline-shadow|sampled|supercollider` | `record-replay` | Select the analysis. Loading the hook activates ConSan. |
-| `RJ_CONSAN_POLICY=default|strict` | `default` | `strict` rejects unsupported or incomplete instrumentation, requires real patches and MOI evidence, and rejects report overflow. It does not make diagnostics fatal. |
+| `RJ_CONSAN_POLICY=default|strict` | `default` | `strict` rejects unsupported or incomplete instrumentation, requires real patches and MOI evidence, and rejects report overflow. A load-time rejection terminates with exit code 92; race diagnostics remain nonfatal. |
 | `RJ_CONSAN_LOG=N` | disabled | Enable compact logs at `1`; larger values add inventory detail. |
 | `RJ_CONSAN_FAIL_CLOSED=0|1` | `0` | Reject unsupported/invalid transformation outcomes instead of loading the original. |
 | `RJ_CONSAN_REQUIRE_PATCH=0|1` | `0` | Reject an applicable code object when no real access/barrier/atomic/fence instrumentation patch is emitted. Prologues and metadata-only changes do not satisfy it. |

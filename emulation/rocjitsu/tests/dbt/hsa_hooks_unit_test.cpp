@@ -1101,6 +1101,37 @@ TEST(HsaHooksUnitTest, ConSanStrictPolicyRequiresCompleteInstrumentationButNotCl
       "moi_require_records=true.*moi_forbid_diagnostics=false.*moi_forbid_overflow=true");
 }
 
+TEST(HsaHooksUnitTest, ConSanStrictPolicyTerminatesAtRejectedCodeObjectLoad) {
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[0], false);
+  ScopedEnvVar policy("RJ_CONSAN_POLICY", "strict");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", nullptr);
+  ScopedEnvVar require_patch("RJ_CONSAN_REQUIRE_PATCH", nullptr);
+  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unsupported;
+
+  ASSERT_EXIT(([] {
+                FakeApiTable api;
+                InstalledDbiHook hook(api);
+                if (!hook.installed())
+                  std::_Exit(1);
+                std::array<uint8_t, 8> original{};
+                original[0] = 0x7f;
+                original[1] = 'E';
+                original[2] = 'L';
+                original[3] = 'F';
+                hsa_code_object_reader_t reader{};
+                if (api.core.hsa_code_object_reader_create_from_memory_fn(
+                        original.data(), original.size(), &reader) != HSA_STATUS_SUCCESS)
+                  std::_Exit(2);
+                (void)api.core.hsa_executable_load_agent_code_object_fn(
+                    hsa_executable_t{7}, kHostAgent, reader, nullptr, nullptr);
+                std::_Exit(3);
+              }()),
+              testing::ExitedWithCode(92),
+              "ConSan load rejection.*reason=non-installable-transform-outcome.*"
+              "policy=strict action=terminate exit_code=92");
+}
+
 void expect_transform_profile(const ConSanHookProfile &profile) {
   ASSERT_EQ(g_transform_override_flavors.size(), 1u);
   ASSERT_EQ(g_transform_override_engines.size(), 1u);

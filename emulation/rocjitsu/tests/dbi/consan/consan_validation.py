@@ -1629,6 +1629,19 @@ def _coverage_summary(log_text: str) -> dict:
     try:
         evidence = parse_coverage_evidence(log_text)
     except CoverageParseError as error:
+        rejection_prefix = "[rocjitsu-dbi-hooks] ConSan load rejection "
+        rejection_lines = [
+            line[len(rejection_prefix) :]
+            for line in log_text.splitlines()
+            if line.startswith(rejection_prefix)
+        ]
+        if rejection_lines:
+            fields = dict(re.findall(r"([a-z_]+)=([^ ]+)", rejection_lines[-1]))
+            return {
+                "accepted": False,
+                "error": "ConSan rejected a code object before execution",
+                "load_rejection": fields,
+            }
         return {"accepted": False, "error": str(error)}
     verdict = evidence.verdict
     reasons = []

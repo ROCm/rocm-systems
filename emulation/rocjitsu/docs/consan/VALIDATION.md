@@ -234,6 +234,11 @@ profile records its explicit `RJ_CONSAN_MODE` and strict completeness policy,
 so provenance does not depend on selection defaults. This
 prevents a coverage-limiting setting, kernel filter, explicit temporary register,
 force-spill control, or stale sampling setting from silently qualifying a cell.
+If a strict transform cannot be installed, the hook emits a typed
+`ConSan load rejection` record and terminates that contained workload process
+with exit code 92. The runner preserves the rejection fields in `result.json`;
+it does not misreport the result as a missing teardown verdict or allow a HIP
+client to launch through a null symbol after ignoring the HSA load error.
 
 An instrumented clean row is accepted only when:
 

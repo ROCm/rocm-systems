@@ -1992,7 +1992,7 @@ hsa_status_t HSA_API rj_dbi_code_object_reader_create_from_memory(
 
 std::shared_ptr<const std::vector<uint8_t>>
 snapshot_code_object_file_range(hsa_file_t file, size_t offset, size_t size) {
-  struct stat file_stat {};
+  struct stat file_stat{};
   if (fstat(file, &file_stat) != 0 || file_stat.st_size <= 0 || size == 0 ||
       static_cast<uintmax_t>(file_stat.st_size) > std::numeric_limits<size_t>::max() ||
       offset > static_cast<size_t>(file_stat.st_size) ||
@@ -2022,7 +2022,7 @@ snapshot_code_object_file_range(hsa_file_t file, size_t offset, size_t size) {
 }
 
 std::shared_ptr<const std::vector<uint8_t>> snapshot_code_object_file(hsa_file_t file) {
-  struct stat file_stat {};
+  struct stat file_stat{};
   if (fstat(file, &file_stat) != 0 || file_stat.st_size <= 0 ||
       static_cast<uintmax_t>(file_stat.st_size) > std::numeric_limits<size_t>::max())
     return {};
@@ -2273,6 +2273,28 @@ hsa_status_t HSA_API rj_dbi_executable_symbol_get_info(hsa_executable_symbol_t s
   return status;
 }
 
+constexpr int kStrictLoadRejectionExitCode = 92;
+
+[[nodiscard]] hsa_status_t reject_code_object_load(const HookConfig &config, hsa_status_t status,
+                                                   uint64_t reader, std::string_view reason) {
+  const bool terminate = config.policy == HookPolicy::Strict;
+  std::fprintf(stderr,
+               "[rocjitsu-dbi-hooks] ConSan load rejection reader=%llu reason=%.*s "
+               "status=%d policy=%s action=%s exit_code=%s\n",
+               static_cast<unsigned long long>(reader), static_cast<int>(reason.size()),
+               reason.data(), static_cast<int>(status), hook_policy_name(config.policy),
+               terminate ? "terminate" : "return-error", terminate ? "92" : "none");
+  std::fflush(stderr);
+  // A caller that ignores the HSA code-object load error can retain a null
+  // kernel symbol and crash later during launch. HIP does this for some
+  // precompiled PyTorch fat objects. Strict policy promises fail-closed
+  // execution, so stop at the attributable loader failure instead of handing
+  // an unusable executable back to a client that may continue regardless.
+  if (terminate)
+    std::_Exit(kStrictLoadRejectionExitCode);
+  return status;
+}
+
 hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     hsa_executable_t executable, hsa_agent_t agent, hsa_code_object_reader_t code_object_reader,
     const char *options, hsa_loaded_code_object_t *loaded_code_object) {
@@ -2426,7 +2448,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                      "[rocjitsu-dbi-hooks] ConSan fault load selection is ambiguous: "
                      "one reader planned %zu mutations\n",
                      probe.planned_fault_mutations);
-        return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+        return reject_code_object_load(*config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
+                                       code_object_reader.handle, "ambiguous-fault-load-selection");
       }
       bool selected = matched;
       if (config->fault_load_occurrence) {
@@ -2444,7 +2467,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                     selected ? "true" : "false",
                     selection && selection->overflow ? "true" : "false");
         if (selection && selection->overflow)
-          return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+          return reject_code_object_load(*config, HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+                                         code_object_reader.handle,
+                                         "fault-load-selection-overflow");
       }
       if (selected && config->fault_require_exactly_one && !config->fault_dry_run) {
         size_t expected = 0;
@@ -2489,7 +2514,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
               "without instrumentation");
           patch_result_storage = std::move(inventory);
           if (config->fail_closed || config->require_patch)
-            return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+            return reject_code_object_load(*config, HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+                                           code_object_reader.handle,
+                                           "supercollider-report-allocation");
         } else {
           patch_options.report_buffer_address = auto_report_address;
         }
@@ -2589,7 +2616,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         patch_options.moi_report_generation = auto_report_generation;
         patch_options.moi_report_dispatch_id = code_object_reader.handle;
       } else if (!patch_result_storage && config->fail_closed) {
-        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+        return reject_code_object_load(*config, HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+                                       code_object_reader.handle, "moi-report-allocation");
       } else if (!patch_result_storage) {
         patch_result_storage = std::move(inventory);
       }
@@ -2620,7 +2648,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       for (const std::string &error : patch_result.errors)
         std::fprintf(stderr, "[rocjitsu-dbi-hooks] %s\n", error.c_str());
       if (config->fail_closed)
-        return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+        return reject_code_object_load(*config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
+                                       code_object_reader.handle, "transform-error");
     }
     for (const std::string &warning : patch_result.warnings)
       log_message(kLogInfo, "%s", warning.c_str());
@@ -2630,7 +2659,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                    "(fail_closed=%s)\n",
                    rocjitsu::consan_transform_outcome_name(patch_result.outcome),
                    config->fail_closed ? "true" : "false");
-      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+      return reject_code_object_load(*config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
+                                     code_object_reader.handle,
+                                     "non-installable-transform-outcome");
     }
 
     log_message(
@@ -3502,7 +3533,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                      "[rocjitsu-dbi-hooks] RJ_CONSAN_REQUIRE_PATCH requested, but no relevant "
                      "access, barrier, atomic, or fence patch was applied to a code object with "
                      "supported ConSan sites\n");
-        return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+        return reject_code_object_load(*config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
+                                       code_object_reader.handle,
+                                       "required-instrumentation-missing");
       }
     }
 
@@ -3528,7 +3561,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       std::fprintf(stderr, "[rocjitsu-dbi-hooks] failed to create replacement patched reader: %d\n",
                    static_cast<int>(reader_status));
       if (config->fail_closed)
-        return reader_status;
+        return reject_code_object_load(*config, reader_status, code_object_reader.handle,
+                                       "replacement-reader-creation");
       log_message(kLogInfo,
                   "ConSan replacement reader creation failed; loading original reader=%llu",
                   static_cast<unsigned long long>(code_object_reader.handle));

@@ -85,6 +85,28 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertFalse(summary["accepted"])
         self.assertIn("analysis incomplete", summary["reasons"])
 
+    def test_coverage_summary_preserves_strict_load_rejection(self) -> None:
+        summary = validation._coverage_summary(
+            "[rocjitsu-dbi-hooks] ConSan load rejection reader=73 "
+            "reason=transform-error status=4112 policy=strict action=terminate "
+            "exit_code=92\n"
+        )
+        self.assertFalse(summary["accepted"])
+        self.assertEqual(
+            summary["error"], "ConSan rejected a code object before execution"
+        )
+        self.assertEqual(
+            summary["load_rejection"],
+            {
+                "reader": "73",
+                "reason": "transform-error",
+                "status": "4112",
+                "policy": "strict",
+                "action": "terminate",
+                "exit_code": "92",
+            },
+        )
+
     def test_manifest_is_the_complete_north_star_matrix(self) -> None:
         manifest = validation._manifest("gfx1201")
         self.assertEqual(len(manifest["workloads"]), 15)
