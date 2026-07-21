@@ -21,7 +21,19 @@ target_include_directories(
 target_link_libraries(rocjitsu_comgr PRIVATE rocjitsu_dbt_internal)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_link_options(rocjitsu_comgr PRIVATE "LINKER:-z,defs")
+    set(_rocjitsu_comgr_version_script
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocjitsu_comgr.map"
+    )
+    target_link_options(
+        rocjitsu_comgr
+        PRIVATE
+            "LINKER:-z,defs"
+            "LINKER:--version-script,${_rocjitsu_comgr_version_script}"
+    )
+    set_target_properties(
+        rocjitsu_comgr
+        PROPERTIES LINK_DEPENDS "${_rocjitsu_comgr_version_script}"
+    )
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -57,6 +69,7 @@ target_link_libraries(
         rocjitsu_code
         rocjitsu_dbt_config
         rocjitsu_isa
+        rocjitsu_isa_registry
         rocjitsu_isa_cdna1
         rocjitsu_isa_cdna2
         rocjitsu_isa_cdna3

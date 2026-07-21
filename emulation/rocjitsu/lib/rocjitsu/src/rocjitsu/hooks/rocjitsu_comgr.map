@@ -1,0 +1,11 @@
+{
+    global:
+        amd_comgr_create_data;
+        amd_comgr_get_data;
+        amd_comgr_get_data_isa_name;
+        amd_comgr_hotswap_rewrite;
+        amd_comgr_release_data;
+        amd_comgr_set_data;
+    local:
+        *;
+};

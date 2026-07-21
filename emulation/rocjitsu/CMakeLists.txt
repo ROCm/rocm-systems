@@ -270,6 +270,7 @@ target_link_libraries(
         rocjitsu_analysis
         rocjitsu_code
         rocjitsu_isa
+        rocjitsu_isa_registry
         rocjitsu_isa_cdna1
         rocjitsu_isa_cdna2
         rocjitsu_isa_cdna3
@@ -349,15 +350,13 @@ install(
 
 install(
     TARGETS rocjitsu_comgr
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    COMPONENT rocjitsu-hotswap
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT rocjitsu-hotswap
 )
 
 if(TARGET rocjitsu_hotswap_select)
     install(
         TARGETS rocjitsu_hotswap_select
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        COMPONENT rocjitsu-hotswap
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT rocjitsu-hotswap
     )
 endif()
 

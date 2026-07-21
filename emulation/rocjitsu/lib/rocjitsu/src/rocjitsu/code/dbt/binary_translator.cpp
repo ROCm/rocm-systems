@@ -8,14 +8,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
-#include "rocjitsu/code/dbt/generated/encoding_cdna4_to_cdna3.h"
-#include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna3.h"
-#include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna4.h"
-#include "rocjitsu/code/dbt/generated/legalization_cdna4_to_cdna3.h"
-#include "rocjitsu/code/dbt/generated/legalization_cdna4_to_rdna3.h"
-#include "rocjitsu/code/dbt/generated/legalization_cdna4_to_rdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
-#include "rocjitsu/code/dbt/gfx1250_b0_to_a0.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/code/dbt/lds_virtualization.h"
 #include "rocjitsu/code/dbt/semantic_translator.h"
@@ -26,7 +19,6 @@
 #include "rocjitsu/code/patch/kernel_text_layout.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/code/relocation_function_table.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
@@ -51,35 +43,6 @@
 namespace rocjitsu {
 
 namespace {
-
-EncodingTranslateFn select_encoding_translator(rj_code_arch_t guest, rj_code_arch_t host) {
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
-    return cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4;
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_CDNA3)
-    return cdna4_to_cdna3::translate_encoding_cdna4_to_cdna3;
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3)
-    return cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3;
-  return nullptr;
-}
-
-LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t host) {
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4) {
-    return [](uint16_t enc_id, uint16_t opcode) -> const InstructionLegalization * {
-      return lookup(kLegalization_cdna4_to_rdna4, enc_id, opcode);
-    };
-  }
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_CDNA3) {
-    return [](uint16_t enc_id, uint16_t opcode) -> const InstructionLegalization * {
-      return lookup(kLegalization_cdna4_to_cdna3, enc_id, opcode);
-    };
-  }
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3) {
-    return [](uint16_t enc_id, uint16_t opcode) -> const InstructionLegalization * {
-      return lookup(kLegalization_cdna4_to_rdna3, enc_id, opcode);
-    };
-  }
-  return nullptr;
-}
 
 [[nodiscard]] std::vector<uint32_t> raw_words_for_inst(const Instruction &inst) {
   const uint32_t *raw = inst.raw_encoding();
@@ -345,9 +308,10 @@ build_block_position_index(const std::vector<std::unique_ptr<BasicBlock>> &block
   return block;
 }
 
-[[nodiscard]] std::unordered_set<uint64_t> attach_relocation_table_call_edges(
-    const BlockOffsetIndex &block_index, std::span<const RelocationFunctionTable> tables,
-    std::span<const RelocationTableDispatch> dispatches) {
+[[nodiscard]] std::unordered_set<uint64_t>
+attach_relocation_table_call_edges(const BlockOffsetIndex &block_index,
+                                   std::span<const RelocationFunctionTable> tables,
+                                   std::span<const RelocationTableDispatch> dispatches) {
   std::unordered_set<uint64_t> accepted_calls;
   for (const RelocationTableDispatch &dispatch : dispatches) {
     if (dispatch.table_index >= tables.size())
@@ -842,26 +806,18 @@ scoped_call_liveness_edges(std::span<BasicBlock *const> blocks, std::span<const 
 BinaryTranslator::~BinaryTranslator() = default;
 
 BinaryTranslator::BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
-                                   uint32_t target_mach, BinaryTranslatorOptions options)
+                                   uint32_t target_mach, BinaryTranslatorOptions options,
+                                   TranslationProfile profile)
     : guest_arch_(guest_arch), host_arch_(host_arch),
       target_mach_(target_mach ? target_mach : elf_mach_for_arch(host_arch)), options_(options),
-      encoding_translate_(select_encoding_translator(guest_arch, host_arch)),
-      legalization_lookup_(select_legalization(guest_arch, host_arch)),
-      semantic_translator_(std::make_unique<SemanticTranslator>(
-          guest_arch, host_arch, options.input_revision, options.output_revision)) {}
+      encoding_translate_(profile.encoding_translate),
+      legalization_lookup_(profile.legalization_lookup), create_decoder_(profile.create_decoder),
+      semantic_translator_(
+          std::make_unique<SemanticTranslator>(profile.semantic_rules, host_arch)) {}
 
 const InstructionLegalization *
 BinaryTranslator::lookup_legalization(const Instruction &inst) const {
-  // gfx1250 B0 and A0 have the same structural ISA, so the generated cross-ISA
-  // tables cannot express their revision-specific behavior. Affected decoded
-  // instructions are classified by the handwritten errata policy; everything
-  // else intentionally has no entry and follows the raw same-ISA copy path.
-  if (guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_GFX1250 &&
-      options_.input_revision == ProcessorRevision::Gfx1250B0 &&
-      options_.output_revision == ProcessorRevision::Gfx1250A0)
-    return gfx1250_b0_to_a0_legalization(inst);
-
-  return legalization_lookup_ ? legalization_lookup_(inst.encoding_id(), inst.opcode()) : nullptr;
+  return legalization_lookup_ ? legalization_lookup_(inst) : nullptr;
 }
 
 void BinaryTranslator::set_trace_callback(TranslationTraceCallback callback) {
@@ -908,7 +864,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   //    direct transfers, recovered indirect transfers, and their PC builders.
   // 5. Feed discovered register/private-memory requirements back into each
   //    descriptor and commit .text, descriptors, sidecars, metadata, and flags.
-  auto decoder = Decoder::create(guest_arch_);
+  auto decoder = create_decoder_ ? create_decoder_(guest_arch_) : nullptr;
   if (!decoder) {
     append_error(result.diagnostics, DiagnosticKind::UnsupportedGuestArch,
                  "unsupported guest_arch: no decoder available");
@@ -962,8 +918,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   auto blocks = BasicBlock::build(obj, *decoder, guest_arch_, block_leaders);
   const BlockOffsetIndex block_index = build_block_offset_index(blocks);
   const uint64_t text_vaddr = obj.text_sections().front()->vaddr();
-  const auto relocation_table_dispatches = discover_relocation_table_dispatches(
-      blocks, relocation_function_tables, text_vaddr);
+  const auto relocation_table_dispatches =
+      discover_relocation_table_dispatches(blocks, relocation_function_tables, text_vaddr);
   const auto relocation_table_calls = attach_relocation_table_call_edges(
       block_index, relocation_function_tables, relocation_table_dispatches);
   auto scopes = kernel_translation_scopes(blocks, block_index, descriptor_translations);
@@ -1129,12 +1085,11 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
     const uint64_t source_entry = scope.translation->entry_text_offset;
     const bool skipped_uses_virtual_lds = scope.translation->needs_lds_overflow_buf;
-    auto skipped_text =
-        append_skipped_kernel_stub(translated_text,
-                                   {.source_entry = scope.translation->entry_text_offset,
-                                    .has_kernarg_preload_firmware_skip =
-                                        scope.translation->has_kernarg_preload_firmware_skip},
-                                   host_arch_);
+    auto skipped_text = append_skipped_kernel_stub(
+        translated_text,
+        {.source_entry = scope.translation->entry_text_offset,
+         .has_kernarg_preload_firmware_skip = scope.translation->has_kernarg_preload_firmware_skip},
+        host_arch_);
     if (!skipped_text.ok) {
       append_error(result.diagnostics, materialization_diagnostic_kind(skipped_text),
                    skipped_text.message, skipped_text.source_offset);
@@ -1319,8 +1274,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     }
 
     layout.entry_plan = {
-        .has_kernarg_preload_firmware_skip =
-            scope.translation->has_kernarg_preload_firmware_skip,
+        .has_kernarg_preload_firmware_skip = scope.translation->has_kernarg_preload_firmware_skip,
         .kernarg_preload_firmware_entry_text_offset =
             scope.translation->kernarg_preload_firmware_entry_text_offset,
         .prologue_words = scope.translation->prologue_words,

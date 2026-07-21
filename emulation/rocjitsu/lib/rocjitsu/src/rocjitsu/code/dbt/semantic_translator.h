@@ -32,7 +32,6 @@
 #include <vector>
 
 #include "rocjitsu/analysis/liveness.h"
-#include "rocjitsu/code/dbt/processor_revision.h"
 #include "rocjitsu/code/dbt/translation_rule.h"
 #include "rocjitsu/code/rj_code.h"
 
@@ -59,8 +58,7 @@ struct SemanticReplacement {
 /// binary search.
 class SemanticTranslator {
 public:
-  SemanticTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
-                     ProcessorRevision input_revision, ProcessorRevision output_revision);
+  SemanticTranslator(std::span<const TranslationRule> expand_rules, rj_code_arch_t host_arch);
 
   /// @brief Try to expand/lower an instruction via the expand rules table.
   /// @param inst        The decoded instruction.

@@ -10,23 +10,14 @@ add_subdirectory(src/rocjitsu/analysis)
 add_subdirectory(src/rocjitsu/code)
 add_subdirectory(src/rocjitsu/isa)
 
-# Private archive for consumers which only need code-object translation.  Keep
-# this as a static library so each shared-library frontend pulls only the
-# object files needed by its entry points.  In particular, the COMGR HotSwap
-# adapter must not acquire the simulator implementation through this target.
+# Private archive for the fixed-profile gfx1250 HotSwap translator. Keep this as
+# a static library so the shared-library frontend pulls only the generic DBT
+# implementation and gfx1250 model selected by its entry point. In particular,
+# it must not acquire the full decoder registry or simulator implementation.
 set(ROCJITSU_DBT_OBJECT_LIBS
     rocjitsu_analysis
     rocjitsu_code
     rocjitsu_isa
-    rocjitsu_isa_cdna1_model
-    rocjitsu_isa_cdna2_model
-    rocjitsu_isa_cdna3_model
-    rocjitsu_isa_cdna4_model
-    rocjitsu_isa_rdna1_model
-    rocjitsu_isa_rdna2_model
-    rocjitsu_isa_rdna3_model
-    rocjitsu_isa_rdna3_5_model
-    rocjitsu_isa_rdna4_model
     rocjitsu_isa_gfx1250_model
 )
 add_library(rocjitsu_dbt_internal STATIC)

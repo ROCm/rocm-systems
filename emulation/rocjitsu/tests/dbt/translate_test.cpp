@@ -6958,6 +6958,29 @@ TEST(BinaryTranslatorE2E, Gfx1250ReplacesSClauseWithNopForB0ToA0) {
   EXPECT_EQ(target_words[1], source_end[0]);
 }
 
+TEST(BinaryTranslatorE2E, Gfx1250FixedProfileMatchesFullRegistryForB0ToA0) {
+  constexpr auto source_clause = gfx1250::build_sopp(gfx1250::kSClauseSopp, {.simm16 = 4});
+  constexpr auto source_end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp, {.simm16 = 0});
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {source_clause[0], source_end[0]});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  const auto options = gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                                rocjitsu::ProcessorRevision::Gfx1250A0);
+  rocjitsu::BinaryTranslator full_registry(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250,
+                                           0, options);
+  rocjitsu::BinaryTranslator fixed_profile(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250,
+                                           rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250, options,
+                                           rocjitsu::gfx1250_b0_to_a0_translation_profile());
+
+  auto full_result = full_registry.translate(source);
+  auto fixed_result = fixed_profile.translate(source);
+  ASSERT_TRUE(full_result.ok());
+  ASSERT_TRUE(fixed_result.ok());
+  EXPECT_EQ(fixed_result.elf_bytes, full_result.elf_bytes);
+}
+
 TEST(BinaryTranslatorE2E, Gfx1250PreservesSClauseOutsideB0ToA0) {
   constexpr auto source_clause = gfx1250::build_sopp(gfx1250::kSClauseSopp, {.simm16 = 4});
   constexpr auto source_end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp, {.simm16 = 0});

@@ -38,10 +38,12 @@
 namespace rocjitsu {
 
 class AmdGpuCodeObject;
+class Decoder;
 class SemanticTranslator;
 class Instruction;
 struct InstructionLegalization;
 struct KernelTextLayout;
+struct TranslationRule;
 
 /// @brief Encoding translation function type.
 ///
@@ -65,11 +67,31 @@ using EncodingTranslateFn = TranslationResult (*)(uint32_t encoding_id, uint32_t
 /// (encoding_id, opcode) pair. Returns the InstructionLegalization entry
 /// describing the action (Identity/Substitute/Lower/Expand) and target opcode.
 ///
-/// @param encoding_id  Guest encoding format ID.
-/// @param opcode       Guest opcode within the encoding format.
+/// @param inst  Decoded guest instruction.
 /// @returns Pointer to the legalization entry, or nullptr if not found.
-using LegalizationLookupFn = const InstructionLegalization *(*)(uint16_t encoding_id,
-                                                                uint16_t opcode);
+using LegalizationLookupFn = const InstructionLegalization *(*)(const Instruction &inst);
+
+/// @brief Decoder factory selected by a DBT translation profile.
+using DecoderFactoryFn = std::unique_ptr<Decoder> (*)(rj_code_arch_t arch);
+
+/// @brief ISA-specific registration used by the ISA-agnostic translation loop.
+///
+/// @details Keeping the decoder, legalization, encoding, and semantic-rule roots
+/// together lets small frontends select one translation profile without linking
+/// the registration tables for every ISA supported by full RocJITsu.
+struct TranslationProfile {
+  EncodingTranslateFn encoding_translate = nullptr;
+  LegalizationLookupFn legalization_lookup = nullptr;
+  std::span<const TranslationRule> semantic_rules;
+  DecoderFactoryFn create_decoder = nullptr;
+};
+
+/// @brief Return the self-contained gfx1250 B0-to-A0 errata profile.
+///
+/// @details Selecting this profile is the revision-policy decision: its
+/// legalization and semantic rules are always active. Callers must pair it
+/// with B0 input and A0 output revision options.
+[[nodiscard]] TranslationProfile gfx1250_b0_to_a0_translation_profile();
 
 /// @brief One source instruction trace event emitted by BinaryTranslator.
 ///
@@ -146,7 +168,7 @@ struct TranslatedCodeObject {
 /// @brief Top-level dynamic binary translator.
 ///
 /// @details Translates an AmdGpuCodeObject from guest_arch to host_arch by:
-///   1. Decoding all instructions via the existing Decoder::create() factory.
+///   1. Decoding all instructions via the selected profile's decoder factory.
 ///   2. Running the semantic translator per-block for special-case translations.
 ///   3. Translating remaining instructions via legalization + encoding translate.
 ///   4. Re-emitting a valid ELF for host_arch via CodeObjectPatcher.
@@ -167,6 +189,14 @@ public:
   ///                      0 = auto-detect from host_arch (default GFX1200 for RDNA4).
   BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch, uint32_t target_mach = 0,
                    BinaryTranslatorOptions options = {});
+
+  /// @brief Construct with an explicit registration profile.
+  ///
+  /// @details Internal frontends with a fixed translation policy use this
+  /// overload to avoid pulling the all-architecture registry into their shared
+  /// object.
+  BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch, uint32_t target_mach,
+                   BinaryTranslatorOptions options, TranslationProfile profile);
   ~BinaryTranslator();
 
   /// @brief Install an optional callback for per-instruction debugging.
@@ -206,6 +236,7 @@ private:
   BinaryTranslatorOptions options_;                         ///< Optional translation controls.
   EncodingTranslateFn encoding_translate_;                  ///< Per-pair encoding translator.
   LegalizationLookupFn legalization_lookup_;                ///< Per-pair legalization table.
+  DecoderFactoryFn create_decoder_;                         ///< Profile-specific decoder factory.
   std::unique_ptr<SemanticTranslator> semantic_translator_; ///< Per-pair semantic rule engine.
 };
 

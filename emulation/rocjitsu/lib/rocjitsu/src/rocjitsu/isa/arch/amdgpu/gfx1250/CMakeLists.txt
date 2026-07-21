@@ -20,6 +20,7 @@ file(
 list(SORT gfx1250_vopc_sources)
 
 rj_add_object_library(rocjitsu_isa_gfx1250
+    MODEL_ONLY_VARIANT
     addr_calc.cpp
     decoder.cpp
     encodings.cpp

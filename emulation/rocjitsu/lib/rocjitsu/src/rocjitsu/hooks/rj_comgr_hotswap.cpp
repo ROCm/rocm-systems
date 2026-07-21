@@ -70,8 +70,7 @@ std::atomic<uint64_t> g_cache_temp_sequence{0};
 
 // Bump this whenever the B0 -> A0 translation policy or serialized output
 // changes incompatibly. The input and ISA names are also part of the key.
-constexpr std::string_view kCacheSchema =
-    "rocjitsu-comgr-gfx1250-b0-a0-v3-tensor-mask";
+constexpr std::string_view kCacheSchema = "rocjitsu-comgr-gfx1250-b0-a0-v3-tensor-mask";
 
 [[nodiscard]] bool env_flag_enabled(const char *name) {
   const char *value = std::getenv(name);
@@ -80,8 +79,7 @@ constexpr std::string_view kCacheSchema =
   std::string normalized(value);
   std::transform(normalized.begin(), normalized.end(), normalized.begin(),
                  [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-  return normalized != "0" && normalized != "off" && normalized != "false" &&
-         normalized != "no";
+  return normalized != "0" && normalized != "off" && normalized != "false" && normalized != "no";
 }
 
 template <typename... Args> void verbose_log(const char *format, Args... args) {
@@ -101,9 +99,9 @@ void dump_failed_input(const DataObject &object) {
 
   const uint64_t sequence = g_dump_sequence.fetch_add(1, std::memory_order_relaxed);
   char path[4096];
-  const int length = std::snprintf(path, sizeof(path), "%s/rocjitsu-hotswap-%ld-%llu.hsaco",
-                                   directory, static_cast<long>(getpid()),
-                                   static_cast<unsigned long long>(sequence));
+  const int length =
+      std::snprintf(path, sizeof(path), "%s/rocjitsu-hotswap-%ld-%llu.hsaco", directory,
+                    static_cast<long>(getpid()), static_cast<unsigned long long>(sequence));
   if (length < 0 || static_cast<size_t>(length) >= sizeof(path)) {
     verbose_log("failed-input dump path is too long\n");
     return;
@@ -222,8 +220,7 @@ public:
     const uint64_t first = avalanche(first_);
     const uint64_t second = avalanche(second_ ^ first);
     char text[33];
-    std::snprintf(text, sizeof(text), "%016llx%016llx",
-                  static_cast<unsigned long long>(first),
+    std::snprintf(text, sizeof(text), "%016llx%016llx", static_cast<unsigned long long>(first),
                   static_cast<unsigned long long>(second));
     return text;
   }
@@ -242,8 +239,7 @@ private:
 };
 
 [[nodiscard]] std::optional<CachePaths>
-cache_paths(const DataObject &input, std::string_view source_isa,
-            std::string_view target_isa) {
+cache_paths(const DataObject &input, std::string_view source_isa, std::string_view target_isa) {
   const char *directory = std::getenv("HSA_HOTSWAP_CACHE_DIR");
   if (directory == nullptr || directory[0] == '\0')
     return std::nullopt;
@@ -300,15 +296,13 @@ cache_paths(const DataObject &input, std::string_view source_isa,
   return true;
 }
 
-[[nodiscard]] std::optional<std::vector<uint8_t>>
-load_cached_translation(const std::string &path) {
+[[nodiscard]] std::optional<std::vector<uint8_t>> load_cached_translation(const std::string &path) {
   const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
   if (fd < 0)
     return std::nullopt;
 
   struct stat file_stat {};
-  if (::fstat(fd, &file_stat) != 0 || !S_ISREG(file_stat.st_mode) ||
-      file_stat.st_size <= 0 ||
+  if (::fstat(fd, &file_stat) != 0 || !S_ISREG(file_stat.st_mode) || file_stat.st_size <= 0 ||
       static_cast<uint64_t>(file_stat.st_size) >
           static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
     (void)::close(fd);
@@ -333,13 +327,10 @@ load_cached_translation(const std::string &path) {
   return bytes;
 }
 
-void store_cached_translation(const std::string &path,
-                              const std::vector<uint8_t> &bytes) {
-  const uint64_t sequence =
-      g_cache_temp_sequence.fetch_add(1, std::memory_order_relaxed);
+void store_cached_translation(const std::string &path, const std::vector<uint8_t> &bytes) {
+  const uint64_t sequence = g_cache_temp_sequence.fetch_add(1, std::memory_order_relaxed);
   const std::string temporary =
-      path + ".tmp-" + std::to_string(static_cast<long>(getpid())) + "-" +
-      std::to_string(sequence);
+      path + ".tmp-" + std::to_string(static_cast<long>(getpid())) + "-" + std::to_string(sequence);
   const int fd = ::open(temporary.c_str(), O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
   if (fd < 0) {
     verbose_log("could not create cache temporary %s\n", temporary.c_str());
@@ -381,8 +372,8 @@ void store_cached_translation(const std::string &path,
   Elf64_Ehdr header{};
   std::memcpy(&header, object.bytes.data(), sizeof(header));
   if (std::memcmp(header.e_ident, EI_MAGIC, EI_MAGIC_SIZE) != 0 ||
-      header.e_ident[EI_CLASS] != ELFCLASS64 ||
-      header.e_ident[EI_OSABI] != ELFOSABI_AMDGPU_HSA || header.e_machine != EM_AMDGPU)
+      header.e_ident[EI_CLASS] != ELFCLASS64 || header.e_ident[EI_OSABI] != ELFOSABI_AMDGPU_HSA ||
+      header.e_machine != EM_AMDGPU)
     return {};
   const char *processor = elf_mach_name(header.e_flags);
   if (std::string_view(processor) == "unknown")
@@ -426,8 +417,7 @@ extern "C" RJ_API_EXPORT int amd_comgr_release_data(ComgrData data) {
 
 namespace {
 
-[[nodiscard]] ComgrStatus return_output_bytes(std::vector<uint8_t> bytes,
-                                              ComgrData *output) {
+[[nodiscard]] ComgrStatus return_output_bytes(std::vector<uint8_t> bytes, ComgrData *output) {
   ComgrData result{};
   ComgrStatus status = allocate_data(kComgrDataKindExecutable, &result);
   if (status != kComgrStatusSuccess)
@@ -469,7 +459,7 @@ extern "C" RJ_API_EXPORT int amd_comgr_get_data(ComgrData data, size_t *size, ch
 }
 
 extern "C" RJ_API_EXPORT int amd_comgr_get_data_isa_name(ComgrData data, size_t *size,
-                                                          char *isa_name) {
+                                                         char *isa_name) {
   DataObject *object = lookup_data(data);
   if (object == nullptr || size == nullptr || object->kind != kComgrDataKindExecutable)
     return kComgrStatusInvalidArgument;
@@ -483,10 +473,9 @@ extern "C" RJ_API_EXPORT int amd_comgr_get_data_isa_name(ComgrData data, size_t 
   return kComgrStatusSuccess;
 }
 
-extern "C" RJ_API_EXPORT int amd_comgr_hotswap_rewrite(ComgrData input,
-                                                        const char *source_isa_name,
-                                                        const char *target_isa_name,
-                                                        ComgrData *output) {
+extern "C" RJ_API_EXPORT int amd_comgr_hotswap_rewrite(ComgrData input, const char *source_isa_name,
+                                                       const char *target_isa_name,
+                                                       ComgrData *output) {
   DataObject *input_object = lookup_data(input);
   if (input_object == nullptr || input_object->kind != kComgrDataKindExecutable ||
       input_object->bytes.empty() || source_isa_name == nullptr || target_isa_name == nullptr ||
@@ -530,8 +519,8 @@ extern "C" RJ_API_EXPORT int amd_comgr_hotswap_rewrite(ComgrData input,
         verbose_log("could not lock cache entry %s; translating without cache\n",
                     paths->lock.c_str());
       } else if (auto cached = load_cached_translation(paths->object)) {
-        verbose_log("cache hit after wait: loaded %zu translated bytes from %s\n",
-                    cached->size(), paths->object.c_str());
+        verbose_log("cache hit after wait: loaded %zu translated bytes from %s\n", cached->size(),
+                    paths->object.c_str());
         return return_output_bytes(std::move(*cached), output);
       } else if (::access(paths->object.c_str(), F_OK) == 0) {
         verbose_log("removing invalid cache entry %s\n", paths->object.c_str());
@@ -550,9 +539,9 @@ extern "C" RJ_API_EXPORT int amd_comgr_hotswap_rewrite(ComgrData input,
     // unsupported kernel to the target-ISA trap stub; the translator reports a
     // KernelSkipped warning with its symbol and failure reason.
     options.skip_failed_kernels = true;
-    rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250,
-                                          ROCJITSU_CODE_ARCH_GFX1250,
-                                          rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250, options);
+    rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250,
+                                          rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250, options,
+                                          rocjitsu::gfx1250_b0_to_a0_translation_profile());
     rocjitsu::TranslatedCodeObject translated = translator.translate(source);
     print_diagnostics(translated.diagnostics);
     if (!translated.ok() || translated.elf_bytes.empty()) {

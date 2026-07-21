@@ -12,6 +12,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_analysis
     rocjitsu_code
     rocjitsu_isa
+    rocjitsu_isa_registry
     rocjitsu_isa_cdna1
     rocjitsu_isa_cdna2
     rocjitsu_isa_cdna3
@@ -543,6 +544,42 @@ rj_add_test(
         "bin/rj_dbt_translate_smoke_test"
         "bin/rj_dbt_translate"
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(hotswap_dual_library_test dbt/hotswap_dual_library_test.cpp)
+    target_link_libraries(hotswap_dual_library_test PRIVATE ${CMAKE_DL_LIBS})
+    rj_configure_target(
+        hotswap_dual_library_test
+        PRIVATE_INCLUDES
+        WARNINGS
+    )
+    add_dependencies(hotswap_dual_library_test rocjitsu_shared rocjitsu_comgr)
+
+    foreach(_load_order simulator-first hotswap-first)
+        rj_add_test(
+            NAME "HotSwap.DualLibrary.${_load_order}"
+            COMMAND
+                hotswap_dual_library_test
+                $<TARGET_FILE:rocjitsu_shared>
+                $<TARGET_FILE:rocjitsu_comgr>
+                ${_load_order}
+            LABELS "dbt;hotswap"
+        )
+    endforeach()
+
+    add_test(
+        NAME "HotSwap.ExportSurface"
+        COMMAND
+            ${CMAKE_COMMAND} "-DNM_TOOL=${CMAKE_NM}"
+            "-DHOTSWAP_LIBRARY=$<TARGET_FILE:rocjitsu_comgr>"
+            "-DSIMULATOR_LIBRARY=$<TARGET_FILE:rocjitsu_shared>" -P
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_hotswap_exports.cmake"
+    )
+    set_tests_properties(
+        "HotSwap.ExportSurface"
+        PROPERTIES LABELS "dbt;hotswap"
+    )
+endif()
 
 # --- Scaling test (standalone executable) ---
 

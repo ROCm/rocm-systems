@@ -23,18 +23,22 @@ function(_rj_configure_object_library name)
     endif()
 endfunction()
 
-# Usage: rj_add_object_library(<name> <sources...>)
+# Usage: rj_add_object_library(<name> [MODEL_ONLY_VARIANT] <sources...>)
 function(rj_add_object_library name)
-    add_library(${name} OBJECT ${ARGN})
+    set(options MODEL_ONLY_VARIANT)
+    cmake_parse_arguments(ARG "${options}" "" "" ${ARGN})
+
+    add_library(${name} OBJECT ${ARG_UNPARSED_ARGUMENTS})
     _rj_configure_object_library(${name} util simdojo_headers)
 
     # The DBT frontends need generated decode and instruction-model code but do
-    # not execute instructions.  Compile a private model-only variant from the
-    # same generated sources.  Returning a null execution callback leaves the
-    # execute methods unreachable, allowing section GC to discard them without
-    # changing the generator or the simulator's normal ISA objects.
-    if(name MATCHES "^rocjitsu_isa_(cdna|rdna|gfx)")
-        add_library(${name}_model OBJECT ${ARGN})
+    # not execute instructions. When explicitly requested, compile a private
+    # model-only variant from the same generated sources. Returning a null
+    # execution callback leaves the execute methods unreachable, allowing
+    # section GC to discard them without changing the generator or simulator's
+    # normal ISA objects.
+    if(ARG_MODEL_ONLY_VARIANT)
+        add_library(${name}_model OBJECT ${ARG_UNPARSED_ARGUMENTS})
         _rj_configure_object_library(${name}_model util simdojo_headers)
         target_compile_definitions(
             ${name}_model

@@ -11,6 +11,7 @@ rj_add_object_library(rocjitsu_code
     rj_code.cpp
     dbt/binary_translator.cpp
     dbt/gfx1250_b0_to_a0.cpp
+    dbt/gfx1250_translation_profile.cpp
     dbt/rj_code_translate.cpp
     dbt/hazard_tracker.cpp
     dbt/kernel_descriptor_translator.cpp
@@ -24,6 +25,7 @@ rj_add_object_library(rocjitsu_code
     dbt/semantic/cdna4_to_rdna3.cpp
     dbt/semantic/cdna4_to_rdna4.cpp
     dbt/semantic_translator.cpp
+    dbt/translation_profile.cpp
     dbt/semantic_scratch.cpp
     dbt/virtual_lds.cpp
     patch/sidecar_metadata.cpp
