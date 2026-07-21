@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import common
 import pandas as pd
 import pytest
+from utils.pc_sampling_analysis import load_pc_sample_records
 
 from pc_sampling.pc_sampling_analysis import load_pc_sample_records
 from utils.parser import load_pc_sampling_data
