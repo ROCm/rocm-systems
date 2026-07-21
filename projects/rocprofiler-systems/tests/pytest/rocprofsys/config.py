@@ -177,7 +177,7 @@ class RocprofsysConfig:
         When is_installed is False, searches in the following order:
         1. rocprofsys_examples_dir/name
         2. rocprofsys_bin_dir/name
-        3. PATH lookup
+        (no PATH lookup: the in-tree binary must be used, never a PATH copy)
 
         Args:
             name: Name of the target executable
@@ -229,34 +229,17 @@ class RocprofsysConfig:
                 if exe.exists() and exe.is_file():
                     return exe
 
-            exe = self.rocprofsys_examples_dir / "examples" / name / name
-            if exe.exists() and exe.is_file():
-                return exe
-
-            # rccl tests lie in their own directory
-            exe = self.rocprofsys_examples_dir / "examples" / "rccl" / name
-            if exe.exists() and exe.is_file():
-                return exe
-
             # binary directory
             exe = self.rocprofsys_bin_dir / name
             if exe.exists() and exe.is_file():
                 return exe
-
-            # PATH lookup via shutil.which
-            exe = shutil.which(name)
-            if exe:
-                return Path(exe)
 
             raise FileNotFoundError(
                 f"Target executable '{name}' not found. Searched in:\n"
                 f"  - {self.rocprofsys_examples_dir}/examples/python/{name}\n"
                 f"  - {self.rocprofsys_examples_dir}/{name}\n"
                 f"  - {self.rocprofsys_examples_dir}/examples/code-coverage/{name}\n"
-                f"  - {self.rocprofsys_examples_dir}/examples/rccl/{name}\n"
-                f"  - {self.rocprofsys_examples_dir}/examples/{name}/{name}\n"
                 f"  - {self.rocprofsys_bin_dir}/{name}\n"
-                f"  - PATH"
             )
 
 
