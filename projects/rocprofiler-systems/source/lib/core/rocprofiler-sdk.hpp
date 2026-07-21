@@ -635,7 +635,9 @@ sdk_core<Wrapper, Externals>::get_callback_domains()
     if constexpr(Wrapper::compile_time_version >= 700)
     {
         if(formatted_version >= 700)
+        {
             supported.emplace(Wrapper::CALLBACK_TRACING_ROCJPEG_API);
+        }
     }
 
     auto _data    = std::unordered_set<kind_t>{};
