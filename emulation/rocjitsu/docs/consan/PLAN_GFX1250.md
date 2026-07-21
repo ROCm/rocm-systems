@@ -122,7 +122,7 @@ flowchart TD
     XP3["XP3 TODO<br/>top-k SC oracle passes;<br/>current exact object has 88 bounded gaps"]
     XP9["XP9 DONE<br/>norm plus softmax Record/Replay clean, paired,<br/>and reviewed-fault bundle green"]
     XP9B["XP9B DONE<br/>norm plus softmax Sampled clean, paired,<br/>and reviewed-fault bundle green"]
-    XP9C["XP9C ACTIVE<br/>norm/softmax Inline residual;<br/>component-scoped EXEC-save SGPR spill"]
+    XP9C["XP9C ACTIVE<br/>norm/softmax Inline clean and paired complete;<br/>reviewed-fault containment retry"]
     XP10["XP10 DONE<br/>cluster Record/Replay clean, paired, and reviewed-fault<br/>bundle accepted at 23/23 accesses and 2/2 barriers"]
     XT0["XT0 DONE<br/>RocJITsu corpus runner, provenance,<br/>and one-repetition contract"]
     XT1["XT1 DONE<br/>both compact P0 kernels green<br/>in all four profiles"]
@@ -351,6 +351,16 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XP9C remains the sole ACTIVE/blue box with implementation,
+  clean correctness, and paired overhead complete.  Clean-tree paired artifact
+  `consan-green-expansion-20260721-norm-softmax-inline-component-spill-overhead-clean-081`
+  accepts 107.31/36,620.42/123.56 ms, or 317.24x against the mean baseline,
+  with complete 4,756-access and 2,352-barrier coverage.  Fresh inventory
+  artifact `...-component-spill-inventory-082` retains the reviewed selector.
+  Fault attempt `...-component-spill-fault-083` applies it but reaches the
+  120-second command bound; one evidence-based 180-second retry is active,
+  with no further timeout widening planned.
 
 - 2026-07-21: XP9C remains ACTIVE/blue after commit `4bfa285247` and clean-tree
   artifact
