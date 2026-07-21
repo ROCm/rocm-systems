@@ -40,7 +40,7 @@ env:
   PATH: "/usr/bin:$PATH"
   SUBMODULE_PATHS: "projects/rocprofiler-sdk projects/clr projects/hip"
   EXCLUDED_PATHS: "external /tmp/build/external"
-  GLOBAL_CMAKE_OPTIONS: ""
+  GLOBAL_CMAKE_OPTIONS: "-DROCPROFILER_DISABLE_ATT_QUICK_SCAN=ON"
   ENABLE_ROCR_BUILD: "false"
   ENABLE_HIP_CLR_BUILD: "false"
   ENABLE_ROCPROFILER_REGISTER_BUILD: "false"

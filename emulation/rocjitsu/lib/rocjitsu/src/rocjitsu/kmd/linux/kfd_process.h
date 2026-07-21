@@ -123,6 +123,11 @@ public:
     bool user_va = false;
     bool imported = false;
     int dmabuf_fd = -1;
+    // True when the driver created host_ptr (mmap it itself) and must munmap it
+    // on teardown. False for caller-owned pages (e.g. reused MAP_FIXED pages
+    // from the thunk) that the driver must never unmap, since unmapping them
+    // races with the owning process still accessing the memory.
+    bool host_ptr_owned = false;
   };
 
   /// @brief Memory policy descriptor.
