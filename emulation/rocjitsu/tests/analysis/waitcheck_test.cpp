@@ -636,6 +636,10 @@ void append_gfx950_s_waitcnt_lgkmcnt_0(std::vector<uint32_t> &program) {
   program.push_back(0xBF8CC07Fu);
 }
 
+void append_gfx950_s_waitcnt_lgkmcnt_1(std::vector<uint32_t> &program) {
+  program.push_back(0xBF8CC17Fu);
+}
+
 void append_gfx950_s_waitcnt_lgkmcnt_2(std::vector<uint32_t> &program) {
   program.push_back(0xBF8CC27Fu);
 }
@@ -1570,6 +1574,63 @@ TEST(WaitcheckTest, Gfx950CounterParityMatchesRequiredVmcnt) {
   EXPECT_EQ(report.counter_parity_exact, 1u);
   EXPECT_EQ(report.counter_underaccounting_observed, 0u);
   EXPECT_TRUE(report.counter_underaccounting_diagnostics.empty());
+}
+
+TEST(WaitcheckTest, Gfx950CounterParityMatchesPendingReplacementDefinitionsLikeLlvm) {
+  std::vector<uint32_t> program;
+  append_gfx950_v_mov_b32_v0_v2(program); // Establish committed v0.
+  append_gfx950_v_mov_b32_v1_v0(program); // Establish committed v1.
+  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
+  append_gfx950_buffer_load_dword_v1_v8_s0_offen(program);
+  append_gfx950_s_waitcnt_vmcnt_0(program);
+  program.push_back(0x68040300u); // v_add_u32_e32 v2, v0, v1.
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_wait_groups, 1u);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+  EXPECT_TRUE(report.counter_underaccounting_diagnostics.empty());
+}
+
+TEST(WaitcheckTest, Gfx950CounterParityForcesZeroForDsWithPendingScalarMemory) {
+  std::vector<uint32_t> program;
+  append_gfx950_ds_read_b32_v0_v4(program);
+  append_gfx950_s_load_dword_s4_s0(program);
+  append_gfx950_s_waitcnt_lgkmcnt_0(program);
+  append_gfx950_v_mov_b32_v1_v0(program);
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_wait_groups, 1u);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx950RejectsPartialLgkmcntForDsWithPendingScalarMemory) {
+  std::vector<uint32_t> program;
+  append_gfx950_ds_read_b32_v0_v4(program);
+  append_gfx950_s_load_dword_s4_s0(program);
+  append_gfx950_s_waitcnt_lgkmcnt_1(program);
+  append_gfx950_v_mov_b32_v1_v0(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+  EXPECT_EQ(report.diagnostics[0].producer_instruction, "ds_read_b32 v0, v4");
 }
 
 TEST(WaitcheckTest, Gfx950CounterParityReportsStrongerEmittedVmcnt) {
