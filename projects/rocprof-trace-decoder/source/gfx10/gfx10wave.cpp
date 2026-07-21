@@ -21,18 +21,19 @@
 // SOFTWARE.
 
 #include "gfx10wave.h"
+
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
 #include <map>
+#include <new>
 #include <utility>
 #include <vector>
+
 #include "gfx11/gfx11wave.h"
 #include "gfx12/gfx12wave.h"
 #include "mi400/mi400wave.h"
 #include "segment.hpp"
-
-#include <cstddef>
-#include <new>
 
 #define INST_JUMP_TYPE 5
 #define INST_TRAP_TYPE 6
@@ -133,10 +134,10 @@ enum EINST
 };
 
 // clang-format off
-using InstructionTable = std::unordered_map<int, mapped_inst_t>;
-alignas(InstructionTable) static std::byte table_map_to_common_type_storage[sizeof(InstructionTable)];
-static InstructionTable& table_map_to_common_type =
-    *::new (static_cast<void*>(table_map_to_common_type_storage)) InstructionTable{
+using instruction_table_t = std::unordered_map<int, mapped_inst_t>;
+alignas(instruction_table_t) static std::byte table_map_to_common_type_storage[sizeof(instruction_table_t)];
+static instruction_table_t& table_map_to_common_type =
+    *::new (static_cast<void*>(table_map_to_common_type_storage)) instruction_table_t{
     {(int) EINST::salu,              {WaveInstCategory::SALU, 1} },
     {(int) EINST::smem_rd,           {WaveInstCategory::SMEM, 1} },
     {(int) EINST::smem_wr,           {WaveInstCategory::SMEM, 1} },

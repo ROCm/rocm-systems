@@ -135,9 +135,9 @@ public:
 
     static std::unordered_map<uint64_t, std::shared_ptr<HandleData>>& get_map()
     {
-        using Map = std::unordered_map<uint64_t, std::shared_ptr<HandleData>>;
-        alignas(Map) static std::byte storage[sizeof(Map)];
-        static Map* map = ::new (static_cast<void*>(storage)) Map{};
+        using handle_data_map_t = std::unordered_map<uint64_t, std::shared_ptr<HandleData>>;
+        alignas(handle_data_map_t) static std::byte storage[sizeof(handle_data_map_t)];
+        static handle_data_map_t* map = ::new (static_cast<void*>(storage)) handle_data_map_t{};
         return *map;
     }
 

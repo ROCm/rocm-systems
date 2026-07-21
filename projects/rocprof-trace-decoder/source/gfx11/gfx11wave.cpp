@@ -21,13 +21,13 @@
 // SOFTWARE.
 
 #include "gfx11wave.h"
+
 #include <algorithm>
 #include <cassert>
-#include <utility>
-#include <vector>
-
 #include <cstddef>
 #include <new>
+#include <utility>
+#include <vector>
 
 typedef gfx10::Token Token;
 
@@ -152,10 +152,10 @@ enum EINST
 };
 
 // clang-format off
-using InstructionTable = std::unordered_map<int, mapped_inst_t>;
-alignas(InstructionTable) static std::byte table_map_to_common_type_storage[sizeof(InstructionTable)];
-static const InstructionTable& table_map_to_common_type =
-    *::new (static_cast<void*>(table_map_to_common_type_storage)) InstructionTable{
+using instruction_table_t = std::unordered_map<int, mapped_inst_t>;
+alignas(instruction_table_t) static std::byte table_map_to_common_type_storage[sizeof(instruction_table_t)];
+static const instruction_table_t& table_map_to_common_type =
+    *::new (static_cast<void*>(table_map_to_common_type_storage)) instruction_table_t{
     {(int) EINST::salu,               {WaveInstCategory::SALU, 1}            },
     {(int) EINST::smem_rd,            {WaveInstCategory::SMEM, 1}            },
     {(int) EINST::smem_wr,            {WaveInstCategory::SMEM, 1}            },
