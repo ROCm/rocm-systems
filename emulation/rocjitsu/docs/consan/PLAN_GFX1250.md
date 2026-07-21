@@ -134,7 +134,7 @@ flowchart TD
     XT3B["XT3B TODO<br/>HGEMM reaches 136 exact rows at 300 seconds;<br/>F8 fault health also remains"]
     XT3D["XT3D DONE<br/>full SGEMM first problem complete;<br/>quadratic 115,776-event frontier isolated"]
     XT3E["XT3E TODO<br/>both emulator baselines prove intrinsic full-grid bound;<br/>substantially longer unrestricted RR run remains"]
-    XT3C["XT3C ACTIVE<br/>SPMM F8 Sampled clean assessment;<br/>RR relay-window fix retained"]
+    XT3C["XT3C ACTIVE<br/>SPMM F8 Sampled fully patches second object;<br/>instrumentation-dependent execution assertion under triage"]
     XT4A["XT4A DONE<br/>019 F16 clean, paired, and reviewed-fault bundle<br/>accepted at 31,265/31,265 accesses"]
     XT4["XT4 DONE<br/>decoded opcode union frozen over accepted rows,<br/>including complete 019 bundle"]
     XF["XF TODO<br/>fault, resource, and frozen-tip bundles<br/>for every expansion row"]
@@ -347,6 +347,18 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XT3C advances its Sampled assessment from static inventory to a
+  concrete execution boundary.  One-repetition artifact
+  `consan-green-expansion-20260721-spmm-f8-ml-sampled-independent-057` passes
+  two exact rows before the validation bound.  Its cached second client
+  removes generation time, patches all 19,960 accesses and all 806 barrier
+  members with no resource or placement gaps, and produces six exact numeric
+  passes before a software-GPU assertion.  The identical uninstrumented client
+  completes normally with five exact passes and no failures, making the
+  boundary instrumentation-dependent.  XT3C remains blue/ACTIVE while the
+  exact kernel descriptor and state-preservation path are checked; the matrix
+  cell remains yellow because this is progress evidence, not acceptance.
 
 - 2026-07-21: XP3 rotates to TODO after a current-tip exact-object audit
   sharpened the SuperCollider `torch.topk` boundary without starting a broad
