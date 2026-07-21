@@ -3576,7 +3576,9 @@ bool KernelBlitManager::batchMemOps(const void* paramArray, size_t paramSize,
   size_t dim = 1;
 
   size_t globalWorkOffset[1] = {0};
-  size_t globalWorkSize[1] = {count};
+  // Launch a single work-item; the kernel loops over all ops sequentially.
+  // CUDA spec: ops execute in array order — globalWorkSize=1 enforces this.
+  size_t globalWorkSize[1] = {1};
   size_t localWorkSize[1] = {1};
 
   // Get constant buffer and copy the array of parameters
