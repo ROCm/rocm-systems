@@ -399,6 +399,8 @@ void append_moi_operational_resource_plans(std::span<const uint8_t> bytes,
           candidate.kernel_descriptor_file_offset,
           /*scratch_count=*/options.moi_engine == ConSanMoiEngine::Sampled
               ? (options.automatic_moi_private_epoch ? 9u : 7u)
+          : options.moi_engine == ConSanMoiEngine::InlineShadow
+              ? inline_shadow_barrier_scratch_count(options)
           : uses_coalesced_epoch ? 1u
                                  : 6u));
     }

@@ -2765,8 +2765,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersUseSpillBackedRouter) {
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   const uint32_t external_return = build_s_setpc_b64(/*sdst=*/26, ROCJITSU_CODE_ARCH_GFX1250);
-  const uint32_t spill_window_return =
-      build_s_setpc_b64(/*sdst=*/88, ROCJITSU_CODE_ARCH_GFX1250);
+  const uint32_t spill_window_return = build_s_setpc_b64(/*sdst=*/88, ROCJITSU_CODE_ARCH_GFX1250);
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiExactShadowStore)
       continue;
@@ -3607,6 +3606,28 @@ TEST(ConSanMoi, InlineBarrierOnlyObjectPatchesBarrierWithoutEntryPrologue) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
                                &ConSanPatchInfo::kind),
             0);
+  const auto barrier_patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier, &ConSanPatchInfo::kind);
+  ASSERT_NE(barrier_patch, result.patches.end());
+  ASSERT_TRUE(barrier_patch->scratch_vgpr);
+  const auto barrier_plan =
+      std::ranges::find(result.resource_plans, ConSanResourceSiteKind::Barrier,
+                        &ConSanCandidateResourcePlan::site_kind);
+  ASSERT_NE(barrier_plan, result.resource_plans.end());
+  EXPECT_EQ(barrier_plan->scratch_vgpr_count, 3u);
+  EXPECT_EQ(barrier_plan->scratch_vgpr, barrier_patch->scratch_vgpr);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> barrier_words = text_words_at_offset(
+      patched, barrier_patch->trampoline_offset, barrier_patch->trampoline_size);
+  const uint16_t scratch = *barrier_patch->scratch_vgpr;
+  const auto visible_atomic = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+      /*vaddr=*/static_cast<uint16_t>(scratch + 1u), /*vsrc=*/scratch, /*vdst=*/scratch,
+      /*return_old_value=*/true, /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(visible_atomic);
+  EXPECT_GE(count_subsequence(barrier_words, *visible_atomic), 1u);
+  EXPECT_TRUE(validate_consan_modified_elf(make_rdna4_lds_code_object(text_words), result).empty());
   const auto barrier_disposition =
       std::ranges::find(result.site_dispositions, ConSanResourceSiteKind::Barrier,
                         &ConSanSiteDispositionRecord::site_kind);
