@@ -91,6 +91,9 @@ jobs:
           sparse-checkout-cone-mode: true
           fetch-depth: 0
 
+      - name: Install dependencies
+        run: pip install pydantic
+
       - name: Configure CI
         id: configure
         env:
