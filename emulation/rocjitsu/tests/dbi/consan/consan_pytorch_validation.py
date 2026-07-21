@@ -145,7 +145,7 @@ def _run_cluster_load_sync(repetitions: int) -> dict[str, object]:
     # Clustered launch geometry changes physical CTA grouping without
     # multiplying the logical program-id domain exposed to the kernel.
     cluster_programs = 4
-    barrier_elements = 256
+    barrier_elements = 512
     barrier_blocked_layout = ttgl.BlockedLayout(
         size_per_thread=[1],
         threads_per_warp=[32],
@@ -154,7 +154,7 @@ def _run_cluster_load_sync(repetitions: int) -> dict[str, object]:
         cga_layout=[[1]],
     )
     barrier_shared_layout = ttgl.PaddedSharedLayout.with_identity_for(
-        interval_padding_pairs=[[128, 1]],
+        interval_padding_pairs=[[256, 1]],
         shape=[barrier_elements],
         order=[0],
         cga_layout=[[1]],
