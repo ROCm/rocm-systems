@@ -91,9 +91,14 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
   if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && (info->func == ncclFuncAllGather) && sizePerRank <= 88448) {
     // Change LL protocol threshold
     info->protocol = NCCL_PROTO_LL;
-  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 131072) {
-    // Change LL protocol threshold
-    info->protocol = NCCL_PROTO_LL;
+  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 1048576) {
+#ifdef ENABLE_WARP_SPEED
+    if (sizePerRank <=  131072)
+#endif
+    {
+      // Change LL protocol threshold
+      info->protocol = NCCL_PROTO_LL;
+    }
   } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") && comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 352128) {
     // Change LL protocol threshold
     info->protocol = NCCL_PROTO_LL;
@@ -642,7 +647,7 @@ ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* in
        // TODO: Remove unroll update when all collectives are optimized
       if(!unrollFactorSet) comm->unroll =  NCCL_UNROLL_2;
     }
-    if(rcclIsAboveWarpSpeedThreshold(comm, info, nBytes)) 
+    if(rcclIsAboveWarpSpeedThreshold(comm, info, nBytes))
     {
       info->nWarps = 4;
       info->useWarpSpeed = true;
