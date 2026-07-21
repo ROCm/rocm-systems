@@ -9,34 +9,39 @@
 
 #include "rocjitsu/base/api.h"
 
+#include <cstdint>
+
 namespace rocjitsu {
 
 struct IsaProperties {
   bool supports_wgp_mode = false;
+  uint32_t max_addressable_vgprs_per_wf = 0;
 };
+
+inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
 
 [[nodiscard]] constexpr IsaProperties isa_properties(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
-    return {false};
+    return {false, 256};
   case ROCJITSU_CODE_ARCH_CDNA2:
-    return {false};
+    return {false, 256};
   case ROCJITSU_CODE_ARCH_CDNA3:
-    return {false};
+    return {false, 256};
   case ROCJITSU_CODE_ARCH_CDNA4:
-    return {false};
+    return {false, 256};
   case ROCJITSU_CODE_ARCH_RDNA1:
-    return {true};
+    return {true, 256};
   case ROCJITSU_CODE_ARCH_RDNA2:
-    return {true};
+    return {true, 256};
   case ROCJITSU_CODE_ARCH_RDNA3:
-    return {true};
+    return {true, 256};
   case ROCJITSU_CODE_ARCH_RDNA3_5:
-    return {true};
+    return {true, 256};
   case ROCJITSU_CODE_ARCH_RDNA4:
-    return {true};
+    return {true, 256};
   case ROCJITSU_CODE_ARCH_GFX1250:
-    return {false};
+    return {false, 1024};
   default:
     return {};
   }

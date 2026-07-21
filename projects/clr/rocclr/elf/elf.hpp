@@ -300,7 +300,7 @@ class Elf {
   bool getSegment(const unsigned int index, segment*& seg) const;
 
   /* Return size of elf file */
-  static uint64_t getElfSize(const void* emi);
+  static uint64_t getElfSize(const void* emi, const size_t size);
 
   /* is it ELF */
   static bool isElfMagic(const char* p);

@@ -29,9 +29,11 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -57,14 +59,24 @@ struct agent_output_buffer_t
     };
     agent_output_buffer_t(agent_output_buffer_t&& other)
     {
-        output_buffer = std::move(other.output_buffer);
-        output_size   = other.output_size.load();
-        id            = other.id;
+        output_buffer       = std::move(other.output_buffer);
+        output_size         = other.output_size.load();
+        id                  = other.id;
+        next_expected_chunk = other.next_expected_chunk;
     };
 
     rocprofiler_agent_id_t id{};
     std::vector<char>      output_buffer{};
     std::atomic<size_t>    output_size{0};
+
+    // Reordering state. Multi-consumer ATT can deliver chunks out of order;
+    // each callback blocks until its chunk_index is the next expected, then
+    // writes its data, advances the counter, and wakes the next waiter.
+    std::mutex              reorder_mut{};
+    std::condition_variable reorder_cv{};
+    uint64_t                next_expected_chunk{0};
+
+    std::vector<size_t> end_chunks{};
 
     static constexpr size_t BUFFER_SIZE = 256ul << 20;
 };
@@ -99,13 +111,13 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
 }
 
 void
-shader_data_callback(rocprofiler_agent_id_t /* agent */,
-                     int64_t /* se_id */,
-                     void*  se_data,
-                     size_t data_size,
-                     rocprofiler_thread_trace_shader_data_flags_t /* flags */,
-                     rocprofiler_user_data_t userdata)
+shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
+                     rocprofiler_user_data_t                userdata)
 {
+    auto  chunk_index = shader_data.chunk_index;
+    auto* se_data     = shader_data.data;
+    auto  data_size   = static_cast<size_t>(shader_data.data_size);
+
     static auto* is_slow  = std::getenv("ATT_SLOW_CALLBACK");
     static bool  do_sleep = is_slow ? atoi(is_slow) != 0 : false;
 
@@ -113,12 +125,37 @@ shader_data_callback(rocprofiler_agent_id_t /* agent */,
 
     auto* agent_output_buffer = static_cast<agent_output_buffer_t*>(userdata.ptr);
 
+    // Multi-consumer ATT can deliver chunks out of order. Block until our
+    // chunk_index is the next-expected one, then write directly to the
+    // output buffer in order.
+    {
+        auto lk = std::unique_lock{agent_output_buffer->reorder_mut};
+        agent_output_buffer->reorder_cv.wait(
+            lk, [&] { return agent_output_buffer->next_expected_chunk == chunk_index; });
+    }
+
     size_t output_buf_size = agent_output_buffer->output_buffer.size();
     size_t location        = agent_output_buffer->output_size.fetch_add(data_size);
     void*  output          = agent_output_buffer->output_buffer.data();
 
-    // Discard
-    if(location >= output_buf_size) return;
+    // Advance and wake the next-in-line consumer regardless of whether we
+    // had room to actually write the bytes.
+    auto release = [&] {
+        {
+            auto lk = std::unique_lock{agent_output_buffer->reorder_mut};
+            agent_output_buffer->next_expected_chunk = chunk_index + 1;
+
+            if(shader_data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END)
+                agent_output_buffer->end_chunks.push_back(location + data_size);
+        }
+        agent_output_buffer->reorder_cv.notify_all();
+    };
+
+    if(location >= output_buf_size)
+    {
+        release();
+        return;
+    }
 
     data_size = std::min(data_size, output_buf_size - location);
 
@@ -136,6 +173,8 @@ shader_data_callback(rocprofiler_agent_id_t /* agent */,
         for(size_t j = 0; j < data_size; j++)
             static_cast<char*>(output)[j + location] = static_cast<char*>(se_data)[j];
     }
+
+    release();
 }
 
 rocprofiler_status_t
@@ -158,8 +197,7 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
     parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, {1}});
     parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {gpu_buffer_size}});
     parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {1}});
-    parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE,
-                          ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_TRIPLE_BUFFER});
+    parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_NUM_BUFFERS, {3}});
 
     auto* nodetail   = std::getenv("ATT_NODETAIL");
     bool  extra_args = nodetail ? atoi(nodetail) != 0 : false;
@@ -220,9 +258,11 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 auto* sdata = static_cast<rocprofiler_thread_trace_decoder_shaderdata_t*>(events);
                 for(size_t i = 0; i < num_events; i++)
                 {
-                    if(sdata[i].value < current_sdata)
+                    // Ignoring the last token because it may have been cutoff
+                    if(i != num_events - 1 && sdata[i].value < current_sdata)
                     {
-                        std::cerr << "Error: Invalid sdata value " << sdata[i].value << std::endl;
+                        std::cerr << i << " Error: Invalid sdata value " << sdata[i].value << " vs "
+                                  << current_sdata << std::endl;
                         abort();
                     }
                     current_sdata = sdata[i].value;
@@ -233,11 +273,24 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
         size_t total_size = 0;
         for(auto& output_buffer : *agent_buffers)
         {
-            uint32_t current_sdata = 0;
-            auto&    buffer        = output_buffer.output_buffer;
-            size_t   output_size   = std::min(output_buffer.output_size.exchange(0), buffer.size());
-            rocprofiler_trace_decode(decoder, parse, buffer.data(), output_size, &current_sdata);
+            auto   lk          = std::unique_lock{output_buffer.reorder_mut};
+            auto&  buffer      = output_buffer.output_buffer;
+            size_t output_size = std::min(output_buffer.output_size.exchange(0), buffer.size());
+
+            size_t current_byte = 0;
+            for(auto& end_byte : output_buffer.end_chunks)
+            {
+                uint32_t current_sdata = 0;
+                char*    ptr           = buffer.data() + current_byte;
+                size_t   cur_size      = std::min(end_byte, output_size) - current_byte;
+
+                rocprofiler_trace_decode(decoder, parse, ptr, cur_size, &current_sdata);
+                current_byte = end_byte;
+            }
             total_size += output_size;
+
+            output_buffer.next_expected_chunk = 0;
+            output_buffer.end_chunks          = {};
         }
 
         static bool ignore_size = std::getenv("STARTSTOP") ? atoi(std::getenv("STARTSTOP")) : false;

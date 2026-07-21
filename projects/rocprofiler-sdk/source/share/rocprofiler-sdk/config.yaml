@@ -6691,6 +6691,7 @@ rocprofiler-sdk:
             - gfx12
             - gfx1200
             - gfx1201
+            - gfx1250
             - gfx9
             - gfx900
             - gfx906

@@ -268,10 +268,12 @@ hipError_t DynCO::populateDynGlobalFuncs() {
     // if symbols are init/fini, we trim them out
     // These are ASAN specific symbols and we do not bubble them up to the user
     // This means something like count of kernels in code object remains the same.
-#if defined(__clang__) && __has_feature(address_sanitizer)
+#if defined(__clang__)
+#if __has_feature(address_sanitizer)
     if (elem == "amdgcn.device.init" || elem == "amdgcn.device.fini") {
       continue;
     }
+#endif
 #endif
     functions_.insert(std::make_pair(elem, new Function(elem)));
   }
