@@ -340,7 +340,12 @@ pub fn enabled_plugin_libs(preload: &std::path::Path, plugins: &PluginsDef) -> V
     };
     plugins
         .keys()
-        .filter_map(|name| find_lib_in(dir, &format!("{PLUGIN_LIB_PREFIX}{name}{PLUGIN_LIB_SUFFIX}")))
+        .filter_map(|name| {
+            find_lib_in(
+                dir,
+                &format!("{PLUGIN_LIB_PREFIX}{name}{PLUGIN_LIB_SUFFIX}"),
+            )
+        })
         .collect()
 }
 
@@ -405,7 +410,7 @@ fn kmd_search_dirs() -> Vec<PathBuf> {
         dirs.extend((0..=3).map(|levels| {
             exe_dir
                 .iter()
-                .chain(std::iter::repeat("..".as_ref()).take(levels))
+                .chain(std::iter::repeat_n("..".as_ref(), levels))
                 .chain(std::iter::once("rocjitsu/build".as_ref()))
                 .collect::<PathBuf>()
         }));
@@ -602,7 +607,10 @@ mod tests {
     fn plugins_to_json_projects_simple_values_to_plain_json() {
         let mut args = SimpleMap::new();
         args.insert("verbose".to_string(), SimpleValue::Boolean(true));
-        args.insert("path".to_string(), SimpleValue::String("/tmp/x".to_string()));
+        args.insert(
+            "path".to_string(),
+            SimpleValue::String("/tmp/x".to_string()),
+        );
         args.insert("level".to_string(), SimpleValue::Number(3));
         let plugins = PluginsDef::from([
             ("race".to_string(), SimpleMap::new()),

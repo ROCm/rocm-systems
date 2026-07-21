@@ -400,11 +400,7 @@ fn peer_pid(fd: RawFd) -> i32 {
             &mut len,
         )
     };
-    if rc == 0 && cred.pid > 0 {
-        cred.pid
-    } else {
-        0
-    }
+    if rc == 0 && cred.pid > 0 { cred.pid } else { 0 }
 }
 
 /// Serve a single client connection until it closes or errors. Mirrors

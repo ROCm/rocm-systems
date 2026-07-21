@@ -534,8 +534,8 @@ fn matrix_lifecycle_across_all_dimensions() {
 
     eprintln!("\nmirage testing matrix — {total} combinations\n");
     eprintln!(
-        "  {:<58}  {}",
-        "COMBINATION (emulator+container+hw+payload+plugin)", "RESULT"
+        "  {:<58}  RESULT",
+        "COMBINATION (emulator+container+hw+payload+plugin)"
     );
 
     for c in &combos {

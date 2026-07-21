@@ -178,7 +178,10 @@ impl RjVmGpuInfo {
     /// matches `rj_vm_gpu_info_t` exactly.
     pub fn as_bytes(&self) -> &[u8] {
         unsafe {
-            std::slice::from_raw_parts(self as *const Self as *const u8, std::mem::size_of::<Self>())
+            std::slice::from_raw_parts(
+                self as *const Self as *const u8,
+                std::mem::size_of::<Self>(),
+            )
         }
     }
 }
@@ -260,8 +263,10 @@ impl Lib {
             let vm_create_from_string =
                 *lib.get::<FnVmCreateFromString>(b"rj_vm_create_from_string\0")?;
             // Optional symbol: tolerate older libraries that predate the loader.
-            let vm_load_plugins =
-                lib.get::<FnVmLoadPlugins>(b"rj_vm_load_plugins\0").map(|s| *s).ok();
+            let vm_load_plugins = lib
+                .get::<FnVmLoadPlugins>(b"rj_vm_load_plugins\0")
+                .map(|s| *s)
+                .ok();
             let vm_run = *lib.get::<FnVmRun>(b"rj_vm_run\0")?;
             let vm_request_exit = *lib.get::<FnVmRequestExit>(b"rj_vm_request_exit\0")?;
             let vm_destroy = *lib.get::<FnVmDestroy>(b"rj_vm_destroy\0")?;
