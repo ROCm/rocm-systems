@@ -322,13 +322,17 @@ public:
   /// @brief Return a const pointer to the data for a cache line.
   ///
   /// @param addr The memory address identifying the cache line.
+  /// @param tag_out If non-null and hit, set to the tag for byte-validity checks.
   /// @returns Pointer to the line data, or nullptr if not found.
-  const uint8_t *line_data_for_read(uint64_t addr, uint32_t vmid = 0) {
+  const uint8_t *line_data_for_read(uint64_t addr, uint32_t vmid = 0,
+                                    CacheTag **tag_out = nullptr) {
     uint32_t set = set_index(addr);
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
       if (t.valid && t.tag == tag && t.vmid == vmid) {
+        if (tag_out)
+          *tag_out = &t;
         policy_.access(set, w);
         return line_data(set, w);
       }

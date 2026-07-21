@@ -97,27 +97,22 @@ VmAccessOutcome L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid, bool fe
 
   uint64_t line_addr = CacheStore::line_address(addr);
   simdojo::CacheTag evicted;
-  cache_.allocate(addr, vmid, &evicted, nullptr);
+  auto allocated = cache_.allocate_with_data(addr, vmid, &evicted);
 
   assert(!evicted.dirty && "L1 V$ is write-through; lines should never be dirty");
 
   // A store supplies only its architectural byte range. Keep all other bytes
   // absent so the store never speculatively reads backing memory.
   if (!fetch_on_miss) {
-    simdojo::CacheTag *allocated = nullptr;
-    cache_.lookup(addr, &allocated, vmid);
-    assert(allocated != nullptr);
-    CacheStore::clear_valid_bytes(*allocated);
+    CacheStore::clear_valid_bytes(*allocated.tag);
     return VmAccessOutcome::Complete;
   }
 
-  uint8_t line_buf[LINE_SIZE];
-  const VmAccessOutcome outcome = l2_->fetch_line(line_addr, line_buf, vmid);
+  const VmAccessOutcome outcome = l2_->fetch_line(line_addr, allocated.data, vmid);
   if (outcome != VmAccessOutcome::Complete) {
     cache_.invalidate(addr, vmid);
     return outcome;
   }
-  cache_.fill_line(addr, line_buf, vmid);
   return VmAccessOutcome::Complete;
 }
 
@@ -139,6 +134,7 @@ void L1VectorCache::cache_partial_bytes(uint64_t addr, const uint8_t *src, uint3
 VmAccessOutcome L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size,
                                           bool non_temporal, bool request_l1_bypass, uint32_t vmid,
                                           RequestMtypeResolver &mtypes) {
+  ++read_count_;
   util::Logger::cp([&](auto &os) {
     const Mtype effective = mtypes.at(addr);
     static thread_local uint64_t mtype_counts[5] = {};
@@ -180,9 +176,9 @@ VmAccessOutcome L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t 
     }
 
     simdojo::CacheTag *resident = nullptr;
-    if (cache_.lookup(ea, &resident, vmid) &&
-        CacheStore::bytes_valid(*resident, line_offset, chunk)) {
-      cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
+    const uint8_t *line = cache_.line_data_for_read(ea, vmid, &resident);
+    if (line && CacheStore::bytes_valid(*resident, line_offset, chunk)) {
+      std::memcpy(dst + copied, line + line_offset, chunk);
       copied += chunk;
       continue;
     }
