@@ -442,7 +442,7 @@ sdk_tracing_config<SdkApi, Externals>::config_settings(
 
     auto domain_choices = std::vector<std::string>{};
     auto add_domain_f   = [&domain_choices,
-                         &domains_to_skip](std::string_view domain_to_add) {
+                           &domains_to_skip](std::string_view domain_to_add) {
         auto domain_lowercase = to_lower(domain_to_add);
         if(!domains_to_skip.contains(domain_lowercase) &&
            std::ranges::find(domain_choices, domain_lowercase) == domain_choices.end())
@@ -451,8 +451,8 @@ sdk_tracing_config<SdkApi, Externals>::config_settings(
         }
     };
 
-    static auto option_names             = std::unordered_set<std::string>{};
-    auto        add_operation_settings_f = [&_config, &domains_to_skip](
+    static auto option_names      = std::unordered_set<std::string>{};
+    auto add_operation_settings_f = [&_config, &domains_to_skip](
                                         std::string_view domain_name, const auto& _domain,
                                         auto& _operation_option_names) {
         const auto domain_lowercase = to_lower(domain_name);
@@ -687,10 +687,10 @@ sdk_tracing_config<SdkApi, Externals>::get_callback_domains()
     }
 
     // Check that the domains are valid
-    const auto valid_choices = Externals::get_settings()
-                                   ->at(std::string{ env_vars::ROCM_DOMAINS })
-                                   ->get_choices();
-    auto invalid_domain = [&valid_choices](const auto& domainv) {
+    const auto valid_choices  = Externals::get_settings()
+                                    ->at(std::string{ env_vars::ROCM_DOMAINS })
+                                    ->get_choices();
+    auto       invalid_domain = [&valid_choices](const auto& domainv) {
         return !std::ranges::any_of(
             valid_choices, [&domainv](const auto& choice) { return choice == domainv; });
     };
@@ -794,10 +794,10 @@ sdk_tracing_config<SdkApi, Externals>::get_buffered_domains()
     auto data    = std::unordered_set<kind_t>{};
     auto domains = rocprofsys::delimit(Externals::get_rocm_domains(), " ,;:\t\n");
     // Check that the domains are valid
-    const auto valid_choices = Externals::get_settings()
-                                   ->at(std::string{ env_vars::ROCM_DOMAINS })
-                                   ->get_choices();
-    auto invalid_domain = [&valid_choices](const auto& domainv) {
+    const auto valid_choices  = Externals::get_settings()
+                                    ->at(std::string{ env_vars::ROCM_DOMAINS })
+                                    ->get_choices();
+    auto       invalid_domain = [&valid_choices](const auto& domainv) {
         return !std::ranges::any_of(
             valid_choices, [&domainv](const auto& choice) { return choice == domainv; });
     };
@@ -1006,8 +1006,8 @@ sdk_tracing_config<SdkApi, Externals>::get_operations(
     const auto  complete_set = get_operations_impl(kind);
     const auto  include_operations =
         opts.operations_include.empty()
-             ? std::unordered_set<std::int32_t>{}
-             : get_operations_impl(kind, opts.operations_include);
+            ? std::unordered_set<std::int32_t>{}
+            : get_operations_impl(kind, opts.operations_include);
     const auto exclude_operations =
         opts.operations_exclude.empty()
             ? std::unordered_set<std::int32_t>{}

@@ -16,7 +16,7 @@
 namespace rocprofsys::rocprofiler_sdk::testing
 {
 
-namespace gm = ::testing;
+namespace gtest = ::testing;
 
 // ─── Mock ─────────────────────────────────────────────────────────────────────
 //
@@ -47,15 +47,17 @@ inline std::unique_ptr<gmock_sdk_core_backend> g_mock;
 // its own static caches (get_version cache, operation option maps, tracing info tables).
 enum backend_tag : int
 {
-    version_fields    = 1,
-    version_formatted = 2,
-    version_caching   = 3,
-    ops_throw         = 60,
-    config_domains    = 80,
-    config_events     = 81,
-    config_operations = 82,
-    config_duplicate  = 83,
-    rocm_events       = 90,
+    version_fields                = 1,
+    version_formatted             = 2,
+    version_caching               = 3,
+    ops_throw                     = 60,
+    config_domains                = 80,
+    config_events                 = 81,
+    config_operations             = 82,
+    config_duplicate              = 83,
+    callback_backtrace_operations = 84,
+    buffered_backtrace_operations = 85,
+    rocm_events                   = 90,
 };
 
 template <int Tag>
@@ -144,9 +146,10 @@ public:
     MOCK_METHOD(std::string, get_rocm_domains, ());
     MOCK_METHOD(std::string, get_rocm_events_setting, ());
     MOCK_METHOD(std::optional<std::string>, get_setting_value, (std::string_view));
+    MOCK_METHOD(void, set_state, (std::uint32_t));
 };
 
-inline std::unique_ptr<gm::StrictMock<gmock_sdk_externals>> g_mock_externals;
+inline std::unique_ptr<gtest::StrictMock<gmock_sdk_externals>> g_mock_externals;
 
 struct mock_sdk_externals
 {
@@ -168,6 +171,10 @@ struct mock_sdk_externals
     {
         return g_mock_externals->get_setting_value(s);
     }
+
+    using StateType                           = std::uint32_t;
+    constexpr static StateType StateFinalized = 3;
+    static void set_state(StateType state) { g_mock_externals->set_state(state); }
 };
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -187,7 +194,7 @@ protected:
     void SetUp() override
     {
         g_mock           = std::make_unique<gmock_sdk_core_backend>();
-        g_mock_externals = std::make_unique<gm::StrictMock<gmock_sdk_externals>>();
+        g_mock_externals = std::make_unique<gtest::StrictMock<gmock_sdk_externals>>();
     }
     void TearDown() override
     {
@@ -291,7 +298,7 @@ TEST(sdk_core_throw, get_operations_error_message_contains_kind_value)
         FAIL() << "Expected std::runtime_error";
     } catch(const std::runtime_error& ex)
     {
-        EXPECT_THAT(ex.what(), gm::HasSubstr("callback tracing kind"));
+        EXPECT_THAT(ex.what(), gtest::HasSubstr("callback tracing kind"));
     }
 }
 
@@ -320,9 +327,9 @@ TEST(sdk_core_config_settings, registers_rocm_domains_setting_with_expected_choi
 
     const auto& choices = itr->second->get_choices();
     EXPECT_THAT(choices,
-                gm::IsSupersetOf({ "hip_api", "hsa_api", "marker_api", "roctx" }));
-    EXPECT_THAT(choices, gm::Not(gm::Contains(std::string{ "code_object" })));
-    EXPECT_THAT(choices, gm::Not(gm::Contains(std::string{ "none" })));
+                gtest::IsSupersetOf({ "hip_api", "hsa_api", "marker_api", "roctx" }));
+    EXPECT_THAT(choices, gtest::Not(gtest::Contains(std::string{ "code_object" })));
+    EXPECT_THAT(choices, gtest::Not(gtest::Contains(std::string{ "none" })));
 
     EXPECT_EQ(itr->second->get<std::string>().second,
               "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory");
@@ -354,7 +361,7 @@ TEST(sdk_core_config_settings, registers_operation_filter_settings_for_marker_ap
         SCOPED_TRACE(name);
         auto itr = config->find(std::string{ name });
         ASSERT_NE(itr, config->end());
-        EXPECT_THAT(itr->second->get_choices(), gm::Not(gm::IsEmpty()));
+        EXPECT_THAT(itr->second->get_choices(), gtest::Not(gtest::IsEmpty()));
     }
 }
 
@@ -377,6 +384,51 @@ TEST(sdk_core_config_settings,
               "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory");
 }
 
+// ─── get_backtrace_operations ─────────────────────────────────────────────────
+
+TEST_F(sdk_core_domains_test,
+       get_backtrace_operations_callback_returns_operations_matching_setting)
+{
+    using backend_t = tagged_backend<callback_backtrace_operations>;
+    using sut       = sdk_core<backend_t, mock_sdk_externals>;
+
+    auto config = std::make_shared<fake_settings>();
+    sut::config_settings(config);
+
+    EXPECT_CALL(*g_mock_externals,
+                get_setting_value(gtest::Eq(
+                    "ROCPROFSYS_ROCM_MARKER_API_OPERATIONS_ANNOTATE_BACKTRACE")))
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{ "roctxMarkA|roctxRangePop" }));
+
+    EXPECT_THAT(
+        sut::get_backtrace_operations(backend_t::CALLBACK_TRACING_MARKER_CORE_API),
+        gtest::UnorderedElementsAre(
+            static_cast<std::int32_t>(backend_t::MARKER_CORE_API_ID_roctxMarkA),
+            static_cast<std::int32_t>(backend_t::MARKER_CORE_API_ID_roctxRangePop)));
+}
+
+TEST_F(sdk_core_domains_test,
+       get_backtrace_operations_buffered_returns_operations_matching_setting)
+{
+    using backend_t = tagged_backend<buffered_backtrace_operations>;
+    using sut       = sdk_core<backend_t, mock_sdk_externals>;
+
+    auto config = std::make_shared<fake_settings>();
+    sut::config_settings(config);
+
+    EXPECT_CALL(*g_mock_externals,
+                get_setting_value(gtest::Eq(
+                    "ROCPROFSYS_ROCM_MEMORY_COPY_OPERATIONS_ANNOTATE_BACKTRACE")))
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{ "HOST_TO_DEVICE|DEVICE_TO_HOST" }));
+
+    EXPECT_THAT(sut::get_backtrace_operations(backend_t::BUFFER_TRACING_MEMORY_COPY),
+                gtest::UnorderedElementsAre(
+                    static_cast<std::int32_t>(ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE),
+                    static_cast<std::int32_t>(ROCPROFILER_MEMORY_COPY_DEVICE_TO_HOST)));
+}
+
 // ─── get_rocm_events ──────────────────────────────────────────────────────────
 
 using rocm_events_sut = sdk_core<tagged_backend<rocm_events>, mock_sdk_externals>;
@@ -384,18 +436,18 @@ using rocm_events_sut = sdk_core<tagged_backend<rocm_events>, mock_sdk_externals
 TEST_F(sdk_core_domains_test, get_rocm_events_splits_delimited_setting_string)
 {
     EXPECT_CALL(*g_mock_externals, get_rocm_events_setting)
-        .WillOnce(gm::Return(std::string{ "EventA,EventB;EventC" }));
+        .WillOnce(gtest::Return(std::string{ "EventA,EventB;EventC" }));
 
     EXPECT_THAT(rocm_events_sut::get_rocm_events(),
-                gm::ElementsAre("EventA", "EventB", "EventC"));
+                gtest::ElementsAre("EventA", "EventB", "EventC"));
 }
 
 TEST_F(sdk_core_domains_test, get_rocm_events_returns_empty_for_empty_setting)
 {
     EXPECT_CALL(*g_mock_externals, get_rocm_events_setting)
-        .WillOnce(gm::Return(std::string{}));
+        .WillOnce(gtest::Return(std::string{}));
 
-    EXPECT_THAT(rocm_events_sut::get_rocm_events(), gm::IsEmpty());
+    EXPECT_THAT(rocm_events_sut::get_rocm_events(), gtest::IsEmpty());
 }
 
 }  // namespace rocprofsys::rocprofiler_sdk::testing
