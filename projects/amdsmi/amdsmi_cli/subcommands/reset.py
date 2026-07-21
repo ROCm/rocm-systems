@@ -46,8 +46,9 @@ class ResetCommands:
             clean_local_data (bool, optional): Value override for args.run_cleaner_shader. Defaults to None.
 
         Raises:
-            ValueError: Value error if no gpu value is provided
-            IndexError: Index error if gpu list is empty
+            AmdSmiInvalidParameterException: If an invalid parameter combination is provided (e.g. --gtt with --gpu)
+            AmdSmiRequiredCommandException: If no reset subcommand argument is provided
+            PermissionError: If a reset operation requires elevation (AMDSMI_STATUS_NO_PERM)
 
         Return:
             Nothing
