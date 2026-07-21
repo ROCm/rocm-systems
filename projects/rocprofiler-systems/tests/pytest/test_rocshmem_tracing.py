@@ -11,6 +11,7 @@ and surfaces them as ``rocm_rocshmem_api`` spans in the Perfetto trace.
 from __future__ import annotations
 import os
 import subprocess
+from pathlib import Path
 import pytest
 from conftest import RocprofsysTest
 
@@ -50,6 +51,12 @@ def rocshmem_env() -> dict[str, str]:
         "OMPI_ALLOW_RUN_AS_ROOT": "1",
         "OMPI_ALLOW_RUN_AS_ROOT_CONFIRM": "1",
     }
+
+
+@pytest.fixture
+def rocshmem_rocpd_rules(validation_rules_dir: Path) -> list[Path]:
+    """Validation rules for rocSHMEM rocpd database checks."""
+    return [validation_rules_dir / "rocshmem" / "validation-rules.json"]
 
 
 @pytest.fixture(scope="session")
@@ -109,6 +116,7 @@ class TestRocSHMEMTracing(RocprofsysTest):
         mode,
         rocshmem_env,
         rocshmem_demo_available,
+        rocshmem_rocpd_rules,
         assert_perfetto,
         assert_rocpd,
         assert_regex,
@@ -134,6 +142,5 @@ class TestRocSHMEMTracing(RocprofsysTest):
             )
             assert_rocpd(
                 result,
-                categories=["rocm_rocshmem_api"],
-                label_substrings=EXPECTED_OPERATIONS,
+                rules_files=rocshmem_rocpd_rules,
             )
