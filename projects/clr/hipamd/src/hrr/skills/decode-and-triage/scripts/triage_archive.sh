@@ -14,8 +14,31 @@ REPLAY_MODE="auto"
 OUTPUT=""
 FORMAT="markdown"
 
+usage() {
+  cat <<'EOF' >&2
+usage: triage_archive.sh --archive <pid-dir> [options]
+
+Options:
+  --archive PATH       pid-* HRR archive directory (required)
+  --replay [MODE]      Replay mode: native, docker, auto (default), or bare --replay (= native)
+  --no-replay          Metadata / --info only (no GPU replay or preflight block on replay)
+  -o, --output PATH    Write finding to PATH (default: HRR_TRIAGE_WORKDIR/<pid>-<ts>.finding.md)
+  --format FORMAT      markdown (default) or json
+  -h, --help           Show this help
+
+Environment (common):
+  HRR_TRIAGE_WORKDIR   Output directory for findings and replay logs
+  HRR_DOCKER_IMAGE     Docker image for --replay docker / auto
+  HRR_DOCKER_MOUNT_CLR=1  Overlay host CLR for docker replay (dev builds)
+  GPU                  Replay GPU ordinal (default: auto-pick)
+  HRR_CONTINUE=1       Proceed after preflight HIP/comgr mismatch prompt
+  HRR_SKIP_COMPAT=1    Skip manifest preflight
+EOF
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -h|--help) usage; exit 0 ;;
     --archive) ARCHIVE="$2"; shift 2 ;;
     --replay)
       if [[ $# -lt 2 || "$2" == --* ]]; then REPLAY_MODE="native"; shift

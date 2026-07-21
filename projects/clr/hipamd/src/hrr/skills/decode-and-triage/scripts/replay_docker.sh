@@ -9,8 +9,33 @@ LOG=""
 GPU="${GPU:-0}"
 MOUNT_CLR="${HRR_DOCKER_MOUNT_CLR:-0}"
 
+usage() {
+  cat <<'EOF' >&2
+usage: replay_docker.sh --archive <pid-dir> [options]
+
+Replay an HRR archive inside HRR_DOCKER_IMAGE. By default uses hrr-playback and
+HIP libs from the image; set HRR_DOCKER_MOUNT_CLR=1 to overlay host CLR_BUILD.
+
+Options:
+  --archive PATH   pid-* archive directory (required)
+  --log PATH       Replay log file (default: ./hrr-replay-<pid>-<ts>.log)
+  --gpu N          HIP_VISIBLE_DEVICES inside container (default: 0 or GPU env)
+  --mount-clr      Same as HRR_DOCKER_MOUNT_CLR=1
+  -h, --help       Show this help
+
+Environment:
+  HRR_DOCKER_IMAGE      Capture/replay container image (required)
+  HRR_DOCKER_MOUNT_CLR  1 = mount host hrr-playback + libamdhip64 from CLR_BUILD
+  HRR_PLAYBACK / CLR_BUILD  Host playback binary / build tree (overlay mode)
+  ROCR_LIB              Optional in-tree ROCR lib dir for overlay mode
+  HRR_DOCKER_PLAYBACK   Path to hrr-playback inside image (default: auto-detect)
+  HRR_DOCKER_EXTRA_LD   Extra LD_LIBRARY_PATH segment inside container
+EOF
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -h|--help) usage; exit 0 ;;
     --archive) ARCHIVE="$2"; shift 2 ;;
     --log) LOG="$2"; shift 2 ;;
     --gpu) GPU="$2"; shift 2 ;;
