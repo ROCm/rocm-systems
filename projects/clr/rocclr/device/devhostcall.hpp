@@ -131,6 +131,15 @@ enum ControlWidth {
 #endif  // !USE_NEW_HOSTCALL_IMPL
 
 #ifdef USE_NEW_HOSTCALL_IMPL
+/** \brief Outcome of a processPackets() pass, ordered so std::min() reduces
+ *  across buffers (kProcessed < kIdleNarrow < kIdleFull).
+ */
+enum class ProcessResult {
+  kProcessed,   //!< Handled at least one packet; more work may be arriving.
+  kIdleNarrow,  //!< No work, but the scan window is narrowed; widen and rescan.
+  kIdleFull,    //!< No work at full scan width; safe to sleep.
+};
+
 /** \brief Shared buffer for submitting hostcall requests.
  *
  *  Holds hostcall packets requested by all kernels executing on the
@@ -145,9 +154,17 @@ enum ControlWidth {
  *  The occupied bitfield lives in device-local memory and tracks which packets
  *  are currently in use by a wave. It is referenced by device virtual address
  *  from this struct.
+ *
+ *  Ordering contract: the device publishes a request with a store-release to
+ *  device_phase_[i] after writing the packet header/payload; the host completes
+ *  it with a store-release to host_phase_[i] after writing the response. Each
+ *  side reads the other's phase with acquire ordering, so the payload writes are
+ *  visible before they are consumed. The device-side definition of this buffer
+ *  (struct buffer_t) lives in the ROCm device library, ockl/src/hostcall_impl.cl.
  */
 class HostcallBuffer {
-  // Shared prefix: must match the device-side hostcall buffer layout.
+  // Shared prefix: field order, types, and sizes must match struct buffer_t in
+  // the device library (ockl/src/hostcall_impl.cl).
   /** Per-packet phase toggled by the device on submission */
   std::atomic<uint32_t>* device_phase_;
   /** Per-packet phase toggled by the host on completion */
@@ -172,9 +189,8 @@ class HostcallBuffer {
   uint32_t scan_limit_;
 
  public:
-  void processPackets(MessageHandler& messages);
+  ProcessResult processPackets(MessageHandler& messages);
   bool initialize(uint32_t num_packets, amd::Memory* occupied_mem);
-  bool hasWorkPending() const;
   void resetScanLimit() { scan_limit_ = num_packets_; }
   void setDoorbell(void* doorbell) { doorbell_ = doorbell; }
   void setDevice(const amd::Device* dptr) { device_ = dptr; }

@@ -20,6 +20,7 @@
 
 #include <assert.h>
 #include <string.h>
+#include <algorithm>
 #include <new>
 #include <set>
 
@@ -179,18 +180,7 @@ bool HostcallBuffer::initialize(uint32_t num_packets, amd::Memory* occupied_mem)
   return true;
 }
 
-bool HostcallBuffer::hasWorkPending() const {
-  for (uint32_t i = 0; i < scan_limit_; ++i) {
-    uint32_t dp = device_phase_[i].load(std::memory_order_relaxed);
-    uint32_t hp = host_phase_[i].load(std::memory_order_relaxed);
-    if (dp != hp) {
-      return true;
-    }
-  }
-  return false;
-}
-
-void HostcallBuffer::processPackets(MessageHandler& messages) {
+ProcessResult HostcallBuffer::processPackets(MessageHandler& messages) {
   uint32_t new_limit = 0;
   for (uint32_t i = 0; i < scan_limit_; ++i) {
     uint32_t dp = device_phase_[i].load(std::memory_order_relaxed);
@@ -230,7 +220,9 @@ void HostcallBuffer::processPackets(MessageHandler& messages) {
 
   if (new_limit > 0) {
     scan_limit_ = new_limit;
+    return ProcessResult::kProcessed;
   }
+  return scan_limit_ < num_packets_ ? ProcessResult::kIdleNarrow : ProcessResult::kIdleFull;
 }
 #else  // !USE_NEW_HOSTCALL_IMPL
 void HostcallBuffer::processPackets(MessageHandler& messages) {
@@ -385,7 +377,7 @@ extern amd::Monitor listenerLock;
 
 static bool listenerTerminating = false;
 #ifdef USE_NEW_HOSTCALL_IMPL
-constexpr static uint32_t kSpinIterations = 1024;
+constexpr static uint32_t kYieldSpins = 128;
 constexpr static uint64_t kSignalTimeout = K * K;
 #else  // !USE_NEW_HOSTCALL_IMPL
 constexpr static uint64_t kTimeoutFloor = K * K * 4;
@@ -409,42 +401,36 @@ static struct Init {
 void HostcallListener::consumePackets() {
   uint64_t signal_value = SIGNAL_INIT;
   kHostThreadActive.state = Init::State::kInit;
+  uint32_t yield_spins = 0;
+
   while (true) {
     if (kHostThreadActive.state == Init::State::kDestroy) {
       kHostThreadActive.state = Init::State::kExit;
       return;
     }
 
-    for (uint32_t spin = 0; spin < kSpinIterations; ++spin) {
-      if (kHostThreadActive.state == Init::State::kDestroy) {
-        kHostThreadActive.state = Init::State::kExit;
-        return;
-      }
-
-      bool work_pending = false;
-      {
-        amd::ScopedLock lock{listenerLock};
-        for (auto buf : buffers_) {
-          buf->processPackets(messages_);
-          work_pending |= buf->hasWorkPending();
-        }
-      }
-
-      if (!work_pending) {
-        break;
-      }
-    }
-
+    ProcessResult result = ProcessResult::kIdleFull;
     {
       amd::ScopedLock lock{listenerLock};
       for (auto buf : buffers_) {
-        buf->resetScanLimit();
+        result = std::min(result, buf->processPackets(messages_));
       }
-      for (auto buf : buffers_) {
-        buf->processPackets(messages_);
+      if (result == ProcessResult::kIdleNarrow) {
+        for (auto buf : buffers_) {
+          buf->resetScanLimit();
+        }
       }
     }
 
+    if (result != ProcessResult::kIdleFull) {
+      if (++yield_spins >= kYieldSpins) {
+        yield_spins = 0;
+        amd::Os::yield();
+      }
+      continue;
+    }
+
+    yield_spins = 0;
     uint64_t new_value =
         doorbell_->Wait(signal_value, device::Signal::Condition::Ne, kSignalTimeout);
     if (new_value != signal_value) {
@@ -613,13 +599,6 @@ bool enableHostcalls(const amd::Device& dev, void* bfr, uint32_t numPackets) {
   }
   if (!hostcallListener) {
     hostcallListener = new HostcallListener();
-#ifdef USE_NEW_HOSTCALL_IMPL
-    if (!hostcallListener) {
-      ClPrint(amd::LOG_ERROR, (amd::LOG_INIT | amd::LOG_QUEUE | amd::LOG_RESOURCE),
-              "Failed to allocate hostcall listener");
-      return false;
-    }
-#endif  // USE_NEW_HOSTCALL_IMPL
     if (!hostcallListener->initSignal(dev)) {
       ClPrint(amd::LOG_ERROR, (amd::LOG_INIT | amd::LOG_QUEUE | amd::LOG_RESOURCE),
               "Failed to launch hostcall listener");
