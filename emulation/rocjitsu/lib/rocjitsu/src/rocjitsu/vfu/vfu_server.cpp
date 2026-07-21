@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vfu/vfu_server.h"
-#include "rocjitsu/kmd/linux/simulated_driver.h"
+#include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 
 // Public C API
@@ -50,12 +50,12 @@ int VfuServer::init() {
     return -1;
   }
 
-  // Reach into the internal VM to get the SimulatedDriver pointer.
+  // Reach into the internal VM to get the SimulatedKfd pointer.
   // This is intentional: VfuServer is part of the rocjitsu library, not an
   // external consumer, so accessing rj_vm_impl is appropriate here.
   driver_ = vm_handle_->vm ? vm_handle_->vm->driver() : nullptr;
   if (!driver_) {
-    std::fprintf(stderr, "[vfu] SimulatedDriver not initialized\n");
+    std::fprintf(stderr, "[vfu] SimulatedKfd not initialized\n");
     return -1;
   }
 
@@ -94,8 +94,33 @@ int VfuServer::init() {
   bar2_ = std::make_unique<Bar2Doorbell>(
       BarSizes::kBar2Doorbell,
       [this](uint32_t offset, uint64_t val) { on_doorbell_write(offset, val); });
-  if (bar2_->setup(ctx_) != 0)
+  if (bar2_->valid() != 0) {
+    std::fprintf(stderr, "[vfu] BAR2 doorbell memfd initialization failed\n");
     return -1;
+  }
+
+  // BAR2/3: 64-bit prefetchable doorbell region. Use a lambda trampoline
+  // (same pattern as BAR5) so vfu_get_private(ctx) → VfuServer* → bar2_.
+  auto bar2_cb = [](vfu_ctx_t *c, char *buf, size_t cnt,
+                    long off, bool wr) -> ssize_t {
+    auto *srv = reinterpret_cast<VfuServer *>(vfu_get_private(c));
+    if (!srv || !srv->bar2_)
+      return -1;
+    return srv->bar2_->handle_access(buf, cnt, off, wr);
+  };
+
+  iovec bar2_mmap{.iov_base = nullptr, .iov_len = bar2_->size()};
+  if (vfu_setup_region(ctx_,
+                       VFU_PCI_DEV_BAR2_REGION_IDX,
+                       bar2_->size(),
+                       bar2_cb,
+                       VFU_REGION_FLAG_RW | VFU_REGION_FLAG_MEM |
+                         VFU_REGION_FLAG_64_BITS | VFU_REGION_FLAG_PREFETCH,
+                       &bar2_mmap, 1,
+                       bar2_->fd(), 0) != 0) {
+    std::perror("vfu_setup_region BAR2");
+    return -1;
+  }
 
   bar5_ = std::make_unique<MmioModel>(bar0_->fd(), bar0_->size());
 

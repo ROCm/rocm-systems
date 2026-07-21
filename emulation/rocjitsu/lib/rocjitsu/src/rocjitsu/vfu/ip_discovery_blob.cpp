@@ -8,37 +8,37 @@
 #include <cassert>
 #include <cstring>
 
-// ---------------------------------------------------------------------------
-// Constants matching amdgpu_discovery.h / discovery.h
-// ---------------------------------------------------------------------------
-static constexpr uint32_t kDiscoveryTmrSize   = 10 * 1024; // DISCOVERY_TMR_SIZE
-static constexpr uint32_t kBinarySignature    = 0x28211407;
-static constexpr uint32_t kDiscoveryTableSig  = 0x53445049; // "IPDS"
-static constexpr uint32_t kHarvestTableSig    = 0x56524148; // "HARV"
-static constexpr uint16_t kDiscoveryVersion   = 2;
-static constexpr int      kTotalTables        = 6;
-
-// Hardware IDs (from soc15_hw_ip.h in the DKMS source)
-static constexpr uint16_t kHwIdMp1    =  1;
-static constexpr uint16_t kHwIdThm    =  3;
-static constexpr uint16_t kHwIdSmuio  =  4;
-static constexpr uint16_t kHwIdGc     = 11;
-static constexpr uint16_t kHwIdMmhub  = 34;
-static constexpr uint16_t kHwIdAthub  = 35;
-static constexpr uint16_t kHwIdOsssys = 40;
-static constexpr uint16_t kHwIdHdp    = 41;
-static constexpr uint16_t kHwIdSdma0  = 42;  // instances 0-4 for MI350P
-static constexpr uint16_t kHwIdDf     = 46;
-static constexpr uint16_t kHwIdUmc    = 196; // actually 12 for VCN/UMC context - see below
-static constexpr uint16_t kHwIdXgmi   = 200;
-static constexpr uint16_t kHwIdNbif   = 192;
-static constexpr uint16_t kHwIdMp0    = 202;
-static constexpr uint16_t kHwIdPcie   = 187;
-static constexpr uint16_t kHwIdLsdma  = 91;  // LSDMA_HWID
-
 namespace rocjitsu::vfu {
 
 namespace {
+
+// ---------------------------------------------------------------------------
+// Constants matching amdgpu_discovery.h / discovery.h
+// ---------------------------------------------------------------------------
+constexpr uint32_t kDiscoveryTmrSize   = 10 * 1024; // DISCOVERY_TMR_SIZE
+constexpr uint32_t kBinarySignature    = 0x28211407;
+constexpr uint32_t kDiscoveryTableSig  = 0x53445049; // "IPDS"
+constexpr uint32_t kHarvestTableSig    = 0x56524148; // "HARV"
+constexpr uint16_t kDiscoveryVersion   = 2;
+constexpr int      kTotalTables        = 6;
+
+// Hardware IDs (from soc15_hw_ip.h in the DKMS source)
+constexpr uint16_t kHwIdMp1    =  1;
+constexpr uint16_t kHwIdThm    =  3;
+constexpr uint16_t kHwIdSmuio  =  4;
+constexpr uint16_t kHwIdGc     = 11;
+constexpr uint16_t kHwIdMmhub  = 34;
+constexpr uint16_t kHwIdAthub  = 35;
+constexpr uint16_t kHwIdOsssys = 40;
+constexpr uint16_t kHwIdHdp    = 41;
+constexpr uint16_t kHwIdSdma0  = 42;  // instances 0-4 for MI350P
+constexpr uint16_t kHwIdDf     = 46;
+constexpr uint16_t kHwIdUmc    = 196; // actually 12 for VCN/UMC context - see below
+constexpr uint16_t kHwIdXgmi   = 200;
+constexpr uint16_t kHwIdNbif   = 192;
+constexpr uint16_t kHwIdMp0    = 202;
+constexpr uint16_t kHwIdPcie   = 187;
+constexpr uint16_t kHwIdLsdma  = 91;  // LSDMA_HWID
 
 // ---------------------------------------------------------------------------
 // Low-level serialisation helpers
@@ -48,19 +48,23 @@ struct Writer {
   std::vector<uint8_t> &buf;
   size_t pos = 0;
 
-  void seek(size_t p) { pos = p; }
+  void seek(size_t p) { assert(p <= buf.size()); pos = p; }
   size_t tell() const { return pos; }
 
-  void write_u8(uint8_t v)  { buf[pos++] = v; }
-  void write_u16(uint16_t v) { buf[pos] = v & 0xff; buf[pos+1] = v >> 8; pos += 2; }
+  void write_u8(uint8_t v)  { assert(pos + 1 <= buf.size()); buf[pos++] = v; }
+  void write_u16(uint16_t v) {
+    assert(pos + 2 <= buf.size());
+    buf[pos] = v & 0xff; buf[pos+1] = v >> 8; pos += 2;
+  }
   void write_u32(uint32_t v) {
+    assert(pos + 4 <= buf.size());
     buf[pos]   =  v        & 0xff;
     buf[pos+1] = (v >>  8) & 0xff;
     buf[pos+2] = (v >> 16) & 0xff;
     buf[pos+3] = (v >> 24) & 0xff;
     pos += 4;
   }
-  void pad(size_t n) { pos += n; }
+  void pad(size_t n) { assert(pos + n <= buf.size()); pos += n; }
 };
 
 uint16_t checksum_range(const std::vector<uint8_t> &buf, size_t off, size_t len) {

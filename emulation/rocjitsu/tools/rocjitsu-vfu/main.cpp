@@ -19,8 +19,12 @@
 ///   qemu-system-x86_64 -accel kvm -m 16G \
 ///     -device '{"driver":"vfio-user-pci","socket":{"path":"/tmp/rocjitsu-vfu-0.sock","type":"unix"}}'
 
-#include "rocjitsu/vfu/vfu_server.h"
+#include "rocjitsu/vfu/gpu_pci_device_provider.h"
 #include "rocjitsu/vfu/pci_config.h"
+#include "rocjitsu/kmd/linux/vfio_device_host.h"
+#include "rocjitsu/kmd/linux/simulated_kfd.h"
+#include "rocjitsu/vm/rj_vm.h"
+#include "rocjitsu/vm/rj_vm_impl.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -28,18 +32,17 @@
 #include <string>
 
 int main(int argc, char **argv) {
-  rocjitsu::vfu::VfuServerOptions opts;
-  opts.socket_path = "/tmp/rocjitsu-vfu-0.sock";
-  opts.config_path = "configs/gfx950_mi350p_kmd.json";
-  opts.vram_bar_size = rocjitsu::vfu::BarSizes::kBar0VramDefault;
+  std::string socket_path = "/tmp/rocjitsu-vfu-0.sock";
+  std::string config_path = "configs/gfx950_mi350p_kmd.json";
+  uint64_t vram_bar_size  = rocjitsu::vfu::BarSizes::kBar0VramDefault;
 
   for (int i = 1; i < argc; ++i) {
     if (std::strcmp(argv[i], "--socket") == 0 && i + 1 < argc) {
-      opts.socket_path = argv[++i];
+      socket_path = argv[++i];
     } else if (std::strcmp(argv[i], "--config") == 0 && i + 1 < argc) {
-      opts.config_path = argv[++i];
+      config_path = argv[++i];
     } else if (std::strcmp(argv[i], "--rebar") == 0) {
-      opts.vram_bar_size = rocjitsu::vfu::BarSizes::kBar0VramFull;
+      vram_bar_size = rocjitsu::vfu::BarSizes::kBar0VramFull;
     } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
       std::printf(
           "Usage: rocjitsu-vfu [--socket PATH] [--config PATH] [--rebar]\n"
@@ -61,11 +64,56 @@ int main(int argc, char **argv) {
     }
   }
 
-  std::fprintf(stderr, "[rocjitsu-vfu] config: %s\n", opts.config_path.c_str());
-  std::fprintf(stderr, "[rocjitsu-vfu] socket: %s\n", opts.socket_path.c_str());
+  std::fprintf(stderr, "[rocjitsu-vfu] config: %s\n", config_path.c_str());
+  std::fprintf(stderr, "[rocjitsu-vfu] socket: %s\n", socket_path.c_str());
   std::fprintf(stderr, "[rocjitsu-vfu] VRAM BAR size: %llu MB\n",
-               static_cast<unsigned long long>(opts.vram_bar_size / (1024 * 1024)));
+               static_cast<unsigned long long>(vram_bar_size / (1024 * 1024)));
 
-  rocjitsu::vfu::VfuServer server(std::move(opts));
-  return server.run();
+  // Create the rocjitsu VM.
+  rj_vm_t *vm_handle = nullptr;
+  rj_status_t st = rj_vm_create(config_path.c_str(), RJ_VM_MODE_DAEMON, &vm_handle);
+  if (st != ROCJITSU_STATUS_SUCCESS) {
+    std::fprintf(stderr, "[rocjitsu-vfu] rj_vm_create failed: %d\n",
+                 static_cast<int>(st));
+    return 1;
+  }
+
+  rocjitsu::SimulatedKfd *kfd =
+      vm_handle->vm ? vm_handle->vm->driver() : nullptr;
+  if (!kfd) {
+    std::fprintf(stderr, "[rocjitsu-vfu] SimulatedKfd not initialized\n");
+    rj_vm_destroy(vm_handle);
+    return 1;
+  }
+
+  uint32_t guest_pid = 0;
+  st = rj_vm_device_open(vm_handle, 0, &guest_pid);
+  if (st != ROCJITSU_STATUS_SUCCESS) {
+    std::fprintf(stderr, "[rocjitsu-vfu] rj_vm_device_open failed: %d\n",
+                 static_cast<int>(st));
+    rj_vm_destroy(vm_handle);
+    return 1;
+  }
+
+  // Build the device graph: one GpuPciDevice per GPU.
+  rocjitsu::vfu::GpuPciDeviceProvider provider(kfd, guest_pid, vram_bar_size);
+
+  // Stand up one VfioDeviceHost per device, each on its own socket.
+  // Today this is a single GPU; adding a NIC means registering another provider.
+  int result = 0;
+  auto devices = provider.pci_devices();
+  for (size_t i = 0; i < devices.size(); ++i) {
+    std::string sock = socket_path;
+    if (devices.size() > 1)
+      sock += "." + std::to_string(i);
+
+    rocjitsu::VfioDeviceHost host(sock, devices[i]);
+    result = host.run();
+    if (result != 0)
+      break;
+  }
+
+  rj_vm_device_close(vm_handle, guest_pid);
+  rj_vm_destroy(vm_handle);
+  return result;
 }

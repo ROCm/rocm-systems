@@ -20,7 +20,7 @@ typedef struct vfu_ctx vfu_ctx_t;
 typedef struct vfu_dma_info vfu_dma_info_t;
 
 namespace rocjitsu {
-class SimulatedDriver;
+class SimulatedKfd;
 } // namespace rocjitsu
 
 namespace rocjitsu::vfu {
@@ -29,15 +29,15 @@ namespace rocjitsu::vfu {
 ///
 /// Each DMA_MAP message from QEMU carries an IOVA (guest physical address) range
 /// and an optional host virtual address (when the guest memory is accessible via
-/// shared memfd). On DMA_MAP, the range is registered into the SimulatedDriver's
+/// shared memfd). On DMA_MAP, the range is registered into the SimulatedKfd's
 /// guest-process page table so the CP can fetch AQL packets and the CUs can
 /// access kernel arguments from guest memory.
 class DmaMapper {
 public:
   /// @brief Construct the DMA mapper.
-  /// @param driver  The SimulatedDriver that owns the GPU process/VA space.
+  /// @param driver  The SimulatedKfd that owns the GPU process/VA space.
   /// @param process_id  The rocjitsu process ID for the guest.
-  explicit DmaMapper(SimulatedDriver &driver, uint32_t process_id);
+  explicit DmaMapper(SimulatedKfd &driver, uint32_t process_id);
   ~DmaMapper();
 
   DmaMapper(const DmaMapper &) = delete;
@@ -59,7 +59,7 @@ private:
     void *   vaddr;    ///< Host virtual address (nullptr if not accessible).
   };
 
-  SimulatedDriver &driver_;
+  SimulatedKfd &driver_;
   uint32_t process_id_;
   std::vector<Mapping> mappings_;
 };

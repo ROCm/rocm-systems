@@ -3,15 +3,16 @@
 
 #include "rocjitsu/vfu/dma_mapper.h"
 #include "rocjitsu/vfu/vfu_server.h"
-#include "rocjitsu/kmd/linux/simulated_driver.h"
+#include "rocjitsu/kmd/linux/simulated_kfd.h"
 
 #include <libvfio-user.h>
 
+#include <algorithm>
 #include <cstdio>
 
 namespace rocjitsu::vfu {
 
-DmaMapper::DmaMapper(SimulatedDriver &driver, uint32_t process_id)
+DmaMapper::DmaMapper(SimulatedKfd &driver, uint32_t process_id)
     : driver_(driver), process_id_(process_id) {}
 
 DmaMapper::~DmaMapper() {

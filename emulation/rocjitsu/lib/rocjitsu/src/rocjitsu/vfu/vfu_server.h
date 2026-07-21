@@ -31,7 +31,7 @@
 typedef struct vfu_ctx vfu_ctx_t;
 
 namespace rocjitsu {
-class SimulatedDriver;
+class SimulatedKfd;
 } // namespace rocjitsu
 
 namespace rocjitsu::vfu {
@@ -75,7 +75,7 @@ private:
   vfu_ctx_t *ctx_ = nullptr;
 
   rj_vm_t *vm_handle_ = nullptr;  ///< Owned VM handle (from rj_vm_create).
-  rocjitsu::SimulatedDriver *driver_ = nullptr; ///< Non-owning pointer into vm_handle_.
+  rocjitsu::SimulatedKfd *driver_ = nullptr; ///< Non-owning pointer into vm_handle_.
 
   std::unique_ptr<Bar0Vram>    bar0_;
   std::unique_ptr<Bar2Doorbell> bar2_;

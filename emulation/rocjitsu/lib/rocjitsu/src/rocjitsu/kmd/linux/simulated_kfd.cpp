@@ -2401,6 +2401,9 @@ void SimulatedKfd::register_guest_dma(uint32_t process_id, uint64_t iova,
   if (!proc)
     return;
 
+  // Guard with alloc_mutex_ — this runs on the vfu poll thread concurrently
+  // with KFD/CP paths that also call map_to_gpu/unmap_from_gpu.
+  std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
   if (map && vaddr) {
     map_to_gpu(*proc, iova, vaddr, length, amdgpu::Mtype::UC);
   } else if (!map) {

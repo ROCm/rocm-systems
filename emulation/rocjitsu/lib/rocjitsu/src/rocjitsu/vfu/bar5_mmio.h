@@ -16,9 +16,6 @@
 #include <sys/types.h>  // ssize_t
 #include <atomic>
 
-// Forward-declare libvfio-user types.
-typedef struct vfu_ctx vfu_ctx_t;
-
 namespace rocjitsu::vfu {
 
 /// @brief MMIO register model for BAR5 (256 KB register window).
@@ -50,11 +47,6 @@ public:
   /// @param offset Byte offset within BAR5.
   /// @returns Bytes written (== count) on success, -1 on error.
   ssize_t write(const char *buf, size_t count, long offset);
-
-  /// @brief libvfio-user region access callback (static trampoline).
-  /// @note Signature matches vfu_region_access_cb_t: loff_t is long on Linux.
-  static ssize_t access_cb(vfu_ctx_t *ctx, char *buf, size_t count,
-                            long offset, bool is_write);
 
 private:
   uint32_t read_register(uint32_t byte_offset);

@@ -16,7 +16,8 @@ target_include_directories(
 target_link_libraries(
     rocjitsu_vfu_bin
     PRIVATE
-        rocjitsu_vfu       # vfio-user wrapper library (see below)
+        rocjitsu_vfio_host  # vfio-user transport (libvfio-user is PRIVATE inside)
+        rocjitsu_gpu_pci_device
         rocjitsu_kmd
         rocjitsu_analysis
         rocjitsu_code
@@ -41,7 +42,6 @@ target_link_libraries(
         flatbuffers
         Threads::Threads
         dl
-        PkgConfig::VFIO_USER
 )
 
 set_target_properties(rocjitsu_vfu_bin PROPERTIES OUTPUT_NAME rocjitsu-vfu)

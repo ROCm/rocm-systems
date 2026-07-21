@@ -4,8 +4,6 @@
 #include "rocjitsu/vfu/bar5_mmio.h"
 #include "rocjitsu/vfu/mmio_registers.h"
 
-#include <libvfio-user.h>
-
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -169,15 +167,6 @@ ssize_t MmioModel::write(const char *buf, size_t count, long offset) {
   }
   write_register(static_cast<uint32_t>(offset), val);
   return static_cast<ssize_t>(count);
-}
-
-ssize_t MmioModel::access_cb(vfu_ctx_t *ctx, char *buf, size_t count,
-                              long offset, bool is_write) {
-  auto *model = reinterpret_cast<MmioModel *>(vfu_get_private(ctx));
-  if (!model)
-    return -1;
-  return is_write ? model->write(buf, count, offset)
-                  : model->read(buf, count, offset);
 }
 
 } // namespace rocjitsu::vfu
