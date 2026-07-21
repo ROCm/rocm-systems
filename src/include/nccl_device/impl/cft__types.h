@@ -21,6 +21,7 @@ struct ncclCft_internal {
   Coop coop;
   ncclCftSmem& cftSmem;
   uint32_t txCount;
+  uint32_t phaseParity;
 };
 
 template <typename T>

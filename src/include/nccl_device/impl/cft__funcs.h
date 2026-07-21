@@ -34,6 +34,20 @@ NCCL_DEVICE_INLINE bool elected(Coop coop) {
   }
 }
 
+template <typename Coop>
+NCCL_DEVICE_INLINE bool electedFlush(Coop) {
+  // v1 mbarrier layout supports an arvCount between 1 and 511.
+  // CoopThread.size and CoopWarp.size are at most 32 threads.
+  return false;
+}
+template <>
+NCCL_DEVICE_INLINE bool electedFlush<ncclCoopCta>(ncclCoopCta coop) {
+  // v1 mbarrier layout supports an arvCount between 1 and 511.
+  // CoopCta can contain more than 511 threads.
+  constexpr int mbarrierMaxArvCount = 511;
+  return coop.size() > mbarrierMaxArvCount;
+}
+
 NCCL_DEVICE_INLINE void unsupported() {
   assert(false && "CFT device helpers require CUDA Toolkit support for fabric PTX instructions.");
 }
@@ -49,6 +63,29 @@ NCCL_DEVICE_INLINE uint32_t smemAddr(void* ptr) {
 NCCL_DEVICE_INLINE uint32_t smemAddr(ncclCftSmem& cftSmem) {
   return smemAddr(&cftSmem.bar);
 }
+
+NCCL_DEVICE_INLINE void waitMbarrier(ncclCftSmem& cftSmem, uint32_t phaseParity, int* hasReport, uint32_t* report) {
+  int ready = 0;
+  *hasReport = 0;
+  *report = 0;
+  do {
+    // clang-format off
+    asm volatile("{\n\t"
+                 ".reg .pred p;\n\t"
+                 ".reg .pred hasReport;\n\t"
+                 ".reg .u8 s8;\n\t"
+                 "mbarrier.try_wait.parity.phase_type::primary.acquire.cta.shared::cta.b64 p|hasReport, s8, [%3], %4;\n\t"
+                 "selp.b32 %0, 1, 0, p;\n\t"
+                 "@p cvt.u32.u8 %2, s8;\n\t"
+                 "@p selp.b32 %1, 1, 0, hasReport;\n\t"
+                 "}"
+                 : "=r"(ready), "+r"(*hasReport), "+r"(*report)
+                 : "r"(smemAddr(cftSmem)), "r"(phaseParity)
+                 : "memory");
+    // clang-format on
+  } while (!ready);
+}
+
 #endif
 
 NCCL_DEVICE_INLINE const char* redOpUnsupported() {
@@ -299,12 +336,13 @@ NCCL_DEVICE_INLINE void ncclMemFence(Coop coop, cuda::memory_order order, ncclMe
 
 template <typename Coop>
 NCCL_DEVICE_INLINE ncclCft<Coop>::ncclCft(Coop coop, ncclCftSmem& cftSmem)
-  : ncclCft_internal<Coop>{coop, cftSmem, /*txCount=*/0} {
+  : ncclCft_internal<Coop>{coop, cftSmem, /*txCount=*/0, /*phaseParity=*/0} {
 #if NCCL_CFT_ENABLE
   if (nccl::cft::internal::elected(coop)) {
     asm volatile("mbarrier.init.shared.layout::v1.b64 [%0], %1;"
                  :
-                 : "r"(nccl::cft::internal::smemAddr(cftSmem)), "r"(coop.size())
+                 : "r"(nccl::cft::internal::smemAddr(cftSmem)),
+                   "r"(nccl::cft::internal::electedFlush(coop) ? 1 : coop.size())
                  : "memory");
   }
   // Every thread in coop must wait for mbarrier to be initialize before using it
@@ -352,7 +390,7 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::submit(Coop coop) {
 template <typename Coop>
 NCCL_DEVICE_INLINE void ncclCft<Coop>::flushLocal(Coop coop) {
 #if NCCL_CFT_ENABLE
-  // Wait fabric operations to consume/read shared memory
+  // Wait for fabric operations to consume/read shared memory
   asm volatile("fabric.wait.sync_restrict::reads;" ::: "memory");
   coop.sync();
 #else
@@ -363,34 +401,21 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::flushLocal(Coop coop) {
 template <typename Coop>
 NCCL_DEVICE_INLINE void ncclCft<Coop>::flush(Coop coop, bool* hasReport, uint32_t* report) {
 #if NCCL_CFT_ENABLE
-  // Wait fabric operations to consume/read shared memory
+  // Wait for fabric operations to consume/read shared memory
   asm volatile("fabric.wait.sync_restrict::reads;" ::: "memory");
 
-  uint64_t arvStatus = 0;
-  asm volatile("mbarrier.arrive.relaxed.cta.shared::cta.b64 %0, [%1], %2;"
-               : "=l"(arvStatus)
-               : "r"(nccl::cft::internal::smemAddr(this->cftSmem)), "r"(1)
-               : "memory");
+  if (!nccl::cft::internal::electedFlush(coop) || nccl::cft::internal::elected(coop)) {
+    asm volatile("mbarrier.arrive.relaxed.cta.shared::cta.b64 _, [%0], %1;"
+                 :
+                 : "r"(nccl::cft::internal::smemAddr(this->cftSmem)), "r"(1)
+                 : "memory");
+  }
 
-  // Wait for completion
-  int ready = 0;
   int hasReportValue = 0;
   uint32_t reportValue = 0;
-  do {
-    asm volatile("{\n\t"
-                 ".reg .pred p;\n\t"
-                 ".reg .pred hasReport;\n\t"
-                 ".reg .u8 s8;\n\t"
-                 "mbarrier.try_wait.acquire.cta.phase_type::primary.shared::cta.b64 p|hasReport, s8, [%3], %4;\n\t"
-                 "cvt.u32.u8 %2, s8;\n\t"
-                 "selp.b32 %0, 1, 0, p;\n\t"
-                 "selp.b32 %1, 1, 0, hasReport;\n\t"
-                 "}"
-                 : "=r"(ready), "=r"(hasReportValue), "=r"(reportValue)
-                 : "r"(nccl::cft::internal::smemAddr(this->cftSmem)), "l"(arvStatus)
-                 : "memory");
-  } while (!ready);
-  if (hasReport) *hasReport = hasReportValue != 0;
+  nccl::cft::internal::waitMbarrier(this->cftSmem, this->phaseParity, &hasReportValue, &reportValue);
+  this->phaseParity ^= 1;
+  if (hasReport) *hasReport = (hasReportValue != 0);
   if (report) *report = reportValue;
 #else
   (void)coop;
