@@ -828,6 +828,18 @@ TEST(RaceDetector, CheckVgprReadAllLanes) {
   EXPECT_FALSE(b3.hasRace());
 }
 
+TEST(RaceDetector, CheckVgprReadLanesReportsMaskedLane) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.globalLoad(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1, /*exec=*/1ULL << 5);
+  b.checkVgprReadLanes(/*wave=*/0, /*reg=*/1, /*laneMask=*/(1ULL << 0) | (1ULL << 5));
+
+  ASSERT_EQ(b.raceCount(), 1);
+  const auto &v = b.violations()[0];
+  EXPECT_EQ(v.space, RaceViolation::Space::VGPR);
+  EXPECT_EQ(v.index, 1);
+  EXPECT_EQ(v.lane, 5);
+}
+
 // ---- Mixed counter types ----
 
 TEST(RaceDetector, Mixed_VmcntAndLgkmcnt) {

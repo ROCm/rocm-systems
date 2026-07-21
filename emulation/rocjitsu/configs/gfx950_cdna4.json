@@ -28,7 +28,10 @@
         "num_sdma_engines": 5,
         "num_sdma_xgmi_engines": 12,
         "num_cp_queues": 128,
-        "max_engine_clk_fcompute": 2700
+        "max_engine_clk_fcompute": 2700,
+        "capability": 2889327232,
+        "capability2": 1,
+        "debug_prop": 1494
       }
     }
   },

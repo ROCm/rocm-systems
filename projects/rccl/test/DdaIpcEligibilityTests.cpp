@@ -4,13 +4,14 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include "common/DdaAlltoAllTestHelpers.hpp"
 #include "common/DdaIpcTestHelpers.hpp"
 
-#include "dda_all_gather_ipc.h"
-#include "dda_alltoall_ipc.h"
-#include "dda_reduce_scatter_ipc.h"
+#include "dda_all_gather.h"
+#include "dda_alltoall.h"
+#include "dda_reduce_scatter.h"
 #include "gtest/gtest.h"
-#include "ipc_init_detail.h"
+#include "dda_init_detail.h"
 
 namespace RcclUnitTesting
 {
@@ -71,7 +72,7 @@ TEST_F(DdaIpcEligibilityTest, AllGather_UnsupportedDatatype)
 
 TEST_F(DdaIpcEligibilityTest, AllGather_ScratchTooSmall)
 {
-    mockComm_.comm.ddaIpcScratchBytes = 8;
+    mockComm_.comm.ddaScratchBytes = 8;
     EXPECT_FALSE(ncclAllGatherDdaIpcEligible(
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
 }
@@ -109,7 +110,7 @@ TEST_F(DdaIpcEligibilityTest, AllToAll_EligibleFloat32)
 
 TEST_F(DdaIpcEligibilityTest, AllToAll_ScratchTooSmallForTotal)
 {
-    mockComm_.comm.ddaIpcScratchBytes = 64;
+    mockComm_.comm.ddaScratchBytes = 64;
     EXPECT_FALSE(ncclAllToAllDdaIpcEligible(
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
 }
@@ -125,6 +126,50 @@ TEST_F(DdaIpcEligibilityTest, AllToAll_InvalidDatatypeDispatch)
     EXPECT_EQ(ncclAllToAllDdaIpc(
                   sendbuff_, recvbuff_, 4, ncclInt32, mockComm_.get(), nullptr),
               ncclInvalidArgument);
+}
+
+TEST_F(DdaIpcEligibilityTest, AllToAll_CountAt4MbTotal_Eligible)
+{
+    EXPECT_TRUE(ncclAllToAllDdaIpcEligible(
+        mockComm_.get(),
+        sendbuff_,
+        recvbuff_,
+        kAlltoAllFloat32CountAt4MbThreshold,
+        ncclFloat32));
+}
+
+TEST_F(DdaIpcEligibilityTest, AllToAll_StagingBytesAtThresholdFitsScratch)
+{
+    const size_t stagingBytes = testAlltoAllDdaIpcStagingBytes(
+        kAlltoAllFloat32CountAt4MbThreshold,
+        mockComm_.comm.nRanks,
+        sizeof(float));
+    EXPECT_EQ(stagingBytes, kDdaAlltoAllGfx950ThresholdBytes);
+    EXPECT_LE(stagingBytes, mockComm_.comm.ddaScratchBytes);
+}
+
+TEST_F(DdaIpcEligibilityTest, AllToAll_StagingBytesOneCountOverThresholdStillEligible)
+{
+    // Eligibility is independent of the 4 MiB dispatch cap enforced in collectives.cc.
+    const size_t count = kAlltoAllFloat32CountAt4MbThreshold + 1;
+    const size_t stagingBytes = testAlltoAllDdaIpcStagingBytes(
+        count, mockComm_.comm.nRanks, sizeof(float));
+    EXPECT_GT(stagingBytes, kDdaAlltoAllGfx950ThresholdBytes);
+    EXPECT_TRUE(ncclAllToAllDdaIpcEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, count, ncclFloat32));
+}
+
+TEST_F(DdaIpcEligibilityTest, AllToAll_MissingBootstrap)
+{
+    mockComm_.comm.bootstrap = nullptr;
+    EXPECT_FALSE(ncclAllToAllDdaIpcEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaIpcEligibilityTest, AllToAll_ZeroCount)
+{
+    EXPECT_FALSE(ncclAllToAllDdaIpcEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 0, ncclFloat32));
 }
 
 TEST_F(DdaIpcEligibilityTest, ReduceScatter_EligibleFloat32)
