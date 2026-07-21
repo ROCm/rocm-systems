@@ -1818,6 +1818,13 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   // Prove one common window with the existing CFG liveness before falling
   // back to an unsupported resource result.
   MoiResourcePlanningState state(bytes, arch, options, result);
+  std::unordered_map<const BasicBlock *, std::vector<const MoiKernelResourceContext *>>
+      contexts_by_block;
+  contexts_by_block.reserve(state.blocks.size());
+  for (const MoiKernelResourceContext &context : state.contexts) {
+    for (const BasicBlock *block : context.scope.blocks)
+      contexts_by_block[block].push_back(&context);
+  }
   RegisterSet unavailable;
   bool saw_site = false;
   const auto include_site = [&](uint64_t text_offset) {
@@ -1825,10 +1832,11 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     const Instruction *instruction = instruction_at(block, text_offset);
     if (block == nullptr || instruction == nullptr)
       return;
-    for (const MoiKernelResourceContext &context : state.contexts) {
-      if (std::ranges::find(context.scope.blocks, block) == context.scope.blocks.end())
-        continue;
-      unavailable |= context.liveness->live_before(*instruction);
+    const auto owners = contexts_by_block.find(block);
+    if (owners == contexts_by_block.end())
+      return;
+    for (const MoiKernelResourceContext *context : owners->second) {
+      unavailable |= context->liveness->live_before(*instruction);
       const InstDefUse def_use(*instruction);
       unavailable |= def_use.defs | def_use.uses;
       saw_site = true;
