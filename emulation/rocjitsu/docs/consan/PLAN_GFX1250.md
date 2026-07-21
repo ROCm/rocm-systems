@@ -108,7 +108,7 @@ flowchart TD
     X0["X0 DONE<br/>expansion corpus surveyed and<br/>aggregate four-profile contract defined"]
     XP0["XP0 DONE<br/>PyTorch/Triton TDM plus clustered-dispatch<br/>clean vertical passes all four profiles"]
     XP1["XP1 DONE<br/>torch.mode SuperCollider and Record/Replay<br/>full bundles accepted"]
-    XP1B["XP1B TODO<br/>torch.mode Sampled and Inline<br/>full-object execution bounds remain"]
+    XP1B["XP1B ACTIVE<br/>torch.mode Sampled and Inline<br/>full-object execution bounds remain"]
     XP4["XP4 DONE<br/>tagged LDS atomic address token plus isolated-release<br/>classification pass torch.mode clean"]
     XP5["XP5 DONE<br/>histogram Inline paired and reviewed-fault bundle<br/>green at 175-access denominator"]
     XP6["XP6 DONE<br/>histogram Record/Replay paired and fault bundle<br/>green at 175-access denominator"]
@@ -131,7 +131,7 @@ flowchart TD
     XT2C2["XT2C2 TODO<br/>004 Stream-K kernel 3/4;<br/>Inline long-bound completion remains"]
     XT2C3["XT2C3 TODO<br/>007 Stream-K kernel 3/4;<br/>Inline long-bound completion remains"]
     XT3A["XT3A TODO<br/>reduced SGEMM SC/RR/Sampled green;<br/>Inline backend-dependent and long"]
-    XT3B["XT3B ACTIVE<br/>quick-GEMM SuperCollider frontier:<br/>HGEMM completion and F8 fault health remain"]
+    XT3B["XT3B TODO<br/>HGEMM reaches 136 exact rows at 300 seconds;<br/>F8 fault health also remains"]
     XT3D["XT3D DONE<br/>full SGEMM first problem complete;<br/>quadratic 115,776-event frontier isolated"]
     XT3E["XT3E TODO<br/>both emulator baselines prove intrinsic full-grid bound;<br/>substantially longer unrestricted RR run remains"]
     XT3C["XT3C TODO<br/>SPMM F8 relay-window fix passes 692/692 tests;<br/>rebuilt-hook unrestricted rerun remains"]
@@ -298,8 +298,8 @@ flowchart TD
 
   class R0,E0,D0,C0,V0,B0,B1,B2,B3,B4,B5,S0,S1,S2,S3,S4,S5,S6,A0,A1,A2,A3A,A4A,SC0,RR0,SA0,IS0,IS1,F0,Q0,V1,V2,V3,V8,V4A,V4B,V4C,V4D,V5A,V5B,V6A,V6B,V7,VT,VD,VP,VW,X0,XP0,XP1,XP2A,XP2C,XP4,XP5,XP6,XP7,XP8,XP9,XP10,XT1,XT2A,XT2B,XT2C1,XT3D,XT4A,XT4 done
   class XP9B done
-  class XT3B active
-  class G0,XP1B,XP2B,XP2D,XP3,XP9C,XT2C2,XT2C3,XT3A,XT3E,XT3C,XF,XG todo
+  class XP1B active
+  class G0,XP2B,XP2D,XP3,XP9C,XT2C2,XT2C3,XT3A,XT3B,XT3E,XT3C,XF,XG todo
 ```
 
 Broader partial-EXEC, dynamic-stack, high-register, cache/fence-shape, and
@@ -347,6 +347,16 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XT3B rotates to TODO after a clean-tree SuperCollider HGEMM
+  reassessment.  One-repetition artifact
+  `consan-green-expansion-20260721-tensile-hgemm-sc-clean-independent-053`
+  produces 136 exact numeric passes with zero failures through 300 seconds,
+  but does not finish the first 143-solution problem or supply both applicable
+  coverage records.  That doubles the prior duration evidence without
+  exposing a ConSan correctness defect, so the Mermaid box returns to gray
+  rather than widening the timeout.  XP1B becomes the sole blue/ACTIVE box for
+  the higher-priority torch.mode Sampled/Inline full-object frontier.
 
 - 2026-07-21: XP9C rotates to TODO after a bounded scalar-pressure improvement.
   Commit `e2c1e026bc` lets non-atomic gfx1250 Inline probes embed the stable
