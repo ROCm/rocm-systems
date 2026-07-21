@@ -41,7 +41,7 @@ jobs:
   distbuild:
     runs-on: ubuntu-latest
     container:
-      image: ubuntu:24.04
+      image: dgaliffiamd/rocprofiler-systems:ci-rocm-7.2-ubuntu-24.04
     name: Create distribution tarball
     env:
       INSTALL_DIR: /tmp/foo1
@@ -106,7 +106,7 @@ jobs:
   disttest:
     runs-on: ubuntu-latest
     container:
-      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-24.04
+      image: dgaliffiamd/rocprofiler-systems:ci-rocm-7.2-ubuntu-24.04
     needs: [distbuild]
     name: Tarball tests
     env:
