@@ -703,8 +703,7 @@ void append_moi_sync_site_dispositions(const ConSanOptions &options, ConSanResul
     append_moi_site_disposition(ConSanResourceSiteKind::Fence, fence.container_name,
                                 fence.in_kernel, fence.text_offset, "fence", reason, result,
                                 unowned_communication ||
-                                    (result.arch_name == "gfx1250" &&
-                                     reason == ConSanSiteDispositionReason::IneligibleFence));
+                                    reason == ConSanSiteDispositionReason::IneligibleFence);
   }
 }
 

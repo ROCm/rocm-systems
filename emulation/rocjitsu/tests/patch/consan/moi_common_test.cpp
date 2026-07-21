@@ -96,27 +96,32 @@ TEST(ConSanMoi, Gfx1250RelaxedLdsAtomicIsAccessButNotSynchronization) {
   }));
 }
 
-TEST(ConSanMoi, Gfx1250UnassociatedFenceIsNotApplicable) {
+TEST(ConSanMoi, UnassociatedFenceIsNotApplicableOnEverySupportedTarget) {
   const std::array<uint32_t, 3> text_words = {
       0xF4042000u,
       0x00000000u, // s_dcache_inv
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
   };
-  const std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "unassociated_fence");
-  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.moi_track_atomics = true;
+  const std::array<std::vector<uint8_t>, 2> objects = {
+      make_rdna4_lds_code_object(text_words, "unassociated_fence"),
+      make_gfx1250_code_object(text_words, "unassociated_fence"),
+  };
+  for (const std::vector<uint8_t> &bytes : objects) {
+    ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+    options.moi_track_atomics = true;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+    const ConSanResult result = try_patch_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_EQ(result.moi_fence_candidates.size(), 1u);
-  EXPECT_FALSE(result.moi_fence_candidates.front().eligible);
-  EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [](const auto &site) {
-    return site.site_kind == ConSanResourceSiteKind::Fence &&
-           site.disposition == ConSanSiteDisposition::NotApplicable &&
-           site.reason == ConSanSiteDispositionReason::IneligibleFence &&
-           site.lowering_outcome == ConSanSiteLoweringOutcome::NotApplicable;
-  }));
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_EQ(result.moi_fence_candidates.size(), 1u);
+    EXPECT_FALSE(result.moi_fence_candidates.front().eligible);
+    EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [](const auto &site) {
+      return site.site_kind == ConSanResourceSiteKind::Fence &&
+             site.disposition == ConSanSiteDisposition::NotApplicable &&
+             site.reason == ConSanSiteDispositionReason::IneligibleFence &&
+             site.lowering_outcome == ConSanSiteLoweringOutcome::NotApplicable;
+    }));
+  }
 }
 
 TEST(ConSanMoi, InventoriesDynamicStackMarker) {
