@@ -85,6 +85,52 @@ class TestSafeExpression:
                 subscriptable_names=set(),
             )
 
+    @pytest.mark.parametrize(
+        ("expression", "variables"),
+        [
+            ("'a' * 2", {}),
+            ("2 * 'a'", {}),
+            ("'a' + 'b'", {}),
+            ("'a' * repeat", {"repeat": np.int64(2)}),
+        ],
+    )
+    def test_rejects_string_arithmetic(self, expression, variables):
+        with pytest.raises(UnsafeExpressionError, match="String arithmetic"):
+            evaluate_expression(
+                expression,
+                variables=variables,
+                functions={},
+                subscriptable_names=set(),
+            )
+
+    def test_rejects_string_series_arithmetic(self):
+        raw_pmc_df = pd.DataFrame({"LABEL": ["a", "b"]})
+
+        with pytest.raises(UnsafeExpressionError, match="String arithmetic"):
+            evaluate_expression(
+                "raw_pmc_df['LABEL'] * 2",
+                variables={"raw_pmc_df": raw_pmc_df},
+                functions={},
+                subscriptable_names={"raw_pmc_df"},
+            )
+
+    def test_allows_numeric_series_arithmetic(self):
+        raw_pmc_df = pd.DataFrame({
+            "COUNTER": pd.Series([1, 2], dtype=object),
+        })
+
+        result = evaluate_expression(
+            "raw_pmc_df['COUNTER'] * 2",
+            variables={"raw_pmc_df": raw_pmc_df},
+            functions={},
+            subscriptable_names={"raw_pmc_df"},
+        )
+
+        pd.testing.assert_series_equal(
+            result,
+            pd.Series([2, 4], name="COUNTER", dtype=object),
+        )
+
     def test_where_rejects_side_effect_arguments(self):
         raw_pmc_df = pd.DataFrame({"COUNTER": [1, -1]})
         original = raw_pmc_df.copy()

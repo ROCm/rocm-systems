@@ -74,13 +74,27 @@ class _ExpressionEvaluator:
         except KeyError as error:
             raise NameError(f"name '{node.id}' is not defined") from error
 
+    @staticmethod
+    def _contains_string_data(value: object) -> bool:
+        if isinstance(value, str):
+            return True
+        if not isinstance(value, pd.Series):
+            return False
+        if not pd.api.types.is_object_dtype(value.dtype):
+            return pd.api.types.is_string_dtype(value.dtype)
+        return any(isinstance(item, str) for item in value.array)
+
     def _evaluate_BinOp(self, node: ast.BinOp) -> object:
         function = self._BINARY_OPERATORS.get(type(node.op))
         if function is None:
             raise UnsafeExpressionError(
                 f"Unsupported binary operator: {type(node.op).__name__}"
             )
-        return function(self.evaluate(node.left), self.evaluate(node.right))
+        left = self.evaluate(node.left)
+        right = self.evaluate(node.right)
+        if self._contains_string_data(left) or self._contains_string_data(right):
+            raise UnsafeExpressionError("String arithmetic is not supported")
+        return function(left, right)
 
     def _evaluate_UnaryOp(self, node: ast.UnaryOp) -> object:
         function = self._UNARY_OPERATORS.get(type(node.op))
