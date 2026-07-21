@@ -107,7 +107,9 @@ python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
 ```
 
 The doctor reports every missing checkout, artifact, workload executable,
-hook, and tool. It performs no GPU dispatch.
+hook, and tool.  When a PyTorch workload is selected, it also performs one
+small numeric GPU dispatch and verifies that the process loaded the exact
+ConSan hook.  Other workload kinds remain filesystem/tooling-only preflight.
 
 ## Inspecting the executable contract
 
