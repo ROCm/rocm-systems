@@ -449,4 +449,4 @@ else()
     target_compile_definitions(rocprofiler-sdk-hipfile-nolink
                                INTERFACE ROCPROFILER_SDK_USE_SYSTEM_HIPFILE=0)
 
-endif()                       
+endif()

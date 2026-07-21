@@ -55,8 +55,10 @@ set(IS_DISABLED ON)
 if(TARGET hipfile-trace-client)
     set(IS_DISABLED OFF)
     set(HIPFILE_TRACE_DEPENDS hipfile-trace-client)
+    set(HIPFILE_TRACE_COMMAND $<TARGET_FILE:hipfile-trace-client>)
 else()
     set(HIPFILE_TRACE_DEPENDS rocprofiler-sdk-tool)
+    set(HIPFILE_TRACE_COMMAND ${CMAKE_COMMAND})
 endif()
 
 rocprofiler_add_integration_execute_test(
@@ -64,8 +66,7 @@ rocprofiler_add_integration_execute_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hipfile-trace -d
         ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json rocpd
-        --log-level env --
-        $<IF:$<TARGET_EXISTS:hipfile-trace-client>,$<TARGET_FILE:hipfile-trace-client>,hipfile-trace-client>
+        --log-level env -- ${HIPFILE_TRACE_COMMAND}
     DEPENDS ${HIPFILE_TRACE_DEPENDS}
     TIMEOUT 45
     LABELS "integration-tests"

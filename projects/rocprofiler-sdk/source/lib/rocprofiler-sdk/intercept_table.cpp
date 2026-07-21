@@ -87,7 +87,7 @@ constexpr auto intercept_library_seq = library_sequence_t<ROCPROFILER_HSA_TABLE,
                                                           ROCPROFILER_RCCL_TABLE,
                                                           ROCPROFILER_ROCDECODE_TABLE,
                                                           ROCPROFILER_ROCJPEG_TABLE,
-                                                          ROCPROFILER_ROCSHMEM_TABLE>,
+                                                          ROCPROFILER_ROCSHMEM_TABLE,
                                                           ROCPROFILER_HIPFILE_TABLE>{};
 
 // check that intercept_library_seq is up to date
@@ -257,7 +257,7 @@ template void notify_intercept_table_registration(rocprofiler_intercept_table_t,
                                                   uint64_t,
                                                   uint64_t,
                                                   std::tuple<rocshmemApiFuncTable*>);
-  
+
 template void notify_intercept_table_registration(rocprofiler_intercept_table_t,
                                                   uint64_t,
                                                   uint64_t,
