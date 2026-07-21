@@ -8,8 +8,24 @@ code object is loaded:
 2. **ConSan** instruments the same code object and loads the instrumented
    replacement when possible.
 
-The combined path does not translate between GPU architectures. ConSan
-currently supports native `gfx950`, `gfx1201`, and `gfx1250` code objects.
+## Target support
+
+| Target | Waitcheck | ConSan |
+| --- | --- | --- |
+| `gfx942` | Yes | — |
+| `gfx950` | Yes | Partial |
+| `gfx1100` | Yes | — |
+| `gfx1150` | Yes | — |
+| `gfx1151` | Yes | — |
+| `gfx1200` | Yes | — |
+| `gfx1201` | Yes | Yes |
+| `gfx1250` | Yes | Yes |
+
+Support is for native code objects; neither tool translates between GPU ISAs.
+On waitcheck-only targets, the combined hook reports wait hazards and leaves
+the original code object uninstrumented. “Partial” means native instrumentation
+exists for only a subset of ConSan forms; “Yes” still denotes supported-form
+coverage, not every ISA memory operation.
 
 ## Build
 
