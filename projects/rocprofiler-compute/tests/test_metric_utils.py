@@ -40,7 +40,11 @@ from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
 )
-from utils.metrics.safe_expression import UnsafeExpressionError, evaluate_expression
+from utils.metrics.safe_expression import (
+    MAX_EXPRESSION_NODES,
+    UnsafeExpressionError,
+    evaluate_expression,
+)
 from utils.utils_analysis import add_unit_counter
 from utils.utils_counter_defs import SUPPORTED_DENOM, UNIT_COUNTER
 
@@ -97,6 +101,20 @@ class TestSafeExpression:
             )
 
         pd.testing.assert_frame_equal(raw_pmc_df, original)
+
+    def test_deep_expression_raises_safe_error(self):
+        expression = "+".join(["1"] * 1500)
+        assert sum(1 for _ in ast.walk(ast.parse(expression, mode="eval"))) < (
+            MAX_EXPRESSION_NODES
+        )
+
+        with pytest.raises(UnsafeExpressionError, match="too deeply nested"):
+            evaluate_expression(
+                expression,
+                variables={},
+                functions={},
+                subscriptable_names=set(),
+            )
 
 
 # =============================================================================

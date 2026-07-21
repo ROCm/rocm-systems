@@ -173,12 +173,18 @@ def evaluate_expression(
         raise UnsafeExpressionError(
             f"Invalid metric expression: {error.msg}"
         ) from error
+    except RecursionError as error:
+        raise UnsafeExpressionError("Metric expression is too deeply nested") from error
 
     if sum(1 for _ in ast.walk(tree)) > MAX_EXPRESSION_NODES:
         raise UnsafeExpressionError("Metric expression is too complex")
 
-    return _ExpressionEvaluator(
+    evaluator = _ExpressionEvaluator(
         variables=variables,
         functions=functions,
         subscriptable_names=subscriptable_names,
-    ).evaluate(tree)
+    )
+    try:
+        return evaluator.evaluate(tree)
+    except RecursionError as error:
+        raise UnsafeExpressionError("Metric expression is too deeply nested") from error
