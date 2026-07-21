@@ -3568,7 +3568,7 @@ TEST(WaitcheckTest, Gfx1250DoesNotInventTensorcntBeforeProgramEnd) {
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
 }
 
-TEST(WaitcheckTest, Gfx1201CodeObjectDoesNotTrackAluDependenciesInNormalMode) {
+TEST(WaitcheckTest, Gfx1201CodeObjectTracksSgprHazardsInNormalMode) {
   std::vector<uint32_t> program;
   append_inst(program, v_add_f32_e32(0, 102, 0));
   append_inst(program, s_mov_b32(102, 128));
@@ -3577,8 +3577,28 @@ TEST(WaitcheckTest, Gfx1201CodeObjectDoesNotTrackAluDependenciesInNormalMode) {
   TestCodeObject code_object(program);
   auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
 
-  EXPECT_TRUE(report.supported) << report.analysis_error;
-  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].kind, WaitcheckDiagnosticKind::SgprDepctr);
+  EXPECT_NE(report.diagnostics[0].message.find("depctr_sa_sdst(0)"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Gfx1201DisablingExpertModeDoesNotClearSgprHazards) {
+  constexpr uint32_t kHwRegWaveSchedMode = 26;
+  std::vector<uint32_t> program;
+  append_inst(program, s_setreg_imm32_b32(hwreg(kHwRegWaveSchedMode, 0, 2), 2));
+  append_inst(program, v_add_f32_e32(0, 102, 0));
+  append_inst(program, s_mov_b32(102, 128));
+  append_inst(program, s_setreg_imm32_b32(hwreg(kHwRegWaveSchedMode, 0, 2), 0));
+  append_inst(program, v_add_f32_e32(1, 102, 1));
+
+  TestCodeObject code_object(program);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].kind, WaitcheckDiagnosticKind::SgprDepctr);
+  EXPECT_NE(report.diagnostics[0].message.find("depctr_sa_sdst(0)"), std::string::npos);
 }
 
 TEST(WaitcheckTest, Gfx1201CodeObjectTracksAluDependenciesInExpertMode) {

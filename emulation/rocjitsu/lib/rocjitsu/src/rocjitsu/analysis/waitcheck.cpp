@@ -2875,8 +2875,6 @@ private:
   static void clear_expert_wait_state(PendingState &state) {
     state.pending[counter_index(WaitCounterKind::VmVsrc)].clear();
     state.uncertain_order[counter_index(WaitCounterKind::VmVsrc)] = false;
-    state.sgpr_hazards = {};
-    state.delay_alu.clear();
     clear_va_vdst_hazards(state.va_vdst_hazards);
   }
 
@@ -5182,7 +5180,10 @@ private:
     }
     apply_expert_scheduling_mode(state, inst, arch);
     clear_matching_barrier_scc_write(state, inst);
-    if (tracks_gfx12_sgpr_hazards(arch) && expert_waits_enabled(state))
+    // LLVM's AMDGPUWaitSGPRHazards pass models this RDNA4 hardware hazard
+    // independently of expert scheduling mode. Do not couple SA_SDST,
+    // VA_SDST, or VA_VCC tracking to the expert-only VM/VALU counters.
+    if (tracks_gfx12_sgpr_hazards(arch))
       apply_sgpr_hazard_memory_cull(state.sgpr_hazards, inst.mnemonic());
     apply_embedded_waitcnt(state, inst, arch);
 
@@ -5207,7 +5208,7 @@ private:
       if (expert_waits_enabled(state))
         check_va_vdst_hazard(state.va_vdst_hazards, inst, du, section_offset, file_offset);
     }
-    if (tracks_gfx12_sgpr_hazards(arch) && expert_waits_enabled(state)) {
+    if (tracks_gfx12_sgpr_hazards(arch)) {
       update_sgpr_hazards(state.sgpr_hazards, inst, du, section_name, section_offset, file_offset,
                           emit_report_diagnostics);
     }
