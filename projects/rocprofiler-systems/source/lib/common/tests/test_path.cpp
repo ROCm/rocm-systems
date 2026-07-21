@@ -382,7 +382,7 @@ TEST_F(PathTest, ParentPath_Identity_RedundantSlashesVerbatim)
 
 TEST_F(PathTest, ParentPath_NegativeArgWrapsAndClamps)
 {
-    // -1 converts to uint16_t max (65535); loop clamps at the root / relative bottom
+    // -1 converts to uint16 max (65535): should clamp at the root / relative bottom
     EXPECT_EQ(parent_path("/a/b/c", -1), "/");
     EXPECT_EQ(parent_path("a/b/c", -1), "");
 }
