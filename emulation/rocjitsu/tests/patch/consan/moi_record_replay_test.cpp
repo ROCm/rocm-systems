@@ -2899,23 +2899,33 @@ TEST(ConSanMoi, AtomicRecordPatchTrampolinesFlatAtomicAndWritesRecord) {
             trampoline_words.end());
   EXPECT_NE(std::find(trampoline_words.begin(), trampoline_words.end(), *restore_exec),
             trampoline_words.end());
+  const auto save_active_exec =
+      build_s_mov_b64(*result.resolved_moi_exec_save_sgpr, kRdna4ExecLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto lane_rank_lo =
-      build_v_mbcnt_lo_u32_b32(*options.scratch_vgpr, /*src0=*/0xC1, scalar_positive_inline_u32(0),
-                               ROCJITSU_CODE_ARCH_RDNA4);
-  const auto lane_rank_hi =
-      build_v_mbcnt_hi_u32_b32(*options.scratch_vgpr, /*src0=*/0xC1,
-                               vector_source_vgpr(*options.scratch_vgpr), ROCJITSU_CODE_ARCH_RDNA4);
+      build_v_mbcnt_lo_u32_b32(*options.scratch_vgpr, *result.resolved_moi_exec_save_sgpr,
+                               scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
+  const auto lane_rank_hi = build_v_mbcnt_hi_u32_b32(
+      *options.scratch_vgpr, static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 1u),
+      vector_source_vgpr(*options.scratch_vgpr), ROCJITSU_CODE_ARCH_RDNA4);
   const auto select_first_lane = build_v_cmp_eq_u32_e32_vcc(
       scalar_positive_inline_u32(0), *options.scratch_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_TRUE(lane_rank_lo && lane_rank_hi && select_first_lane);
+  ASSERT_TRUE(save_active_exec && lane_rank_lo && lane_rank_hi && select_first_lane);
+  const auto saved_active_exec =
+      std::find(trampoline_words.begin(), trampoline_words.end(), *save_active_exec);
   EXPECT_TRUE(contains_subsequence(trampoline_words, *lane_rank_lo));
   EXPECT_TRUE(contains_subsequence(trampoline_words, *lane_rank_hi));
+  const auto ranked = std::search(trampoline_words.begin(), trampoline_words.end(),
+                                  lane_rank_lo->begin(), lane_rank_lo->end());
   const auto selected =
       std::find(trampoline_words.begin(), trampoline_words.end(), *select_first_lane);
   const auto reserved = std::search(trampoline_words.begin(), trampoline_words.end(),
                                     reserve_record.begin(), reserve_record.end());
+  ASSERT_NE(saved_active_exec, trampoline_words.end());
+  ASSERT_NE(ranked, trampoline_words.end());
   ASSERT_NE(selected, trampoline_words.end());
   ASSERT_NE(reserved, trampoline_words.end());
+  EXPECT_LT(saved_active_exec, ranked);
+  EXPECT_LT(ranked, selected);
   EXPECT_LT(selected, reserved);
 
   const auto expect_dynamic_field_address = [&](uint32_t offset) {

@@ -337,6 +337,10 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     errors.emplace_back("ConSan MOI atomic record patch requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
   }
+  if (!options.moi_exec_save_sgpr) {
+    errors.emplace_back("ConSan MOI atomic record patch requires scalar EXEC state");
+    return std::nullopt;
+  }
   if (static_cast<uint32_t>(*options.scratch_vgpr) + address_plan.scratch_vgpr_count > 256u) {
     errors.emplace_back("ConSan MOI atomic record patch has an invalid scratch VGPR window");
     return std::nullopt;
@@ -448,7 +452,6 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   const uint64_t atomic_record_base = base + atomic_records_offset;
   const uint16_t slot_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 2u);
   const uint16_t lane_rank_vgpr = *options.scratch_vgpr;
-  constexpr uint16_t kScalarInlineMinusOne = 0xC1;
   if (is_compare_exchange) {
     if (!candidate.site.data_vgpr || !candidate.site.dst_vgpr) {
       errors.emplace_back("ConSan MOI atomic record CAS lacks compare/result operands");
@@ -467,20 +470,22 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     words.push_back(
         build_v_mov_b32_e32(static_cast<uint16_t>(*options.scratch_vgpr + 4u), kRdna4VccHi, arch));
   }
+  const auto save_active_exec =
+      instrumentation::build_s_mov_b64(*options.moi_exec_save_sgpr, kRdna4ExecLo, arch);
   const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
-      lane_rank_vgpr, kScalarInlineMinusOne, scalar_positive_inline_u32(0), arch);
+      lane_rank_vgpr, *options.moi_exec_save_sgpr, scalar_positive_inline_u32(0), arch);
   const auto mbcnt_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
-      lane_rank_vgpr, kScalarInlineMinusOne, vector_source_vgpr(lane_rank_vgpr), arch);
+      lane_rank_vgpr, static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u),
+      vector_source_vgpr(lane_rank_vgpr), arch);
   const auto first_active_lane =
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank_vgpr, arch);
-  const auto save_exec = options.moi_exec_save_sgpr
-                             ? instrumentation::build_s_and_saveexec_b64(
-                                   *options.moi_exec_save_sgpr, kRdna4VccLo, arch)
-                             : std::nullopt;
-  if (!mbcnt_lo || !mbcnt_hi || !first_active_lane || !save_exec) {
+  const auto save_exec =
+      instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
+  if (!save_active_exec || !mbcnt_lo || !mbcnt_hi || !first_active_lane || !save_exec) {
     errors.emplace_back("ConSan MOI atomic record patch could not select a wave publisher");
     return std::nullopt;
   }
+  words.push_back(*save_active_exec);
   words.insert(words.end(), mbcnt_lo->begin(), mbcnt_lo->end());
   words.insert(words.end(), mbcnt_hi->begin(), mbcnt_hi->end());
   words.push_back(*first_active_lane);
