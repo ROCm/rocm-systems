@@ -2,7 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 /// @file plugin_abi.h
-/// @brief Stable C ABI for runtime-loadable execution plugins.
+/// @brief In-tree toolchain contract for runtime-loadable execution plugins.
+///
+/// This is a toolchain contract, not a stable ABI: it only supports plugins
+/// built in-tree, from the same source tree and toolchain as the host (see
+/// "Toolchain contract" below). It does not offer the compatibility
+/// guarantees a true stable ABI would (e.g. across compilers, standard
+/// library versions, or releases).
 ///
 /// Execution plugins are shipped as shared objects named
 /// `librocjitsu_plugin_<name>.so` and discovered through the standard
@@ -10,11 +16,11 @@
 ///
 /// Each plugin shared object must export exactly three `extern "C"` symbols.
 /// They form a C-shaped boundary: no C++ library types (`std::unique_ptr`,
-/// `std::string`, ...) cross the ABI, and the plugin owns allocation and
+/// `std::string`, ...) cross the boundary, and the plugin owns allocation and
 /// destruction of its instance via its own allocator.
 ///
 ///   1. `rocjitsu_plugin_metadata` — returns a pointer to a static
-///      ::rocjitsu::PluginMetadata describing the plugin (ABI version,
+///      ::rocjitsu::PluginMetadata describing the plugin (contract version,
 ///      name, contact, version, and a JSON config schema).
 ///
 ///   2. `rocjitsu_plugin_create` — constructs a plugin instance from a JSON
@@ -31,8 +37,10 @@
 /// The opaque handle is an ::rocjitsu::ExecutionPlugin subclass instance; the
 /// host calls its virtual hooks directly. Plugins must therefore be built
 /// in-tree with the same toolchain and standard library as the host, against a
-/// matching ::rocjitsu::ExecutionPlugin layout. The ABI version below guards
-/// against mismatched in-tree builds; it is not a cross-toolchain guarantee.
+/// matching ::rocjitsu::ExecutionPlugin layout. The contract version below
+/// only guards against mismatched in-tree builds (e.g. a stale plugin built
+/// against an older header); it is not a stable ABI and provides no
+/// cross-toolchain or cross-release compatibility guarantee.
 ///
 /// Use the ROCJITSU_DEFINE_PLUGIN() helper to emit all three exports.
 
@@ -46,8 +54,11 @@
 
 namespace rocjitsu {
 
-/// @brief ABI version. Bump on any incompatible change to the plugin
-/// interface (this header, ExecutionPlugin's hook signatures, etc.).
+/// @brief Toolchain-contract version. Bump on any incompatible change to the
+/// plugin interface (this header, ExecutionPlugin's hook signatures, etc.).
+/// This is not a stable ABI version: it only detects mismatched in-tree
+/// builds, not compatibility across toolchains or releases (see the
+/// "Toolchain contract" note above).
 inline constexpr int kPluginAbiVersion = 2;
 
 /// @brief Opaque handle to a plugin instance returned by the create export.
@@ -64,7 +75,9 @@ using PluginHandle = void *;
 /// plugin shared object; they remain valid for as long as the library is
 /// loaded.
 struct PluginMetadata {
-  /// Must equal ::rocjitsu::kPluginAbiVersion. The loader rejects mismatches.
+  /// Toolchain-contract version; must equal ::rocjitsu::kPluginAbiVersion.
+  /// The loader rejects mismatches. Not a stable ABI version — see the
+  /// "Toolchain contract" note above.
   int abi;
   /// Plugin name. Must match the `<name>` in `librocjitsu_plugin_<name>.so`
   /// and the key used to configure the plugin in the config file.
@@ -105,10 +118,11 @@ inline constexpr const char *kPluginDestroySymbol = "rocjitsu_plugin_destroy";
 
 } // namespace rocjitsu
 
-/// @brief Ensure ABI exports stay visible even under -fvisibility=hidden.
+/// @brief Ensure the plugin's exported symbols stay visible even under
+/// -fvisibility=hidden.
 #define ROCJITSU_PLUGIN_EXPORT RJ_API_EXPORT
 
-/// @brief Emit the three required plugin ABI exports.
+/// @brief Emit the three required plugin exports.
 ///
 /// @param PluginClass Concrete ::rocjitsu::ExecutionPlugin subclass. It must
 ///        be constructible from a single `const char *config_json` argument.
