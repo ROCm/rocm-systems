@@ -294,9 +294,10 @@ ncclResult_t ncclGetUserP2pLevel(int* level) {
 // Tests two ranks for CUDA P2P connectivity.
 // *cudaP2p returns 1 if CUDA P2P between the ranks is supported.
 // *p2p returns 1 only if the distance between the ranks is no greater than NCCL_P2P_LEVEL.
+// *isCrossClique returns 1 when P2P is classified using MNNVL fabric metadata.
 // The connection may go through an intermediate rank.
 ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* system, int rank1, int rank2, int* p2p,
-                              int* read, int* intermediateRank, int* cudaP2p) {
+                              int* read, int* intermediateRank, int* cudaP2p, int* isCrossClique) {
   int mnnvl = 0;
   struct ncclPeerInfo* info1 = NULL;
   struct ncclPeerInfo* info2 = NULL;
@@ -304,6 +305,7 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
   if (read) *read = 0;
   if (intermediateRank) *intermediateRank = -1;
   if (cudaP2p) *cudaP2p = 0;
+  if (isCrossClique) *isCrossClique = 0;
 
   // Rule out different nodes / isolated containers
   if (comm) {
@@ -313,9 +315,13 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
       if (comm->MNNVL) {
         NCCLCHECK(ncclTopoCheckMNNVL(comm, info1, info2, &mnnvl));
         if (mnnvl < 0) {
-          // Force enable CUDA P2P for cross-clique (NCCL_MNNVL_CROSS_CLIQUE=1)
-          if (p2p) *p2p = 1;
+          // Cross-clique connectivity comes from communicator-wide fabric metadata because the peer is absent from
+          // this rank's topology.
+          int p2pLevel = PATH_NVL;
+          NCCLCHECK(ncclGetUserP2pLevel(&p2pLevel));
+          *p2p = p2pLevel >= PATH_NVL;
           if (cudaP2p) *cudaP2p = 1;
+          if (isCrossClique) *isCrossClique = 1;
           return ncclSuccess;
         }
         if (!mnnvl) return ncclSuccess;
@@ -451,7 +457,7 @@ ncclResult_t ncclTopoCheckMNNVL(struct ncclComm* comm, struct ncclPeerInfo* info
       (comm->p2pCrossClique || fabricInfo1->cliqueId == fabricInfo2->cliqueId)) {
     TRACE(NCCL_NET, "MNNVL rank %d matching peer %d 0x%lx UUID %lx.%lx cliqueId 0x%x/0x%x crossClique %d", info1->rank,
           info2->rank, info2->busId, uuid0, uuid1, fabricInfo1->cliqueId, fabricInfo2->cliqueId, comm->p2pCrossClique);
-    // Return -1 for cross-clique (different clique but same UUID) to force CUDA P2P
+    // Return -1 to distinguish cross-clique peers (different clique but same UUID).
     *ret = (comm->p2pCrossClique && fabricInfo1->cliqueId != fabricInfo2->cliqueId) ? -1 : 1;
   }
   return ncclSuccess;
@@ -607,6 +613,7 @@ ncclResult_t ncclTopoCheckNet(struct ncclTopoSystem* system, int rank1, int rank
     *net = 0;
     return ncclSuccess;
   }
+  *net = 1;
   // First check the current GPU-to-GPU speed.
   int g1, g2;
   if (ncclTopoRankToIndex(system, rank1, &g1, /*showWarn=*/false) != ncclSuccess ||
@@ -614,7 +621,6 @@ ncclResult_t ncclTopoCheckNet(struct ncclTopoSystem* system, int rank1, int rank
     return ncclSuccess;
   }
 
-  *net = 1;
   struct ncclTopoNode* gpu1 = system->nodes[GPU].nodes + g1;
   struct ncclTopoNode* gpu2 = system->nodes[GPU].nodes + g2;
   float speed = gpu1->paths[GPU][g2].bw;

@@ -132,19 +132,23 @@ ncclResult_t p2pCanConnect(int* ret, struct ncclComm* comm, struct ncclTopoGraph
 
   // Check topology / p2p level.
   int intermediateRank;
-  NCCLCHECK(ncclTopoCheckP2p(comm, comm->topo, info1->rank, info2->rank, ret, NULL, &intermediateRank, NULL));
+  int isCrossClique;
+  NCCLCHECK(ncclTopoCheckP2p(comm, comm->topo, info1->rank, info2->rank, ret, NULL, &intermediateRank, NULL,
+                             &isCrossClique));
   if (*ret == 0) return ncclSuccess;
   if (intermediateRank != -1) {
     if (useMemcpy) *ret = 0;
     return ncclSuccess;
   }
 
-  // Check if NET would work better
-  int useNet = 0;
-  NCCLCHECK(ncclTopoCheckNet(comm->topo, info1->rank, info2->rank, &useNet));
-  if (useNet) {
-    *ret = 0;
-    return ncclSuccess;
+  // Cross-clique MNNVL is preferred because its peer is absent from this rank's topology.
+  if (!isCrossClique) {
+    int useNet = 0;
+    NCCLCHECK(ncclTopoCheckNet(comm->topo, info1->rank, info2->rank, &useNet));
+    if (useNet) {
+      *ret = 0;
+      return ncclSuccess;
+    }
   }
 
   if (info1->hostHash != comm->peerInfo[comm->rank].hostHash || info1->hostHash != info2->hostHash) {

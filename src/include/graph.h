@@ -40,7 +40,7 @@ ncclResult_t ncclTopoComputeCommCPU(struct ncclComm* comm);
 ncclResult_t ncclTopoGetNetDev(struct ncclComm* comm, int rank, struct ncclTopoGraph* graph, int channelId,
                                int peerRank, int64_t* id, int* dev, int* proxyRank);
 ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* system, int rank1, int rank2, int* p2p,
-                              int* read, int* intermediateRank, int* cudaP2p);
+                              int* read, int* intermediateRank, int* cudaP2p, int* isCrossClique = nullptr);
 ncclResult_t ncclTopoCheckMNNVL(struct ncclComm* comm, struct ncclPeerInfo* info1, struct ncclPeerInfo* info2,
                                 int* ret);
 enum ncclTopoGdrMode {
