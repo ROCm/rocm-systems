@@ -606,11 +606,16 @@ void AqlQueue::AllocRegisteredRingBuffer(uint32_t queue_size_pkts) {
                                 "Trying to allocate an AQL ring buffer in device memory without "
                                 "large BAR PCIe enabled.");
     }
-    // Device-memory ring buffers use the region's default CPU mapping; callers
-    // that select this path are responsible for the required packet-store ordering.
+    // GFX10/GFX11 need uncached memory - GPU L2 doesn't snoop PCIe BAR writes to local VRAM.
+    // GFX12+ has improved cache coherency and can use cached memory for better performance.
+    core::MemoryRegion::AllocateFlags alloc_flags = core::MemoryRegion::AllocateExecutable;
+    if (agent_->supported_isas()[0]->GetMajorVersion() < 12) {
+      alloc_flags = static_cast<core::MemoryRegion::AllocateFlags>(
+          alloc_flags | core::MemoryRegion::AllocateUncached);
+    }
     ring_buf_ = agent_->coarsegrain_allocator()(
         ring_buf_alloc_bytes_ + ring_buf_metadata_alloc_bytes_,
-        core::MemoryRegion::AllocateExecutable);
+        alloc_flags);
   } else {
     ring_buf_ = agent_->system_allocator()(
         ring_buf_alloc_bytes_ + ring_buf_metadata_alloc_bytes_, 0x1000,

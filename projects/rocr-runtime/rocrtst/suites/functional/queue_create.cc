@@ -188,6 +188,16 @@ void QueueCreateTest::SystemMemQueueTest() {
   ASSERT_SUCCESS(hsa_queue_destroy(desc.queue));
 }
 
+void QueueCreateTest::DestroyQueues(hsa_amd_queue_create_desc_t* descs, uint32_t num_descs) {
+  for (uint32_t i = 0; i < num_descs; i++) {
+    if (descs[i].queue != nullptr) {
+      hsa_status_t status = hsa_queue_destroy(descs[i].queue);
+      ASSERT_SUCCESS(status);
+      descs[i].queue = nullptr;
+    }
+  }
+}
+
 void QueueCreateTest::DeviceMemRingBufQueueTest() {
   ASSERT_SUCCESS(rocrtst::SetDefaultAgents(this));
   ASSERT_SUCCESS(rocrtst::SetPoolsTypical(this));
@@ -256,11 +266,7 @@ void QueueCreateTest::BatchQueueCreateTest() {
   hsa_status_t status = hsa_amd_queue_create(*gpu_device1(), descs, kNumQueues);
   if (status == HSA_STATUS_ERROR_INVALID_ARGUMENT ||
       status == HSA_STATUS_ERROR_INVALID_QUEUE_CREATION) {
-    for (int i = 0; i < kNumQueues; i++) {
-      if (descs[i].queue != nullptr) {
-        hsa_queue_destroy(descs[i].queue);
-      }
-    }
+    DestroyQueues(descs, kNumQueues);
     printf("  BatchQueueCreateTest: SKIPPED (agent does not support "
            "device-memory flags or Large BAR is unavailable)\n");
     return;
@@ -276,9 +282,7 @@ void QueueCreateTest::BatchQueueCreateTest() {
     DispatchAndVerify(descs[i].queue, labels[i]);
   }
 
-  for (int i = 0; i < kNumQueues; i++) {
-    ASSERT_SUCCESS(hsa_queue_destroy(descs[i].queue));
-  }
+  DestroyQueues(descs, kNumQueues);
 }
 
 void QueueCreateTest::SdmaQueueCreateDestroyTest() {

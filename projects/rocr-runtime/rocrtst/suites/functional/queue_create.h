@@ -41,6 +41,7 @@ class QueueCreateTest : public TestBase {
 
  private:
   void DispatchAndVerify(hsa_queue_t* queue, const char* test_label);
+  void DestroyQueues(hsa_amd_queue_create_desc_t* descs, uint32_t num_descs);
 };
 
 #endif  // ROCRTST_SUITES_FUNCTIONAL_QUEUE_CREATE_H
