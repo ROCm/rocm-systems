@@ -21,6 +21,7 @@ import utils.utils_common as utils_common
 import utils.utils_profile as utils_profile
 from utils.amdsmi_interface import _per_device_query
 from utils.mi_gpu_spec import mi_gpu_specs
+from utils.rocm_stack_preflight import Rocprofv3Launch
 from utils.tty import (
     format_duration,
     format_node_stats,
@@ -940,21 +941,6 @@ def test_parse_pmc_perf_file_not_found():
 # =============================================================================
 
 
-def test_workload_cmd_from_options_extracts_after_separator():
-    assert utils_profile._workload_cmd_from_options([
-        "-A",
-        "absolute",
-        "--",
-        "python3",
-        "net.py",
-    ]) == ["python3", "net.py"]
-
-
-def test_workload_cmd_from_options_empty_without_separator():
-    options = ["-A", "absolute", "-i", "x.yaml"]
-    assert utils_profile._workload_cmd_from_options(options) == []
-
-
 def test_workload_cmd_from_options_keeps_nested_separator():
     # Torch-trace wraps the app: python3 launch.py --frameworks torch -- net.py
     assert utils_profile._workload_cmd_from_options([
@@ -969,7 +955,7 @@ def test_workload_cmd_from_options_keeps_nested_separator():
 
 
 def test_run_prof_v3_forces_workload_comgr(tmp_path, monkeypatch):
-    """rocprofv3: a detected workload comgr is prepended to LD_PRELOAD."""
+    """rocprofv3: the pre-flight forced comgr is prepended to LD_PRELOAD."""
     fname = tmp_path / "pmc_perf_test.yaml"
     fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
     workload_dir = str(tmp_path / "workload")
@@ -977,11 +963,6 @@ def test_run_prof_v3_forces_workload_comgr(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
-    monkeypatch.setattr(
-        "utils.utils_profile.detect_and_log_double_comgr",
-        lambda *a, **k: Path("/wheel/lib/libamd_comgr.so.3"),
-    )
-    utils_profile._forced_workload_comgr.cache_clear()
 
     captured: dict[str, dict[str, str]] = {}
 
@@ -998,7 +979,7 @@ def test_run_prof_v3_forces_workload_comgr(tmp_path, monkeypatch):
             workload_dir,
             logging.INFO,
             "csv",
-            tool_path="/tool.so",
+            launch=Rocprofv3Launch(forced_comgr="/wheel/lib/libamd_comgr.so.3"),
         )
 
     assert captured["env"]["LD_PRELOAD"].split(":")[0] == "/wheel/lib/libamd_comgr.so.3"

@@ -7,6 +7,7 @@ import shlex
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_error, console_log, demarcate
+from utils.rocm_stack_preflight import plan_rocprofv3
 from utils.utils_common import PROFILE_OUTPUT_FORMAT
 from utils.utils_profile import pc_sampling_unit
 
@@ -117,6 +118,9 @@ class rocprof_v3_profiler(RocProfCompute_Base):
     def pre_processing(self) -> None:
         """Perform any pre-processing steps prior to profiling."""
         super().pre_processing()
+
+        if self._stack_resolution is not None:
+            self._launch = plan_rocprofv3(self._stack_resolution)
 
     @demarcate
     def run_profiling(self, version: str, prog: str) -> None:

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
+import os
 import re
 import shlex
 import shutil
@@ -22,6 +23,11 @@ from utils.logger import (
     demarcate,
 )
 from utils.native_tool_finder import NativeToolFinder
+from utils.rocm_stack_preflight import (
+    Rocprofv3Launch,
+    StackResolution,
+    resolve_rocm_stacks,
+)
 from utils.utils_common import (
     PROFILE_OUTPUT_FORMAT,
     format_time,
@@ -152,6 +158,10 @@ class RocProfCompute_Base:
         self.__args = args
         self.__profiler = profiler_mode
         self._soc = soc  # OmniSoC obj
+
+        # ROCm stack pre-flight state populated during pre-processing.
+        self._stack_resolution: Optional[StackResolution] = None
+        self._launch: Rocprofv3Launch = Rocprofv3Launch()
 
     def get_args(self) -> argparse.Namespace:
         return self.__args
@@ -320,6 +330,17 @@ class RocProfCompute_Base:
             soc=self._soc,
         )
 
+        # Resolve the profiler and workload ROCm stacks for backend pre-flight.
+        self._stack_resolution = (
+            resolve_rocm_stacks(
+                shlex.split(args.remaining),
+                getattr(args, "rocprofiler_sdk_tool_path", None),
+                dict(os.environ),
+            )
+            if args.remaining and not args.attach_pid
+            else None
+        )
+
     def profile(
         self,
         fnames: Union[list[Path], Path],
@@ -362,7 +383,8 @@ class RocProfCompute_Base:
                 workload_dir=args.output_directory,
                 ml_api_trace_enabled=bool(getattr(self, "_selected_frameworks", set())),
                 retain_rocpd_output=args.retain_rocpd_output,
-                tool_path=getattr(args, "rocprofiler_sdk_tool_path", None),
+                launch=self._launch,
+                resolution=self._stack_resolution,
             )
 
             end_time = time.time()

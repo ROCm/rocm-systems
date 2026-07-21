@@ -2,7 +2,6 @@
 # SPDX-License-Identifier:  MIT
 
 import fcntl
-import functools
 import importlib
 import os
 import pkgutil
@@ -18,17 +17,6 @@ from typing import Any, Optional, Union, cast
 import config
 import utils.utils_profile_csv as csv_ops
 from utils import rocpd_data
-from utils.comgr_detect import (
-    dedupe_comgr_paths,
-    detect_and_log_double_comgr,
-    double_comgr_error_message,
-    find_workload_comgr_by_imports,
-    find_workload_comgr_dynamic,
-    find_workload_comgr_static,
-    output_indicates_double_comgr,
-    resolve_tool_comgr,
-    tool_path_from_preload,
-)
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
@@ -36,6 +24,13 @@ from utils.logger import (
     console_log,
     console_warning,
     demarcate,
+)
+from utils.rocm_stack_preflight import (
+    COMGR_LIB_STEM,
+    Rocprofv3Launch,
+    StackResolution,
+    double_comgr_error_message,
+    output_indicates_double_comgr,
 )
 from utils.utils_common import (
     capture_subprocess_output,
@@ -80,16 +75,6 @@ def _workload_cmd_from_options(options: list[str]) -> list[str]:
     if "--" in options:
         return options[options.index("--") + 1 :]
     return []
-
-
-@functools.lru_cache(maxsize=None)
-def _forced_workload_comgr(
-    app_cmd: tuple[str, ...],
-    tool_path: Optional[str],
-) -> Optional[str]:
-    """Return the workload comgr to preload for ``app_cmd``, or ``None``."""
-    forced = detect_and_log_double_comgr(list(app_cmd), tool_path, dict(os.environ))
-    return str(forced) if forced is not None else None
 
 
 @contextmanager
@@ -163,7 +148,8 @@ def run_prof(
     ml_api_trace_enabled: bool = False,
     retain_rocpd_output: bool = False,
     extra_env: Optional[dict[str, str]] = None,
-    tool_path: Optional[str] = None,
+    launch: Optional[Rocprofv3Launch] = None,
+    resolution: Optional[StackResolution] = None,
 ) -> None:
     multiple_files = isinstance(fnames, list)
     if multiple_files and (
@@ -271,21 +257,24 @@ def run_prof(
             )
     else:
         app_cmd = _workload_cmd_from_options(options)
-        if app_cmd and not is_live_attach(profiler_options):
-            forced_comgr = _forced_workload_comgr(tuple(app_cmd), tool_path)
-            if forced_comgr is not None:
+        rocprof_bin = get_rocprof_cmd()
+        if launch is not None and app_cmd and not is_live_attach(profiler_options):
+            if launch.rocprofv3 is not None:
+                rocprof_bin = launch.rocprofv3
+            elif launch.forced_comgr is not None:
                 existing = new_env.get("LD_PRELOAD")
                 new_env["LD_PRELOAD"] = ":".join(
-                    part for part in (forced_comgr, existing) if part
+                    part for part in (launch.forced_comgr, existing) if part
                 )
                 console_log(
-                    "comgr", f"Forcing single comgr via LD_PRELOAD: {forced_comgr}"
+                    "comgr",
+                    f"Forcing single comgr via LD_PRELOAD: {launch.forced_comgr}",
                 )
         # print in readable format using shlex
-        console_debug(f"rocprof command: {shlex.join([get_rocprof_cmd()] + options)}")
+        console_debug(f"rocprof command: {shlex.join([rocprof_bin] + options)}")
         # profile the app
         success, output = capture_subprocess_output(
-            [get_rocprof_cmd()] + options, new_env=new_env, profileMode=True
+            [rocprof_bin] + options, new_env=new_env, profileMode=True
         )
 
     time_2 = time.time()
@@ -312,19 +301,13 @@ def run_prof(
             stripped = line.strip()
             if stripped:
                 _classify_output_line(stripped)
-        if output_indicates_double_comgr(output):
-            tool_comgr = resolve_tool_comgr(
-                tool_path_from_preload(new_env.get("LD_PRELOAD"))
-            )
-            # Probe with a clean environment, without the profiler's LD_PRELOAD.
-            probe_env = dict(os.environ)
-            workload_comgrs = dedupe_comgr_paths(
-                find_workload_comgr_dynamic(new_env)
-                + find_workload_comgr_by_imports(app_cmd or [], probe_env)
-                + find_workload_comgr_static(app_cmd or [])
-            )
+        if output_indicates_double_comgr(output) and resolution is not None:
             console_error(
-                double_comgr_error_message(tool_comgr, workload_comgrs), exit=False
+                double_comgr_error_message(
+                    resolution.tool(COMGR_LIB_STEM),
+                    resolution.workload(COMGR_LIB_STEM),
+                ),
+                exit=False,
             )
         console_error("Profiling execution failed.")
 

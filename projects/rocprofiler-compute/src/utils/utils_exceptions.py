@@ -8,6 +8,10 @@ class WorkloadCommandError(Exception):
     """Base for all workload command validation errors raised by sanitize()."""
 
 
+class IncompatibleRocmStackError(Exception):
+    """The workload and profiler cannot run on a single, compatible ROCm stack."""
+
+
 class ExecutableNotFoundError(WorkloadCommandError, FileNotFoundError):
     """The command could not be resolved to an executable via PATH."""
 

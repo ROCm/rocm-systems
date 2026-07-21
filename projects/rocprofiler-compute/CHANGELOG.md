@@ -73,7 +73,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
-* Fixed profiling aborts caused by two different ``libamd_comgr`` libraries loading in the same process (for example, a PyTorch wheel bundling its own ROCm alongside the profiler's ROCm). rocprof-compute now detects the workload's ``libamd_comgr`` and, when its soname major matches the profiler tool's ``libamd_comgr``, forces a single library through ``LD_PRELOAD`` so the run can proceed. When the majors differ (a conflict a single preload cannot resolve), it reports a clear, actionable error instead of a cryptic LLVM abort.
+* Fixed profiling aborts caused by a workload bundling its own ROCm alongside the profiler's (for example, a PyTorch or pip ROCm wheel), where duplicate ``libamd_comgr`` or rocprofiler libraries caused an LLVM abort or a rocprofiler registration failure (error 16). rocprof-compute now compares the profiler and workload ROCm stacks before profiling, runs them on a single ``libamd_comgr`` when the versions are compatible, and otherwise reports a clear message identifying both stacks.
+
+* Under the ``rocprofv3`` backend, when the workload ships its own ``librocprofiler-sdk`` with a matching ``rocprofv3``, profiling now runs through the workload's ``rocprofv3`` to stay on a single ROCm stack; otherwise it stops early and recommends the rocprofiler-sdk backend.
 
 * The Dual VALU (VOPD) instruction mix metric is now reported for gfx115x in the WGP panel.
 

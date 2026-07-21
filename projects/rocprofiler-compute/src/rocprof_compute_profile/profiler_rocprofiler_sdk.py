@@ -9,8 +9,8 @@ from typing import Optional, Union
 
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils.comgr_detect import detect_and_log_double_comgr
 from utils.logger import console_debug, console_error, console_log, demarcate
+from utils.rocm_stack_preflight import comgr_to_force
 from utils.utils_common import (
     PROFILE_OUTPUT_FORMAT,
     resolve_rocm_library_path,
@@ -26,6 +26,8 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         soc: OmniSoC_Base,
     ) -> None:
         super().__init__(profiling_args, profiler_mode, soc)
+        # Workload comgr to preload, resolved during pre-processing.
+        self._forced_comgr: Optional[Path] = None
 
     def get_profiler_options(
         self, native_tool_path: Optional[str] = None
@@ -33,13 +35,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         args = self.get_args()
         app_cmd = shlex.split(args.remaining)
 
-        if app_cmd and not getattr(self, "_comgr_checked", False):
-            self._forced_comgr = detect_and_log_double_comgr(
-                app_cmd, args.rocprofiler_sdk_tool_path, dict(os.environ)
-            )
-            self._comgr_checked = True
-
-        forced_comgr = getattr(self, "_forced_comgr", None)
+        forced_comgr = self._forced_comgr
         if forced_comgr is not None:
             console_log(
                 "comgr",
@@ -186,6 +182,9 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
     def pre_processing(self) -> None:
         """Perform any pre-processing steps prior to profiling."""
         super().pre_processing()
+
+        if self._stack_resolution is not None:
+            self._forced_comgr = comgr_to_force(self._stack_resolution)
 
     @demarcate
     def run_profiling(self, version: str, prog: str) -> None:
