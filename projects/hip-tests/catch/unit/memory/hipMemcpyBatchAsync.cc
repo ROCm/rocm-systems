@@ -1331,26 +1331,16 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_ThresholdSelection) {
  *
  *   NO env manipulation.  No routing-fork assertion (routing unobservable).
  *
- *   ==========================================================================
- *   RESIDUAL EXISTING BUG (still must be fixed, but NOT exercised by this test):
- *   Op 1 originally exposed a pre-existing, swap-specific defect where a batch
- *   swap whose src/dst pointers carry a non-zero buffer offset does NOT update
- *   the device->host side at the offset region.  It is confirmed independent of
- *   alignment (failed at both +4 and +16 byte offsets) and specific to the
- *   *SDMA* swap path: offset-0 swaps pass, and batch LINEAR copies with the same
- *   offset pass (verified via a standalone reproducer).  The shader swap path
- *   added by this feature computes virtualAddress()+offset like the shader
- *   linear copy and therefore handles offsets correctly, so this test now PASSES
- *   because its small ops (<= sdmaSwapThreshold_) route to the shader.  A LARGE
- *   (> threshold) offset swap on swap-capable HW still routes to SDMA and
- *   remains broken until the SDMA swap offset handling is fixed.
- *   ==========================================================================
+ *   Coverage note: this test only exercises 0-offset and 4-byte-aligned
+ *   offsets.  Sub-word (1/2/3-byte) offsets and mismatched src/dst alignments
+ *   are covered by Unit_hipMemcpyBatchAsync_Swap_UnalignedMatrix, and large
+ *   (> threshold) unaligned swaps are covered by
+ *   Unit_hipMemcpyBatchAsync_Swap_LargeUnalignedRouting.
  *
  *   Expected state:
- *     Unmodified runtime: Op 1 fails via the SDMA offset bug (this test was
- *     tagged [!shouldfail] at that baseline).
- *     With this feature: small offset swaps route to the shader path and pass,
- *     so the test passes normally (the [!shouldfail] tag has been removed).
+ *     On swap-capable HW its small ops (<= sdmaSwapThreshold_) route to the
+ *     shader path and pass.  On non-swap-capable HW hipMemcpyBatchAsync returns
+ *     hipErrorNotSupported and the test fails (do NOT skip).
  *
  * Test source
  * ------------------------
@@ -1477,6 +1467,278 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_AlignmentCoverage) {
   HIP_CHECK(hipHostFree(h0));
   HIP_CHECK(hipHostFree(h1_base));
   HIP_CHECK(hipHostFree(h2));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - [Group B] Parameterized H<->D swap correctness over mismatched src/dst
+ *   byte offsets and two transfer sizes.  For each (src_off, dst_off) pair the
+ *   difference d = (dst_addr - src_addr) selects the largest shareable op width
+ *   per the design doc's per-copy op-size algorithm, exercising op widths
+ *   1/2/4/8/16 plus head/tail handling:
+ *
+ *     (0,0)   -> 16-byte body, no head/tail
+ *     (4,4)   -> 4-byte-aligned, aligned fallback
+ *     (0,15)  -> d=15 (odd) -> 1-byte body
+ *     (1,15)  -> d=14 -> 2-byte body, head=1
+ *     (3,11)  -> d=8  -> 8-byte body, head=5
+ *     (3,9)   -> d=6  -> 2-byte body, head=1
+ *     (1,0)   -> d=-1 (odd) -> 1-byte body
+ *     (8,8)   -> 8-byte-aligned mismatch-free
+ *
+ *   Sizes: 4096 (<= 16 KB threshold -> shader path) and 131072 (128 KiB,
+ *   > threshold -> SDMA path at baseline).
+ *
+ *   Each host/device allocation is size+64 bytes.  The full host allocation is
+ *   filled with 0xAA and the full device allocation with 0xBB.  A single swap of
+ *   `size` bytes is issued from host+src_off <-> device+dst_off.  After sync the
+ *   transfer region must be swapped (host holds 0xBB, device holds 0xAA) and all
+ *   bytes OUTSIDE the transfer region (the padding) must be UNCHANGED (host
+ *   padding still 0xAA, device padding still 0xBB).
+ *
+ *   Tagged [!shouldfail]: on the unmodified runtime the sub-word / mismatched
+ *   offsets (shader path) and the large unaligned case (routed to SDMA which
+ *   cannot handle non-64B-aligned offsets) produce wrong data, so the overall
+ *   test fails.  [!shouldfail] makes Catch2 report the test as passing at this
+ *   baseline; a later commit removes the tag once the kernel rewrite makes every
+ *   case pass.
+ *
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_UnalignedMatrix) {
+  constexpr uint8_t kHostFill = 0xAA;
+  constexpr uint8_t kDevFill = 0xBB;
+  constexpr size_t kPad = 64;
+
+  const std::pair<size_t, size_t> off =
+      GENERATE(std::make_pair(size_t{0}, size_t{0}), std::make_pair(size_t{4}, size_t{4}),
+               std::make_pair(size_t{0}, size_t{15}), std::make_pair(size_t{1}, size_t{15}),
+               std::make_pair(size_t{3}, size_t{11}), std::make_pair(size_t{3}, size_t{9}),
+               std::make_pair(size_t{1}, size_t{0}), std::make_pair(size_t{8}, size_t{8}));
+  const size_t size = GENERATE(size_t{4096}, size_t{131072});
+  const size_t src_off = off.first;
+  const size_t dst_off = off.second;
+
+  INFO("src_off=" << src_off << " dst_off=" << dst_off << " size=" << size);
+
+  void* h_base = nullptr;
+  void* d_base = nullptr;
+  HIP_CHECK(hipHostMalloc(&h_base, size + kPad));
+  HIP_CHECK(hipMalloc(&d_base, size + kPad));
+
+  std::memset(h_base, kHostFill, size + kPad);
+  HIP_CHECK(hipMemset(d_base, kDevFill, size + kPad));
+
+  void* src = static_cast<uint8_t*>(h_base) + src_off;
+  void* dst = static_cast<uint8_t*>(d_base) + dst_off;
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  void* dsts[] = {dst};
+  void* srcs[] = {src};
+  size_t sizes[] = {size};
+  size_t attrsIdxs[] = {0};
+
+  hipMemcpyAttributes attr{};
+  attr.flags = hipMemcpyFlagExtOpSwap;
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+
+  size_t failIdx = 0;
+  // Do NOT skip on hipErrorNotSupported: at baseline the large unaligned case
+  // routes to SDMA and fails, which is the state [!shouldfail] absorbs.
+  HIP_CHECK(hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &attr, attrsIdxs, 1, &failIdx, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  // Copy both buffers back in full so padding can be verified too.
+  std::vector<uint8_t> devResult(size + kPad);
+  HIP_CHECK(hipMemcpy(devResult.data(), d_base, size + kPad, hipMemcpyDeviceToHost));
+  const uint8_t* hostResult = static_cast<const uint8_t*>(h_base);
+
+  for (size_t i = 0; i < size + kPad; i++) {
+    const bool in_host_region = (i >= src_off) && (i < src_off + size);
+    const uint8_t expected_host = in_host_region ? kDevFill : kHostFill;
+    INFO("host byte " << i << " (region=" << in_host_region << ") = "
+                      << static_cast<int>(hostResult[i]) << " expected "
+                      << static_cast<int>(expected_host));
+    REQUIRE(hostResult[i] == expected_host);
+
+    const bool in_dev_region = (i >= dst_off) && (i < dst_off + size);
+    const uint8_t expected_dev = in_dev_region ? kHostFill : kDevFill;
+    INFO("dev byte " << i << " (region=" << in_dev_region << ") = "
+                     << static_cast<int>(devResult[i]) << " expected "
+                     << static_cast<int>(expected_dev));
+    REQUIRE(devResult[i] == expected_dev);
+  }
+
+  HIP_CHECK(hipFree(d_base));
+  HIP_CHECK(hipHostFree(h_base));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - [Group B] Imbalanced-batch swap correctness routed through the SHADER path.
+ *   A single hipMemcpyBatchAsync call with 8 H<->D swap ops of alternating
+ *   sizes: large = 8192 bytes at even indices (0,2,4,6) and small = 512 bytes
+ *   at odd indices (1,3,5,7).  Every size is <= the default 16 KB
+ *   sdmaSwapThreshold_ so all ops take the shader path.  All pointers are
+ *   16-byte aligned (base pointers from hipHostMalloc / hipMalloc, offset 0).
+ *
+ *   Each host op is filled with a distinct pattern (0x10 + index) and each
+ *   device op with another distinct pattern (0x80 + index).  After sync every
+ *   op's data must have swapped correctly on both sides.
+ *
+ *   This exercises the unified imbalanced dispatch (mixed body-op counts in one
+ *   batch).  It should PASS at baseline and after the rewrite (correctness is
+ *   identical; only the thread-to-work distribution changes) — NOT tagged.
+ *
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_ImbalancedBatch) {
+  constexpr size_t kNumOps = 8;
+  constexpr size_t kLargeBytes = 8192;
+  constexpr size_t kSmallBytes = 512;
+
+  auto op_size = [](size_t i) -> size_t { return (i % 2 == 0) ? kLargeBytes : kSmallBytes; };
+
+  std::vector<void*> h_bufs(kNumOps, nullptr);
+  std::vector<void*> d_bufs(kNumOps, nullptr);
+  std::vector<size_t> sizes(kNumOps);
+  std::vector<uint8_t> host_pattern(kNumOps);
+  std::vector<uint8_t> dev_pattern(kNumOps);
+
+  for (size_t i = 0; i < kNumOps; i++) {
+    sizes[i] = op_size(i);
+    host_pattern[i] = static_cast<uint8_t>(0x10 + i);
+    dev_pattern[i] = static_cast<uint8_t>(0x80 + i);
+    HIP_CHECK(hipHostMalloc(&h_bufs[i], sizes[i]));
+    HIP_CHECK(hipMalloc(&d_bufs[i], sizes[i]));
+    std::memset(h_bufs[i], host_pattern[i], sizes[i]);
+    HIP_CHECK(hipMemset(d_bufs[i], dev_pattern[i], sizes[i]));
+  }
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  std::vector<void*> dsts(d_bufs);
+  std::vector<void*> srcs(h_bufs);
+  std::vector<size_t> attrsIdxs(kNumOps, 0);
+
+  hipMemcpyAttributes attr{};
+  attr.flags = hipMemcpyFlagExtOpSwap;
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+
+  size_t failIdx = 0;
+  HIP_CHECK(hipMemcpyBatchAsync(dsts.data(), srcs.data(), sizes.data(), kNumOps, &attr,
+                                attrsIdxs.data(), 1, &failIdx, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  for (size_t i = 0; i < kNumOps; i++) {
+    std::vector<uint8_t> devResult(sizes[i]);
+    HIP_CHECK(hipMemcpy(devResult.data(), d_bufs[i], sizes[i], hipMemcpyDeviceToHost));
+    const uint8_t* hostResult = static_cast<const uint8_t*>(h_bufs[i]);
+    for (size_t b = 0; b < sizes[i]; b++) {
+      INFO("op " << i << " host byte " << b << " = " << static_cast<int>(hostResult[b])
+                 << " expected " << static_cast<int>(dev_pattern[i]));
+      REQUIRE(hostResult[b] == dev_pattern[i]);
+      INFO("op " << i << " dev byte " << b << " = " << static_cast<int>(devResult[b])
+                 << " expected " << static_cast<int>(host_pattern[i]));
+      REQUIRE(devResult[b] == host_pattern[i]);
+    }
+  }
+
+  for (size_t i = 0; i < kNumOps; i++) {
+    HIP_CHECK(hipFree(d_bufs[i]));
+    HIP_CHECK(hipHostFree(h_bufs[i]));
+  }
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - [Group B] Focused single-op LARGE unaligned H<->D swap.  size = 262144
+ *   (256 KiB, > the default 16 KB sdmaSwapThreshold_), src offset = 4 and dst
+ *   offset = 4 (4-byte aligned but NOT 64-byte aligned).  At baseline a
+ *   > threshold swap routes to SDMA, which cannot service non-64B-aligned
+ *   offsets, so this fails.
+ *
+ *   Host (hipHostMalloc) and device (hipMalloc) allocations are size+64 bytes.
+ *   The full host allocation is filled with 0xAA and the full device allocation
+ *   with 0xBB.  After the swap the transfer region must be swapped (host holds
+ *   0xBB, device holds 0xAA) and the padding OUTSIDE the transfer region must be
+ *   UNCHANGED (host still 0xAA, device still 0xBB).
+ *
+ *   Tagged [!shouldfail]: the baseline SDMA route fails this case.  The tag is
+ *   removed once the routing gate sends non-64B-aligned swaps to the shader.
+ *
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_LargeUnalignedRouting) {
+  constexpr uint8_t kHostFill = 0xAA;
+  constexpr uint8_t kDevFill = 0xBB;
+  constexpr size_t kPad = 64;
+  constexpr size_t kSize = 262144;  // 256 KiB, > threshold
+  constexpr size_t kSrcOff = 4;     // 4-byte aligned, not 64-byte aligned
+  constexpr size_t kDstOff = 4;
+
+  void* h_base = nullptr;
+  void* d_base = nullptr;
+  HIP_CHECK(hipHostMalloc(&h_base, kSize + kPad));
+  HIP_CHECK(hipMalloc(&d_base, kSize + kPad));
+
+  std::memset(h_base, kHostFill, kSize + kPad);
+  HIP_CHECK(hipMemset(d_base, kDevFill, kSize + kPad));
+
+  void* src = static_cast<uint8_t*>(h_base) + kSrcOff;
+  void* dst = static_cast<uint8_t*>(d_base) + kDstOff;
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  void* dsts[] = {dst};
+  void* srcs[] = {src};
+  size_t sizes[] = {kSize};
+  size_t attrsIdxs[] = {0};
+
+  hipMemcpyAttributes attr{};
+  attr.flags = hipMemcpyFlagExtOpSwap;
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+
+  size_t failIdx = 0;
+  HIP_CHECK(hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &attr, attrsIdxs, 1, &failIdx, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  std::vector<uint8_t> devResult(kSize + kPad);
+  HIP_CHECK(hipMemcpy(devResult.data(), d_base, kSize + kPad, hipMemcpyDeviceToHost));
+  const uint8_t* hostResult = static_cast<const uint8_t*>(h_base);
+
+  for (size_t i = 0; i < kSize + kPad; i++) {
+    const bool in_host_region = (i >= kSrcOff) && (i < kSrcOff + kSize);
+    const uint8_t expected_host = in_host_region ? kDevFill : kHostFill;
+    INFO("host byte " << i << " = " << static_cast<int>(hostResult[i]) << " expected "
+                      << static_cast<int>(expected_host));
+    REQUIRE(hostResult[i] == expected_host);
+
+    const bool in_dev_region = (i >= kDstOff) && (i < kDstOff + kSize);
+    const uint8_t expected_dev = in_dev_region ? kHostFill : kDevFill;
+    INFO("dev byte " << i << " = " << static_cast<int>(devResult[i]) << " expected "
+                     << static_cast<int>(expected_dev));
+    REQUIRE(devResult[i] == expected_dev);
+  }
+
+  HIP_CHECK(hipFree(d_base));
+  HIP_CHECK(hipHostFree(h_base));
   HIP_CHECK(hipStreamDestroy(stream));
 }
 

@@ -858,6 +858,13 @@ memory:
   Unit_hipMemcpyBatchAsync_Swap_ThresholdSelection: *level_2
   Unit_hipMemcpyBatchAsync_Swap_AlignmentCoverage: *level_2
   Unit_hipMemcpyBatchAsync_Swap_MixedBatch: *level_2
+  Unit_hipMemcpyBatchAsync_Swap_ImbalancedBatch: *level_2
+  Unit_hipMemcpyBatchAsync_Swap_UnalignedMatrix:
+    <<: *level_2
+    tags: ["!shouldfail"]
+  Unit_hipMemcpyBatchAsync_Swap_LargeUnalignedRouting:
+    <<: *level_2
+    tags: ["!shouldfail"]
   Unit_hipMemcpyBatchAsync_Mixed_Functional:
     <<: *level_2
     tags: [transfer]
