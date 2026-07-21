@@ -200,12 +200,7 @@ def gen_vector_mad_64_32(dst: list[str], src: list[str], dtype: str | None) -> s
         )
     L.append('  }')
     if writes_carry:
-        L.append('  if (wf.wf_size() <= 32)')
-        L.append(
-            f'    amdgpu::RegisterAccess(wf).write_scalar({dst[1]}, static_cast<uint32_t>(carry));'
-        )
-        L.append('  else')
-        L.append(f'    amdgpu::RegisterAccess(wf).write_scalar64({dst[1]}, carry);')
+        L.append(f'  amdgpu::write_wave_mask_scalar({dst[1]}, wf, carry);')
     return '\n'.join(L)
 
 
@@ -539,12 +534,7 @@ def gen_vector_div_scale(
     )
     L.append('  }')
     if len(dst) > 1:
-        L.append('  if (wf.wf_size() <= 32)')
-        L.append(
-            f'    amdgpu::RegisterAccess(wf).write_scalar({dst[1]}, static_cast<uint32_t>(vcc));'
-        )
-        L.append('  else')
-        L.append(f'    amdgpu::RegisterAccess(wf).write_scalar64({dst[1]}, vcc);')
+        L.append(f'  amdgpu::write_wave_mask_scalar({dst[1]}, wf, vcc);')
     else:
         L.append('  wf.set_vcc(vcc);')
     return '\n'.join(L)

@@ -239,6 +239,13 @@ inline void write_wave_mask_scalar(const Op &op, Wavefront &wf, uint64_t mask) {
   write_explicit_lane_mask(op, wf, mask);
 }
 
+/// @brief Read a wave-sized mask from an explicit scalar-register operand.
+/// @details Reads one SGPR for a Wave32 wavefront and an SGPR pair for Wave64.
+template <typename Op> inline uint64_t read_wave_mask_scalar(const Op &op, Wavefront &wf) {
+  RegisterAccess regs(wf);
+  return wf.wf_size() <= 32 ? static_cast<uint64_t>(regs.read_scalar(op)) : regs.read_scalar64(op);
+}
+
 template <typename MachineInst> inline uint32_t vop3_opsel(const MachineInst &inst) {
   if constexpr (requires { inst.opsel; })
     return inst.opsel;
@@ -1049,8 +1056,9 @@ template <typename Inst> [[nodiscard]] bool try_execute_cndmask_vop2_simd(Inst &
 }
 
 /// v_cndmask_b32 VOP3 form: dst[lane] = (sel[lane]) ? src1 : src0, where `sel`
-/// is the 64-bit value read from the SGPR-pair `src2` (instead of the fixed VCC
-/// used by the VOP2 form). VOP3 source modifiers are bitwise sign modifiers for
+/// is the wave-mask value read from scalar `src2` (instead of the fixed VCC
+/// used by the VOP2 form). Wave32-only gfx1250 uses one SGPR; wave64-capable
+/// targets use a pair when running Wave64. VOP3 source modifiers are bitwise sign modifiers for
 /// this B32 select: abs clears bit 31 and neg flips bit 31 before selection.
 /// `src2` is an SGPR/inline operand, not a VGPR, so it does not participate in
 /// the simd_capable gate; src0/src1/vdst do.
@@ -1064,7 +1072,7 @@ template <typename Inst>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  const uint64_t sel64 = amdgpu::RegisterAccess(wf).read_scalar64(inst.src2);
+  const uint64_t sel64 = read_wave_mask_scalar(inst.src2, wf);
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand(inst.src0, exec);
   auto src1 = regs.read_operand(inst.src1, exec);
@@ -1108,7 +1116,7 @@ template <typename Inst>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  const uint64_t sel64 = amdgpu::RegisterAccess(wf).read_scalar64(inst.src2);
+  const uint64_t sel64 = read_wave_mask_scalar(inst.src2, wf);
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand(inst.src0, exec);
   auto src1 = regs.read_operand(inst.src1, exec);
@@ -1261,8 +1269,8 @@ template <typename Inst, typename CmpOp>
 
 /// VOP3 v_cmp_class_f16/f32 SIMD fast path (32-bit value). The VOP3 form differs
 /// from the VOPC form in three ways, all handled here: (1) the result merges into
-/// an arbitrary SGPR-pair dst via `inst.vdst.read_scalar64`/`write_scalar64`, not
-/// the fixed VCC; (2) the per-instruction `abs`/`neg` source modifiers are applied
+/// an arbitrary wave-mask scalar dst via `write_explicit_lane_mask`, not the fixed
+/// VCC; (2) the per-instruction `abs`/`neg` source modifiers are applied
 /// to src0's selected raw bits before classification; `signmask` is passed per op
 /// (0x8000 for f16, 0x80000000 for f32, since both share a uint32 lane); (3) the
 /// class mask is read from `inst.src1`, not `inst.vsrc1`. In true16 mode, f16
@@ -1545,8 +1553,8 @@ template <typename T, typename Inst, typename BinOp>
 
 /// VOP3 integer/bitwise VOPC compare SIMD fast path (32-bit lane). The VOP3 form
 /// of v_cmp_<rel>_<i16|u16|i32|u32> reads src0/src1 (not src0/vsrc1) and writes
-/// the per-lane compare result into an arbitrary SGPR-pair dst via
-/// `inst.vdst.read_scalar64`/`write_scalar64` instead of the fixed VCC. The
+/// the per-lane compare result into an arbitrary wave-mask scalar dst via
+/// `write_explicit_lane_mask` instead of the fixed VCC. The
 /// integer/bitwise scalar bodies apply no source/result modifiers (abs/neg/omod
 /// are float-only; clamp on integer is unused here), so the plain functor is
 /// bit-identical to the scalar body on every input. Mirrors the VOPC merge:
@@ -2847,7 +2855,7 @@ template <typename Inst, typename CarryOp>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  const uint64_t cin_all = amdgpu::RegisterAccess(wf).read_scalar64(inst.src2);
+  const uint64_t cin_all = read_wave_mask_scalar(inst.src2, wf);
   uint64_t carry_out = 0;
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand(inst.src0, exec);
@@ -3761,7 +3769,7 @@ template <bool Vop3, typename Inst>
   return
 
 /// v_cndmask_b32 VOP3 counterpart. Same shape, but the selector comes from the
-/// SGPR-pair `src2` instead of fixed VCC.
+/// wave-mask scalar `src2` instead of fixed VCC.
 #define ROCJITSU_TRY_SIMD_VOP3_CNDMASK()                                                           \
   if (::rocjitsu::amdgpu::try_execute_cndmask_vop3_simd(inst, wf))                                 \
   return
