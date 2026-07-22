@@ -331,6 +331,7 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
     BinaryTranslatorOptions translator_options;
     translator_options.debug_min_free_vgpr = options.debug_min_free_vgpr;
     translator_options.debug_continue_after_failure = options.debug_continue_after_failure;
+    translator_options.skip_failed_kernels = options.skip_failed_kernels;
     BinaryTranslator translator(options.guest_arch, options.host_arch, options.target_mach,
                                 translator_options);
     if (need_report) {

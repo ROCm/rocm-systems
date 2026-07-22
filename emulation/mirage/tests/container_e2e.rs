@@ -267,7 +267,7 @@ fn containerized_session_writes_cid_then_cleans_up_on_stop() {
     // Stopping the session must remove the container + network and delete
     // the whole session directory.
     env.mirage()
-        .args(["session", "stop", "s-box", "-f"])
+        .args(["session", "stop", "s-box"])
         .assert()
         .success();
 

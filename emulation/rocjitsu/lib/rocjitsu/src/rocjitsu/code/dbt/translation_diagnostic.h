@@ -28,6 +28,7 @@ enum class DiagnosticKind {
   ExpandMissing,
   ExpandFailed,
   ResourceLimit,
+  KernelSkipped,
 };
 
 /// @brief One user/developer-facing DBT diagnostic.
@@ -50,6 +51,21 @@ struct TranslationDiagnostic {
 has_error_diagnostic(const std::vector<TranslationDiagnostic> &diagnostics) {
   return std::ranges::any_of(diagnostics, [](const TranslationDiagnostic &diagnostic) {
     return diagnostic.severity == DiagnosticSeverity::Error;
+  });
+}
+
+/// @brief True if any kernel was replaced by a non-dispatchable trap stub.
+///
+/// @details skip_failed_kernels reports a KernelSkipped *warning* (not an error),
+/// so a code object with a skipped kernel still passes has_error_diagnostic. The
+/// stub is an s_trap; s_endpgm that, with no trap handler, completes normally and
+/// would let a dispatched skipped kernel silently produce wrong results. Any
+/// consumer that emits or dispatches the translated artifact must treat this as
+/// non-dispatchable, matching the HSA hook which refuses such a load.
+[[nodiscard]] inline bool
+has_skipped_kernel(const std::vector<TranslationDiagnostic> &diagnostics) {
+  return std::ranges::any_of(diagnostics, [](const TranslationDiagnostic &diagnostic) {
+    return diagnostic.kind == DiagnosticKind::KernelSkipped;
   });
 }
 

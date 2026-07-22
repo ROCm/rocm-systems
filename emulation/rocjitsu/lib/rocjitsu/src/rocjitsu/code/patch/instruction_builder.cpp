@@ -65,7 +65,7 @@ enum class ScalarSop2Op {
   auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::AddU32);
   if (!opcode)
     return std::nullopt;
-  return pack_sop2(*opcode, sdst, ssrc0, ssrc1);
+  return build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1);
 }
 
 /// @brief Build an encoded scalar `s_sub_u32` instruction.
@@ -75,7 +75,7 @@ enum class ScalarSop2Op {
   auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::SubU32);
   if (!opcode)
     return std::nullopt;
-  return pack_sop2(*opcode, sdst, ssrc0, ssrc1);
+  return build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1);
 }
 
 /// @brief Build an encoded scalar `s_addc_u32` instruction.
@@ -85,7 +85,7 @@ enum class ScalarSop2Op {
   auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::AddcU32);
   if (!opcode)
     return std::nullopt;
-  return pack_sop2(*opcode, sdst, ssrc0, ssrc1);
+  return build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1);
 }
 
 /// @brief Build an encoded scalar `s_subb_u32` instruction.
@@ -95,7 +95,7 @@ enum class ScalarSop2Op {
   auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::SubbU32);
   if (!opcode)
     return std::nullopt;
-  return pack_sop2(*opcode, sdst, ssrc0, ssrc1);
+  return build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1);
 }
 
 } // namespace

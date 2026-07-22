@@ -72,7 +72,6 @@ struct basic_block_signature;
 struct module_function;
 
 using string_t               = std::string;
-using string_view_t          = std::string_view;
 using stringstream_t         = std::stringstream;
 using strvec_t               = std::vector<string_t>;
 using strset_t               = std::set<string_t>;
@@ -171,11 +170,13 @@ extern bool   loop_level_instr;
 extern bool   instr_dynamic_callsites;
 extern bool   instr_traps;
 extern bool   instr_loop_traps;
-extern bool   parse_all_modules;
+extern bool   exclude_internal_lib_paths;
+extern bool   exe_only;
 extern size_t min_address_range;
 extern size_t min_loop_address_range;
 extern size_t min_instructions;
 extern size_t min_loop_instructions;
+extern size_t max_library_functions;
 //
 //  debug settings
 //
@@ -364,12 +365,20 @@ get_name(module_t*);
 symtab_func_t*
 get_symtab_function(procedure_t*);
 
+size_t
+get_object_procedure_count_lb(object_t*);
+
+std::vector<object_t*>
+filter_objects(std::vector<object_t*>* app_objects);
+
 std::vector<module_t*>
 filter_modules(std::vector<module_t*>* app_modules);
 
-std::vector<procedure_t*>
-get_procedures(image_t* app_image, std::vector<module_t*>* app_modules,
-               bool include_uninstrumentable);
+std::unique_ptr<std::vector<module_t*>>
+get_modules(std::vector<object_t*>* app_objects);
+
+std::unique_ptr<std::vector<procedure_t*>>
+get_procedures(std::vector<module_t*>* app_modules, bool include_uninstrumentable);
 
 namespace std
 {

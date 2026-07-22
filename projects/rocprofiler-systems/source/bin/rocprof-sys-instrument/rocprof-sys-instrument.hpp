@@ -11,8 +11,8 @@
 #include "log.hpp"
 #include "module_function.hpp"
 
+#include <spdlog/fmt/ranges.h>
 #include <timemory/utility/filepath.hpp>
-#include <timemory/utility/join.hpp>
 
 #include <dlfcn.h>
 #include <string>
@@ -355,9 +355,10 @@ insert_instr(address_space_t* mutatee, const std::vector<point_t*>& _points, Tp 
             if(itr && itr->getFunction()) _v.emplace(get_name(itr->getFunction()));
         return _v;
     }();
+    auto _names_str = fmt::format("[{}]", fmt::join(_names, ", "));
 
     ROCPROFSYS_ADD_LOG_ENTRY("Inserting", _points.size(),
-                             "instrumentation points into function(s)", _names);
+                             "instrumentation points into function(s)", _names_str);
 
     auto _trace = traceFunc.get();
     auto _traps = std::set<point_t*>{};
@@ -370,7 +371,8 @@ insert_instr(address_space_t* mutatee, const std::vector<point_t*>& _points, Tp 
     }
 
     ROCPROFSYS_ADD_LOG_ENTRY("Found", _traps.size(),
-                             "instrumentation points using traps in function(s)", _names);
+                             "instrumentation points using traps in function(s)",
+                             _names_str);
 
     size_t _n = 0;
     for(const auto& itr : _points)
@@ -381,7 +383,7 @@ insert_instr(address_space_t* mutatee, const std::vector<point_t*>& _points, Tp 
     }
 
     ROCPROFSYS_ADD_LOG_ENTRY("Inserted", _n, "instrumentation points in function(s)",
-                             _names);
+                             _names_str);
 
     return (_n > 0);
 }

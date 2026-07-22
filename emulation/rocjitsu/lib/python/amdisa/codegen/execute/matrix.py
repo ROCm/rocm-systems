@@ -81,7 +81,7 @@ def gen_accvgpr_read(dst: list[str], src: list[str]) -> str:
         f'  uint64_t exec = wf.exec();\n'
         f'  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {{\n'
         f'    if (!(exec & (1ULL << lane))) continue;\n'
-        f'    {dst[0]}.write_lane(wf, lane, {src[0]}.read_lane(wf, lane));\n'
+        f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));\n'
         f'  }}'
     )
 
@@ -92,7 +92,7 @@ def gen_accvgpr_write(dst: list[str], src: list[str]) -> str:
         f'  uint64_t exec = wf.exec();\n'
         f'  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {{\n'
         f'    if (!(exec & (1ULL << lane))) continue;\n'
-        f'    {dst[0]}.write_lane(wf, lane, {src[0]}.read_lane(wf, lane));\n'
+        f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));\n'
         f'  }}'
     )
 
@@ -292,7 +292,7 @@ def gen_mfma(
             L.append(f'    const_acc = amdgpu::ACC_FROM_VGPR;')
             L.append(f'    s2 = vb + *src2_off;')
             L.append(f'  }} else {{')
-            L.append(f'    const_acc = {s2}.read_scalar(wf);')
+            L.append(f'    const_acc = amdgpu::RegisterAccess(wf).read_scalar({s2});')
             L.append(f'  }}')
     else:
         # acc_cd field exists in CDNA2/3/4 VOP3P_MFMA encoding (controls
@@ -319,7 +319,7 @@ def gen_mfma(
             L.append(f'  uint32_t s2 = amdgpu::resolve_acc(vb, dst,')
             L.append(
                 f'      {s2}.encoding_value_, const_acc,'
-                f' [&] {{ return {s2}.read_scalar(wf); }});'
+                f' [&] {{ return amdgpu::RegisterAccess(wf).read_scalar({s2}); }});'
             )
 
     if result_type == 'F64':
@@ -333,20 +333,32 @@ def gen_mfma(
         neg = 'inst_.blgp' if arch in ('cdna3', 'cdna4') else '0u'
         L.append(f'                 s2, const_acc, {neg});')
     elif result_type == 'I32':
+
+        def append_signed_extractors(suffix: str) -> None:
+            L.append(
+                f'  auto extract_a = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc) {{'
+            )
+            L.append(
+                f'    return (inst_.neg & 0x1u) ? amdgpu::extract_i{suffix}(cu, base, loc)'
+                f' : amdgpu::extract_u{suffix}(cu, base, loc);'
+            )
+            L.append(f'  }};')
+            L.append(
+                f'  auto extract_b = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc) {{'
+            )
+            L.append(
+                f'    return (inst_.neg & 0x2u) ? amdgpu::extract_i{suffix}(cu, base, loc)'
+                f' : amdgpu::extract_u{suffix}(cu, base, loc);'
+            )
+            L.append(f'  }};')
+
         if arch == 'gfx1250':
             # LLVM's gfx1250 IU WMMA convention overloads neg_lo: bit set means
             # signed extension, bit clear means unsigned.
             if is_swmmac:
                 if input_type in ('IU4', 'IU8'):
                     suffix = '4' if input_type == 'IU4' else '8'
-                    L.append(
-                        f'  auto extract_a = (inst_.neg & 0x1u) ? amdgpu::extract_i{suffix}'
-                        f' : amdgpu::extract_u{suffix};'
-                    )
-                    L.append(
-                        f'  auto extract_b = (inst_.neg & 0x2u) ? amdgpu::extract_i{suffix}'
-                        f' : amdgpu::extract_u{suffix};'
-                    )
+                    append_signed_extractors(suffix)
                 else:
                     L.append(f'  auto extract_a = amdgpu::extract_i8;')
                     L.append(f'  auto extract_b = amdgpu::extract_i8;')
@@ -367,14 +379,7 @@ def gen_mfma(
                 return '\n'.join(L)
             if input_type in ('IU4', 'IU8'):
                 suffix = '4' if input_type == 'IU4' else '8'
-                L.append(
-                    f'  auto extract_a = (inst_.neg & 0x1u) ? amdgpu::extract_i{suffix}'
-                    f' : amdgpu::extract_u{suffix};'
-                )
-                L.append(
-                    f'  auto extract_b = (inst_.neg & 0x2u) ? amdgpu::extract_i{suffix}'
-                    f' : amdgpu::extract_u{suffix};'
-                )
+                append_signed_extractors(suffix)
             else:
                 L.append(f'  auto extract_a = amdgpu::extract_i8;')
                 L.append(f'  auto extract_b = amdgpu::extract_i8;')
@@ -385,14 +390,7 @@ def gen_mfma(
         elif uses_rdna4_swmmac_layout:
             if input_type in ('IU4', 'IU8'):
                 suffix = '4' if input_type == 'IU4' else '8'
-                L.append(
-                    f'  auto extract_a = (inst_.neg & 0x1u) ? amdgpu::extract_i{suffix}'
-                    f' : amdgpu::extract_u{suffix};'
-                )
-                L.append(
-                    f'  auto extract_b = (inst_.neg & 0x2u) ? amdgpu::extract_i{suffix}'
-                    f' : amdgpu::extract_u{suffix};'
-                )
+                append_signed_extractors(suffix)
             else:
                 L.append(f'  auto extract_a = amdgpu::extract_i8;')
                 L.append(f'  auto extract_b = amdgpu::extract_i8;')
@@ -406,14 +404,7 @@ def gen_mfma(
         elif uses_gfx11_wmma_layout:
             if input_type in ('IU4', 'IU8'):
                 suffix = '4' if input_type == 'IU4' else '8'
-                L.append(
-                    f'  auto extract_a = (inst_.neg & 0x1u) ? amdgpu::extract_i{suffix}'
-                    f' : amdgpu::extract_u{suffix};'
-                )
-                L.append(
-                    f'  auto extract_b = (inst_.neg & 0x2u) ? amdgpu::extract_i{suffix}'
-                    f' : amdgpu::extract_u{suffix};'
-                )
+                append_signed_extractors(suffix)
             else:
                 L.append(f'  auto extract_a = amdgpu::extract_i8;')
                 L.append(f'  auto extract_b = amdgpu::extract_i8;')
@@ -426,14 +417,7 @@ def gen_mfma(
         elif uses_gfx12_wmma_layout:
             if input_type in ('IU4', 'IU8'):
                 suffix = '4' if input_type == 'IU4' else '8'
-                L.append(
-                    f'  auto extract_a = (inst_.neg & 0x1u) ? amdgpu::extract_i{suffix}'
-                    f' : amdgpu::extract_u{suffix};'
-                )
-                L.append(
-                    f'  auto extract_b = (inst_.neg & 0x2u) ? amdgpu::extract_i{suffix}'
-                    f' : amdgpu::extract_u{suffix};'
-                )
+                append_signed_extractors(suffix)
             else:
                 L.append(f'  auto extract_a = amdgpu::extract_i8;')
                 L.append(f'  auto extract_b = amdgpu::extract_i8;')
@@ -447,14 +431,7 @@ def gen_mfma(
             has_blgp = arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4')
             if not has_blgp:
                 suffix = '4' if input_type == 'IU4' else '8'
-                L.append(
-                    f'  auto extract_a = (inst_.neg & 0x1u) ? amdgpu::extract_i{suffix}'
-                    f' : amdgpu::extract_u{suffix};'
-                )
-                L.append(
-                    f'  auto extract_b = (inst_.neg & 0x2u) ? amdgpu::extract_i{suffix}'
-                    f' : amdgpu::extract_u{suffix};'
-                )
+                append_signed_extractors(suffix)
                 L.append(
                     f'  amdgpu::exec_i32_mixed(cu, {M}, {N}, {K}, {B}, {in_bits}, dst,'
                 )

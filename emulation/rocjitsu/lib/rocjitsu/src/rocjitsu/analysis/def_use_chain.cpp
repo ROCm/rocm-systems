@@ -10,10 +10,6 @@ namespace rocjitsu {
 
 namespace {
 
-// TODO: Replace this class-based approximation with instruction metadata that
-// identifies vector defs whose inactive lanes are preserved under EXEC, and pair
-// it with program-point EXEC state so full-EXEC writes can be treated as normal
-// kills.
 [[nodiscard]] bool is_exec_masked_def(RegisterRef ref) {
   return ref.cls == RegClass::VGPR || ref.cls == RegClass::ACC_VGPR;
 }
