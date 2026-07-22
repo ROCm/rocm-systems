@@ -417,8 +417,8 @@ get_callback_domains()
         supported.emplace(ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API);
     }
 #endif
-#if(ROCPROFILER_VERSION >= 10304)
-    if(_version.formatted >= 10304)
+#if(ROCPROFILER_VERSION >= 10305)
+    if(_version.formatted >= 10305)
     {
         supported.emplace(ROCPROFILER_CALLBACK_TRACING_HIPFILE_API);
     }

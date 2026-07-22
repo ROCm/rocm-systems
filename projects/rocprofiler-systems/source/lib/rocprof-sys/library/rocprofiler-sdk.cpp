@@ -1420,7 +1420,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 break;
             }
 #endif
-#if(ROCPROFILER_VERSION >= 10304)
+#if(ROCPROFILER_VERSION >= 10305)
             case ROCPROFILER_CALLBACK_TRACING_HIPFILE_API:
             {
                 tool_tracing_callback_start(category::rocm_hipfile_api{}, record,
@@ -1515,7 +1515,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 break;
             }
 #endif
-#if(ROCPROFILER_VERSION >= 10304)
+#if(ROCPROFILER_VERSION >= 10305)
             case ROCPROFILER_CALLBACK_TRACING_HIPFILE_API:
             {
                 tool_tracing_callback_stop(category::rocm_hipfile_api{}, record,
@@ -2499,7 +2499,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 #if(ROCPROFILER_VERSION >= 700)
             ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API,
 #endif
-#if(ROCPROFILER_VERSION >= 10304)
+#if(ROCPROFILER_VERSION >= 10305)
             ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,
 #endif
         })

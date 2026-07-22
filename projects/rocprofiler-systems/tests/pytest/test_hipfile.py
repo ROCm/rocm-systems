@@ -14,8 +14,8 @@ pytestmark = [
     pytest.mark.gpu,
     pytest.mark.hipfile,
     pytest.mark.rocm,
-    # hipFILE callback tracing domain requires rocprofiler-sdk >= 1.3.4
-    pytest.mark.rocprofiler_sdk_min_version("1.3.4"),
+    # hipFILE callback tracing domain requires rocprofiler-sdk >= 1.3.5
+    pytest.mark.rocprofiler_sdk_min_version("1.3.5"),
 ]
 
 
