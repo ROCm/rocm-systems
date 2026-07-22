@@ -33,6 +33,7 @@ set(AMD_TEST_SRC
 if(HIP_PLATFORM STREQUAL "nvidia")
   set(COMPUTE_ARCH "-arch=compute_75")
   set(EXPERIMENTAL_ABI "-D_CG_ABI_EXPERIMENTAL")
+  set_source_files_properties(thread_block_tile.cc PROPERTIES COMPILE_FLAGS "--expt-relaxed-constexpr")
   set(GENCODE_PARAMS "-rdc=true -gencode arch=compute_60,code=sm_60 -gencode arch=compute_70,code=compute_75 -gencode arch=compute_80,code=sm_80")
   set_source_files_properties(hipCGMultiGridGroupType_old.cc PROPERTIES COMPILE_FLAGS "${EXPERIMENTAL_ABI} ${GENCODE_PARAMS}")
   set_source_files_properties(hipLaunchCooperativeKernelMultiDevice_old.cc PROPERTIES COMPILE_FLAGS "${EXPERIMENTAL_ABI} ${GENCODE_PARAMS}")

@@ -806,8 +806,16 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueV2Ctx(
 	err = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_CREATE_QUEUE, &args);
 
 	if (err == -1) {
+		int saved_errno = errno;
 		free_queue(ctx, q);
-		return HSAKMT_STATUS_ERROR;
+      	
+		/* Return specific error code based on errno */
+      	if (saved_errno == ENOMEM)
+			return HSAKMT_STATUS_NO_MEMORY;
+      	else if (saved_errno == EINVAL)
+			return HSAKMT_STATUS_INVALID_PARAMETER;
+      	else
+			return HSAKMT_STATUS_ERROR;
 	}
 
 	q->queue_id = args.queue_id;
@@ -1158,6 +1166,19 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetQueueInfo(
 						 HsaQueueInfo *QueueInfo)
 {
 	return hsaKmtGetQueueInfoCtx(&hsakmt_primary_kfd_ctx, QueueId, QueueInfo);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetKernelQueueId(
+						 HSA_QUEUEID QueueId,
+						 HSAuint32 *KernelInternalQueueId)
+{
+	struct queue *q = PORT_UINT64_TO_VPTR(QueueId);
+
+	if (!q || !KernelInternalQueueId)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	*KernelInternalQueueId = q->queue_id;
+	return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetTrapHandler(HSAuint32 Node,

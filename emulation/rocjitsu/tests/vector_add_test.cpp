@@ -9,6 +9,7 @@
 /// CPU golden reference.
 
 #include "aql_queue.h"
+#include "test_paths.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/executable.h"
@@ -44,9 +45,8 @@ namespace {
 
 using namespace rocjitsu;
 
-const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
-
-std::string kernel_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".o"; }
+const std::string CONFIG_PATH = test::config_path("gfx950_cdna4.json");
+using test::kernel_path;
 
 constexpr uint32_t TOTAL_XCDS = 8;
 constexpr uint32_t CUS_PER_XCD = 32; // 4 SEs x 8 CUs
@@ -75,7 +75,7 @@ TEST(VectorAddStressTest, AllCUsGoldenReference) {
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
   loaded.wire_links(engine->topology());
-  engine->build();
+  engine->create();
 
   // Load code into GPU memory. Place .rodata (kernel descriptor) and .text (code)
   // at their virtual addresses relative to a base. The .kd symbol value matches
@@ -170,7 +170,7 @@ TEST(VectorAddStressTest, AllCUsGoldenReference_MultiThreaded) {
         }
         return 0;
       });
-  engine->build();
+  engine->create();
 
   co->load_to_memory(memory, KD_ADDR);
   uint64_t kernel_object = KD_ADDR + co->kernel_descriptor_offset("vector_add");

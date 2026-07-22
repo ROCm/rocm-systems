@@ -50,7 +50,7 @@ template <> hipError_t HandleException<hipError_t>() {
 }  // namespace hip
 
 #define TRY try {
-#define CATCH } catch(...) { return hip::HandleException<hipError_t>(); }
+#define CATCH } catch(...) { HIP_RETURN(hip::HandleException<hipError_t>()); }
 #define CATCHRET(RETURN_TYPE) } catch(...) { return hip::HandleException<RETURN_TYPE>(); }
 
 extern "C" hipError_t __hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem,
@@ -3345,5 +3345,11 @@ hipError_t hipExecutionCtxSynchronize(hipExecutionCtx_t ctx) {
 hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event) {
   TRY;
   return hip::GetHipDispatchTable()->hipExecutionCtxWaitEvent_fn(ctx, event);
+  CATCH;
+}
+hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
+                                   hipMemAllocationType type) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipMemGetDefaultMemPool_fn(memPool, location, type);
   CATCH;
 }

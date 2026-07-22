@@ -21,6 +21,9 @@ include(GNUInstallDirs)
 # always use lib instead of lib64
 set(CMAKE_INSTALL_LIBDIR "lib")
 
+# standalone sample builds do not inherit the top-level PIC settings
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 # this should be defaulted to OFF by ROCm 7.0.1 or 7.1 this should only used to disable
 # sample tests in extreme circumstances
 option(ROCPROFILER_DISABLE_UNSTABLE_CTESTS "Disable unstable tests" ON)

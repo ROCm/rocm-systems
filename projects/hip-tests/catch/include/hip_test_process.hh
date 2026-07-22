@@ -163,7 +163,7 @@ class SpawnProc {
       if (hFile != INVALID_HANDLE_VALUE) {
         si.dwFlags |= STARTF_USESTDHANDLES;
         si.hStdOutput = hFile;
-        si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+        si.hStdError = hFile;  // Redirect stderr to the same file as stdout
         si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
         inheritHandles = TRUE;
       }
@@ -230,6 +230,7 @@ class SpawnProc {
         int fd = open(tmpFileName_.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (fd >= 0) {
           dup2(fd, STDOUT_FILENO);
+          dup2(fd, STDERR_FILENO);  // Redirect stderr to the same file as stdout
           close(fd);
         }
       }
@@ -281,6 +282,8 @@ class SpawnProc {
       resultStr_ = std::string((std::istreambuf_iterator<char>(t)),
                                 std::istreambuf_iterator<char>());
       t.close();
+      // Clean up temp file after reading
+      fs::remove(tmpFileName_);
     }
     spawned_ = false;
     return exitCode;

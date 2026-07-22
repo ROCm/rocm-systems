@@ -56,7 +56,6 @@ namespace os {
 typedef void* LibHandle;
 typedef void* Semaphore;
 typedef void* Mutex;
-typedef void* SharedMutex;
 typedef void* Thread;
 typedef void* EventHandle;
 
@@ -157,48 +156,6 @@ void ReleaseMutex(Mutex lock);
 /// @param: lock(Input), handle to the mutex.
 /// @return: void.
 void DestroyMutex(Mutex lock);
-
-/// @brief: Creates a shared mutex, will return NULL if failed.
-/// @param: void.
-/// @return: SharedMutex.
-SharedMutex CreateSharedMutex();
-
-/// @brief: Tries to acquire the mutex in exclusive mode once, if successed, return true.
-/// @param: lock(Input), handle to the shared mutex.
-/// @return: bool.
-bool TryAcquireSharedMutex(SharedMutex lock);
-
-/// @brief: Aquires the mutex in exclusive mode, if the mutex is locked, it will wait until it is
-/// released. If the mutex is acquired successfully, it will return true.
-/// @param: lock(Input), handle to the mutex.
-/// @return: bool.
-bool AcquireSharedMutex(SharedMutex lock);
-
-/// @brief: Releases the mutex from exclusive mode.
-/// @param: lock(Input), handle to the mutex.
-/// @return: void.
-void ReleaseSharedMutex(SharedMutex lock);
-
-/// @brief: Tries to acquire the mutex in shared mode once, if successed, return true.
-/// @param: lock(Input), handle to the mutex.
-/// @return: bool.
-bool TrySharedAcquireSharedMutex(SharedMutex lock);
-
-/// @brief: Aquires the mutex in shared mode, if the mutex in exclusive mode, it will wait until it
-/// is released. If the mutex is acquired successfully, it will return true.
-/// @param: lock(Input), handle to the mutex.
-/// @return: bool.
-bool SharedAcquireSharedMutex(SharedMutex lock);
-
-/// @brief: Releases the mutex from shared mode.
-/// @param: lock(Input), handle to the mutex.
-/// @return: void.
-void SharedReleaseSharedMutex(SharedMutex lock);
-
-/// @brief: Destroys the mutex.
-/// @param: lock(Input), handle to the mutex.
-/// @return: void.
-void DestroySharedMutex(SharedMutex lock);
 
 /// @brief: Puts current thread to sleep.
 /// @param: delayInMs(Input), time in millisecond for sleeping.
@@ -361,8 +318,11 @@ bool UncommitMemory(void* addr, size_t size);
 bool UnmapMemory(void* addr, size_t size);
 bool MapMemory(void* addr, size_t size, MemProt prot, int fd, uint64_t cpu_addr);
 
-/// Close a dmabuf file descriptor.
-hsa_status_t DmaBufClose(int dmabuf);
+/// Close a dmabuf file descriptor and set *dmabuf to -1.
+hsa_status_t DmaBufClose(int* dmabuf);
+
+/// Duplicate a dmabuf file descriptor. Returns the new fd, or -1 on failure.
+int DmaBufDup(int dmabuf);
 
 bool ProtectMemory(void* va, size_t size, MemProt perms);
 

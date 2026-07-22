@@ -17,9 +17,9 @@ Using PC sampling in ROCm Compute Profiler
 Program Counter (PC) sampling service for GPU profiling is a profiling technique that periodically samples the program counter during the GPU kernel execution to understand code execution patterns and hotspots.
 
 ROCm Compute Profiler supports Host Trap PC sampling and Stochastic (Hardware-Based) PC sampling.
-Host Trap PC sampling is enabled for AMD Instinct MI200 series and later
-accelerators. Stochastic (hardware-based) PC sampling is enabled for
-AMD Instinct MI300 series and later accelerators. Stochastic PC sampling provides additional information that tells whether a sampled wave issued an instruction for a particular PC. It also provides the reason
+Host Trap PC sampling is enabled for AMD Instinct MI200 Series and later
+GPUs. Stochastic (hardware-based) PC sampling is enabled for
+AMD Instinct MI300 Series and later GPUs. Stochastic PC sampling provides additional information that tells whether a sampled wave issued an instruction for a particular PC. It also provides the reason
 for not issuing the instruction (stall reason). This type of information is
 particularly useful for understanding stalls during the kernel execution. The PC sampling can be used with profiling and analysis options.
 
@@ -40,7 +40,8 @@ Analysis options
 ================
 For using analysis options for PC sampling the configuration needed are:
 
-* ``--pc-sampling-sorting-type``: ``offset`` or ``count``. The default option is ``offset``. ``offset`` is an assembly instruction offset in the code object.
+* ``--pc-sampling-sorting-type``: ``offset`` or ``count``. The default option is ``count``, which surfaces the most-sampled instructions (hotspots) first. ``offset`` is an assembly instruction offset in the code object.
+* ``--pc-sampling-rows``: Maximum number of rows shown in the PC sampling table (DEFAULT: 10). Must be a non-negative integer; use ``0`` to show all rows.
 
 **Sample command:**
 
@@ -51,7 +52,7 @@ For using analysis options for PC sampling the configuration needed are:
 **Sample output:**
 
 ``source_line`` shows ``N/A`` because the example binary was built without
-``-g`` (see the note at the end of this page).
+``-g`` (See the :ref:`note <pc-sampling-note>` at the end of this page).
 
 Selecting a single kernel with ``host_trap`` PC sampling:
 
@@ -131,6 +132,7 @@ Sorting a single kernel by sample ``count`` instead of ``offset``:
    │         │               │                                                     │                  │          │         │                │                 │                                                                                     │ __vector(4)*, int)                   │
    ╘═════════╧═══════════════╧═════════════════════════════════════════════════════╧══════════════════╧══════════╧═════════╧════════════════╧═════════════════╧═════════════════════════════════════════════════════════════════════════════════════╧══════════════════════════════════════╛
 
+.. _pc-sampling-note:
 
 .. note::
 

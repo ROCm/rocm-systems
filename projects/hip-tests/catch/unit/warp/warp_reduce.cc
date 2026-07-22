@@ -90,6 +90,7 @@ template <class T> void runTestMultipleMasks(unsigned long long masks[], int num
   distribution distInput(a, b);
   dim3 blkDim{wavefrontSize};
   dim3 grdDim{1u};
+  T expectedByLane[64];
 
   HIP_CHECK(hipMemcpy(d_masks.ptr(), &masks[0], d_masks.size_bytes(), hipMemcpyHostToDevice));
   genRandomBuffers(d_input, input, distInput, gen, wavefrontSize);
@@ -99,7 +100,7 @@ template <class T> void runTestMultipleMasks(unsigned long long masks[], int num
 
   for (int numMask = 0; numMask < numMasks; numMask++) {
     unsigned long long mask = masks[numMask];
-    T expected = calculateExpected<T>(input.ptr(), op, mask);
+    T expected = calculateExpected<T>(expectedByLane, input.ptr(), op, mask, AggregationType::Reduce);
     int lane = 0;
 
     while (lane < wavefrontSize) {
@@ -109,11 +110,12 @@ template <class T> void runTestMultipleMasks(unsigned long long masks[], int num
         if constexpr (std::is_integral<T>::value) {
           // for integral types the result should match exactly
           if (result != expected) {
-            printMismatch(result, expected, input.ptr(), mask);
+            printMismatch(result, expected, input.ptr(), mask, lane);
             REQUIRE(result == expected);
           }
-        } else
-          compareFloatingPoint(result, expected, mask, input.ptr());
+        } else {
+          compareFloatingPoint<std::plus<T>>(result, expected, mask, input.ptr(), lane);
+        }
       }
 
       lane++;

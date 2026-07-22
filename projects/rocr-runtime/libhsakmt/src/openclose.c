@@ -151,7 +151,7 @@ static HSAKMT_STATUS init_vars_from_env(void)
 
 	envvar = getenv("HSAKMT_DEBUG_LEVEL");
 	if (envvar) {
-		debug_level = atoi(envvar);
+		debug_level = hsakmt_safe_env_to_int(envvar, HSAKMT_DEBUG_LEVEL_DEFAULT);
 		if (debug_level >= HSAKMT_DEBUG_LEVEL_ERR &&
 				debug_level <= HSAKMT_DEBUG_LEVEL_DEBUG)
 			hsakmt_debug_level = debug_level;
@@ -160,11 +160,11 @@ static HSAKMT_STATUS init_vars_from_env(void)
 	/* Check whether to support Zero frame buffer */
 	envvar = getenv("HSA_ZFB");
 	if (envvar)
-		hsakmt_zfb_support = atoi(envvar);
+		hsakmt_zfb_support = hsakmt_safe_env_to_int(envvar, 0);
 
 	envvar = getenv("PM4_TARGET_XCC");
 	if (envvar)
-		hsakmt_pm4_target_xcc = atoi(envvar);
+		hsakmt_pm4_target_xcc = hsakmt_safe_env_to_int(envvar, 0);
 	return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -231,7 +231,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFDCtx(HsaKFDContext **pCtx)
 
 		/* check if udmabuf is enabled by env HSA_USE_UDMABUF */
 		useUdmaBuf = getenv("HSA_USE_UDMABUF");
-		if (useUdmaBuf && atoi(useUdmaBuf)) {
+		if (useUdmaBuf && hsakmt_safe_env_to_int(useUdmaBuf, 0)) {
 			/* open udmabuf device */
 			hsakmt_udmabuf_dev_fd = open(kfd_udmabuf_device_name, 0);
 			if (hsakmt_udmabuf_dev_fd < 0)

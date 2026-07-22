@@ -7,18 +7,33 @@ include_guard(GLOBAL)
 # ENABLE_SANITIZER, precedence THEROCK_SANITIZER > ENABLE_SANITIZER >
 # ENABLE_ADDRESS_SANITIZER, so every downstream site reads one variable.
 function(resolve_sanitizer)
-    set(sanitizer_valid
+    set(therock_sanitizer_valid
         ""
         "OFF"
         "ASAN"
         "HOST_ASAN"
         "TSAN"
     )
+    # Empty string is omitted by variable expansion, so add it explicitly.
+    set(sanitizer_valid "" ${therock_sanitizer_valid} "UBSAN")
 
-    if(DEFINED THEROCK_SANITIZER AND NOT THEROCK_SANITIZER IN_LIST sanitizer_valid)
+    # Human-readable forms for the error messages, derived from the lists so they
+    # cannot drift. Drop the empty-string placeholder.
+    set(therock_sanitizer_display ${therock_sanitizer_valid})
+    list(REMOVE_ITEM therock_sanitizer_display "")
+    list(JOIN therock_sanitizer_display ", " therock_sanitizer_display)
+
+    set(sanitizer_display ${sanitizer_valid})
+    list(REMOVE_ITEM sanitizer_display "")
+    list(JOIN sanitizer_display ", " sanitizer_display)
+
+    if(
+        DEFINED THEROCK_SANITIZER
+        AND NOT THEROCK_SANITIZER IN_LIST therock_sanitizer_valid
+    )
         message(
             FATAL_ERROR
-            "THEROCK_SANITIZER='${THEROCK_SANITIZER}' is not one of: OFF, ASAN, HOST_ASAN, TSAN"
+            "THEROCK_SANITIZER='${THEROCK_SANITIZER}' is not one of: ${therock_sanitizer_display}"
         )
     endif()
 
@@ -50,7 +65,7 @@ function(resolve_sanitizer)
         set(ENABLE_SANITIZER
             ""
             CACHE STRING
-            "Sanitizer for the native tool library: OFF, ASAN, HOST_ASAN, or TSAN"
+            "Sanitizer for the native tool library: OFF, ASAN, HOST_ASAN, TSAN, or UBSAN"
             FORCE
         )
     endif()
@@ -58,7 +73,7 @@ function(resolve_sanitizer)
     if(NOT ENABLE_SANITIZER IN_LIST sanitizer_valid)
         message(
             FATAL_ERROR
-            "ENABLE_SANITIZER='${ENABLE_SANITIZER}' is not one of: OFF, ASAN, HOST_ASAN, TSAN"
+            "ENABLE_SANITIZER='${ENABLE_SANITIZER}' is not one of: ${sanitizer_display}"
         )
     endif()
 
@@ -93,6 +108,9 @@ function(enable_sanitizer)
         set(_flag "address")
     elseif(ENABLE_SANITIZER STREQUAL "TSAN")
         set(_flag "thread")
+    elseif(ENABLE_SANITIZER STREQUAL "UBSAN")
+        set(_flag "undefined")
+        set(_is_ubsan_mode ON)
     endif()
 
     if(CMAKE_CXX_FLAGS_INIT MATCHES "-fsanitize=")
@@ -102,6 +120,9 @@ function(enable_sanitizer)
         )
     else()
         set(_extra "-fsanitize=${_flag} -fno-omit-frame-pointer -g")
+        if(_is_ubsan_mode)
+            string(APPEND _extra " -fno-sanitize-recover=all -fno-sanitize=vptr")
+        endif()
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${_extra}" PARENT_SCOPE)
         set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${_extra}" PARENT_SCOPE)
     endif()
@@ -112,10 +133,16 @@ function(enable_sanitizer)
         $<$<LINK_LANGUAGE:C,CXX>:-fsanitize=${_flag}>
         $<$<AND:$<LINK_LANGUAGE:C,CXX>,$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>>:-shared-libsan>
     )
+    if(_is_ubsan_mode)
+        add_link_options(
+            $<$<LINK_LANGUAGE:C,CXX>:-fno-sanitize-recover=all>
+            $<$<LINK_LANGUAGE:C,CXX>:-fno-sanitize=vptr>
+        )
+    endif()
 endfunction()
 
 # Rewrite GPU_TARGETS for full ASAN and TSAN modes (gfx942/gfx950 -> :xnack+).
-# No-op for HOST_ASAN or when TheRock has already rewritten the targets upstream.
+# No-op for host-only modes or when TheRock has already rewritten the targets upstream.
 function(enable_sanitizer_gpu_target_munging)
     if(NOT (ENABLE_SANITIZER STREQUAL "ASAN" OR ENABLE_SANITIZER STREQUAL "TSAN"))
         return()
@@ -136,30 +163,35 @@ function(enable_sanitizer_gpu_target_munging)
     message(STATUS "${ENABLE_SANITIZER}: GPU_TARGETS rewritten -> ${GPU_TARGETS}")
 endfunction()
 
+# Build the per-mode sanitizer runtime ENV for a ctest entry.
+#
+# suppress_leaks=ON keeps CPython arena/module leaks from failing the pytest
+# entries when they run under the TheRock-driven sanitizer flow
+# (THEROCK_SANITIZER + enable_sanitizer_python_launcher). The standalone
+# sanitizer CI does not run those entries.
+# suppress_leaks=OFF keeps leak detection enabled for native gtests, which is
+# what the standalone sanitizer CI runs.
+function(sanitizer_runtime_env out_var suppress_leaks)
+    set(_env "")
+    if(ENABLE_SANITIZER STREQUAL "ASAN" OR ENABLE_SANITIZER STREQUAL "HOST_ASAN")
+        if(suppress_leaks)
+            list(APPEND _env "ASAN_OPTIONS=detect_leaks=0")
+        endif()
+    elseif(ENABLE_SANITIZER STREQUAL "TSAN")
+        list(APPEND _env "TSAN_OPTIONS=second_deadlock_stack=1")
+    elseif(ENABLE_SANITIZER STREQUAL "UBSAN")
+        list(APPEND _env "UBSAN_OPTIONS=print_stacktrace=1")
+    endif()
+    set(${out_var} "${_env}" PARENT_SCOPE)
+endfunction()
+
 # Wrap the ctest python command with THEROCK_SANITIZER_LAUNCHER plus env that
 # quiets known false positives.
 function(enable_sanitizer_python_launcher out_var)
     set(_launcher ${THEROCK_SANITIZER_LAUNCHER} ${${out_var}})
-    if(ENABLE_SANITIZER STREQUAL "ASAN" OR ENABLE_SANITIZER STREQUAL "HOST_ASAN")
-        list(
-            PREPEND
-            _launcher
-            "${CMAKE_COMMAND}"
-            -E
-            env
-            "ASAN_OPTIONS=detect_leaks=0"
-            --
-        )
-    elseif(ENABLE_SANITIZER STREQUAL "TSAN")
-        list(
-            PREPEND
-            _launcher
-            "${CMAKE_COMMAND}"
-            -E
-            env
-            "TSAN_OPTIONS=second_deadlock_stack=1"
-            --
-        )
+    sanitizer_runtime_env(_sanitizer_env ON)
+    if(_sanitizer_env)
+        list(PREPEND _launcher "${CMAKE_COMMAND}" -E env ${_sanitizer_env})
     endif()
     set(${out_var} "${_launcher}" PARENT_SCOPE)
 endfunction()
@@ -167,11 +199,11 @@ endfunction()
 set(ENABLE_SANITIZER
     "OFF"
     CACHE STRING
-    "Sanitizer for the native tool library: OFF, ASAN, HOST_ASAN, or TSAN"
+    "Sanitizer for the native tool library: OFF, ASAN, HOST_ASAN, TSAN, or UBSAN"
 )
 set_property(
     CACHE ENABLE_SANITIZER
-    PROPERTY STRINGS OFF ASAN HOST_ASAN TSAN
+    PROPERTY STRINGS OFF ASAN HOST_ASAN TSAN UBSAN
 )
 
 # Drive all three side effects at include time: resolve the selection, rewrite GPU

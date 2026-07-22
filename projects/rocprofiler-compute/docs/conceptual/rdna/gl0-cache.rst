@@ -8,7 +8,7 @@
 GL0 (TCP Vector Cache)
 =========================
 
-**GL0** is the vector-side TCP cache immediately in front of GL1 inside each shader engine datapath (hardware counters keep the ``TCP_*`` prefix on gfx115x).
+**GL0** is the vector-side TCP cache immediately in front of GL1, per CU (WGP-pair) in the shader datapath (hardware counters keep the ``TCP_*`` prefix on gfx115x).
 
 For GL1 panels and the GL1 Cache Memory Chart table, see :doc:`gl1-cache`.
 The handoff toward GL2 cache is under :doc:`gl2-cache`.

@@ -176,6 +176,7 @@ global:
     hipStreamQuery;
     hipStreamSynchronize;
     hipStreamWaitEvent;
+    __hipOnError;
     __hipPopCallConfiguration;
     __hipPushCallConfiguration;
     __hipRegisterFatBinary;
@@ -698,3 +699,10 @@ global:
 local:
     *;
 } hip_7.2;
+
+hip_7.15 {
+global:
+    hipMemGetDefaultMemPool;
+local:
+    *;
+} hip_7.14;

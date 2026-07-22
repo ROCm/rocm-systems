@@ -367,7 +367,7 @@ hipError_t hipEventCreateWithFlags(hipEvent_t* event, unsigned flags) {
   HIP_INIT_API(hipEventCreateWithFlags, event, flags);
 
   if (event == nullptr) {
-    return hipErrorInvalidValue;
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   HIP_RETURN(ihipEventCreateWithFlags(event, flags), *event);
@@ -378,7 +378,7 @@ hipError_t hipEventCreate(hipEvent_t* event) {
   HIP_INIT_API(hipEventCreate, event);
 
   if (event == nullptr) {
-    return hipErrorInvalidValue;
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   HIP_RETURN(ihipEventCreateWithFlags(event, 0), *event);
@@ -394,7 +394,7 @@ hipError_t hipEventDestroy(hipEvent_t event) {
 
   std::unique_lock lock(hip::eventSetLock);
   if (hip::eventSet.erase(event) == 0) {
-    return hipErrorContextIsDestroyed;
+    HIP_RETURN(hipErrorContextIsDestroyed);
   }
 
   auto* e = reinterpret_cast<hip::Event*>(event);
@@ -441,6 +441,7 @@ hipError_t hipEventRecord_common(hipEvent_t event, hipStream_t stream, uint32_t 
   }
 
   getStreamPerThread(stream);
+  CHECK_STREAM_DETACHED(stream);
   auto* const e = reinterpret_cast<hip::Event*>(event);
   auto* const hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {

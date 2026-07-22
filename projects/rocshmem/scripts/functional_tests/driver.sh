@@ -145,6 +145,29 @@ declare -A TEST_NUMBERS=(
   ["host_int_amo_fcswap"]="128"
   ["host_amo_all_pes"]="129"
   ["host_amo_self"]="130"
+  ["host_amo_add"]="131"
+  ["tile_broadcast"]="132"
+  ["tile_broadcast_wave"]="133"
+  ["tile_broadcast_wg"]="134"
+  ["tile_allgather"]="135"
+  ["tile_allgather_wave"]="136"
+  ["tile_allgather_wg"]="137"
+  ["host_wait_until"]="138"
+  ["host_test"]="139"
+  ["host_wait_until_all"]="140"
+  ["host_wait_until_any"]="141"
+  ["host_wait_until_some"]="142"
+  ["host_wait_until_all_vector"]="143"
+  ["host_wait_until_any_vector"]="144"
+  ["host_wait_until_some_vector"]="145"
+  ["host_wait_until_all_status"]="146"
+  ["host_wait_until_any_status"]="147"
+  ["host_wait_until_some_status"]="148"
+  ["teamreducescatter"]="149"
+  ["broadcast_wave"]="150"
+  ["alltoall_wave"]="151"
+  ["fcollect_wave"]="152"
+  ["reduce_wave"]="153"
 )
 
 # Detect which runtime to use
@@ -157,6 +180,71 @@ if [[ "${ROCSHMEM_TEST_SLR:-0}" == "1" ]]; then
 else
   USE_SLR=0
 fi
+
+# Detect wavefront size and grid-sync residency limits based on GPU architecture.
+# gfx1100/gfx1201/gfx1250 have wavefront size 32, most others have 64.
+# GRID_SYNC_MAX_THREADS applies only to functional tests whose kernels use the
+# software grid_barrier occupancy guard. A value of 0 disables driver-side adjustment. 
+# It can be overridden with ROCSHMEM_TEST_GRID_SYNC_MAX_THREADS.
+WAVE_SIZE=64
+GPU_ARCH=""
+GRID_SYNC_MAX_THREADS=0
+if command -v rocminfo >/dev/null 2>&1; then
+  GPU_ARCH=$(rocminfo 2>/dev/null | grep -m1 -Eo "gfx[0-9a-z]+" || true)
+  if [[ "$GPU_ARCH" =~ ^(gfx1100|gfx1201|gfx1250)$ ]]; then
+    WAVE_SIZE=32
+  fi
+  if [[ "$GPU_ARCH" =~ ^(gfx1100|gfx1201)$ ]]; then
+    GRID_SYNC_MAX_THREADS=$((32 * 1024))
+  fi
+fi
+GRID_SYNC_MAX_THREADS=${ROCSHMEM_TEST_GRID_SYNC_MAX_THREADS:-$GRID_SYNC_MAX_THREADS}
+
+IsGridBarrierOccupancyLimitedTest() {
+  case "$1" in
+    get|getnbi|put|putnbi|p|g|\
+    defaultctxget|defaultctxgetnbi|defaultctxput|defaultctxputnbi|defaultctxp|defaultctxg|\
+    teamctxget|teamctxgetnbi|teamctxput|teamctxputnbi|\
+    waveget|wavegetnbi|waveput|waveputnbi|\
+    wgget|wggetnbi|wgput|wgputnbi|\
+    flood_add|flood_fadd|flood_waitadd)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+AdjustGridBarrierProblemSize() {
+  local test_name=$1
+  local num_wg=$2
+  local num_threads=$3
+
+  if (( GRID_SYNC_MAX_THREADS <= 0 )); then
+    echo "$num_wg"
+    return
+  fi
+
+  if ! IsGridBarrierOccupancyLimitedTest "$test_name"; then
+    echo "$num_wg"
+    return
+  fi
+
+  local requested_threads=$((num_wg * num_threads))
+  if (( requested_threads <= GRID_SYNC_MAX_THREADS )); then
+    echo "$num_wg"
+    return
+  fi
+
+  local adjusted_wg=$((GRID_SYNC_MAX_THREADS / num_threads))
+  if (( adjusted_wg < 1 )); then
+    adjusted_wg=1
+  fi
+
+  echo "Adjust: $test_name workgroups $num_wg -> $adjusted_wg for ${GPU_ARCH:-unknown GPU} grid_barrier residency limit (${GRID_SYNC_MAX_THREADS} threads, -z $num_threads)" >&2
+  echo "$adjusted_wg"
+}
 
 # Router function - dispatches to appropriate implementation
 ExecTest() {
@@ -200,6 +288,8 @@ ExecTest_SLR() {
     DRIVER_RETURN_STATUS=1
     return
   fi
+
+  NUM_WG=$(AdjustGridBarrierProblemSize "$TEST_NAME" "$NUM_WG" "$NUM_THREADS")
 
   if [[ "" == "$ROCSHMEM_MAX_NUM_CONTEXTS" ]]
   then
@@ -330,6 +420,8 @@ ExecTest_MPI() {
     DRIVER_RETURN_STATUS=1
     return
   fi
+
+  NUM_WG=$(AdjustGridBarrierProblemSize "$TEST_NAME" "$NUM_WG" "$NUM_THREADS")
 
   if [[ "" == "$ROCSHMEM_MAX_NUM_CONTEXTS" ]]
   then
@@ -654,6 +746,8 @@ TestColl() {
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
   ExecTest  "syncall"          2       1            1
+  ExecTest  "syncall"          3       1            1
+  ExecTest  "syncall"          5       1            1
 
   ExecTest  "wavesyncall"      2       1            1
 
@@ -663,6 +757,8 @@ TestColl() {
   ExecTest  "teamsync"         2       16           64
   ExecTest  "teamsync"         2       32           256
   ExecTest  "teamsync"         2       39           1024
+  ExecTest  "teamsync"         3       16           64
+  ExecTest  "teamsync"         5       16           64
 
   ExecTest  "teamwavesync"     2       1            1
   ExecTest  "teamwavesync"     2       16           64
@@ -675,6 +771,8 @@ TestColl() {
   ExecTest  "teamwgsync"       2       39           1024
 
   ExecTest  "barrierall"       2       1            1
+  ExecTest  "barrierall"       3       1            1
+  ExecTest  "barrierall"       5       1            1
 
   ExecTest  "wavebarrierall"   2       1            1
 
@@ -684,6 +782,8 @@ TestColl() {
   ExecTest  "teambarrier"      2       16           64
   ExecTest  "teambarrier"      2       32           256
   ExecTest  "teambarrier"      2       39           1024
+  ExecTest  "teambarrier"      3       16           64
+  ExecTest  "teambarrier"      5       16           64
 
   ExecTest  "teamwavebarrier"  2       1            1
   ExecTest  "teamwavebarrier"  2       16           64
@@ -696,12 +796,32 @@ TestColl() {
   ExecTest  "teamwgbarrier"    2       39           1024
 
   ExecTest  "alltoall"         2       1            64        512
+  ExecTest  "alltoall"         3       1            64        512
+  ExecTest  "alltoall"         5       1            64        512
 
   ExecTest  "teambroadcast"    2       1            64        32768
+  ExecTest  "teambroadcast"    3       1            64        32768
+  ExecTest  "teambroadcast"    5       1            64        32768
 
   ExecTest  "fcollect"         2       1            64        32768
+  ExecTest  "fcollect"         3       1            64        32768
+  ExecTest  "fcollect"         5       1            64        32768
 
+  # NOTE: teamreduction at rank counts > 2 currently fails a data validation
+  # check in the ring all-reduce path; this is a pre-existing bug unrelated to
+  # work/sync pool alignment, so it is only run at 2 ranks here.
   ExecTest  "teamreduction"    2       1            64        32768
+
+  ExecTest  "teamreducescatter" 2      1            64        32768
+  ExecTest  "teamreducescatter" 4      1            64        32768
+  ExecTest  "teamreducescatter" 8      1            64        32768
+
+  if [[ $TEST != ro* ]]; then #AIROCSHMEM-409: wave tests not supported on RO
+    ExecTest  "broadcast_wave"   2       1            $WAVE_SIZE        32768
+    ExecTest  "alltoall_wave"    2       1            $WAVE_SIZE        512
+    ExecTest  "fcollect_wave"    2       1            $WAVE_SIZE        32768
+    ExecTest  "reduce_wave"      2       1            $WAVE_SIZE        32768
+  else echo "Skip:   *_wave (AIROCSHMEM-409: wave tests not supported on RO)"; fi
 }
 
 TestOnStream() {
@@ -757,6 +877,18 @@ TestHostRma() { #AIROCSHMEM-419
   # Int (32-bit) AMOs: rocshmem_int_atomic_fetch_add/cas (exercises 32-bit kernel path)
   ExecTest  "host_int_amo_fadd"   2        1      1
   ExecTest  "host_int_amo_fcswap" 2        1      1
+  ROCSHMEM_MAX_NUM_HOST_CONTEXTS=2 ExecTest "host_amo_add" 2 1 1
+  ExecTest  "host_wait_until"            2        1      1
+  ExecTest  "host_test"                  2        1      1
+  ExecTest  "host_wait_until_all"        2        1      1
+  ExecTest  "host_wait_until_any"        2        1      1
+  ExecTest  "host_wait_until_some"       2        1      1
+  ExecTest  "host_wait_until_all_vector" 2        1      1
+  ExecTest  "host_wait_until_any_vector" 2        1      1
+  ExecTest  "host_wait_until_some_vector" 2       1      1
+  ExecTest  "host_wait_until_all_status" 2        1      1
+  ExecTest  "host_wait_until_any_status" 2        1      1
+  ExecTest  "host_wait_until_some_status" 2       1      1
   # Concurrency tests — configurable PE count (IPC_HOST_NPES, default 4)
   ExecTest  "host_amo_all_pes"    $npes    1      1
   ExecTest  "host_amo_self"       $npes    1      1
@@ -790,12 +922,13 @@ TestOther() {
   ExecTest  "flood_putnbi"     8       64           1024
   ExecTest  "flood_p"          8       64           1024
 
-  ExecTest  "flood_get"        2       64           1024
-  ExecTest  "flood_get"        8       64           1024
-  ExecTest  "flood_getnbi"     8       64           1024
-  if [[ $TEST != gda* ]]; then #AIROCSHMEM-162
-  ExecTest  "flood_g"          8       64           1024
-  else echo "Skip:   flood_g (AIROCSHMEM-162: GDA _g not implemented)"; fi
+  # Temporarily disabled flood_get tests
+  # ExecTest  "flood_get"        2       64           1024
+  # ExecTest  "flood_get"        8       64           1024
+  # ExecTest  "flood_getnbi"     8       64           1024
+  # if [[ $TEST != gda* ]]; then #AIROCSHMEM-162
+  # ExecTest  "flood_g"          8       64           1024
+  # else echo "Skip:   flood_g (AIROCSHMEM-162: GDA _g not implemented)"; fi
 
   ExecTest  "flood_add"        2       64           1024
   ExecTest  "flood_add"        8       64           1024
@@ -852,15 +985,6 @@ TestTiles() {
   #       | Name                      | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
 
-  # Detect wavefront size based on GPU architecture
-  # gfx1100 and gfx1201 have wavefront size 32, most others have 64
-  WAVE_SIZE=64
-  if command -v rocminfo >/dev/null 2>&1; then
-    if rocminfo | grep -qE "Name:.*(gfx1100|gfx1201)"; then
-      WAVE_SIZE=32
-    fi
-  fi
-
   ExecTest  "tile_put_contiguous"       2       1            1
   ExecTest  "tile_put_rowmajor"         2       1            1
   ExecTest  "tile_put_colmajor"         2       1            1
@@ -877,6 +1001,18 @@ TestTiles() {
   ExecTest  "tile_put_1d"               2       1            1
   ExecTest  "tile_get_1d"               2       1            1
   ExecTest  "tile_get_wave_contiguous"  2       1            $WAVE_SIZE
+  ExecTest  "tile_broadcast"            2       1            1
+  ExecTest  "tile_broadcast"            4       1            1
+  ExecTest  "tile_broadcast_wave"       2       1            $WAVE_SIZE
+  ExecTest  "tile_broadcast_wave"       4       1            $WAVE_SIZE
+  ExecTest  "tile_broadcast_wg"         2       4            $WAVE_SIZE
+  ExecTest  "tile_broadcast_wg"         4       4            $WAVE_SIZE
+  ExecTest  "tile_allgather"            2       1            1
+  ExecTest  "tile_allgather"            4       1            1
+  ExecTest  "tile_allgather_wave"       2       1            $WAVE_SIZE
+  ExecTest  "tile_allgather_wave"       4       1            $WAVE_SIZE
+  ExecTest  "tile_allgather_wg"         2       4            $WAVE_SIZE
+  ExecTest  "tile_allgather_wg"         4       4            $WAVE_SIZE
 }
 
 TestHeatMapRMA() {

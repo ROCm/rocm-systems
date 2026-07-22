@@ -53,14 +53,20 @@ subtrees:
   entries:
   - file: conceptual/partition.md
     title: GPU partitioning
+  - file: conceptual/gpu-reset-behavior.md
+    title: GPU reset behavior
   - file: conceptual/gpu-violations.md
+    title: GPU violations
   - file: conceptual/perf-determinism.md
     title: Performance determinism
   - file: conceptual/ras.md
+    title: Reliability, availability, serviceability (RAS)
+  - file: conceptual/test-design.md
+    title: Test suite design
 
 - caption: Tutorials
   entries:
-  - url: https://github.com/ROCm/rocm-systems/tree/${branch}/projects/amdsmi/example
+  - url: https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi/example
     title: AMD SMI examples (GitHub)
   - url: https://rocm.blogs.amd.com/software-tools-optimization/amd-smi-overview/README.html
     title: AMD SMI CLI walkthrough

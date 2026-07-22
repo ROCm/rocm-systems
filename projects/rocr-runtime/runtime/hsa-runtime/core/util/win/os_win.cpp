@@ -54,7 +54,6 @@
 #include <emmintrin.h>
 #include <pmmintrin.h>
 #include <xmmintrin.h>
-#include <shared_mutex>
 
 #undef Yield
 #undef CreateMutex
@@ -271,40 +270,6 @@ uint64_t AccurateClockFrequency() {
   return ret;
 }
 
-SharedMutex CreateSharedMutex() {
-  return reinterpret_cast<SharedMutex>(new std::shared_mutex());
-}
-
-bool TryAcquireSharedMutex(SharedMutex lock) {
-  return reinterpret_cast<std::shared_mutex*>(lock)->try_lock();
-}
-
-bool AcquireSharedMutex(SharedMutex lock) {
-  reinterpret_cast<std::shared_mutex*>(lock)->lock();
-  return true;
-}
-
-void ReleaseSharedMutex(SharedMutex lock) {
-  reinterpret_cast<std::shared_mutex*>(lock)->unlock();
-}
-
-bool TrySharedAcquireSharedMutex(SharedMutex lock) {
-  return reinterpret_cast<std::shared_mutex*>(lock)->try_lock_shared();
-}
-
-bool SharedAcquireSharedMutex(SharedMutex lock) {
-  reinterpret_cast<std::shared_mutex*>(lock)->lock_shared();
-  return true;
-}
-
-void SharedReleaseSharedMutex(SharedMutex lock) {
-  reinterpret_cast<std::shared_mutex*>(lock)->unlock_shared();
-}
-
-void DestroySharedMutex(SharedMutex lock) {
-  delete reinterpret_cast<std::shared_mutex*>(lock);
-}
-
 uint64_t ReadSystemClock() {
   assert(false && "Not implemented.");
   abort();
@@ -481,9 +446,15 @@ bool MapMemory(void* addr, size_t size, MemProt perms, int fd [[maybe_unused]],
   return VirtualProtect(addr, size, memProtToOsProt(perms), &OldProtect) != 0;
 }
 
-hsa_status_t DmaBufClose(int dmabuf) {
-  (void)dmabuf;
+hsa_status_t DmaBufClose(int* dmabuf) {
+  if (dmabuf) *dmabuf = -1;
   return HSA_STATUS_SUCCESS;
+}
+
+int DmaBufDup(int dmabuf) {
+  /* DMA-BUF is not supported on Windows; preserve pre-dup behavior by returning the caller fd. */
+  if (dmabuf < 0) return -1;
+  return dmabuf;
 }
 
 bool ProtectMemory(void* va, size_t size, MemProt perms) {

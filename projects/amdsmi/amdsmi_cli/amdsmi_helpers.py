@@ -3152,6 +3152,8 @@ class AMDSMIHelpers:
             current_power_cap = self.convert_SI_unit(
                 power_cap_info["power_cap"], AMDSMIHelpers.SI_Unit.MICRO
             )
+            # Setting power cap to 0 reads back the current cap, so the technical minimum is 1
+            min_power_cap = max(min_power_cap, 1)
 
             # Return structured data for JSON/CSV or formatted string for human-readable
             if requested_power_cap == current_power_cap:
@@ -3174,18 +3176,13 @@ class AMDSMIHelpers:
                         "message": f"Unable to set {power_type_key} power cap to {requested_power_cap}W, current value is {current_power_cap}W",
                     }
                 return f"Unable to set {power_type_key} power cap to {requested_power_cap}W, current value is {current_power_cap}W"
-            elif not (
-                min_power_cap < requested_power_cap <= max_power_cap and requested_power_cap > 0
-            ):
-                # setting power cap to 0 will return the current power cap so the technical minimum value is 1
-                min_cap_display = 1 if min_power_cap == 0 else min_power_cap
-
+            elif not min_power_cap <= requested_power_cap <= max_power_cap:
                 # Raise so the caller exits with a non-zero return code
                 raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
                     sys.argv[1] if len(sys.argv) > 1 else "unknown",
                     f"{requested_power_cap}W",
                     self.get_output_format(),
-                    hint=f"Power cap must be between {min_cap_display}W and {max_power_cap}W",
+                    hint=f"Power cap must be between {min_power_cap}W and {max_power_cap}W",
                 )
             # Set the power cap
             new_power_cap = self.convert_SI_unit(

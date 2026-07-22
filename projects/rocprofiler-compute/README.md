@@ -34,13 +34,13 @@ git checkout develop
 
 cd projects/rocprofiler-compute
 
-# Initialize vendored dependencies
-git submodule update --init --recursive -- src/vendored/
+# Initialize submodule dependencies (vendored Python deps and src/lib/external C++ libs)
+git submodule update --init --recursive -- src/
 
 python3 -m pip install -r requirements.txt
 ```
 
-**Note**: When working from source, vendored dependencies (like PyYAML) are included as git submodules. If you see import errors about missing vendored modules, run `git submodule update --init --recursive -- src/vendored/`.
+**Note**: When working from source, submodules live under `src/` (vendored Python dependencies like PyYAML in `src/vendored/`, and C++ libraries like googletest, fmt, and json in `src/lib/external/`). If you see import errors about missing vendored modules or missing C++ externals during a build, run `git submodule update --init --recursive -- src/`.
 
 ### Development dependencies
 
@@ -52,13 +52,13 @@ python3 -m pip install -r requirements-development.txt
 
 ## Testing
 
-Populate the <usename> variable in `docker/docker-compose.customrocmtest.yml`.
-Populate the <rocm_build_image> variable in `docker/Dockerfile.customrocmtest` based on latest ROCm CI build information.
+Populate the <username> variable in `docker/docker-compose.therock.tarball.yml`.
+Populate the <tarball_name> variable in `docker/Dockerfile.therock.tarball` (see the comment there for the naming convention and nightly index).
 
 To quickly get the environment (bash shell) for building and testing, run the following commands:
 * `cd docker`
-* If the docker image is not available on the machine, then build the image, otherwise skip this step: `docker compose -f docker-compose.customrocmtest.yml build`
-* Launch the container, and check the name of the container: `docker compose -f docker-compose.customrocmtest.yml up --force-recreate -d `
+* If the docker image is not available on the machine, then build the image, otherwise skip this step: `docker compose -f docker-compose.therock.tarball.yml build`
+* Launch the container, and check the name of the container: `docker compose -f docker-compose.therock.tarball.yml up --force-recreate -d `
 * Run bash shell on the launched container: `docker exec -it <container_name> bash`
 * If testing is done, kill the container: `docker container kill <container_name>`
 

@@ -5,13 +5,19 @@
 #include "common/env_vars.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
+#include "core/perfetto/emitter.hpp"
+#include "core/perfetto/engine.hpp"
 #include "core/state.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include <cstdint>
+#include <mutex>
+#include <unordered_map>
 
 #include <timemory/hash/types.hpp>
 #include <timemory/process/threading.hpp>
+
+#include <unistd.h>
 
 #include "logger/debug.hpp"
 
@@ -45,20 +51,6 @@ bool debug_pop  = rocprofsys::get_env(env_vars::DEBUG_POP, false) || get_debug_e
 bool debug_mark = rocprofsys::get_env(env_vars::DEBUG_MARK, false) || get_debug_env();
 bool debug_user =
     rocprofsys::get_env(env_vars::DEBUG_USER_REGIONS, false) || get_debug_env();
-
-std::unordered_map<hash_value_t, std::string>&
-get_perfetto_track_uuids()
-{
-    static auto _v = std::unordered_map<hash_value_t, std::string>{};
-    return _v;
-}
-
-std::mutex&
-get_perfetto_track_uuids_mutex()
-{
-    static auto _mtx = std::mutex{};
-    return _mtx;
-}
 
 void
 copy_timemory_hash_ids()

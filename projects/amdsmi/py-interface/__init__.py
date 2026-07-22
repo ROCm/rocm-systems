@@ -161,6 +161,7 @@ from .amdsmi_interface import amdsmi_stop_gpu_event_notification
 
 # # Process Information
 from .amdsmi_interface import amdsmi_get_gpu_process_list
+from .amdsmi_interface import amdsmi_get_gpu_process_list_by_pid
 
 # # ECC Error Information
 from .amdsmi_interface import amdsmi_get_gpu_total_ecc_count
@@ -353,6 +354,10 @@ from .amdsmi_interface import amdsmi_set_gpu_uma_carveout
 from .amdsmi_interface import amdsmi_get_ttm_info
 from .amdsmi_interface import amdsmi_set_ttm_pages_limit
 from .amdsmi_interface import amdsmi_reset_ttm_pages_limit
+
+# # Fabric (IFoE/UALoE) Information
+from .amdsmi_interface import amdsmi_get_fabric_telemetry_data
+from .amdsmi_interface import amdsmi_get_gpu_fabric_info
 
 # Exceptions
 from .amdsmi_exception import AmdSmiLibraryException

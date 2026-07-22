@@ -17,6 +17,7 @@ target_link_libraries(
         rocjitsu_analysis
         rocjitsu_code
         rocjitsu_isa
+        rocjitsu_isa_registry
         rocjitsu_isa_cdna1
         rocjitsu_isa_cdna2
         rocjitsu_isa_cdna3
@@ -27,12 +28,14 @@ target_link_libraries(
         rocjitsu_isa_rdna3_5
         rocjitsu_isa_rdna4
         rocjitsu_isa_gfx1250
+        # \NPI new ISA family: link its rocjitsu_isa_<isa> object library here.
         rocjitsu_isa_risc_v
         simdojo
         rocjitsu_vm
         rocjitsu_vm_amdgpu
         rocjitsu_vm_risc_v
         rocjitsu_config
+        rocjitsu_dbt_config
         util
         flatbuffers
         Threads::Threads
@@ -42,3 +45,8 @@ target_link_libraries(
 set_target_properties(rocjitsu_bin PROPERTIES OUTPUT_NAME rocjitsu)
 
 rj_configure_target(rocjitsu_bin TOOL)
+
+# Install the rocjitsu CLI so it is usable from a packaged dist (the default
+# entrypoint for driving emulation when mirage is not present).
+include(GNUInstallDirs)
+install(TARGETS rocjitsu_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

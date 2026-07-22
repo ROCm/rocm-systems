@@ -61,6 +61,22 @@ def test_gfx1250_mad_mix_f32_uses_helper_and_fma():
     assert 'a * b + c' not in cpp
 
 
+def test_mad_mix_applies_abs_before_neg():
+    cpp = gen_mad_mix_f32(
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        op_sel_hi_2_expr='inst_.op_sel_hi_2',
+        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
+    )
+
+    abs_line = 'if (inst_.neg_hi & 1) a = std::fabs(a);'
+    neg_line = 'if (inst_.neg & 1) a = -a;'
+    assert 'read_mix_src(raw1, inst_.src1' in cpp
+    assert 'src_selector >= 240u && src_selector <= 248u' in cpp
+    assert abs_line in cpp
+    assert cpp.index(abs_line) < cpp.index(neg_line)
+
+
 def test_gfx1250_mad_mixlo_f16_uses_helper_and_fma():
     cpp = gen_mad_mix_lo_hi(
         ['vdst'],
@@ -74,6 +90,32 @@ def test_gfx1250_mad_mixlo_f16_uses_helper_and_fma():
     assert 'read_fma_mix_source_f32(src0, wf, lane' in cpp
     assert 'std::fma(a, b, c)' in cpp
     assert 'util::f32_to_f16(result)' in cpp
+
+
+def test_mad_mixhi_f16_uses_true16_high_write():
+    cpp = gen_mad_mix_lo_hi(
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        is_lo=False,
+        op_sel_hi_2_expr='inst_.op_sel_hi_2',
+        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
+    )
+
+    assert 'write_vop3_true16_dst(vdst, wf, lane, 0x8u, h)' in cpp
+    assert 'vdst.write_lane(wf, lane, (prev & 0x0000FFFFu)' not in cpp
+
+
+def test_mad_mixlo_bf16_uses_true16_low_write():
+    cpp = gen_mad_mix_bf16(
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        result='lo',
+        op_sel_hi_2_expr='inst_.op_sel_hi_2',
+        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
+    )
+
+    assert 'write_vop3_true16_dst(vdst, wf, lane, 0u, h)' in cpp
+    assert 'vdst.write_lane(wf, lane, (prev & 0xFFFF0000u)' not in cpp
 
 
 def test_gfx1250_bf16_mad_mix_variants_use_bf16_helper():

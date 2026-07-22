@@ -23,6 +23,11 @@ if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx(10|11|12)[0-9][0-9]$"
     set(IS_DISABLED ON)
 endif()
 
+rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
+if(${IS_DISABLED})
+    set(IS_SPM_DISABLED on)
+endif()
+
 rocprofiler_add_integration_execute_test(
     rocprofv3-avail-test-hw-counters
     COMMAND ${Python3_EXECUTABLE} $<TARGET_FILE:rocprofiler-sdk::rocprofv3-avail> info
@@ -34,6 +39,18 @@ rocprofiler_add_integration_execute_test(
     PASS_REGULAR_EXPRESSION
         "GPU:[0-9]*\\n*;Name:\\t[a-zA-Z_]*\\n;Counter_Name:\\t[a-zA-Z_]*\\n;Description:\\t(.*)\\n*;Expression:\\t(.)*\\n*;Block:\\t[a-zA-Z]*\\n*;Dimensions:\\t([A-Z_]*)\\t([[0-9]*:[0-9]*\\])*\\n*"
     DISABLED "${IS_DISABLED}")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-avail-spm-test-hw-counters
+    COMMAND ${Python3_EXECUTABLE} $<TARGET_FILE:rocprofiler-sdk::rocprofv3-avail> info
+            --spm
+    DEPENDS rocprofiler-sdk::rocprofv3-avail
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION
+        "GPU:[0-9]*\\n*;Name:\\t[a-zA-Z_]*\\n;Counter_Name:\\t[a-zA-Z_]*\\n;Description:\\t(.*)\\n*;Expression:\\t(.)*\\n*;Block:\\t[a-zA-Z]*\\n*;Dimensions:\\t([A-Z_]*)\\t([[0-9]*:[0-9]*\\])*\\n*"
+    DISABLED "${IS_SPM_DISABLED}")
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-avail-test-pc-sample-config
@@ -66,6 +83,26 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
+    DISABLED "${IS_DISABLED}")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-avail-test-info
+    COMMAND ${Python3_EXECUTABLE} $<TARGET_FILE:rocprofiler-sdk::rocprofv3-avail> info
+    DEPENDS rocprofiler-sdk::rocprofv3-avail
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION "GPU:[0-9]*\\n*";
+    DISABLED "${IS_DISABLED}")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-avail-test-list
+    COMMAND ${Python3_EXECUTABLE} $<TARGET_FILE:rocprofiler-sdk::rocprofv3-avail> list
+    DEPENDS rocprofiler-sdk::rocprofv3-avail
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION "GPU"[ \t\r]":[0-9]*\\n*";
     DISABLED "${IS_DISABLED}")
 
 rocprofiler_add_integration_validate_test(

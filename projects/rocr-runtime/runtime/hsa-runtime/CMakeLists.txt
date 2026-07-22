@@ -198,13 +198,19 @@ if ( CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   endif()
 endif()
 
+## UndefinedBehaviorSanitizer flags
+if ( UNDEFINED_SANITIZER OR THEROCK_SANITIZER STREQUAL "UBSAN" OR DEFINED ENV{UNDEFINED_SANITIZER} OR "$ENV{THEROCK_SANITIZER}" STREQUAL "UBSAN" )
+  set ( HSA_CXX_FLAGS ${HSA_CXX_FLAGS} -fsanitize=undefined -fsanitize-recover=undefined -g )
+  set ( HSA_SHARED_LINK_FLAGS "${HSA_SHARED_LINK_FLAGS} -fsanitize=undefined" )
+  message(STATUS "hsa-runtime64: UndefinedBehaviorSanitizer (UBSAN) enabled")
+endif()
+
 if (UNIX)
   set ( LNKSCR "hsacore.so.link" )
   set ( DRVDEF "${CMAKE_CURRENT_SOURCE_DIR}/hsacore.so.def" )
-  set(HSA_SHARED_LINK_FLAGS "-Wl,-Bdynamic -Wl,-z,noexecstack -Wl,${CMAKE_CURRENT_SOURCE_DIR}/${LNKSCR} -Wl,--version-script=${DRVDEF} -Wl,--enable-new-dtags")
+  set(HSA_SHARED_LINK_FLAGS "-Wl,-Bdynamic -Wl,-z,noexecstack -Wl,${CMAKE_CURRENT_SOURCE_DIR}/${LNKSCR} -Wl,--version-script=${DRVDEF} -Wl,--enable-new-dtags ${HSA_SHARED_LINK_FLAGS}")
 else()
   target_sources(${CORE_RUNTIME_TARGET} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/hsacore.dll.def")
-  set(HSA_SHARED_LINK_FLAGS "")
 endif()
 
 target_compile_options(${CORE_RUNTIME_TARGET} PRIVATE ${HSA_CXX_FLAGS})
@@ -224,6 +230,7 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/amd_gpu_agent.cpp
            core/runtime/amd_hsa_loader.cpp
            core/runtime/amd_aql_queue.cpp
+           core/runtime/amd_sdma_queue.cpp
            core/runtime/amd_loader_context.cpp
            core/runtime/hsa_ven_amd_loader.cpp
            core/runtime/amd_memory_region.cpp
@@ -231,6 +238,8 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/amd_topology.cpp
            core/runtime/default_signal.cpp
            core/runtime/host_queue.cpp
+           core/runtime/hotswap.cpp
+           core/runtime/hotswap_gfx_query.cpp
            core/runtime/hsa.cpp
            core/runtime/hsa_api_trace.cpp
            core/runtime/hsa_ext_amd.cpp

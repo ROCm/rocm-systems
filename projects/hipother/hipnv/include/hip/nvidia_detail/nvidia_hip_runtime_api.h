@@ -125,6 +125,7 @@ typedef enum hipMemoryAdvise {
 #define hipStreamWaitValueEq CU_STREAM_WAIT_VALUE_EQ
 #define hipStreamWaitValueAnd CU_STREAM_WAIT_VALUE_AND
 #define hipStreamWaitValueNor CU_STREAM_WAIT_VALUE_NOR
+#define hipStreamWriteValueDefault CU_STREAM_WRITE_VALUE_DEFAULT
 
 // hipLibraryPropertyType
 #define hipLibraryPropertyType libraryPropertyType
@@ -367,6 +368,7 @@ typedef enum cudaResourceViewFormat hipResourceViewFormat;
 #define hipHostMallocWriteCombined cudaHostAllocWriteCombined
 #define hipHostMallocCoherent 0x0
 #define hipHostMallocNonCoherent 0x0
+#define hipMallocSignalMemory 0x0
 
 #define hipHostAllocDefault cudaHostAllocDefault
 #define hipHostAllocPortable cudaHostAllocPortable
@@ -4351,6 +4353,13 @@ inline static hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* lo
   CUmemLocation cu_location = cudaMemLocationToCUmemLocation(location);
   CUmemAllocationType cu_allocation_type = cudaMemAllocationTypeToCUmemAllocationType(type);
   return hipCUResultTohipError(cuMemGetMemPool(pool, &cu_location, cu_allocation_type));
+}
+
+inline static hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
+                                                 hipMemAllocationType type) {
+  CUmemLocation cu_location = cudaMemLocationToCUmemLocation(location);
+  CUmemAllocationType cu_allocation_type = cudaMemAllocationTypeToCUmemAllocationType(type);
+  return hipCUResultTohipError(cuMemGetDefaultMemPool(memPool, &cu_location, cu_allocation_type));
 }
 #endif // CUDA_VERSION >= CUDA_13000
 

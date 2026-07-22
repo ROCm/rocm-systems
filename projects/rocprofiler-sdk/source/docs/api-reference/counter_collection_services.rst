@@ -24,17 +24,54 @@ Definitions
 
 **Instance ID**: Unique record Id that encodes the counter Id and dimension for a collected value.
 
-**Dimension**: Dimensions help to provide context to the raw counter values by specifying the hardware register that is the source of counter collection, such as a shader engine. All counter values have dimension data encoded in their instance Id, which allows you to extract the values for individual dimensions using functions in the counter interface. The following dimensions are supported:
+**Dimension**: Dimensions help to provide context to the raw counter values by identifying *which* physical hardware unit produced a given value. A single counter is usually replicated across many hardware units (for example, one copy per shader engine), so a single counter produces multiple values per collection. Each value is tagged with a coordinate in one or more dimensions, and this coordinate is encoded into the value's instance Id. You can extract the coordinate for an individual dimension using functions in the counter interface (see :ref:`querying_counter_dimensions`).
 
-.. code-block:: c
+The following dimensions are supported:
 
-    ROCPROFILER_DIMENSION_XCC,            ///< XCC dimension of result
-    ROCPROFILER_DIMENSION_AID,            ///< AID dimension of result
-    ROCPROFILER_DIMENSION_SHADER_ENGINE,  ///< SE dimension of result
-    ROCPROFILER_DIMENSION_AGENT,          ///< Agent dimension (note: this field is not set externally)
-    ROCPROFILER_DIMENSION_SHADER_ARRAY,   ///< Number of shader arrays
-    ROCPROFILER_DIMENSION_WGP,            ///< Number of workgroup processors
-    ROCPROFILER_DIMENSION_INSTANCE,       ///< From unspecified hardware register
+.. list-table::
+    :header-rows: 1
+    :widths: 30 15 55
+
+    * - Dimension
+      - Hardware unit
+      - Meaning
+    * - ``ROCPROFILER_DIMENSION_XCC``
+      - XCD / XCC
+      - Index of the Accelerator Complex Die (XCD, sometimes called the XCC) that produced the value. Only present on GPUs that expose more than one compute die to a single agent (for example, the MI300 series). On single-die agents (for example, MI200, where each die is a separate agent) this dimension is absent.
+    * - ``ROCPROFILER_DIMENSION_AID``
+      - AID
+      - Index of the Accelerator Interconnect/IO Die (AID). Present only on multi-die accelerators that expose IO-die-level blocks (for example, the MI300 series). Typically applies to memory- and IO-related blocks.
+    * - ``ROCPROFILER_DIMENSION_SHADER_ENGINE``
+      - Shader Engine (SE)
+      - Index of the shader engine within a die. Most compute (SQ/GRBM-class) counters are replicated per shader engine.
+    * - ``ROCPROFILER_DIMENSION_SHADER_ARRAY``
+      - Shader Array (SA)
+      - Index of the shader array within a shader engine. A shader engine contains one or more shader arrays.
+    * - ``ROCPROFILER_DIMENSION_WGP``
+      - Workgroup Processor (WGP) / CU
+      - Index of the compute unit within a shader array. Named after the RDNA Workgroup Processor (a WGP groups two CUs); on CDNA parts (MI-series) this indexes the compute unit (CU). Present only for counters collected at CU/WGP granularity.
+    * - ``ROCPROFILER_DIMENSION_INSTANCE``
+      - Block instance
+      - Generic per-block instance index used when a block has multiple hardware instances that do not map onto the named geometric dimensions above (for example, multiple memory channels or multiple copies of a fixed-function block). Also used for constant (non-hardware) counters, which report a single instance.
+    * - ``ROCPROFILER_DIMENSION_AGENT``
+      - Agent
+      - Internal use only. This dimension is not set externally and should not be supplied by tools.
+
+.. note::
+    The set of dimensions that applies to a counter is **not** fixed by the SDK and is **not** the same for every architecture or every counter. The dimensions (and the size/extent of each dimension) are determined at runtime for the specific agent and the specific counter, based on the hardware block the counter reads from. For example:
+
+    - ``ROCPROFILER_DIMENSION_XCC`` appears only on multi-XCD agents such as the MI300 series; it does not appear on MI200.
+    - ``ROCPROFILER_DIMENSION_WGP`` appears only for counters collected at CU/WGP granularity.
+    - The extent of ``ROCPROFILER_DIMENSION_SHADER_ENGINE`` (the number of shader engines) differs between architectures.
+
+    Because of this, you should always **query the dimensions of a counter at runtime** rather than assuming a fixed set (see :ref:`querying_counter_dimensions`). When a counter does not have a given dimension, that dimension's coordinate is encoded as ``0`` for every value. As a result, ``reduce`` on an absent dimension is a no-op, but ``select`` on an absent dimension only matches index ``0`` (selecting any non-zero index drops all values for that counter).
+
+.. _querying_counter_dimensions:
+
+Querying counter dimensions
++++++++++++++++++++++++++++
+
+Dimensions depend on the counter and the specific agent it is collected on. To discover which dimensions a counter has (and their sizes), query the counter info with ``rocprofiler_query_counter_info`` using ``ROCPROFILER_COUNTER_INFO_VERSION_1``. This call does not take an agent Id; it selects a representative agent of that counter's architecture internally and reports the dimensions for that agent. The returned ``rocprofiler_counter_info_v1_t`` reports ``dimensions_count`` and, in ``dimensions``, the name and extent of each dimension. To read the coordinate of a specific value within a dimension from a collected record, use ``rocprofiler_query_record_dimension_position`` with the value's instance Id (see the buffered callback example above).
 
 Using the counter collection service
 ------------------------------------
@@ -438,6 +475,13 @@ Select function
     expression: select(Y, [DIMENSION_XCC=[0],DIMENSION_SHADER_ENGINE=[2]])
 
 The select() function returns only the counter values matching the dimension indices provided in the expression. This operation helps the user select specific dimension's index. Supported dimensions include ``DIMENSION_XCC``, ``DIMENSION_AID``, ``DIMENSION_SHADER_ENGINE``, ``DIMENSION_AGENT``, ``DIMENSION_SHADER_ARRAY``, ``DIMENSION_WGP``, and ``DIMENSION_INSTANCE``. For example ``select(Y, [DIMENSION_XCC=[0],DIMENSION_SHADER_ENGINE=[2]])`` provides counter values from DIMENSION_XCC= 0 and DIMENSION_SHADER_ENGINE= 2 for Y Metric.
+
+.. note::
+    Points to note on ``select`` arguments:
+
+    - **Number of dimensions**: There is no fixed limit of one or two. The examples show one and two dimensions only for brevity. You may constrain as many distinct dimensions as the counter actually has, up to all of the user-visible dimensions listed above. Each dimension may appear at most once in the argument list. To find out which dimensions a counter has, see :ref:`querying_counter_dimensions`.
+    - **Single index per dimension**: Each dimension takes exactly one index in square brackets (for example, ``DIMENSION_XCC=[0]``). A comma-separated list (for example, ``DIMENSION_XCC=[0,1]``) and range syntax (for example, ``[0:1]``) are **not** supported and raise a runtime error. To keep several indices, apply ``select`` for each index separately.
+    - **Index limits**: Each index must be non-negative and fit within the number of bits allocated to the dimension: ``DIMENSION_XCC``, ``DIMENSION_AID``, ``DIMENSION_SHADER_ENGINE``, ``DIMENSION_SHADER_ARRAY``, and ``DIMENSION_WGP`` use 6 bits (indices ``0``-``63``), while ``DIMENSION_INSTANCE`` uses 10 bits (indices ``0``-``1023``). The index must also be within the actual extent of that dimension for the counter.
 
 Assuming that Y has XCC, SHADER_ENGINE (SE), and WGP dimensions with sizes 2, 4, and 4 respectively, the raw counter data in the 3D space is:
 

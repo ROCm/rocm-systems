@@ -20,6 +20,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
+  static const bool execute_registered_;
 };
 
 class SVersionSopk : public Sopk {
@@ -27,6 +28,7 @@ public:
   SVersionSopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
+  static const bool execute_registered_;
 };
 
 class SCmovkI32Sopk : public Sopk {
@@ -35,6 +37,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
+  static const bool execute_registered_;
 };
 
 class SAddkCoI32Sopk : public Sopk {
@@ -43,6 +46,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
+  static const bool execute_registered_;
 };
 
 class SMulkI32Sopk : public Sopk {
@@ -51,6 +55,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
+  static const bool execute_registered_;
 };
 
 class SGetregB32Sopk : public Sopk {
@@ -59,30 +64,37 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
+  static const bool execute_registered_;
 };
 
 class SSetregB32Sopk : public Sopk {
 public:
   SSetregB32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand simm16;
   Operand sdst;
+  static const bool execute_registered_;
 };
 
 class SSetregImm32B32Sopk : public Sopk {
 public:
   SSetregImm32B32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand simm16;
   Operand literal;
+  static const bool execute_registered_;
 };
 
 class SCallI64Sopk : public Sopk {
 public:
   SCallI64Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  std::optional<int64_t> branch_offset_bytes() const override;
   Operand sdst;
   Operand simm16;
+  static const bool execute_registered_;
 };
 
 } // namespace gfx1250

@@ -40,11 +40,11 @@ How to run examples
 ```bash
 docker run -it --rm --shm-size 64G --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged \
   # Broadcom Thor2 specific options to import the host bnxt driver libraries (note: Thor2 bnxt GDA requires specific firmware version)
-    -v /usr/local/lib/libbnxt_re-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libbnxt_re-rdmav34.so  -v /usr/local/lib/libbnxt_re.so:/usr/local/lib/libbnxt_re.so \
+    -v /usr/local/lib/libbnxt_re-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libbnxt_re-rdmav34.so:ro  -v /usr/local/lib/libbnxt_re.so:/usr/local/lib/libbnxt_re.so:ro \
   # Pensando AMD Pollara specific options to import host ionic driver libraries (note: Pollara ionic GDA requires specific firmware version)
-    -v /sys/class/infiniband:/sys/class/infiniband -v /usr/lib/x86_64-linux-gnu/libionic.so.1:/usr/lib/x86_64-linux-gnu/libionic.so.1 -v /usr/lib/x86_64-linux-gnu/libionic.so:/usr/lib/x86_64-linux-gnu/libionic.so \
-    -v /usr/lib/x86_64-linux-gnu/libibverbs/libionic-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libionic-rdmav34.so \
-    -v /etc/libibverbs.d/ionic.driver:/etc/libibverbs.d/ionic.driver \
+    -v /sys/class/infiniband:/sys/class/infiniband:ro -v /usr/lib/x86_64-linux-gnu/libionic.so.1:/usr/lib/x86_64-linux-gnu/libionic.so.1:ro -v /usr/lib/x86_64-linux-gnu/libionic.so:/usr/lib/x86_64-linux-gnu/libionic.so:ro \
+    -v /usr/lib/x86_64-linux-gnu/libibverbs/libionic-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libionic-rdmav34.so:ro \
+    -v /etc/libibverbs.d/ionic.driver:/etc/libibverbs.d/ionic.driver:ro \
   $USER/rocshmem ibv_devinfo
 ```
 
@@ -53,11 +53,11 @@ docker run -it --rm --shm-size 64G --network host --device /dev/dri --device /de
 ```bash
 docker run -it --rm --shm-size 64G --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged \
   # Broadcom Thor2 options to import host driver libraries (note: Thor2 bnxt GDA requires specific firmware version)
-    -v /usr/local/lib/libbnxt_re-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libbnxt_re-rdmav34.so  -v /usr/local/lib/libbnxt_re.so:/usr/local/lib/libbnxt_re.so \
+    -v /usr/local/lib/libbnxt_re-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libbnxt_re-rdmav34.so:ro  -v /usr/local/lib/libbnxt_re.so:/usr/local/lib/libbnxt_re.so:ro \
   # Pensando AMD Pollara options to import host driver libraries (note: Pollara ionic GDA requires specific firmware version)
-    -v /sys/class/infiniband:/sys/class/infiniband -v /usr/lib/x86_64-linux-gnu/libionic.so.1:/usr/lib/x86_64-linux-gnu/libionic.so.1 -v /usr/lib/x86_64-linux-gnu/libionic.so:/usr/lib/x86_64-linux-gnu/libionic.so \
-    -v /usr/lib/x86_64-linux-gnu/libibverbs/libionic-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libionic-rdmav34.so \
-    -v /etc/libibverbs.d/ionic.driver:/etc/libibverbs.d/ionic.driver \
+    -v /sys/class/infiniband:/sys/class/infiniband:ro -v /usr/lib/x86_64-linux-gnu/libionic.so.1:/usr/lib/x86_64-linux-gnu/libionic.so.1:ro -v /usr/lib/x86_64-linux-gnu/libionic.so:/usr/lib/x86_64-linux-gnu/libionic.so:ro \
+    -v /usr/lib/x86_64-linux-gnu/libibverbs/libionic-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libionic-rdmav34.so:ro \
+    -v /etc/libibverbs.d/ionic.driver:/etc/libibverbs.d/ionic.driver:ro \
   $USER/rocshmem tools/rocshmem_info
 ```
 
@@ -68,11 +68,11 @@ srun -N2 --ntasks-per-node=1 --gpus=8 \
   docker run -d --rm \
     --shm-size 64G --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged
     # Broadcom Thor2 options to import host driver libraries (note: Thor2 bnxt GDA requires specific firmware version)
-      -v /usr/local/lib/libbnxt_re-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libbnxt_re-rdmav34.so  -v /usr/local/lib/libbnxt_re.so:/usr/local/lib/libbnxt_re.so \
+      -v /usr/local/lib/libbnxt_re-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libbnxt_re-rdmav34.so:ro  -v /usr/local/lib/libbnxt_re.so:/usr/local/lib/libbnxt_re.so:ro \
     # Pensando AMD Pollara options to import host driver libraries (note: Pollara ionic GDA requires specific firmware version)
-      -v /sys/class/infiniband:/sys/class/infiniband -v /usr/lib/x86_64-linux-gnu/libionic.so.1:/usr/lib/x86_64-linux-gnu/libionic.so.1 -v /usr/lib/x86_64-linux-gnu/libionic.so:/usr/lib/x86_64-linux-gnu/libionic.so \
-      -v /usr/lib/x86_64-linux-gnu/libibverbs/libionic-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libionic-rdmav34.so \
-      -v /etc/libibverbs.d/ionic.driver:/etc/libibverbs.d/ionic.driver \
+      -v /sys/class/infiniband:/sys/class/infiniband:ro -v /usr/lib/x86_64-linux-gnu/libionic.so.1:/usr/lib/x86_64-linux-gnu/libionic.so.1:ro -v /usr/lib/x86_64-linux-gnu/libionic.so:/usr/lib/x86_64-linux-gnu/libionic.so:ro \
+      -v /usr/lib/x86_64-linux-gnu/libibverbs/libionic-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libionic-rdmav34.so:ro \
+      -v /etc/libibverbs.d/ionic.driver:/etc/libibverbs.d/ionic.driver:ro \
     --name $USER-rocshmem $USER/rocshmem \
 # Default command will run rocshmem_info, then launch SSHD, lets print the outcome.
 && sleep 5 && srun -N 2 --ntasks-per-node=1 -l docker logs $USER-rocshmem

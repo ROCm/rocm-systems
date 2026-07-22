@@ -168,7 +168,7 @@ HIP_TEST_CASE(Unit_hipMemUnmap_CrossLinksTornDown) {
   HIP_CHECK(hipMemMap(ptr, size_mem, 0, handle, 0));
 
   // Sanity: cross-link is wired pre-unmap.
-  hipMemGenericAllocationHandle_t retrieved = nullptr;
+  hipMemGenericAllocationHandle_t retrieved = 0;  // 0 instead of nullptr: handle is an integer type on CUDA
   HIP_CHECK(hipMemRetainAllocationHandle(&retrieved, ptr));
   REQUIRE(retrieved == handle);
   HIP_CHECK(hipMemRelease(retrieved));
@@ -223,7 +223,7 @@ HIP_TEST_CASE(Unit_hipMemUnmap_RemapCrossLinks) {
   HIP_CHECK(hipMemAddressReserve(&ptr, size_mem, 0, 0, 0));
 
   HIP_CHECK(hipMemMap(ptr, size_mem, 0, handle1, 0));
-  hipMemGenericAllocationHandle_t retrieved = nullptr;
+  hipMemGenericAllocationHandle_t retrieved = 0;  // 0 instead of nullptr: handle is an integer type on CUDA
   HIP_CHECK(hipMemRetainAllocationHandle(&retrieved, ptr));
   REQUIRE(retrieved == handle1);
   HIP_CHECK(hipMemRelease(retrieved));

@@ -46,7 +46,7 @@ profiling, how it supports performance analysis, and how to leverage its capabil
       * :doc:`Unified memory profiling <./how-to/unified-memory-profiling>`
       * :doc:`OpenMP performance profiling <./how-to/openmp-profiling>`
       * :doc:`VCN and JPEG sampling and tracing <./how-to/vcn-jpeg-sampling>`
-      * :doc:`XGMI and PCIe metrics monitoring <./how-to/xgmi-pcie-sampling>`
+      * :doc:`XGMI, PCIe, and SDMA metrics monitoring <./how-to/xgmi-pcie-sdma-sampling>`
 
     * :doc:`Understanding the output <./how-to/understanding-rocprof-sys-output>`
     * :doc:`Use the preset profiles <./how-to/using-preset-profiles>`

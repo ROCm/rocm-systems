@@ -239,6 +239,9 @@ TEST(enum_string, hsa_api_id)
 #    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x04
     TEST_API_ID_STR(ROCPROFILER_HSA_AMD_EXT_API_ID, hsa_amd_enable_logging);
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+    TEST_API_ID_STR(ROCPROFILER_HSA_AMD_EXT_API_ID, hsa_amd_queue_create);
+#    endif
 #endif
 
     TEST_API_ID_STR(ROCPROFILER_HSA_FINALIZE_EXT_API_ID, hsa_ext_program_create);

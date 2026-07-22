@@ -10,12 +10,12 @@ Pre-built configs are in `configs/`:
 
 | File | Description |
 |---|---|
-| `amdgpu_cdna4.json` | Single CDNA4 GPU (standalone simulation) |
-| `amdgpu_cdna4_kmd.json` | Single CDNA4 GPU (daemon/KFD mode) |
-| `amdgpu_cdna4_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
-| `amdgpu_cdna3.json` | Single CDNA3 GPU (standalone simulation) |
-| `amdgpu_cdna3_kmd.json` | Single CDNA3 GPU (daemon/KFD mode) |
-| `amdgpu_gfx1250.json` | Single gfx1250 GPU (standalone simulation, no KMD) |
+| `gfx950_cdna4.json` | Single CDNA4 GPU (standalone simulation) |
+| `gfx950_cdna4_kmd.json` | Single CDNA4 GPU (daemon/KFD mode) |
+| `gfx950_cdna4_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
+| `gfx942_cdna3.json` | Single CDNA3 GPU (standalone simulation) |
+| `gfx942_cdna3_kmd.json` | Single CDNA3 GPU (daemon/KFD mode) |
+| `gfx1250.json` | Single gfx1250 GPU (standalone simulation, no KMD) |
 
 ## JSON structure
 
@@ -48,12 +48,14 @@ Pre-built configs are in `configs/`:
 }
 ```
 
+The example above is intentionally minimal and single-threaded.
+
 ### Top-level fields
 
 | Field | Type | Description |
 |---|---|---|
 | `max_ticks` | int | Maximum simulation ticks (0 = unlimited) |
-| `num_threads` | int | Worker threads for PDES engine |
+| `num_threads` | int | Number of PDES engine partitions/worker threads. |
 | `exec_mode` | string | `"functional"` or `"cycle"` |
 | `vm.arch` | string | Architecture: `cdna3`, `cdna4`, etc. |
 
@@ -84,5 +86,5 @@ location IDs. Each GPU gets its own command processor, memory, and
 cache hierarchy. The daemon manages all GPUs and routes KFD ioctls
 to the correct device based on `gpu_id`.
 
-See `configs/amdgpu_cdna4_kmd_2gpu.json` for a working two-GPU
+See `configs/gfx950_cdna4_kmd_2gpu.json` for a working two-GPU
 configuration used by the RCCL collective tests.

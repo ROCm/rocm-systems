@@ -127,6 +127,15 @@ rccl_get_event_info_impl(
             set_event(info, false, payload.args.ncclAllToAll.count,
                       payload.args.ncclAllToAll.datatype, payload.args.ncclAllToAll.comm);
             break;
+#if RCCL_API_TRACE_VERSION_PATCH >= 3
+        // RCCL renamed ncclAllToAll to ncclAlltoAll (note the lowercase 't').
+        // The deprecated ncclAllToAll now forwards to ncclAlltoAll, so the SDK
+        // reports the collective under this id and it must be handled here too.
+        case ROCPROFILER_RCCL_API_ID_ncclAlltoAll:
+            set_event(info, false, payload.args.ncclAlltoAll.count,
+                      payload.args.ncclAlltoAll.datatype, payload.args.ncclAlltoAll.comm);
+            break;
+#endif
         case ROCPROFILER_RCCL_API_ID_ncclAllReduce:
             set_event(info, false, payload.args.ncclAllReduce.count,
                       payload.args.ncclAllReduce.datatype,

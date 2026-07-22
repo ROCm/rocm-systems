@@ -41,6 +41,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <assert.h>
+#include <cstddef>
 #include <cstring>
 #include <iomanip>
 #include <algorithm>
@@ -52,19 +53,40 @@
 #include <sstream>
 #include <cstdlib>
 #include <algorithm>
+#include <vector>
 
 #ifdef SP3_STATIC_LIB
 #include "sp3.h"
 #endif // SP3_STATIC_LIB
 
-#ifndef _WIN32
-#define _alloca alloca
-#endif
-
 namespace rocr {
 namespace amd {
 namespace hsa {
 namespace code {
+namespace detail {
+
+// Upper bound for variable-length AMD HSA note payloads built from compiler
+// metadata; larger values indicate malformed or attacker-controlled input.
+constexpr size_t kMaxAmdNoteBufferSize = 4096;
+
+}  // namespace detail
+
+namespace detail {
+
+// Returns false when claimed_size would cause GetNoteString to read past desc_size.
+inline bool IsNoteStringSizeWithinDescriptor(uint32_t desc_size, size_t field_offset,
+                                             uint16_t claimed_size) {
+  if (desc_size < field_offset) { return false; }
+  return claimed_size <= desc_size - field_offset;
+}
+
+// Bounds a trailing variable-length field within room already carved out of the descriptor.
+inline bool IsNoteStringSizeWithinRoom(size_t room, size_t offset, uint16_t claimed_size) {
+  if (offset > room) { return false; }
+  return claimed_size <= room - offset;
+}
+
+}  // namespace detail
 
     using amd::elf::GetNoteString;
 
@@ -524,10 +546,15 @@ namespace code {
       return true;
     }
 
-    void AmdHsaCode::AddNoteIsa(const std::string& vendor_name, const std::string& architecture_name, uint32_t major, uint32_t minor, uint32_t stepping)
+    bool AmdHsaCode::AddNoteIsa(const std::string& vendor_name, const std::string& architecture_name, uint32_t major, uint32_t minor, uint32_t stepping)
     {
-      size_t size = sizeof(amdgpu_hsa_note_producer_t) + vendor_name.length() + architecture_name.length() + 1;
-      amdgpu_hsa_note_isa_t* desc = (amdgpu_hsa_note_isa_t*) _alloca(size);
+      size_t size = sizeof(amdgpu_hsa_note_isa_t) + vendor_name.length() + architecture_name.length() + 1;
+      if (size > detail::kMaxAmdNoteBufferSize) {
+        out << "ISA note buffer size exceeds limit: " << size << std::endl;
+        return false;
+      }
+      std::vector<char> buffer(size);
+      amdgpu_hsa_note_isa_t* desc = reinterpret_cast<amdgpu_hsa_note_isa_t*>(buffer.data());
       memset(desc, 0, size);
       desc->vendor_name_size = vendor_name.length()+1;
       desc->architecture_name_size = architecture_name.length()+1;
@@ -537,14 +564,37 @@ namespace code {
       memcpy(desc->vendor_and_architecture_name, vendor_name.c_str(), vendor_name.length() + 1);
       memcpy(desc->vendor_and_architecture_name + desc->vendor_name_size, architecture_name.c_str(), architecture_name.length() + 1);
       AddAmdNote(NT_AMD_HSA_ISA_VERSION, desc, size);
+      return true;
     }
 
     bool AmdHsaCode::GetNoteIsa(std::string& vendor_name, std::string& architecture_name, uint32_t* major_version, uint32_t* minor_version, uint32_t* stepping)
     {
       amdgpu_hsa_note_isa_t *desc;
-      if (!GetAmdNote(NT_AMD_HSA_ISA_VERSION, &desc)) { return false; }
+      uint32_t desc_size = 0;
+      if (!GetAmdNote(NT_AMD_HSA_ISA_VERSION, &desc, &desc_size)) { return false; }
+      // The inner *_name_size fields are attacker-controlled. Bound the
+      // variable-length name array against the actual descriptor size before
+      // reading, otherwise GetNoteString reads past the descriptor into
+      // adjacent heap memory. See ROCM-26177 finding #3.
+      static_assert(sizeof(amdgpu_hsa_note_isa_t) >
+                        offsetof(amdgpu_hsa_note_isa_t, vendor_and_architecture_name));
+      const size_t name_offset = offsetof(amdgpu_hsa_note_isa_t, vendor_and_architecture_name);
+      if (!detail::IsNoteStringSizeWithinDescriptor(desc_size, name_offset,
+                                                    desc->vendor_name_size)) {
+        return false;
+      }
+      const size_t name_room = desc_size - name_offset;
       vendor_name = GetNoteString(desc->vendor_name_size, desc->vendor_and_architecture_name);
-      architecture_name = GetNoteString(desc->architecture_name_size, desc->vendor_and_architecture_name + vendor_name.length() + 1);
+      // arch_offset follows GetNoteString's parsed length plus one byte (the NUL when
+      // present). Well-formed notes set vendor_name_size to include a trailing NUL, so
+      // arch_offset equals vendor_name_size; crafted notes without NUL stay in-bounds but
+      // may mis-parse the architecture name.
+      const size_t arch_offset = vendor_name.length() + 1;
+      if (!detail::IsNoteStringSizeWithinRoom(name_room, arch_offset,
+                                              desc->architecture_name_size)) {
+        return false;
+      }
+      architecture_name = GetNoteString(desc->architecture_name_size, desc->vendor_and_architecture_name + arch_offset);
       *major_version = desc->major;
       *minor_version = desc->minor;
       *stepping = desc->stepping;
@@ -606,7 +656,6 @@ namespace code {
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1200: MI.Name = "gfx1200"; MI.XnackSupported = false; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1201: MI.Name = "gfx1201"; MI.XnackSupported = false; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1250: MI.Name = "gfx1250"; MI.XnackSupported = true; MI.SrameccSupported = true; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1251: MI.Name = "gfx1251"; MI.XnackSupported = true; MI.SrameccSupported = true; break;
 
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX9_GENERIC:    MI.Name = "gfx9-generic";    MI.XnackSupported = true; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX9_4_GENERIC:  MI.Name = "gfx9-4-generic";  MI.XnackSupported = true;  MI.SrameccSupported = true; break;
@@ -614,7 +663,6 @@ namespace code {
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX10_3_GENERIC: MI.Name = "gfx10-3-generic"; MI.XnackSupported = false; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX11_GENERIC:   MI.Name = "gfx11-generic";   MI.XnackSupported = false; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX12_GENERIC:   MI.Name = "gfx12-generic";   MI.XnackSupported = false; MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX12_5_GENERIC: MI.Name = "gfx12-5-generic"; MI.XnackSupported = true;  MI.SrameccSupported = true;  break;
       default: return false;
       }
       return true;
@@ -814,38 +862,62 @@ namespace code {
       }
     }
 
-    void AmdHsaCode::AddNoteProducer(uint32_t major, uint32_t minor, const std::string& producer)
+    bool AmdHsaCode::AddNoteProducer(uint32_t major, uint32_t minor, const std::string& producer)
     {
       size_t size = sizeof(amdgpu_hsa_note_producer_t) + producer.length();
-      amdgpu_hsa_note_producer_t* desc = (amdgpu_hsa_note_producer_t*) _alloca(size);
+      if (size > detail::kMaxAmdNoteBufferSize) {
+        out << "Producer note buffer size exceeds limit: " << size << std::endl;
+        return false;
+      }
+      std::vector<char> buffer(size);
+      amdgpu_hsa_note_producer_t* desc = reinterpret_cast<amdgpu_hsa_note_producer_t*>(buffer.data());
       memset(desc, 0, size);
       desc->producer_name_size = producer.length();
       desc->producer_major_version = major;
       desc->producer_minor_version = minor;
       memcpy(desc->producer_name, producer.c_str(), producer.length() + 1);
       AddAmdNote(NT_AMD_HSA_PRODUCER, desc, size);
+      return true;
     }
 
     bool AmdHsaCode::GetNoteProducer(uint32_t* major, uint32_t* minor, std::string& producer_name)
     {
       amdgpu_hsa_note_producer_t* desc;
-      if (!GetAmdNote(NT_AMD_HSA_PRODUCER, &desc)) { return false; }
+      uint32_t desc_size = 0;
+      if (!GetAmdNote(NT_AMD_HSA_PRODUCER, &desc, &desc_size)) { return false; }
       *major = desc->producer_major_version;
       *minor = desc->producer_minor_version;
+      // Bound the attacker-controlled producer_name_size against the descriptor.
+      // See ROCM-26177 finding #3.
+      static_assert(sizeof(amdgpu_hsa_note_producer_t) >
+                        offsetof(amdgpu_hsa_note_producer_t, producer_name));
+      const size_t name_offset = offsetof(amdgpu_hsa_note_producer_t, producer_name);
+      if (!detail::IsNoteStringSizeWithinDescriptor(desc_size, name_offset,
+                                                    desc->producer_name_size)) {
+        return false;
+      }
       producer_name = GetNoteString(desc->producer_name_size, desc->producer_name);
       return true;
     }
 
-    void AmdHsaCode::AddNoteProducerOptions(const std::string& options)
+    bool AmdHsaCode::AddNoteProducerOptions(const std::string& options)
     {
       size_t size = sizeof(amdgpu_hsa_note_producer_options_t) + options.length();
-      amdgpu_hsa_note_producer_options_t *desc = (amdgpu_hsa_note_producer_options_t*) _alloca(size);
+      if (size > detail::kMaxAmdNoteBufferSize) {
+        out << "Producer options note buffer size exceeds limit: " << size << std::endl;
+        return false;
+      }
+      std::vector<char> buffer(size);
+      amdgpu_hsa_note_producer_options_t *desc =
+          reinterpret_cast<amdgpu_hsa_note_producer_options_t*>(buffer.data());
+      memset(desc, 0, size);
       desc->producer_options_size = options.length();
       memcpy(desc->producer_options, options.c_str(), options.length() + 1);
       AddAmdNote(NT_AMD_HSA_PRODUCER_OPTIONS, desc, size);
+      return true;
     }
 
-    void AmdHsaCode::AddNoteProducerOptions(int32_t call_convention, const hsa_ext_control_directives_t& user_directives, const std::string& user_options)
+    bool AmdHsaCode::AddNoteProducerOptions(int32_t call_convention, const hsa_ext_control_directives_t& user_directives, const std::string& user_options)
     {
       using namespace code_options;
       std::ostringstream ss;
@@ -856,13 +928,23 @@ namespace code {
         ss << space << user_options;
       }
 
-      AddNoteProducerOptions(ss.str());
+      return AddNoteProducerOptions(ss.str());
     }
 
     bool AmdHsaCode::GetNoteProducerOptions(std::string& options)
     {
       amdgpu_hsa_note_producer_options_t* desc;
-      if (!GetAmdNote(NT_AMD_HSA_PRODUCER_OPTIONS, &desc)) { return false; }
+      uint32_t desc_size = 0;
+      if (!GetAmdNote(NT_AMD_HSA_PRODUCER_OPTIONS, &desc, &desc_size)) { return false; }
+      // Bound the attacker-controlled producer_options_size against the
+      // descriptor. See ROCM-26177 finding #3.
+      static_assert(sizeof(amdgpu_hsa_note_producer_options_t) >
+                        offsetof(amdgpu_hsa_note_producer_options_t, producer_options));
+      const size_t opts_offset = offsetof(amdgpu_hsa_note_producer_options_t, producer_options);
+      if (!detail::IsNoteStringSizeWithinDescriptor(desc_size, opts_offset,
+                                                    desc->producer_options_size)) {
+        return false;
+      }
       options = GetNoteString(desc->producer_options_size, desc->producer_options);
       return true;
     }
@@ -1403,10 +1485,17 @@ namespace code {
 
     void AmdHsaCode::PrintRawData(std::ostream& out, Section* section)
     {
+      constexpr size_t kMaxSectionPrintSize = 1024 * 1024;
       out << "    Data:" << std::endl;
-      unsigned char *sdata = (unsigned char*)alloca(section->size());
-      section->getData(0, sdata, section->size());
-      PrintRawData(out, sdata, section->size());
+      const size_t section_size = section->size();
+      if (section_size > kMaxSectionPrintSize) {
+        out << "      (section data too large to display: " << section_size
+            << " bytes)" << std::endl;
+        return;
+      }
+      std::vector<unsigned char> sdata(section_size);
+      section->getData(0, sdata.data(), section_size);
+      PrintRawData(out, sdata.data(), section_size);
     }
 
     void AmdHsaCode::PrintRawData(std::ostream& out, const unsigned char *data, size_t size)

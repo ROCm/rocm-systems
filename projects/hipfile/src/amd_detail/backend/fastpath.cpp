@@ -129,8 +129,8 @@ using namespace std;
  */
 
 int
-Fastpath::score(shared_ptr<IFile> file, shared_ptr<IBuffer> buffer, size_t size, hoff_t file_offset,
-                hoff_t buffer_offset) const
+Fastpath::score(const shared_ptr<IFile> &file, const shared_ptr<IBuffer> &buffer, size_t size,
+                hoff_t file_offset, hoff_t buffer_offset) const
 {
     bool accept_io{true};
 

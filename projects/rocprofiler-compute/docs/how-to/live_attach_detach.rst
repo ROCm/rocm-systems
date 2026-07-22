@@ -41,6 +41,6 @@ The analyze options for Dynamic process attachment are completely compatible wit
 
 .. note::
 
-  * Dynamic process attachment feature is currently in BETA version. To enable Dynamic process attachment, you need to have the correct supported version of ROCprofiler-SDK and rocprofiler-register.
-  * To make the Dynamic process attachment feature work, you must use "--block" or "--set" to limit the number of counter input files to ensure single application run. You can also use "--iteration-multiplexing" to ensure single application run.
+  * To enable Dynamic process attachment, you need to have the correct supported version of :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` and ``rocprofiler-register``.
+  * To make the Dynamic process attachment feature work, you must use ``--block`` or ``--set`` to limit the number of counter input files to ensure single application run. You can also use "--iteration-multiplexing" to ensure single application run.
   * Due to the limitation of ROCprofiler-SDK, the attach can now only happen before Heterogeneous System Architecture (HSA) initialization. HSA initialization happens before the execution of the first HIP kernel call. It only happens once to save all the kernels' function signature, such as the function name and other launch parameters. Attaching after this stage misses all crucial information of the HIP kernel and makes it impossible to store the output. This limitation will be solved in later releases of ROCprofiler-SDK.

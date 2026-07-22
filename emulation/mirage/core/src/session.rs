@@ -212,8 +212,49 @@ pub struct SessionDef {
     /// Working directory used as the default `cwd` for execs.
     pub workdir: String,
 
+    /// Run the emulator in out-of-process *daemon* mode for this session
+    /// (e.g. rocjitsu's per-node daemon) instead of the default
+    /// in-process (local) emulation. Off by default; opt in with
+    /// `mirage run --daemon` / `mirage session start --daemon`.
+    #[serde(default)]
+    pub daemon: bool,
+
     /// When this session was created (wall-clock).
     pub created_at: DateTime<Utc>,
+}
+
+/// Read a session's on-disk definition and resolve its profile (whether
+/// stored inline or referenced by name).
+///
+/// Shared by the host and every emulator backend so a backend's
+/// [`crate::emulator::EmulatorBackend::injection_def`] — which receives
+/// only a [`SessionId`] — can recover the profile it was started with
+/// without the caller threading it through.
+pub fn resolve_profile(session: &SessionId) -> crate::error::Result<ProfileDef> {
+    let layout = crate::paths::SessionLayout::for_id(session);
+    let def: SessionDef = crate::state::read_json(&layout.def())?;
+    match def.profile {
+        MaybeRef::Owned(p) => Ok(p),
+        MaybeRef::Ref(name) => {
+            let p = crate::paths::profile_path(&name);
+            if !p.exists() {
+                return Err(crate::error::MirageError::ProfileNotFound(name));
+            }
+            crate::state::read_json(&p)
+        }
+    }
+}
+
+/// Whether a session opted into out-of-process emulator *daemon* mode
+/// (`mirage run --daemon`). Best-effort: a missing or unreadable session
+/// definition reads as `false` (the in-process default), so a backend
+/// never accidentally stands up a daemon for a session that didn't ask
+/// for one.
+pub fn session_uses_daemon(session: &SessionId) -> bool {
+    let layout = crate::paths::SessionLayout::for_id(session);
+    crate::state::read_json::<SessionDef>(&layout.def())
+        .map(|def| def.daemon)
+        .unwrap_or(false)
 }
 
 /// Aggregate view returned by `MirageCtl::session_state`.

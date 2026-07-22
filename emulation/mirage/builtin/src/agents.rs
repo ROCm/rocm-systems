@@ -1,8 +1,8 @@
 //! Strongly-typed builtin [`AgentDef`]s.
 //!
 //! Each agent mirrors one of the rocjitsu `configs/*.json` files:
-//! `MI300X` follows `amdgpu_cdna3.json`, `MI350X` follows
-//! `amdgpu_cdna4.json`, and `MI450X` follows `amdgpu_gfx1250.json`.
+//! `MI300X` follows `gfx942_cdna3.json`, `MI350X` follows
+//! `gfx950_cdna4.json`, and `MI450X` follows `gfx1250.json`.
 //! All three share the same `soc -> {vram, iod, xcd -> {l2, cp,
 //! se -> cu}}` component tree and six link patterns; they differ
 //! only in their device identity, the IOD fan-out, and the per-CU
@@ -14,16 +14,20 @@ use mirage_core::agent::{
 };
 
 /// All builtin agents, keyed by the name written to disk.
+///
+/// Agent names are case-insensitive and always stored lowercase, so the
+/// registry keys are lowercase to match the on-disk filenames.
 pub fn agents() -> Vec<(&'static str, AgentDef)> {
     vec![
-        ("MI300X", mi300x()),
-        ("MI350X", mi350x()),
-        ("MI450X", mi450x()),
+        ("mi300x", mi300x()),
+        ("mi350x", mi350x()),
+        ("mi450x", mi450x()),
+        // \NPI new GPU: add a builtin agent mirroring its configs/<gpu>.json here.
     ]
 }
 
 /// `MI300X` builtin agent (registry key `MI300X`), mirroring the
-/// rocjitsu `amdgpu_cdna3.json` config: `arch = cdna3`, marketing
+/// rocjitsu `gfx942_cdna3.json` config: `arch = cdna3`, marketing
 /// name "AMD Instinct MI300X", and an 8-XCD / 4-SE / 8-CU shader
 /// fabric over a 4-IOD memory tier.
 pub fn mi300x() -> AgentDef {
@@ -34,6 +38,7 @@ pub fn mi300x() -> AgentDef {
                 num_xcds: 0,
                 num_iods: 0,
                 memory: None,
+                num_gpus: 1,
                 device: KfdDeviceInfo {
                     gpu_id: 50148,
                     gfx_target_version: 90402,
@@ -72,7 +77,7 @@ pub fn mi300x() -> AgentDef {
 }
 
 /// `MI350X` builtin agent (registry key `MI350X`), mirroring the
-/// rocjitsu `amdgpu_cdna4.json` config: `arch = cdna4`, marketing
+/// rocjitsu `gfx950_cdna4.json` config: `arch = cdna4`, marketing
 /// name "AMD Instinct MI350X", and an 8-XCD / 4-SE / 8-CU shader
 /// fabric over a 2-IOD memory tier.
 pub fn mi350x() -> AgentDef {
@@ -83,6 +88,7 @@ pub fn mi350x() -> AgentDef {
                 num_xcds: 0,
                 num_iods: 0,
                 memory: None,
+                num_gpus: 1,
                 device: KfdDeviceInfo {
                     gpu_id: 38144,
                     gfx_target_version: 90500,
@@ -121,7 +127,7 @@ pub fn mi350x() -> AgentDef {
 }
 
 /// `MI450X` builtin agent (registry key `MI450X`), mirroring the
-/// rocjitsu `amdgpu_gfx1250.json` config: `arch = gfx1250`, an
+/// rocjitsu `gfx1250.json` config: `arch = gfx1250`, an
 /// 8-XCD / 4-SE / 8-CU shader fabric and a 2-IOD memory tier.
 pub fn mi450x() -> AgentDef {
     AgentDef {
@@ -131,6 +137,7 @@ pub fn mi450x() -> AgentDef {
                 num_xcds: 0,
                 num_iods: 0,
                 memory: None,
+                num_gpus: 1,
                 device: KfdDeviceInfo {
                     gpu_id: 1250,
                     gfx_target_version: 120500,
@@ -303,9 +310,9 @@ mod tests {
     fn agents_have_expected_keys() {
         let a = agents();
         assert_eq!(a.len(), 3);
-        assert_eq!(a[0].0, "MI300X");
-        assert_eq!(a[1].0, "MI350X");
-        assert_eq!(a[2].0, "MI450X");
+        assert_eq!(a[0].0, "mi300x");
+        assert_eq!(a[1].0, "mi350x");
+        assert_eq!(a[2].0, "mi450x");
     }
 
     #[test]

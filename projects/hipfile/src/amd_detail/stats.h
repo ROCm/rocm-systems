@@ -4,6 +4,8 @@
  */
 #pragma once
 
+#include "buffer.h"
+#include "file.h"
 #include "file-descriptor.h"
 #include "io.h"
 
@@ -69,12 +71,13 @@ struct StatsHistogram {
 };
 
 struct PerGpuStatsV1 {
-    static constexpr uint64_t     version{1};
-    std::atomic_uint64_t          inUse{};
-    std::array<StatsHistogram, 2> ioSizeBytes{};
-    std::array<StatsHistogram, 2> ioCount{};
-    std::array<StatsHistogram, 2> ioTimeUs{};
-    std::array<StatsHistogram, 2> errorCount{};
+    static constexpr uint64_t           version{1};
+    std::atomic_uint64_t                inUse{};
+    std::array<StatsHistogram, 2>       ioSizeBytes{};
+    std::array<StatsHistogram, 2>       ioCount{};
+    std::array<StatsHistogram, 2>       ioTimeUs{};
+    std::array<StatsHistogram, 2>       errorCount{};
+    std::array<std::atomic_uint64_t, 2> unalignedCount{};
 
     using Histograms = std::tuple<StatsHistogram *, StatsHistogram *, StatsHistogram *, StatsHistogram *>;
     using ConstHistograms = std::tuple<const StatsHistogram *, const StatsHistogram *, const StatsHistogram *,
@@ -283,8 +286,22 @@ private:
 class StatsIoTracker {
 public:
     StatsIoTracker(IoType ioType, StatsBackend backend) noexcept
-        : m_ioType(ioType), m_backend(backend), m_startTime{std::chrono::steady_clock::now()}
+        : m_ioType(ioType), m_backend(backend), m_startTime{std::chrono::steady_clock::now()}, m_aligned{true}
     {
+    }
+
+    StatsIoTracker(IoType ioType, StatsBackend backend, const std::shared_ptr<IFile> &file,
+                   const std::shared_ptr<IBuffer> &buffer, size_t size, hoff_t file_offset,
+                   hoff_t buffer_offset) noexcept
+        : StatsIoTracker(ioType, backend)
+    {
+        const uint32_t dio_offset_align{file->dioOffsetAlign()};
+        m_aligned &= dio_offset_align && !(file_offset & (dio_offset_align - 1));
+        m_aligned &= dio_offset_align && !(size & (dio_offset_align - 1));
+
+        const uint32_t dio_mem_align{file->dioMemAlign()};
+        const auto     mem_addr{reinterpret_cast<intptr_t>(buffer->getBuffer()) + buffer_offset};
+        m_aligned &= dio_mem_align && !(mem_addr & (dio_mem_align - 1));
     }
     void complete(uint64_t bytes) const noexcept;
 
@@ -292,12 +309,14 @@ private:
     IoType                                m_ioType;
     StatsBackend                          m_backend;
     std::chrono::steady_clock::time_point m_startTime;
+    bool                                  m_aligned;
 };
 
 class StatsCollection {
 public:
     virtual ~StatsCollection() = default;
-    virtual void addIo(IoType ioType, StatsBackend backend, uint64_t bytes, uint64_t timeUs) const noexcept;
+    virtual void addIo(IoType ioType, StatsBackend backend, uint64_t bytes, uint64_t timeUs,
+                       bool aligned) const noexcept;
     virtual void error(IoType ioType, StatsBackend backend, uint64_t bytes) const noexcept;
     virtual void fileRegistration() const noexcept;
     virtual void bufferRegistration() const noexcept;

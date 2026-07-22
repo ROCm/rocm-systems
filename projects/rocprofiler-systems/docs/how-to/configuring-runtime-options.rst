@@ -282,7 +282,13 @@ For example, the following is a valid configuration:
 
    ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,vcn_activity,mem_usage
 
-Supported values for ``ROCPROFSYS_AMD_SMI_METRICS`` are: ``busy``, ``temp``, ``power``, ``vcn_activity``, ``mem_usage``, ``jpeg_activity``, ``xgmi``, ``pcie``.
+Supported values for ``ROCPROFSYS_AMD_SMI_METRICS`` are: ``all`` (or empty), ``none``, ``busy``,
+``gfx_clock``, ``jpeg_activity``, ``mem_clock``, ``mem_usage``, ``pcie``, ``power``,
+``sdma_usage``, ``temp``, ``vcn_activity``, ``xgmi``.
+
+.. note::
+
+   The ``sdma_usage`` metric requires AMD GPU driver 31.40 or higher and an Instinct-family GPU.
 
 API tracing is configured with the ``ROCPROFSYS_ROCM_DOMAINS`` setting. The domains are used to filter the events that are captured during profiling.
 Supported values for this setting are those supported by ROCprofiler-SDK, which are returned by the API ``get_callback_tracing_names()`` and ``get_buffer_tracing_names()``. See the `ROCprofiler-SDK developer API documentation <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/_doxygen/rocprofiler-sdk/html/>`_ to learn more about ROCprofiler-SDK APIs.
@@ -302,7 +308,7 @@ Use the following command to view the available domains:
      ``kfd_page_fault``, ``kfd_page_migrate``, ``kfd_queue``,
      ``kfd_event_queue``, ``kfd_event_unmap_from_gpu``, and
      ``kfd_event_dropped_events``. Requires ``HSA_XNACK=1``, an XNACK-capable
-     GPU, and ROCm 7.13 or later (ROCProfiler-SDK version 1.2.2 or above).
+     GPU, and ROCm 7.13 or later. For standalone `ROCprofiler-SDK <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html>`_ installations, requires ROCprofiler-SDK 1.2.2 or later.
 
 For example, the following is a valid configuration:
 
@@ -355,8 +361,7 @@ unified-memory view is expected to be fault-only: page-fault totals and trigger
 breakdowns can populate, migration counters remain zero, and the Perfetto
 migration-throughput track is not shown.
 
-Requires an XNACK-capable AMD GPU with ``HSA_XNACK=1`` and ROCm 7.13 or later
-(ROCProfiler-SDK 1.2.2 or above). The KFD tracing domains
+Requires an XNACK-capable AMD GPU with ``HSA_XNACK=1`` and ROCm 7.13 or later. For standalone `ROCprofiler-SDK <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html>`_ installations, requires ROCprofiler-SDK 1.2.2 or later. The KFD tracing domains
 (``kfd_page_fault``, ``kfd_page_migrate``) are enabled automatically when this
 setting is on -- you do not need to add ``kfd_events`` to
 ``ROCPROFSYS_ROCM_DOMAINS`` separately.

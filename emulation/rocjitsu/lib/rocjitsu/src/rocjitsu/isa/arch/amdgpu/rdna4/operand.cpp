@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/operand.h"
 #include "rocjitsu/isa/isa_operand_simd_inl.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include <format>
 #include <optional>
@@ -24,10 +25,57 @@ std::string reg_name(const char *prefix, int reg_num, int size_bits) {
   return std::string(prefix) + "[" + std::to_string(reg_num) + ":" +
          std::to_string(reg_num + count - 1) + "]";
 }
+
+struct Packed16VgprSource {
+  uint32_t reg = 0;
+  uint32_t shift = 0;
+};
+
+std::optional<Packed16VgprSource> packed_16bit_vgpr_source(bool packed_16bit_source, int size_bits,
+                                                           OperandType opr_type, int ev) {
+  if (!packed_16bit_source || size_bits != 16)
+    return std::nullopt;
+  if (opr_type == OperandType::OPR_VGPR) {
+    if (ev >= 0 && ev <= 127)
+      return Packed16VgprSource{static_cast<uint32_t>(ev), 0};
+    if (ev >= 128 && ev <= 255)
+      return Packed16VgprSource{static_cast<uint32_t>(ev - 128), 16};
+    return std::nullopt;
+  }
+  if (ev >= 384 && ev <= 511)
+    return Packed16VgprSource{static_cast<uint32_t>(ev - 384), 16};
+  return std::nullopt;
+}
+
+std::optional<Packed16VgprSource> packed_16bit_vgpr_dst(bool packed_16bit_dst, int size_bits,
+                                                        OperandType opr_type, int ev) {
+  if (!packed_16bit_dst || size_bits != 16 || opr_type != OperandType::OPR_VGPR)
+    return std::nullopt;
+  if (ev >= 0 && ev <= 127)
+    return Packed16VgprSource{static_cast<uint32_t>(ev), 0};
+  if (ev >= 128 && ev <= 255)
+    return Packed16VgprSource{static_cast<uint32_t>(ev - 128), 16};
+  return std::nullopt;
+}
 } // namespace
 
-Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
-    : AmdgpuIsaOperand<Isa>(size_bits, opr_type, encoding_value) {
+Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool packed_16bit_source,
+                 bool packed_16bit_dst)
+    : AmdgpuIsaOperand<Isa>(size_bits, opr_type, encoding_value),
+      packed_16bit_source_(packed_16bit_source), packed_16bit_dst_(packed_16bit_dst) {
+  is_vgpr_ = is_vgpr_operand_type(opr_type);
+}
+
+Operand::Operand(int size_bits, OperandType opr_type, unsigned short encoding_value,
+                 bool packed_16bit_source, bool packed_16bit_dst)
+    : Operand(size_bits, opr_type, static_cast<int>(encoding_value), packed_16bit_source,
+              packed_16bit_dst) {}
+
+Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,
+                 uint16_t literal16_display_value, bool has_literal16_display)
+    : AmdgpuIsaOperand<Isa>(size_bits, opr_type, encoding_value),
+      literal16_display_value_(literal16_display_value),
+      has_literal16_display_(has_literal16_display) {
   is_vgpr_ = is_vgpr_operand_type(opr_type);
 }
 
@@ -46,6 +94,14 @@ std::optional<uint64_t> Operand::literal64_value() const {
 std::string Operand::name() const {
   if (has_literal64_)
     return std::format("0x{:x}", literal64_value_);
+  if (has_literal16_display_)
+    return std::format("0x{:x}", literal16_display_value_);
+  if (auto packed =
+          packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_))
+    return std::format("v{}.{}", packed->reg, packed->shift ? "h" : "l");
+  if (auto packed =
+          packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_))
+    return std::format("v{}.{}", packed->reg, packed->shift ? "h" : "l");
   switch (opr_type_) {
   case OperandType::OPR_ATTR: {
     if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR0)
@@ -509,7 +565,7 @@ std::string Operand::name() const {
   case OperandType::OPR_SIMM24:
     return std::to_string(encoding_value_);
   case OperandType::OPR_SIMM32:
-    return std::format("0x{:x}", encoding_value_);
+    return std::format("0x{:x}", static_cast<uint32_t>(encoding_value_));
   case OperandType::OPR_SIMM5:
     return std::to_string(encoding_value_);
   case OperandType::OPR_SIMM8:
@@ -519,9 +575,9 @@ std::string Operand::name() const {
   case OperandType::OPR_VERSION:
     return std::to_string(encoding_value_);
   case OperandType::OPR_WAITCNT: {
-    uint32_t vmcnt = (encoding_value_ & 0xF) | (((encoding_value_ >> 14) & 0x3) << 4);
-    uint32_t expcnt = (encoding_value_ >> 4) & 0x7;
-    uint32_t lgkmcnt = (encoding_value_ >> 8) & 0x3F;
+    uint32_t expcnt = encoding_value_ & 0x7;
+    uint32_t lgkmcnt = (encoding_value_ >> 4) & 0x3F;
+    uint32_t vmcnt = (encoding_value_ >> 10) & 0x3F;
     return std::format("vmcnt({}) expcnt({}) lgkmcnt({})", vmcnt, expcnt, lgkmcnt);
   }
   case OperandType::OPR_WAIT_ALU:
@@ -539,6 +595,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
     return std::nullopt;
   // Liveness tracks operands as contiguous 32-bit register lanes.
   const auto reg_width = static_cast<uint8_t>(size_bits_ > 32 ? size_bits_ / 32 : 1);
+  if (auto packed =
+          packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_))
+    return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(packed->reg), reg_width};
+  if (auto packed =
+          packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_))
+    return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(packed->reg), reg_width};
   switch (opr_type_) {
   case OperandType::OPR_ATTR: {
     break;
@@ -694,13 +756,13 @@ uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {
   if (ev == 103)
     return static_cast<uint32_t>(wf.scratch_base() >> 32);
   if (ev <= 105)
-    return wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
+    return amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
   if (ev == 106)
     return static_cast<uint32_t>(wf.vcc());
   if (ev == 107)
     return static_cast<uint32_t>(wf.vcc() >> 32);
   if (ev >= 108 && ev <= 123)
-    return wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
+    return amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
   if (ev == 124)
     return 0u; // NULL
   if (ev == 125)
@@ -708,7 +770,7 @@ uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {
   if (ev == 126)
     return static_cast<uint32_t>(wf.exec());
   if (ev == 127)
-    return static_cast<uint32_t>(wf.exec() >> 32);
+    return static_cast<uint32_t>(wf.exec_raw() >> 32);
   if (ev >= 128 && ev <= 192)
     return static_cast<uint32_t>(ev - 128);
   if (ev >= 193 && ev <= 208)
@@ -748,12 +810,41 @@ uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {
   if (ev == 250)
     return 0u; // NULL
   if (ev == 251)
-    return wf.vcc() == 0 ? 1u : 0u; // VCCZ
-  if (ev == 252)
-    return wf.exec() == 0 ? 1u : 0u; // EXECZ
+    return (wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL))) == 0
+               ? 1u
+               : 0u; // VCCZ
+  if (ev == 252) {
+    uint64_t active = wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL);
+    return (wf.exec() & active) == 0 ? 1u : 0u; // EXECZ
+  }
   if (ev == 253)
     return wf.read_scc() ? 1u : 0u; // SCC
   throw std::logic_error("Unsupported encoding value for scalar read: " + std::to_string(ev));
+}
+
+uint32_t resolve_src_scalar16(const amdgpu::Wavefront &wf, int ev) {
+  switch (ev) {
+  case 240:
+    return 0x3800u; // 0.5h
+  case 241:
+    return 0xB800u; // -0.5h
+  case 242:
+    return 0x3C00u; // 1.0h
+  case 243:
+    return 0xBC00u; // -1.0h
+  case 244:
+    return 0x4000u; // 2.0h
+  case 245:
+    return 0xC000u; // -2.0h
+  case 246:
+    return 0x4400u; // 4.0h
+  case 247:
+    return 0xC400u; // -4.0h
+  case 248:
+    return 0x3118u; // f16 1/(2*pi)
+  default:
+    return resolve_src_scalar(wf, ev);
+  }
 }
 
 // Must stay in sync with resolve_src_scalar above — returns true for
@@ -770,15 +861,19 @@ uint64_t resolve_src_scalar64(const amdgpu::Wavefront &wf, int ev) {
   if (ev == 102)
     return wf.scratch_base();
   if (ev <= 105) {
-    uint32_t lo = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
-    uint32_t hi = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));
+    uint32_t lo =
+        amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
+    uint32_t hi =
+        amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));
     return static_cast<uint64_t>(hi) << 32 | lo;
   }
   if (ev == 106)
     return wf.vcc();
   if (ev >= 108 && ev <= 122) {
-    uint32_t lo = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
-    uint32_t hi = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));
+    uint32_t lo =
+        amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
+    uint32_t hi =
+        amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));
     return static_cast<uint64_t>(hi) << 32 | lo;
   }
   if (ev == 124)
@@ -786,7 +881,7 @@ uint64_t resolve_src_scalar64(const amdgpu::Wavefront &wf, int ev) {
   if (ev == 125)
     return wf.m0();
   if (ev == 126)
-    return wf.exec();
+    return wf.exec_raw();
   if (ev >= 128 && ev <= 192)
     return static_cast<uint64_t>(ev - 128);
   if (ev >= 193 && ev <= 208)
@@ -834,7 +929,7 @@ void resolve_dst_write(amdgpu::Wavefront &wf, int ev, uint32_t val) {
     return;
   }
   if (ev <= 105) {
-    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
+    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
     return;
   }
   if (ev == 106) {
@@ -846,7 +941,7 @@ void resolve_dst_write(amdgpu::Wavefront &wf, int ev, uint32_t val) {
     return;
   }
   if (ev >= 108 && ev <= 123) {
-    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
+    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
     return;
   }
   if (ev == 124)
@@ -860,7 +955,7 @@ void resolve_dst_write(amdgpu::Wavefront &wf, int ev, uint32_t val) {
     return;
   }
   if (ev == 127) {
-    wf.set_exec((wf.exec() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));
+    wf.set_exec_raw((wf.exec_raw() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));
     return;
   }
   throw std::logic_error("Unsupported encoding value for scalar write: " + std::to_string(ev));
@@ -872,10 +967,10 @@ void resolve_dst_write64(amdgpu::Wavefront &wf, int ev, uint64_t val) {
     return;
   }
   if (ev <= 105) {
-    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev),
-                       static_cast<uint32_t>(val));
-    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1),
-                       static_cast<uint32_t>(val >> 32));
+    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev),
+                                          static_cast<uint32_t>(val));
+    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1),
+                                          static_cast<uint32_t>(val >> 32));
     return;
   }
   if (ev == 106) {
@@ -883,16 +978,16 @@ void resolve_dst_write64(amdgpu::Wavefront &wf, int ev, uint64_t val) {
     return;
   }
   if (ev >= 108 && ev <= 122) {
-    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev),
-                       static_cast<uint32_t>(val));
-    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1),
-                       static_cast<uint32_t>(val >> 32));
+    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev),
+                                          static_cast<uint32_t>(val));
+    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1),
+                                          static_cast<uint32_t>(val >> 32));
     return;
   }
   if (ev == 124)
     return;
   if (ev == 126) {
-    wf.set_exec(val);
+    wf.set_exec_raw(val);
     return;
   }
   throw std::logic_error("Unsupported encoding value for scalar64 write: " + std::to_string(ev));
@@ -912,6 +1007,12 @@ uint32_t vgpr_index(OperandType opr_type, int ev) {
   if (opr_type == OperandType::OPR_VGPR)
     return static_cast<uint32_t>(ev);
   return static_cast<uint32_t>(ev - 256);
+}
+
+uint64_t read_immediate64(OperandType opr_type, int ev) {
+  if (opr_type == OperandType::OPR_SIMM32)
+    return static_cast<uint64_t>(static_cast<uint32_t>(ev));
+  return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(ev)));
 }
 
 } // namespace
@@ -937,9 +1038,50 @@ uint32_t Isa::simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_
   return is_immediate_type(opr_type) ? static_cast<uint32_t>(ev) : resolve_src_scalar(wf, ev);
 }
 
+bool Operand::simd_capable() const {
+  if (delegate())
+    return delegate()->simd_capable();
+  if (packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_))
+    return false;
+  if (packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_))
+    return false;
+  return AmdgpuIsaOperand<Isa>::simd_capable();
+}
+
+void Operand::read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
+                              uint32_t *out) const {
+  if (delegate()) {
+    amdgpu::RegisterAccess(wf).read_chunk(*delegate(), lane_base, count, out);
+    return;
+  }
+  if (packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_)) {
+    for (uint32_t i = 0; i < count; ++i)
+      out[i] = read_lane(wf, lane_base + i);
+    return;
+  }
+  detail::amdgpu_isa_read_lane_chunk_base(static_cast<const AmdgpuIsaOperand<Isa> &>(*this), wf,
+                                          lane_base, count, out);
+}
+
+void Operand::write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
+                               const uint32_t *vals, uint64_t mask) const {
+  if (delegate()) {
+    amdgpu::RegisterAccess(wf).write_chunk(*delegate(), lane_base, count, vals, mask);
+    return;
+  }
+  if (packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_)) {
+    for (uint32_t i = 0; i < count; ++i)
+      if (mask & (1ULL << i))
+        write_lane(wf, lane_base + i, vals[i]);
+    return;
+  }
+  detail::amdgpu_isa_write_lane_chunk_base(static_cast<const AmdgpuIsaOperand<Isa> &>(*this), wf,
+                                           lane_base, count, vals, mask);
+}
+
 uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {
   if (delegate())
-    return delegate()->read_scalar(wf);
+    return amdgpu::RegisterAccess(wf).read_scalar(*delegate());
   if (has_literal64_)
     return static_cast<uint32_t>(literal64_value_);
   if (is_immediate_type(opr_type_))
@@ -949,14 +1091,22 @@ uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {
 
 uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
   if (delegate())
-    return delegate()->read_lane(wf, lane);
+    return amdgpu::RegisterAccess(wf).read_lane(*delegate(), lane);
   int ev = encoding_value_;
+  if (auto packed = packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, ev)) {
+    uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, off, false) : off;
+    uint32_t raw = amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + voff, lane);
+    return (raw >> packed->shift) & 0xffffu;
+  }
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev)) {
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
-    return wf.cu().read_vgpr(wf.vgpr_alloc().base + voff, lane);
+    return amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + voff, lane);
   }
   if (is_immediate_type(opr_type_))
     return static_cast<uint32_t>(ev);
+  if (size_bits_ == 16)
+    return resolve_src_scalar16(wf, ev);
   return resolve_src_scalar(wf, ev);
 }
 
@@ -965,9 +1115,20 @@ void Operand::write_scalar(amdgpu::Wavefront &wf, uint32_t val) const {
 }
 
 void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const {
+  if (auto packed =
+          packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_)) {
+    uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, off, true) : off;
+    uint32_t idx = wf.vgpr_alloc().base + voff;
+    uint32_t old = amdgpu::RegisterAccess(wf.cu()).read_vgpr(idx, lane);
+    uint32_t keep_mask = packed->shift ? 0x0000ffffu : 0xffff0000u;
+    uint32_t merged = (old & keep_mask) | ((val & 0xffffu) << packed->shift);
+    amdgpu::RegisterAccess(wf.cu()).write_vgpr(idx, lane, merged);
+    return;
+  }
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, encoding_value_)) {
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
-    wf.cu().write_vgpr(wf.vgpr_alloc().base + voff, lane, val);
+    amdgpu::RegisterAccess(wf.cu()).write_vgpr(wf.vgpr_alloc().base + voff, lane, val);
     return;
   }
   throw std::logic_error("write_lane called on non-VGPR operand type");
@@ -975,19 +1136,17 @@ void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) con
 
 uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const {
   if (delegate())
-    return delegate()->read_lane64(wf, lane);
+    return amdgpu::RegisterAccess(wf).read_lane64(*delegate(), lane);
   int ev = encoding_value_;
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev)) {
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
     uint32_t idx = wf.vgpr_alloc().base + voff;
-    uint32_t lo = wf.cu().read_vgpr(idx, lane);
-    uint32_t hi = wf.cu().read_vgpr(idx + 1, lane);
-    return static_cast<uint64_t>(hi) << 32 | lo;
+    return amdgpu::RegisterAccess(wf.cu()).read_vgpr64(idx, lane);
   }
   if (has_literal64_)
     return literal64_value_;
   if (is_immediate_type(opr_type_))
-    return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(ev)));
+    return read_immediate64(opr_type_, ev);
   return resolve_src_scalar64(wf, ev);
 }
 
@@ -995,8 +1154,7 @@ void Operand::write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) c
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, encoding_value_)) {
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
     uint32_t idx = wf.vgpr_alloc().base + voff;
-    wf.cu().write_vgpr(idx, lane, static_cast<uint32_t>(val));
-    wf.cu().write_vgpr(idx + 1, lane, static_cast<uint32_t>(val >> 32));
+    amdgpu::RegisterAccess(wf.cu()).write_vgpr64(idx, lane, val);
     return;
   }
   throw std::logic_error("write_lane64 called on non-VGPR operand type");
@@ -1006,7 +1164,7 @@ uint64_t Operand::read_scalar64(const amdgpu::Wavefront &wf) const {
   if (has_literal64_)
     return literal64_value_;
   if (is_immediate_type(opr_type_))
-    return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(encoding_value_)));
+    return read_immediate64(opr_type_, encoding_value_);
   return resolve_src_scalar64(wf, encoding_value_);
 }
 

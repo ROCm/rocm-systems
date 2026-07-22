@@ -47,7 +47,7 @@
 #define RCCL_API_TRACE_VERSION_MAJOR 0
 
 // should be increased every time new members are added to existing dispatch tables
-#define RCCL_API_TRACE_VERSION_PATCH 6
+#define RCCL_API_TRACE_VERSION_PATCH 7
 
 #if !defined(RCCL_EXTERN_C_INIT)
 #    ifdef __cplusplus
@@ -297,6 +297,15 @@ typedef ncclResult_t (*ncclWaitSignal_fn_t)(int                   nDesc,
                                             ncclComm_t            comm,
                                             hipStream_t           stream);
 
+typedef ncclResult_t (*ncclCommGetUniqueId_fn_t)(ncclComm_t comm, ncclUniqueId* uniqueId);
+
+typedef ncclResult_t (*ncclCommGrow_fn_t)(ncclComm_t          comm,
+                                          int                 nRanks,
+                                          const ncclUniqueId* uniqueId,
+                                          int                 rank,
+                                          ncclComm_t*         newcomm,
+                                          ncclConfig_t*       config);
+
 typedef struct rcclApiFuncTable
 {
     // ADD NEW FUNCTIONS AT BOTTOM ONLY
@@ -351,6 +360,8 @@ typedef struct rcclApiFuncTable
     ncclPutSignal_fn_t            ncclPutSignal_fn;
     ncclSignal_fn_t               ncclSignal_fn;
     ncclWaitSignal_fn_t           ncclWaitSignal_fn;
+    ncclCommGetUniqueId_fn_t      ncclCommGetUniqueId_fn;
+    ncclCommGrow_fn_t             ncclCommGrow_fn;
     // ADD NEW FUNCTIONS HERE ONLY
 } rcclApiFuncTable;
 

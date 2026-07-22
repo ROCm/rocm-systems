@@ -45,6 +45,10 @@ typedef enum rj_code_arch_e {
   ROCJITSU_CODE_ARCH_RV64I = 10,
   /// @brief gfx1250 ISA architecture.
   ROCJITSU_CODE_ARCH_GFX1250 = 11,
+  /*
+   * \NPI a GPU that introduces a new ISA family needs a new arch id here; \
+   * give it the next value and keep NUM_ARCHS / INVALID last.
+   */
   /// @brief Total number of supported architectures.
   ROCJITSU_CODE_ARCH_NUM_ARCHS = 12,
   /// @brief Sentinel value representing an invalid architecture.
@@ -98,6 +102,8 @@ RJ_API_EXPORT rj_status_t rj_code_decoder_decode(rj_code_decoder_t *decoder,
 
 /// @brief GPU target identifiers.
 typedef enum rj_code_target_id_t {
+  /// @brief gfx90a target ID (CDNA2).
+  ROCJITSU_CODE_TARGET_GFX90A,
   /// @brief gfx942 target ID (CDNA3).
   ROCJITSU_CODE_TARGET_GFX942,
   /// @brief gfx950 target ID (CDNA4).
@@ -108,6 +114,10 @@ typedef enum rj_code_target_id_t {
   ROCJITSU_CODE_TARGET_GFX1201,
   /// @brief gfx1250 target ID.
   ROCJITSU_CODE_TARGET_GFX1250,
+  /*
+   * \NPI every new GPU needs a target id here (one per distinct gfxNNNN \
+   * variant); keep INVALID last.
+   */
   /// @brief Sentinel value representing an invalid target.
   ROCJITSU_CODE_TARGET_INVALID
 } rj_code_target_id_t;
@@ -353,6 +363,14 @@ RJ_API_EXPORT const rj_code_inst_t *rj_code_inst_next(const rj_code_inst_t *inst
 /// @defgroup dbt Dynamic Binary Translation
 /// @{
 
+/// @brief Options for rj_code_translate.
+///
+/// @details Silicon revision is intentionally NOT part of this struct. gfx1250 A0
+/// and B0 share an ELF machine ID, so a same-architecture gfx1250 translation is
+/// direction-ambiguous; rather than carry a revision through this C ABI, that case
+/// is rejected here. The revision-aware B0->A0 path is driven internally through
+/// the C++ BinaryTranslator (used by the DBT hook, which sources the revision from
+/// its guest configuration, and by the rj_dbt_translate CLI).
 typedef struct rj_code_dbt_options_t {
   rj_code_arch_t guest_arch;
   rj_code_arch_t host_arch;

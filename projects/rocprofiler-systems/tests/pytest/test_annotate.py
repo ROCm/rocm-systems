@@ -19,11 +19,8 @@ pytestmark = [pytest.mark.annotate]
 @pytest.fixture
 def annotate_papi_condition(rocprof_config) -> bool:
     """Check if PAPI is available and usable."""
-    return rocprof_config.capabilities.papi_availability and (
-        rocprof_config.capabilities.perf_event_paranoid <= 3
-        or rocprof_config.capabilities.cap_sys_admin
-        or rocprof_config.capabilities.cap_perfmon
-    )
+    caps = rocprof_config.capabilities
+    return caps.papi_availability and caps.perf_events_usable
 
 
 @pytest.fixture

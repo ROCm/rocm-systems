@@ -6,6 +6,7 @@ from repo_config_model import RepoConfig, RepoEntry
 
 logger = logging.getLogger(__name__)
 
+
 def load_repo_config(config_path: str) -> List[RepoEntry]:
     """Load and validate repository config from JSON using Pydantic."""
     try:
