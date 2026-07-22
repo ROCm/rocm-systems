@@ -105,11 +105,11 @@ TEST(MarkerEncoding, ComputesMasksAndDecodesClock)
         uint32_t sourceClockMask;
     };
     for (const Case& test : {
-             Case{"packed", {12, 4}, true,  0x000FFFFCu, 0xFFF00000u, 0x0000FFF0u},
-             Case{"legacy", {},      false, 0xFFFFFFFCu, 0u,          0u         },
-             Case{"high_bit", {1, 31}, true, 0x7FFFFFFCu, 0x80000000u, 0x80000000u},
-             Case{"wide", {29, 3},    true, 0x00000004u, 0xFFFFFFF8u, 0xFFFFFFF8u},
-         })
+             Case{"packed",   {12, 4}, true,  0x000FFFFCu, 0xFFF00000u, 0x0000FFF0u},
+             Case{"legacy",   {},      false, 0xFFFFFFFCu, 0u,          0u         },
+             Case{"high_bit", {1, 31}, true,  0x7FFFFFFCu, 0x80000000u, 0x80000000u},
+             Case{"wide",     {29, 3}, true,  0x00000004u, 0xFFFFFFF8u, 0xFFFFFFF8u},
+    })
     {
         SCOPED_TRACE(test.name);
         EXPECT_TRUE(test.encoding.is_valid());
@@ -488,19 +488,19 @@ TEST(ExtractElfSection, HandlesBasicSectionLayouts)
         bool warning;
     };
     for (const Case& test : {
-             Case{"find", {{".sqtt_funcmap", "F:1:foo\n"}}, "F:1:foo\n", false},
-             Case{"absent", {{".text", "xx"}}, nullptr, false},
-             Case{"empty", {{".sqtt_funcmap", {}}}, nullptr, true},
-             Case{"multiple", {{".text", "xxx"}, {".rodata", "hello"}, {".sqtt_funcmap", "F:1:hit\n"}},
-                  "F:1:hit\n", false},
-         })
+             Case{"find",     {{".sqtt_funcmap", "F:1:foo\n"}},                                         "F:1:foo\n", false},
+             Case{"absent",   {{".text", "xx"}},                                                        nullptr,     false},
+             Case{"empty",    {{".sqtt_funcmap", {}}},                                                  nullptr,     true },
+             Case{
+                  "multiple", {{".text", "xxx"}, {".rodata", "hello"}, {".sqtt_funcmap", "F:1:hit\n"}},
+                  "F:1:hit\n",                                                                                       false},
+    })
     {
         SCOPED_TRACE(test.name);
         auto elf = buildElf(test.sections);
         std::vector<FuncmapDiagnostic> diags;
-        auto section = extract_elf_section(
-            reinterpret_cast<const char*>(elf.data()), elf.size(), ".sqtt_funcmap", diags
-        );
+        auto section =
+            extract_elf_section(reinterpret_cast<const char*>(elf.data()), elf.size(), ".sqtt_funcmap", diags);
         if (test.expected)
         {
             ASSERT_TRUE(section);

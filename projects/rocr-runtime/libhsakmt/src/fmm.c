@@ -4600,8 +4600,16 @@ HSAKMT_STATUS hsakmt_fmm_register_shared_memory(HsaKFDContext *ctx,
 	const HsaSharedMemoryStruct *SharedMemoryStruct =
 		to_const_hsa_shared_memory_struct(SharedMemoryHandle);
 	HSAuint64 SizeInPages = SharedMemoryStruct->SizeInPages;
+	HSAuint64 SizeInBytesCalc;
 	HsaMemFlags mflags;
 	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+
+	SizeInBytesCalc = SizeInPages << PAGE_SHIFT;
+
+	if (SizeInPages == 0) {
+		pr_err("IPC import: size cannot be zero\n");
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+	}
 
 	if (gpu_id_array_size > 0 && !gpu_id_array)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
@@ -4613,6 +4621,14 @@ HSAKMT_STATUS hsakmt_fmm_register_shared_memory(HsaKFDContext *ctx,
 	aperture = fmm_get_aperture(fmm_ctx, SharedMemoryStruct->ApeInfo);
 	if (!aperture)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	HSAuint64 aperture_size = VOID_PTRS_SUB(aperture->limit, aperture->base) + 1;
+	if (SizeInBytesCalc > aperture_size) {
+		pr_err("IPC import: size 0x%llx exceeds aperture range 0x%llx\n",
+				(unsigned long long)SizeInBytesCalc,
+		(unsigned long long)aperture_size);
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+	}
 
 	pthread_mutex_lock(&aperture->fmm_mutex);
 	reservedMem = aperture_allocate_area(aperture, NULL,

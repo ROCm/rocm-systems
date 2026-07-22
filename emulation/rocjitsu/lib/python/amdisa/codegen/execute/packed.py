@@ -793,18 +793,22 @@ def gen_dot2(
     L.append(f'    bool sel0_hi = ({opsel_hi} >> 0) & 1;')
     L.append(f'    bool sel1_hi = ({opsel_hi} >> 1) & 1;')
 
-    if cls == 'dot2_f32_f16':
+    if cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
+        # F16 and BF16 share the dot2 structure but widen differently: BF16 has
+        # an 8-bit exponent and no denormal renormalization, so it must use
+        # bf16_to_f32, not f16_to_f32 (which would misinterpret the exponent).
+        widen = 'util::bf16_to_f32' if cls == 'dot2_f32_bf16' else 'util::f16_to_f32'
         L.append(
-            '    float a0 = util::f16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));'
+            f'    float a0 = {widen}(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));'
         )
         L.append(
-            '    float a1 = util::f16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));'
+            f'    float a1 = {widen}(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));'
         )
         L.append(
-            '    float b0 = util::f16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));'
+            f'    float b0 = {widen}(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));'
         )
         L.append(
-            '    float b1 = util::f16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));'
+            f'    float b1 = {widen}(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));'
         )
         L.append('    if (inst_.neg & 1) a0 = -a0;')
         L.append('    if (inst_.neg & 2) b0 = -b0;')

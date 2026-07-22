@@ -55,7 +55,6 @@
 #include "amd_smi/impl/amd_smi_gpu_mutex.h"
 #include "amd_smi/impl/amd_smi_system.h"
 #include "amd_smi/impl/scoped_fd.h"
-#include "config/amd_smi_config.h"
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
@@ -704,7 +703,7 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
   }
 
   amd::smi::AMDSmiLibraryLoader libdrm_amdgpu_;
-  amdsmi_status_t status = libdrm_amdgpu_.load(LIBDRM_AMDGPU_SONAME);
+  amdsmi_status_t status = libdrm_amdgpu_.load(amd::smi::libdrm_amdgpu_sonames());
   if (status != AMDSMI_STATUS_SUCCESS) {
     libdrm_amdgpu_.unload();
     return status;

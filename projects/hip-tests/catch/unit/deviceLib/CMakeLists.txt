@@ -77,6 +77,19 @@ set(AMD_TEST_SRC
     fp16_atomic_test.cc
 )
 
+# The OCP host reference (fcbx packed bitfield structs in amd_hip_ocp_host.hpp)
+# relies on Itanium bitfield packing and fails a static_assert under the MSVC
+# bitfield ABI on Windows. Only compile the fp4/fp6/fp8 OCP tests on non-Windows
+# until the header is made portable.
+if(NOT WIN32)
+  list(APPEND AMD_TEST_SRC ext_ocp_fp6.cc ext_ocp_fp8.cc ext_ocp_fp4.cc)
+  # The OCP host reference returns wide vector types (__amd_floatx32_storage_t)
+  # by value. Without AVX-512 enabled this triggers -Wpsabi ABI-change notes,
+  # which are inherent to the type and not a real defect, so suppress them here.
+  set_source_files_properties(ext_ocp_fp6.cc ext_ocp_fp8.cc ext_ocp_fp4.cc
+                              PROPERTIES COMPILE_OPTIONS "-Wno-psabi")
+endif()
+
 set(AMD_ARCH_SPEC_TEST_SRC
     AtomicAdd_Coherent.cc
     AtomicAdd_NonCoherent.cc

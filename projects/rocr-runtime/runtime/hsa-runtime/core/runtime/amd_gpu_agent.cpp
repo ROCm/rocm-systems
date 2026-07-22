@@ -263,7 +263,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   auto link_info = core::Runtime::runtime_singleton_->GetLinkInfo(first_cpu->node_id(), node_id());
   xgmi_cpu_gpu_ = (link_info.info.link_type == HSA_AMD_LINK_INFO_TYPE_XGMI);
 
-  if (link_info.num_hop >= 1) {
+  if (link_info.num_hop >= 1 && !properties_.Integrated) {
     large_bar_enabled_ = true;
   }
 
@@ -434,7 +434,14 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
     amd_kernel_code_t* header = reinterpret_cast<amd_kernel_code_t*>(code_buf);
 
     int gran_sgprs = std::max(0, (int(asic_shader->num_sgprs) - 1) / 8);
-    int gran_vgprs = std::max(0, (int(asic_shader->num_vgprs) - 1) / 4);
+    // gfx1250 changed the VGPR granularity from 4 to 16: the field is now
+    // max(0, ceil(vgprs_used / 16) - 1). See SWDEV-512636 / SWDEV-510239.
+    const int vgpr_gran = (supported_isas()[0]->GetMajorVersion() == 12 &&
+                           supported_isas()[0]->GetMinorVersion() >= 5)
+                              ? 16
+                              : 4;
+    int gran_vgprs =
+        std::max(0, (int(asic_shader->num_vgprs) + vgpr_gran - 1) / vgpr_gran - 1);
 
     header->kernel_code_entry_byte_offset = sizeof(amd_kernel_code_t);
     AMD_HSA_BITS_SET(header->kernel_code_properties,

@@ -2,7 +2,12 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
-## HIP 10 for ROCm 10
+## HIP 7.15 for ROCm 7.15
+
+### Added
+* New HIP APIs
+    - Stream Ordered Memory Allocator: Support for the following APIs for parity with corresponding CUDA APIs.
+      * `hipMemGetDefaultMemPool` returns the default memory pool for the specified location and allocation type
 
 ### Resolved issues
 

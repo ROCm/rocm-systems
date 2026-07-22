@@ -2611,6 +2611,9 @@ inline void execute_s_subb_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]
 }
 
 template <typename Inst>
+inline void execute_s_trap_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
+
+template <typename Inst>
 inline void execute_s_trunc_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   float result = util::trunc_scalar(
       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))));
@@ -2833,10 +2836,10 @@ inline void execute_v_add_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
     if (!(exec & (1ULL << lane)))
       continue;
     amdgpu::RegisterAccess(wf).write_lane(inst.vdst, lane, [&]() {
-      uint64_t w = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)) +
-                   static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)) +
-                   static_cast<uint64_t>(
-                       ((amdgpu::RegisterAccess(wf).read_scalar64(inst.src2) >> lane) & 1));
+      uint64_t w =
+          static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)) +
+          static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)) +
+          static_cast<uint64_t>(((amdgpu::read_wave_mask_scalar(inst.src2, wf) >> lane) & 1));
       if (w > 0xFFFFFFFFULL)
         vcc |= (1ULL << lane);
       else
@@ -2844,10 +2847,7 @@ inline void execute_v_add_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(w);
     }());
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.sdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -2895,10 +2895,7 @@ inline void execute_v_add_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
       return static_cast<uint32_t>(w);
     }());
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.sdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -3263,10 +3260,10 @@ inline void execute_v_addc_co_u32_vop3([[maybe_unused]] Inst &inst,
     if (!(exec & (1ULL << lane)))
       continue;
     amdgpu::RegisterAccess(wf).write_lane(inst.vdst, lane, [&]() {
-      uint64_t w = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)) +
-                   static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)) +
-                   static_cast<uint64_t>(
-                       ((amdgpu::RegisterAccess(wf).read_scalar64(inst.src2) >> lane) & 1));
+      uint64_t w =
+          static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)) +
+          static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)) +
+          static_cast<uint64_t>(((amdgpu::read_wave_mask_scalar(inst.src2, wf) >> lane) & 1));
       if (w > 0xFFFFFFFFULL)
         vcc |= (1ULL << lane);
       else
@@ -3274,10 +3271,7 @@ inline void execute_v_addc_co_u32_vop3([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(w);
     }());
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.sdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -3916,10 +3910,7 @@ inline void execute_v_cmp_class_f16_vop3([[maybe_unused]] Inst &inst,
     if (match)
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -4056,10 +4047,7 @@ inline void execute_v_cmp_class_f32_vop3([[maybe_unused]] Inst &inst,
     if (match)
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -4193,10 +4181,7 @@ inline void execute_v_cmp_class_f64_vop3([[maybe_unused]] Inst &inst,
     if (match)
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -4294,10 +4279,7 @@ inline void execute_v_cmp_eq_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -4345,10 +4327,7 @@ inline void execute_v_cmp_eq_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -4394,10 +4373,7 @@ inline void execute_v_cmp_eq_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -4426,10 +4402,7 @@ inline void execute_v_cmp_eq_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -4462,10 +4435,7 @@ inline void execute_v_cmp_eq_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -4495,10 +4465,7 @@ inline void execute_v_cmp_eq_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -4527,10 +4494,7 @@ inline void execute_v_cmp_eq_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -4560,10 +4524,7 @@ inline void execute_v_cmp_eq_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -4593,10 +4554,7 @@ inline void execute_v_cmp_eq_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -4625,10 +4583,7 @@ inline void execute_v_cmp_f_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (0)
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -4658,10 +4613,7 @@ inline void execute_v_cmp_f_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (0)
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -4689,10 +4641,7 @@ inline void execute_v_cmp_f_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (0)
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -4737,10 +4686,7 @@ inline void execute_v_cmp_f_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (0)
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -4769,10 +4715,7 @@ inline void execute_v_cmp_f_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (0)
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -4815,10 +4758,7 @@ inline void execute_v_cmp_f_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (0)
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -4847,10 +4787,7 @@ inline void execute_v_cmp_f_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (0)
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -4895,10 +4832,7 @@ inline void execute_v_cmp_ge_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -4946,10 +4880,7 @@ inline void execute_v_cmp_ge_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -4995,10 +4926,7 @@ inline void execute_v_cmp_ge_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5027,10 +4955,7 @@ inline void execute_v_cmp_ge_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5063,10 +4988,7 @@ inline void execute_v_cmp_ge_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5096,10 +5018,7 @@ inline void execute_v_cmp_ge_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5128,10 +5047,7 @@ inline void execute_v_cmp_ge_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5161,10 +5077,7 @@ inline void execute_v_cmp_ge_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5194,10 +5107,7 @@ inline void execute_v_cmp_ge_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5243,10 +5153,7 @@ inline void execute_v_cmp_gt_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5293,10 +5200,7 @@ inline void execute_v_cmp_gt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5342,10 +5246,7 @@ inline void execute_v_cmp_gt_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5374,10 +5275,7 @@ inline void execute_v_cmp_gt_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5410,10 +5308,7 @@ inline void execute_v_cmp_gt_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5443,10 +5338,7 @@ inline void execute_v_cmp_gt_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5475,10 +5367,7 @@ inline void execute_v_cmp_gt_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5508,10 +5397,7 @@ inline void execute_v_cmp_gt_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5541,10 +5427,7 @@ inline void execute_v_cmp_gt_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5590,10 +5473,7 @@ inline void execute_v_cmp_le_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5641,10 +5521,7 @@ inline void execute_v_cmp_le_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5690,10 +5567,7 @@ inline void execute_v_cmp_le_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5722,10 +5596,7 @@ inline void execute_v_cmp_le_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5758,10 +5629,7 @@ inline void execute_v_cmp_le_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5791,10 +5659,7 @@ inline void execute_v_cmp_le_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5823,10 +5688,7 @@ inline void execute_v_cmp_le_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5856,10 +5718,7 @@ inline void execute_v_cmp_le_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5889,10 +5748,7 @@ inline void execute_v_cmp_le_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5941,10 +5797,7 @@ inline void execute_v_cmp_lg_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
         }()))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -5999,10 +5852,7 @@ inline void execute_v_cmp_lg_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
         }()))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -6054,10 +5904,7 @@ inline void execute_v_cmp_lg_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
         }()))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -6106,10 +5953,7 @@ inline void execute_v_cmp_lt_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -6156,10 +6000,7 @@ inline void execute_v_cmp_lt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -6205,10 +6046,7 @@ inline void execute_v_cmp_lt_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -6237,10 +6075,7 @@ inline void execute_v_cmp_lt_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -6273,10 +6108,7 @@ inline void execute_v_cmp_lt_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -6306,10 +6138,7 @@ inline void execute_v_cmp_lt_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -6338,10 +6167,7 @@ inline void execute_v_cmp_lt_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -6371,10 +6197,7 @@ inline void execute_v_cmp_lt_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -6404,10 +6227,7 @@ inline void execute_v_cmp_lt_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -6436,10 +6256,7 @@ inline void execute_v_cmp_ne_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -6472,10 +6289,7 @@ inline void execute_v_cmp_ne_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -6505,10 +6319,7 @@ inline void execute_v_cmp_ne_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -6537,10 +6348,7 @@ inline void execute_v_cmp_ne_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -6570,10 +6378,7 @@ inline void execute_v_cmp_ne_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -6603,10 +6408,7 @@ inline void execute_v_cmp_ne_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -6653,10 +6455,7 @@ inline void execute_v_cmp_neq_f16_vop3([[maybe_unused]] Inst &inst,
          }()))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -6706,10 +6505,7 @@ inline void execute_v_cmp_neq_f32_vop3([[maybe_unused]] Inst &inst,
          }()))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -6757,10 +6553,7 @@ inline void execute_v_cmp_neq_f64_vop3([[maybe_unused]] Inst &inst,
          }()))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -6808,10 +6601,7 @@ inline void execute_v_cmp_nge_f16_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -6861,10 +6651,7 @@ inline void execute_v_cmp_nge_f32_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -6912,10 +6699,7 @@ inline void execute_v_cmp_nge_f64_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -6963,10 +6747,7 @@ inline void execute_v_cmp_ngt_f16_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -7016,10 +6797,7 @@ inline void execute_v_cmp_ngt_f32_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -7067,10 +6845,7 @@ inline void execute_v_cmp_ngt_f64_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -7118,10 +6893,7 @@ inline void execute_v_cmp_nle_f16_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -7171,10 +6943,7 @@ inline void execute_v_cmp_nle_f32_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -7222,10 +6991,7 @@ inline void execute_v_cmp_nle_f64_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -7276,10 +7042,7 @@ inline void execute_v_cmp_nlg_f16_vop3([[maybe_unused]] Inst &inst,
         }())))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -7336,10 +7099,7 @@ inline void execute_v_cmp_nlg_f32_vop3([[maybe_unused]] Inst &inst,
         }())))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -7393,10 +7153,7 @@ inline void execute_v_cmp_nlg_f64_vop3([[maybe_unused]] Inst &inst,
         }())))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -7447,10 +7204,7 @@ inline void execute_v_cmp_nlt_f16_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -7500,10 +7254,7 @@ inline void execute_v_cmp_nlt_f32_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -7551,10 +7302,7 @@ inline void execute_v_cmp_nlt_f64_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -7602,10 +7350,7 @@ inline void execute_v_cmp_o_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
          }())))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -7655,10 +7400,7 @@ inline void execute_v_cmp_o_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
          }())))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -7706,10 +7448,7 @@ inline void execute_v_cmp_o_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
          }())))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -7754,10 +7493,7 @@ inline void execute_v_cmp_t_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (1)
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -7784,10 +7520,7 @@ inline void execute_v_cmp_t_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (1)
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -7831,10 +7564,7 @@ inline void execute_v_cmp_t_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (1)
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -7862,10 +7592,7 @@ inline void execute_v_cmp_t_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (1)
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -7908,10 +7635,7 @@ inline void execute_v_cmp_t_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (1)
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -7940,10 +7664,7 @@ inline void execute_v_cmp_t_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (1)
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -7972,10 +7693,7 @@ inline void execute_v_cmp_tru_f16_vop3([[maybe_unused]] Inst &inst,
     if (1)
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -8007,10 +7725,7 @@ inline void execute_v_cmp_tru_f32_vop3([[maybe_unused]] Inst &inst,
     if (1)
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -8040,10 +7755,7 @@ inline void execute_v_cmp_tru_f64_vop3([[maybe_unused]] Inst &inst,
     if (1)
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -8090,10 +7802,7 @@ inline void execute_v_cmp_u_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
          }())))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -8143,10 +7852,7 @@ inline void execute_v_cmp_u_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
          }())))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -8194,10 +7900,7 @@ inline void execute_v_cmp_u_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
          }())))
       vcc |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.vdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.vdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -8247,8 +7950,7 @@ inline void execute_v_cndmask_b32_vop3([[maybe_unused]] Inst &inst,
         amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane), inst.inst_.abs, inst.inst_.neg, 1);
     amdgpu::RegisterAccess(wf).write_lane(
         inst.vdst, lane,
-        ((amdgpu::RegisterAccess(wf).read_scalar64(inst.src2) >> lane) & 1) ? src1_value
-                                                                            : src0_value);
+        ((amdgpu::read_wave_mask_scalar(inst.src2, wf) >> lane) & 1) ? src1_value : src0_value);
   }
 }
 
@@ -10310,10 +10012,7 @@ inline void execute_v_div_scale_f32_vop3([[maybe_unused]] Inst &inst,
       vcc &= ~(1ULL << lane);
     amdgpu::RegisterAccess(wf).write_lane(inst.vdst, lane, std::bit_cast<uint32_t>(result));
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.sdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -10369,16 +10068,13 @@ inline void execute_v_div_scale_f64_vop3([[maybe_unused]] Inst &inst,
       vcc &= ~(1ULL << lane);
     amdgpu::RegisterAccess(wf).write_lane64(inst.vdst, lane, std::bit_cast<uint64_t>(result));
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.sdst, wf, vcc);
 }
 
 template <typename Inst>
 inline void execute_v_dot2_f32_bf16_vop3p([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3P_DOT_F16();
+  ROCJITSU_TRY_SIMD_VOP3P_DOT_F16(BF16);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -10389,10 +10085,10 @@ inline void execute_v_dot2_f32_bf16_vop3p([[maybe_unused]] Inst &inst,
     bool sel1_lo = (inst.inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst.inst_.op_sel_hi >> 0) & 1;
     bool sel1_hi = (inst.inst_.op_sel_hi >> 1) & 1;
-    float a0 = util::f16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));
-    float a1 = util::f16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));
-    float b0 = util::f16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));
-    float b1 = util::f16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));
+    float a0 = util::bf16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));
+    float a1 = util::bf16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));
+    float b0 = util::bf16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));
+    float b1 = util::bf16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));
     if (inst.inst_.neg & 1)
       a0 = -a0;
     if (inst.inst_.neg & 2)
@@ -10414,7 +10110,7 @@ inline void execute_v_dot2_f32_bf16_vop3p([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_dot2_f32_f16_vop3p([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3P_DOT_F16();
+  ROCJITSU_TRY_SIMD_VOP3P_DOT_F16(F16);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -13023,10 +12719,7 @@ inline void execute_v_mad_co_i64_i32_vop3([[maybe_unused]] Inst &inst,
       carry |= 1ULL << lane;
     amdgpu::RegisterAccess(wf).write_lane64(inst.vdst, lane, result);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, static_cast<uint32_t>(carry));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, carry);
+  amdgpu::write_wave_mask_scalar(inst.sdst, wf, carry);
 }
 
 template <typename Inst>
@@ -13046,10 +12739,7 @@ inline void execute_v_mad_co_u64_u32_vop3([[maybe_unused]] Inst &inst,
       carry |= 1ULL << lane;
     amdgpu::RegisterAccess(wf).write_lane64(inst.vdst, lane, result);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, static_cast<uint32_t>(carry));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, carry);
+  amdgpu::write_wave_mask_scalar(inst.sdst, wf, carry);
 }
 
 template <typename Inst>
@@ -13191,10 +12881,7 @@ inline void execute_v_mad_i64_i32_vop3([[maybe_unused]] Inst &inst,
       carry |= 1ULL << lane;
     amdgpu::RegisterAccess(wf).write_lane64(inst.vdst, lane, result);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, static_cast<uint32_t>(carry));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, carry);
+  amdgpu::write_wave_mask_scalar(inst.sdst, wf, carry);
 }
 
 template <typename Inst>
@@ -13451,10 +13138,7 @@ inline void execute_v_mad_u64_u32_vop3([[maybe_unused]] Inst &inst,
       carry |= 1ULL << lane;
     amdgpu::RegisterAccess(wf).write_lane64(inst.vdst, lane, result);
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, static_cast<uint32_t>(carry));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, carry);
+  amdgpu::write_wave_mask_scalar(inst.sdst, wf, carry);
 }
 
 template <typename Inst>
@@ -18470,7 +18154,7 @@ inline void execute_v_sub_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
       uint64_t a = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
                b = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)),
                c = static_cast<uint64_t>(
-                   ((amdgpu::RegisterAccess(wf).read_scalar64(inst.src2) >> lane) & 1));
+                   ((amdgpu::read_wave_mask_scalar(inst.src2, wf) >> lane) & 1));
       if (a < b + c)
         vcc |= (1ULL << lane);
       else
@@ -18478,10 +18162,7 @@ inline void execute_v_sub_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(a - b - c);
     }());
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.sdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -18523,10 +18204,7 @@ inline void execute_v_sub_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
       return a - b;
     }());
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.sdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -18819,7 +18497,7 @@ inline void execute_v_subb_co_u32_vop3([[maybe_unused]] Inst &inst,
       uint64_t a = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
                b = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)),
                c = static_cast<uint64_t>(
-                   ((amdgpu::RegisterAccess(wf).read_scalar64(inst.src2) >> lane) & 1));
+                   ((amdgpu::read_wave_mask_scalar(inst.src2, wf) >> lane) & 1));
       if (a < b + c)
         vcc |= (1ULL << lane);
       else
@@ -18827,10 +18505,7 @@ inline void execute_v_subb_co_u32_vop3([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(a - b - c);
     }());
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.sdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -18881,7 +18556,7 @@ inline void execute_v_subbrev_co_u32_vop3([[maybe_unused]] Inst &inst,
       uint64_t a = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)),
                b = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
                c = static_cast<uint64_t>(
-                   ((amdgpu::RegisterAccess(wf).read_scalar64(inst.src2) >> lane) & 1));
+                   ((amdgpu::read_wave_mask_scalar(inst.src2, wf) >> lane) & 1));
       if (a < b + c)
         vcc |= (1ULL << lane);
       else
@@ -18889,10 +18564,7 @@ inline void execute_v_subbrev_co_u32_vop3([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(a - b - c);
     }());
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.sdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -18936,7 +18608,7 @@ inline void execute_v_subrev_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
       uint64_t a = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)),
                b = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
                c = static_cast<uint64_t>(
-                   ((amdgpu::RegisterAccess(wf).read_scalar64(inst.src2) >> lane) & 1));
+                   ((amdgpu::read_wave_mask_scalar(inst.src2, wf) >> lane) & 1));
       if (a < b + c)
         vcc |= (1ULL << lane);
       else
@@ -18944,10 +18616,7 @@ inline void execute_v_subrev_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(a - b - c);
     }());
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.sdst, wf, vcc);
 }
 
 template <typename Inst>
@@ -18991,10 +18660,7 @@ inline void execute_v_subrev_co_u32_vop3([[maybe_unused]] Inst &inst,
       return a - b;
     }());
   }
-  if (wf.wf_size() <= 32)
-    amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, static_cast<uint32_t>(vcc));
-  else
-    amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, vcc);
+  amdgpu::write_wave_mask_scalar(inst.sdst, wf, vcc);
 }
 
 template <typename Inst>

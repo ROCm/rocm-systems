@@ -802,7 +802,10 @@ protected:
   /// @brief Execute one instruction on the given wavefront.
   ///
   /// @brief Execute one instruction on the given wavefront via direct dispatch.
-  void execute_instruction(Instruction *inst, Wavefront &wf) override { inst->execute(*inst, &wf); }
+  void execute_instruction(Instruction *inst, Wavefront &wf) override {
+    assert(inst->execute && "instruction execution backend is not linked");
+    inst->execute(*inst, &wf);
+  }
 
 private:
   simdojo::RegisterFile<Vgpr> vgpr_file_{"vgpr"};
