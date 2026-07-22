@@ -392,6 +392,40 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
 
+    def test_sharktank_gfx950_uses_configured_python_and_one_repetition(self) -> None:
+        tp1 = validation.WORKLOAD_BY_ID["tp1-prefill"]
+        with mock.patch.dict(
+            os.environ,
+            {validation.SHARKTANK_PYTHON_ENV: "/workspace/venv/bin/python"},
+        ):
+            command = validation._workload_command(
+                Path("/workspace"), "gfx950", tp1, "overhead", Path("/unused")
+            )
+        self.assertEqual(command[0], "/workspace/venv/bin/python")
+        self.assertEqual(command[command.index("--repetitions") + 1], "1")
+
+    def test_qwen_gfx950_overhead_uses_one_repetition(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["qwen-prefill"]
+        command = validation._workload_command(
+            Path("/workspace"),
+            "gfx950",
+            workload,
+            "overhead",
+            Path("/artifacts/benchmark.json"),
+        )
+        self.assertIn("--benchmark_repetitions=1", command)
+
+    def test_pytorch_gfx950_overhead_uses_one_repetition(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-torch-mode"]
+        command = validation._workload_command(
+            Path("/workspace"),
+            "gfx950",
+            workload,
+            "overhead",
+            Path("/unused"),
+        )
+        self.assertEqual(command[command.index("--repetitions") + 1], "1")
+
     def test_pytorch_gfx1250_runs_both_variants_once(self) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-tdm-descriptor-add"]
         with mock.patch.dict(

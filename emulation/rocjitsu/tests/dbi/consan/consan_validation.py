@@ -36,9 +36,10 @@ SCHEMA_VERSION = 1
 WORKSPACE_ENV = "CONSAN_VALIDATION_WORKSPACE_DIR"
 TARGET_ENV = "CONSAN_VALIDATION_TARGET"
 PYTORCH_PYTHON_ENV = "CONSAN_VALIDATION_PYTORCH_PYTHON"
+SHARKTANK_PYTHON_ENV = "CONSAN_VALIDATION_SHARKTANK_PYTHON"
 TENSILE_PYTHON_ENV = "CONSAN_VALIDATION_TENSILE_PYTHON"
 TIMEOUT_SECONDS = 30
-QWEN_OVERHEAD_REPETITIONS = {"gfx1250": 1}
+QWEN_OVERHEAD_REPETITIONS = {"gfx950": 1, "gfx1250": 1}
 CONTROLLED_ENV_PREFIX = "RJ_CONSAN_"
 TOOLS = ("iree-run-module", "iree-benchmark-module", "rocminfo")
 HSA_TOOL_ENVIRONMENT = {
@@ -1114,6 +1115,14 @@ def _pytorch_python(workspace: Path | None = None) -> Path:
     )
 
 
+def _sharktank_python() -> Path:
+    return Path(
+        os.path.abspath(
+            Path(os.environ.get(SHARKTANK_PYTHON_ENV, sys.executable)).expanduser()
+        )
+    )
+
+
 def _pytorch_runtime_probe(
     python: Path, hook: Path, target: str, workload: Workload
 ) -> dict:
@@ -1193,8 +1202,6 @@ print(json.dumps({
         "detail": payload if payload is not None else probe.stderr.strip(),
         "reasons": reasons,
     }
-
-
 def _tensile_python() -> Path:
     return Path(
         os.path.abspath(
@@ -1616,16 +1623,15 @@ def _workload_command(
     if workload.kind == "qwen":
         return _qwen_command(workspace, target, overhead, output)
     if workload.kind == "sharktank":
-        # gfx1250 validation runs in a software GPU environment where repeated
-        # end-to-end model execution is too expensive for the iteration loop.
+        # The active architecture campaigns use one end-to-end repetition.
         # Keep both the outer process count and this inner suite count at one.
         repetitions = (
             1
-            if target == "gfx1250" or workload.overhead_processes > 1
+            if target in {"gfx950", "gfx1250"} or workload.overhead_processes > 1
             else (10 if overhead else 1)
         )
         return [
-            sys.executable,
+            str(_sharktank_python()),
             str(Path(__file__).with_name("consan_sharktank_validation.py")),
             "--suite-root",
             str(workspace / "iree-test-suites"),
@@ -1645,7 +1651,11 @@ def _workload_command(
             "--workload",
             workload.id.removeprefix("pytorch-"),
             "--repetitions",
-            "1" if target == "gfx1250" else ("10" if overhead else "1"),
+            (
+                "1"
+                if target in {"gfx950", "gfx1250"}
+                else ("10" if overhead else "1")
+            ),
             "--label",
             f"{workload.id}-{phase}",
         ]

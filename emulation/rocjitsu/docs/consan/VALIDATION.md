@@ -58,11 +58,18 @@ For compatibility with the original gfx1201 workspace, it also recognizes
 doctor or row instead verifies the target through its stronger in-process
 numeric dispatch, device-architecture, and exact-hook mapping probe, so a
 prebuilt-wheel setup does not need a separate `rocminfo` installation.
-The Python used to launch the runner must be able to import the IREE Python
-bindings and the `pytest`, `numpy`, and `ml_dtypes` dependencies needed by the
-Sharktank tests.  Launch the runner with that configured interpreter; putting
-a bare system `python3` earlier in `PATH` can otherwise fail before any GPU
-dispatch.
+When the launcher Python is not the workload environment, select the exact
+interpreters explicitly:
+
+```sh
+export CONSAN_VALIDATION_SHARKTANK_PYTHON=/path/to/iree-venv/bin/python
+export CONSAN_VALIDATION_PYTORCH_PYTHON=/path/to/pytorch-venv/bin/python
+export CONSAN_VALIDATION_TENSILE_PYTHON=/path/to/tensile-venv/bin/python
+```
+
+The Sharktank interpreter must import the IREE Python bindings plus `pytest`,
+`numpy`, and `ml_dtypes`; the other two variables are needed only when those
+workload families are selected.
 
 PyTorch validation deliberately uses a separate, prebuilt-wheel interpreter;
 the workspace `pytorch/` checkout is for workload discovery and source
@@ -315,14 +322,13 @@ and the maximum mode ratio used for the support-table cell:
 slowdown = instrumented median / paired baseline median
 ```
 
-Qwen normally uses ten benchmark dispatch repetitions.  The time-constrained
-`gfx1250` software-execution campaign uses one repetition so that each paired
-row remains practical; its result is an order-of-magnitude qualification, not
-a statistically smoothed performance result.  Sharktank performs an untimed
-warmup and retains call samples. CLIP and hip-moi rows use fresh processes as
-declared by the manifest. Raw samples, commands, complete controlled
-environment, hook hash, source revisions, and unrounded ratios remain in the
-artifact tree.
+The active `gfx950` and `gfx1250` campaigns use one benchmark repetition per
+process for Qwen, Sharktank, PyTorch, and Tensile.  These results qualify the
+order of magnitude rather than providing statistically smoothed performance
+numbers.  Sharktank still performs its untimed warmup, while CLIP and hip-moi
+rows use fresh processes as declared by the manifest. Raw samples, commands,
+complete controlled environment, hook hash, source revisions, and unrounded
+ratios remain in the artifact tree.
 
 ## Fault inventory and reviewed specs
 
