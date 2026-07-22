@@ -1581,7 +1581,7 @@ __host__ int QueuePairBase<Provider>::buffer_register(void *addr, size_t length)
   /* Try inserting buffer host info into buffer_info_map; detects whether this is a duplicate */
   auto&& [it, inserted] = buffer_info_map.try_emplace(addr, mr, info_ptr);
 
-  if (inserted) {
+  if (inserted) [[likely]] {
     /* Insertion succceeded, pop the buffer_info entry from the freelist */
     buffer_info_freelist.pop();
     /* Copy buffer info to device */
@@ -1605,7 +1605,7 @@ __host__ int QueuePairBase<Provider>::buffer_unregister(void *addr) {
   /* Lookup buffer host info */
   auto it = buffer_info_map.find(addr);
 
-  if (it != buffer_info_map.end()) {
+  if (it != buffer_info_map.end()) [[likely]] {
     auto&& [key, host_info] = *it;
     /* Reset buffer_info entry and push to freelist */
     CHECK_HIP(hipMemset(host_info.info_ptr, 0, sizeof(BufferInfo)));
@@ -1645,7 +1645,7 @@ __host__ int QueuePairBase<Provider>::buffer_unregister_all() {
 template <typename Provider>
 __device__ __forceinline__ uint32_t QueuePairBase<Provider>::get_lkey(uintptr_t addr) {
   /* Check if in heap */
-  if (is_ptr_in_range(base_heap, heap_size, addr)) {
+  if (is_ptr_in_range(base_heap, heap_size, addr)) [[likely]] {
     return lkey;
   }
 
