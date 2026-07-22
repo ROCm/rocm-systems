@@ -223,7 +223,7 @@ struct buffer_ids
 
     auto as_array() const
     {
-        return std::array<rocprofiler_buffer_id_t, 16>{hsa_api_trace,
+        return std::array<rocprofiler_buffer_id_t, 17>{hsa_api_trace,
                                                        hip_api_trace,
                                                        kernel_trace,
                                                        memory_copy_trace,
@@ -2919,6 +2919,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                               dummy_callback_tracing_callback},
                       callback_service_config{tool::get_config().rocshmem_api_trace,
                                               ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API,
+                                              dummy_callback_tracing_callback},
                       callback_service_config{tool::get_config().hipfile_api_trace,
                                               ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,
                                               dummy_callback_tracing_callback}})
@@ -3511,7 +3512,8 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
     // both rely on `rocpd convert` for CSV/Perfetto/OTF2. The record count above is still
     // tallied so that rocpd/JSON output is produced even when one of these is the only
     // active trace domain.
-    if constexpr(DomainT != domain_type::OMPT && DomainT != domain_type::ROCSHMEM && DomainT != domain_type::HIPFILE)
+    if constexpr(DomainT != domain_type::OMPT && DomainT != domain_type::ROCSHMEM &&
+                 DomainT != domain_type::HIPFILE)
     {
         if(tool::get_config().stats || tool::get_config().summary_output)
         {
@@ -3572,7 +3574,7 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
         tool::rocdecode_buffered_output_t{tool::get_config().rocdecode_api_trace};
     auto rocjpeg_output  = tool::rocjpeg_buffered_output_t{tool::get_config().rocjpeg_api_trace};
     auto rocshmem_output = tool::rocshmem_buffered_output_t{tool::get_config().rocshmem_api_trace};
-    auto hipfile_output = tool::hipfile_buffered_output_t{tool::get_config().hipfile_api_trace};
+    auto hipfile_output  = tool::hipfile_buffered_output_t{tool::get_config().hipfile_api_trace};
     auto pc_sampling_stochastic_output =
         tool::pc_sampling_stochastic_buffered_output_t{tool::get_config().pc_sampling_stochastic};
 
