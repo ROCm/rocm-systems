@@ -52,7 +52,7 @@ scratch before promotion.
 | **P0 Qwen3-0.6B prefill** | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown |
 | **P1 Sharktank TP1 prefill** | 🟨 current clean and paired: exact oracle, 120/120 accesses, complete analysis, 1.13x; reviewed exact-one fault detected one instability but contradicted its frozen external-oracle policy | 🟩 current accepted bundle: exact clean and paired oracle, complete 120/120 accesses plus 31/31 barriers, 1.29x paired slowdown, reviewed exact-one detected/pass fault, containment, health, and clean provenance | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before installing the instrumented object | 🟨 current clean and paired: exact oracle, complete 120/120 accesses plus 31/31 barriers, 246.6x paired slowdown; reviewed exact-one mutation is schedule-masked with a passing oracle and no diagnostic, contradicting its frozen detection policy |
 | **P1 Sharktank TP1 decode/combined** | 🟨 current clean and paired: both exact oracles, 240/240 accesses, complete analysis, 1.33x maximum; reviewed exact-one fault was schedule-masked and contradicted its frozen detection policy | 🟥 current decode warmup oracle fails after complete 120/120 access plus 31/31 barrier lowering; the prefill mode remains exact, localizing a mode-sensitive replay defect | 🩶 historical: clean 208/208 access + 14/14 qualified barrier accepted | 🟧 current clean execution passes both exact oracles with complete 240/240 accesses plus 62/62 barriers; clean-tip paired and fault gates remain |
-| **P2 Sharktank TP2 family** | 🟨 current clean: prefill, decode, and combined oracles pass; aggregate 936/936 accesses; complete analysis | 🟥 current lowering is complete at 624/624 supported accesses plus 112/112 barriers, but the prefill warmup oracle fails (`13.0608`) | 🩶 historical: aggregate rejected: one 140-access + 10-barrier slice executes 0 | 🩶 historical: aggregate rejected: one 140-access + 28-barrier slice lowers 0 |
+| **P2 Sharktank TP2 family** | 🟨 current clean and paired: all three exact oracles pass with complete 936/936 access coverage; reviewed exact-one fault was schedule-masked and contradicted its frozen detection policy | 🟨 current clean and paired: all three exact oracles pass with complete 936/936 accesses plus 168/168 barriers and 1.57x combined paired slowdown; two prospectively reviewed exact-one barrier drops produced no Record/Replay diagnostic, so the fault gate remains open | 🩶 historical: aggregate rejected: one 140-access + 10-barrier slice executes 0 | 🟨 current clean and paired: all three exact oracles pass with complete 936/936 accesses plus 168/168 barriers and 16.80x combined slowdown; reviewed exact-one fault manifested an oracle failure without an Inline diagnostic, contradicting its frozen pass/no-diagnostic policy |
 | **P3 CLIP BF16** | 🟨 current clean: cosine oracle passes; 45/45 accesses; complete analysis | 🟨 current one-process clean passes the cosine oracle with complete 45/45 accesses plus 24/24 barriers; a separate ten-process stress keeps full coverage but reproduces a replay conflict in 2/10 processes, so paired evidence is rejected | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before installing the instrumented object | 🟥 current lowering is complete at 45/45 accesses plus 24/24 barriers, but the warmup cosine oracle fails with NaN |
 | **P4 hip-moi D128 block attention** | 🟩 current accepted bundle: exact clean, 12/12 coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🟧 current oracle passes with 6/12 accesses and 4/4 barriers; six shared-helper accesses hit the typed dynamic-stack resource limit | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary | 🟥 current scalar fallback lacks entry-local scratch for one connected component |
 | **P4 hip-moi D128 pressure attention** | 🟩 current accepted bundle: four exact clean oracles, 12/12 coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🟧 current four-oracle run passes with 6/12 accesses and 4/4 barriers; six shared-helper accesses hit the typed dynamic-stack resource limit | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary | 🩶 historical: clean 12/12 access + 4/4 barrier accepted |
@@ -249,16 +249,17 @@ workload/profile cell without the end-to-end evidence above.
 | CDNA4 Record/Replay fence spill parity | 🩶 Typed fail-closed | `af03dfa4c4`: CDNA4 reaches the same deliberate second-text-growth limitation as RDNA4. Both qualified companion fences retain spill plans but emit no guessed patch; each final ledger entry is `placement_or_lowering_failed` / `instrumentation_patch_missing`, accompanied by the explicit second-growth spill warning. |
 | CDNA4 dynamic-stack spill policy | 🩶 Native-proven / typed fail-closed | `8068d7d018` and `4dcba398f9`: Inline Shadow uses a site-local, SCC-preserving frame around the compiler `s32:s33` stack convention, with exact explicit-`saddr` CDNA4 scratch words and VM_CNT waits. Host integration final-validates a 16-VGPR spill and 64-byte private requirement. A production-hook gfx950 dynamic-allocation kernel forces the same recipe and preserves all 64 private-stack values without diagnostics. Record/Replay deliberately remains unpatched with typed `DynamicStack` / `ResourceFailed` / `UnsupportedResourcePlan` evidence. |
 | Instrumented group-segment dispatch growth | 🩶 Native-proven | The production HSA hook now propagates each instrumented kernel's required group bytes through cached symbol metadata and copied AQL dispatch packets, independently of the existing private-segment transaction. Retained TP1 artifact `consan-validation/gfx950-take2-tp1-prefill-inline-clean-027` proves the affected attention dispatch grows from 768 to 2304 group bytes. Its unchanged oracle failure and 533,757 dynamic-incomplete publications ruled out underallocated LDS as the identity root cause; the subsequent physical-VCC repair is recorded in the mixed-identity row. |
-| Focused host gate | 🩶 606/606 focused | The complete 604-test `ConSan*.*` host suite plus two CDNA4 cache-control builder tests pass in the canonical `/home/ossci/xx/rocjitsu-build`. Exact encoding/decoder proof pins `buffer_inv sc1`, and the CDNA4 Inline emitted-code regression requires it in both versioned retry paths. Earlier physical-VCC, private epoch/owner/workgroup-key, entry-save, and displaced-address snapshot regressions remain covered. |
+| Focused host gate | 🩶 730/730 focused | The complete current `ConSan*.*` host suite passes in the canonical `/home/ossci/xx/rocjitsu-build`, including the CDNA4 old/grown physical-VCC allocation regression. Exact encoding/decoder proof pins `buffer_inv sc1`; earlier private epoch/owner/workgroup-key, entry-save, displaced-address snapshot, and cache-control regressions remain covered. |
 | Live CDNA4 scratch round trip | 🩶 Native-proven | `0ad99bd3ac`: full-wave64 and divergent even-lane native MI355X round trips pass. Code-object inspection retains the exact scratch store/load pairs, `0xbf8c0f70` waits, partial-`EXEC` save/restore, wave64 metadata, and 32 private bytes. |
 
 ## Frozen campaign provenance
 
-Not established.  Before the first green cell this section must name one
+The final whole-matrix frozen campaign is not established.  Individual green
+cells above retain same-revision bundles, but the final campaign must name one
 committed executable revision, freshly rebuilt hook SHA-256, target-aware
-manifest and audit hashes, workload source revisions, exact artifact root, and
-the controlled runtime/toolchain environment.  The final campaign must rerun
-every accepted row at the same frozen tip.
+manifest and audit hashes, workload source revisions, exact artifact roots,
+and the controlled runtime/toolchain environment, then rerun every accepted
+row at that one tip.
 
 ## Promotion requirements
 
@@ -286,6 +287,22 @@ trap, crash, output mismatch, or GPU reset is an execution outcome rather than
 a ConSan detection.
 
 ## Progress log
+
+- 2026-07-22: Commit `4ad984b1c9` fixes the TP2 Record/Replay oracle corruption
+  by modeling CDNA4's six-register descriptor-allocation tail correctly.  At
+  the formerly corrupting partial-`EXEC` `ds_write_b32`, the old five-register
+  transient window s72:s76 overlapped the grown physical VCC pair s74:s75.
+  The corrected allocator preserves both the original and post-growth VCC
+  locations; its focused physical discriminator changes from `13.0608` to the
+  exact `0.5778079629` oracle, and all 730 ConSan host tests pass.  Frozen clean
+  artifact `consan-validation-gfx950-tp2-family-rr-physical-vcc-fix-20260722-043`
+  accepts prefill, decode, and combined with complete 936/936 access plus
+  168/168 barrier coverage.  Paired artifact `...-overhead-20260722-044`
+  records a 1.57x combined slowdown with one repetition per leg.  Fresh
+  inventory `...-inventory-vcc-fix-20260722-045` retains 28 exact singleton
+  barriers.  Two independently precommitted exact-one faults (`...-046` and
+  `...-047`) were not diagnosed—one broke the external oracle and one was
+  schedule-masked—so Record/Replay is yellow rather than green.
 
 - 2026-07-22: The fast physical-gfx950 lane assessed four previously gray
   profile cells at clean hook SHA-256 `0832ad97...d594bc`.  TP1 prefill

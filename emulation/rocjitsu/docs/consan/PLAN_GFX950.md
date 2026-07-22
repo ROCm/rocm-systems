@@ -98,7 +98,7 @@ flowchart TD
   subgraph F[Four instrumentation flavors]
     SC0["SC0 DONE<br/>native CDNA4 LDS checks:<br/>CLIP + TP1/TP2 clean"]
     SC1["SC1 TODO<br/>SuperCollider group-FLAT clean vertical;<br/>racy detection and trap breadth open"]
-    RR0["RR0 ACTIVE<br/>AccVGPR-safe scalar state and CDNA4 DS breadth run;<br/>dynamic-stack helpers and replay stability open"]
+    RR0["RR0 ACTIVE<br/>TP1 prefill + TP2 full clean accepted;<br/>dynamic-stack helpers and fault detection open"]
     RR1["RR1 TODO<br/>Record/Replay barriers, atomics and fences"]
     SA0A["SA0A DONE<br/>CDNA4 sampled barrier lowering:<br/>TP1 + CLIP clean"]
     SA0["SA0 TODO<br/>Sampled TP2 admission/selection<br/>and broader runtime coverage"]
@@ -122,7 +122,7 @@ flowchart TD
     V2["V2 TODO<br/>P0 Qwen clean baseline and four profiles"]
     V3["V3 TODO<br/>P0 Qwen fault inventory and exact policies"]
     V4["V4 TODO<br/>P0 Qwen contained fault campaign"]
-    V5["V5 ACTIVE<br/>Sharktank/CLIP SC + RR clean;<br/>TP1/CLIP Sampled clean; TP2/Inline open"]
+    V5["V5 ACTIVE<br/>TP2 SC/RR/Inline clean + paired;<br/>Sampled admission and remaining faults open"]
     V6["V6 ACTIVE<br/>D128 barrier-drop campaign accepted;<br/>remaining workload faults open"]
     V7["V7 ACTIVE<br/>D128 paired overhead accepted;<br/>peak memory and broader rows open"]
     V8["V8 TODO<br/>freeze one committed tip, rebuild,<br/>and rerun authoritative matrix"]
@@ -272,6 +272,15 @@ flowchart TD
 
 ## Reconnaissance conclusions
 
+- 2026-07-22: `RR0` remains ACTIVE/blue after `4ad984b1c9`, but TP2 replay
+  stability is no longer the blocker.  CDNA4 reserves a six-register tail in
+  each encoded SGPR allocation granule; the former s72:s76 Record/Replay
+  window overlapped grown VCC s74:s75.  Correct old-and-grown VCC placement
+  restores all three TP2 modes with complete 936/936 access plus 168/168
+  barrier coverage and passes all 730 ConSan host tests.  The remaining TP2
+  Record/Replay gate is fault detection, while shared dynamic-stack helpers
+  remain the broader `RR0` implementation frontier.
+
 - 2026-07-22: `RR0` remains ACTIVE/blue after `92678db569`, but its CDNA4 DS
   breadth slice is complete for the current TP1 and CLIP inventories.  TP1
   prefill Record/Replay is green at 120/120 accesses and 31/31 barriers.
@@ -325,11 +334,14 @@ tests to them.
 
 - gfx950 is wave64.  `EXEC` and `VCC` are 64-bit state; vector ALU, vector
   memory, and LDS operations are masked by `EXEC`.
-- Ordinary SGPRs are `s0-s101`; `FLAT_SCRATCH` and `VCC` are architectural
-  special pairs.  SGPR allocation is in groups of 16 while the descriptor
-  field uses groups of eight.  VGPR allocation and descriptor encoding use
-  groups of eight.  AccVGPRs are a distinct class and must not silently enter
-  an ordinary VGPR spill plan.
+- Ordinary SGPR operands are `s0-s101`; `FLAT_SCRATCH` and `VCC` are
+  architectural special pairs.  The descriptor field uses eight-SGPR
+  granules, with CDNA4 VCC six registers below the encoded allocation end
+  (for example, 40 allocated SGPRs place VCC at s34:s35, while 48 place it at
+  s42:s43).  Every scalar-state plan must avoid both the original and grown
+  physical VCC pair.  VGPR allocation and descriptor encoding use groups of
+  eight.  AccVGPRs are a distinct class and must not silently enter an
+  ordinary VGPR spill plan.
 - Scratch uses a signed 13-bit byte offset and contributes to `VM_CNT`, not
   `LGKM_CNT`.  The old live port used four-byte slots through offset 4092 and
   the LLVM-matched load/store words recorded in its architecture inventory.
