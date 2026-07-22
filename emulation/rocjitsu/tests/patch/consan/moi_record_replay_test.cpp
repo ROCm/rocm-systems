@@ -3585,6 +3585,36 @@ TEST(ConSanMoi, FenceRecordPatchCardinalityIsBoundedAndPrefixComplete) {
                                         1u, *options.scratch_vgpr)));
 }
 
+TEST(ConSanMoi, FenceRecordAcceptsSupportedRdna4OrdinaryAcquireAddress) {
+  const std::vector<uint8_t> bytes = make_rdna4_ordinary_acquire_code_object();
+  ASSERT_FALSE(bytes.empty());
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = true;
+  options.scratch_vgpr = 16;
+  options.moi_owner_vgpr = 30;
+  options.moi_epoch_vgpr = 31;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  SCOPED_TRACE(testing::PrintToString(result.warnings));
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.kernels.size(), 1u);
+  ASSERT_EQ(result.kernels.front().ordinary_memory_sites.size(), 1u);
+  EXPECT_EQ(result.moi_fence_candidates.size(), 1u);
+  EXPECT_EQ(result.site_dispositions.size(), 1u);
+  EXPECT_EQ(result.kernels.front().ordinary_memory_sites.front().support_reason,
+            ConSanOrdinaryMemorySupportReason::Supported);
+  EXPECT_EQ(result.site_dispositions.front().disposition, ConSanSiteDisposition::Supported);
+  EXPECT_EQ(result.site_dispositions.front().reason, ConSanSiteDispositionReason::None);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
+                               &ConSanPatchInfo::kind),
+            1);
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, Cdna4FenceRecordUsesCacheOrderingWithoutRdnaTh) {
   const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
   const auto acquire = cdna4::build_mubuf(cdna4::kBufferInvMubuf, {.sc1 = 1});

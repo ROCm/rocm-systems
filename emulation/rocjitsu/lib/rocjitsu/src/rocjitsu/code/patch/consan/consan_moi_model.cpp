@@ -2188,9 +2188,10 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
     plan.result_address_vgpr_count = 2u;
     return plan;
   }
-  // Record/Replay only needs the atomic's effective address and, for CAS, its
-  // dynamic success mask. Both 32- and 64-bit global/flat atomics use the same
-  // 64-bit address forms; the wider value merely occupies more consecutive
+  // Record/Replay only needs the communication operation's effective address
+  // and, for CAS, its dynamic success mask. Global/flat atomics and the
+  // ordinary load/store side of a qualified fence sequence use the same
+  // 64-bit address forms. Wider atomic values merely occupy more consecutive
   // guest VGPRs. Other widths still need an explicit operand-layout proof.
   if (site.width_bits != 32u && site.width_bits != 64u)
     return reject(ConSanMoiAtomicAddressSupport::UnsupportedWidth);
@@ -2220,7 +2221,7 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
       site.returns_old_value.value_or(false) && site.dst_vgpr &&
       overlaps(*site.addr_vgpr, 2u, *site.dst_vgpr, destination_count);
 
-  if (site.mnemonic.starts_with("flat_atomic")) {
+  if (site.mnemonic.starts_with("flat_")) {
     if (*site.raw_saddr != flat_no_saddr)
       return reject(ConSanMoiAtomicAddressSupport::UnsupportedEncoding);
     if (*site.addr_vgpr >= 255u)
@@ -2250,7 +2251,7 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
     return plan;
   }
 
-  if (!site.mnemonic.starts_with("global_atomic"))
+  if (!site.mnemonic.starts_with("global_"))
     return reject(ConSanMoiAtomicAddressSupport::UnsupportedAddressKind);
   if (*site.raw_saddr == flat_no_saddr) {
     if (*site.addr_vgpr >= 255u)

@@ -164,6 +164,7 @@ normalize_ordinary_fence_communication(const ConSanOrdinaryMemorySite &site) {
   normalized.raw_soffset = site.raw_soffset;
   normalized.raw_offen = site.raw_offen;
   normalized.raw_idxen = site.raw_idxen;
+  normalized.raw_saddr = site.raw_saddr;
   normalized.raw_ioffset = site.raw_ioffset;
   normalized.raw_scope = site.raw_scope;
   normalized.raw_th = site.raw_th;
@@ -203,7 +204,8 @@ void append_fence_record_candidates(const ConSanResult &result,
       if (site == container.ordinary_memory_sites.end() ||
           std::ranges::count(container.ordinary_memory_sites, event->text_offset,
                              &ConSanOrdinaryMemorySite::text_offset) != 1 ||
-          site->support_reason != ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly)
+          (site->support_reason != ConSanOrdinaryMemorySupportReason::Supported &&
+           site->support_reason != ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly))
         return;
       candidates.push_back({fence, normalize_ordinary_fence_communication(*site),
                             descriptor_file_offset, container.entry_text_offset,
@@ -231,7 +233,7 @@ void append_fence_record_candidates(const ConSanResult &result,
       site.returns_old_value.value_or(false) && site.addr_vgpr && site.dst_vgpr &&
       *site.dst_vgpr >= *site.addr_vgpr && *site.dst_vgpr < *site.addr_vgpr + 2u;
   return returned_value_aliases_address ||
-                 (site.mnemonic.starts_with("global_atomic") &&
+                 (site.mnemonic.starts_with("global_") &&
                   (!site.raw_saddr || !is_vector_flat_no_saddr(*site.raw_saddr, arch) ||
                    site.raw_ioffset.value_or(0) != 0))
              ? 5u
