@@ -40,7 +40,6 @@ env:
   PATH: "/usr/bin:$PATH"
   SUBMODULE_PATHS: "projects/rocprofiler-sdk projects/clr projects/hip"
   EXCLUDED_PATHS: "external /tmp/build/external"
-  GLOBAL_CMAKE_OPTIONS: "-DROCPROFILER_DISABLE_ATT_QUICK_SCAN=ON"
   ENABLE_ROCR_BUILD: "false"
   ENABLE_HIP_CLR_BUILD: "false"
   ENABLE_ROCPROFILER_REGISTER_BUILD: "false"
@@ -143,7 +142,7 @@ jobs:
       run: |
         cd projects/rocprofiler-sdk
         python3 -m pip install -U --user -r requirements.txt
-        cmake -B /tmp/build -DCMAKE_PREFIX_PATH=/opt/rocm ${{ env.GLOBAL_CMAKE_OPTIONS }} -DPython3_EXECUTABLE=$(which python3) .
+        cmake -B /tmp/build -DCMAKE_PREFIX_PATH=/opt/rocm -DPython3_EXECUTABLE=$(which python3) .
         cmake --build /tmp/build --target all --parallel 16
         rm -rf ${EXCLUDED_PATHS}
 
