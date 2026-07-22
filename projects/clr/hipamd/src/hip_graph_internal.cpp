@@ -602,13 +602,13 @@ void GraphExecSegmented::BuildSyncPlan() {
 
       sync_plan_.patch_list.push_back(
           {completion_barrier, nullptr, hw_slot,
-           amd::Device::HwEventPatch::kCompletionSignal});
+           amd::Device::HwEventPatch::kCompletionSignal, segment.id});
     } else if (!lastBatch.dispatchPackets.empty() && completion_signal_needed) {
       // Safe to patch the last kernel dispatch directly
       uint8_t* last_pkt = lastBatch.dispatchPackets.back();
       sync_plan_.patch_list.push_back(
           {last_pkt, nullptr, hw_slot,
-           amd::Device::HwEventPatch::kCompletionSignal});
+           amd::Device::HwEventPatch::kCompletionSignal, segment.id});
     }
 
     if (segment.segment_ids_edges.empty()) {
@@ -1825,6 +1825,7 @@ void GraphExecSegmented::PacketBatch::rebuildFilteredLists(
   enabledKernelNames.reserve(dispatchPackets.size());
   filteredFlatPacketData.reserve(dispatchPackets.size() * kAqlPktSize);
   filteredValidPacketFullHeaders.reserve(dispatchPackets.size());
+  filteredFlatMetadataData.reserve(dispatchPackets.size() * kMetadataPktSize);
 
   const bool hasMetadata = !dispatchMetadataPackets.empty();
 
@@ -1837,20 +1838,21 @@ void GraphExecSegmented::PacketBatch::rebuildFilteredLists(
       size_t filteredIdx = enabledPackets.size();
       enabledPackets.push_back(dispatchPackets[i]);
       enabledKernelNames.push_back(dispatchKernelNames[i]);
-      appendPacketToFlatBuffer(dispatchPackets[i], filteredFlatPacketData,
-                               filteredValidPacketFullHeaders);
-      // Append corresponding metadata slot. Slots without captured metadata are
-      // published as HSA_PACKET_TYPE_INVALID so the CP prefetch engine skips them.
-      if (hasMetadata) {
-        size_t metaOff = filteredFlatMetadataData.size();
-        filteredFlatMetadataData.resize(metaOff + kMetadataPktSize, 0);
-        uint8_t* slot = filteredFlatMetadataData.data() + metaOff;
-        if (i < dispatchMetadataPackets.size() && dispatchMetadataPackets[i] != nullptr) {
-          std::memcpy(slot, dispatchMetadataPackets[i], kMetadataPktSize);
-        } else {
-          invalidateMetadataSlot(slot);
-        }
+      // appendPacketToFlatBuffer also appends the index-aligned metadata slot
+      // (zero-filled when this index has no metadata packet). Empty slots
+      // (barriers / uncaptured dispatches) are then stamped
+      // HSA_PACKET_TYPE_INVALID so the CP prefetch engine skips them — a zeroed
+      // slot would be type 0 (VENDOR_SPECIFIC), which the CP could process.
+      const uint8_t* metadata_raw =
+          (hasMetadata && i < dispatchMetadataPackets.size()) ? dispatchMetadataPackets[i]
+                                                              : nullptr;
+      appendPacketToFlatBuffer(dispatchPackets[i], metadata_raw, filteredFlatPacketData,
+                               filteredValidPacketFullHeaders, filteredFlatMetadataData);
+      if (hasMetadata && metadata_raw == nullptr) {
+        invalidateMetadataSlot(filteredFlatMetadataData.data() +
+                               filteredFlatMetadataData.size() - kMetadataPktSize);
       }
+
       packetToFilteredIndex[dispatchPackets[i]] = filteredIdx;
     }
   }
@@ -2148,8 +2150,10 @@ hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node) {
       // Capture new packets for this node
       std::vector<uint8_t*> newPackets;
       std::vector<const std::string*> newKernelNames;
+      std::vector<uint8_t*> newMetadataPackets;  // FIX: refresh prefetch metadata on SetParams
       hipError_t status = node->CaptureAndFormPacket(kernArgManager_, &newPackets,
-                                                                      &newKernelNames);
+                                                                      &newKernelNames,
+                                                                      &newMetadataPackets);
       if (status != hipSuccess) {
         return status;
       }
@@ -2175,6 +2179,11 @@ hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node) {
           packetBatch.dispatchKernelNames.insert(
               packetBatch.dispatchKernelNames.begin() + insertPos,
               static_cast<size_t>(packetDelta), nullptr);
+          if (packetBatch.dispatchMetadataPackets.size() >= insertPos) {
+            packetBatch.dispatchMetadataPackets.insert(
+                packetBatch.dispatchMetadataPackets.begin() + insertPos,
+                static_cast<size_t>(packetDelta), nullptr);
+          }
         } else {
           // Negative packetDelta, remove excess packet slots from the end of this node's range
           const size_t removePos = range.startIndex + newPacketCount;
@@ -2194,6 +2203,11 @@ hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node) {
           packetBatch.dispatchKernelNames.erase(
               packetBatch.dispatchKernelNames.begin() + removePos,
               packetBatch.dispatchKernelNames.begin() + removePos + removeCount);
+          if (packetBatch.dispatchMetadataPackets.size() >= removePos + removeCount) {
+            packetBatch.dispatchMetadataPackets.erase(
+                packetBatch.dispatchMetadataPackets.begin() + removePos,
+                packetBatch.dispatchMetadataPackets.begin() + removePos + removeCount);
+          }
         }
 
         // Update this node's packet count and adjust startIndex for all subsequent nodes
@@ -2204,6 +2218,10 @@ hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node) {
         }
       }
 
+      // Metadata-prefetch packets are kept parallel to dispatchPackets; the vector is
+      // empty when the gfx1250 prefetch path is inactive.
+      const bool hasMetadata = !packetBatch.dispatchMetadataPackets.empty();
+
       // Update dispatch packets (always update regardless of enabled state)
       // The enabled/disabled check happens during dispatch, not here
       for (size_t i = 0; i < range.packetCount && i < newPackets.size(); ++i) {
@@ -2212,6 +2230,10 @@ hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node) {
         uint8_t* newPkt = newPackets[i];
         packetBatch.dispatchPackets[packetIndex] = newPkt;
         packetBatch.dispatchKernelNames[packetIndex] = newKernelNames[i];
+        if (hasMetadata) {
+          packetBatch.dispatchMetadataPackets[packetIndex] =
+              (i < newMetadataPackets.size()) ? newMetadataPackets[i] : nullptr;
+        }
 
         // Update SyncPlan patch list to point to the new packet
         // ApplyHwEventPatches patches the correct packet at launch time.
@@ -2248,8 +2270,10 @@ hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node) {
 // Append one 64-byte AQL packet to a flat buffer: copies the body, saves the original full_header
 // and invalidates the header.
 void GraphExecSegmented::PacketBatch::appendPacketToFlatBuffer(const uint8_t* pkt_raw,
-                                                      std::vector<uint8_t>& flatData,
-                                                      std::vector<uint32_t>& fullHeaders) {
+                                                      const uint8_t* metadata_raw,
+                                                      amd::AlignedVector64<uint8_t>& flatData,
+                                                      std::vector<uint32_t>& fullHeaders,
+                                                      std::vector<uint8_t>& flatMetadata) {
   static constexpr size_t kSigOff = 56;
   const size_t baseOff = flatData.size();
   flatData.insert(flatData.end(), pkt_raw, pkt_raw + kAqlPktSize);
@@ -2266,6 +2290,14 @@ void GraphExecSegmented::PacketBatch::appendPacketToFlatBuffer(const uint8_t* pk
   memcpy(dst, &kInvalidAqlHeader, sizeof(kInvalidAqlHeader));
   // Zero completion signal; ApplyHwEventPatches re-patches it directly via flat_packet pointers.
   memset(dst + kSigOff, 0, sizeof(uint64_t));
+
+  // Append the matching metadata-prefetch packet so flatMetadata stays index-
+  // aligned with flatData. A nullptr |metadata_raw| yields a zeroed slot.
+  const size_t metaOff = flatMetadata.size();
+  flatMetadata.insert(flatMetadata.end(), kMetadataPktSize, 0);
+  if (metadata_raw != nullptr) {
+    memcpy(flatMetadata.data() + metaOff, metadata_raw, kMetadataPktSize);
+  }
 }
 
 // ================================================================================================
@@ -2290,8 +2322,12 @@ void GraphExecSegmented::PacketBatch::rebuildFlatBuffer() {
   filteredCacheValid = false;
   flatPacketData.reserve(n * kAqlPktSize);
   validPacketFullHeaders.reserve(n);
-  for (const uint8_t* pkt_raw : dispatchPackets) {
-    appendPacketToFlatBuffer(pkt_raw, flatPacketData, validPacketFullHeaders);
+  flatMetadataData.reserve(n * kMetadataPktSize);
+  for (size_t i = 0; i < n; ++i) {
+    const uint8_t* metadata_raw =
+        (i < dispatchMetadataPackets.size()) ? dispatchMetadataPackets[i] : nullptr;
+    appendPacketToFlatBuffer(dispatchPackets[i], metadata_raw, flatPacketData,
+                             validPacketFullHeaders, flatMetadataData);
   }
   // Build flat metadata buffer (kMetadataPktSize per slot).
   // Slots without captured metadata (barriers, uncaptured dispatches) are published as
@@ -2394,12 +2430,6 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
     }
   }
 
-  // Apply pre-computed patches -- writes HW events directly into flatPacketData
-  // via the flat_packet pointers resolved at instantiate time, so no rebuild needed.
-  if (!sync_plan_.patch_list.empty()) {
-    device->ApplyHwEventPatches(sync_plan_.patch_list, segment_hw_events);
-  }
-
   // Resolve a segment's assigned hip::Stream* from its pre-computed stream_id.
   // streams is the collision-handled streams_ vector built by UpdateStreams.
   auto resolveSegmentStream = [&](const Segment& seg) -> hip::Stream* {
@@ -2409,15 +2439,26 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
     return launch_stream;
   };
 
+  // Apply pre-computed patches -- writes HW events directly into flatPacketData
+  // via the flat_packet pointers resolved at instantiate time, so no rebuild needed.
+  // Resolve each completion-signal patch's segment_id (set at BuildSyncPlan time) to
+  // the actual stream's queue index now that streams are available.
+  if (!sync_plan_.patch_list.empty()) {
+    for (auto& patch : sync_plan_.patch_list) {
+      if (patch.dep_slot == amd::Device::HwEventPatch::kCompletionSignal &&
+          patch.segment_id >= 0 &&
+          patch.segment_id < static_cast<int>(segments_.size())) {
+        patch.queue_index = resolveSegmentStream(segments_[patch.segment_id])->vdev()->index();
+      }
+    }
+    device->ApplyHwEventPatches(sync_plan_.patch_list, segment_hw_events);
+  }
+
   // Single AccumulateCommand on launch_stream manages all HW event lifetimes
   // and serves as the dispatch anchor for all segments across all streams.
-  // Pass `this` as the kernel-names owner: the command borrows kernel-name
-  // strings owned by this graph's nodes (via setKernelNamesRef during dispatch)
-  // and reads them in ReportActivity() at completion, after OnLaunchComplete()
-  // drops the launch's reference. Tying the GraphExecBase's lifetime to the command
-  // keeps those strings valid through the report (no copies). We already hold a
-  // launch reference here, so the retain in the constructor needs no trim lock.
-  auto* graph_accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr, this);
+  // Kernel names are copied into the command at dispatch time (via addKernelName
+  // in dispatchAqlPacketBatchFlat) — no string borrowing, no GraphExecBase pin.
+  auto* graph_accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr);
 
   // Register HW events with graph_accumulate so profiling can read them.
   for (auto& hw_event : segment_hw_events) {
@@ -2535,13 +2576,11 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
       return hipSuccess;
     }
 
-    const std::vector<const std::string*>* kernelNamesToDispatch;
-    const std::vector<uint8_t>* flatData;
+    const amd::AlignedVector64<uint8_t>* flatData;
     const std::vector<uint32_t>* flatHdrs;
     const std::vector<uint8_t>* metaData = nullptr;
 
     if (packetBatch.disabledNodeCount == 0) {
-      kernelNamesToDispatch = &packetBatch.dispatchKernelNames;
       flatData = &packetBatch.flatPacketData;
       flatHdrs = &packetBatch.validPacketFullHeaders;
       if (!packetBatch.flatMetadataData.empty()) {
@@ -2551,7 +2590,6 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
       // Guard against stale filtered buffers: rebuildFlatBuffer (called from
       // UpdateAQLPacket) invalidates the cache. This is a no-op when valid.
       packetBatch.rebuildFilteredLists(sync_plan_.patch_list);
-      kernelNamesToDispatch = &packetBatch.enabledKernelNames;
       flatData = &packetBatch.filteredFlatPacketData;
       flatHdrs = &packetBatch.filteredValidPacketFullHeaders;
       if (!packetBatch.filteredFlatMetadataData.empty()) {
@@ -2561,8 +2599,7 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
 
     if (!flatData->empty()) {
       bool batchStatus = stream->vdev()->dispatchAqlPacketBatchFlat(
-          *flatData, *flatHdrs, accumulate, attach_signal, kernelNamesToDispatch, true,
-          false, metaData);
+          *flatData, *flatHdrs, accumulate, attach_signal, true, false, metaData);
       if (!batchStatus) {
         return hipErrorUnknown;
       }
@@ -3234,13 +3271,7 @@ void GraphKernelArgManager::ReadBackOrFlush() {
   for (const auto& kernarg : kernarg_graph_) {
     const auto kernArgImpl = kernarg.first->settings().kernel_arg_impl_;
 
-    if (kernArgImpl == KernelArgImpl::DeviceKernelArgsHDP) {
-      // Trigger HDP flush
-      *kernarg.first->info().hdpMemFlushCntl = 1u;
-      // Read back to ensure flush completion
-      volatile int kSentinel = *reinterpret_cast<volatile int*>(kernarg.first->info().hdpMemFlushCntl);
-      (void)kSentinel; // Suppress unused variable warning
-    } else if (kernArgImpl == KernelArgImpl::DeviceKernelArgsReadback) {
+    if (kernArgImpl == KernelArgImpl::DeviceKernelArgsReadback) {
       const auto& pool = kernarg.second.back();
       if (pool.kernarg_pool_addr_ == 0) {
         continue;

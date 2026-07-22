@@ -78,6 +78,22 @@ def test_implied_literal_uses_parent_encoding_literal_struct():
     assert info == ('Sop2InstLiteralMachineInst', ('ssrc0', 'ssrc1'))
 
 
+def test_implied_literal64_uses_its_three_dword_machine_inst():
+    inst = Instruction(
+        'V_FMAMK_F64',
+        'VOP2_INST_LITERAL64',
+        opcode=35,
+        operands=[],
+        is_implied_literal_enc=True,
+    )
+
+    info = CodeGenerator._literal_encoding_info(
+        _enc('ENC_VOP2'), _enc('VOP2_INST_LITERAL64'), inst
+    )
+
+    assert info == ('Vop2InstLiteral64MachineInst', ('src0',))
+
+
 def test_literal_fixups_require_generated_machine_inst_struct():
     inst = Instruction('V_PK_ADD_I16', 'ENC_VOP3P', opcode=0, operands=[])
 
@@ -209,6 +225,18 @@ def test_simm16_literal_operand_uses_low_half_of_extension_word():
         'literal = Operand(16, OperandType::OPR_SIMM16, '
         'static_cast<int>((reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 '
         '& 0xFFFFu)));'
+    ) == stmt
+
+
+def test_simm64_literal_operand_reads_both_unaligned_extension_words():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _literal_operand(64, 'OPR_SIMM64'), 'Vop2InstLiteral64MachineInst'
+    )
+
+    assert (
+        'literal = Operand(64, OperandType::OPR_SIMM64, '
+        '(static_cast<uint64_t>(reinterpret_cast<const uint32_t *>(inst)[2]) << 32) | '
+        'reinterpret_cast<const uint32_t *>(inst)[1], true);'
     ) == stmt
 
 
@@ -347,10 +375,12 @@ def test_scalar_fmamk_generated_execute_uses_literal_multiplier():
 
     body = codegen._gen_execute_body(inst, sem, 'ENC_SOP2')
 
-    assert 'std::bit_cast<float>(ssrc0.read_scalar(wf))' in body
-    assert 'std::bit_cast<float>(src2.read_scalar(wf))' in body
-    assert 'std::bit_cast<float>(ssrc1.read_scalar(wf))' in body
-    assert body.index('src2.read_scalar(wf)') < body.index('ssrc1.read_scalar(wf)')
+    assert 'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))' in body
+    assert 'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(src2))' in body
+    assert 'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))' in body
+    assert body.index('amdgpu::RegisterAccess(wf).read_scalar(src2)') < body.index(
+        'amdgpu::RegisterAccess(wf).read_scalar(ssrc1)'
+    )
 
 
 def test_scalar_mul_u64_generated_execute_reads_full_source_pairs():
@@ -384,11 +414,11 @@ def test_scalar_mul_u64_generated_execute_reads_full_source_pairs():
 
     body = codegen._gen_execute_body(inst, sem, 'ENC_SOP2')
 
-    assert 'ssrc0.read_scalar64(wf)' in body
-    assert 'ssrc1.read_scalar64(wf)' in body
-    assert 'sdst.write_scalar64(wf, result);' in body
-    assert 'ssrc0.read_scalar(wf)' not in body
-    assert 'ssrc1.read_scalar(wf)' not in body
+    assert 'amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)' in body
+    assert 'amdgpu::RegisterAccess(wf).read_scalar64(ssrc1)' in body
+    assert 'amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);' in body
+    assert 'amdgpu::RegisterAccess(wf).read_scalar(ssrc0)' not in body
+    assert 'amdgpu::RegisterAccess(wf).read_scalar(ssrc1)' not in body
 
 
 def test_literal_fma_mnemonics_are_not_shared_across_isa_layouts():

@@ -549,7 +549,8 @@ static ncclResult_t commFree(ncclComm_t comm) {
       CUDACHECK(cudaEventDestroy(comm->sharedRes->scratchEvent));
       NCCLCHECK(ncclProxyDestroy(comm));
       NCCLCHECK(ncclGinFinalize(comm));
-      delete comm->sharedRes;
+      // sharedRes is allocated with ncclCalloc (malloc); free() it here to avoid mismatch.
+      free(comm->sharedRes);
     }
   }
 

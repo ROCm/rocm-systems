@@ -1566,6 +1566,13 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
 
 template <bool useGCR, bool scopeFields>
 hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyCommand(void* dst, const void* src, size_t size) {
+  if (core::Runtime::runtime_singleton_->flag().enable_dtif_fast_copy()) {
+    LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF SDMA] src = %p, dst = %p, size = 0x%lx", src, dst, size);
+    memcpy(dst, src, size);
+    LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF SDMA] Fast copy success");
+    return HSA_STATUS_SUCCESS;
+  }
+
   // Break the copy into multiple copy operation incase the copy size exceeds
   // the SDMA linear copy limit.
   const size_t max_copy_size = max_single_linear_copy_size_ ? max_single_linear_copy_size_ :
@@ -1587,6 +1594,20 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyCommand(void* dst, c
                                                        std::vector<core::Signal*>& dep_signals,
                                                        core::Signal& out_signal,
                                                        std::vector<core::Signal*>& gang_signals) {
+
+  if (core::Runtime::runtime_singleton_->flag().enable_dtif_fast_copy() && dep_signals.empty()) {
+    LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF SDMA] src = %p, dst = %p, size = 0x%lx", src, dst, size);
+    memcpy(dst, src, size);
+    LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF SDMA] Fast copy success");
+
+    hsa_signal_t signal = {(core::Signal::Convert(&out_signal)).handle};
+    if (signal.handle) {
+      LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF SDMA] completion_signal = 0x%zx", signal.handle);
+      hsa_signal_subtract_relaxed(signal, 1);
+    }
+    return HSA_STATUS_SUCCESS;
+  }
+
   // Break the copy into multiple copy operations when the copy size exceeds
   // the SDMA linear copy limit.
   const size_t max_copy_size = max_single_linear_copy_size_ ? max_single_linear_copy_size_ :
@@ -2776,47 +2797,60 @@ void BlitSdma<useGCR, scopeFields>::BuildWaitSignalIndirectCopyCommand(
   const bool do_wait = (wait_signal != nullptr);
   const bool do_signal = (signal_signal != nullptr);
 
-  SDMA_PKT_COPY_LINEAR_WAITSIGNAL_INDIRECT_GFX1250* pkt =
-      reinterpret_cast<SDMA_PKT_COPY_LINEAR_WAITSIGNAL_INDIRECT_GFX1250*>(cmd_addr);
-  memset(pkt, 0, sizeof(SDMA_PKT_COPY_LINEAR_WAITSIGNAL_INDIRECT_GFX1250));
+  // Build into a scratch packet, then emit only the present DW blocks (below).
+  SDMA_PKT_COPY_LINEAR_WAITSIGNAL_INDIRECT_GFX1250 pkt;
+  memset(&pkt, 0, sizeof(pkt));
 
-  pkt->HEADER_UNION.op = SDMA_OP_COPY;
-  pkt->HEADER_UNION.sub_op = SDMA_SUBOP_COPY_INDIRECT;
-  pkt->HEADER_UNION.indirect_src = indirect_src ? 1 : 0;
-  pkt->HEADER_UNION.indirect_dst = indirect_dst ? 1 : 0;
-  pkt->HEADER_UNION.wait = do_wait ? 1 : 0;
-  pkt->HEADER_UNION.signal = do_signal ? 1 : 0;
+  pkt.HEADER_UNION.op = SDMA_OP_COPY;
+  pkt.HEADER_UNION.sub_op = SDMA_SUBOP_COPY_INDIRECT;
+  pkt.HEADER_UNION.indirect_src = indirect_src ? 1 : 0;
+  pkt.HEADER_UNION.indirect_dst = indirect_dst ? 1 : 0;
+  pkt.HEADER_UNION.wait = do_wait ? 1 : 0;
+  pkt.HEADER_UNION.signal = do_signal ? 1 : 0;
 
   if (do_wait) {
-    pkt->WAIT_FUNCTION_UNION.wait_function = 0x3;  // Equal
+    pkt.WAIT_FUNCTION_UNION.wait_function = 0x3;  // Equal
     void* wait_addr = const_cast<core::Signal*>(wait_signal)->ValueLocation();
-    pkt->WAIT_ADDR_LO_UNION.wait_addr_31_3 = ptrlow32(wait_addr) >> 3;
-    pkt->WAIT_ADDR_HI_UNION.wait_addr_63_32 = ptrhigh32(wait_addr);
-    pkt->WAIT_REFERENCE_LO_UNION.wait_reference_31_0 = 0;
-    pkt->WAIT_REFERENCE_HI_UNION.wait_reference_63_32 = 0;
-    pkt->WAIT_MASK_LO_UNION.wait_mask_31_0 = 0xffffffff;
-    pkt->WAIT_MASK_HI_UNION.wait_mask_63_32 = 0xffffffff;
+    pkt.WAIT_ADDR_LO_UNION.wait_addr_31_3 = ptrlow32(wait_addr) >> 3;
+    pkt.WAIT_ADDR_HI_UNION.wait_addr_63_32 = ptrhigh32(wait_addr);
+    pkt.WAIT_REFERENCE_LO_UNION.wait_reference_31_0 = 0;
+    pkt.WAIT_REFERENCE_HI_UNION.wait_reference_63_32 = 0;
+    pkt.WAIT_MASK_LO_UNION.wait_mask_31_0 = 0xffffffff;
+    pkt.WAIT_MASK_HI_UNION.wait_mask_63_32 = 0xffffffff;
   }
 
-  pkt->COPY_COUNT_UNION.copy_count = static_cast<uint32_t>(size) - 1;
-  pkt->COPY_PARAMETER_UNION.copy_dst_scope = SDMA_MEMORY_SCOPE_SYS;
-  pkt->COPY_PARAMETER_UNION.copy_src_scope = SDMA_MEMORY_SCOPE_SYS;
-  pkt->COPY_PARAMETER_UNION.indirect_addr_scope = SDMA_MEMORY_SCOPE_SYS;
+  pkt.COPY_COUNT_UNION.copy_count = static_cast<uint32_t>(size) - 1;
+  pkt.COPY_PARAMETER_UNION.copy_dst_scope = SDMA_MEMORY_SCOPE_SYS;
+  pkt.COPY_PARAMETER_UNION.copy_src_scope = SDMA_MEMORY_SCOPE_SYS;
+  pkt.COPY_PARAMETER_UNION.indirect_addr_scope = SDMA_MEMORY_SCOPE_SYS;
 
-  pkt->SRC_ADDR_LO_UNION.copy_src_addr_31_0 = ptrlow32(src);
-  pkt->SRC_ADDR_HI_UNION.copy_src_addr_63_32 = ptrhigh32(src);
-  pkt->DST_ADDR_LO_UNION.copy_dst_addr_31_0 = ptrlow32(dst);
-  pkt->DST_ADDR_HI_UNION.copy_dst_addr_63_32 = ptrhigh32(dst);
+  pkt.SRC_ADDR_LO_UNION.copy_src_addr_31_0 = ptrlow32(src);
+  pkt.SRC_ADDR_HI_UNION.copy_src_addr_63_32 = ptrhigh32(src);
+  pkt.DST_ADDR_LO_UNION.copy_dst_addr_31_0 = ptrlow32(dst);
+  pkt.DST_ADDR_HI_UNION.copy_dst_addr_63_32 = ptrhigh32(dst);
 
   if (do_signal) {
-    pkt->SIGNAL_OPERATION_UNION.signal_operation = 0x70;  // 64b sub
-    pkt->SIGNAL_OPERATION_UNION.signal_scope = SDMA_MEMORY_SCOPE_SYS;
+    pkt.SIGNAL_OPERATION_UNION.signal_operation = 0x70;  // 64b sub
+    pkt.SIGNAL_OPERATION_UNION.signal_scope = SDMA_MEMORY_SCOPE_SYS;
     void* sig_addr = signal_signal->ValueLocation();
-    pkt->SIGNAL_ADDR_LO_UNION.signal_addr_31_3 = ptrlow32(sig_addr) >> 3;
-    pkt->SIGNAL_ADDR_HI_UNION.signal_addr_63_32 = ptrhigh32(sig_addr);
-    pkt->SIGNAL_DATA_LO_UNION.signal_data_31_0 = 1;
-    pkt->SIGNAL_DATA_HI_UNION.signal_data_63_32 = 0;
+    pkt.SIGNAL_ADDR_LO_UNION.signal_addr_31_3 = ptrlow32(sig_addr) >> 3;
+    pkt.SIGNAL_ADDR_HI_UNION.signal_addr_63_32 = ptrhigh32(sig_addr);
+    pkt.SIGNAL_DATA_LO_UNION.signal_data_31_0 = 1;
+    pkt.SIGNAL_DATA_HI_UNION.signal_data_63_32 = 0;
   }
+
+  // Emit compacted, matching the sibling WaitSignal builders and the caller's
+  // per_pkt_dws = 1 + wait_dws + 6 + 5. The SDMA engine parses these packets as
+  // variable length; absent wait/signal blocks must NOT be reserved. Writing the
+  // fixed full-struct layout left the copy block at DW8 while the engine (wait=0)
+  // reads it at DW1 -> SRC_ADDR=0 -> indirect_src deref of 0x0 -> SDMA fault.
+  const uint32_t* pkt_dw = reinterpret_cast<const uint32_t*>(&pkt);
+  uint32_t* out_dw = reinterpret_cast<uint32_t*>(cmd_addr);
+  uint32_t n = 0;
+  out_dw[n++] = pkt_dw[0];                                              // header
+  if (do_wait)   for (uint32_t d = 1;  d <= 7;  ++d) out_dw[n++] = pkt_dw[d];  // wait   (7)
+  for (uint32_t d = 8;  d <= 13; ++d) out_dw[n++] = pkt_dw[d];          // copy   (6)
+  if (do_signal) for (uint32_t d = 14; d <= 18; ++d) out_dw[n++] = pkt_dw[d];  // signal (5)
 }
 
 template <bool useGCR, bool scopeFields>

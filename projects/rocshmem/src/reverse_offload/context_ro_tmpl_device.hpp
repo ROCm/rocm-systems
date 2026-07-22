@@ -113,7 +113,7 @@ struct GetROType<long double> {
  *****************************************************************************/
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ int ROContext::reduce(rocshmem_team_t team, T *dest,
+__device__ int ROContext::reduce_wg(rocshmem_team_t team, T *dest,
                                  const T *source, int nreduce) {
   if (!is_thread_zero_in_block()) {
     __syncthreads();
@@ -129,6 +129,15 @@ __device__ int ROContext::reduce(rocshmem_team_t team, T *dest,
 
   __syncthreads();
   return ROCSHMEM_SUCCESS;
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ int ROContext::reduce_wave([[maybe_unused]] rocshmem_team_t team,
+                                      [[maybe_unused]] T *dest,
+                                      [[maybe_unused]] const T *source,
+                                      [[maybe_unused]] int nreduce) {
+  LOGD_WARN("reduce_wave is not available on reverse offload backend");
+  return ROCSHMEM_ERROR;
 }
 
 template <typename T>
