@@ -102,7 +102,7 @@ flowchart TD
     V6B["V6B DONE<br/>remaining rows' resource and timing gates"]
     V7["V7 DONE<br/>one committed tip reruns all 40<br/>non-omitted gfx1250 cells"]
     V9A["V9A DONE<br/>Qwen Sampled 151936-workgroup initializer<br/>isolated exact at 3/3 accesses and 4/4 barriers"]
-    V9B["V9B TODO<br/>Qwen Sampled full-object cumulative cost;<br/>dense-dispatch burden localization"]
+    V9B["V9B ACTIVE<br/>Qwen Sampled full-object cumulative cost;<br/>bounded dense-dispatch diagnosis"]
     G0["G0 TODO<br/>current STATUS_GFX1250 matrix<br/>simultaneously green"]
   end
 
@@ -153,7 +153,7 @@ flowchart TD
     XT3B["XT3B DONE<br/>quick-GEMM SuperCollider assessed;<br/>SGEMM first problem 12/12 exact and fully covered"]
     XT3G["XT3G DONE<br/>quick SGEMM Sampled first problem;<br/>12/12 exact, 640/640 accesses, 40/40 barriers"]
     XT3H["XT3H DONE<br/>quick SGEMM Inline assessed;<br/>first problem exact, aggregate dynamic incomplete"]
-    XT3I["XT3I ACTIVE<br/>SPMM F8 Sampled clean and paired accepted;<br/>reviewed fault and final promotion remain"]
+    XT3I["XT3I DONE<br/>SPMM F8 Sampled clean, paired, reviewed fault,<br/>containment, and frozen evidence green"]
     XT3J["XT3J DONE<br/>SPMM F8 Inline standard clean assessed;<br/>MT64x64 wrong-result rows isolate blocker"]
     XT3K["XT3K DONE<br/>SPMM F8 Inline ninth-barrier bank defect fixed;<br/>exact kernel fully passes"]
     XT3D["XT3D DONE<br/>full SGEMM first problem complete;<br/>quadratic 115,776-event frontier isolated"]
@@ -384,9 +384,20 @@ flowchart TD
   class XP3C done
   class XP2D done
   class V9A done
-  class XT3I active
-  class G0,V9B,XT2C2,XT2C3,XT3E,XF,XG todo
+  class V9B active
+  class XT3I done
+  class G0,XT2C2,XT2C3,XT3E,XF,XG todo
 ```
+
+- 2026-07-22: XT3I is DONE/green.  Fresh inventory artifact
+  `consan-green-expansion-20260722-spmm-f8-ml-sampled-inventory-final-204`
+  enumerates 403 barrier sequences and 806 sites.  Reviewed fault artifact
+  `consan-green-expansion-20260722-spmm-f8-ml-sampled-fault-rotate3-final-208`
+  precommits and applies exactly one barrier-to-NOP mutation at PC `0xb5904`,
+  accepts its qualified detector miss and passing exact oracle, retains
+  complete 172,468-access and 6,118-barrier-member coverage, cleans all live
+  state, and passes independent health probes.  V9B is now the sole ACTIVE
+  node for bounded Qwen Sampled dense-dispatch diagnosis.
 
 - 2026-07-22: XT3I's committed-tip 1200-second paired retry is accepted.
   Artifact
