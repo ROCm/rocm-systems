@@ -49,7 +49,7 @@ scratch before promotion.
 
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
-| **P0 Qwen3-0.6B prefill** | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown |
+| **P0 Qwen3-0.6B prefill** | 🟨 current physical baseline and full 658/658-access SuperCollider command pass after preserving the complete wave64 VCC pair; retained clean, paired, and fault evidence remain open | 🩶 Runnable; not yet assessed | 🩶 Runnable; not yet assessed | 🩶 Runnable; not yet assessed |
 | **P1 Sharktank TP1 prefill** | 🟩 current accepted bundle: exact clean and paired oracle, complete 120/120 access coverage, 1.13x paired slowdown, reviewed exact-one attention publish/read barrier fault with one instability diagnosis, bounded execution, cleanup, health, and clean provenance | 🟩 current accepted bundle: exact clean and paired oracle, complete 120/120 accesses plus 31/31 barriers, 1.29x paired slowdown, reviewed exact-one detected/pass fault, containment, health, and clean provenance | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before installing the instrumented object | 🟩 current VCC-safe spill-backed bundle: exact clean and paired oracle, complete 120/120 accesses plus 31/31 barriers, 243.9x paired slowdown, reviewed exact-one pass/no-diagnosis fault, containment, health, and clean provenance |
 | **P1 Sharktank TP1 decode/combined** | 🟩 current accepted bundle: both exact clean and paired oracles, complete 240/240 access coverage, 1.33x maximum paired slowdown, reviewed exact-one DPP-phase qualified miss, bounded execution, cleanup, health, and clean provenance | 🟩 current accepted bundle: both exact clean and paired oracles, complete 240/240 accesses plus 62/62 barriers, 1.41x maximum paired slowdown, reviewed exact-one DPP-phase qualified miss with complete 240/240 plus 61/61 surviving coverage, bounded execution, cleanup, health, and clean provenance | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before installing the instrumented object | 🟩 current VCC-safe spill-backed bundle: both exact clean and paired oracles, complete 240/240 accesses plus 62/62 barriers, 31.2x maximum slowdown, reviewed exact-one pass/no-diagnosis fault, containment, health, and clean provenance |
 | **P2 Sharktank TP2 family** | 🟩 current accepted bundle: all three exact clean and paired oracles, complete 936/936 access coverage, reviewed exact-one attention publish/read barrier fault with one instability diagnosis, bounded execution, cleanup, health, and clean provenance | 🟩 current accepted bundle: all three exact clean and paired oracles, complete 936/936 accesses plus 168/168 barriers, 1.57x combined paired slowdown, reviewed exact-one DPP-phase qualified miss, bounded execution, cleanup, health, and clean provenance | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before installing the instrumented object | 🟩 current VCC-safe spill-backed bundle: all three exact clean and paired oracles, complete 936/936 accesses plus 168/168 barriers, 167.0x maximum slowdown, reviewed exact-one fail/no-diagnosis fault, containment, health, and clean provenance |
@@ -71,7 +71,7 @@ an instrumentation acceptance claim.
 
 | Validation ID | Current gfx950 availability | Exact definition |
 |---|---|---|
-| `qwen-prefill` | **Blocked** | Input, expected output, and parameters exist, but `iree-test-suites-build/torch_models/qwen3-600m/gfx950/qwen3-600m.vmfb` is missing. |
+| `qwen-prefill` | **Runnable and baseline-passed** | Input, expected output, parameters, and the locally compiled gfx950 VMFB exist.  The direct physical-device oracle passes; a bounded patch-count reproducer exposed and verified the SuperCollider wave64-VCC preservation fix. |
 | `tp1-prefill` | **Runnable** | Sharktank `toy_llama.mlir` + `toy_llama.irpa`, prefill mode; workload-scoped doctor passes. |
 | `tp1-decode-combined` | **Runnable** | The same TP1 assets, decode and combined modes; workload-scoped doctor passes. |
 | `tp2-family` | **Runnable** | Sharktank `toy_llama_tp2.mlir` with common, rank-0, and rank-1 parameters; workload-scoped doctor passes. |
@@ -83,8 +83,8 @@ an instrumentation acceptance claim.
 | `tree-atomic-or` | **Runnable and smoke-passed** | `hip_moi_instrumented_cdna4_mfma_streamk_tree_atomic_or_test`, `HipMoiCdna4MfmaStreamKTreeAtomicOr.AcqRelBitmaskOrdersMfmaPartials`; physical gfx950 oracle passes in 101 ms. |
 | `jakub-attention` | **Blocked** | The registry deliberately requires `hip_moi_reference_cdna4_jakub_matmul`; that target-native executable does not yet exist. |
 
-The two blocked rows remain visible so their missing deliverable is explicit.
-They must not be scheduled as executable validation until the named artifact
+The blocked Jakub row remains visible so its missing deliverable is explicit.
+It must not be scheduled as executable validation until the named artifact
 exists.  All smoke commands use the physical device through the workspace
 TheRock runtime, with software-model environment variables unset.
 

@@ -118,8 +118,8 @@ flowchart TD
 
   subgraph V[Target-native end-to-end validation]
     V0["V0 TODO<br/>target-aware workload registry and manifest"]
-    V1["V1 TODO<br/>TP1/TP2/CLIP assets runnable;<br/>Qwen and Jakub-CDNA4 assets open"]
-    V2["V2 TODO<br/>P0 Qwen clean baseline and four profiles"]
+    V1["V1 ACTIVE<br/>TP1/TP2/CLIP/Qwen runnable;<br/>Jakub-CDNA4 asset open"]
+    V2["V2 ACTIVE<br/>Qwen baseline + SC direct pass;<br/>formal bundles and three profiles open"]
     V3["V3 TODO<br/>P0 Qwen fault inventory and exact policies"]
     V4["V4 TODO<br/>P0 Qwen contained fault campaign"]
     V5["V5 ACTIVE<br/>TP2 SC/RR/Inline clean + paired;<br/>Sampled admission and remaining faults open"]
@@ -265,8 +265,8 @@ flowchart TD
   classDef milestone fill:#6f42c1,stroke:#e2d5ff,color:#ffffff,stroke-width:3px
 
   class R0,R1,E0,B0,B1,B2,B3,B4,B5A,S0,S1,S2,S3,S4,S5,S6A,S6B,S7A,S7B,S8A,S8B,S8C,S8D,I4,SC0,SC1,SA0A,IS0A,IS0,V6 done
-  class RR0,V5,V7,ST0 active
-  class R2,E1,C0,B5B,I0,I1,I2,I3,A0,A1,A2,A3,A4,A5,RR1,SA0,SA1,IS1,Q0,Q1,Q2,Q3,V0,V1,V2,V3,V4,V8 todo
+  class RR0,V1,V2,V5,V7,ST0 active
+  class R2,E1,C0,B5B,I0,I1,I2,I3,A0,A1,A2,A3,A4,A5,RR1,SA0,SA1,IS1,Q0,Q1,Q2,Q3,V0,V3,V4,V8 todo
   class F0,G0 milestone
 ```
 
