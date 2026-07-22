@@ -576,13 +576,13 @@ using nccl_comm_t = void*;
 // actually pass — GCC rejects implicit function-pointer → void* conversion at -Werror.
 using callback_tracing_cb_t = void (*)(callback_tracing_record_t, user_data_t*, void*);
 using buffer_tracing_cb_t   = void (*)(handle_t, handle_t, record_header_t**, std::size_t,
-                                     void*, std::uint64_t);
+                                       void*, std::uint64_t);
 using external_correlation_id_request_cb_t = int (*)(std::uint64_t, handle_t, int,
                                                      std::int32_t, std::uint64_t,
                                                      user_data_t*, void*);
 using internal_thread_library_cb_t         = void (*)(int, void*);
 using dispatch_counting_service_cb         = void (*)(dispatch_counting_data_t, handle_t*,
-                                              user_data_t*, void*);
+                                                      user_data_t*, void*);
 using dispatch_counting_record_cb = void (*)(dispatch_counting_data_t, counter_record_t*,
                                              std::size_t, user_data_t, void*);
 
@@ -595,9 +595,9 @@ using callback_tracing_operation_args_cb_t = int (*)(callback_tracing_kind, std:
                                                      const char*, const char*,
                                                      std::int32_t, void*);
 using available_counters_cb_t      = std::uint64_t (*)(handle_t, handle_t*, std::size_t,
-                                                  void*);
+                                                       void*);
 using available_dimensions_cb_t    = std::uint64_t (*)(handle_t, const dim_info_t*,
-                                                    std::size_t, void*);
+                                                       std::size_t, void*);
 using device_counting_agent_cb_t   = void*;
 using device_counting_service_cb_t = void*;
 
