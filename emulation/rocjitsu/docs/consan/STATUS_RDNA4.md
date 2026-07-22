@@ -238,13 +238,23 @@ after seeing what the RDNA4 stack actually dispatches.
 | **D1** `test/test_reductions.py` histogram | 🟥 Promoted: typed strict atomic-object rejection exits 92 | 🟧 Promoted: exact oracle, 135/135 accesses, 42/84 barriers | 🟧 Promoted: exact oracle, 122/135 accesses, 86/168 barrier members | 🟧 Promoted: exact oracle, 100/135 accesses, 43/84 barriers | Ordinary `torch.histc` is now in the main matrix. Its native object adds a real precompiled-library placement and relaxed-atomic difficulty class; the relaxed LDS atomics are accesses, not qualified memory-ordering events. Sampled now preserves explicit partial coverage instead of rejecting the entire object when one far barrier has no relay island. |
 | **D1** `torch.compile` softmax selected from the reduction/softmax survey | 🟩 Promoted: clean 4/4; exact drop qualified miss; 0.960x | 🟩 Promoted: clean 4/4 + 3/3; exact drop detected; 1.052x | 🟧 Promoted but clean false conflict | 🟧 Promoted: static 4/4 + 3/3; dynamic workgroup-bank limit | The `128x256` exact client is in the main matrix.  Record/Replay detects the third exact barrier-pair drop even though the numeric oracle remains schedule-masked. Inline now instruments every site and exposes a distinct 32-bank external-shadow scalability limit; a different native shape remains desirable for Sampled. |
 | **D2** `test/inductor/test_cooperative_reductions.py` and `test/inductor/test_online_softmax.py` | 🟨 Promoted: exact oracle, clean 8/8 across two stages | 🟨 Promoted: clean 8/8 + 6/6 across two stages | 🟧 Promoted: static-complete, but 16 clean false conflicts | 🟧 Promoted: static-complete, but 18,576 dynamic-incomplete events | Upstream split online softmax is now in the main matrix. Its deterministic client avoids the unrelated 856-kernel RNG object while retaining the exact target-native `1x(2^20+13)` split-reduction shape. |
-| **D3** Broader PyTorch model/test survey | 🩶 Survey pending | 🩶 Survey pending | 🩶 Survey pending | 🩶 Survey pending | Inventory first, then cluster by executed event, resource shape, and engine applicability to prevent a large redundant matrix. |
+| **D3** Broader PyTorch model/test survey | — Not admitted | — Not admitted | — Not admitted | — Not admitted | The retained generic mode, sort, top-k, and norm/softmax clients all pass their exact gfx1201 baselines. They add no stronger LLM semantic class than the admitted Qwen-vocabulary top-k and target-native softmax rows; norm/softmax Record/Replay also fails to reach a verdict within a 30-second discovery bound. Keep these as reproducer clients, not four more redundant acceptance rows. |
 
 The gfx1250 tensor-descriptor and cluster-synchronization cases are not
 presumed to have RDNA4 equivalents.  They remain examples of architecture-
 specific breadth, not TODOs to recreate.  A genuinely native RDNA4 feature may
 take their conceptual place; otherwise no N/A cell is needed because they were
 never admitted to the gfx1201 denominator.
+
+The final D3 selection pass executes `torch.mode`, segmented `torch.sort`, the
+generic FP64/BF16 `torch.topk` pair, and `torch.linalg.vector_norm` plus
+large-row `torch.softmax` through `consan_pytorch_validation.py`. All exact
+baselines pass on gfx1201. The norm/softmax Record/Replay discriminator
+`rdna4-norm-softmax-discovery-001` reaches its 30-second bound before emitting
+an analysis verdict; pursuing that whole precompiled object would duplicate
+the admitted compiled- and split-softmax semantics instead of expanding useful
+coverage. Thus the broader survey is a resolved selection decision, not an
+unbounded gray promise.
 
 ## Qualification order
 
