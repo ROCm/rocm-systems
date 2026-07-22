@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/thread_trace/shared_trace_lease.hpp"
 
+#include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
 
 #include <cstdint>
@@ -44,12 +45,12 @@ struct lease_state_t
     std::map<uint64_t, agent_lease_t> agents = {};  // keyed by hsa_agent_t.handle
 };
 
-// Namespace-scope (constructed during dynamic initialization) so it outlives finalize(),
-// which runs as an atexit handler registered later, during the run, and calls
-// free_agent_leases() at process exit; a function-local static could be destroyed before
-// finalize() runs and crash it. Mirrors the `client` global in core.cpp. The buffer and
-// queue managers use this same pattern and refer back to this note.
-common::Synchronized<lease_state_t> g_lease_state{};
+// Held in a static_object, not a plain namespace-scope global: on the attach path the global's
+// destructor can run before finalize() frees it (via free_agent_leases()) -- a use-after-free.
+// static_object is destroyed after finalize() (by destroy_static_objects()), so it outlives
+// teardown without leaking. The buffer and queue managers mirror this.
+common::Synchronized<lease_state_t>& g_lease_state =
+    *common::static_object<common::Synchronized<lease_state_t>>::construct();
 }  // namespace
 
 bool
