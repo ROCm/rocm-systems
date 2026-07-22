@@ -210,14 +210,24 @@ class AbiCompatTest(unittest.TestCase):
         )
 
     def test_stable_symbols_resolve_against_older_so(self):
-        # Older .so: only the stable subset is exported. Wrapper must
-        # successfully bind every stable amdsmi_* it touches at module
-        # init -- regression here means wrappers built against newer
-        # headers cannot be used against older libraries at all.
+        # Simulate a user with an OLDER/mismatched .so loaded: it exports only
+        # the stable subset, none of the newer symbols. The contract is:
+        #   * every common (stable) symbol the user requests still works, and
+        #   * a symbol the older .so does not export fails cleanly, not silently.
         with _Patch(STABLE_SYMBOLS):
             w = _import_fresh_wrapper()
+        lib = w._libraries["libamd_smi.so"]
+        self.assertIsInstance(lib, FakeCDLL)
+
+        # Common symbols resolve and are callable against the older .so.
         for sym in STABLE_SYMBOLS:
             self.assertTrue(hasattr(w, sym), "wrapper lost stable symbol %s" % sym)
+            fn = getattr(lib, sym)
+            self.assertEqual(fn(), 0, "stable symbol %s not callable against older .so" % sym)
+
+        # A newer symbol the older .so lacks must raise, not return a no-op.
+        with self.assertRaises(AttributeError):
+            lib.amdsmi_get_gpu_a_future_only_symbol()
 
     def test_unguarded_bindings_are_stable(self):
         # Contract: any amdsmi_* binding the wrapper performs WITHOUT a
