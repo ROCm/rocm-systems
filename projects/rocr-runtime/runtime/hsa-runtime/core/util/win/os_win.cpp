@@ -54,7 +54,6 @@
 #include <emmintrin.h>
 #include <pmmintrin.h>
 #include <xmmintrin.h>
-#include <shared_mutex>
 
 #undef Yield
 #undef CreateMutex
@@ -269,40 +268,6 @@ uint64_t AccurateClockFrequency() {
   uint64_t ret;
   QueryPerformanceFrequency((LARGE_INTEGER*)&ret);
   return ret;
-}
-
-SharedMutex CreateSharedMutex() {
-  return reinterpret_cast<SharedMutex>(new std::shared_mutex());
-}
-
-bool TryAcquireSharedMutex(SharedMutex lock) {
-  return reinterpret_cast<std::shared_mutex*>(lock)->try_lock();
-}
-
-bool AcquireSharedMutex(SharedMutex lock) {
-  reinterpret_cast<std::shared_mutex*>(lock)->lock();
-  return true;
-}
-
-void ReleaseSharedMutex(SharedMutex lock) {
-  reinterpret_cast<std::shared_mutex*>(lock)->unlock();
-}
-
-bool TrySharedAcquireSharedMutex(SharedMutex lock) {
-  return reinterpret_cast<std::shared_mutex*>(lock)->try_lock_shared();
-}
-
-bool SharedAcquireSharedMutex(SharedMutex lock) {
-  reinterpret_cast<std::shared_mutex*>(lock)->lock_shared();
-  return true;
-}
-
-void SharedReleaseSharedMutex(SharedMutex lock) {
-  reinterpret_cast<std::shared_mutex*>(lock)->unlock_shared();
-}
-
-void DestroySharedMutex(SharedMutex lock) {
-  delete reinterpret_cast<std::shared_mutex*>(lock);
 }
 
 uint64_t ReadSystemClock() {

@@ -6,13 +6,13 @@ This example suite demonstrates the ROCTx tracing API for annotating GPU workloa
 
 ## Source Files
 
-- `roctx_example_kernels.hpp` - Shared header providing GPU kernel definitions (`DEFINE_KERNEL`, `LAUNCH_KERNEL`, `LAUNCH_KERNEL_STREAM` macros), a `gpu_buffer` RAII wrapper, a `thread_barrier` for multi-threaded synchronization, and `run_on_threads()` for spawning worker threads with per-thread HIP streams.
+- `roctx-example-kernels.hpp` - Shared header providing GPU kernel definitions (`DEFINE_KERNEL`, `LAUNCH_KERNEL`, `LAUNCH_KERNEL_STREAM` macros), a `gpu_buffer` RAII wrapper, a `thread_barrier` for multi-threaded synchronization, and `run_on_threads()` for spawning worker threads with per-thread HIP streams.
 - `roctx.cpp` - Demonstrates `roctxRangeStart()`/`roctxRangeStop()` for timing ranges, `roctxRangePush()`/`roctxRangePop()` for nested ranges, `roctxMark()` for instant markers, `roctxNameOsThread()`/`roctxNameHipDevice()`/`roctxNameHipStream()`/`roctxNameHsaAgent()` for entity labeling, and `roctxProfilerPause()`/`roctxProfilerResume()` for selective profiling.
-- `pause_resume.cpp` - Demonstrates pause/resume for selective profiling. Launches kernels `CodeBlock_Z`, `A`, `B`, `C`, `D` with a pause around `B`. Expected profiled: `{Z, A, C, D}`.
-- `selective_region.cpp` - Demonstrates `ROCPROFSYS_SELECTED_REGIONS` for filtering traces to named regions. Multi-threaded workload with nested regions (`Region1`, `Region2`, `Region3`) and kernels `CodeBlock_A` through `G`. When filtered to `Region1`, only `{B, C, D, F}` are profiled.
-- `selective_region_pause_1.cpp` - Pause and resume both occur **inside** the target region. Expected profiled with `Region1` filter: `{CodeBlock_A, CodeBlock_C}`.
-- `selective_region_pause_2.cpp` - Pause occurs **before** the target region (ignored by region filtering). Expected profiled with `Region1` filter: `{CodeBlock_A, CodeBlock_B, CodeBlock_C}`.
-- `selective_region_pause_3.cpp` - Pause occurs **inside** the region, resume occurs **outside** after region stop. Expected profiled with `Region1` filter: `{CodeBlock_A}`.
+- `pause-resume.cpp` - Demonstrates pause/resume for selective profiling. Launches kernels `CodeBlock_Z`, `A`, `B`, `C`, `D` with a pause around `B`. Expected profiled: `{Z, A, C, D}`.
+- `selective-region.cpp` - Demonstrates `ROCPROFSYS_SELECTED_REGIONS` for filtering traces to named regions. Multi-threaded workload with nested regions (`Region1`, `Region2`, `Region3`) and kernels `CodeBlock_A` through `G`. When filtered to `Region1`, only `{B, C, D, F}` are profiled.
+- `selective-region-pause-1.cpp` - Pause and resume both occur **inside** the target region. Expected profiled with `Region1` filter: `{CodeBlock_A, CodeBlock_C}`.
+- `selective-region-pause-2.cpp` - Pause occurs **before** the target region (ignored by region filtering). Expected profiled with `Region1` filter: `{CodeBlock_A, CodeBlock_B, CodeBlock_C}`.
+- `selective-region-pause-3.cpp` - Pause occurs **inside** the region, resume occurs **outside** after region stop. Expected profiled with `Region1` filter: `{CodeBlock_A}`.
 
 ## Prerequisites
 
@@ -40,8 +40,8 @@ cmake --build <build_dir> --target roctx
 
 ```bash
 ./roctx             # ROCTx API demo
-./pause_resume      # Pause/resume selective profiling
-./selective_region  # Region-filtered tracing
+./pause-resume      # Pause/resume selective profiling
+./selective-region  # Region-filtered tracing
 ```
 
 No command-line arguments. Each program runs a fixed workflow of GPU kernel launches with ROCTx annotations.
@@ -73,5 +73,5 @@ rocprof-sys-run \
 ```bash
 ROCPROFSYS_SELECTED_REGIONS="Region1" rocprof-sys-run \
     -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch \
-    -- ./selective_region
+    -- ./selective-region
 ```

@@ -52,69 +52,67 @@ enum class ThreadScope : int {
 };
 
 class ActiveWFInfo {
- public:
-  uint64_t    activemask{0};
-  uint64_t    pe_group_mask{0};
-  int         pe{-1};
-  int         num_pe_group_lanes{0};
-  int         pe_group_logical_lane_id{0};
-  int         pe_group_first_phys_lane_id{0};
-  int         pe_group_last_phys_lane_id{0};
+public:
+  uint64_t activemask{0};
+  uint64_t pe_group_mask{0};
+  int pe{-1};
+  int num_pe_group_lanes{0};
+  int pe_group_logical_lane_id{0};
+  int pe_group_first_phys_lane_id{0};
+  int pe_group_last_phys_lane_id{0};
   ThreadScope scope{ThreadScope::thread};
-  bool        is_pe_group_first{false};
-  bool        is_pe_group_last{false};
+  bool is_pe_group_first{false};
+  bool is_pe_group_last{false};
 
-  __device__ explicit ActiveWFInfo(int pe, ThreadScope scope = ThreadScope::thread)
-      : pe(pe), scope(scope) {
+  __device__ explicit ActiveWFInfo(int pe, ThreadScope scope = ThreadScope::thread) : pe(pe), scope(scope) {
     activemask = get_active_lane_mask();
     switch (scope) {
-      case ThreadScope::thread: {
-        pe_group_mask       = __match_any_sync(activemask, pe);
-        num_pe_group_lanes  = get_active_lane_count(pe_group_mask);
+    case ThreadScope::thread:
+      {
+        pe_group_mask = __match_any_sync(activemask, pe);
+        num_pe_group_lanes = get_active_lane_count(pe_group_mask);
         pe_group_logical_lane_id = get_active_lane_num(pe_group_mask);
         pe_group_first_phys_lane_id = get_first_active_lane_id(pe_group_mask);
-        pe_group_last_phys_lane_id  = get_last_active_lane_id(pe_group_mask);
+        pe_group_last_phys_lane_id = get_last_active_lane_id(pe_group_mask);
         break;
       }
-      case ThreadScope::exclusive: {
-        pe_group_mask       = 1;
-        num_pe_group_lanes  = 1;
+    case ThreadScope::exclusive:
+      {
+        pe_group_mask = 1;
+        num_pe_group_lanes = 1;
         pe_group_logical_lane_id = 0;
         pe_group_first_phys_lane_id = 0;
-        pe_group_last_phys_lane_id  = 0;
+        pe_group_last_phys_lane_id = 0;
         break;
       }
-      case ThreadScope::wave:
-      case ThreadScope::wg: {
-        pe_group_mask       = 1;
-        num_pe_group_lanes  = 1;
+    case ThreadScope::wave:
+    case ThreadScope::wg:
+      {
+        pe_group_mask = 1;
+        num_pe_group_lanes = 1;
         pe_group_logical_lane_id = get_active_lane_num(activemask);
         pe_group_first_phys_lane_id = 0;
-        pe_group_last_phys_lane_id  = 0;
+        pe_group_last_phys_lane_id = 0;
       }
     }
     is_pe_group_first = (pe_group_logical_lane_id == 0);
-    is_pe_group_last  = (pe_group_logical_lane_id == num_pe_group_lanes - 1);
+    is_pe_group_last = (pe_group_logical_lane_id == num_pe_group_lanes - 1);
   }
 };
 
 class QueuePair {
- public:
-  __device__ void put_nbi(void *raddr, uint32_t rkey,
-      const void *laddr, uint32_t lkey,
-      size_t length, ActiveWFInfo &wf_info, bool ring_db = true);
+public:
+  __device__ void put_nbi(void* raddr, uint32_t rkey, const void* laddr, uint32_t lkey, size_t length,
+                          ActiveWFInfo& wf_info, bool ring_db = true);
 
-  __device__ void put_nbi_single(void *raddr, uint32_t rkey,
-      const void *laddr, uint32_t lkey,
-      size_t length, bool ring_db = true);
+  __device__ void put_nbi_single(void* raddr, uint32_t rkey, const void* laddr, uint32_t lkey, size_t length,
+                                 bool ring_db = true);
 
-  __device__ void atomic_add(void *raddr, uint32_t rkey,
-      int64_t value, ActiveWFInfo &wf_info, bool fence = false);
+  __device__ void atomic_add(void* raddr, uint32_t rkey, int64_t value, ActiveWFInfo& wf_info, bool fence = false);
 
-  __device__ void atomic_add_single(void *raddr, uint32_t rkey,
-      int64_t value, bool fence = false);
+  __device__ void atomic_add_single(void* raddr, uint32_t rkey, int64_t value, bool fence = false);
 
-  __device__ void quiet(ActiveWFInfo &wf_info);
+  __device__ void quiet(ActiveWFInfo& wf_info);
 
   __device__ void quiet_single();
 };

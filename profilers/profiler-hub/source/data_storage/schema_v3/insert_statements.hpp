@@ -4,7 +4,7 @@
 #pragma once
 
 #include "queries/insert/table_insert_query.hpp"
-#include <fmt/core.h>
+#include <fmt/format.h>
 
 #include <cstddef>
 #include <cstdint>

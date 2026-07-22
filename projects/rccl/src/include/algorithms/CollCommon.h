@@ -32,21 +32,18 @@ using bf16 = __nv_bfloat16;
 using bf162 = __nv_bfloat162;
 #endif
 
-
 namespace meta::comms {
 
 template <typename T>
-inline constexpr bool is_supported_type_v =
-    (std::is_same<T, float>::value || std::is_same<T, half>::value ||
-     std::is_same<T, int8_t>::value || std::is_same<T, bf16>::value
+inline constexpr bool is_supported_type_v = (std::is_same<T, float>::value || std::is_same<T, half>::value ||
+                                             std::is_same<T, int8_t>::value || std::is_same<T, bf16>::value
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
-     || std::is_same<T, __hip_bfloat16>::value
+                                             || std::is_same<T, __hip_bfloat16>::value
 #endif
-    );
+);
 
 template <typename T>
-static inline __device__ uint32_t
-vecElementAdd(const uint32_t& a, const uint32_t& b) {
+static inline __device__ uint32_t vecElementAdd(const uint32_t& a, const uint32_t& b) {
   static_assert(is_supported_type_v<T>, "dda: unsupported element type");
   if constexpr (std::is_same<T, float>::value) {
     const float* x = reinterpret_cast<const float*>(&a);
@@ -91,33 +88,32 @@ static inline __device__ uint4 vecElementAdd(const uint4& a, const uint4& b) {
 }
 
 template <typename T>
-static inline __device__ void copyFromSrcToDest(
-    const T* __restrict__ srcbuff,
-    T* __restrict__ destbuff,
-    const size_t idxStart,
-    const size_t idxEnd,
-    const size_t idxStride) {
+static inline __device__ void copyFromSrcToDest(const T* __restrict__ srcbuff, T* __restrict__ destbuff,
+                                                const size_t idxStart, const size_t idxEnd, const size_t idxStride) {
   static_assert(is_supported_type_v<T>, "dda: unsupported element type");
   for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
-    *reinterpret_cast<uint4*>(&destbuff[idx]) =
-        reinterpret_cast<const uint4*>(&srcbuff[idx])[0];
+    *reinterpret_cast<uint4*>(&destbuff[idx]) = reinterpret_cast<const uint4*>(&srcbuff[idx])[0];
   }
 }
 
-template <typename T, int NRANKS, bool hasAcc>
-static inline __device__ void reduceScatter(
-    T* const* __restrict__ ipcbuffs,
-    T* __restrict__ destbuff,
-    const T* __restrict__ acc,
-    int selfRank,
-    const size_t idxStart,
-    const size_t idxEnd,
-    const size_t idxStride,
-    int pattern) {
+// Unified reduce-scatter helper for both the IPC and fabric paths.
+//   - NRANKS_CT > 0  : compile-time clique size; nRanks folds to a constant and
+//                      the peer loop is fully unrolled (the IPC / fabric 4,8
+//                      fast paths).
+//   - NRANKS_CT == 0 : runtime fallback; nRanks comes from nRanksRuntime and the
+//                      peer loop is partially unrolled 8-wide, covering any clique up to
+//                      kDdaMaxNranks.
+template <typename T, int NRANKS_CT, bool hasAcc>
+static inline __device__ void reduceScatter(T* const* __restrict__ ipcbuffs, T* __restrict__ destbuff,
+                                            const T* __restrict__ acc, int selfRank, int nRanksRuntime,
+                                            const size_t idxStart, const size_t idxEnd, const size_t idxStride,
+                                            int pattern) {
   static_assert(is_supported_type_v<T>, "dda: unsupported element type");
+  const int nRanks = (NRANKS_CT > 0) ? NRANKS_CT : nRanksRuntime;
+  constexpr int kUnroll = (NRANKS_CT > 0) ? NRANKS_CT : 8;
   for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
     // pattern = 2 performs reduce (one-shot)
-    // pattern = 1 performs reduce-scatter (two-shot)	  
+    // pattern = 1 performs reduce-scatter (two-shot)
     size_t srcIdx = (pattern == 2) ? idx : (idx + selfRank * idxEnd);
     size_t destIdx = (pattern == 1) ? (idx + selfRank * idxEnd) : idx;
 
@@ -127,36 +123,31 @@ static inline __device__ void reduceScatter(
     }
 
     uint4 srcVals[2];
-    *reinterpret_cast<uint4*>(&srcVals[0]) =
-        reinterpret_cast<const uint4*>(&ipcbuffs[0][srcIdx])[0];
-#pragma unroll NRANKS - 1
-    for (int r = 0; r < NRANKS - 1; ++r) {
-      *reinterpret_cast<uint4*>(&srcVals[(r + 1) & 1]) =
-          reinterpret_cast<const uint4*>(
-              &ipcbuffs[(r + 1) % NRANKS][srcIdx])[0];
+    *reinterpret_cast<uint4*>(&srcVals[0]) = reinterpret_cast<const uint4*>(&ipcbuffs[0][srcIdx])[0];
+#pragma unroll kUnroll
+    for (int r = 0; r < nRanks - 1; ++r) {
+      *reinterpret_cast<uint4*>(&srcVals[(r + 1) & 1]) = reinterpret_cast<const uint4*>(&ipcbuffs[r + 1][srcIdx])[0];
       sum = vecElementAdd<T>(sum, srcVals[r & 1]);
     }
-    sum = vecElementAdd<T>(sum, srcVals[(NRANKS - 1) & 1]);
+    sum = vecElementAdd<T>(sum, srcVals[(nRanks - 1) & 1]);
 
-    *reinterpret_cast<uint4*>(&destbuff[destIdx]) =
-        *reinterpret_cast<const uint4*>(&sum);
+    *reinterpret_cast<uint4*>(&destbuff[destIdx]) = *reinterpret_cast<const uint4*>(&sum);
   }
 }
 
-template <typename T, int NRANKS>
-static inline __device__ void allGather(
-    T* const* __restrict__ ipcbuffs,
-    T* __restrict__ destbuff,
-    int selfRank,
-    const size_t idxStart,
-    const size_t idxEnd,
-    const size_t idxStride,
-    bool enable_offset) {
+// Unified all-gather helper for both the IPC and fabric paths. See reduceScatter
+// above for the NRANKS_CT / nRanksRuntime / unroll semantics.
+template <typename T, int NRANKS_CT>
+static inline __device__ void allGather(T* const* __restrict__ ipcbuffs, T* __restrict__ destbuff, int selfRank,
+                                        int nRanksRuntime, const size_t idxStart, const size_t idxEnd,
+                                        const size_t idxStride, bool enable_offset) {
   static_assert(is_supported_type_v<T>, "dda: unsupported element type");
+  const int nRanks = (NRANKS_CT > 0) ? NRANKS_CT : nRanksRuntime;
+  constexpr int kUnroll = (NRANKS_CT > 0) ? NRANKS_CT : 8;
   for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
-#pragma unroll NRANKS
-    for (int r = 0; r < NRANKS; ++r) {
-      int srcRank = (selfRank + r) % NRANKS;
+#pragma unroll kUnroll
+    for (int r = 0; r < nRanks; ++r) {
+      int srcRank = (selfRank + r) % nRanks;
       int destIdx = idx + srcRank * idxEnd;
       int srcIdx;
       if (enable_offset) {
@@ -164,8 +155,7 @@ static inline __device__ void allGather(
       } else {
         srcIdx = static_cast<int>(idx);
       }
-      *reinterpret_cast<uint4*>(&destbuff[destIdx]) =
-          reinterpret_cast<const uint4*>(&ipcbuffs[srcRank][srcIdx])[0];
+      *reinterpret_cast<uint4*>(&destbuff[destIdx]) = reinterpret_cast<const uint4*>(&ipcbuffs[srcRank][srcIdx])[0];
     }
   }
 }
@@ -178,13 +168,11 @@ inline uint32_t divRoundUp(size_t a, size_t b) {
   return y;
 }
 
-constexpr uint32_t
-calcBlockCount(size_t numThreads, size_t threadsPerBlock, size_t maxBlocks) {
+constexpr uint32_t calcBlockCount(size_t numThreads, size_t threadsPerBlock, size_t maxBlocks) {
   const auto uNumThreads = static_cast<uint64_t>(numThreads);
   const auto uThreadsPerBlock = static_cast<uint64_t>(threadsPerBlock);
   // Overflow safe variant of (a + b - 1) / b
-  const uint64_t blocks =
-      uNumThreads / uThreadsPerBlock + (uNumThreads % uThreadsPerBlock != 0);
+  const uint64_t blocks = uNumThreads / uThreadsPerBlock + (uNumThreads % uThreadsPerBlock != 0);
   uint32_t y = static_cast<uint32_t>(std::min(blocks, maxBlocks));
   if (y == 0) {
     y = 1;
@@ -192,13 +180,11 @@ calcBlockCount(size_t numThreads, size_t threadsPerBlock, size_t maxBlocks) {
   return y;
 }
 
-inline std::pair<dim3, dim3>
-getGridAndBlockDims(size_t count, int typeSize, size_t maxBlocks) {
+inline std::pair<dim3, dim3> getGridAndBlockDims(size_t count, int typeSize, size_t maxBlocks) {
   constexpr uint32_t kThreadsPerWarp = 64;
   constexpr uint32_t kThreadsPerBlock = 512;
 
-  const uint32_t elementsPerThread =
-      16 / typeSize; // we do 16 Byte load in kernel
+  const uint32_t elementsPerThread = 16 / typeSize; // we do 16 Byte load in kernel
 
   const uint32_t elementsPerWarp = elementsPerThread * kThreadsPerWarp;
 
@@ -209,11 +195,9 @@ getGridAndBlockDims(size_t count, int typeSize, size_t maxBlocks) {
     blocks.x = 1;
   } else {
     auto warpsRequired = divRoundUp(count, elementsPerWarp);
-    blocks.x = calcBlockCount(
-        divRoundUp(count, elementsPerThread), kThreadsPerBlock, maxBlocks);
+    blocks.x = calcBlockCount(divRoundUp(count, elementsPerThread), kThreadsPerBlock, maxBlocks);
     auto warpsPerBlock = divRoundUp(warpsRequired, blocks.x);
-    auto threadsPerBlock =
-        std::min<uint32_t>(kThreadsPerBlock, warpsPerBlock * kThreadsPerWarp);
+    auto threadsPerBlock = std::min<uint32_t>(kThreadsPerBlock, warpsPerBlock * kThreadsPerWarp);
     threads.x = threadsPerBlock;
   }
 

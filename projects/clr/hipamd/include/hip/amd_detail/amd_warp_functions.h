@@ -151,8 +151,13 @@ __device__ static inline unsigned int __lane_id() {
 __device__ inline int __shfl(MAYBE_UNDEF int var, int src_lane, int width = warpSize) {
   int self = __lane_id();
   int index = (src_lane & (width - 1)) + (self & ~(width - 1));
-  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_bpermute))
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_bpermute)) {
+#if __has_builtin(__builtin_amdgcn_wave_shuffle)
+    return __builtin_amdgcn_wave_shuffle(var, index);
+#else
     return __builtin_amdgcn_ds_bpermute(index << 2, var);
+#endif
+  }
   __builtin_trap();
 }
 __device__ inline unsigned int __shfl(MAYBE_UNDEF unsigned int var, int src_lane,
@@ -269,8 +274,13 @@ __device__ inline int __shfl_up(MAYBE_UNDEF int var, unsigned int lane_delta,
   int self = __lane_id();
   int index = self - lane_delta;
   index = (index < (self & ~(width - 1))) ? self : index;
-  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_bpermute))
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_bpermute)) {
+#if __has_builtin(__builtin_amdgcn_wave_shuffle)
+    return __builtin_amdgcn_wave_shuffle(var, index);
+#else
     return __builtin_amdgcn_ds_bpermute(index << 2, var);
+#endif
+  }
   __builtin_trap();
 }
 __device__ inline unsigned int __shfl_up(MAYBE_UNDEF unsigned int var, unsigned int lane_delta,
@@ -390,8 +400,13 @@ __device__ inline int __shfl_down(MAYBE_UNDEF int var, unsigned int lane_delta,
   int self = __lane_id();
   int index = self + lane_delta;
   index = (int)((self & (width - 1)) + lane_delta) >= width ? self : index;
-  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_bpermute))
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_bpermute)) {
+#if __has_builtin(__builtin_amdgcn_wave_shuffle)
+    return __builtin_amdgcn_wave_shuffle(var, index);
+#else
     return __builtin_amdgcn_ds_bpermute(index << 2, var);
+#endif
+  }
   __builtin_trap();
 }
 __device__ inline unsigned int __shfl_down(MAYBE_UNDEF unsigned int var, unsigned int lane_delta,
@@ -507,8 +522,13 @@ __device__ inline int __shfl_xor(MAYBE_UNDEF int var, int lane_mask, int width =
   int self = __lane_id();
   int index = self ^ lane_mask;
   index = index >= ((self + width) & ~(width - 1)) ? self : index;
-  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_bpermute))
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_bpermute)) {
+#if __has_builtin(__builtin_amdgcn_wave_shuffle)
+    return __builtin_amdgcn_wave_shuffle(var, index);
+#else
     return __builtin_amdgcn_ds_bpermute(index << 2, var);
+#endif
+  }
   __builtin_trap();
 }
 __device__ inline unsigned int __shfl_xor(MAYBE_UNDEF unsigned int var, int lane_mask,

@@ -1,15 +1,22 @@
 # rocjitsu DBT Guest Mode
 
-A rocjitsu-only path where an unmodified ROCm process can see a
-guest GPU, but translate kernels and execute on a real host GPU.
+A rocjitsu-only path where an unmodified ROCm process can see a guest GPU, but
+translate kernels and execute on either a real or simulated host GPU.
 
 The design has three main components with their own responsibilities:
 
 1. **GuestKfd Interposer**: Shows applications a guest GPU device that looks
    like a real KFD/DRM device.
 2. **HSA Hooks**: Intercepts HSA Runtime calls for the guest GPU and forwards
-   them to the host GPU, translating kernels as needed.
+   them to the selected host backend, translating kernels as needed.
 3. **DBT**: Translates guest GPU kernels to host GPU kernels.
+
+The `dbt_guest.execution_backend` enum selects `hardware` or `simulator`.
+Simulator mode can reference an external host config with `simulator_config`,
+which takes precedence over VM/topology in the enclosing file, or omit that
+field and keep the simulator VM/topology in the same file. The checked-in
+CDNA4-on-CDNA3 config references the golden CDNA3 simulator config; the
+self-contained layout is primarily useful for tests and temporary configs.
 
 ## High Level Flow
 

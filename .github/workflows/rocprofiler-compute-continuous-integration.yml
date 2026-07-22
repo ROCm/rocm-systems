@@ -103,6 +103,7 @@ jobs:
         --device /dev/dri
         --cap-add CAP_SYS_ADMIN
         --env-file /etc/podinfo/gha-gpu-isolation-settings
+        --pull always
 
     steps:
       - uses: actions/checkout@v6

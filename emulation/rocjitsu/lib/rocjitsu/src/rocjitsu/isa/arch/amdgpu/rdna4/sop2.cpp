@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/rdna4/sop2.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -1162,13 +1163,15 @@ SPackLlB32B16Sop2::SPackLlB32B16Sop2(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc1 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
 void SPackLlB32B16Sop2::execute_impl(amdgpu::Wavefront &wf) {
@@ -1187,9 +1190,10 @@ SPackLhB32B16Sop2::SPackLhB32B16Sop2(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1241,9 +1245,10 @@ SPackHlB32B16Sop2::SPackHlB32B16Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc1 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
 void SPackHlB32B16Sop2::execute_impl(amdgpu::Wavefront &wf) {
@@ -1393,10 +1398,10 @@ SFmaakF32Sop2::SFmaakF32Sop2(const MachineInst *inst)
 }
 
 void SFmaakF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  float result = std::fma(std::bit_cast<float>(ssrc0.read_scalar(wf)),
-                          std::bit_cast<float>(ssrc1.read_scalar(wf)),
-                          std::bit_cast<float>(src2.read_scalar(wf)));
-  sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
+  float result = std::fma(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)),
+                          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)),
+                          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(src2)));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, std::bit_cast<uint32_t>(result));
 }
 
 SFmamkF32Sop2::SFmamkF32Sop2(const MachineInst *inst)
@@ -1426,10 +1431,10 @@ SFmamkF32Sop2::SFmamkF32Sop2(const MachineInst *inst)
 }
 
 void SFmamkF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  float result = std::fma(std::bit_cast<float>(ssrc0.read_scalar(wf)),
-                          std::bit_cast<float>(src2.read_scalar(wf)),
-                          std::bit_cast<float>(ssrc1.read_scalar(wf)));
-  sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
+  float result = std::fma(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)),
+                          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(src2)),
+                          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, std::bit_cast<uint32_t>(result));
 }
 
 SFmacF32Sop2::SFmacF32Sop2(const MachineInst *inst)
@@ -1478,6 +1483,12 @@ SCvtPkRtzF16F32Sop2::SCvtPkRtzF16F32Sop2(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
 }
 
+void SCvtPkRtzF16F32Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void SCvtPkRtzF16F32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_cvt_pk_rtz_f16_f32_sop2(*this, wf);
 }
@@ -1493,13 +1504,21 @@ SAddF16Sop2::SAddF16Sop2(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc1 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+}
+
+void SAddF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void SAddF16Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_add_f16_sop2(*this, wf); }
@@ -1515,13 +1534,21 @@ SSubF16Sop2::SSubF16Sop2(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc1 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+}
+
+void SSubF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void SSubF16Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_sub_f16_sop2(*this, wf); }
@@ -1538,13 +1565,21 @@ SMinNumF16Sop2::SMinNumF16Sop2(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc1 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+}
+
+void SMinNumF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void SMinNumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
@@ -1563,13 +1598,21 @@ SMaxNumF16Sop2::SMaxNumF16Sop2(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc1 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+}
+
+void SMaxNumF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void SMaxNumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
@@ -1587,13 +1630,21 @@ SMulF16Sop2::SMulF16Sop2(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc1 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+}
+
+void SMulF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void SMulF16Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mul_f16_sop2(*this, wf); }
@@ -1610,13 +1661,21 @@ SFmacF16Sop2::SFmacF16Sop2(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc1 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+}
+
+void SFmacF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void SFmacF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
@@ -1685,13 +1744,21 @@ SMinimumF16Sop2::SMinimumF16Sop2(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc1 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+}
+
+void SMinimumF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void SMinimumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
@@ -1710,13 +1777,21 @@ SMaximumF16Sop2::SMaximumF16Sop2(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc1 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+}
+
+void SMaximumF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void SMaximumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {

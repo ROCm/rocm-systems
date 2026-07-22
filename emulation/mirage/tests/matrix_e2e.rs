@@ -427,7 +427,7 @@ fn run_combo(c: &Combo, caps: &Caps) -> Outcome {
         create.args(["--num-nodes", "2"]);
     }
     if c.container.is_containerized() {
-        create.args(["--image", "img:latest", "--provider"]);
+        create.args(["--image", "img:latest", "--container-provider"]);
         create.arg(&env.provider);
     }
     create.assert().success();

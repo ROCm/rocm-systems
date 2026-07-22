@@ -117,6 +117,20 @@ Vop1::Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exe
     size_ += sizeof(MachineInst);
 }
 
+void Vop1::implicit_uses(RegisterSet &uses) const {
+  bool sdwa_preserve =
+      sdwa_dst_sel_ != amdgpu::sdwa::DWORD && sdwa_dst_unused_ == amdgpu::sdwa::UNUSED_PRESERVE;
+  bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP &&
+                     (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
+                      (dpp_bound_ctrl_ == 0 && amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)));
+  if (sdwa_preserve || dpp_partial)
+    for (int i = 0; i < num_dst_operands(); ++i)
+      if (const auto *dst = dst_operand(i))
+        if (auto ref = dst->to_register_ref())
+          if (ref->cls == RegClass::VGPR)
+            uses.expand(*ref);
+}
+
 bool Vop1::default_encoding() {
   return inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255;
 }
@@ -151,6 +165,20 @@ Vop2::Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exe
     literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
 }
 
+void Vop2::implicit_uses(RegisterSet &uses) const {
+  bool sdwa_preserve =
+      sdwa_dst_sel_ != amdgpu::sdwa::DWORD && sdwa_dst_unused_ == amdgpu::sdwa::UNUSED_PRESERVE;
+  bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP &&
+                     (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
+                      (dpp_bound_ctrl_ == 0 && amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)));
+  if (sdwa_preserve || dpp_partial)
+    for (int i = 0; i < num_dst_operands(); ++i)
+      if (const auto *dst = dst_operand(i))
+        if (auto ref = dst->to_register_ref())
+          if (ref->cls == RegClass::VGPR)
+            uses.expand(*ref);
+}
+
 bool Vop2::default_encoding() {
   return inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255;
 }
@@ -170,6 +198,18 @@ Vop3::Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exe
   if (has_lit_0() || has_lit_1() || has_lit_0_has_lit_1() || has_lit_2() || has_lit_0_has_lit_2() ||
       has_lit_1_has_lit_2() || has_lit_0_has_lit_1_has_lit_2())
     size_ += sizeof(MachineInst);
+}
+
+void Vop3::implicit_uses(RegisterSet &uses) const {
+  bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP &&
+                     (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
+                      (dpp_bound_ctrl_ == 0 && amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)));
+  if (dpp_partial)
+    for (int i = 0; i < num_dst_operands(); ++i)
+      if (const auto *dst = dst_operand(i))
+        if (auto ref = dst->to_register_ref())
+          if (ref->cls == RegClass::VGPR)
+            uses.expand(*ref);
 }
 
 bool Vop3::has_lit_0() { return inst_.src0 == 255 && inst_.src1 != 255 && inst_.src2 != 255; }
@@ -210,6 +250,18 @@ Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn 
   if (has_lit_0() || has_lit_1() || has_lit_0_has_lit_1() || has_lit_2() || has_lit_0_has_lit_2() ||
       has_lit_1_has_lit_2() || has_lit_0_has_lit_1_has_lit_2())
     size_ += sizeof(MachineInst);
+}
+
+void Vop3p::implicit_uses(RegisterSet &uses) const {
+  bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP &&
+                     (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
+                      (dpp_bound_ctrl_ == 0 && amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)));
+  if (dpp_partial)
+    for (int i = 0; i < num_dst_operands(); ++i)
+      if (const auto *dst = dst_operand(i))
+        if (auto ref = dst->to_register_ref())
+          if (ref->cls == RegClass::VGPR)
+            uses.expand(*ref);
 }
 
 bool Vop3p::has_lit_0() { return inst_.src0 == 255 && inst_.src1 != 255 && inst_.src2 != 255; }
@@ -368,6 +420,18 @@ Vop3SdstEnc::Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst
   if (has_lit_0() || has_lit_1() || has_lit_0_has_lit_1() || has_lit_2() || has_lit_0_has_lit_2() ||
       has_lit_1_has_lit_2() || has_lit_0_has_lit_1_has_lit_2())
     size_ += sizeof(MachineInst);
+}
+
+void Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
+  bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP &&
+                     (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
+                      (dpp_bound_ctrl_ == 0 && amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)));
+  if (dpp_partial)
+    for (int i = 0; i < num_dst_operands(); ++i)
+      if (const auto *dst = dst_operand(i))
+        if (auto ref = dst->to_register_ref())
+          if (ref->cls == RegClass::VGPR)
+            uses.expand(*ref);
 }
 
 bool Vop3SdstEnc::has_lit_0() {

@@ -250,6 +250,30 @@ class Runtime {
   /// @retval ::HSA_STATUS_SUCCESS if @p ptr is successfully released.
   hsa_status_t FreeMemory(void* ptr);
 
+  /// @brief Resolve a pointer to the driver handle usable by a requesting agent.
+  ///
+  /// Looks up the allocation in @ref allocation_map_ or @ref mapped_handle_map_ that contains
+  /// @p ptr and returns its base address and a DriverMemoryHandle whose native id is meaningful to
+  /// @p requesting_agent's driver. Lets a driver recover the native allocation id, e.g. a BO
+  /// handle, from a virtual address without maintaining its own address table.
+  ///
+  /// The handle word is driver-specific (a virtual address for KFD, a GEM BO for XDNA), so the
+  /// resolved handle must match the requesting agent's driver:
+  /// - Same driver as the owner: returns the owner's allocation handle.
+  /// - Different driver (vmem only): returns the per-agent handle imported for
+  ///   @p requesting_agent by @ref hsa_amd_vmem_set_access. If @p ptr was not shared to that
+  ///   agent, resolution fails.
+  ///
+  /// @param[in] ptr Address within an allocation (need not be the base).
+  /// @param[in] requesting_agent Agent whose driver will consume the handle.
+  /// @param[out] base Base address of the containing allocation.
+  /// @param[out] handle Driver handle of the containing allocation.
+  /// @retval ::HSA_STATUS_SUCCESS if a containing allocation accessible to @p requesting_agent
+  /// was found.
+  /// @retval ::HSA_STATUS_ERROR_INVALID_ALLOCATION otherwise.
+  hsa_status_t FindDriverMemoryHandle(const void* ptr, const Agent* requesting_agent, void** base,
+                                      DriverMemoryHandle* handle);
+
   hsa_status_t RegisterReleaseNotifier(void* ptr, hsa_amd_deallocation_callback_t callback,
                                        void* user_data);
 
@@ -596,15 +620,18 @@ class Runtime {
           user_ptr(nullptr),
           thunk_bo(nullptr),
           thunk_node_id(-1) {}
+
     AllocationRegion(const MemoryRegion* region_arg, size_t size_arg, size_t size_requested,
-                     MemoryRegion::AllocateFlags alloc_flags)
+                     MemoryRegion::AllocateFlags alloc_flags,
+                     DriverMemoryHandle driver_handle_arg = {})
         : region(region_arg),
           size(size_arg),
           size_requested(size_requested),
           alloc_flags(alloc_flags),
           user_ptr(nullptr),
           thunk_bo(nullptr),
-          thunk_node_id(-1) {}
+          thunk_node_id(-1),
+          driver_handle(driver_handle_arg) {}
 
     struct notifier_t {
       void* ptr;
@@ -620,6 +647,7 @@ class Runtime {
     std::unique_ptr<std::vector<notifier_t>> notifiers;
     HsaMemoryObjectHandle thunk_bo;
     HSAuint32 thunk_node_id;
+    DriverMemoryHandle driver_handle;
   };
 
   struct AsyncEventsInfo;
@@ -656,6 +684,13 @@ class Runtime {
     std::vector<HsaEvent*> hsa_events_; //!< A list of HSA events for KFD wait
     std::vector<uint64_t> age_;         //!< The age list for KFD wait
     std::vector<void*> arg_;
+    //! Last-known KFD event_age, keyed by the HSA event. The hsa_events_/age_
+    //! arrays above form a compacted, per-iteration view whose slot indices do
+    //! not track a given event across reordering of the async list (handler
+    //! removal swap-removes entries, registration appends them). This map keeps
+    //! each event's baseline so the KFD wait stays edge-triggered instead of
+    //! being re-primed to 1 and spinning.
+    std::unordered_map<HsaEvent*, uint64_t> age_by_event_;
   };
 
   // Event item structure to hold all signal information
@@ -1032,8 +1067,8 @@ class Runtime {
 
     __forceinline core::Agent* agentOwner() const { return region->owner(); }
 
-    /** 
-     * @brief For host owned memory, resolve to the GPU agent that imported the memory. 
+    /**
+     * @brief For host owned memory, resolve to the GPU agent that imported the memory.
      * For device owned memory, return the agent that owns the memory.
      */
     __forceinline core::Agent* drmAgent() const {
@@ -1047,7 +1082,8 @@ class Runtime {
     bool imported; // True if this BO was imported from another process
     bool is_fabric_handle;
     MemoryRegion::AllocateFlags alloc_flag;
-    core::Agent* drm_owner; // Gpu agent used for import of host memory, NULL for device memory/imported handles 
+    core::Agent* drm_owner;  // Gpu agent used for import of host memory, NULL for device
+                             // memory/imported handles
   };
   // hsa_amd_vmem_alloc_handle_t (MemoryHandle*) to MemoryHandle mapping. Owns MemoryHandle
   // lifetime. Uniqueness is guaranteed by the runtime, independent of any driver-supplied

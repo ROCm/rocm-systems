@@ -339,6 +339,52 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
         self.assert_regex(result, pass_regex=pass_regex)
         self.assert_file_exists(result.output_dir / "instrumentation" / "user.log")
 
+    @pytest.mark.timeout(60)
+    def test_exe_only(self):
+        """Test --exe-only excludes shared libraries from instrumentation."""
+        ls_name, ls_args = get_ls_command()
+
+        pass_regex = [r"\[filter\] skipping shared lib '.*' \(--exe-only\)"]
+
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=[
+                "--simulate",
+                "--exe-only",
+                "--",
+                ls_name,
+                *ls_args,
+            ],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=pass_regex)
+
+    @pytest.mark.timeout(60)
+    def test_max_library_functions(self):
+        """Test --max-library-functions skips shared libs exceeding the threshold."""
+        ls_name, ls_args = get_ls_command()
+
+        pass_regex = [
+            r"\[filter\] skipping shared lib '.*' "
+            r"\(\d+ functions > --max-library-functions=10\)"
+        ]
+
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=[
+                "--simulate",
+                "--max-library-functions",
+                "10",
+                "--",
+                ls_name,
+                *ls_args,
+            ],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=pass_regex)
+
 
 # ============================================================================
 # rocprof-sys-avail tests

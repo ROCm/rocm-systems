@@ -16,6 +16,10 @@ option(UNIT_TESTS "Build unit tests" ON)
 option(BUILD_INTEGRATION_TESTS "Build integration tests" ON)
 option(DISABLE_COMGR "Disable dependency on disassembly" OFF)
 
+if(NOT DEFINED TTD_PROJECT_SOURCE_DIR)
+    set(TTD_PROJECT_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
+endif()
+
 # Allow parent CMakeLists.txt to disable unit tests via BUILD_UNIT_TESTS
 if(DEFINED BUILD_UNIT_TESTS AND NOT BUILD_UNIT_TESTS)
     set(UNIT_TESTS OFF)
@@ -40,9 +44,42 @@ if(UNIT_TESTS)
     add_subdirectory(unit)
 endif()
 
+if(BUILD_MARKERS)
+    if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR AND NOT TARGET SQTTInstrumentPass)
+        add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../markers ${CMAKE_CURRENT_BINARY_DIR}/markers)
+    endif()
+
+    find_program(
+        HIPCC_EXECUTABLE
+        NAMES hipcc
+        HINTS /opt/rocm/bin)
+    if(HIPCC_EXECUTABLE AND TARGET SQTTInstrumentPass)
+        add_test(NAME markers-python COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/markers/run_tests.py)
+        set_tests_properties(
+            markers-python
+            PROPERTIES
+                TIMEOUT
+                300
+                LABELS
+                "markers;integration-tests"
+                WORKING_DIRECTORY
+                ${TTD_PROJECT_SOURCE_DIR}
+                ENVIRONMENT
+                "HIPCC=${HIPCC_EXECUTABLE};SQTT_BUILD_DIR=${CMAKE_BINARY_DIR};SQTT_PASS_PLUGIN=$<TARGET_FILE:SQTTInstrumentPass>"
+        )
+    elseif(NOT TARGET SQTTInstrumentPass)
+        message(WARNING "SQTTInstrumentPass target not found; skipping SQTT marker Python tests")
+    else()
+        message(WARNING "hipcc not found; skipping SQTT marker Python tests")
+    endif()
+endif()
+
 if(BUILD_INTEGRATION_TESTS)
     set(Python3_FIND_UNVERSIONED_NAMES LAST)
-    find_package(Python3 3.8 COMPONENTS Interpreter REQUIRED)
+    find_package(
+        Python3 3.8
+        COMPONENTS Interpreter
+        REQUIRED)
     execute_process(
         COMMAND ${Python3_EXECUTABLE} -c "import elftools"
         RESULT_VARIABLE PYELFTOOLS_IMPORT_RESULT
@@ -77,6 +114,8 @@ if(BUILD_INTEGRATION_TESTS)
     set(CSV_PY ${CMAKE_CURRENT_SOURCE_DIR}/csv_test.py)
     set(ATT_TOOL_PY ${CMAKE_CURRENT_SOURCE_DIR}/../python/att_tool.py)
     set(PYTHON_API_PY ${CMAKE_CURRENT_SOURCE_DIR}/python_api_test.py)
+    set(CODEGEN_TEST_PY ${CMAKE_CURRENT_SOURCE_DIR}/codegen_test.py)
+    set(ATT_TOOL_TEST_PY ${CMAKE_CURRENT_SOURCE_DIR}/att_tool_test.py)
 
     set(LIB_PATH ${CMAKE_BINARY_DIR}/lib/librocprof-trace-decoder${CMAKE_SHARED_LIBRARY_SUFFIX})
     set(SANITIZED_LIB_PATH ${CMAKE_BINARY_DIR}/lib/librocprof-trace-decoder-sanitized${CMAKE_SHARED_LIBRARY_SUFFIX})
@@ -88,19 +127,16 @@ if(BUILD_INTEGRATION_TESTS)
     list(JOIN PYTHON_API_DEP_LIBRARY_PATH ":" PYTHON_API_DEP_LIBRARY_PATH)
     set(PYTHON_API_LD_LIBRARY_PATH "${CMAKE_BINARY_DIR}/lib")
     if(PYTHON_API_DEP_LIBRARY_PATH)
-        set(PYTHON_API_LD_LIBRARY_PATH
-            "${PYTHON_API_LD_LIBRARY_PATH}:${PYTHON_API_DEP_LIBRARY_PATH}")
+        set(PYTHON_API_LD_LIBRARY_PATH "${PYTHON_API_LD_LIBRARY_PATH}:${PYTHON_API_DEP_LIBRARY_PATH}")
     endif()
 
     add_test(NAME csv-launch COMMAND ${Python3_EXECUTABLE} ${CSV_PY} --lib ${LIB_PATH})
     set_tests_properties(csv-launch PROPERTIES TIMEOUT 30 LABELS "integration-tests" WORKING_DIRECTORY ${TEST_BIN_DIR})
 
-    add_test(NAME python-api-launch COMMAND ${Python3_EXECUTABLE} ${PYTHON_API_PY} --lib
-                                             ${LIB_PATH})
+    add_test(NAME python-api-launch COMMAND ${Python3_EXECUTABLE} ${PYTHON_API_PY} --lib ${LIB_PATH})
     set(PYTHON_API_TEST_ENV
         "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python"
-        "LD_LIBRARY_PATH=${PYTHON_API_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
-        "ROCM_PATH=${CMAKE_INSTALL_PREFIX}")
+        "LD_LIBRARY_PATH=${PYTHON_API_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}" "ROCM_PATH=${CMAKE_INSTALL_PREFIX}")
     set_tests_properties(
         python-api-launch
         PROPERTIES TIMEOUT
@@ -112,25 +148,24 @@ if(BUILD_INTEGRATION_TESTS)
                    ENVIRONMENT
                    "${PYTHON_API_TEST_ENV}")
 
+    add_test(NAME codegen-funcmap-metadata COMMAND ${Python3_EXECUTABLE} ${CODEGEN_TEST_PY})
+    set_tests_properties(codegen-funcmap-metadata PROPERTIES TIMEOUT 30 LABELS "integration-tests" ENVIRONMENT
+                                                             "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
+
+    add_test(NAME att-marker-clock-correction COMMAND ${Python3_EXECUTABLE} ${ATT_TOOL_TEST_PY})
+    set_tests_properties(att-marker-clock-correction PROPERTIES TIMEOUT 30 LABELS "integration-tests" ENVIRONMENT
+                                                                "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
+
     if(DEFINED ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR)
         configure_file(python_api_install_test.cmake.in python_api_install_test.cmake @ONLY)
-        add_test(
-            NAME python-api-install
-            COMMAND ${CMAKE_COMMAND} -P
-                    ${CMAKE_CURRENT_BINARY_DIR}/python_api_install_test.cmake)
-        set_tests_properties(
-            python-api-install
-            PROPERTIES TIMEOUT
-                       300
-                       LABELS
-                       "integration-tests"
-                       DEPENDS
-                       python-api-launch)
+        add_test(NAME python-api-install COMMAND ${CMAKE_COMMAND} -P
+                                                 ${CMAKE_CURRENT_BINARY_DIR}/python_api_install_test.cmake)
+        set_tests_properties(python-api-install PROPERTIES TIMEOUT 300 LABELS "integration-tests" DEPENDS
+                                                           python-api-launch)
     endif()
 
     add_test(NAME att-launch COMMAND ${Python3_EXECUTABLE} ${ATT_TOOL_PY} --help)
-    set_tests_properties(att-launch PROPERTIES TIMEOUT 30 LABELS "integration-tests" WORKING_DIRECTORY
-                                               ${TEST_BIN_DIR})
+    set_tests_properties(att-launch PROPERTIES TIMEOUT 30 LABELS "integration-tests" WORKING_DIRECTORY ${TEST_BIN_DIR})
 
     add_test(NAME decompress COMMAND ${TEST_BIN_DIR}/unpack.sh)
     set_tests_properties(
@@ -203,9 +238,8 @@ if(BUILD_INTEGRATION_TESTS)
         endif()
 
         if(NOT USES_VCMPX)
-            add_test(NAME ${DATA}_execute
-                     COMMAND ${Python3_EXECUTABLE} ${ATT_TOOL_PY} --lib ${LIB_PATH} --base-name 1_results
-                             ${TEST_BIN_DIR}/${DATA})
+            add_test(NAME ${DATA}_execute COMMAND ${Python3_EXECUTABLE} ${ATT_TOOL_PY} --lib ${LIB_PATH} --base-name
+                                                  1_results ${TEST_BIN_DIR}/${DATA})
             set_tests_properties(
                 ${DATA}_execute
                 PROPERTIES TIMEOUT

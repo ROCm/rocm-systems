@@ -146,13 +146,9 @@ STrapSopp::STrapSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
-  flags_ |= PROGRAM_TERMINATOR;
 }
 
-void STrapSopp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void STrapSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_trap_sopp(*this, wf); }
 
 SRoundModeSopp::SRoundModeSopp(const MachineInst *inst)
     : Sopp("s_round_mode", reinterpret_cast<const OpEncoding *>(inst),
