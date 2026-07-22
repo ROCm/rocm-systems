@@ -1242,6 +1242,23 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(trials[0], {"RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": "0"})
         self.assertEqual(trials[-1], {"RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": "31"})
 
+    def test_checked_in_gfx1201_native_record_replay_fault_is_runnable(self) -> None:
+        path = Path(__file__).with_name(
+            "consan_validation_faults_gfx1201_native_record_replay.json"
+        )
+        workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
+        fault = validation._load_fault(
+            path, "gfx1201", workload, "barrier-drop"
+        )
+        policy, trials = validation._fault_trials(fault, "record-replay")
+        self.assertEqual(policy["detector"], "detected")
+        self.assertEqual(policy["oracle"], "any")
+        self.assertEqual(trials, [{}])
+        self.assertIn(
+            "pc=0x000000000000b8cc",
+            fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
