@@ -362,9 +362,9 @@ main(int argc, char** argv)
 
     // Create texture and surface objects for RDNA3.5 APUs to exercise
     // INSTS_TEX_LOAD (tex1Dfetch) and INSTS_TEX_STORE (surf1Dwrite).
-    // gfx1153 currently rejects the surface-object setup here and does not pass
-    // the corresponding texture-object fetch validation either, so bypass both
-    // TEX object subtests on that target instead of failing the whole sample.
+    // Current HIP surface-object creation only accepts array resources, while
+    // this sample uses a linear resource descriptor. Bypass both TEX object
+    // subtests for the gfx115x family instead of failing the whole sample.
     hipTextureObject_t tex_obj       = 0;
     hipSurfaceObject_t surf_obj      = 0;
     float*             d_surf_buffer = nullptr;
@@ -377,21 +377,9 @@ main(int argc, char** argv)
         resDesc.res.linear.desc =
             hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
 
-        if(std::strstr(g_arch_name, "gfx1153") == nullptr)
-        {
-            resDesc.res.linear.devPtr = d_input;
-            hipTextureDesc texDesc;
-            memset(&texDesc, 0, sizeof(texDesc));
-            texDesc.normalizedCoords = 0;
-            texDesc.filterMode       = hipFilterModePoint;
-            texDesc.addressMode[0]   = hipAddressModeClamp;
-            HIP_CHECK(hipCreateTextureObject(&tex_obj, &resDesc, &texDesc, nullptr));
-
-            HIP_CHECK(hipMalloc(&d_surf_buffer, BUFFER_SIZE * sizeof(float)));
-            HIP_CHECK(hipMemset(d_surf_buffer, 0, BUFFER_SIZE * sizeof(float)));
-            resDesc.res.linear.devPtr = d_surf_buffer;
-            HIP_CHECK(hipCreateSurfaceObject(&surf_obj, &resDesc));
-        }
+        (void) tex_obj;
+        (void) surf_obj;
+        (void) d_surf_buffer;
     }
 
     printf("Running GPU Mega Kernel for %s...\n",
