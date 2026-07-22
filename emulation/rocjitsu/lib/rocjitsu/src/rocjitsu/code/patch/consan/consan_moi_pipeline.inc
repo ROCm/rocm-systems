@@ -209,8 +209,11 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     };
     for (size_t host_index = result.patches.size(); host_index-- > 0u;) {
       const ConSanPatchInfo &host = result.patches[host_index];
+      // A relocatable dense host preserves at least one entry word before the
+      // local indirect island. Compact eight-word islands are not dispatchers.
       if (host.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland ||
-          host.original_size != 8u * sizeof(uint32_t) || !owns_descriptor(host) ||
+          host.original_size < (kMoiLocalIndirectIslandWords + 1u) * sizeof(uint32_t) ||
+          !owns_descriptor(host) ||
           host_index + 1u >= result.patches.size())
         continue;
       const ConSanPatchInfo &dispatcher = result.patches[host_index + 1u];
