@@ -991,6 +991,59 @@ TEST(ConSanMoi, Cdna4RecordReplayNormalizesTransposeAndTwoAddressLdsRanges) {
   check(0xD89E0400u, 0x0006080Bu, "ds_write2st64_b64", {0u, 2048u});
 }
 
+TEST(ConSanMoi, Cdna4RecordReplayRecordsDispatchIdentity) {
+  const auto guest = build_cdna4_ds_store_b32(
+      /*vaddr=*/2, /*vdata=*/3, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(guest);
+  std::vector<uint32_t> text_words(320, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  std::copy(guest->begin(), guest->end(), text_words.begin());
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_init_owner_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8, 0, 0, 0, 8);
+
+  const ConSanResult result = try_patch_consan(
+      make_cdna4_lds_code_object(text_words, "record_replay_dispatch_identity"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
+  const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+           patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
+  });
+  ASSERT_NE(access, result.patches.end());
+  ASSERT_TRUE(access->scratch_vgpr);
+
+  const std::vector<uint32_t> access_words =
+      access->kind == ConSanPatchKind::InlineMoiAccessRecordStore
+          ? patched_words_at_file_offset(result, 0x100 + access->anchor_offset,
+                                         access->original_size)
+          : text_words_at_offset(AmdGpuCodeObject(result.elf_bytes.data(), result.elf_bytes.size()),
+                                 access->trampoline_offset, access->trampoline_size);
+  const auto expected_dispatch_store = [&](uint32_t byte_offset, uint16_t scalar_src) {
+    const uint16_t value_vgpr = static_cast<uint16_t>(*access->scratch_vgpr + 2u);
+    std::vector<uint32_t> words = {
+        build_v_mov_b32_e32(value_vgpr, scalar_src, ROCJITSU_CODE_ARCH_CDNA4)};
+    const auto store =
+        build_cdna4_flat_store_b32(*access->scratch_vgpr, value_vgpr,
+                                   static_cast<uint16_t>(byte_offset), ROCJITSU_CODE_ARCH_CDNA4);
+    EXPECT_TRUE(store);
+    if (store)
+      words.insert(words.end(), store->begin(), store->end());
+    return words;
+  };
+  EXPECT_TRUE(contains_subsequence(
+      access_words, expected_dispatch_store(offsetof(ConSanMoiAccessRecord, generation),
+                                            *result.resolved_moi_dispatch_id_sgpr)));
+  EXPECT_TRUE(contains_subsequence(
+      access_words,
+      expected_dispatch_store(offsetof(ConSanMoiAccessRecord, generation) + sizeof(uint32_t),
+                              static_cast<uint16_t>(*result.resolved_moi_dispatch_id_sgpr + 1u))));
+}
+
 TEST(ConSanMoi, Cdna4FirstLightProbeDescriptorGrowthUsesEightVgprGranules) {
   const auto guest = build_cdna4_ds_store_b32(
       /*vaddr=*/6, /*vdata=*/7, /*byte_offset=*/4, ROCJITSU_CODE_ARCH_CDNA4);
@@ -1064,10 +1117,19 @@ TEST(ConSanMoi, Cdna4FirstLightTransientSgprsAvoidOldAndGrownPhysicalVcc) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
-  // s36:s40 avoids the original VCC pair. Growing to 48 SGPRs moves VCC to
-  // s42:s43, so the complete five-register window also remains ordinary.
-  EXPECT_EQ(*result.resolved_moi_exec_save_sgpr, 36u);
+  const uint16_t dispatch_id = *result.resolved_moi_dispatch_id_sgpr;
+  const uint16_t exec_save = *result.resolved_moi_exec_save_sgpr;
+  const auto overlaps = [](uint16_t lhs_base, uint16_t lhs_width, uint16_t rhs_base,
+                           uint16_t rhs_width) {
+    return lhs_base < static_cast<uint32_t>(rhs_base) + rhs_width &&
+           rhs_base < static_cast<uint32_t>(lhs_base) + lhs_width;
+  };
+  constexpr uint16_t kOriginalVcc = 34u;
+  EXPECT_FALSE(overlaps(dispatch_id, 2u, kOriginalVcc, 2u));
+  EXPECT_FALSE(overlaps(exec_save, 5u, kOriginalVcc, 2u));
+  EXPECT_FALSE(overlaps(dispatch_id, 2u, exec_save, 5u));
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.kernels().size(), 1u);
@@ -1075,9 +1137,17 @@ TEST(ConSanMoi, Cdna4FirstLightTransientSgprsAvoidOldAndGrownPhysicalVcc) {
   std::memcpy(&descriptor,
               result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(descriptor));
-  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
-                            kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT),
-            5u);
+  const uint16_t allocated_sgprs = static_cast<uint16_t>(
+      (AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
+                       kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT) +
+       1u) *
+      8u);
+  ASSERT_GE(allocated_sgprs, 6u);
+  const uint16_t grown_vcc = static_cast<uint16_t>(allocated_sgprs - 6u);
+  EXPECT_GE(allocated_sgprs, static_cast<uint16_t>(dispatch_id + 2u));
+  EXPECT_GE(allocated_sgprs, static_cast<uint16_t>(exec_save + 5u));
+  EXPECT_FALSE(overlaps(dispatch_id, 2u, grown_vcc, 2u));
+  EXPECT_FALSE(overlaps(exec_save, 5u, grown_vcc, 2u));
 }
 
 TEST(ConSanMoi, Cdna4FirstLightProbeForcedSpillUsesNativePrivateWindow) {
