@@ -136,6 +136,7 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
   AMDSmiGPUDevice(uint32_t gpu_id, AMDSmiDrm& drm);
   ~AMDSmiGPUDevice();
 
+  virtual bool is_wsl_device() const { return false; }
   amdsmi_status_t get_drm_data();
   pthread_mutex_t* get_mutex();
   uint32_t get_gpu_id() const;

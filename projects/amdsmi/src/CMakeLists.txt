@@ -55,10 +55,9 @@ set(SRC_LIST
     "${NIC_SOURCES}"
 )
 
-# WSL/WDDM backend source is compiled only when the feature is enabled. Native
-# builds never see it, so the default library is unchanged.
 if(ENABLE_WSL_BACKEND)
-    set(SRC_LIST ${SRC_LIST} "${SRC_DIR}/amd_smi_wsl_backend.cc")
+    list(APPEND SRC_LIST "${SRC_DIR}/amd_smi_wsl_backend.cc")
+    list(APPEND SRC_LIST "${SRC_DIR}/amd_smi_wsl_device.cc")
 endif()
 
 # CONFIGURE_DEPENDS re-evaluates the glob at build time so adding or removing an
@@ -145,6 +144,15 @@ foreach(_TARGET IN LISTS _AMD_SMI_ALL_TARGETS)
         ${_TARGET}
         PRIVATE rt Threads::Threads ${CMAKE_DL_LIBS} amdsminic ${FILESYSTEM_LIB} ${UALOE_LINK_LIBRARIES}
     )
+
+    if(ENABLE_WSL_BACKEND)
+        target_compile_definitions(${_TARGET} PRIVATE ENABLE_WSL_BACKEND AMDSMI_ENABLE_WSL_BACKEND)
+        target_include_directories(
+            ${_TARGET}
+            PRIVATE
+                ${PROJECT_SOURCE_DIR}/../rocr-runtime/libhsakmt/include
+        )
+    endif()
 
     target_include_directories(
         ${_TARGET}
@@ -244,10 +252,9 @@ install(
 # error. Build them, but keep them out of the installed dev headers.
 set(INSTALL_IMPL_HEADERS ${IMPL_HEADERS})
 list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "_test")
-# The WSL backend header is build-only: it includes the generated
-# config/amd_smi_config.h and declares an internal class that is not part of the
-# public dev surface, so keep it out of the installed headers.
 list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_wsl_backend")
+list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_wsl_device")
+list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_wsl_syms")
 install(FILES ${INSTALL_IMPL_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/ COMPONENT dev)
 
 install(FILES ${NIC_INCLUDES} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/ COMPONENT dev)

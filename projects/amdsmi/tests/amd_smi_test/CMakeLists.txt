@@ -53,6 +53,9 @@ message("")
 
 # Other source directories
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/functional functionalSources)
+# WSL-only test that calls rocdxg_smi_* directly requires librocdxg at link time.
+# Exclude it from the main test binary; it will be linked separately when rocdxg is found.
+list(REMOVE_ITEM functionalSources "${CMAKE_CURRENT_SOURCE_DIR}/functional/wsl_smi_test.cc")
 
 set(TEST "amdsmitst")
 
@@ -65,6 +68,14 @@ include_directories(${TEST} ${CMAKE_CURRENT_SOURCE_DIR}/.. ${ROCM_INC_DIR}/..)
 add_executable(${TEST} ${tstSources} ${functionalSources})
 # Absolute path to the committed mock CPER fixtures (functional/mock_values).
 target_compile_definitions(${TEST} PRIVATE AMDSMI_TEST_MOCK_DIR="${CMAKE_CURRENT_SOURCE_DIR}/functional/mock_values")
+if(ENABLE_WSL_BACKEND)
+    target_compile_definitions(${TEST} PRIVATE ENABLE_WSL_BACKEND)
+    target_include_directories(${TEST} PRIVATE ${PROJECT_SOURCE_DIR}/../rocr-runtime/libhsakmt/include)
+    find_library(ROCDXG_LIB rocdxg)
+    if(ROCDXG_LIB)
+        target_link_libraries(${TEST} ${ROCDXG_LIB})
+    endif()
+endif()
 target_link_libraries(
     ${TEST}
     ${AMD_SMI_TARGET}
