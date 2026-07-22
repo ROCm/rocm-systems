@@ -39,8 +39,8 @@ using namespace rocshmem;
  * Bypass the rocSHMEM API and use anvil directly on the SDMA queue.
  *
  * op_type selects the signaling method:
- *   0,1 — anvil::put (no quiet), spin on data value (matches pingpong -o 1)
- *   2   — anvil::put + quiet + GPU shader atomic (separate signal)
+ *   0,1 — sdma_anvil::put (no quiet), spin on data value (matches pingpong -o 1)
+ *   2   — sdma_anvil::put + quiet + GPU shader atomic (separate signal)
  *
  * Only thread 0 is active (single-producer handle).
  *****************************************************************************/
@@ -64,7 +64,7 @@ __global__ void SdmaPingPongTest(int loop, int skip,
     int target_local_pe{-1};
     base_ctx->ipcImpl_.isIpcAvailable(pe, target, &target_local_pe);
 
-    anvil::SdmaQueueDeviceHandle *handle =
+    sdma_anvil::SdmaQueueDeviceHandle *handle =
         sdma.deviceHandles_d[target_local_pe * sdma.numChannels + 0];
 
     int wg_id = hipBlockIdx_x;
@@ -95,26 +95,26 @@ __global__ void SdmaPingPongTest(int loop, int skip,
         if (pe == 0) {
           *s_int = val;
           __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
-          anvil::put(*handle, remote_r_buf, my_s, sizeof(int));
+          sdma_anvil::put(*handle, remote_r_buf, my_s, sizeof(int));
           while (uncached_load(r_int) != val) {}
         } else {
           while (uncached_load(r_int) != val) {}
           *s_int = val;
           __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
-          anvil::put(*handle, remote_r_buf, my_s, sizeof(int));
+          sdma_anvil::put(*handle, remote_r_buf, my_s, sizeof(int));
         }
       } else {
         uint64_t expected = static_cast<uint64_t>(i + 1);
         if (pe == 0) {
-          anvil::put(*handle, remote_r_buf, my_s, size);
-          anvil::quiet(*handle);
+          sdma_anvil::put(*handle, remote_r_buf, my_s, size);
+          sdma_anvil::quiet(*handle);
           __hip_atomic_fetch_add(remote_sig, 1ULL, __ATOMIC_RELAXED,
                                  __HIP_MEMORY_SCOPE_SYSTEM);
-          anvil::waitSignal(my_sig, expected);
+          sdma_anvil::waitSignal(my_sig, expected);
         } else {
-          anvil::waitSignal(my_sig, expected);
-          anvil::put(*handle, remote_r_buf, my_s, size);
-          anvil::quiet(*handle);
+          sdma_anvil::waitSignal(my_sig, expected);
+          sdma_anvil::put(*handle, remote_r_buf, my_s, size);
+          sdma_anvil::quiet(*handle);
           __hip_atomic_fetch_add(remote_sig, 1ULL, __ATOMIC_RELAXED,
                                  __HIP_MEMORY_SCOPE_SYSTEM);
         }
@@ -122,7 +122,7 @@ __global__ void SdmaPingPongTest(int loop, int skip,
     }
     end_time[wg_id] = wall_clock64();
 
-    anvil::quiet(*handle);
+    sdma_anvil::quiet(*handle);
   }
 
   rocshmem_wg_ctx_destroy(&ctx);

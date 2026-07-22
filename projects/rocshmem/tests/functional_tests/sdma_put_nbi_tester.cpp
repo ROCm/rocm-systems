@@ -36,7 +36,7 @@ using namespace rocshmem;
  * DEVICE TEST KERNEL
  *
  * One-way non-blocking put using anvil directly on the SDMA queue.
- * Pipelines multiple anvil::put calls and quiets only at batch boundaries.
+ * Pipelines multiple sdma_anvil::put calls and quiets only at batch boundaries.
  *****************************************************************************/
 __global__ void SdmaPutNbiTest(int loop, int skip,
                                long long int *start_time,
@@ -56,7 +56,7 @@ __global__ void SdmaPutNbiTest(int loop, int skip,
     int target_local_pe{-1};
     base_ctx->ipcImpl_.isIpcAvailable(pe, target, &target_local_pe);
 
-    anvil::SdmaQueueDeviceHandle *handle =
+    sdma_anvil::SdmaQueueDeviceHandle *handle =
         sdma.deviceHandles_d[target_local_pe * sdma.numChannels + 0];
 
     char *my_base = base_ctx->ipcImpl_.ipc_bases[pe];
@@ -69,7 +69,7 @@ __global__ void SdmaPutNbiTest(int loop, int skip,
       int slot = (start_slot + i) % batch;
 
       if (slot == 0) {
-        anvil::quiet(*handle);
+        sdma_anvil::quiet(*handle);
         if (i == skip) {
           start_time[wg_id] = wall_clock64();
         }
@@ -78,10 +78,10 @@ __global__ void SdmaPutNbiTest(int loop, int skip,
       uint64_t d_offset = (dest + size * slot) - my_base;
       void *remote_dest = remote_base + d_offset;
 
-      anvil::put(*handle, remote_dest, source, size);
+      sdma_anvil::put(*handle, remote_dest, source, size);
     }
 
-    anvil::quiet(*handle);
+    sdma_anvil::quiet(*handle);
     end_time[wg_id] = wall_clock64();
   }
 
