@@ -21,8 +21,8 @@ session::shutdown()
         m_subscribers.clear();
     }
     {
-        const std::scoped_lock lk{ m_votes_mutex };
-        m_votes.clear();
+        const std::scoped_lock lk{ m_actions_mutex };
+        m_actions.clear();
         m_active.store(true, std::memory_order_relaxed);
     }
 }
@@ -34,19 +34,42 @@ session::subscribe(subscriber sub)
     m_subscribers.push_back(std::move(sub));
 }
 
-void
+trigger::action_setter
 session::register_trigger(const trigger& trig)
 {
-    const std::scoped_lock lk{ m_votes_mutex };
-    m_votes[std::string{ trig.name() }] = trig.initial_vote();
-    m_active.store(resolve_locked(), std::memory_order_relaxed);
+    std::string name{ trig.name() };
+    {
+        const std::scoped_lock lk{ m_actions_mutex };
+        m_actions[name] = trig.initial_action();
+        m_active.store(resolve_locked(), std::memory_order_relaxed);
+    }
+
+    return [this, name](action new_action) {
+        const std::scoped_lock notify_lk{ m_notify_mutex };
+
+        bool was_active = false;
+        bool now_active = false;
+        {
+            const std::scoped_lock lk{ m_actions_mutex };
+            was_active      = m_active.load(std::memory_order_relaxed);
+            m_actions[name] = new_action;
+            now_active      = resolve_locked();
+            m_active.store(now_active, std::memory_order_relaxed);
+        }
+
+        if(was_active == now_active) return;
+        if(now_active)
+            notify_resume();
+        else
+            notify_pause();
+    };
 }
 
 void
 session::unregister_trigger(const trigger& trig)
 {
-    const std::scoped_lock lk{ m_votes_mutex };
-    m_votes.erase(std::string{ trig.name() });
+    const std::scoped_lock lk{ m_actions_mutex };
+    m_actions.erase(std::string{ trig.name() });
     m_active.store(resolve_locked(), std::memory_order_relaxed);
 }
 
@@ -57,40 +80,13 @@ session::force_initial_pause()
     notify_pause();
 }
 
-void
-session::publish_vote(const trigger& trig, vote new_vote)
-{
-    // Serializes compute-then-notify across concurrent publish_vote() callers
-    // so subscribers observe transitions in the same order they were
-    // computed. Deliberately a separate mutex from m_votes_mutex (released
-    // below, before notify_pause()/notify_resume() run) so a subscriber
-    // callback that re-enters is_active() cannot deadlock.
-    const std::scoped_lock notify_lk{ m_notify_mutex };
-
-    bool was_active = false;
-    bool now_active = false;
-    {
-        const std::scoped_lock lk{ m_votes_mutex };
-        was_active                          = m_active.load(std::memory_order_relaxed);
-        m_votes[std::string{ trig.name() }] = new_vote;
-        now_active                          = resolve_locked();
-        m_active.store(now_active, std::memory_order_relaxed);
-    }
-
-    if(was_active == now_active) return;
-    if(now_active)
-        notify_resume();
-    else
-        notify_pause();
-}
-
-// Any paused vote pauses the session. Abstain is ignored.
-// With no votes the session is active by default.
+// Any pause action pauses the session. Skip is ignored.
+// With no actions the session is active by default.
 bool
 session::resolve_locked() const noexcept
 {
-    return std::none_of(m_votes.begin(), m_votes.end(),
-                         [](const auto& entry) { return entry.second == vote::paused; });
+    return std::none_of(m_actions.begin(), m_actions.end(),
+                        [](const auto& entry) { return entry.second == action::pause; });
 }
 
 void
