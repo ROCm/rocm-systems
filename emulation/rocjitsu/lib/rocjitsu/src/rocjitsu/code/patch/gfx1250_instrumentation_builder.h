@@ -15,6 +15,18 @@ namespace rocjitsu {
 // both the semantic null selector and the encoding accepted by LLVM/RocJITsu.
 inline constexpr uint8_t kGfx1250FlatNoSaddrEncoding = static_cast<uint8_t>(gfx1250::OPR_SREG_NULL);
 
+/// @brief Encode gfx1250 `s_wait_xcnt 0`.
+///
+/// This explicit address-translation drain is useful at spill boundaries
+/// before instrumentation reuses registers consumed by preceding scratch
+/// stores.
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+build_gfx1250_s_wait_xcnt0(rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_GFX1250)
+    return std::nullopt;
+  return pack_sopp(gfx1250::kSWaitXcntSopp, 0u);
+}
+
 /// @brief Encode gfx1250 `s_set_vgpr_msb simm16`.
 ///
 /// Instrumentation uses this to select the low 256-register window while it

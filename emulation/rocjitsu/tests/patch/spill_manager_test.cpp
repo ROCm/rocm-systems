@@ -8,6 +8,7 @@
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/patch/cdna4_instrumentation_builder.h"
+#include "rocjitsu/code/patch/gfx1250_instrumentation_builder.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/patch/rdna4_instrumentation_builder.h"
 #include "rocjitsu/isa/decoder.h"
@@ -618,13 +619,14 @@ TEST(SpillManager, BuildsGfx1250VgprSaveRestoreSequence) {
   EXPECT_EQ(sequence->slot_offsets, (std::vector<uint32_t>{0, 4, 8}));
   EXPECT_EQ(sequence->total_private_bytes, 12u);
   EXPECT_EQ(manager.total_private_bytes(), 12u);
-  ASSERT_EQ(sequence->save_words.size(), 11u);
+  ASSERT_EQ(sequence->save_words.size(), 12u);
   ASSERT_EQ(sequence->restore_words.size(), 10u);
   EXPECT_EQ(sequence->save_words[0], 0xbfc00000u);
   EXPECT_EQ(sequence->save_words[1], 0xed06807cu);
   EXPECT_EQ(sequence->save_words[2], 10u << 23u);
   EXPECT_EQ(sequence->save_words[3], 0u);
   EXPECT_EQ(sequence->save_words[10], 0xbfc10000u);
+  EXPECT_EQ(sequence->save_words[11], *build_gfx1250_s_wait_xcnt0(ROCJITSU_CODE_ARCH_GFX1250));
   EXPECT_EQ(sequence->restore_words[0], 0xed05007cu);
   EXPECT_EQ(sequence->restore_words[1], 10u);
   EXPECT_EQ(sequence->restore_words[2], 0u);

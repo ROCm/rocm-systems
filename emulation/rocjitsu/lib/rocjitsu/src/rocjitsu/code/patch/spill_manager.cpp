@@ -5,6 +5,7 @@
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/patch/cdna4_instrumentation_builder.h"
+#include "rocjitsu/code/patch/gfx1250_instrumentation_builder.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/patch/rdna4_instrumentation_builder.h"
 #include "util/bit.h"
@@ -147,7 +148,8 @@ std::optional<VgprSpillSequence> build_vgpr_spill_sequence(SpillManager &manager
                                                            : build_s_wait_storecnt0(arch);
   const auto wait_load = arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
                                                           : build_s_wait_loadcnt0(arch);
-  if (!wait_store || !wait_load)
+  const auto wait_translation = build_gfx1250_s_wait_xcnt0(arch);
+  if (!wait_store || !wait_load || (arch == ROCJITSU_CODE_ARCH_GFX1250 && !wait_translation))
     return std::nullopt;
 
   VgprSpillSequence sequence;
@@ -186,6 +188,8 @@ std::optional<VgprSpillSequence> build_vgpr_spill_sequence(SpillManager &manager
     }
   }
   sequence.save_words.push_back(*wait_store);
+  if (wait_translation)
+    sequence.save_words.push_back(*wait_translation);
   sequence.restore_words.push_back(*wait_load);
   sequence.total_private_bytes = *required_private_bytes;
   manager = std::move(planned_manager);
@@ -211,6 +215,7 @@ std::optional<VgprSpillSequence> build_dynamic_stack_vgpr_spill_sequence(
                                                            : build_s_wait_storecnt0(arch);
   const auto wait_load = arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
                                                           : build_s_wait_loadcnt0(arch);
+  const auto wait_translation = build_gfx1250_s_wait_xcnt0(arch);
   const auto capture_scc =
       arch == ROCJITSU_CODE_ARCH_CDNA4
           ? build_cdna4_s_cselect_b32(saved_scc_sgpr, scalar_positive_inline_u32(1),
@@ -226,7 +231,8 @@ std::optional<VgprSpillSequence> build_dynamic_stack_vgpr_spill_sequence(
       arch == ROCJITSU_CODE_ARCH_CDNA4
           ? build_cdna4_s_cmp_lg_u32(saved_scc_sgpr, scalar_positive_inline_u32(0), arch)
           : build_rdna4_s_cmp_lg_u32(saved_scc_sgpr, scalar_positive_inline_u32(0), arch);
-  if (!wait_store || !wait_load || !capture_scc || !advance_stack || !restore_scc)
+  if (!wait_store || !wait_load || (arch == ROCJITSU_CODE_ARCH_GFX1250 && !wait_translation) ||
+      !capture_scc || !advance_stack || !restore_scc)
     return std::nullopt;
 
   VgprSpillSequence sequence;
@@ -261,6 +267,8 @@ std::optional<VgprSpillSequence> build_dynamic_stack_vgpr_spill_sequence(
     }
   }
   sequence.save_words.push_back(*wait_store);
+  if (wait_translation)
+    sequence.save_words.push_back(*wait_translation);
   sequence.save_words.push_back(*advance_stack);
   sequence.save_words.push_back(frame_bytes);
   sequence.save_words.push_back(*restore_scc);
