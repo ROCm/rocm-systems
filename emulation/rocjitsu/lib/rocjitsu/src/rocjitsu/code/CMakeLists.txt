@@ -6,6 +6,7 @@ rj_add_object_library(rocjitsu_code
     basic_block.cpp
     executable.cpp
     file_io.cpp
+    kernel_descriptor_scan.cpp
     kernel_symbol.cpp
     relocation_function_table.cpp
     rj_code.cpp
