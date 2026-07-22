@@ -2043,6 +2043,48 @@ TEST(ConSanMoi, RecordReplayRejectsSpillRouterWithoutDeadPairAndScalars) {
             0u);
 }
 
+TEST(ConSanMoi, Rdna4SpillBackedTwoSiteDenseDispatcherIncludesSharedHostArm) {
+  constexpr uint32_t kAccessCount = 2u;
+  const std::array<uint16_t, 4> dead = {0u, 1u, 4u, 6u};
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/20u, /*ssrc0=*/20u, ROCJITSU_CODE_ARCH_RDNA4);
+  std::vector<uint32_t> words(8u, filler);
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    words.push_back(0xD8340000u | index * sizeof(uint32_t));
+    words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+  }
+  for (uint16_t sgpr = 0; sgpr < 106u; ++sgpr) {
+    if (std::ranges::find(dead, sgpr) == dead.end())
+      words.push_back(build_s_mov_b32(/*sdst=*/20u, sgpr, ROCJITSU_CODE_ARCH_RDNA4));
+  }
+  // Keep the two access anchors outside SOPP reach of the appended bodies,
+  // with no local NOP island, so they share the spill-backed dense host whose
+  // dispatcher exposed the missing terminator reservation.
+  words.resize(33'000u, filler);
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const ConSanResult result =
+      try_patch_consan(make_rdna4_lds_code_object(words, "rdna4_spill_dense_two"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  EXPECT_TRUE(result.resolved_moi_transient_sgpr_assignments.front().spill_backed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount);
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, RecordReplaySpillBackedDenseHostDoesNotConsumeNearbyBarrier) {
   constexpr uint32_t kAccessCount = 9u;
   const std::array<uint16_t, 6> dead = {0u, 1u, 4u, 6u, 8u, 9u};

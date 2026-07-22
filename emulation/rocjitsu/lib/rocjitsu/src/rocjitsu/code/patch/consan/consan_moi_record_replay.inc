@@ -75,12 +75,13 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   // A stranded RDNA4 access group can need a relocatable entry host in
   // addition to its per-access comparisons and branches. A singleton can need
   // an indirect compare/branch stub plus fixed key setup and termination.
-  // Ten words per access cover the observed small-group worst case without
-  // assuming that the seven-word indirect-jump island is also a sufficient
-  // dispatcher slot.
+  // A stranded singleton or two-site group amortizes a relocated-host arm,
+  // indirect dispatch targets, and the terminating s_endpgm over very few
+  // sites. Use the same conservative per-site envelope as the dense barrier
+  // router instead of relying on large-group amortization.
   const uint64_t access_relay_words = arch == ROCJITSU_CODE_ARCH_GFX1250
                                           ? 24u
-                                          : 10u + (has_spill_backed_scalar_assignment ? 1u : 0u);
+                                          : 20u + (has_spill_backed_scalar_assignment ? 1u : 0u);
   const bool has_unreachable_function_candidate =
       std::ranges::any_of(candidates, [&](const ConSanMoiCandidate *candidate) {
         return !candidate->in_kernel &&

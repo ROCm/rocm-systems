@@ -2234,6 +2234,9 @@ def _inventory(args: argparse.Namespace) -> int:
     aggregate_records = {"sites": set(), "sequences": set(), "destinations": set()}
     for family in _fault_families(target, workload):
         environment = _clean_environment("supercollider", workload, hook, target)
+        # Clean qualification uses compact level-1 summaries. Fault inventory
+        # explicitly requests level 2 because it consumes per-site identities.
+        environment["RJ_CONSAN_LOG"] = "2"
         environment["RJ_CONSAN_FAULT_DRY_RUN"] = "1"
         environment.update(_fault_inventory_environment(family))
         log_path = root / f"command-{family}.log"

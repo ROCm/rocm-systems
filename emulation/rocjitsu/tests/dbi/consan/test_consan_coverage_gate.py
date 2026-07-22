@@ -630,9 +630,6 @@ class ConSanCoverageGateTest(unittest.TestCase):
         cases = {
             "missing coverage": log(verdict()),
             "missing verdict": log(coverage()),
-            "missing site inventory": log(
-                coverage(), verdict(), synthesize_sites=False
-            ),
             "duplicate verdict": log(coverage(), verdict(), verdict()),
             "duplicate reader": log(coverage(), coverage(), verdict()),
             "zero load occurrence": log(coverage(load="0"), verdict()),
@@ -640,6 +637,13 @@ class ConSanCoverageGateTest(unittest.TestCase):
         for name, text in cases.items():
             with self.subTest(name=name), self.assertRaises(CoverageParseError):
                 parse_coverage_evidence(text)
+
+    def test_accepts_compact_moi_log_without_verbose_site_inventory(self) -> None:
+        evidence = parse_coverage_evidence(
+            log(coverage(), verdict(), synthesize_sites=False)
+        )
+        self.assertEqual(evidence.sites, ())
+        self.assertEqual(evidence.coverage[0].counts["access_patched"], 20)
 
     def test_allows_reused_reader_only_for_aggregate_supercollider_records(self) -> None:
         updates = {

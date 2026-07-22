@@ -1157,25 +1157,38 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     std::map<uint64_t, std::vector<size_t>> groups;
     for (size_t index : dense_fallback_indices)
       groups[*planned_candidates[index].candidate.kernel_descriptor_file_offset].push_back(index);
-    std::vector<std::pair<uint64_t, uint64_t>> claimed_hosts;
-    const auto overlaps_range = [](uint64_t begin, uint64_t end, uint64_t other_begin,
-                                   uint64_t other_size) {
-      return other_begin < end && other_begin + other_size > begin;
+    std::vector<std::pair<uint64_t, uint64_t>> occupied_ranges;
+    occupied_ranges.reserve(result.patches.size() + patches.size() + selected_candidates.size());
+    const auto append_occupied_range = [&](uint64_t begin, uint64_t size) {
+      if (size != 0u && begin <= std::numeric_limits<uint64_t>::max() - size)
+        occupied_ranges.emplace_back(begin, begin + size);
     };
+    for (const ConSanPatchInfo &patch : result.patches)
+      append_occupied_range(patch.anchor_offset, patch.original_size);
+    for (const ConSanPatchInfo &patch : patches)
+      append_occupied_range(patch.anchor_offset, patch.original_size);
+    for (const BarrierRecordCandidate &candidate : selected_candidates)
+      append_occupied_range(candidate.site.text_offset, candidate.site.size);
+    std::ranges::sort(occupied_ranges);
+    size_t merged_range_count = 0u;
+    for (const auto &range : occupied_ranges) {
+      if (merged_range_count != 0u &&
+          occupied_ranges[merged_range_count - 1u].second >= range.first) {
+        occupied_ranges[merged_range_count - 1u].second =
+            std::max(occupied_ranges[merged_range_count - 1u].second, range.second);
+      } else {
+        occupied_ranges[merged_range_count++] = range;
+      }
+    }
+    occupied_ranges.resize(merged_range_count);
+    std::map<uint64_t, uint64_t> claimed_hosts;
     const auto overlaps_existing = [&](uint64_t begin, uint64_t end) {
-      const auto patch_overlaps = [&](const ConSanPatchInfo &patch) {
-        return patch.original_size != 0u &&
-               overlaps_range(begin, end, patch.anchor_offset, patch.original_size);
-      };
-      if (std::ranges::any_of(result.patches, patch_overlaps) ||
-          std::ranges::any_of(patches, patch_overlaps) ||
-          std::ranges::any_of(claimed_hosts, [&](const auto &range) {
-            return range.first < end && range.second > begin;
-          }))
+      const auto occupied_after =
+          std::ranges::lower_bound(occupied_ranges, end, {}, &std::pair<uint64_t, uint64_t>::first);
+      if (occupied_after != occupied_ranges.begin() && std::prev(occupied_after)->second > begin)
         return true;
-      return std::ranges::any_of(selected_candidates, [&](const BarrierRecordCandidate &candidate) {
-        return overlaps_range(begin, end, candidate.site.text_offset, candidate.site.size);
-      });
+      const auto claimed_after = claimed_hosts.lower_bound(end);
+      return claimed_after != claimed_hosts.begin() && std::prev(claimed_after)->second > begin;
     };
 
     for (const auto &[descriptor_offset, indices] : groups) {
@@ -1239,13 +1252,18 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       std::vector<uint32_t> displaced_words;
       uint64_t best_max_distance = std::numeric_limits<uint64_t>::max();
       const uint64_t kernel_end = kernel->entry_text_offset + kernel->code_size;
-      for (const std::unique_ptr<BasicBlock> &block : blocks) {
-        if (block->start_offset() < kernel->entry_text_offset || block->end_offset() > kernel_end ||
-            block->size() < host_bytes)
+      auto block =
+          std::lower_bound(blocks.begin(), blocks.end(), kernel->entry_text_offset,
+                           [](const std::unique_ptr<BasicBlock> &candidate, uint64_t entry) {
+                             return candidate->end_offset() <= entry;
+                           });
+      for (; block != blocks.end() && (*block)->start_offset() < kernel_end; ++block) {
+        if ((*block)->start_offset() < kernel->entry_text_offset ||
+            (*block)->end_offset() > kernel_end || (*block)->size() < host_bytes)
           continue;
-        for (const Instruction &instruction : block->instructions()) {
+        for (const Instruction &instruction : (*block)->instructions()) {
           const uint64_t candidate_host = instruction.src_loc();
-          if (candidate_host + host_bytes > block->end_offset() ||
+          if (candidate_host + host_bytes > (*block)->end_offset() ||
               overlaps_existing(candidate_host, candidate_host + host_bytes))
             continue;
           const uint64_t relay_offset = candidate_host + sizeof(uint32_t);
@@ -1283,7 +1301,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             kernel->name);
         continue;
       }
-      claimed_hosts.emplace_back(*host_offset, *host_offset + host_bytes);
+      claimed_hosts.emplace(*host_offset, *host_offset + host_bytes);
 
       const uint64_t dispatcher_offset = new_text.size();
       const uint64_t dispatcher_reservation =

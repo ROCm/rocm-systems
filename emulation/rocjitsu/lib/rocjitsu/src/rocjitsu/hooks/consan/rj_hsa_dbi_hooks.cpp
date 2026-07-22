@@ -2649,7 +2649,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                                        code_object_reader.handle, "transform-error");
     }
     for (const std::string &warning : patch_result.warnings)
-      log_message(kLogInfo, "%s", warning.c_str());
+      log_message(kLogVerbose, "%s", warning.c_str());
     if (install_action == rocjitsu::ConSanInstallAction::Reject) {
       std::fprintf(stderr,
                    "[rocjitsu-dbi-hooks] ConSan outcome %s is not installable "
@@ -2721,7 +2721,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                 patch_result.fault_sites.size());
     for (const rocjitsu::ConSanFaultSite &site : patch_result.fault_sites) {
       const OwnerLogFields owners = owner_log_fields(site.execution_owners, patch_result.kernels);
-      log_message(kLogInfo,
+      log_message(kLogVerbose,
                   "ConSan fault site reader=%llu identity=%s kind=%s container=%s "
                   "container_kind=%s occurrence=%u text_offset=0x%llx file_offset=0x%llx "
                   "size=%u width_bits=%u mnemonic=%s role=%s operands=%s sync_event=%s "
@@ -2758,7 +2758,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           destination.structured_source_block_index
               ? std::to_string(*destination.structured_source_block_index)
               : "-";
-      log_message(kLogInfo,
+      log_message(kLogVerbose,
                   "ConSan barrier destination reader=%llu identity=%s container=%s "
                   "container_kind=%s block=%u text_offset=0x%llx file_offset=0x%llx size=%u "
                   "mnemonic=%s memory_operation=%s suitable=%s reason=%s cfg_contract=%s "
@@ -2825,7 +2825,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                 patch_result.perturbation_candidates.size());
     for (const rocjitsu::ConSanPerturbationCandidate &candidate :
          patch_result.perturbation_candidates) {
-      log_message(kLogInfo,
+      log_message(kLogVerbose,
                   "ConSan SC perturb candidate reader=%llu identity=%s sequence=%s kind=%s "
                   "edge=%s container=%s container_kind=%s block=%u anchor=%s "
                   "anchor_text_offset=0x%llx anchor_size=%u eligible=%s reason=%s",
@@ -2858,7 +2858,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         patch_result.applied_perturbations, config->sc_perturb_max,
         config->sc_perturb_required_count, config->sc_perturb_sleep);
     for (const rocjitsu::ConSanAccessPlan &plan : patch_result.access_plans) {
-      log_message(kLogInfo,
+      log_message(kLogVerbose,
                   "ConSan access plan reader=%llu dry_run=true identity=%s container=%s "
                   "container_kind=%s kind=%s planned=1 text_offset=0x%llx",
                   static_cast<unsigned long long>(code_object_reader.handle), plan.identity.c_str(),
@@ -2921,7 +2921,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       const std::string barrier_raw_simm16 =
           event.barrier_raw_simm16 ? std::to_string(*event.barrier_raw_simm16) : "-";
       log_message(
-          kLogInfo,
+          kLogVerbose,
           "ConSan sync event reader=%llu identity=%s kind=%s operation=%s "
           "address_source=%s memory_role=%s memory_role_confidence=%s rmw_outcome=%s "
           "confidence=%s reason=%s "
@@ -2990,7 +2990,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       } else {
         release_wait_offset[0] = '-';
       }
-      log_message(kLogInfo,
+      log_message(kLogVerbose,
                   "ConSan sync sequence reader=%llu identity=%s kind=%s operation=%s "
                   "address_source=%s memory_role=%s memory_role_confidence=%s rmw_outcome=%s "
                   "confidence=%s reason=%s "
@@ -3034,7 +3034,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       }
       std::string reason = group.rejection_reason.empty() ? "-" : group.rejection_reason;
       std::ranges::replace(reason, ' ', '-');
-      log_message(kLogInfo,
+      log_message(kLogVerbose,
                   "ConSan barrier lifecycle reader=%llu identity=%s container=%s "
                   "container_kind=%s block=%s begin_text_offset=0x%llx "
                   "end_text_offset=0x%llx barrier_id=%s barrier_scope=%s admissible=%s "
@@ -3120,7 +3120,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         if (owner_names.empty())
           owner_names = "-";
         log_message(
-            kLogInfo,
+            kLogDebug,
             "ConSan MOI resource reader=%llu site=%s candidate=%zu text_offset=0x%llx "
             "source=%s reason=%s owners=%zu owner_names=%s scratch_vgpr=%s scratch_count=%u "
             "current_vgprs=%u max_referenced_vgprs=%u required_vgprs=%u "
@@ -3307,7 +3307,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     for (const rocjitsu::ConSanSiteDispositionRecord &site : patch_result.site_dispositions) {
       if (site.lowering_outcome == rocjitsu::ConSanSiteLoweringOutcome::NotApplicable)
         continue;
-      log_message(kLogInfo,
+      log_message(kLogDebug,
                   "ConSan coverage_site reader=%llu kind=%s disposition=%s reason=%s "
                   "outcome=%s lowering_reason=%s resource_reason=%s "
                   "container=%s scope=%s text=0x%llx mnemonic=%s load=%llu",
@@ -3333,7 +3333,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     for (const rocjitsu::ConSanKernelInfo &kernel : patch_result.kernels) {
       if (kernel.has_text_range) {
         log_message(
-            kLogInfo,
+            kLogDebug,
             "ConSan kernel reader=%llu name=%s kd_file=0x%llx "
             "text_file=0x%llx entry_text=0x%llx code_size=%llu decoded=%s "
             "dynamic_stack=%s "
@@ -3372,7 +3372,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             static_cast<unsigned long long>(kernel.stats.decode_error_count),
             preflight_action_name(kernel.preflight_action));
       } else {
-        log_message(kLogInfo,
+        log_message(kLogDebug,
                     "ConSan kernel reader=%llu name=%s kd_file=0x%llx "
                     "text_range=unavailable decoded=%s dynamic_stack=%s decode_errors=%llu "
                     "preflight=%s",
@@ -3506,7 +3506,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           patch.persistent_epoch_private_offset
               ? std::to_string(*patch.persistent_epoch_private_offset)
               : "-";
-      log_message(kLogInfo,
+      log_message(kLogDebug,
                   "ConSan proof patch reader=%llu kind=%s anchor=0x%llx "
                   "trampoline=0x%llx original_size=%u trampoline_size=%u scratch_vgpr=%s "
                   "private_epoch_offset=%s spilled_vgprs=%u private_bytes=%u "
