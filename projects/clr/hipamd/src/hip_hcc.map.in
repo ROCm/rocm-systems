@@ -707,6 +707,7 @@ local:
 hip_7.18 {
 global:
     hipDeviceFlushGPUDirectRDMAWrites;
+    hipExtMemcpyBatchAsync;
 local:
     *;
 } hip_7.17;
