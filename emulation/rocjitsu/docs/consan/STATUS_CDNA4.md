@@ -117,8 +117,8 @@ enablement work and may not be counted as current gfx950 execution evidence.
 
 | Priority | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow | Why it matters and next proof |
 |---|---|---|---|---|---|---|
-| P0 | `hip_matmul_matmul::m128_n128_k128` | 🟧 All three upstream numerical checks pass, Waitcheck analyzes all 46 kernels after recursive-call summarization, 719/739 supported LDS accesses are patched, and the automatic report is mismatch-free; 20 remaining placement/lowering failures keep static coverage incomplete | 🟥 Current clean execution rejects the 1.84 MiB code object because persistent dispatch-ID and EXEC-save SGPR state cannot be placed, then exits by signal before the numerical oracle | 🩶 Unassessed | 🩶 Unassessed | Native gfx950 MFMA kernels use shared-memory tiling, repeated workgroup barriers, and a double-buffered LDS path.  Current-tip one-repetition artifacts are `consan-gfx950-hip-matmul-supercollider-recursionfix-20260722-252` and `consan-gfx950-hip-matmul-record-replay-clean-20260722-251`; next localize the 20 SuperCollider placement failures and address MOI scalar placement. |
-| P0 | `hipkittens_gemm_bf16fp32_16x32::m256_n256_k256` | 🩶 Unassessed | 🩶 Unassessed | 🩶 Unassessed | 🩶 Unassessed | Explicit gfx950 case with dynamic LDS, wide DS reads/writes, direct global-to-LDS traffic, a deep barrier schedule, and MFMA.  This is the highest-signal packaged gfx950 synchronization case. |
+| P0 | `hip_matmul_matmul::m128_n128_k128` | 🟧 All three upstream numerical checks pass, Waitcheck analyzes all 46 kernels after recursive-call summarization, 719/739 supported LDS accesses are patched, and the automatic report is mismatch-free; 20 remaining placement/lowering failures keep static coverage incomplete | 🟥 Current clean execution rejects the 1.84 MiB code object because persistent dispatch-ID and EXEC-save SGPR state cannot be placed, then exits by signal before the numerical oracle | 🟥 Current clean execution reaches the same early code-object-wide persistent dispatch-ID and EXEC-save SGPR placement rejection before the numerical oracle | 🩶 Unassessed | Native gfx950 MFMA kernels use shared-memory tiling, repeated workgroup barriers, and a double-buffered LDS path.  Current-tip one-repetition artifacts are `consan-gfx950-hip-matmul-supercollider-recursionfix-20260722-252`, `consan-gfx950-hip-matmul-record-replay-clean-20260722-251`, and `consan-gfx950-hip-matmul-sampled-clean-20260722-257`; next localize the 20 SuperCollider placement failures and address the shared MOI scalar-placement boundary. |
+| P0 | `hipkittens_gemm_bf16fp32_16x32::m256_n256_k256` | 🩶 Build assessment blocked | 🩶 Build assessment blocked | 🩶 Build assessment blocked | 🩶 Build assessment blocked | Explicit gfx950 case with dynamic LDS, wide DS reads/writes, direct global-to-LDS traffic, a deep barrier schedule, and MFMA.  Its source and target definition are present, but the local corpus build requires an unavailable CPU-reference dependency that is outside the current validation setup; no ConSan profile has run. |
 | P1 | `hipkittens_gemm_fp8fp32_4wave::m256_n256_k256` | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | Explicit gfx950 four-wave FP8 case; currently listed in `skip_compile_tests`.  Remove that corpus-level blocker only after recording the compiler failure or confirming a current toolchain build, then inventory its LDS/barrier shapes. |
 | P1 | `hipkittens_gemm_mxfp8_4wave::m256_n256_k256` | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | Explicit gfx950 four-wave microscaling GEMM; also currently compile-skipped.  It is the closest packaged low-precision companion to the BF16 row. |
 | P1 | `hip_streamk_simple::m256_n256_k256` gfx950 port | 🩶 Target enablement pending | 🩶 Target enablement pending | 🩶 Target enablement pending | 🩶 Target enablement pending | Source contains double-buffered LDS, workgroup barriers, and release-store/acquire-load cross-workgroup publication.  Metadata currently admits only gfx942, so gfx950 compilation and numeric equivalence must be established before this becomes a runnable row. |
@@ -287,6 +287,17 @@ trap, crash, output mismatch, or GPU reset is an execution outcome rather than
 a ConSan detection.
 
 ## Progress log
+
+- 2026-07-22: The first P0 HIP-matmul Sampled assessment advances from gray to
+  red with precise evidence rather than a timeout.  Artifact
+  `consan-gfx950-hip-matmul-sampled-clean-20260722-257` analyzes all 46 kernels
+  but rejects the heterogeneous 1.84 MiB object before execution because a
+  single code-object-wide persistent dispatch-ID pair and EXEC-save window
+  cannot satisfy every owner.  This is the same early planning boundary as
+  Record/Replay; both profiles now share one owner-qualified fallback task.
+  The P0 HipKittens source is present, but its local build is explicitly gray
+  because a CPU-reference build dependency is absent; no instrumentation
+  failure is inferred.
 
 - 2026-07-22: Qwen SuperCollider advances from yellow to green.  Artifact
   `consan-validation-gfx950-qwen-sc-final-output-fault-20260722-254` applies
