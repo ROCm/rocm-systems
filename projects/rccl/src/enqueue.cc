@@ -2689,8 +2689,7 @@ rccl_static ncclResult_t getAlgoInfo(struct ncclComm* comm, struct ncclTaskColl*
   // Direct ReduceScatter only works with the RING kernel (its direct
   // branch reads the pre-staged tempBuff and skips proxies). Force RING/SIMPLE
   // in case the tuner picked another algo.
-  if (info->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter
-      && info->algorithm != NCCL_ALGO_RING) {
+  if (info->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter && info->algorithm != NCCL_ALGO_RING) {
     info->algorithm = NCCL_ALGO_RING;
     info->protocol = NCCL_PROTO_SIMPLE;
     info->nWarps = comm->maxThreads[info->algorithm][info->protocol] / comm->WarpSize;
@@ -3686,15 +3685,19 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
                                     info->count, info->datatype, r, allowUB));
           }
         } else if (info->coll == ncclFuncReduceScatter && info->useDirect) {
-          NCCLCHECK(ncclRegFind(comm, info->sendbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype), &sendReg));
-          NCCLCHECK(ncclRegFind(comm, info->recvbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype), &recvReg));
+          NCCLCHECK(ncclRegFind(comm, info->sendbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
+                                &sendReg));
+          NCCLCHECK(ncclRegFind(comm, info->recvbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
+                                &recvReg));
           allowUB = captured || (sendReg != NULL && recvReg != NULL);
           size_t rankOffset = info->count * ncclTypeSize(info->datatype);
-          for (int r=0; r<comm->nRanks; r++) {
-            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, (void*)((char*)info->sendbuff + r*rankOffset), info->count, info->datatype, r, allowUB));
-            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, (void*)((char*)info->recvbuff + r*rankOffset), info->count, info->datatype, r, allowUB));
+          for (int r = 0; r < comm->nRanks; r++) {
+            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, (void*)((char*)info->sendbuff + r * rankOffset),
+                                    info->count, info->datatype, r, allowUB));
+            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, (void*)((char*)info->recvbuff + r * rankOffset),
+                                    info->count, info->datatype, r, allowUB));
           }
-        } else if (info->coll == ncclFuncGather){
+        } else if (info->coll == ncclFuncGather) {
           size_t offset = 0;
           allowUB = captured;
           NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, (void*)info->sendbuff, info->count, info->datatype,

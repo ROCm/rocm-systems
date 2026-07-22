@@ -436,8 +436,8 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
     // For hierarchical algorithm, only the inter-comm protocol/channels are
     // reported in rccl-tests -A output.
     // The intra-comm values are logged below for debugging purposes
-    INFO(NCCL_COLL, "Hierarchical RS inter: proto=%d channels=%d, intra: proto=%d channels=%d",
-        *protocol, *maxChannels, intraProto, intraChan);
+    INFO(NCCL_COLL, "Hierarchical RS inter: proto=%d channels=%d, intra: proto=%d channels=%d", *protocol, *maxChannels,
+         intraProto, intraChan);
     return ncclSuccess;
   }
   if (coll == ncclFuncAllGather && rcclUseAllGatherDirect(comm, msgSize)) {
@@ -506,17 +506,17 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
     WARN("Invalid algorithm value: %d", algo);
     return ncclInvalidArgument;
   }
-  if(algo >= NCCL_NUM_ALGORITHMS) {
-    switch(algo) {
-      case rcclAddonAlgos_t::RCCL_DIRECT_ALLGATHER:
-        *algoName = "Direct";
-        break;
-      case rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER:
-        *algoName = "Hier";
-        break;
-      case rcclAddonAlgos_t::RCCL_HIERARCHICAL_REDUCESCATTER:
-        *algoName = "Hier";
-        break;
+  if (algo >= NCCL_NUM_ALGORITHMS) {
+    switch (algo) {
+    case rcclAddonAlgos_t::RCCL_DIRECT_ALLGATHER:
+      *algoName = "Direct";
+      break;
+    case rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER:
+      *algoName = "Hier";
+      break;
+    case rcclAddonAlgos_t::RCCL_HIERARCHICAL_REDUCESCATTER:
+      *algoName = "Hier";
+      break;
 #ifdef ENABLE_WARP_SPEED
     case rcclAddonAlgos_t::RCCL_WARP_SPEED:
       *algoName = "RING*"; // WarpSpeed (*) uses RING algorithm
@@ -685,8 +685,7 @@ bool rcclUseHierarchicalReduceScatter(struct ncclComm* comm, size_t msgSize) {
   return threshold > 0 && msgSize <= threshold;
 }
 
-
-void rcclSetPxn(struct ncclComm* comm,  int& rcclPxnDisable) {
+void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable) {
   if (comm->pxnDisable != RCCL_VALUE_UNSET) {
     rcclPxnDisable = comm->pxnDisable;
     return;

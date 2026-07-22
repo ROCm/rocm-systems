@@ -299,8 +299,8 @@ static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* r
   // Step 3: Shuffle tempBuffer (local-rank-major) -> recvbuff (node-major).
   size_t totalAGBytes = (size_t)nNodes * localRanks * rankOffset;
   int numBlocks = hierarchicalShuffleNumBlocks(totalAGBytes);
-  hierarchicalShuffle<<<numBlocks, 256, 0, stream>>>(
-    (const char*)tempBuffer, (char*)recvbuff, rankOffset, nNodes, localRanks);
+  hierarchicalShuffle<<<numBlocks, 256, 0, stream>>>((const char*)tempBuffer, (char*)recvbuff, rankOffset, nNodes,
+                                                     localRanks);
   CUDACHECK(hipGetLastError());
 
   return ncclSuccess;
@@ -673,31 +673,50 @@ ncclResult_t ncclReduce_impl(const void* sendbuff, void* recvbuff, size_t count,
 //            ncclEnqueueCheck under enableDirectReduceScatter=1. The kernel
 //            reads all N peer slices from tempBuff and writes the reduced
 //            result to recvbuff.
-static ncclResult_t rcclDirectReduceScatter(const void* sendbuff, void* recvbuff,
-    size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op,
-    ncclComm_t comm, cudaStream_t stream,
-    int chunkSteps, int sliceSteps) {
+static ncclResult_t rcclDirectReduceScatter(const void* sendbuff, void* recvbuff, size_t recvcount,
+                                            ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm,
+                                            cudaStream_t stream, int chunkSteps, int sliceSteps) {
   if (recvcount == 0) return ncclSuccess;
   void* tempbuff = comm->tempBuff;
 
   comm->enableDirectReduceScatter = 1;
-  struct ncclInfo infoP2P = { ncclFuncReduceScatter, "ReduceScatter",
-    sendbuff, tempbuff, recvcount, datatype, op, 0, comm, stream,
-    chunkSteps, sliceSteps, nullptr };
+  struct ncclInfo infoP2P = {ncclFuncReduceScatter,
+                             "ReduceScatter",
+                             sendbuff,
+                             tempbuff,
+                             recvcount,
+                             datatype,
+                             op,
+                             0,
+                             comm,
+                             stream,
+                             chunkSteps,
+                             sliceSteps,
+                             nullptr};
   infoP2P.useDirect = true;
   NCCLCHECK(ncclEnqueueCheck(&infoP2P));
 
-  struct ncclInfo info = { ncclFuncReduceScatter, "ReduceScatter",
-    sendbuff, recvbuff, recvcount, datatype, op, 0, comm, stream,
-    chunkSteps, sliceSteps, nullptr };
+  struct ncclInfo info = {ncclFuncReduceScatter,
+                          "ReduceScatter",
+                          sendbuff,
+                          recvbuff,
+                          recvcount,
+                          datatype,
+                          op,
+                          0,
+                          comm,
+                          stream,
+                          chunkSteps,
+                          sliceSteps,
+                          nullptr};
   NCCLCHECK(ncclEnqueueCheck(&info));
   comm->enableDirectReduceScatter = 0;
   return ncclSuccess;
 }
 
-static ncclResult_t ncclHierarchicalReduceScatter_Impl(const void* sendbuff, void* recvbuff,
-    size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op,
-    ncclComm_t comm, cudaStream_t stream) {
+static ncclResult_t ncclHierarchicalReduceScatter_Impl(const void* sendbuff, void* recvbuff, size_t recvcount,
+                                                       ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm,
+                                                       cudaStream_t stream) {
   if (recvcount == 0) return ncclSuccess;
   ncclComm* intraComm = comm->hierarchicalIntraComm;
   ncclComm* interComm = comm->hierarchicalInterComm;
@@ -713,29 +732,47 @@ static ncclResult_t ncclHierarchicalReduceScatter_Impl(const void* sendbuff, voi
   // Step 1: Pre-shuffle sendbuff (node-major) -> tempBuf (local-rank-major).
   size_t totalBytes = (size_t)nNodes * localRanks * rankOffset;
   int numBlocks = hierarchicalShuffleNumBlocks(totalBytes);
-  hierarchicalShuffle<<<numBlocks, 256, 0, stream>>>(
-      (const char*)sendbuff, (char*)tempBuf, rankOffset, localRanks, nNodes);
+  hierarchicalShuffle<<<numBlocks, 256, 0, stream>>>((const char*)sendbuff, (char*)tempBuf, rankOffset, localRanks,
+                                                     nNodes);
   CUDACHECK(hipGetLastError());
 
   // Step 2: Intra-node ReduceScatter, in-place inside tempBuf.
-  struct ncclInfo infoIntraRS = { ncclFuncReduceScatter, "HierarchicalReduceScatter-Intra",
-    tempBuf, intraOut, intraOutCount, datatype, op, 0, intraComm, stream,
-    REDUCESCATTER_CHUNKSTEPS,
-    intraComm->rcclUseOneSlice ? REDUCESCATTER_SLICESTEPS_SINGLE_NODE : REDUCESCATTER_SLICESTEPS,
-    nullptr };
+  struct ncclInfo infoIntraRS = {ncclFuncReduceScatter,
+                                 "HierarchicalReduceScatter-Intra",
+                                 tempBuf,
+                                 intraOut,
+                                 intraOutCount,
+                                 datatype,
+                                 op,
+                                 0,
+                                 intraComm,
+                                 stream,
+                                 REDUCESCATTER_CHUNKSTEPS,
+                                 intraComm->rcclUseOneSlice ? REDUCESCATTER_SLICESTEPS_SINGLE_NODE :
+                                                              REDUCESCATTER_SLICESTEPS,
+                                 nullptr};
   NCCLCHECK(ncclEnqueueCheck(&infoIntraRS));
 
   // Step 3: Inter-node ReduceScatter  intraOut -> recvbuff.
   size_t interMsgSize = recvcount * typeSize * (size_t)nNodes;
   interComm->enableDirectReduceScatter = 0;
   if (rcclUseReduceScatterDirect(interComm, interMsgSize)) {
-    NCCLCHECK(rcclDirectReduceScatter(intraOut, recvbuff, recvcount, datatype, op,
-      interComm, stream,
-      REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS));
+    NCCLCHECK(rcclDirectReduceScatter(intraOut, recvbuff, recvcount, datatype, op, interComm, stream,
+                                      REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS));
   } else {
-    struct ncclInfo infoInterRS = { ncclFuncReduceScatter, "HierarchicalReduceScatter-Inter",
-      intraOut, recvbuff, recvcount, datatype, op, 0, interComm, stream,
-      REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS, nullptr };
+    struct ncclInfo infoInterRS = {ncclFuncReduceScatter,
+                                   "HierarchicalReduceScatter-Inter",
+                                   intraOut,
+                                   recvbuff,
+                                   recvcount,
+                                   datatype,
+                                   op,
+                                   0,
+                                   interComm,
+                                   stream,
+                                   REDUCESCATTER_CHUNKSTEPS,
+                                   REDUCESCATTER_SLICESTEPS,
+                                   nullptr};
     NCCLCHECK(ncclEnqueueCheck(&infoInterRS));
   }
 
@@ -818,16 +855,17 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
 
   rcclReduceScatterAlgo algo = symEligible ? RCCL_RS_RING : rcclSelectReduceScatterAlgo(comm, msgSize);
   switch (algo) {
-    case RCCL_RS_HIERARCHICAL:
-      return ncclHierarchicalReduceScatter_Impl(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
-    case RCCL_RS_DIRECT:
-      INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER recvcount=%zu msgSize=%zu rank=%d nRanks=%d nNodes=%d comm=%p stream=%p sendbuff=%p recvbuff=%p",
-        recvcount, msgSize, comm->rank, nRanks, comm->nNodes, comm, stream, sendbuff, recvbuff);
-      return rcclDirectReduceScatter(sendbuff, recvbuff, recvcount, datatype, op,
-        comm, stream, chunkSteps, sliceSteps);
-    case RCCL_RS_RING:
-    default:
-      return ncclEnqueueCheck(&info);
+  case RCCL_RS_HIERARCHICAL:
+    return ncclHierarchicalReduceScatter_Impl(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
+  case RCCL_RS_DIRECT:
+    INFO(NCCL_INIT,
+         "RCCL DIRECT REDUCE-SCATTER recvcount=%zu msgSize=%zu rank=%d nRanks=%d nNodes=%d comm=%p stream=%p "
+         "sendbuff=%p recvbuff=%p",
+         recvcount, msgSize, comm->rank, nRanks, comm->nNodes, comm, stream, sendbuff, recvbuff);
+    return rcclDirectReduceScatter(sendbuff, recvbuff, recvcount, datatype, op, comm, stream, chunkSteps, sliceSteps);
+  case RCCL_RS_RING:
+  default:
+    return ncclEnqueueCheck(&info);
   }
 }
 

@@ -12,7 +12,7 @@
  *   src: [LR0:{N0..Nn}, LR1:{N0..Nn}, ..., LRk:{N0..Nn}]   (local-rank-major)
  * this kernel shuffles the data to the following layout:
  *   dst: [N0:{LR0..LRk}, N1:{LR0..LRk}, ..., Nn:{LR0..LRk}] (node-major)
- * 
+ *
  * ReduceScatter (before intra and inter RS): the reverse of AG (node-major -> local-rank-major)
  *   src: [N0:{LR0..LRk}, N1:{LR0..LRk}, ..., Nn:{LR0..LRk}] (node-major)
  * this kernel shuffles the data to the following layout:
@@ -24,9 +24,8 @@
  *
  * Uses 16B (v4u) non-temporal vectorized copies; work is block-strided.
  */
-static __global__ __launch_bounds__(256)
-void hierarchicalShuffle(const char* __restrict__ src, char* __restrict__ dst,
-    size_t rankOffset, int cols, int rows) {
+static __global__ __launch_bounds__(256) void hierarchicalShuffle(const char* __restrict__ src, char* __restrict__ dst,
+                                                                  size_t rankOffset, int cols, int rows) {
   int totalPairs = rows * cols;
   size_t numVec = rankOffset / sizeof(v4u);
 
@@ -35,7 +34,7 @@ void hierarchicalShuffle(const char* __restrict__ src, char* __restrict__ dst,
     int j = pair - i * cols;
     int dstIdx = j * rows + i;
 
-    v4u_gptr srcV = (v4u_gptr)(src + (size_t)pair   * rankOffset);
+    v4u_gptr srcV = (v4u_gptr)(src + (size_t)pair * rankOffset);
     v4u_gptr dstV = (v4u_gptr)(dst + (size_t)dstIdx * rankOffset);
 
     size_t stride = blockDim.x;

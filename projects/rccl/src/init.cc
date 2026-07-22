@@ -2713,16 +2713,18 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
         // inherit PXN disable from parent comm
         comm->hierarchicalInterComm->pxnDisable = comm->pxnDisable;
         if (rcclParamHierarchicalAllGather() == 1) {
-          size_t agBufSize = (comm->nNodes >= 16) ? HIERARCHICAL_AG_TEMP_BUFFER_SIZE : HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
+          size_t agBufSize =
+            (comm->nNodes >= 16) ? HIERARCHICAL_AG_TEMP_BUFFER_SIZE : HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
           NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalAGTempBuffer), agBufSize, comm->memManager), res, fail);
         }
         if (rcclParamHierarchicalReduceScatter() == 1) {
-          size_t rsBufSize = (comm->nNodes >= 16) ? HIERARCHICAL_RS_TEMP_BUFFER_SIZE : HIERARCHICAL_RS_TEMP_BUFFER_SIZE / 2;
+          size_t rsBufSize =
+            (comm->nNodes >= 16) ? HIERARCHICAL_RS_TEMP_BUFFER_SIZE : HIERARCHICAL_RS_TEMP_BUFFER_SIZE / 2;
           NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalRSTempBuffer), rsBufSize, comm->memManager), res, fail);
         }
         comm->hierarchicalCommsInitialized = true;
         INFO(NCCL_INIT, "Hierarchical collectives: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
-          comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
+             comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
       }
     }
   }
