@@ -697,12 +697,13 @@ For attachment profiling of running processes:
 
     add_parser_bool_argument(
         counter_collection_options,
-        "--kernel-replay",
+        "--kernel-replay-beta-enabled",
         help=(
             "Collect all --pmc counter groups within a single application run via in-process "
             "kernel replay: each dispatch is replayed once per counter group, with device-memory "
             "snapshot/restore between passes, instead of re-running the whole application per "
-            "group. Requires --pmc. (experimental)"
+            "group. Without this flag, multiple --pmc groups use application replay (the app is "
+            "re-run once per group) as usual. Requires --pmc. (beta)"
         ),
     )
 
@@ -2088,12 +2089,13 @@ def run(app_args, args, **kwargs):
     if args.pmc and args.pmc_groups:
         fatal_error("Cannot specify both --pmc and (input file) pmc_groups")
 
-    if getattr(args, "kernel_replay", None) and not args.pmc:
+    if getattr(args, "kernel_replay_beta_enabled", None) and not args.pmc:
         fatal_error(
-            "--kernel-replay requires --pmc (it routes counter collection through replay)"
+            "--kernel-replay-beta-enabled requires --pmc "
+            "(it routes counter collection through replay)"
         )
 
-    if getattr(args, "kernel_replay", None):
+    if getattr(args, "kernel_replay_beta_enabled", None):
         # Route counter collection through the in-process kernel-replay service (config.hpp:
         # ROCPROF_KERNEL_REPLAY). The SDK derives the pass count from the number of counter groups
         # via the tool's pass-count callback, so no pass-count env is needed.
@@ -2440,7 +2442,7 @@ def main(argv=None):
     # each dispatch once per group), so it must not use the per-group child-process relaunch. Merge
     # every counter group (from CLI --pmc and/or input-file pmc lines) into cmd_args.pmc as a
     # list-of-lists; process_args then emits ROCPROF_COUNTER_GROUPS and the app runs once.
-    if getattr(cmd_args, "kernel_replay", None):
+    if getattr(cmd_args, "kernel_replay_beta_enabled", None):
         replay_groups = []
         if cli_has_pmc:
             for g in cmd_args.pmc:
