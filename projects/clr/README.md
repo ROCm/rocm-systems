@@ -122,6 +122,18 @@ For detailed instructions, please refer to [How to build HIP](https://rocm.docs.
 | --- | --- | --- |
 | `CLR_ENABLE_WERROR` | `ON` (Linux), `OFF` (other platforms) | Build the first-party CLR targets (`rocclr`, `amdhip64`, `hiprtc`, and the HRR playback tools) with `-Wall -Werror`. Pass `-DCLR_ENABLE_WERROR=OFF` to downgrade warnings so they no longer fail the build. Has no effect on non-Linux builds. |
 
+## Static analysis (clang-tidy)
+
+CLR is being incrementally linted with [clang-tidy](https://clang.llvm.org/extra/clang-tidy/). Because the codebase predates the linter, coverage is opt-in **per file**: only the paths listed in [`clang-tidy-files.txt`](./clang-tidy-files.txt) are checked. The enabled checks are defined in [`.clang-tidy`](./.clang-tidy) (currently just `misc-const-correctness`) and are treated as errors on the listed files.
+
+clang-tidy reads compiler flags from the build's `compile_commands.json`, so configure the project first (the Ninja generator emits one automatically; with other generators pass `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`). Then run the `clang-tidy` target:
+
+```bash
+cmake --build build --target clang-tidy
+```
+
+To expand coverage, add a repo-relative path to `clang-tidy-files.txt`, run the target, fix any reported issues, then commit. Many `misc-const-correctness` findings can be applied automatically with `clang-tidy --fix`.
+
 ## Tests
 
 ### HIP
