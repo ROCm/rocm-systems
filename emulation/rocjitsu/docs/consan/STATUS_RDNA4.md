@@ -129,6 +129,11 @@ cases.  This is a discovery pool, not 105 ConSan acceptance rows.  Most cases
 will have no relevant executed synchronization or will duplicate a stronger
 workload.
 
+**Selection state: zero gray cells.** Two llama.cpp candidates are admitted and
+colored independently per engine below; six candidate families are resolved
+blue exclusions.  Red, orange, and yellow cells are real qualification work,
+not undiscovered corpus scope.
+
 The gfx1250 Tensile directory is explicitly marked unsupported on gfx1201.
 Do not copy, retarget, or author lookalike versions of those configurations
 merely to make the ledgers symmetric.  Search the native IREE, kernel, and CTS
@@ -171,12 +176,21 @@ building the independent HIP-matmul case.  Configuring that case alone with
 `KERNEL_CORPUS_ENABLE_LLAMA_HIP=OFF` establishes its exact baseline and permits
 inventory without weakening the workload.
 
-The first RMS fault discriminator exactly drops the wait-side singleton at
-`pc=0x1830` in the executed 256-thread, non-fused kernel.  Exact-one mutation
-enforcement passes, but the output remains within the 1e-5 oracle tolerance and
-SuperCollider reports no mismatch.  Keep that result as a reviewed-candidate
-miss, not detection acceptance; select a mutation with an observable semantic
-effect before promoting any RMS cell to green.
+The llama.cpp runner's `--validate` switch selects its CPU backend; it does not
+run a GPU workload and then validate it.  Reproducible qualification therefore
+uses two processes: an instrumented GPU run without `--validate`, and an
+uninstrumented CPU run with `--validate`, each writing its output for an exact
+comparison.  Running only the latter silently exercises no HSA code and cannot
+qualify a ConSan cell.
+
+The first RMS fault discriminator exactly dropped the wait-side singleton at
+`pc=0x1830` in the executed 256-thread, non-fused kernel.  Current-hook artifact
+`rdna4-rms-native-inventory-ae96` additionally drops the complete signal/wait
+pair with exact-one enforcement at both the 128- and 1,024-element shapes.  All
+three mutations apply, but the outputs remain bitwise equal to their independent
+CPU results and SuperCollider reports no mismatch.  Keep these as reviewed
+candidate misses, not detection acceptance; select a mutation with an
+observable semantic effect before promoting any RMS cell to green.
 
 The noncontiguous llama cases are absent from collection because
 `corpus/kernels/configs/gfx1201.json` names both cases in
