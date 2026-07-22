@@ -30,6 +30,7 @@ RJ_DIAGNOSTIC_POP
 #include <bit>
 #include <compare>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <exception>
 #include <limits>

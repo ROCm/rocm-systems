@@ -665,6 +665,7 @@ candidate_payload_vgpr_count_per_address(const ConSanMoiCandidate &candidate) {
 struct MoiKernelResourceContext {
   const ConSanKernelInfo *kernel = nullptr;
   KernelCfgScope scope;
+  std::unordered_set<BasicBlock *> block_set;
   std::unique_ptr<LivenessAnalysis> liveness;
   uint16_t current_vgpr_count = 0;
   uint16_t max_referenced_vgpr_count = 0;
@@ -862,6 +863,7 @@ struct MoiResourcePlanningState {
   std::vector<std::unique_ptr<BasicBlock>> blocks;
   BlockOffsetIndex block_index;
   std::vector<MoiKernelResourceContext> contexts;
+  std::unordered_map<uint64_t, MoiKernelResourceContext *> context_by_descriptor;
   bool valid = false;
 
   MoiResourcePlanningState(std::span<const uint8_t> input, rj_code_arch_t arch,
@@ -937,6 +939,7 @@ struct MoiResourcePlanningState {
       context.scope = std::move(*scope);
       contexts.push_back(std::move(context));
       MoiKernelResourceContext &stored = contexts.back();
+      stored.block_set.insert(stored.scope.blocks.begin(), stored.scope.blocks.end());
       stored.liveness = std::make_unique<LivenessAnalysis>(KernelBlockScope(stored.scope.blocks),
                                                            LivenessAnalysisOptions{},
                                                            stored.scope.liveness_edges);
@@ -969,6 +972,9 @@ struct MoiResourcePlanningState {
       stored.original_private_segment_size = descriptor.private_segment_fixed_size;
       stored.descriptor_valid = true;
     }
+    context_by_descriptor.reserve(contexts.size());
+    for (MoiKernelResourceContext &context : contexts)
+      context_by_descriptor.try_emplace(context.kernel->descriptor_file_offset, &context);
     valid = true;
   }
 };
@@ -997,15 +1003,19 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
   }
 
   std::vector<MoiKernelResourceContext *> owners;
-  for (MoiKernelResourceContext &context : state.contexts) {
-    if (kernel_descriptor_file_offset &&
-        context.kernel->descriptor_file_offset != *kernel_descriptor_file_offset) {
-      continue;
-    }
-    if (std::ranges::find(context.scope.blocks, anchor_block) == context.scope.blocks.end())
-      continue;
+  const auto add_owner = [&](MoiKernelResourceContext &context) {
+    if (!context.block_set.contains(anchor_block))
+      return;
     owners.push_back(&context);
     plan.owner_descriptor_file_offsets.push_back(context.kernel->descriptor_file_offset);
+  };
+  if (kernel_descriptor_file_offset) {
+    const auto owner = state.context_by_descriptor.find(*kernel_descriptor_file_offset);
+    if (owner != state.context_by_descriptor.end())
+      add_owner(*owner->second);
+  } else {
+    for (MoiKernelResourceContext &context : state.contexts)
+      add_owner(context);
   }
   if (owners.empty()) {
     plan.reason = ConSanRegisterPlanReason::MissingOwner;
@@ -1197,12 +1207,16 @@ struct ResolvedMoiScratchPlan {
 resource_plan_for_candidate(const ConSanResult &result, const ConSanMoiCandidate &candidate) {
   if (result.moi_candidates.empty())
     return nullptr;
-  const auto it = std::ranges::find_if(result.moi_candidates,
-                                       [&](const auto &item) { return &item == &candidate; });
-  if (it == result.moi_candidates.end())
+  const std::uintptr_t begin = reinterpret_cast<std::uintptr_t>(result.moi_candidates.data());
+  const std::uintptr_t address = reinterpret_cast<std::uintptr_t>(&candidate);
+  if (address < begin)
     return nullptr;
-  const size_t index = static_cast<size_t>(std::distance(result.moi_candidates.begin(), it));
-  if (index >= result.resource_plans.size() ||
+  const std::uintptr_t byte_offset = address - begin;
+  if (byte_offset % sizeof(ConSanMoiCandidate) != 0u)
+    return nullptr;
+  const size_t index = static_cast<size_t>(byte_offset / sizeof(ConSanMoiCandidate));
+  if (index >= result.resource_plans.size() || index >= result.moi_candidates.size() ||
+      &result.moi_candidates[index] != &candidate ||
       result.resource_plans[index].candidate_index != index) {
     return nullptr;
   }

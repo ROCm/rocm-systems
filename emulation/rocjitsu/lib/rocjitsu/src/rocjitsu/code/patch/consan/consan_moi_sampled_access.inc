@@ -402,6 +402,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   uint32_t next_record_index = 0;
   bool capacity_limited = false;
   MoiSpillManagers spill_managers;
+  std::unordered_map<uint64_t, std::optional<MoiPrivateEpochLayout>> private_layout_by_descriptor;
   uint64_t planned_anchor_end = 0;
   for (const ConSanMoiCandidate *candidate_ptr : candidates) {
     const uint32_t current_sample_index = sampled_candidate_index++;
@@ -438,7 +439,18 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       continue;
     std::optional<MoiPrivateEpochLayout> private_layout;
     if (options.automatic_moi_private_epoch) {
-      private_layout = build_moi_private_epoch_layout(result, *resources, arch, result.warnings);
+      if (resources->owner_descriptor_file_offsets.size() == 1u) {
+        const uint64_t descriptor = resources->owner_descriptor_file_offsets.front();
+        auto [cached, inserted] =
+            private_layout_by_descriptor.try_emplace(descriptor, std::nullopt);
+        if (inserted) {
+          cached->second =
+              build_moi_private_epoch_layout(result, *resources, arch, result.warnings);
+        }
+        private_layout = cached->second;
+      } else {
+        private_layout = build_moi_private_epoch_layout(result, *resources, arch, result.warnings);
+      }
       if (!private_layout)
         continue;
     }
