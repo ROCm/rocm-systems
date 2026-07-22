@@ -867,6 +867,10 @@ def _fault_families(target: str, workload: Workload) -> tuple[str, ...]:
         "tp1-decode-combined",
     ):
         return ("barrier-move",)
+    if target == "gfx950" and workload.id in ("streamk-arrival", "tree-atomic-or"):
+        # CDNA4 compiler atomics encode ordering through surrounding cache and
+        # wait operations, but have no gfx12-style instruction scope field.
+        return ("atomic-weaken-order",)
     return workload.fault_families
 
 

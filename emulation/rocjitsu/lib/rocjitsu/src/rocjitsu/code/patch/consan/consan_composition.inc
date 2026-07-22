@@ -689,7 +689,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
                                         options.abort_unmatched_barrier_wait ||
                                         options.collect_barrier_move_destinations;
   if (needs_semantic_inventory) {
-    build_fault_site_inventory(code_object_bytes, result);
+    build_fault_site_inventory(code_object_bytes, arch, result);
     build_sync_event_inventory(code_object_bytes, result);
     build_singleton_sync_sequences(code_object, *decoder, arch, result);
     const bool allow_extended_barrier_pairs =
@@ -719,7 +719,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     annotate_execution_owners(code_object, *decoder, arch, options, result);
   }
   if (options.fault_dry_run) {
-    build_fault_mutation_plan(options, result);
+    build_fault_mutation_plan(options, arch, result);
     build_perturbation_plan(options, result, carried_plans);
     return result;
   }

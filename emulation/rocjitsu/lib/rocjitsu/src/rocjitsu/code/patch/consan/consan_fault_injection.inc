@@ -343,7 +343,8 @@ void mark_participant_mutation_unsupported(ConSanResult &result, std::string_vie
   return count;
 }
 
-void build_fault_mutation_plan(const ConSanOptions &options, ConSanResult &result) {
+void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch,
+                               ConSanResult &result) {
   auto append_primary = [&](ConSanFaultMutationKind kind, const ConSanFaultSite *site) {
     if (site == nullptr) {
       result.warnings.emplace_back("ConSan fault dry run found no site for the requested mutation");
@@ -677,12 +678,21 @@ void build_fault_mutation_plan(const ConSanOptions &options, ConSanResult &resul
     atomic = select_fault_site_for_plan(result, options, ConSanFaultSiteKind::Atomic,
                                         options.fault_atomic_index);
   }
-  if (options.fault_atomic_wrong_address)
-    append_primary(ConSanFaultMutationKind::AtomicWrongAddress, atomic);
+  if (options.fault_atomic_wrong_address) {
+    const AtomicFaultEncoding encoding =
+        atomic == nullptr ? AtomicFaultEncoding::Unsupported
+                          : atomic_fault_encoding(atomic->mnemonic, atomic->size, arch);
+    if (!atomic_fault_supports_address(encoding)) {
+      result.warnings.emplace_back(
+          "ConSan fault dry run cannot rewrite the address for the selected atomic encoding");
+    } else {
+      append_primary(ConSanFaultMutationKind::AtomicWrongAddress, atomic);
+    }
+  }
   if (options.fault_atomic_weaken_order) {
     const AtomicFaultEncoding encoding =
         atomic == nullptr ? AtomicFaultEncoding::Unsupported
-                          : atomic_fault_encoding(atomic->mnemonic, atomic->size);
+                          : atomic_fault_encoding(atomic->mnemonic, atomic->size, arch);
     const ConSanSyncSequence *sequence =
         atomic_fault_supports_order(encoding) && atomic->sync_event_identity
             ? find_consan_sync_sequence_for_event(result, *atomic->sync_event_identity)
@@ -692,7 +702,8 @@ void build_fault_mutation_plan(const ConSanOptions &options, ConSanResult &resul
     if (sequence != nullptr &&
         consan_sync_confidence_meets(sequence->memory_role_confidence,
                                      ConSanSemanticConfidence::Conservative)) {
-      if (options.fault_atomic_order_edge != ConSanAtomicOrderEdge::Acquire)
+      if (options.fault_atomic_order_edge != ConSanAtomicOrderEdge::Acquire &&
+          encoding != AtomicFaultEncoding::Cdna4Flat)
         release_wait_text_offset = sequence->release_wait_text_offset;
       for (const std::string &identity : sequence->member_event_identities) {
         const auto event = std::ranges::find_if(result.sync_events, [&](const auto &candidate) {
@@ -743,7 +754,7 @@ void build_fault_mutation_plan(const ConSanOptions &options, ConSanResult &resul
   if (options.fault_atomic_weaken_scope) {
     const AtomicFaultEncoding encoding =
         atomic == nullptr ? AtomicFaultEncoding::Unsupported
-                          : atomic_fault_encoding(atomic->mnemonic, atomic->size);
+                          : atomic_fault_encoding(atomic->mnemonic, atomic->size, arch);
     if (!atomic_fault_supports_scope(encoding)) {
       result.warnings.emplace_back(
           "ConSan fault dry run cannot weaken scope for the selected atomic encoding");
@@ -1552,8 +1563,8 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
                                site->range_name);
 }
 
-void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, const ConSanOptions &options,
-                                  ConSanResult &result) {
+void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
+                                  const ConSanOptions &options, ConSanResult &result) {
   const ConSanFaultSite *selected = select_fault_site_for_plan(
       result, options, ConSanFaultSiteKind::Atomic, options.fault_atomic_index);
   if (!selected) {
@@ -1568,7 +1579,8 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, const Con
     return;
   }
 
-  const AtomicFaultEncoding encoding = atomic_fault_encoding(selected->mnemonic, selected->size);
+  const AtomicFaultEncoding encoding =
+      atomic_fault_encoding(selected->mnemonic, selected->size, arch);
   if (options.fault_atomic_weaken_scope && !atomic_fault_supports_scope(encoding)) {
     result.errors.emplace_back(
         "ConSan atomic scope fault is unsupported for the selected atomic encoding");
@@ -1577,6 +1589,11 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, const Con
   if (options.fault_atomic_weaken_order && !atomic_fault_supports_order(encoding)) {
     result.errors.emplace_back(
         "ConSan atomic order fault is unsupported for the selected atomic encoding");
+    return;
+  }
+  if (options.fault_atomic_wrong_address && !atomic_fault_supports_address(encoding)) {
+    result.errors.emplace_back(
+        "ConSan atomic address fault is unsupported for the selected atomic encoding");
     return;
   }
 
@@ -1664,11 +1681,11 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, const Con
     // independently sufficient release proof once the cache operation is
     // removed. Discover it directly so the staged reinventory observes the
     // complete weakened boundary rather than re-admitting the same atomic.
-    if (!release_wait_text_offset &&
+    if (encoding != AtomicFaultEncoding::Cdna4Flat && !release_wait_text_offset &&
         options.fault_atomic_order_edge != ConSanAtomicOrderEdge::Acquire &&
         selected->text_offset >= sizeof(uint32_t) && selected->file_offset >= sizeof(uint32_t)) {
-      const auto expected_combined = build_s_wait_storecnt_dscnt0(ROCJITSU_CODE_ARCH_RDNA4);
-      const auto expected_store = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
+      const auto expected_combined = build_s_wait_storecnt_dscnt0(arch);
+      const auto expected_store = build_s_wait_storecnt0(arch);
       uint32_t preceding_word = 0;
       std::memcpy(&preceding_word,
                   result.elf_bytes.data() + selected->file_offset - sizeof(uint32_t),
@@ -1683,7 +1700,7 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, const Con
           "ConSan atomic weaken-order mutation found no qualified ordering boundary");
       return;
     }
-    const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
+    const uint32_t nop = build_s_nop(0, arch);
     ConSanPatchInfo info;
     info.phase = ConSanPatchPhase::Mutation;
     info.kind = ConSanPatchKind::InlineAtomicOrderRewrite;
@@ -1708,8 +1725,8 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, const Con
       // release, defeating the requested weaken-order mutation. Treat that
       // adjacent cache/wait pair as one logical ordering boundary.
       if (release_wait_text_offset) {
-        const auto expected_combined = build_s_wait_storecnt_dscnt0(ROCJITSU_CODE_ARCH_RDNA4);
-        const auto expected_store = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
+        const auto expected_combined = build_s_wait_storecnt_dscnt0(arch);
+        const auto expected_store = build_s_wait_storecnt0(arch);
         if (!expected_combined || !expected_store ||
             *release_wait_text_offset >= selected->text_offset ||
             selected->file_offset < selected->text_offset - *release_wait_text_offset) {
@@ -1743,8 +1760,8 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, const Con
       result.warnings.emplace_back("ConSan atomic fault removed associated " + removed_boundary +
                                    " while preserving " + selected->mnemonic);
     } else {
-      const auto expected_combined = build_s_wait_storecnt_dscnt0(ROCJITSU_CODE_ARCH_RDNA4);
-      const auto expected_store = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
+      const auto expected_combined = build_s_wait_storecnt_dscnt0(arch);
+      const auto expected_store = build_s_wait_storecnt0(arch);
       if (!expected_combined || !expected_store ||
           *release_wait_text_offset >= selected->text_offset ||
           selected->file_offset < selected->text_offset - *release_wait_text_offset) {

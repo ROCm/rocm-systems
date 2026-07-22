@@ -426,6 +426,18 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
 
+    def test_gfx950_cdna4_atomics_only_admit_order_faults(self) -> None:
+        for workload_id in ("streamk-arrival", "tree-atomic-or"):
+            workload = validation.WORKLOAD_BY_ID[workload_id]
+            self.assertEqual(
+                validation._fault_families("gfx950", workload),
+                ("atomic-weaken-order",),
+            )
+            self.assertEqual(
+                validation._fault_families("gfx1201", workload),
+                ("atomic-weaken-order", "atomic-weaken-scope"),
+            )
+
     def test_pytorch_gfx1250_runs_both_variants_once(self) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-tdm-descriptor-add"]
         with mock.patch.dict(

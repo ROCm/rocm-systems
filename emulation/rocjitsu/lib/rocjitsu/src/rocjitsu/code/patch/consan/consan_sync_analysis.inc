@@ -1,17 +1,25 @@
 enum class AtomicFaultEncoding : uint8_t {
   Unsupported,
+  Cdna4Flat,
   FlatLike,
   Buffer,
   Ds,
 };
 
-[[nodiscard]] AtomicFaultEncoding atomic_fault_encoding(std::string_view mnemonic, uint32_t size) {
-  if ((mnemonic.starts_with("flat_atomic") || mnemonic.starts_with("global_atomic")) &&
+[[nodiscard]] AtomicFaultEncoding atomic_fault_encoding(std::string_view mnemonic, uint32_t size,
+                                                        rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4 && mnemonic.starts_with("flat_atomic") &&
+      size == sizeof(cdna4::FlatMachineInst))
+    return AtomicFaultEncoding::Cdna4Flat;
+  if ((arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250) &&
+      (mnemonic.starts_with("flat_atomic") || mnemonic.starts_with("global_atomic")) &&
       size == sizeof(rdna4::VflatMachineInst))
     return AtomicFaultEncoding::FlatLike;
-  if (mnemonic.starts_with("buffer_atomic") && size == sizeof(rdna4::VbufferMachineInst))
+  if ((arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250) &&
+      mnemonic.starts_with("buffer_atomic") && size == sizeof(rdna4::VbufferMachineInst))
     return AtomicFaultEncoding::Buffer;
-  if (mnemonic.starts_with("ds_") && is_ds_atomic(mnemonic) && lds_width_bits(mnemonic) == 32u &&
+  if ((arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250) &&
+      mnemonic.starts_with("ds_") && is_ds_atomic(mnemonic) && lds_width_bits(mnemonic) == 32u &&
       size == sizeof(rdna4::VdsMachineInst))
     return AtomicFaultEncoding::Ds;
   return AtomicFaultEncoding::Unsupported;
@@ -22,12 +30,19 @@ enum class AtomicFaultEncoding : uint8_t {
 }
 
 [[nodiscard]] bool atomic_fault_supports_order(AtomicFaultEncoding encoding) {
-  return encoding == AtomicFaultEncoding::FlatLike || encoding == AtomicFaultEncoding::Buffer;
+  return encoding == AtomicFaultEncoding::Cdna4Flat ||
+         encoding == AtomicFaultEncoding::FlatLike || encoding == AtomicFaultEncoding::Buffer;
+}
+
+[[nodiscard]] bool atomic_fault_supports_address(AtomicFaultEncoding encoding) {
+  return encoding == AtomicFaultEncoding::FlatLike || encoding == AtomicFaultEncoding::Buffer ||
+         encoding == AtomicFaultEncoding::Ds;
 }
 
 template <typename Container>
 void append_fault_sites_for_container(std::span<const uint8_t> bytes, std::string_view fingerprint,
                                       const Container &container, bool in_kernel,
+                                      rj_code_arch_t arch,
                                       std::vector<ConSanFaultSite> &sites) {
   const std::string container_kind = in_kernel ? "kernel" : "function";
   uint32_t barrier_occurrence = 0;
@@ -63,7 +78,8 @@ void append_fault_sites_for_container(std::span<const uint8_t> bytes, std::strin
 
   uint32_t atomic_occurrence = 0;
   for (const ConSanAtomicSite &atomic : container.atomic_sites) {
-    if (atomic_fault_encoding(atomic.mnemonic, atomic.size) == AtomicFaultEncoding::Unsupported) {
+    if (atomic_fault_encoding(atomic.mnemonic, atomic.size, arch) ==
+        AtomicFaultEncoding::Unsupported) {
       continue;
     }
     ConSanFaultSite site;
@@ -109,15 +125,16 @@ void append_fault_sites_for_container(std::span<const uint8_t> bytes, std::strin
   }
 }
 
-void build_fault_site_inventory(std::span<const uint8_t> bytes, ConSanResult &result) {
+void build_fault_site_inventory(std::span<const uint8_t> bytes, rj_code_arch_t arch,
+                                ConSanResult &result) {
   const std::string fingerprint = code_object_fingerprint(bytes);
   result.fault_sites.clear();
   for (const ConSanKernelInfo &kernel : result.kernels) {
     if (!is_rocclr_runtime_kernel_name(kernel.name))
-      append_fault_sites_for_container(bytes, fingerprint, kernel, true, result.fault_sites);
+      append_fault_sites_for_container(bytes, fingerprint, kernel, true, arch, result.fault_sites);
   }
   for (const ConSanFunctionInfo &function : result.functions)
-    append_fault_sites_for_container(bytes, fingerprint, function, false, result.fault_sites);
+    append_fault_sites_for_container(bytes, fingerprint, function, false, arch, result.fault_sites);
 }
 
 [[nodiscard]] ConSanSyncAddressSource sync_address_source(ConSanAtomicAddressSpaceHint hint) {
@@ -3154,9 +3171,7 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
   if (!options.fault_site_identity.empty()) {
     const ConSanFaultSite *site =
         find_fault_site_by_identity(result, options.fault_site_identity, kind);
-    const bool patchable = site != nullptr && (kind != ConSanFaultSiteKind::Atomic ||
-                                               atomic_fault_encoding(site->mnemonic, site->size) !=
-                                                   AtomicFaultEncoding::Unsupported);
+    const bool patchable = site != nullptr;
     return patchable && owned_by_requested_kernel(site->execution_owners, result, options)
                ? site
                : nullptr;
@@ -3164,9 +3179,6 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
   uint32_t index = 0;
   for (const ConSanFaultSite &site : result.fault_sites) {
     if (site.kind != kind)
-      continue;
-    if (kind == ConSanFaultSiteKind::Atomic &&
-        atomic_fault_encoding(site.mnemonic, site.size) == AtomicFaultEncoding::Unsupported)
       continue;
     if (!owned_by_requested_kernel(site.execution_owners, result, options))
       continue;
