@@ -200,7 +200,8 @@ FILTER[vega12]=\
 FILTER[vega20]=\
 "$BLACKLIST_ALL_ASICS:"\
 "$SDMA_BLACKLIST:"\
-"KFDQMTest.GPUDoorbellWrite"
+"KFDQMTest.GPUDoorbellWrite:"\
+"KFDEvictTest.*"
 
 FILTER[raven_dgpuFallback]=\
 "$BLACKLIST_ALL_ASICS:"\

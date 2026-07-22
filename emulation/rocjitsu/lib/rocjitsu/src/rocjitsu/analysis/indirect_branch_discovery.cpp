@@ -10,9 +10,12 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
+#include <bitset>
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <limits>
 #include <optional>
 #include <set>
 #include <string_view>
@@ -158,6 +161,7 @@ enum class ScalarSop2Op {
   AddI32,
   AddcU32,
   SubbU32,
+  AddNcU64,
 };
 
 /// @brief Concrete PC-builder value carried by one SGPR pair.
@@ -181,6 +185,50 @@ struct TempDeltaPattern {
   size_t instruction_count = 0;
 };
 
+/// @brief Compact SGPR-only write mask for the indirect-PC recovery pass.
+///
+/// @details This analysis only needs to know which scalar general-purpose
+/// registers an unmodeled instruction writes. Storing that local fact in a full
+/// RegisterSet causes recovery performance regressions because every
+/// invalidation scans SGPR, VGPR, and AccVGPR bitsets even though vector classes
+/// are irrelevant here. Keep two words instead and iterate only set SGPR bits.
+struct SgprWriteMask {
+  uint64_t lo = 0;
+  uint64_t hi = 0;
+
+  void set(uint16_t sgpr) {
+    if (sgpr < 64) {
+      lo |= uint64_t{1} << sgpr;
+    } else if (sgpr < REGISTER_SET_MAX_SGPRS) {
+      hi |= uint64_t{1} << (sgpr - 64);
+    }
+  }
+
+  void expand(RegisterRef ref) {
+    if (ref.cls != RegClass::SGPR)
+      return;
+    const uint16_t width = std::max<uint16_t>(1, ref.width);
+    for (uint16_t i = 0; i < width; ++i)
+      set(static_cast<uint16_t>(ref.index + i));
+  }
+
+  template <typename F> void for_each(F &&f) const {
+    uint64_t bits = lo;
+    while (bits != 0) {
+      const auto sgpr = static_cast<uint16_t>(std::countr_zero(bits));
+      f(sgpr);
+      bits &= bits - 1;
+    }
+
+    bits = hi;
+    while (bits != 0) {
+      const auto sgpr = static_cast<uint16_t>(64 + std::countr_zero(bits));
+      f(sgpr);
+      bits &= bits - 1;
+    }
+  }
+};
+
 /// @brief Cached per-instruction facts used by the analysis.
 ///
 /// @details Decoding instruction operands can be expensive on large code
@@ -196,7 +244,7 @@ struct InstructionFacts {
   std::optional<uint16_t> swappc_ssrc;
   std::optional<uint16_t> swappc_sdst;
   std::optional<uint16_t> call_sdst;
-  RegisterSet written_sgprs;
+  SgprWriteMask written_sgprs;
   bool written_sgprs_computed = false;
 };
 
@@ -398,8 +446,8 @@ private:
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
-    return add_base(0x47);
   case ROCJITSU_CODE_ARCH_GFX1250:
+    return add_base(0x47);
   case ROCJITSU_CODE_ARCH_RV32I:
   case ROCJITSU_CODE_ARCH_RV64I:
   case ROCJITSU_CODE_ARCH_NUM_ARCHS:
@@ -419,6 +467,21 @@ private:
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
+    switch (op) {
+    case ScalarSop2Op::AddU32:
+      return 0;
+    case ScalarSop2Op::SubU32:
+      return 1;
+    case ScalarSop2Op::AddI32:
+      return 2;
+    case ScalarSop2Op::AddcU32:
+      return 4;
+    case ScalarSop2Op::SubbU32:
+      return 5;
+    case ScalarSop2Op::AddNcU64:
+      return std::nullopt;
+    }
+    return std::nullopt;
   case ROCJITSU_CODE_ARCH_GFX1250:
     switch (op) {
     case ScalarSop2Op::AddU32:
@@ -431,6 +494,8 @@ private:
       return 4;
     case ScalarSop2Op::SubbU32:
       return 5;
+    case ScalarSop2Op::AddNcU64:
+      return 83;
     }
     return std::nullopt;
   case ROCJITSU_CODE_ARCH_RV32I:
@@ -525,8 +590,6 @@ private:
 }
 
 void record_written_sgpr_ref(InstructionFacts &facts, RegisterRef ref) {
-  if (ref.cls != RegClass::SGPR)
-    return;
   facts.written_sgprs.expand(ref);
 }
 
@@ -545,10 +608,9 @@ void record_written_sgprs(const Instruction &inst, InstructionFacts &facts) {
 
   RegisterSet implicit_defs;
   inst.implicit_defs(implicit_defs);
-  implicit_defs.for_each([&](RegisterRef ref) {
-    if (ref.cls == RegClass::SGPR)
-      record_written_sgpr_ref(facts, ref);
-  });
+  if (!implicit_defs.none()) {
+    implicit_defs.for_each([&](RegisterRef ref) { record_written_sgpr_ref(facts, ref); });
+  }
   facts.written_sgprs_computed = true;
 }
 
@@ -570,10 +632,7 @@ void invalidate_written_sgprs(AnalysisContext &ctx, size_t index, BlockState &st
   // processed normally.
   ensure_written_sgprs(ctx, index);
   const InstructionFacts &facts = ctx.facts[index];
-  facts.written_sgprs.for_each([&](RegisterRef ref) {
-    if (ref.cls == RegClass::SGPR)
-      state.invalidate_half(ref.index, protected_pair);
-  });
+  facts.written_sgprs.for_each([&](uint16_t sgpr) { state.invalidate_half(sgpr, protected_pair); });
 }
 
 [[nodiscard]] bool is_program_terminator(const Instruction &inst) {
@@ -615,6 +674,52 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   if (it == insts.end() || (*it)->src_loc() != offset)
     return std::nullopt;
   return static_cast<size_t>(std::distance(insts.begin(), it));
+}
+
+/// @brief Mark every basic-block leader in the decoded instruction stream.
+///
+/// @details A leader is the first instruction of a basic block: index 0, any
+/// direct branch target, the fallthrough after a terminator, an instruction
+/// following an address discontinuity, and any caller-supplied extra leader.
+/// Returns a per-instruction bitmap (1 == leader). This is the single source of
+/// truth for both the temporary CFG skeleton and the block-local lane-stash
+/// scan, so the two agree on where a block begins.
+[[nodiscard]] std::vector<uint8_t> compute_block_leaders(std::span<const Instruction *const> insts,
+                                                         std::span<const uint64_t> extra_leaders) {
+  std::vector<uint8_t> leaders(insts.size(), 0);
+  if (insts.empty())
+    return leaders;
+  leaders.front() = 1;
+
+  const uint64_t section_end =
+      insts.back()->src_loc() + static_cast<uint64_t>(insts.back()->size());
+  for (uint64_t leader : extra_leaders) {
+    if (leader >= section_end)
+      continue;
+    if (auto index = instruction_index_for_offset(insts, leader))
+      leaders[*index] = 1;
+  }
+
+  for (size_t i = 0; i < insts.size(); ++i) {
+    const Instruction &inst = *insts[i];
+    const uint64_t next_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+    // An address discontinuity or the instruction after any terminator begins a
+    // new block.
+    if (i + 1 < insts.size() && insts[i + 1]->src_loc() != next_offset)
+      leaders[i + 1] = 1;
+    if (is_block_terminator(inst) && next_offset < section_end && i + 1 < insts.size() &&
+        insts[i + 1]->src_loc() == next_offset)
+      leaders[i + 1] = 1;
+
+    if (auto delta = inst.branch_offset_bytes()) {
+      const int64_t target = static_cast<int64_t>(next_offset) + static_cast<int64_t>(*delta);
+      if (target >= 0 && static_cast<uint64_t>(target) < section_end) {
+        if (auto index = instruction_index_for_offset(insts, static_cast<uint64_t>(target)))
+          leaders[*index] = 1;
+      }
+    }
+  }
+  return leaders;
 }
 
 [[nodiscard]] bool sop1_same_sreg(const Instruction &inst, uint32_t word, std::string_view mnemonic,
@@ -799,6 +904,55 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   return false;
 }
 
+[[nodiscard]] bool apply_gfx1250_add_nc_u64_update(const Instruction &inst, uint32_t word,
+                                                   std::span<const uint8_t> text,
+                                                   rj_code_arch_t arch, uint16_t pair_lo,
+                                                   PcValue &value) {
+  // gfx1250 compilers use one SCC-neutral 64-bit add instead of the legacy
+  // low-add/high-carry pair:
+  //
+  //   s_get_pc_i64  s[lo:lo+1]
+  //   s_add_nc_u64  s[lo:lo+1], s[lo:lo+1], literal
+  //   s_set_pc_i64  s[lo:lo+1]
+  //
+  // Match only the self-update literal forms. Register addends would require a
+  // separate constant-propagation proof and must continue to fail closed.
+  if (arch != ROCJITSU_CODE_ARCH_GFX1250 || inst.mnemonic() != "s_add_nc_u64" ||
+      inst.num_dst_operands() != 1 || inst.num_src_operands() != 2)
+    return false;
+
+  const Operand *dst = inst.dst_operand(0);
+  const Operand *src0 = inst.src_operand(0);
+  const Operand *src1 = inst.src_operand(1);
+  if (dst == nullptr || src0 == nullptr || src1 == nullptr)
+    return false;
+  const auto dst_ref = dst->to_register_ref();
+  const auto src0_ref = src0->to_register_ref();
+  if (!dst_ref || !src0_ref || dst_ref->cls != RegClass::SGPR || src0_ref->cls != RegClass::SGPR ||
+      dst_ref->index != pair_lo || src0_ref->index != pair_lo || dst_ref->width != 2 ||
+      src0_ref->width != 2)
+    return false;
+
+  uint64_t literal = 0;
+  if (auto literal64 = src1->literal64_value()) {
+    literal = *literal64;
+  } else {
+    constexpr uint16_t kLiteralOperand = 255;
+    if (inst.size() != 2 * sizeof(uint32_t) || ((word >> 8) & 0xffu) != kLiteralOperand)
+      return false;
+    literal = text_word_at(text, inst.src_loc() + sizeof(uint32_t));
+  }
+
+  // s_add_nc_u64 performs modulo-2^64 arithmetic. A valid local text target is
+  // representable as a non-negative int64 offset after the modulo addition.
+  const uint64_t updated = static_cast<uint64_t>(value.offset) + literal;
+  if (updated > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+    return false;
+  value.offset = static_cast<int64_t>(updated);
+  value.source_recovery_end_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+  return true;
+}
+
 [[nodiscard]] std::optional<IndirectCallFixup> fixup_for_value(const AnalysisContext &ctx,
                                                                size_t inst_index, uint16_t pair_lo,
                                                                const PcValue &value) {
@@ -821,13 +975,31 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
 }
 
 bool append_unique(std::vector<IndirectCallFixup> &out, IndirectCallFixup fixup) {
+  // Deduplicate only FULLY identical fixups. A consumer with several distinct
+  // s_getpc builders reaching the same target keeps the translator rewriting each
+  // builder to its relocated address, so the builder identity
+  // (source_getpc_offset and the recovery range) must participate in the compare.
+  // Collapsing on {call, target, sreg} alone would drop a distinct builder, which
+  // then keeps its stale pre-relocation address and can branch into unrelated
+  // translated bytes. This mirrors the lattice value identity, which likewise
+  // includes source_getpc_offset.
   const auto duplicate = std::ranges::find_if(out, [&](const IndirectCallFixup &existing) {
     return existing.source_call_offset == fixup.source_call_offset &&
            existing.source_target_offset == fixup.source_target_offset &&
-           existing.source_call_sreg == fixup.source_call_sreg;
+           existing.source_call_sreg == fixup.source_call_sreg &&
+           existing.source_getpc_offset == fixup.source_getpc_offset &&
+           existing.source_recovery_begin_offset == fixup.source_recovery_begin_offset &&
+           existing.source_recovery_end_offset == fixup.source_recovery_end_offset;
   });
-  if (duplicate != out.end())
+  if (duplicate != out.end()) {
+    // Incompleteness is monotonic: if any iteration observes this fixup as
+    // incomplete, the merged record must stay incomplete. Otherwise a later
+    // fixed-point pass that rediscovers an earlier-complete fact as incomplete
+    // would be dropped here, leaving the consumer wrongly eligible for a direct
+    // window.
+    duplicate->source_incomplete = duplicate->source_incomplete || fixup.source_incomplete;
     return false;
+  }
   out.push_back(fixup);
   return true;
 }
@@ -900,39 +1072,11 @@ build_analysis_blocks(const AnalysisContext &ctx, std::span<const uint64_t> extr
   // The leader set is represented as an instruction-index bitmap instead of an
   // ordered set of offsets. The decoded instruction stream is already sorted,
   // and index marking avoids an O(number_of_instructions * log leaders)
-  // membership check on very large kernels.
-  std::vector<uint8_t> leaders(ctx.insts.size(), 0);
-  leaders.front() = 1;
-
-  const uint64_t section_end =
-      ctx.insts.back()->src_loc() + static_cast<uint64_t>(ctx.insts.back()->size());
-  for (uint64_t leader : extra_leaders) {
-    if (leader >= section_end)
-      continue;
-    if (auto index = instruction_index_for_offset(ctx.insts, leader))
-      leaders[*index] = 1;
-  }
-
-  for (size_t i = 0; i < ctx.insts.size(); ++i) {
-    const Instruction &inst = *ctx.insts[i];
-    const uint64_t next_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
-    if (is_block_terminator(inst) && next_offset < section_end) {
-      // Splitting after terminators makes each setpc/swappc the last
-      // instruction in its analysis block. That is important because the block
-      // transfer must summarize the state at the control-transfer boundary, not
-      // after unrelated fallthrough instructions.
-      if (i + 1 < ctx.insts.size() && ctx.insts[i + 1]->src_loc() == next_offset)
-        leaders[i + 1] = 1;
-    }
-
-    if (auto delta = inst.branch_offset_bytes()) {
-      const int64_t target = static_cast<int64_t>(next_offset) + static_cast<int64_t>(*delta);
-      if (target >= 0 && static_cast<uint64_t>(target) < section_end) {
-        if (auto index = instruction_index_for_offset(ctx.insts, static_cast<uint64_t>(target)))
-          leaders[*index] = 1;
-      }
-    }
-  }
+  // membership check on very large kernels. Splitting after terminators makes
+  // each setpc/swappc the last instruction in its analysis block, so the block
+  // transfer summarizes the state at the control-transfer boundary rather than
+  // after unrelated fallthrough instructions.
+  const std::vector<uint8_t> leaders = compute_block_leaders(ctx.insts, extra_leaders);
 
   std::vector<AnalysisBlock> blocks;
   blocks.reserve(std::ranges::count(leaders, uint8_t{1}));
@@ -1085,20 +1229,48 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
     return std::nullopt;
 
   const Instruction &low_inst = *ctx.insts[block.first_index];
-  const Instruction &high_inst = *ctx.insts[block.first_index + 1];
-  const Instruction &setpc_inst = *ctx.insts[block.first_index + 2];
+  const auto is_gfx1250_padding = [&](size_t index) {
+    if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
+      return false;
+    const Instruction &inst = *ctx.insts[index];
+    if (inst.mnemonic() == "s_prefetch_inst_pc_rel")
+      return true;
+    // The compiler also emits a scalar immediate move to configure the
+    // prefetch. It is safe to skip only when its destination is outside the
+    // getpc pair being proven AND is not tmp_sreg — a move into tmp_sreg would
+    // change the value the following s_add/s_abs consumes while recovery keeps
+    // computing the target from the original literal.
+    if (inst.mnemonic() != "s_mov_b32" || inst.size() != sizeof(uint32_t))
+      return false;
+    const uint16_t dst = static_cast<uint16_t>((ctx.facts[index].word >> 16) & 0x7fu);
+    return dst != pair_lo && dst != static_cast<uint16_t>(pair_lo + 1u) && dst != tmp_sreg;
+  };
+
+  size_t high_index = block.first_index + 1;
+  while (high_index <= block.last_index && is_gfx1250_padding(high_index))
+    ++high_index;
+  if (high_index > block.last_index)
+    return std::nullopt;
+  const Instruction &high_inst = *ctx.insts[high_index];
+
+  size_t setpc_index = high_index + 1;
+  while (setpc_index <= block.last_index && is_gfx1250_padding(setpc_index))
+    ++setpc_index;
+  if (setpc_index > block.last_index)
+    return std::nullopt;
+  const Instruction &setpc_inst = *ctx.insts[setpc_index];
   if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[block.first_index].word, *add_u32_opcode,
                                 pair_lo, pair_lo, tmp_sreg))
     return std::nullopt;
-  if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[block.first_index + 1].word,
-                                     *addc_u32_opcode, static_cast<uint16_t>(pair_lo + 1),
+  if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[high_index].word, *addc_u32_opcode,
+                                     static_cast<uint16_t>(pair_lo + 1),
                                      static_cast<uint16_t>(pair_lo + 1)))
     return std::nullopt;
-  auto setpc_sreg = scalar_pc_sreg(ctx.arch, setpc_inst, ctx.facts[block.first_index + 2].word,
-                                   ScalarPcOp::SetPc64);
+  auto setpc_sreg =
+      scalar_pc_sreg(ctx.arch, setpc_inst, ctx.facts[setpc_index].word, ScalarPcOp::SetPc64);
   if (!setpc_sreg || *setpc_sreg != pair_lo)
     return std::nullopt;
-  return block.first_index + 2;
+  return setpc_index;
 }
 
 [[nodiscard]] std::optional<std::pair<size_t, uint64_t>>
@@ -1115,33 +1287,53 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
   // through this subtract half. Relocation rewrites that first range once; the
   // add-half fixup shares the range only so translation knows its setpc was
   // statically accounted for.
-  if (block.first_index + 3 > block.last_index)
-    return std::nullopt;
-
   const auto sub_u32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::SubU32);
   const auto subb_u32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::SubbU32);
   if (!sub_u32_opcode || !subb_u32_opcode)
     return std::nullopt;
 
-  const Instruction &abs_inst = *ctx.insts[block.first_index];
-  const Instruction &low_inst = *ctx.insts[block.first_index + 1];
-  const Instruction &high_inst = *ctx.insts[block.first_index + 2];
-  const Instruction &setpc_inst = *ctx.insts[block.first_index + 3];
-  if (!sop1_same_sreg(abs_inst, ctx.facts[block.first_index].word, "s_abs_i32", tmp_sreg))
+  const auto is_gfx1250_padding = [&](size_t index) {
+    if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
+      return false;
+    const Instruction &inst = *ctx.insts[index];
+    if (inst.mnemonic() == "s_prefetch_inst_pc_rel")
+      return true;
+    // Skip a prefetch-config move only when it clobbers neither the getpc pair
+    // nor tmp_sreg (whose value s_abs_i32/s_sub_u32 below consume).
+    if (inst.mnemonic() != "s_mov_b32" || inst.size() != sizeof(uint32_t))
+      return false;
+    const uint16_t dst = static_cast<uint16_t>((ctx.facts[index].word >> 16) & 0x7fu);
+    return dst != pair_lo && dst != static_cast<uint16_t>(pair_lo + 1u) && dst != tmp_sreg;
+  };
+
+  size_t abs_index = block.first_index;
+  while (abs_index <= block.last_index && is_gfx1250_padding(abs_index))
+    ++abs_index;
+  if (abs_index + 3 > block.last_index)
     return std::nullopt;
-  if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[block.first_index + 1].word, *sub_u32_opcode,
-                                pair_lo, pair_lo, tmp_sreg))
+  const Instruction &abs_inst = *ctx.insts[abs_index];
+  const Instruction &low_inst = *ctx.insts[abs_index + 1];
+  const Instruction &high_inst = *ctx.insts[abs_index + 2];
+  size_t setpc_index = abs_index + 3;
+  while (setpc_index <= block.last_index && is_gfx1250_padding(setpc_index))
+    ++setpc_index;
+  if (setpc_index > block.last_index)
     return std::nullopt;
-  if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[block.first_index + 2].word,
-                                     *subb_u32_opcode, static_cast<uint16_t>(pair_lo + 1),
+  const Instruction &setpc_inst = *ctx.insts[setpc_index];
+  if (!sop1_same_sreg(abs_inst, ctx.facts[abs_index].word, "s_abs_i32", tmp_sreg))
+    return std::nullopt;
+  if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[abs_index + 1].word, *sub_u32_opcode, pair_lo,
+                                pair_lo, tmp_sreg))
+    return std::nullopt;
+  if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[abs_index + 2].word, *subb_u32_opcode,
+                                     static_cast<uint16_t>(pair_lo + 1),
                                      static_cast<uint16_t>(pair_lo + 1)))
     return std::nullopt;
-  auto setpc_sreg = scalar_pc_sreg(ctx.arch, setpc_inst, ctx.facts[block.first_index + 3].word,
-                                   ScalarPcOp::SetPc64);
+  auto setpc_sreg =
+      scalar_pc_sreg(ctx.arch, setpc_inst, ctx.facts[setpc_index].word, ScalarPcOp::SetPc64);
   if (!setpc_sreg || *setpc_sreg != pair_lo)
     return std::nullopt;
-  return std::pair{block.first_index + 3,
-                   high_inst.src_loc() + static_cast<uint64_t>(high_inst.size())};
+  return std::pair{setpc_index, high_inst.src_loc() + static_cast<uint64_t>(high_inst.size())};
 }
 
 bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state) {
@@ -1152,7 +1344,8 @@ bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state
     PcValue updated = *value;
     const Instruction &inst = *ctx.insts[index];
     const uint32_t word = ctx.facts[index].word;
-    if (!apply_low_literal_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
+    if (!apply_gfx1250_add_nc_u64_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
+        !apply_low_literal_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
         !apply_high_carry_update(inst, word, ctx.text, ctx.arch, pair_lo, updated))
       continue;
 
@@ -1165,14 +1358,18 @@ bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state
 
 void emit_fixups_for_values(const AnalysisContext &ctx, size_t inst_index, uint16_t pair_lo,
                             std::span<const PcValue> values,
-                            std::vector<IndirectCallFixup> &recovered) {
+                            std::vector<IndirectCallFixup> &recovered, bool incomplete = false) {
   // A complete lattice value can contain multiple concrete targets. That is not
   // an error by itself; it represents a bounded static dispatch where different
   // predecessor paths materialize different PC constants before joining at one
-  // setpc/swappc consumer.
+  // setpc/swappc consumer. When @p incomplete, at least one predecessor left the
+  // pair unconstrained; the concrete targets are still recorded (for relocation
+  // and liveness) but flagged so the translator does not build a direct window.
   for (const PcValue &value : values) {
-    if (auto fixup = fixup_for_value(ctx, inst_index, pair_lo, value))
+    if (auto fixup = fixup_for_value(ctx, inst_index, pair_lo, value)) {
+      fixup->source_incomplete = incomplete;
       append_unique(recovered, *fixup);
+    }
   }
 }
 
@@ -1271,24 +1468,6 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
   finalize_block_transfers(block, state);
 }
 
-[[nodiscard]] std::unordered_map<uint16_t, LatticeValue>
-compute_exit_facts(const std::unordered_map<uint16_t, LatticeValue> &entry,
-                   const AnalysisBlock &block) {
-  // Apply one block's transfer summary to an entry fact map. SET and KILL are
-  // strong updates for their pair; PASS is represented by absence from the
-  // transfer map, so the incoming entry value remains in `exit`.
-  std::unordered_map<uint16_t, LatticeValue> exit = entry;
-  for (const auto &[pair_lo, transfer] : block.transfers) {
-    if (transfer.kind == PairTransfer::Kind::Set) {
-      exit[pair_lo] =
-          LatticeValue{.values = {transfer.value}, .incomplete = false, .killed = false};
-    } else if (transfer.kind == PairTransfer::Kind::Kill) {
-      exit[pair_lo] = LatticeValue{.values = {}, .incomplete = true, .killed = true};
-    }
-  }
-  return exit;
-}
-
 [[nodiscard]] std::vector<std::unordered_map<uint16_t, LatticeValue>>
 run_block_dataflow(const std::vector<AnalysisBlock> &blocks) {
   // Phase 3: compute block-entry facts to a fixed point.
@@ -1306,6 +1485,11 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks) {
   }
 
   std::vector<std::unordered_map<uint16_t, LatticeValue>> entry_facts(blocks.size());
+  // Keep key presence separate from the node-based value maps. The dataflow
+  // join needs the union of predecessor keys on every worklist visit; caching
+  // that bounded set avoids repeatedly chasing every unordered_map node just
+  // to recover information that changes only when the corresponding map does.
+  std::vector<std::bitset<REGISTER_SET_MAX_SGPRS>> entry_pairs(blocks.size());
   std::deque<size_t> worklist;
   std::vector<bool> on_worklist(blocks.size(), false);
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
@@ -1319,28 +1503,57 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks) {
     on_worklist[block_index] = false;
 
     std::unordered_map<uint16_t, LatticeValue> new_entry;
+    std::bitset<REGISTER_SET_MAX_SGPRS> mentioned_pairs;
     if (!predecessors[block_index].empty()) {
-      std::vector<std::unordered_map<uint16_t, LatticeValue>> pred_exits;
-      pred_exits.reserve(predecessors[block_index].size());
-      std::set<uint16_t> mentioned_pairs;
+      // A predecessor exit is its sparse entry map with this block's SET/KILL
+      // summaries overlaid. The old implementation materialized that complete
+      // map for every predecessor on every worklist visit, then allocated a
+      // std::set to recover the union of keys. Large generated kernels spend
+      // most dataflow time allocating and freeing those short-lived nodes.
+      // Track the bounded SGPR-pair key union in fixed storage and evaluate each
+      // predecessor's exit value only for the pair currently being joined.
       for (size_t predecessor : predecessors[block_index]) {
-        pred_exits.push_back(compute_exit_facts(entry_facts[predecessor], blocks[predecessor]));
-        for (const auto &[pair_lo, _] : pred_exits.back())
-          mentioned_pairs.insert(pair_lo);
+        mentioned_pairs |= entry_pairs[predecessor];
+        for (const auto &[pair_lo, _] : blocks[predecessor].transfers)
+          mentioned_pairs.set(pair_lo);
       }
 
-      for (uint16_t pair_lo : mentioned_pairs) {
+      for (uint16_t pair_lo = 0; pair_lo < mentioned_pairs.size(); ++pair_lo) {
+        if (!mentioned_pairs[pair_lo])
+          continue;
+
         LatticeValue joined;
-        for (const auto &pred_exit : pred_exits) {
-          auto it = pred_exit.find(pair_lo);
-          if (it == pred_exit.end()) {
+        for (size_t predecessor : predecessors[block_index]) {
+          const AnalysisBlock &pred_block = blocks[predecessor];
+          const auto transfer = pred_block.transfers.find(pair_lo);
+          if (transfer != pred_block.transfers.end()) {
+            if (transfer->second.kind == PairTransfer::Kind::Set) {
+              append_lattice_value(joined, transfer->second.value);
+            } else if (transfer->second.kind == PairTransfer::Kind::Kill) {
+              joined.incomplete = true;
+              joined.killed = true;
+            } else {
+              // Pass is normally represented by absence from the sparse
+              // transfer map, but handle it explicitly to keep this lookup
+              // equivalent if a caller ever stores a Pass summary.
+              const auto entry = entry_facts[predecessor].find(pair_lo);
+              if (entry == entry_facts[predecessor].end())
+                joined.incomplete = true;
+              else
+                join_lattice_value(joined, entry->second);
+            }
+            continue;
+          }
+
+          const auto entry = entry_facts[predecessor].find(pair_lo);
+          if (entry == entry_facts[predecessor].end()) {
             // A missing predecessor fact means the pair is still at its
             // unconstrained kernel-entry value on that path. Joining a concrete
             // PC with an unconstrained value must not create a speculative CFG
             // edge, so the result becomes incomplete.
             joined.incomplete = true;
           } else {
-            join_lattice_value(joined, it->second);
+            join_lattice_value(joined, entry->second);
           }
         }
         new_entry.emplace(pair_lo, std::move(joined));
@@ -1351,6 +1564,7 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks) {
       continue;
 
     entry_facts[block_index] = std::move(new_entry);
+    entry_pairs[block_index] = mentioned_pairs;
     for (size_t successor : blocks[block_index].successors) {
       if (on_worklist[successor])
         continue;
@@ -1392,8 +1606,8 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks) {
       continue;
     }
 
-    emit_fixups_for_values(ctx, consumer.inst_index, consumer.pair_lo, it->second.values,
-                           recovered);
+    emit_fixups_for_values(ctx, consumer.inst_index, consumer.pair_lo, it->second.values, recovered,
+                           it->second.incomplete);
   }
   return unresolved;
 }
@@ -1428,6 +1642,249 @@ void add_recovered_successors(const std::vector<IndirectCallFixup> &recovered,
     std::vector<size_t> &successors = blocks[source_it->second].successors;
     if (std::ranges::find(successors, target_it->second) == successors.end())
       successors.push_back(target_it->second);
+  }
+}
+
+struct VectorLaneSlot {
+  uint16_t vgpr = 0;
+  uint16_t lane = 0;
+
+  friend bool operator==(const VectorLaneSlot &, const VectorLaneSlot &) = default;
+};
+
+struct VectorLaneSlotHash {
+  size_t operator()(const VectorLaneSlot &slot) const {
+    return (static_cast<size_t>(slot.vgpr) << 16) | slot.lane;
+  }
+};
+
+struct StashedPcHalf {
+  PcValue value;
+  bool high = false;
+};
+
+[[nodiscard]] std::optional<uint16_t> inline_lane(const Operand *operand) {
+  if (operand == nullptr || operand->encoding_value() < kInlineInt0 ||
+      operand->encoding_value() >= kInlineInt0 + 32)
+    return std::nullopt;
+  return static_cast<uint16_t>(operand->encoding_value() - kInlineInt0);
+}
+
+[[nodiscard]] std::optional<RegisterRef> operand_register(const Operand *operand, RegClass cls) {
+  if (operand == nullptr)
+    return std::nullopt;
+  auto ref = operand->to_register_ref();
+  if (!ref || ref->cls != cls || ref->width != 1)
+    return std::nullopt;
+  return ref;
+}
+
+void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
+                                     std::vector<IndirectCallFixup> &recovered) {
+  // gfx1250 device functions sometimes keep a small static call set in one
+  // VGPR: getpc-built low/high halves are written to fixed lanes, then read
+  // back into an SGPR pair immediately before swappc. Track only fixed-lane
+  // writelane/readlane transport. Any ordinary write to the VGPR invalidates
+  // every recorded lane, and any SGPR write invalidates a reconstructed half.
+  //
+  // This recovery is intentionally BLOCK-LOCAL and fails closed rather than
+  // reasoning across the CFG. The lane-slot map is scanned in source order, so a
+  // writelane that is jumped over, reached on only one predecessor, or belongs to
+  // an earlier region must not seed a later consumer. Two guards enforce this:
+  //   1. Reset all recovery state (builders, lane slots, reconstructed halves,
+  //      VGPR-MSB bank) at every basic-block LEADER, so a stash only feeds a
+  //      readlane in the SAME straight-line block. Resetting at leaders (not just
+  //      after terminators) is required: a conditional branch can jump directly
+  //      into the readlane/swappc block while the lexical fallthrough path holds
+  //      the stash, so the consumer's block leader must start from a clean state
+  //      even though its lexical predecessor fell through. The real compiler idiom
+  //      emits writelane/readlane/swappc contiguously, so true positives survive.
+  //   2. Clear `slots` on any S_SET_VGPR_MSB / MODE write, because gfx1250 encodes
+  //      only the low VGPR selector: the same VectorLaneSlot key can name a
+  //      different physical VGPR once the DST/SRC0 MSB bank changes. Rather than
+  //      key slots by proven physical bank (a full CFG bank analysis), drop stale
+  //      slots when the bank state may have moved.
+  if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
+    return;
+
+  // Leaders drive the block-local reset. No extra leaders here: recovered
+  // indirect targets are outputs of this pass, and direct branch targets alone
+  // are enough to keep a jumped-into consumer from reusing a skipped stash.
+  const std::vector<uint8_t> leaders = compute_block_leaders(ctx.insts, {});
+
+  const auto changes_vgpr_msb_bank = [](std::string_view mnemonic) {
+    return mnemonic == "s_set_vgpr_msb" || mnemonic == "s_setreg_b32" ||
+           mnemonic == "s_setreg_imm32_b32";
+  };
+
+  BlockState builders;
+  std::unordered_map<VectorLaneSlot, StashedPcHalf, VectorLaneSlotHash> slots;
+  std::array<std::optional<StashedPcHalf>, REGISTER_SET_MAX_SGPRS> read_halves;
+  std::set<uint16_t> active_read_halves;
+
+  // Block-local VGPR-MSB bank state. gfx1250 vector operands encode only the low
+  // eight bits of a VGPR index; s_set_vgpr_msb supplies the high two bits per role
+  // (immediate byte {DST[7:6], SRC2[5:4], SRC1[3:2], SRC0[1:0]}). v_writelane
+  // addresses its destination through the DST bank and v_readlane its source
+  // through the SRC0 bank, so equal low selectors under differing banks name
+  // different physical VGPRs. Track the current immediate; nullopt means the bank
+  // is unknown (a dynamic MODE write, or a block leader — see the reset below) and
+  // any lane transport must fail closed. The kernel entry block starts at the
+  // architectural default of bank 0 for every role; later blocks are marked
+  // unknown until they locally re-establish the bank.
+  std::optional<uint8_t> vgpr_msb_imm = uint8_t{0};
+  const auto role_bank = [&](unsigned shift) -> std::optional<uint8_t> {
+    if (!vgpr_msb_imm)
+      return std::nullopt;
+    return static_cast<uint8_t>((*vgpr_msb_imm >> shift) & 0x3u);
+  };
+  // Physical VGPR = low selector + bank * 256, or nullopt when the bank is unknown.
+  const auto physical_vgpr = [&](uint16_t low, unsigned bank_shift) -> std::optional<uint16_t> {
+    const auto bank = role_bank(bank_shift);
+    if (!bank)
+      return std::nullopt;
+    return static_cast<uint16_t>(low + static_cast<uint16_t>(*bank) * 256u);
+  };
+  constexpr unsigned kDstBankShift = 6;  // s_set_vgpr_msb immediate DST field.
+  constexpr unsigned kSrc0BankShift = 0; // s_set_vgpr_msb immediate SRC0 field.
+
+  for (size_t index = 0; index < ctx.insts.size(); ++index) {
+    const Instruction &inst = *ctx.insts[index];
+    const InstructionFacts &facts = ctx.facts[index];
+    const std::string_view mnemonic = inst.mnemonic();
+
+    // At every block leader after entry, discard all block-local recovery state:
+    // a jumped-into block must not inherit a lexical predecessor's stash, builders,
+    // reconstructed halves, or VGPR-MSB bank. The bank becomes unknown (only entry
+    // is guaranteed bank 0), so a leader that needs lane transport must locally
+    // re-establish it with s_set_vgpr_msb, else transport fails closed.
+    if (index != 0 && leaders[index]) {
+      builders = BlockState{};
+      slots.clear();
+      read_halves.fill(std::nullopt);
+      active_read_halves.clear();
+      vgpr_msb_imm = std::nullopt;
+    }
+
+    if (!active_read_halves.empty()) {
+      ensure_written_sgprs(ctx, index);
+      ctx.facts[index].written_sgprs.for_each([&](uint16_t sgpr) {
+        read_halves[sgpr].reset();
+        active_read_halves.erase(sgpr);
+      });
+    }
+
+    if (facts.getpc_sdst && *facts.getpc_sdst < kMaxTrackedSgprPair) {
+      const uint64_t next_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+      builders.set_builder(*facts.getpc_sdst, PcValue{.offset = static_cast<int64_t>(next_offset),
+                                                      .source_getpc_offset = inst.src_loc(),
+                                                      .source_recovery_begin_offset = next_offset,
+                                                      .source_recovery_end_offset = next_offset});
+      continue;
+    }
+    if (try_apply_pair_update(ctx, index, builders))
+      continue;
+
+    if (mnemonic == "v_writelane_b32") {
+      const auto dst = operand_register(inst.dst_operand(0), RegClass::VGPR);
+      const auto src = operand_register(inst.src_operand(0), RegClass::SGPR);
+      const auto lane = inline_lane(inst.src_operand(1));
+      // Key by the PHYSICAL destination VGPR (low selector + DST bank). If the
+      // bank is unknown, fail closed: do not record a slot under an ambiguous
+      // physical register.
+      const auto dst_phys = dst ? physical_vgpr(dst->index, kDstBankShift) : std::nullopt;
+      if (dst && src && lane && dst_phys) {
+        const VectorLaneSlot written_slot{*dst_phys, *lane};
+        slots.erase(written_slot);
+        for (uint16_t pair_lo : builders.active_pairs()) {
+          const PcValue *value = builders.builder(pair_lo);
+          if (value == nullptr || (src->index != pair_lo && src->index != pair_lo + 1))
+            continue;
+          slots[written_slot] = StashedPcHalf{.value = *value, .high = src->index == pair_lo + 1};
+          break;
+        }
+      }
+      invalidate_written_sgprs(ctx, index, builders);
+      continue;
+    }
+
+    if (mnemonic == "v_readlane_b32") {
+      const auto dst = operand_register(inst.dst_operand(0), RegClass::SGPR);
+      const auto src = operand_register(inst.src_operand(0), RegClass::VGPR);
+      const auto lane = inline_lane(inst.src_operand(1));
+      invalidate_written_sgprs(ctx, index, builders);
+      // Look up by the PHYSICAL source VGPR (low selector + SRC0 bank). An unknown
+      // bank cannot match any recorded slot, so it fails closed.
+      const auto src_phys = src ? physical_vgpr(src->index, kSrc0BankShift) : std::nullopt;
+      if (dst && src && lane && src_phys) {
+        auto slot = slots.find(VectorLaneSlot{*src_phys, *lane});
+        if (slot != slots.end()) {
+          read_halves[dst->index] = slot->second;
+          active_read_halves.insert(dst->index);
+        }
+      }
+      continue;
+    }
+
+    if (facts.swappc_ssrc && static_cast<size_t>(*facts.swappc_ssrc + 1) < read_halves.size()) {
+      const uint16_t pair_lo = *facts.swappc_ssrc;
+      const auto &lo = read_halves[pair_lo];
+      const auto &hi = read_halves[pair_lo + 1];
+      if (lo && hi && !lo->high && hi->high && lo->value == hi->value) {
+        if (auto fixup = fixup_for_value(ctx, index, pair_lo, lo->value))
+          append_unique(recovered, *fixup);
+      }
+    }
+
+    if (mnemonic != "v_writelane_b32") {
+      // Any ordinary write to a stashed VGPR invalidates that slot. Build the full
+      // VGPR def set (explicit destinations of ANY width, plus implicit vector
+      // defs) rather than only width-1 destination operands: a 64-bit-or-wider
+      // destination overlapping a stashed lane must still clear it. RegisterSet
+      // handles the operand width and implicit defs, and for_each yields each
+      // covered lane individually.
+      RegisterSet vgpr_defs;
+      for (int dst_index = 0; dst_index < inst.num_dst_operands(); ++dst_index) {
+        const Operand *op = inst.dst_operand(dst_index);
+        if (op == nullptr)
+          continue;
+        if (auto ref = op->to_register_ref(); ref && ref->cls == RegClass::VGPR)
+          vgpr_defs.expand(*ref);
+      }
+      inst.implicit_defs(vgpr_defs);
+      vgpr_defs.for_each([&](RegisterRef ref) {
+        if (ref.cls != RegClass::VGPR)
+          return;
+        // The write's physical bank is not generally known here, so conservatively
+        // invalidate every slot whose low selector matches (all four banks). Slots
+        // store the physical index (low + bank*256), so compare the low 8 bits.
+        std::erase_if(slots, [&](const auto &item) {
+          return (item.first.vgpr & 0xffu) == (ref.index & 0xffu);
+        });
+      });
+    }
+
+    if (!builders.active_pairs().empty())
+      invalidate_written_sgprs(ctx, index, builders);
+    // Track / invalidate the VGPR-MSB bank state. An immediate s_set_vgpr_msb sets
+    // a known bank; a dynamic MODE write (s_setreg_b32) makes the bank unknown, so
+    // later transport fails closed. Either way, existing slots recorded under the
+    // previous bank are no longer trustworthy, so drop them.
+    if (changes_vgpr_msb_bank(mnemonic)) {
+      slots.clear();
+      if (mnemonic == "s_set_vgpr_msb") {
+        if (const auto *imm = inst.src_operand(0))
+          vgpr_msb_imm = static_cast<uint8_t>(imm->encoding_value() & 0xff);
+        else
+          vgpr_msb_imm = std::nullopt;
+      } else {
+        // s_setreg_b32 / s_setreg_imm32_b32 to MODE: treat the bank as unknown.
+        vgpr_msb_imm = std::nullopt;
+      }
+    }
+    // No reset after a terminator is needed here: the instruction following any
+    // terminator is a block leader, and the leader reset at the top of the next
+    // iteration discards all recovery state before it is used.
   }
 }
 
@@ -1548,6 +2005,7 @@ discover_indirect_branch_edges(std::span<const Instruction *const> insts,
     return recovered;
 
   AnalysisContext ctx = build_context(insts, text, arch);
+  recover_vector_lane_stashed_pcs(ctx, recovered);
   std::vector<uint64_t> leaders(extra_leaders.begin(), extra_leaders.end());
 
   for (size_t iteration = 0; iteration < kMaxIndirectDiscoveryIterations; ++iteration) {

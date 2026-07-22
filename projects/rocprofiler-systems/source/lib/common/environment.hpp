@@ -5,8 +5,8 @@
 
 #include "common/defines.h"
 #include "common/env_vars.hpp"
-#include "common/join.hpp"
 #include "logger/debug.hpp"
+#include <spdlog/fmt/fmt.h>
 
 #include <timemory/utility/filepath.hpp>
 
@@ -57,6 +57,48 @@ struct posix_env
     static char* getenv(const char* name) { return ::getenv(name); }
 };
 
+/// @brief Parse a string into a boolean.
+///
+/// Leading and trailing whitespace is trimmed before interpretation. All-digit
+/// strings are truthy when non-zero (an overflowing digit string is also truthy);
+/// other values are matched case-insensitively against the false tokens
+/// off/false/no/n/f/0 (anything else is truthy). An empty or all-whitespace string
+/// yields @p fallback.
+/// @param value    The string to interpret.
+/// @param fallback Returned when @p value is empty or all whitespace.
+/// @return The parsed boolean.
+[[nodiscard]] inline bool
+to_bool(std::string_view value, bool fallback = false)
+{
+    // trim leading/trailing whitespace before interpreting
+    constexpr std::string_view whitespace = " \t\n\r\f\v";
+    const auto                 first_pos  = value.find_first_not_of(whitespace);
+    if(first_pos == std::string_view::npos) return fallback;  // empty or all whitespace
+    const auto last_pos = value.find_last_not_of(whitespace);
+    value               = value.substr(first_pos, last_pos - first_pos + 1);
+
+    if(value.find_first_not_of("0123456789") == std::string_view::npos)
+    {
+        std::uint64_t numeric{};
+        const auto*   last   = value.data() + value.size();
+        const auto [ptr, ec] = std::from_chars(value.data(), last, numeric);
+        if(ec == std::errc::result_out_of_range) return true;
+        if(ec == std::errc{} && ptr == last) return numeric != 0;
+        return true;
+    }
+
+    std::string lower{ value };
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char chr) { return std::tolower(chr); });
+
+    constexpr auto false_values = std::array{
+        std::string_view{ "off" }, std::string_view{ "false" }, std::string_view{ "no" },
+        std::string_view{ "n" },   std::string_view{ "f" },
+    };
+    return !std::any_of(false_values.begin(), false_values.end(),
+                        [&lower](std::string_view val) { return lower == val; });
+}
+
 /// @brief Environment variable read/write facade, parameterised over the backend.
 ///
 /// All conversion and parsing logic lives here. Use @c environment<posix_env> (the
@@ -92,31 +134,7 @@ private:
             throw std::runtime_error(
                 std::string{ "No boolean value provided for " }.append(env_id));
         }
-
-        if(env_sv.find_first_not_of("0123456789") == std::string_view::npos)
-        {
-            // Parse with from_chars so a very large all-digit value cannot throw
-            // (std::stoi would throw std::out_of_range). Any non-zero digit string,
-            // including one that overflows, is truthy.
-            std::uint64_t numeric{};
-            const auto*   last   = env_sv.data() + env_sv.size();
-            const auto [ptr, ec] = std::from_chars(env_sv.data(), last, numeric);
-            if(ec == std::errc::result_out_of_range) return true;
-            if(ec == std::errc{} && ptr == last) return numeric != 0;
-            return true;
-        }
-
-        std::string lower{ env_sv };
-        std::transform(lower.begin(), lower.end(), lower.begin(),
-                       [](unsigned char chr) { return std::tolower(chr); });
-
-        constexpr auto false_values = std::array{
-            std::string_view{ "off" }, std::string_view{ "false" },
-            std::string_view{ "no" },  std::string_view{ "n" },
-            std::string_view{ "f" },   std::string_view{ "0" },
-        };
-        return !std::any_of(false_values.begin(), false_values.end(),
-                            [&lower](std::string_view val) { return lower == val; });
+        return to_bool(env_sv, fallback);
     }
 
     template <typename Tp>
@@ -384,7 +402,7 @@ inline void
 remove_env(std::vector<std::string>& env_list, std::string_view env_variable,
            const std::unordered_set<std::string>& original_envs)
 {
-    auto key = join("", env_variable, "=");
+    auto key = fmt::format("{}=", env_variable);
 
     env_list.erase(std::remove_if(env_list.begin(), env_list.end(),
                                   [&key](const std::string& entry) {
@@ -632,7 +650,7 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
     _updated_envs.emplace(updated_value_t{ _env_var });
 
     const auto _env_val_str = to_env_string(std::forward<Tp>(_env_val));
-    const auto _key         = join("", _env_var, "=");
+    const auto _key         = fmt::format("{}=", _env_var);
 
     const auto matches_key = [&_key](const std::string& entry) {
         return std::string_view{ entry }.find(_key) == 0;
@@ -641,7 +659,7 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
     auto first = std::find_if(_environ.begin(), _environ.end(), matches_key);
     if(first == _environ.end())
     {
-        _environ.emplace_back(join('=', _env_var, _env_val_str));
+        _environ.emplace_back(fmt::format("{}={}", _env_var, _env_val_str));
         return;
     }
 
@@ -649,7 +667,7 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
     {
         case update_mode::WEAK:
             if(_original_envs.find(*first) == _original_envs.end()) return;
-            *first = join('=', _env_var, _env_val_str);
+            *first = fmt::format("{}={}", _env_var, _env_val_str);
             return;
 
         case update_mode::PREPEND:
@@ -657,14 +675,15 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
         {
             if(first->find(_env_val_str) != std::string::npos) return;
             auto _val = first->substr(_key.size());
-            *first    = (_mode == update_mode::PREPEND)
-                            ? join('=', _env_var, join(_join_delim, _env_val_str, _val))
-                            : join('=', _env_var, join(_join_delim, _val, _env_val_str));
+            *first =
+                (_mode == update_mode::PREPEND)
+                    ? fmt::format("{}={}{}{}", _env_var, _env_val_str, _join_delim, _val)
+                    : fmt::format("{}={}{}{}", _env_var, _val, _join_delim, _env_val_str);
             return;
         }
 
         case update_mode::REPLACE:
-            *first = join('=', _env_var, _env_val_str);
+            *first = fmt::format("{}={}", _env_var, _env_val_str);
             _environ.erase(std::remove_if(std::next(first), _environ.end(), matches_key),
                            _environ.end());
             return;
@@ -711,7 +730,7 @@ add_torch_library_path(std::vector<std::string>& envp, std::string_view executab
     }
 
     envp.erase(std::remove_if(envp.begin(), envp.end(), is_ld_path), envp.end());
-    envp.emplace_back(join("", ld_prefix, result));
+    envp.emplace_back(fmt::format("{}{}", ld_prefix, result));
 
     updated_envs.emplace(ld_prefix.substr(0, ld_prefix.length() - 1));
 }

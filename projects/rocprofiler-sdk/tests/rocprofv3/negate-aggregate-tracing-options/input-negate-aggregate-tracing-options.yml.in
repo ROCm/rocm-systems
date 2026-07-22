@@ -17,6 +17,7 @@ jobs:
     ompt_trace: False
     rocdecode_trace: False
     rocjpeg_trace: False
+    rocshmem_trace: False
     hip_runtime_trace: False
     hip_compiler_trace: False
     hsa_core_trace: False

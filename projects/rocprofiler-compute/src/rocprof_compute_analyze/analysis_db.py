@@ -58,7 +58,10 @@ from utils.utils_analysis import (
     VALUE_COL_PREFERENCE,
 )
 from utils.utils_common import get_uuid, get_version
-from utils.utils_counter_defs import extract_counters_and_variables, get_build_in_vars
+from utils.utils_counter_defs import (
+    extract_counters_and_variables,
+    get_build_in_vars,
+)
 
 
 class MetricInfoRow(NamedTuple):
@@ -341,6 +344,8 @@ class db_analysis(OmniAnalyze_Base):
             pmc_df = utils_analysis.process_rocpd_csv(
                 pd.read_csv(Path(workload_path) / "pmc_perf.csv")
             )
+
+            utils_analysis.add_unit_counter(pmc_df)
 
             if self._profiling_config.get("iteration_multiplexing") is not None:
                 pmc_df = self.iteration_multiplex_impute_counters(

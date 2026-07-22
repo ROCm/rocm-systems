@@ -367,7 +367,8 @@ fn handle_client(fd: RawFd, shared: &Shared) {
 
     loop {
         let mut header = [0u8; RPC_HEADER_LEN];
-        if !recv_exact(fd, &mut header) {
+        let (ok, mut in_fd) = recv_header_with_fd(fd, &mut header);
+        if !ok {
             break;
         }
         let (opcode, request_id, payload_bytes) = parse_header(&header);
@@ -478,8 +479,15 @@ fn handle_client(fd: RawFd, shared: &Shared) {
                             buf_size: args_bytes as usize,
                             result: 0,
                             shared_handle: -1,
+                            in_handle: in_fd,
                         };
                         unsafe { lib.vm_execute_as(vm, process_id, &mut cmd) };
+                        // The debug session adopts the notifier fd on success
+                        // (in_handle cleared); reclaim it otherwise.
+                        if cmd.in_handle >= 0 {
+                            unsafe { libc::close(cmd.in_handle) };
+                        }
+                        in_fd = -1;
                         // `buf_size` is updated in place; clamp the slice
                         // we read back to what the payload actually holds.
                         let out_len = cmd.buf_size.min(payload.len().saturating_sub(8));
@@ -501,6 +509,12 @@ fn handle_client(fd: RawFd, shared: &Shared) {
 
             _ => false,
         };
+
+        // Reclaim any notifier fd attached to a non-ioctl message (the client
+        // only sends one on DBG_TRAP ENABLE; this is a safety net).
+        if in_fd >= 0 {
+            unsafe { libc::close(in_fd) };
+        }
 
         if !keep_going {
             break;
@@ -558,6 +572,69 @@ fn recv_exact(fd: RawFd, buf: &mut [u8]) -> bool {
         read += n as usize;
     }
     true
+}
+
+/// Receive the 16-byte RPC header, capturing an optional `SCM_RIGHTS` fd the
+/// client attaches to the message (the debugger notifier pipe on DBG_TRAP
+/// ENABLE). Returns `(ok, fd)`, where `fd` is `-1` if none was received. Any
+/// received fd is close-on-exec and belongs to the caller, which must close it
+/// if unused.
+fn recv_header_with_fd(fd: RawFd, buf: &mut [u8]) -> (bool, RawFd) {
+    let mut iov = libc::iovec {
+        iov_base: buf.as_mut_ptr() as *mut c_void,
+        iov_len: buf.len(),
+    };
+    let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+    let cmsg_space = unsafe { libc::CMSG_SPACE(std::mem::size_of::<RawFd>() as u32) } as usize;
+    let mut cmsg_buf = vec![0u8; cmsg_space];
+    msg.msg_iov = &mut iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = cmsg_buf.as_mut_ptr() as *mut c_void;
+    msg.msg_controllen = cmsg_space as _;
+
+    // `MSG_CMSG_CLOEXEC` sets `FD_CLOEXEC` on any descriptor delivered as
+    // ancillary data, matching `rpc_recv_msg()` in the C++ daemon. Without it
+    // the transferred notifier would be inheritable and could leak through a
+    // later `exec`.
+    let n = loop {
+        let r = unsafe { libc::recvmsg(fd, &mut msg, libc::MSG_CMSG_CLOEXEC) };
+        if r < 0 && last_errno() == libc::EINTR {
+            continue;
+        }
+        break r;
+    };
+    if n <= 0 {
+        return (false, -1);
+    }
+
+    // Extract an fd if the client attached one as SCM_RIGHTS ancillary data.
+    let mut recv_fd: RawFd = -1;
+    unsafe {
+        let mut cmsg = libc::CMSG_FIRSTHDR(&msg);
+        while !cmsg.is_null() {
+            if (*cmsg).cmsg_level == libc::SOL_SOCKET && (*cmsg).cmsg_type == libc::SCM_RIGHTS {
+                std::ptr::copy_nonoverlapping(
+                    libc::CMSG_DATA(cmsg),
+                    &mut recv_fd as *mut RawFd as *mut u8,
+                    std::mem::size_of::<RawFd>(),
+                );
+            }
+            cmsg = libc::CMSG_NXTHDR(&msg, cmsg);
+        }
+    }
+
+    // Ancillary data only arrives with the first bytes; read the remainder of a
+    // short header with a plain recv.
+    let read = n as usize;
+    if read < buf.len() && !recv_exact(fd, &mut buf[read..]) {
+        if recv_fd >= 0 {
+            unsafe {
+                libc::close(recv_fd);
+            }
+        }
+        return (false, -1);
+    }
+    (true, recv_fd)
 }
 
 /// Write exactly `buf.len()` bytes, handling partial writes. Returns

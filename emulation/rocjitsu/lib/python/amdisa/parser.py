@@ -325,6 +325,44 @@ class Parser:
         self.parse_operand_types()
         return self.isa_spec
 
+    def implicit_operand_accesses(
+        self, operand_type: str
+    ) -> dict[tuple[str, str], tuple[bool, bool]]:
+        """Return active instruction-encoding reads and writes for an implicit operand."""
+        accesses: dict[tuple[str, str], tuple[bool, bool]] = {}
+        for inst_node in self.insts_node:
+            inst_name = xs.get_node_text(xs.get_node(inst_node, xs.INST_NAME))
+            encodings = xs.get_node(inst_node, xs.INST_ENCODINGS)
+            for enc_node in encodings:
+                enc_name = xs.get_node_text(xs.get_node(enc_node, xs.ENCODING_NAME))
+                enc_cond = xs.get_node_text(xs.get_node(enc_node, xs.ENCODING_COND))
+                if (
+                    enc_name in self.profile.skip_encodings
+                    or self.profile.skip_inst_encoding(enc_name, enc_cond)
+                ):
+                    continue
+
+                reads = False
+                writes = False
+                for opnd in xs.get_node(enc_node, xs.OPERANDS):
+                    is_implicit = (
+                        opnd.attrib[xs.OPERAND_ATTR_IS_IMPLICIT].lower() == 'true'
+                    )
+                    opnd_type = xs.get_node_text(xs.get_node(opnd, xs.OPERAND_TYPE))
+                    if not is_implicit or opnd_type != operand_type:
+                        continue
+                    reads |= opnd.attrib[xs.OPERAND_ATTR_INPUT].lower() == 'true'
+                    writes |= opnd.attrib[xs.OPERAND_ATTR_OUTPUT].lower() == 'true'
+
+                key = (inst_name, enc_name)
+                previous_reads, previous_writes = accesses.get(key, (False, False))
+                accesses[key] = (previous_reads or reads, previous_writes or writes)
+
+        for enc in self.isa_spec.inst_encodings:
+            for inst in enc.insts:
+                accesses.setdefault((inst.name, inst.enc_name), (False, False))
+        return accesses
+
     def _inject_compat_insts(self) -> None:
         """Add instructions accepted by LLVM but missing from selected XML specs."""
         if self.isa_spec.arch_name not in {'rdna4', 'gfx1250'}:
@@ -878,10 +916,16 @@ class Parser:
                     )
                     order = int(opnd.attrib[xs.OPERAND_ATTR_ORDER])
                     field_name_node = opnd.find(xs.FIELD_NAME)
+                    data_format_name_node = opnd.find(xs.DATA_FORMAT_NAME)
                     opnd_size = int(xs.get_node_text(opnd.find(xs.OPERAND_SIZE)))
                     opnd_type = xs.get_node_text(opnd.find(xs.OPERAND_TYPE))
                     if field_name_node is not None:
                         field_name = xs.get_node_text(field_name_node).lower()
+                        data_format_name = (
+                            xs.get_node_text(data_format_name_node)
+                            if data_format_name_node is not None
+                            else ''
+                        )
                         opnds.append(
                             Operand(
                                 field_name,
@@ -892,6 +936,7 @@ class Parser:
                                 is_implicit,
                                 is_bin_ucode_required,
                                 order,
+                                data_format_name,
                             )
                         )
                 opnds.sort(key=lambda x: x.order)
@@ -911,7 +956,10 @@ class Parser:
                     parent_name = self.profile.derive_parent_enc_name(enc_name)
                     parent_enc = self.isa_spec.encoding_map[parent_name]
                     parent_enc.insts.append(inst)
-                    parent_enc.implied_literal_ops.append(str(inst.opcode))
+                    extension_words = self.implied_literal_extension_words(
+                        enc, parent_enc
+                    )
+                    parent_enc.implied_literal_ops[str(inst.opcode)] = extension_words
                 else:
                     enc.insts.append(inst)
 
@@ -956,3 +1004,16 @@ class Parser:
                     OperandSelector(opnd_type_name, predef_vals_list, name_patterns)
                 )
             self.isa_spec.operand_types.append(opnd_type_name)
+
+    @staticmethod
+    def implied_literal_extension_words(
+        encoding: InstEncoding, parent_encoding: InstEncoding
+    ) -> int:
+        """Return the number of literal DWORDs appended to the parent form."""
+        extension_bits = encoding.bit_cnt - parent_encoding.bit_cnt
+        if extension_bits <= 0 or extension_bits % 32 != 0:
+            raise ValueError(
+                f'implied-literal encoding {encoding.enc_name} has invalid size '
+                f'relative to parent {parent_encoding.enc_name}'
+            )
+        return extension_bits // 32

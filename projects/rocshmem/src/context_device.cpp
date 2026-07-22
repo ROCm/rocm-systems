@@ -293,6 +293,37 @@ __device__ void Context::getmem_nbi_wave(void* dest, const void* source,
   DISPATCH(getmem_nbi_wave(dest, source, size, pe));
 }
 
+__device__ int Context::broadcastmem_wave(rocshmem_team_t team, void *dest, const void *source, 
+                                          int nelement, int PE_root){
+  DISPATCH_RET(broadcastmem_wave(team, dest, source, nelement, PE_root));
+}
+
+__device__ void Context::broadcastmem_wg(rocshmem_team_t team, void *dest, const void *source, 
+                                        int nelement, int PE_root){
+  DISPATCH(broadcastmem_wg(team, dest, source, nelement, PE_root));
+}
+
+__device__ void Context::alltoallmem_wg(rocshmem_team_t team, void* dest,
+                                   const void* source, int nelems) {
+  if (is_thread_zero_in_block()) {
+    ctxStats.incStat(NUM_ALLTOALL);
+  }
+
+  DISPATCH(alltoallmem_wg(team, dest, source, nelems));
+}
+
+__device__ int Context::alltoallmem_wave(rocshmem_team_t team, void* dest, const void* source, int nelems){
+  if (nelems == 0) {
+    return ROCSHMEM_SUCCESS;
+  }
+
+  if (is_thread_zero_in_block()) {
+    ctxStats.incStat(NUM_ALLTOALL);
+  }
+
+  DISPATCH_RET(alltoallmem_wave(team, dest, source, nelems));
+}
+
 #define CONTEXT_PUTMEM_SIGNAL_DEF(SUFFIX, STATS_SUFFIX)                                           \
   __device__ void Context::putmem_signal##SUFFIX(void *dest, const void *source, size_t nelems,   \
                                                  uint64_t *sig_addr, uint64_t signal, int sig_op, \
@@ -326,5 +357,34 @@ CONTEXT_SIGNAL_FETCH_DEF(_wave)
 __device__ int Context::tile_collective_wait(rocshmem_team_t team, uint64_t flags) {
   DISPATCH_RET(tile_collective_wait(team, flags));
 }
+
+
+__device__ int Context::fcollectmem_wave(rocshmem_team_t team, void *dest,
+                                  const void *source, int nelems) {
+  if (nelems == 0) {
+    return ROCSHMEM_SUCCESS;
+  }
+
+  if (is_thread_zero_in_block()) {
+    ctxStats.incStat(NUM_FCOLLECT);
+  }
+
+  DISPATCH_RET(fcollectmem_wave(team, dest, source, nelems));
+}
+
+
+__device__ void Context::fcollectmem_wg(rocshmem_team_t team, void *dest,
+                                  const void *source, int nelems) {
+  if (nelems == 0) {
+    return;
+  }
+
+  if (is_thread_zero_in_block()) {
+    ctxStats.incStat(NUM_FCOLLECT);
+  }
+
+  DISPATCH(fcollectmem_wg(team, dest, source, nelems));
+}
+
 
 }  // namespace rocshmem

@@ -45,9 +45,13 @@ constexpr uint32_t kDstVgpr = 6;
 constexpr uint32_t DST_SENTINEL = 0xCDCDCDCDu;
 
 constexpr void vop3_encode(uint32_t op, uint32_t vdst, uint32_t src0, uint32_t src1, uint32_t src2,
-                           uint32_t words[2]) {
-  words[0] = (vdst & 0xFF) | ((op & 0x3FF) << 16) | (0x34u << 26);
+                           uint32_t words[2], uint32_t op_sel = 0) {
+  words[0] = (vdst & 0xFF) | ((op_sel & 0xFu) << 11) | ((op & 0x3FF) << 16) | (0x34u << 26);
   words[1] = (src0 & 0x1FF) | ((src1 & 0x1FF) << 9) | ((src2 & 0x1FF) << 18);
+}
+
+constexpr uint32_t pack16(uint16_t lo, uint16_t hi) {
+  return static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 16);
 }
 
 struct Case {
@@ -172,6 +176,55 @@ void check_case(const Case &c, uint64_t exec) {
   }
 }
 
+void check_mad_u32_u16_opsel_high_halves(uint64_t exec) {
+  ForceScalarGuard gate_guard;
+  constexpr uint32_t kOpSelSrc0Src1High = 0x3u;
+
+  auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    const uint32_t vb = fx.wf->vgpr_alloc().base;
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+      fx.cu->write_vgpr(vb + 0, lane,
+                        pack16(static_cast<uint16_t>(lane + 2), static_cast<uint16_t>(lane + 7)));
+      fx.cu->write_vgpr(vb + 1, lane,
+                        pack16(static_cast<uint16_t>(lane + 3), static_cast<uint16_t>(lane + 11)));
+      fx.cu->write_vgpr(vb + 2, lane, 0x12340000u + 1000u + lane);
+      fx.cu->write_vgpr(vb + kDstVgpr, lane, DST_SENTINEL);
+    }
+    fx.wf->set_exec(exec);
+
+    uint32_t words[4] = {0u, 0u, 0u, 0u};
+    vop3_encode(/*op=*/497, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/257, /*src2=*/258, words,
+                kOpSelSrc0Src1High);
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << "v_mad_u32_u16_vop3 decode failed";
+    fx.cu->execute_instruction(inst, *fx.wf);
+    delete inst;
+
+    std::array<uint32_t, WF_SIZE> out{};
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+      out[lane] = fx.cu->read_vgpr(vb + kDstVgpr, lane);
+    return out;
+  };
+
+  const auto scalar_out = run_mode(/*force_scalar=*/true);
+  const auto simd_out = run_mode(/*force_scalar=*/false);
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+    const bool active = (exec >> lane) & 1ULL;
+    if (!active) {
+      EXPECT_EQ(scalar_out[lane], DST_SENTINEL) << "scalar clobbered inactive lane " << lane;
+      EXPECT_EQ(simd_out[lane], DST_SENTINEL) << "simd clobbered inactive lane " << lane;
+      continue;
+    }
+    const uint32_t want = (lane + 7u) * (lane + 11u) + 0x12340000u + 1000u + lane;
+    EXPECT_EQ(scalar_out[lane], want) << "scalar lane " << lane;
+    EXPECT_EQ(simd_out[lane], want) << "simd lane " << lane;
+  }
+}
+
 TEST(Vop3IntWideningTernarySimdCorrectness, FullExec) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
@@ -188,6 +241,14 @@ TEST(Vop3IntWideningTernarySimdCorrectness, PartialExec) {
   }
   for (const auto &c : kCases)
     check_case(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
+}
+
+TEST(Vop3IntWideningTernarySimdCorrectness, MadU32U16_OpSelHighHalves) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  check_mad_u32_u16_opsel_high_halves(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
 }
 
 } // namespace

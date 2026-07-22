@@ -13,6 +13,7 @@
 #include "simdojo/sim/message.h"
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -79,6 +80,13 @@ public:
   /// @brief Set the backing memory for direct writeback in functional mode.
   /// @param mem GpuMemory instance (used when req_port_ has no link).
   void set_backing_memory(GpuMemory *mem) { backing_memory_ = mem; }
+
+  uint64_t backing_read_transactions() const {
+    return backing_read_transactions_.load(std::memory_order_relaxed);
+  }
+  uint64_t backing_write_transactions() const {
+    return backing_write_transactions_.load(std::memory_order_relaxed);
+  }
 
   /// @brief Read a cache line worth of data (or partial line).
   ///
@@ -202,6 +210,9 @@ private:
   std::array<std::mutex, ATOMIC_STRIPE_COUNT> atomic_stripes_;
   std::vector<simdojo::Port *> cpl_ports_;
   uint64_t write_count_ = 0; ///< Debug: total L2 writes (for trace).
+  // Relaxed atomics: striped atomic_rmw() calls can update these concurrently.
+  std::atomic<uint64_t> backing_read_transactions_{0};
+  std::atomic<uint64_t> backing_write_transactions_{0};
 };
 
 } // namespace amdgpu
