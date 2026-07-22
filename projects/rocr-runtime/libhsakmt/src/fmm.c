@@ -2510,7 +2510,7 @@ static int __fmm_release(HsaKFDContext *ctx,
 		if (hsakmt_enable_drm && is_supported_on_drm(object->alloc_flags)) {
 			amdgpu_bo_handle handle = object->handles[i].drm;
 			int tmp_ret;
-			if (!handle) {
+			if (handle) {
 				tmp_ret = amdgpu_bo_free(handle);
 				if (!ret)
 					ret = tmp_ret;
