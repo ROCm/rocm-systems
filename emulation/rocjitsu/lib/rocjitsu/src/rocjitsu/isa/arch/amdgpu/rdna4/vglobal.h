@@ -14,295 +14,286 @@
 namespace rocjitsu {
 namespace rdna4 {
 
-class GlobalLoadU8Vglobal : public Vglobal {
-public:
-  GlobalLoadU8Vglobal(const MachineInst *inst);
+class GlobalLoadU8Vglobal : public Vglobal
+{
+  public:
+   GlobalLoadU8Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalLoadI8Vglobal : public Vglobal {
-public:
-  GlobalLoadI8Vglobal(const MachineInst *inst);
+class GlobalLoadI8Vglobal : public Vglobal
+{
+  public:
+   GlobalLoadI8Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalLoadU16Vglobal : public Vglobal {
-public:
-  GlobalLoadU16Vglobal(const MachineInst *inst);
+class GlobalLoadU16Vglobal : public Vglobal
+{
+  public:
+   GlobalLoadU16Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalLoadI16Vglobal : public Vglobal {
-public:
-  GlobalLoadI16Vglobal(const MachineInst *inst);
+class GlobalLoadI16Vglobal : public Vglobal
+{
+  public:
+   GlobalLoadI16Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalLoadB32Vglobal : public Vglobal {
-public:
-  GlobalLoadB32Vglobal(const MachineInst *inst);
+class GlobalLoadB32Vglobal : public Vglobal
+{
+  public:
+   GlobalLoadB32Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalLoadB64Vglobal : public Vglobal {
-public:
-  GlobalLoadB64Vglobal(const MachineInst *inst);
+class GlobalLoadB64Vglobal : public Vglobal
+{
+  public:
+   GlobalLoadB64Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalLoadB96Vglobal : public Vglobal {
-public:
-  GlobalLoadB96Vglobal(const MachineInst *inst);
+class GlobalLoadB96Vglobal : public Vglobal
+{
+  public:
+   GlobalLoadB96Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalLoadB128Vglobal : public Vglobal {
-public:
-  GlobalLoadB128Vglobal(const MachineInst *inst);
+class GlobalLoadB128Vglobal : public Vglobal
+{
+  public:
+   GlobalLoadB128Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalStoreB8Vglobal : public Vglobal {
-public:
-  GlobalStoreB8Vglobal(const MachineInst *inst);
+class GlobalStoreB8Vglobal : public Vglobal
+{
+  public:
+   GlobalStoreB8Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalStoreB16Vglobal : public Vglobal {
-public:
-  GlobalStoreB16Vglobal(const MachineInst *inst);
+class GlobalStoreB16Vglobal : public Vglobal
+{
+  public:
+   GlobalStoreB16Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalStoreB32Vglobal : public Vglobal {
-public:
-  GlobalStoreB32Vglobal(const MachineInst *inst);
+class GlobalStoreB32Vglobal : public Vglobal
+{
+  public:
+   GlobalStoreB32Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalStoreB64Vglobal : public Vglobal {
-public:
-  GlobalStoreB64Vglobal(const MachineInst *inst);
+class GlobalStoreB64Vglobal : public Vglobal
+{
+  public:
+   GlobalStoreB64Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalStoreB96Vglobal : public Vglobal {
-public:
-  GlobalStoreB96Vglobal(const MachineInst *inst);
+class GlobalStoreB96Vglobal : public Vglobal
+{
+  public:
+   GlobalStoreB96Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalStoreB128Vglobal : public Vglobal {
-public:
-  GlobalStoreB128Vglobal(const MachineInst *inst);
+class GlobalStoreB128Vglobal : public Vglobal
+{
+  public:
+   GlobalStoreB128Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalLoadD16U8Vglobal : public Vglobal {
-public:
-  GlobalLoadD16U8Vglobal(const MachineInst *inst);
+class GlobalLoadD16U8Vglobal : public Vglobal
+{
+  public:
+   GlobalLoadD16U8Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalLoadD16I8Vglobal : public Vglobal {
-public:
-  GlobalLoadD16I8Vglobal(const MachineInst *inst);
+class GlobalLoadD16I8Vglobal : public Vglobal
+{
+  public:
+   GlobalLoadD16I8Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalLoadD16B16Vglobal : public Vglobal {
-public:
-  GlobalLoadD16B16Vglobal(const MachineInst *inst);
+class GlobalLoadD16B16Vglobal : public Vglobal
+{
+  public:
+   GlobalLoadD16B16Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalLoadD16HiU8Vglobal : public Vglobal {
-public:
-  GlobalLoadD16HiU8Vglobal(const MachineInst *inst);
+class GlobalLoadD16HiU8Vglobal : public Vglobal
+{
+  public:
+   GlobalLoadD16HiU8Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalLoadD16HiI8Vglobal : public Vglobal {
-public:
-  GlobalLoadD16HiI8Vglobal(const MachineInst *inst);
+class GlobalLoadD16HiI8Vglobal : public Vglobal
+{
+  public:
+   GlobalLoadD16HiI8Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalLoadD16HiB16Vglobal : public Vglobal {
-public:
-  GlobalLoadD16HiB16Vglobal(const MachineInst *inst);
+class GlobalLoadD16HiB16Vglobal : public Vglobal
+{
+  public:
+   GlobalLoadD16HiB16Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalStoreD16HiB8Vglobal : public Vglobal {
-public:
-  GlobalStoreD16HiB8Vglobal(const MachineInst *inst);
+class GlobalStoreD16HiB8Vglobal : public Vglobal
+{
+  public:
+   GlobalStoreD16HiB8Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalStoreD16HiB16Vglobal : public Vglobal {
-public:
-  GlobalStoreD16HiB16Vglobal(const MachineInst *inst);
+class GlobalStoreD16HiB16Vglobal : public Vglobal
+{
+  public:
+   GlobalStoreD16HiB16Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalLoadAddtidB32Vglobal : public Vglobal {
-public:
-  GlobalLoadAddtidB32Vglobal(const MachineInst *inst);
+class GlobalLoadAddtidB32Vglobal : public Vglobal
+{
+  public:
+   GlobalLoadAddtidB32Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalStoreAddtidB32Vglobal : public Vglobal {
-public:
-  GlobalStoreAddtidB32Vglobal(const MachineInst *inst);
+class GlobalStoreAddtidB32Vglobal : public Vglobal
+{
+  public:
+   GlobalStoreAddtidB32Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalInvVglobal : public Vglobal {
-public:
-  GlobalInvVglobal(const MachineInst *inst);
+class GlobalInvVglobal : public Vglobal
+{
+  public:
+   GlobalInvVglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
-};
+} ;
 
-class GlobalWbVglobal : public Vglobal {
-public:
-  GlobalWbVglobal(const MachineInst *inst);
+class GlobalWbVglobal : public Vglobal
+{
+  public:
+   GlobalWbVglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
-};
+} ;
 
-class GlobalAtomicSwapB32Vglobal : public Vglobal {
-public:
-  GlobalAtomicSwapB32Vglobal(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand vaddr;
-  Operand vsrc;
-  Operand saddr;
-  Operand gpumem;
-  Operand gpumem_in;
-};
-
-class GlobalAtomicCmpswapB32Vglobal : public Vglobal {
-public:
-  GlobalAtomicCmpswapB32Vglobal(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand vaddr;
-  Operand vsrc;
-  Operand saddr;
-  Operand gpumem;
-  Operand gpumem_in;
-};
-
-class GlobalAtomicAddU32Vglobal : public Vglobal {
-public:
-  GlobalAtomicAddU32Vglobal(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand vaddr;
-  Operand vsrc;
-  Operand saddr;
-  Operand gpumem;
-  Operand gpumem_in;
-};
-
-class GlobalAtomicSubU32Vglobal : public Vglobal {
-public:
-  GlobalAtomicSubU32Vglobal(const MachineInst *inst);
+class GlobalAtomicSwapB32Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicSwapB32Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -310,11 +301,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicSubClampU32Vglobal : public Vglobal {
-public:
-  GlobalAtomicSubClampU32Vglobal(const MachineInst *inst);
+class GlobalAtomicCmpswapB32Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicCmpswapB32Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -322,11 +314,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicMinI32Vglobal : public Vglobal {
-public:
-  GlobalAtomicMinI32Vglobal(const MachineInst *inst);
+class GlobalAtomicAddU32Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicAddU32Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -334,11 +327,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicMinU32Vglobal : public Vglobal {
-public:
-  GlobalAtomicMinU32Vglobal(const MachineInst *inst);
+class GlobalAtomicSubU32Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicSubU32Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -346,11 +340,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicMaxI32Vglobal : public Vglobal {
-public:
-  GlobalAtomicMaxI32Vglobal(const MachineInst *inst);
+class GlobalAtomicSubClampU32Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicSubClampU32Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -358,11 +353,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicMaxU32Vglobal : public Vglobal {
-public:
-  GlobalAtomicMaxU32Vglobal(const MachineInst *inst);
+class GlobalAtomicMinI32Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicMinI32Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -370,11 +366,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicAndB32Vglobal : public Vglobal {
-public:
-  GlobalAtomicAndB32Vglobal(const MachineInst *inst);
+class GlobalAtomicMinU32Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicMinU32Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -382,11 +379,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicOrB32Vglobal : public Vglobal {
-public:
-  GlobalAtomicOrB32Vglobal(const MachineInst *inst);
+class GlobalAtomicMaxI32Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicMaxI32Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -394,11 +392,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicXorB32Vglobal : public Vglobal {
-public:
-  GlobalAtomicXorB32Vglobal(const MachineInst *inst);
+class GlobalAtomicMaxU32Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicMaxU32Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -406,11 +405,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicIncU32Vglobal : public Vglobal {
-public:
-  GlobalAtomicIncU32Vglobal(const MachineInst *inst);
+class GlobalAtomicAndB32Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicAndB32Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -418,11 +418,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicDecU32Vglobal : public Vglobal {
-public:
-  GlobalAtomicDecU32Vglobal(const MachineInst *inst);
+class GlobalAtomicOrB32Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicOrB32Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -430,11 +431,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicSwapB64Vglobal : public Vglobal {
-public:
-  GlobalAtomicSwapB64Vglobal(const MachineInst *inst);
+class GlobalAtomicXorB32Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicXorB32Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -442,11 +444,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicCmpswapB64Vglobal : public Vglobal {
-public:
-  GlobalAtomicCmpswapB64Vglobal(const MachineInst *inst);
+class GlobalAtomicIncU32Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicIncU32Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -454,11 +457,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicAddU64Vglobal : public Vglobal {
-public:
-  GlobalAtomicAddU64Vglobal(const MachineInst *inst);
+class GlobalAtomicDecU32Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicDecU32Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -466,11 +470,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicSubU64Vglobal : public Vglobal {
-public:
-  GlobalAtomicSubU64Vglobal(const MachineInst *inst);
+class GlobalAtomicSwapB64Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicSwapB64Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -478,11 +483,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicMinI64Vglobal : public Vglobal {
-public:
-  GlobalAtomicMinI64Vglobal(const MachineInst *inst);
+class GlobalAtomicCmpswapB64Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicCmpswapB64Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -490,11 +496,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicMinU64Vglobal : public Vglobal {
-public:
-  GlobalAtomicMinU64Vglobal(const MachineInst *inst);
+class GlobalAtomicAddU64Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicAddU64Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -502,11 +509,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicMaxI64Vglobal : public Vglobal {
-public:
-  GlobalAtomicMaxI64Vglobal(const MachineInst *inst);
+class GlobalAtomicSubU64Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicSubU64Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -514,11 +522,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicMaxU64Vglobal : public Vglobal {
-public:
-  GlobalAtomicMaxU64Vglobal(const MachineInst *inst);
+class GlobalAtomicMinI64Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicMinI64Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -526,11 +535,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicAndB64Vglobal : public Vglobal {
-public:
-  GlobalAtomicAndB64Vglobal(const MachineInst *inst);
+class GlobalAtomicMinU64Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicMinU64Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -538,11 +548,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicOrB64Vglobal : public Vglobal {
-public:
-  GlobalAtomicOrB64Vglobal(const MachineInst *inst);
+class GlobalAtomicMaxI64Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicMaxI64Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -550,11 +561,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicXorB64Vglobal : public Vglobal {
-public:
-  GlobalAtomicXorB64Vglobal(const MachineInst *inst);
+class GlobalAtomicMaxU64Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicMaxU64Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -562,11 +574,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicIncU64Vglobal : public Vglobal {
-public:
-  GlobalAtomicIncU64Vglobal(const MachineInst *inst);
+class GlobalAtomicAndB64Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicAndB64Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -574,11 +587,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicDecU64Vglobal : public Vglobal {
-public:
-  GlobalAtomicDecU64Vglobal(const MachineInst *inst);
+class GlobalAtomicOrB64Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicOrB64Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -586,17 +600,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalWbinvVglobal : public Vglobal {
-public:
-  GlobalWbinvVglobal(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-};
-
-class GlobalAtomicCondSubU32Vglobal : public Vglobal {
-public:
-  GlobalAtomicCondSubU32Vglobal(const MachineInst *inst);
+class GlobalAtomicXorB64Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicXorB64Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -604,11 +613,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicMinNumF32Vglobal : public Vglobal {
-public:
-  GlobalAtomicMinNumF32Vglobal(const MachineInst *inst);
+class GlobalAtomicIncU64Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicIncU64Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -616,11 +626,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicMaxNumF32Vglobal : public Vglobal {
-public:
-  GlobalAtomicMaxNumF32Vglobal(const MachineInst *inst);
+class GlobalAtomicDecU64Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicDecU64Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -628,33 +639,82 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalLoadBlockVglobal : public Vglobal {
-public:
-  GlobalLoadBlockVglobal(const MachineInst *inst);
+class GlobalWbinvVglobal : public Vglobal
+{
+  public:
+   GlobalWbinvVglobal(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+} ;
+
+class GlobalAtomicCondSubU32Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicCondSubU32Vglobal(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand vaddr;
+  Operand vsrc;
+  Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
+} ;
+
+class GlobalAtomicMinNumF32Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicMinNumF32Vglobal(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand vaddr;
+  Operand vsrc;
+  Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
+} ;
+
+class GlobalAtomicMaxNumF32Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicMaxNumF32Vglobal(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand vaddr;
+  Operand vsrc;
+  Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
+} ;
+
+class GlobalLoadBlockVglobal : public Vglobal
+{
+  public:
+   GlobalLoadBlockVglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   Operand m0;
-};
+} ;
 
-class GlobalStoreBlockVglobal : public Vglobal {
-public:
-  GlobalStoreBlockVglobal(const MachineInst *inst);
+class GlobalStoreBlockVglobal : public Vglobal
+{
+  public:
+   GlobalStoreBlockVglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
   Operand m0;
-};
+} ;
 
-class GlobalAtomicAddF32Vglobal : public Vglobal {
-public:
-  GlobalAtomicAddF32Vglobal(const MachineInst *inst);
+class GlobalAtomicAddF32Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicAddF32Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -662,43 +722,34 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalLoadTrB128Vglobal : public Vglobal {
-public:
-  GlobalLoadTrB128Vglobal(const MachineInst *inst);
+class GlobalLoadTrB128Vglobal : public Vglobal
+{
+  public:
+   GlobalLoadTrB128Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalLoadTrB64Vglobal : public Vglobal {
-public:
-  GlobalLoadTrB64Vglobal(const MachineInst *inst);
+class GlobalLoadTrB64Vglobal : public Vglobal
+{
+  public:
+   GlobalLoadTrB64Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-};
+} ;
 
-class GlobalAtomicPkAddF16Vglobal : public Vglobal {
-public:
-  GlobalAtomicPkAddF16Vglobal(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand vaddr;
-  Operand vsrc;
-  Operand saddr;
-  Operand gpumem;
-  Operand gpumem_in;
-};
-
-class GlobalAtomicPkAddBf16Vglobal : public Vglobal {
-public:
-  GlobalAtomicPkAddBf16Vglobal(const MachineInst *inst);
+class GlobalAtomicPkAddF16Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicPkAddF16Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -706,11 +757,12 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
 
-class GlobalAtomicOrderedAddB64Vglobal : public Vglobal {
-public:
-  GlobalAtomicOrderedAddB64Vglobal(const MachineInst *inst);
+class GlobalAtomicPkAddBf16Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicPkAddBf16Vglobal(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -718,7 +770,20 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-};
+} ;
+
+class GlobalAtomicOrderedAddB64Vglobal : public Vglobal
+{
+  public:
+   GlobalAtomicOrderedAddB64Vglobal(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand vaddr;
+  Operand vsrc;
+  Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
+} ;
 
 } // namespace rdna4
 } // namespace rocjitsu

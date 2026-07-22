@@ -17,6 +17,54 @@ from amdisa.codegen.execute.vop3_modifiers import (
     vop3_dst_mod_f64,
 )
 
+_F32_TO_FP8_MODE_RNE = {
+    'util::f32_to_fp8_e4m3_rne': 'util::f32_to_fp8_e4m3_rne_mode',
+    'util::f32_to_bf8_e5m2_rne': 'util::f32_to_bf8_e5m2_rne_mode',
+    'util::f32_to_fp8_e5m3_rne': 'util::f32_to_fp8_e5m3_rne_mode',
+}
+
+_F32_TO_FP8_MODE_SR = {
+    'util::f32_to_fp8_e4m3_sr': 'util::f32_to_fp8_e4m3_sr_mode',
+    'util::f32_to_bf8_e5m2_sr': 'util::f32_to_bf8_e5m2_sr_mode',
+    'util::f32_to_fp8_e5m3_sr': 'util::f32_to_fp8_e5m3_sr_mode',
+}
+
+
+def _fp8_mode_rne_helper_name(arch_name: str, name: str) -> str:
+    return fp8_helper_name(arch_name, _F32_TO_FP8_MODE_RNE[name])
+
+
+def _fp8_mode_sr_helper_name(arch_name: str, name: str) -> str:
+    return fp8_helper_name(arch_name, _F32_TO_FP8_MODE_SR[name])
+
+
+def _narrow_rne_encode_call(fmt: str, cvt_fn: str, value_expr: str) -> str:
+    if fmt in ('fp8', 'bf8'):
+        return f'{cvt_fn}({value_expr}, wf.fp16_ovfl())'
+    return f'{cvt_fn}({value_expr})'
+
+
+def _narrow_sr_encode_call(
+    fmt: str, cvt_fn: str, value_expr: str, seed_expr: str
+) -> str:
+    if fmt in ('fp8', 'bf8'):
+        return f'{cvt_fn}({value_expr}, {seed_expr}, wf.fp16_ovfl())'
+    return f'{cvt_fn}({value_expr}, {seed_expr})'
+
+
+def _fp8_rne_encode_call(cvt_fn: str, value_expr: str, use_fp16_ovfl: bool) -> str:
+    if use_fp16_ovfl:
+        return f'{cvt_fn}({value_expr}, wf.fp16_ovfl())'
+    return f'{cvt_fn}({value_expr})'
+
+
+def _fp8_sr_encode_call(
+    cvt_fn: str, value_expr: str, seed_expr: str, use_fp16_ovfl: bool
+) -> str:
+    if use_fp16_ovfl:
+        return f'{cvt_fn}({value_expr}, {seed_expr}, wf.fp16_ovfl())'
+    return f'{cvt_fn}({value_expr}, {seed_expr})'
+
 
 def _shared_inst_operand(opnd: str) -> bool:
     return opnd.startswith('inst.')
@@ -389,13 +437,15 @@ def gen_vector_div_fixup(
         L.append('    else result = p;')
         if is_vop3:
             L.extend(vop3_dst_mod('result'))
-            L.append('    uint32_t result_bits = util::f32_to_f16(result);')
+            L.append(
+                '    uint32_t result_bits = util::f32_to_f16_mode(result, wf.fp16_ovfl());'
+            )
             L.append(
                 f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, opsel, result_bits, true);'
             )
         else:
             L.append(
-                f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, util::f32_to_f16(result));'
+                f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, util::f32_to_f16_mode(result, wf.fp16_ovfl()));'
             )
     else:
         L.append(
@@ -1005,23 +1055,33 @@ def gen_vector_cvt_pk(
         L.append(
             f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
         )
-        L.append(f'    uint32_t lo = util::f32_to_f16(s0);')
-        L.append(f'    uint32_t hi = util::f32_to_f16(s1);')
+        L.append(f'    uint32_t lo = util::f32_to_f16_rtz(s0);')
+        L.append(f'    uint32_t hi = util::f32_to_f16_rtz(s1);')
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, lo | (hi << 16));'
         )
     elif cls == 'vector_cvt_pk':
         if op in ('fp8_f32', 'bf8_f32', 'fp8_f16', 'bf8_f16'):
-            conv = fp8_helper_name(
-                arch_name,
-                (
-                    'util::f32_to_fp8_e4m3_rne'
-                    if op.startswith('fp8_')
-                    else 'util::f32_to_bf8_e5m2_rne'
-                ),
+            # RDNA4 data-conversion prose scopes FP16_OVFL for FP8/BF8
+            # destinations to conversions from F32 sources. Plain F16/BF16
+            # sources convert the already-rounded 16-bit input value.
+            use_fp16_ovfl = op.endswith('_f32')
+            base_conv = (
+                'util::f32_to_fp8_e4m3_rne'
+                if op.startswith('fp8_')
+                else 'util::f32_to_bf8_e5m2_rne'
+            )
+            conv = (
+                _fp8_mode_rne_helper_name(arch_name, base_conv)
+                if use_fp16_ovfl
+                else fp8_helper_name(arch_name, base_conv)
             )
             conv_e5m3 = (
-                'util::f32_to_fp8_e5m3_rne'
+                (
+                    'util::f32_to_fp8_e5m3_rne_mode'
+                    if use_fp16_ovfl
+                    else 'util::f32_to_fp8_e5m3_rne'
+                )
                 if op.startswith('fp8_') and fp8_format_select is not None
                 else None
             )
@@ -1042,14 +1102,18 @@ def gen_vector_cvt_pk(
                 )
             if conv_e5m3 is not None:
                 L.append(
-                    f'    uint32_t lo = ({fp8_format_select}) ? {conv_e5m3}(s0) : {conv}(s0);'
+                    f"    uint32_t lo = ({fp8_format_select}) ? {_fp8_rne_encode_call(conv_e5m3, 's0', use_fp16_ovfl)} : {_fp8_rne_encode_call(conv, 's0', use_fp16_ovfl)};"
                 )
                 L.append(
-                    f'    uint32_t hi = ({fp8_format_select}) ? {conv_e5m3}(s1) : {conv}(s1);'
+                    f"    uint32_t hi = ({fp8_format_select}) ? {_fp8_rne_encode_call(conv_e5m3, 's1', use_fp16_ovfl)} : {_fp8_rne_encode_call(conv, 's1', use_fp16_ovfl)};"
                 )
             else:
-                L.append(f'    uint32_t lo = {conv}(s0);')
-                L.append(f'    uint32_t hi = {conv}(s1);')
+                L.append(
+                    f"    uint32_t lo = {_fp8_rne_encode_call(conv, 's0', use_fp16_ovfl)};"
+                )
+                L.append(
+                    f"    uint32_t hi = {_fp8_rne_encode_call(conv, 's1', use_fp16_ovfl)};"
+                )
             L.append(
                 '    uint32_t packed = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 8);'
             )
@@ -1083,8 +1147,12 @@ def gen_vector_cvt_pk(
                     f'    amdgpu::RegisterAccess(wf).write_lane64({dst[0]}, lane, static_cast<uint64_t>(lo_bits) | (static_cast<uint64_t>(hi_bits) << 32));'
                 )
             else:
-                L.append('    uint32_t lo_bits = util::f32_to_f16(lo);')
-                L.append('    uint32_t hi_bits = util::f32_to_f16(hi);')
+                L.append(
+                    '    uint32_t lo_bits = util::f32_to_f16_mode(lo, wf.fp16_ovfl());'
+                )
+                L.append(
+                    '    uint32_t hi_bits = util::f32_to_f16_mode(hi, wf.fp16_ovfl());'
+                )
                 L.append(
                     f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, lo_bits | (hi_bits << 16));'
                 )
@@ -1143,8 +1211,8 @@ def gen_vector_cvt_pk(
         L.append(
             f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
         )
-        L.append(f'    uint32_t lo = util::f32_to_f16(s0);')
-        L.append(f'    uint32_t hi = util::f32_to_f16(s1);')
+        L.append(f'    uint32_t lo = util::f32_to_f16_mode(s0, wf.fp16_ovfl());')
+        L.append(f'    uint32_t hi = util::f32_to_f16_mode(s1, wf.fp16_ovfl());')
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, lo | (hi << 16));'
         )
@@ -1155,8 +1223,8 @@ def gen_vector_cvt_pk(
         L.append(
             f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
         )
-        L.append(f'    uint32_t lo = util::f32_to_bf16_rne(s0);')
-        L.append(f'    uint32_t hi = util::f32_to_bf16_rne(s1);')
+        L.append(f'    uint32_t lo = util::f32_to_bf16_rne_mode(s0, wf.fp16_ovfl());')
+        L.append(f'    uint32_t hi = util::f32_to_bf16_rne_mode(s1, wf.fp16_ovfl());')
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, lo | (hi << 16));'
         )
@@ -1171,8 +1239,12 @@ def gen_vector_cvt_pk(
             f'    uint32_t seed_lo = amdgpu::RegisterAccess(wf).read_lane({src[2]}, lane);'
         )
         L.append('    uint32_t seed_hi = util::prng_advance(seed_lo);')
-        L.append('    uint32_t lo = util::f32_to_f16_sr(s0, seed_lo);')
-        L.append('    uint32_t hi = util::f32_to_f16_sr(s1, seed_hi);')
+        L.append(
+            '    uint32_t lo = util::f32_to_f16_sr_mode(s0, seed_lo, wf.fp16_ovfl());'
+        )
+        L.append(
+            '    uint32_t hi = util::f32_to_f16_sr_mode(s1, seed_hi, wf.fp16_ovfl());'
+        )
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, lo | (hi << 16));'
         )
@@ -1187,8 +1259,12 @@ def gen_vector_cvt_pk(
             f'    uint32_t seed_lo = amdgpu::RegisterAccess(wf).read_lane({src[2]}, lane);'
         )
         L.append('    uint32_t seed_hi = util::prng_advance(seed_lo);')
-        L.append('    uint32_t lo = util::f32_to_bf16_sr(s0, seed_lo);')
-        L.append('    uint32_t hi = util::f32_to_bf16_sr(s1, seed_hi);')
+        L.append(
+            '    uint32_t lo = util::f32_to_bf16_sr_mode(s0, seed_lo, wf.fp16_ovfl());'
+        )
+        L.append(
+            '    uint32_t hi = util::f32_to_bf16_sr_mode(s1, seed_hi, wf.fp16_ovfl());'
+        )
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, lo | (hi << 16));'
         )
@@ -1212,16 +1288,30 @@ def gen_vector_cvt_pk(
             f'    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
         )
         L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, static_cast<uint32_t>(util::f32_to_f16(s0)));'
+            f'    uint32_t seed = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
+        )
+        L.append(
+            '    uint32_t result = static_cast<uint32_t>(util::f32_to_f16_sr_mode(s0, seed, wf.fp16_ovfl()));'
+        )
+        L.append(
+            f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, {opsel}, result);'
         )
     elif cls == 'vector_cvt_sr_bf16_f32':
         L.append(
             f'    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
         )
         L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, static_cast<uint32_t>(util::f32_to_bf16(s0)));'
+            f'    uint32_t seed = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
+        )
+        L.append(
+            '    uint32_t result = static_cast<uint32_t>(util::f32_to_bf16_sr_mode(s0, seed, wf.fp16_ovfl()));'
+        )
+        L.append(
+            f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, {opsel}, result);'
         )
     elif cls == 'vector_cvt_sr_fp8_f16':
+        # RDNA4 data-conversion prose scopes FP16_OVFL for FP8 destinations to
+        # conversions from F32 sources; the F16-source SR form stays raw.
         L.append(
             f'    uint32_t raw = ::rocjitsu::amdgpu::read_vop3_true16_src({src[0]}, wf, lane, {opsel}, 0);'
         )
@@ -1230,8 +1320,9 @@ def gen_vector_cvt_pk(
             f'    uint32_t seed = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
         )
         if fp8_format_select is not None:
+            cvt_fn = fp8_helper_name(arch_name, 'util::f32_to_fp8_e4m3_sr')
             L.append(
-                f'    uint8_t result = ({fp8_format_select}) ? util::f32_to_fp8_e5m3_sr(s0, seed) : util::f32_to_fp8_e4m3_sr(s0, seed);'
+                f'    uint8_t result = ({fp8_format_select}) ? util::f32_to_fp8_e5m3_sr(s0, seed) : {cvt_fn}(s0, seed);'
             )
         else:
             cvt_fn = fp8_helper_name(arch_name, 'util::f32_to_fp8_e4m3_sr')
@@ -1245,6 +1336,8 @@ def gen_vector_cvt_pk(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, (old & mask) | (static_cast<uint32_t>(result) << (dst_byte * 8)));'
         )
     elif cls == 'vector_cvt_sr_bf8_f16':
+        # RDNA4 data-conversion prose scopes FP16_OVFL for BF8 destinations to
+        # conversions from F32 sources; the F16-source SR form stays raw.
         L.append(
             f'    uint32_t raw = ::rocjitsu::amdgpu::read_vop3_true16_src({src[0]}, wf, lane, {opsel}, 0);'
         )
@@ -1288,13 +1381,9 @@ def _scale_encode_call(fmt: str, value_expr: str, arch_name: str = '') -> str:
     if fmt == 'bf6':
         return f'util::f32_to_bf6_e3m2_rne({value_expr})'
     if fmt == 'fp8':
-        return (
-            f"{fp8_helper_name(arch_name, 'util::f32_to_fp8_e4m3_rne')}({value_expr})"
-        )
+        return f"{_fp8_mode_rne_helper_name(arch_name, 'util::f32_to_fp8_e4m3_rne')}({value_expr}, wf.fp16_ovfl())"
     if fmt == 'bf8':
-        return (
-            f"{fp8_helper_name(arch_name, 'util::f32_to_bf8_e5m2_rne')}({value_expr})"
-        )
+        return f"{_fp8_mode_rne_helper_name(arch_name, 'util::f32_to_bf8_e5m2_rne')}({value_expr}, wf.fp16_ovfl())"
     raise ValueError(f'unsupported scaled conversion output format: {fmt}')
 
 
@@ -1308,9 +1397,9 @@ def _scale_sr_encode_call(
     if fmt == 'bf6':
         return f'util::f32_to_bf6_e3m2_sr({value_expr}, {seed_expr})'
     if fmt == 'fp8':
-        return f"{fp8_helper_name(arch_name, 'util::f32_to_fp8_e4m3_sr')}({value_expr}, {seed_expr})"
+        return f"{_fp8_mode_sr_helper_name(arch_name, 'util::f32_to_fp8_e4m3_sr')}({value_expr}, {seed_expr}, wf.fp16_ovfl())"
     if fmt == 'bf8':
-        return f"{fp8_helper_name(arch_name, 'util::f32_to_bf8_e5m2_sr')}({value_expr}, {seed_expr})"
+        return f"{_fp8_mode_sr_helper_name(arch_name, 'util::f32_to_bf8_e5m2_sr')}({value_expr}, {seed_expr}, wf.fp16_ovfl())"
     raise ValueError(f'unsupported scaled SR conversion output format: {fmt}')
 
 
@@ -1464,11 +1553,17 @@ def gen_vector_cvt_scale(
             )
             L.append('    }')
         elif out_fmt in ('f16', 'bf16'):
-            conv = 'util::f32_to_f16' if out_fmt == 'f16' else 'util::f32_to_bf16'
+            conv = (
+                'util::f32_to_f16_mode'
+                if out_fmt == 'f16'
+                else 'util::f32_to_bf16_rne_mode'
+            )
             words = count // 2
             L.append(f'    uint32_t dst_words[{words}] = {{}};')
             L.append(f'    for (uint32_t index = 0; index < {count}u; ++index) {{')
-            L.append(f'      uint32_t bits = {conv}(read_scaled_src(index) * scale);')
+            L.append(
+                f'      uint32_t bits = {conv}(read_scaled_src(index) * scale, wf.fp16_ovfl());'
+            )
             L.append('      dst_words[index / 2u] |= bits << ((index & 1u) * 16u);')
             L.append('    }')
             L.append(f'    for (uint32_t word = 0; word < {words}u; ++word)')
@@ -1574,17 +1669,17 @@ def gen_cvt_fp8(ctx) -> str:
             L,
             dst,
             src,
-            fp8_helper_name(ctx.arch_name, 'util::f32_to_fp8_e4m3_rne'),
+            _fp8_mode_rne_helper_name(ctx.arch_name, 'util::f32_to_fp8_e4m3_rne'),
             opsel,
             fp8_format_select=fp8_format_select,
-            fp8_format_fn='util::f32_to_fp8_e5m3_rne',
+            fp8_format_fn='util::f32_to_fp8_e5m3_rne_mode',
         )
     elif op == 'pk_bf8_f32':
         _gen_pk_narrow_fp8(
             L,
             dst,
             src,
-            fp8_helper_name(ctx.arch_name, 'util::f32_to_bf8_e5m2_rne'),
+            _fp8_mode_rne_helper_name(ctx.arch_name, 'util::f32_to_bf8_e5m2_rne'),
             opsel,
         )
     elif op == 'sr_fp8_f32':
@@ -1592,17 +1687,17 @@ def gen_cvt_fp8(ctx) -> str:
             L,
             dst,
             src,
-            fp8_helper_name(ctx.arch_name, 'util::f32_to_fp8_e4m3_sr'),
+            _fp8_mode_sr_helper_name(ctx.arch_name, 'util::f32_to_fp8_e4m3_sr'),
             opsel,
             fp8_format_select=fp8_format_select,
-            fp8_format_fn='util::f32_to_fp8_e5m3_sr',
+            fp8_format_fn='util::f32_to_fp8_e5m3_sr_mode',
         )
     elif op == 'sr_bf8_f32':
         _gen_sr_narrow_fp8(
             L,
             dst,
             src,
-            fp8_helper_name(ctx.arch_name, 'util::f32_to_bf8_e5m2_sr'),
+            _fp8_mode_sr_helper_name(ctx.arch_name, 'util::f32_to_bf8_e5m2_sr'),
             opsel,
         )
     elif op == 'pk_f32_fp8':
@@ -1645,14 +1740,14 @@ def _gen_pk_narrow_fp8(
     )
     if fp8_format_select is not None and fp8_format_fn is not None:
         L.append(
-            f'    uint8_t r0 = ({fp8_format_select}) ? {fp8_format_fn}(s0) : {cvt_fn}(s0);'
+            f'    uint8_t r0 = ({fp8_format_select}) ? {fp8_format_fn}(s0, wf.fp16_ovfl()) : {cvt_fn}(s0, wf.fp16_ovfl());'
         )
         L.append(
-            f'    uint8_t r1 = ({fp8_format_select}) ? {fp8_format_fn}(s1) : {cvt_fn}(s1);'
+            f'    uint8_t r1 = ({fp8_format_select}) ? {fp8_format_fn}(s1, wf.fp16_ovfl()) : {cvt_fn}(s1, wf.fp16_ovfl());'
         )
     else:
-        L.append(f'    uint8_t r0 = {cvt_fn}(s0);')
-        L.append(f'    uint8_t r1 = {cvt_fn}(s1);')
+        L.append(f'    uint8_t r0 = {cvt_fn}(s0, wf.fp16_ovfl());')
+        L.append(f'    uint8_t r1 = {cvt_fn}(s1, wf.fp16_ovfl());')
     L.append(
         '    uint32_t packed = static_cast<uint32_t>(r0) | (static_cast<uint32_t>(r1) << 8);'
     )
@@ -1680,10 +1775,10 @@ def _gen_sr_narrow_fp8(
     )
     if fp8_format_select is not None and fp8_format_fn is not None:
         L.append(
-            f'    uint8_t result = ({fp8_format_select}) ? {fp8_format_fn}(s0, seed) : {cvt_fn}(s0, seed);'
+            f'    uint8_t result = ({fp8_format_select}) ? {fp8_format_fn}(s0, seed, wf.fp16_ovfl()) : {cvt_fn}(s0, seed, wf.fp16_ovfl());'
         )
     else:
-        L.append(f'    uint8_t result = {cvt_fn}(s0, seed);')
+        L.append(f'    uint8_t result = {cvt_fn}(s0, seed, wf.fp16_ovfl());')
     L.append(f'    uint32_t dst_byte = ({opsel} >> 2) & 0x3;')
     L.append(
         f'    uint32_t old = amdgpu::RegisterAccess(wf).read_lane({dst[0]}, lane);'
@@ -1753,6 +1848,29 @@ def _f32_to_narrow_sr_name(arch_name: str, fmt: str) -> str:
     return fp8_helper_name(arch_name, _F32_TO_NARROW_SR[fmt])
 
 
+def _f32_to_narrow_rne_mode_name(arch_name: str, fmt: str) -> str:
+    # FP16_OVFL is applied at the final FP8/BF8 narrowing step after any
+    # source widening or SCALEF32 adjustment has produced the float value. Plain
+    # F16/BF16-source FP8/BF8 converts bypass this mode-aware helper, while
+    # SCALEF32 converts use it because scale application creates an F32
+    # intermediate before narrowing.
+    if fmt == 'fp8':
+        return _fp8_mode_rne_helper_name(arch_name, 'util::f32_to_fp8_e4m3_rne')
+    if fmt == 'bf8':
+        return _fp8_mode_rne_helper_name(arch_name, 'util::f32_to_bf8_e5m2_rne')
+    return _f32_to_narrow_rne_name(arch_name, fmt)
+
+
+def _f32_to_narrow_sr_mode_name(arch_name: str, fmt: str) -> str:
+    # Keep SR behavior aligned with the RNE mode helper above: only conversions
+    # that intentionally request final FP8/BF8 mode handling come through here.
+    if fmt == 'fp8':
+        return _fp8_mode_sr_helper_name(arch_name, 'util::f32_to_fp8_e4m3_sr')
+    if fmt == 'bf8':
+        return _fp8_mode_sr_helper_name(arch_name, 'util::f32_to_bf8_e5m2_sr')
+    return _f32_to_narrow_sr_name(arch_name, fmt)
+
+
 def _parse_scalef32_op(op: str):
     """Parse a CVT_SCALEF32 operation suffix into components.
 
@@ -1806,9 +1924,9 @@ def _write_as_fmt(dst_name: str, dst_fmt: str, val_expr: str) -> str:
     if dst_fmt == 'f32':
         return f'amdgpu::RegisterAccess(wf).write_lane({dst_name}, lane, std::bit_cast<uint32_t>({val_expr}));'
     elif dst_fmt == 'f16':
-        return f'amdgpu::RegisterAccess(wf).write_lane({dst_name}, lane, static_cast<uint32_t>(util::f32_to_f16({val_expr})));'
+        return f'amdgpu::RegisterAccess(wf).write_lane({dst_name}, lane, static_cast<uint32_t>(util::f32_to_f16_mode({val_expr}, wf.fp16_ovfl())));'
     elif dst_fmt == 'bf16':
-        return f'amdgpu::RegisterAccess(wf).write_lane({dst_name}, lane, static_cast<uint32_t>(util::f32_to_bf16({val_expr})));'
+        return f'amdgpu::RegisterAccess(wf).write_lane({dst_name}, lane, static_cast<uint32_t>(util::f32_to_bf16_rne_mode({val_expr}, wf.fp16_ovfl())));'
     raise ValueError(f'unsupported dst format: {dst_fmt}')
 
 
@@ -1857,7 +1975,7 @@ def _gen_narrow_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
     """Narrowing: F32/F16/BF16 → FP8/BF8/FP4, with scale, RNE."""
     dst = ctx.dst_ops
     src = ctx.src_ops
-    cvt_fn = _f32_to_narrow_rne_name(ctx.arch_name, dst_fmt)
+    cvt_fn = _f32_to_narrow_rne_mode_name(ctx.arch_name, dst_fmt)
     nan_val = _nan_for_fmt(dst_fmt)
 
     L = []
@@ -1881,8 +1999,8 @@ def _gen_narrow_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
         L.append(
             f'    float s1 = static_cast<float>(static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane)))) / scale);'
         )
-        L.append(f'    uint8_t r0 = {cvt_fn}(s0);')
-        L.append(f'    uint8_t r1 = {cvt_fn}(s1);')
+        L.append(f"    uint8_t r0 = {_narrow_rne_encode_call(dst_fmt, cvt_fn, 's0')};")
+        L.append(f"    uint8_t r1 = {_narrow_rne_encode_call(dst_fmt, cvt_fn, 's1')};")
         L.append(
             '    uint32_t packed = static_cast<uint32_t>(r0) | (static_cast<uint32_t>(r1) << 8);'
         )
@@ -1925,8 +2043,8 @@ def _gen_narrow_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
             L.append(
                 '    float s1 = static_cast<float>(static_cast<double>(util::bf16_to_f32(static_cast<uint16_t>((packed_src >> 16) & 0xFFFF))) / scale);'
             )
-        L.append(f'    uint8_t r0 = {cvt_fn}(s0);')
-        L.append(f'    uint8_t r1 = {cvt_fn}(s1);')
+        L.append(f"    uint8_t r0 = {_narrow_rne_encode_call(dst_fmt, cvt_fn, 's0')};")
+        L.append(f"    uint8_t r1 = {_narrow_rne_encode_call(dst_fmt, cvt_fn, 's1')};")
         if dst_fmt == 'fp4':
             L.append(
                 '    uint32_t packed = static_cast<uint32_t>(r0 & 0xF) | (static_cast<uint32_t>(r1 & 0xF) << 4);'
@@ -1971,8 +2089,8 @@ def _gen_narrow_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
         L.append(
             f'    float s1 = static_cast<float>(static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane)))) / scale);'
         )
-        L.append(f'    uint8_t r0 = {cvt_fn}(s0);')
-        L.append(f'    uint8_t r1 = {cvt_fn}(s1);')
+        L.append(f"    uint8_t r0 = {_narrow_rne_encode_call(dst_fmt, cvt_fn, 's0')};")
+        L.append(f"    uint8_t r1 = {_narrow_rne_encode_call(dst_fmt, cvt_fn, 's1')};")
         L.append(
             '    uint32_t packed = static_cast<uint32_t>(r0 & 0xF) | (static_cast<uint32_t>(r1 & 0xF) << 4);'
         )
@@ -1993,7 +2111,7 @@ def _gen_sr_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
     """Narrowing with stochastic rounding: scale + SR."""
     dst = ctx.dst_ops
     src = ctx.src_ops
-    cvt_fn = _f32_to_narrow_sr_name(ctx.arch_name, dst_fmt)
+    cvt_fn = _f32_to_narrow_sr_mode_name(ctx.arch_name, dst_fmt)
     op = ctx.op
 
     L = []
@@ -2038,9 +2156,13 @@ def _gen_sr_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
             L.append(
                 '    float s1 = static_cast<float>(static_cast<double>(val1) / scale);'
             )
-            L.append(f'    uint8_t r0 = {cvt_fn}(s0, seed_lo);')
+            L.append(
+                f"    uint8_t r0 = {_narrow_sr_encode_call(dst_fmt, cvt_fn, 's0', 'seed_lo')};"
+            )
             L.append('    uint32_t seed_hi = util::prng_advance(seed_lo);')
-            L.append(f'    uint8_t r1 = {cvt_fn}(s1, seed_hi);')
+            L.append(
+                f"    uint8_t r1 = {_narrow_sr_encode_call(dst_fmt, cvt_fn, 's1', 'seed_hi')};"
+            )
         elif src_fmt == 'f16':
             L.append(
                 '    float s0 = static_cast<float>(static_cast<double>(util::f16_to_f32(static_cast<uint16_t>(packed_src & 0xFFFF))) / scale);'
@@ -2048,9 +2170,13 @@ def _gen_sr_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
             L.append(
                 '    float s1 = static_cast<float>(static_cast<double>(util::f16_to_f32(static_cast<uint16_t>((packed_src >> 16) & 0xFFFF))) / scale);'
             )
-            L.append(f'    uint8_t r0 = {cvt_fn}(s0, seed_lo);')
+            L.append(
+                f"    uint8_t r0 = {_narrow_sr_encode_call(dst_fmt, cvt_fn, 's0', 'seed_lo')};"
+            )
             L.append('    uint32_t seed_hi = util::prng_advance(seed_lo);')
-            L.append(f'    uint8_t r1 = {cvt_fn}(s1, seed_hi);')
+            L.append(
+                f"    uint8_t r1 = {_narrow_sr_encode_call(dst_fmt, cvt_fn, 's1', 'seed_hi')};"
+            )
         elif src_fmt == 'bf16':
             L.append(
                 '    float s0 = static_cast<float>(static_cast<double>(util::bf16_to_f32(static_cast<uint16_t>(packed_src & 0xFFFF))) / scale);'
@@ -2058,9 +2184,13 @@ def _gen_sr_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
             L.append(
                 '    float s1 = static_cast<float>(static_cast<double>(util::bf16_to_f32(static_cast<uint16_t>((packed_src >> 16) & 0xFFFF))) / scale);'
             )
-            L.append(f'    uint8_t r0 = {cvt_fn}(s0, seed_lo);')
+            L.append(
+                f"    uint8_t r0 = {_narrow_sr_encode_call(dst_fmt, cvt_fn, 's0', 'seed_lo')};"
+            )
             L.append('    uint32_t seed_hi = util::prng_advance(seed_lo);')
-            L.append(f'    uint8_t r1 = {cvt_fn}(s1, seed_hi);')
+            L.append(
+                f"    uint8_t r1 = {_narrow_sr_encode_call(dst_fmt, cvt_fn, 's1', 'seed_hi')};"
+            )
         L.append(
             '    uint32_t packed = static_cast<uint32_t>(r0 & 0xF) | (static_cast<uint32_t>(r1 & 0xF) << 4);'
         )
@@ -2106,7 +2236,9 @@ def _gen_sr_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
         L.append(
             f'    uint32_t seed = amdgpu::RegisterAccess(wf).read_lane({random_src}, lane);'
         )
-        L.append(f'    uint8_t result = {cvt_fn}(scaled, seed);')
+        L.append(
+            f"    uint8_t result = {_narrow_sr_encode_call(dst_fmt, cvt_fn, 'scaled', 'seed')};"
+        )
         L.append('    uint32_t dst_byte = (inst_.op_sel >> 2) & 0x3;')
         L.append(
             f'    uint32_t old = amdgpu::RegisterAccess(wf).read_lane({dst[0]}, lane);'
@@ -2138,7 +2270,11 @@ def _gen_widen_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
     if mode == 'single':
         # Single widening: src0 = narrow value (byte selected by OPSEL[1:0])
         if dst_fmt in ('f16', 'bf16'):
-            conv = 'util::f32_to_f16' if dst_fmt == 'f16' else 'util::f32_to_bf16'
+            conv = (
+                'util::f32_to_f16_mode'
+                if dst_fmt == 'f16'
+                else 'util::f32_to_bf16_rne_mode'
+            )
             L.append('    bool hi = (inst_.op_sel >> 3) & 1;')
             L.append(
                 f'    uint32_t old = amdgpu::RegisterAccess(wf).read_lane({dst[0]}, lane);'
@@ -2173,7 +2309,9 @@ def _gen_widen_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
             f'    float f = static_cast<float>(static_cast<double>({cvt_fn}(narrow_val)) * scale);'
         )
         if dst_fmt in ('f16', 'bf16'):
-            L.append(f'    uint32_t bits = static_cast<uint32_t>({conv}(f));')
+            L.append(
+                f'    uint32_t bits = static_cast<uint32_t>({conv}(f, wf.fp16_ovfl()));'
+            )
             L.append(
                 f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, hi ? ((old & 0xFFFFu) | (bits << 16)) : ((old & 0xFFFF0000u) | (bits & 0xFFFFu)));'
             )
@@ -2250,17 +2388,21 @@ def _gen_widen_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
             )
         elif dst_fmt == 'f16':
             L.append(
-                '    uint32_t result = static_cast<uint32_t>(util::f32_to_f16(f0))'
+                '    uint32_t result = static_cast<uint32_t>(util::f32_to_f16_mode(f0, wf.fp16_ovfl()))'
             )
-            L.append('        | (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16);')
+            L.append(
+                '        | (static_cast<uint32_t>(util::f32_to_f16_mode(f1, wf.fp16_ovfl())) << 16);'
+            )
             L.append(
                 f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, result);'
             )
         else:
             L.append(
-                '    uint32_t result = static_cast<uint32_t>(util::f32_to_bf16(f0))'
+                '    uint32_t result = static_cast<uint32_t>(util::f32_to_bf16_rne_mode(f0, wf.fp16_ovfl()))'
             )
-            L.append('        | (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16);')
+            L.append(
+                '        | (static_cast<uint32_t>(util::f32_to_bf16_rne_mode(f1, wf.fp16_ovfl())) << 16);'
+            )
             L.append(
                 f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, result);'
             )
@@ -2311,9 +2453,9 @@ def _gen_wide_scalef32(
 
     if direction == 'narrow':
         cvt_fn = (
-            _f32_to_narrow_sr_name(ctx.arch_name, dst_fmt)
+            _f32_to_narrow_sr_mode_name(ctx.arch_name, dst_fmt)
             if stochastic
-            else _f32_to_narrow_rne_name(ctx.arch_name, dst_fmt)
+            else _f32_to_narrow_rne_mode_name(ctx.arch_name, dst_fmt)
         )
         n_elems = 32
         bits_per_elem = 6
@@ -2340,10 +2482,14 @@ def _gen_wide_scalef32(
                         f'      float sv = static_cast<float>(static_cast<double>(v) / scale);'
                     )
                     if stochastic:
-                        L.append(f'      vals[{idx}] = {cvt_fn}(sv, seed);')
+                        L.append(
+                            f"      vals[{idx}] = {_narrow_sr_encode_call(dst_fmt, cvt_fn, 'sv', 'seed')};"
+                        )
                         L.append(f'      seed = util::prng_advance(seed);')
                     else:
-                        L.append(f'      vals[{idx}] = {cvt_fn}(sv);')
+                        L.append(
+                            f"      vals[{idx}] = {_narrow_rne_encode_call(dst_fmt, cvt_fn, 'sv')};"
+                        )
                     L.append(f'    }}')
         elif src_fmt == 'f32':
             # sr_pk32: src0 = 32×F32 (32 DWORDs)
@@ -2356,10 +2502,14 @@ def _gen_wide_scalef32(
                     f'      float sv = static_cast<float>(static_cast<double>(v) / scale);'
                 )
                 if stochastic:
-                    L.append(f'      vals[{j}] = {cvt_fn}(sv, seed);')
+                    L.append(
+                        f"      vals[{j}] = {_narrow_sr_encode_call(dst_fmt, cvt_fn, 'sv', 'seed')};"
+                    )
                     L.append(f'      seed = util::prng_advance(seed);')
                 else:
-                    L.append(f'      vals[{j}] = {cvt_fn}(sv);')
+                    L.append(
+                        f"      vals[{j}] = {_narrow_rne_encode_call(dst_fmt, cvt_fn, 'sv')};"
+                    )
                 L.append(f'    }}')
         else:
             # pk32 from F16/BF16: src0 = 32×F16/BF16 (16 DWORDs, 2 per DWORD)
@@ -2380,13 +2530,21 @@ def _gen_wide_scalef32(
                     f'      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);'
                 )
                 if stochastic:
-                    L.append(f'      vals[{j*2}] = {cvt_fn}(sv0, seed);')
+                    L.append(
+                        f"      vals[{j*2}] = {_narrow_sr_encode_call(dst_fmt, cvt_fn, 'sv0', 'seed')};"
+                    )
                     L.append(f'      seed = util::prng_advance(seed);')
-                    L.append(f'      vals[{j*2+1}] = {cvt_fn}(sv1, seed);')
+                    L.append(
+                        f"      vals[{j*2+1}] = {_narrow_sr_encode_call(dst_fmt, cvt_fn, 'sv1', 'seed')};"
+                    )
                     L.append(f'      seed = util::prng_advance(seed);')
                 else:
-                    L.append(f'      vals[{j*2}] = {cvt_fn}(sv0);')
-                    L.append(f'      vals[{j*2+1}] = {cvt_fn}(sv1);')
+                    L.append(
+                        f"      vals[{j*2}] = {_narrow_rne_encode_call(dst_fmt, cvt_fn, 'sv0')};"
+                    )
+                    L.append(
+                        f"      vals[{j*2+1}] = {_narrow_rne_encode_call(dst_fmt, cvt_fn, 'sv1')};"
+                    )
                 L.append(f'    }}')
 
         L.append('    uint32_t dwords[6];')
@@ -2411,7 +2569,7 @@ def _gen_wide_scalef32(
                     f'    wr({dst[0]}, lane, {j}, std::bit_cast<uint32_t>(static_cast<float>(static_cast<double>({cvt_fn}(vals[{j}])) * scale)));'
                 )
         elif dst_fmt == 'f16':
-            to_narrow = 'util::f32_to_f16'
+            to_narrow = 'util::f32_to_f16_mode'
             for j in range(16):
                 L.append(f'    {{')
                 L.append(
@@ -2421,11 +2579,11 @@ def _gen_wide_scalef32(
                     f'      float f1 = static_cast<float>(static_cast<double>({cvt_fn}(vals[{j*2+1}])) * scale);'
                 )
                 L.append(
-                    f'      wr({dst[0]}, lane, {j}, static_cast<uint32_t>({to_narrow}(f0)) | (static_cast<uint32_t>({to_narrow}(f1)) << 16));'
+                    f'      wr({dst[0]}, lane, {j}, static_cast<uint32_t>({to_narrow}(f0, wf.fp16_ovfl())) | (static_cast<uint32_t>({to_narrow}(f1, wf.fp16_ovfl())) << 16));'
                 )
                 L.append(f'    }}')
         else:
-            to_narrow = 'util::f32_to_bf16'
+            to_narrow = 'util::f32_to_bf16_rne_mode'
             for j in range(16):
                 L.append(f'    {{')
                 L.append(
@@ -2435,7 +2593,7 @@ def _gen_wide_scalef32(
                     f'      float f1 = static_cast<float>(static_cast<double>({cvt_fn}(vals[{j*2+1}])) * scale);'
                 )
                 L.append(
-                    f'      wr({dst[0]}, lane, {j}, static_cast<uint32_t>({to_narrow}(f0)) | (static_cast<uint32_t>({to_narrow}(f1)) << 16));'
+                    f'      wr({dst[0]}, lane, {j}, static_cast<uint32_t>({to_narrow}(f0, wf.fp16_ovfl())) | (static_cast<uint32_t>({to_narrow}(f1, wf.fp16_ovfl())) << 16));'
                 )
                 L.append(f'    }}')
 

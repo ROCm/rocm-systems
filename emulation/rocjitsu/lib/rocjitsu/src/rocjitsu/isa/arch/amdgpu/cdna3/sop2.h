@@ -14,527 +14,580 @@
 namespace rocjitsu {
 namespace cdna3 {
 
-class SAddU32Sop2 : public Sop2 {
-public:
-  SAddU32Sop2(const MachineInst *inst);
+class SAddU32Sop2 : public Sop2
+{
+  public:
+   SAddU32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SSubU32Sop2 : public Sop2 {
-public:
-  SSubU32Sop2(const MachineInst *inst);
+class SSubU32Sop2 : public Sop2
+{
+  public:
+   SSubU32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SAddI32Sop2 : public Sop2 {
-public:
-  SAddI32Sop2(const MachineInst *inst);
+class SAddI32Sop2 : public Sop2
+{
+  public:
+   SAddI32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SSubI32Sop2 : public Sop2 {
-public:
-  SSubI32Sop2(const MachineInst *inst);
+class SSubI32Sop2 : public Sop2
+{
+  public:
+   SSubI32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SAddcU32Sop2 : public Sop2 {
-public:
-  SAddcU32Sop2(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand sdst;
-  Operand ssrc0;
-  Operand ssrc1;
-  Operand scc;
-  Operand scc_in;
-};
-
-class SSubbU32Sop2 : public Sop2 {
-public:
-  SSubbU32Sop2(const MachineInst *inst);
+class SAddcU32Sop2 : public Sop2
+{
+  public:
+   SAddcU32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   Operand scc_in;
-};
+} ;
 
-class SMinI32Sop2 : public Sop2 {
-public:
-  SMinI32Sop2(const MachineInst *inst);
+class SSubbU32Sop2 : public Sop2
+{
+  public:
+   SSubbU32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+  Operand scc_in;
+} ;
 
-class SMinU32Sop2 : public Sop2 {
-public:
-  SMinU32Sop2(const MachineInst *inst);
+class SMinI32Sop2 : public Sop2
+{
+  public:
+   SMinI32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SMaxI32Sop2 : public Sop2 {
-public:
-  SMaxI32Sop2(const MachineInst *inst);
+class SMinU32Sop2 : public Sop2
+{
+  public:
+   SMinU32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SMaxU32Sop2 : public Sop2 {
-public:
-  SMaxU32Sop2(const MachineInst *inst);
+class SMaxI32Sop2 : public Sop2
+{
+  public:
+   SMaxI32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SCselectB32Sop2 : public Sop2 {
-public:
-  SCselectB32Sop2(const MachineInst *inst);
+class SMaxU32Sop2 : public Sop2
+{
+  public:
+   SMaxU32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SCselectB64Sop2 : public Sop2 {
-public:
-  SCselectB64Sop2(const MachineInst *inst);
+class SCselectB32Sop2 : public Sop2
+{
+  public:
+   SCselectB32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SAndB32Sop2 : public Sop2 {
-public:
-  SAndB32Sop2(const MachineInst *inst);
+class SCselectB64Sop2 : public Sop2
+{
+  public:
+   SCselectB64Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SAndB64Sop2 : public Sop2 {
-public:
-  SAndB64Sop2(const MachineInst *inst);
+class SAndB32Sop2 : public Sop2
+{
+  public:
+   SAndB32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SOrB32Sop2 : public Sop2 {
-public:
-  SOrB32Sop2(const MachineInst *inst);
+class SAndB64Sop2 : public Sop2
+{
+  public:
+   SAndB64Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SOrB64Sop2 : public Sop2 {
-public:
-  SOrB64Sop2(const MachineInst *inst);
+class SOrB32Sop2 : public Sop2
+{
+  public:
+   SOrB32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SXorB32Sop2 : public Sop2 {
-public:
-  SXorB32Sop2(const MachineInst *inst);
+class SOrB64Sop2 : public Sop2
+{
+  public:
+   SOrB64Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SXorB64Sop2 : public Sop2 {
-public:
-  SXorB64Sop2(const MachineInst *inst);
+class SXorB32Sop2 : public Sop2
+{
+  public:
+   SXorB32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SAndn2B32Sop2 : public Sop2 {
-public:
-  SAndn2B32Sop2(const MachineInst *inst);
+class SXorB64Sop2 : public Sop2
+{
+  public:
+   SXorB64Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SAndn2B64Sop2 : public Sop2 {
-public:
-  SAndn2B64Sop2(const MachineInst *inst);
+class SAndn2B32Sop2 : public Sop2
+{
+  public:
+   SAndn2B32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SOrn2B32Sop2 : public Sop2 {
-public:
-  SOrn2B32Sop2(const MachineInst *inst);
+class SAndn2B64Sop2 : public Sop2
+{
+  public:
+   SAndn2B64Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SOrn2B64Sop2 : public Sop2 {
-public:
-  SOrn2B64Sop2(const MachineInst *inst);
+class SOrn2B32Sop2 : public Sop2
+{
+  public:
+   SOrn2B32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SNandB32Sop2 : public Sop2 {
-public:
-  SNandB32Sop2(const MachineInst *inst);
+class SOrn2B64Sop2 : public Sop2
+{
+  public:
+   SOrn2B64Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SNandB64Sop2 : public Sop2 {
-public:
-  SNandB64Sop2(const MachineInst *inst);
+class SNandB32Sop2 : public Sop2
+{
+  public:
+   SNandB32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SNorB32Sop2 : public Sop2 {
-public:
-  SNorB32Sop2(const MachineInst *inst);
+class SNandB64Sop2 : public Sop2
+{
+  public:
+   SNandB64Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SNorB64Sop2 : public Sop2 {
-public:
-  SNorB64Sop2(const MachineInst *inst);
+class SNorB32Sop2 : public Sop2
+{
+  public:
+   SNorB32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SXnorB32Sop2 : public Sop2 {
-public:
-  SXnorB32Sop2(const MachineInst *inst);
+class SNorB64Sop2 : public Sop2
+{
+  public:
+   SNorB64Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SXnorB64Sop2 : public Sop2 {
-public:
-  SXnorB64Sop2(const MachineInst *inst);
+class SXnorB32Sop2 : public Sop2
+{
+  public:
+   SXnorB32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SLshlB32Sop2 : public Sop2 {
-public:
-  SLshlB32Sop2(const MachineInst *inst);
+class SXnorB64Sop2 : public Sop2
+{
+  public:
+   SXnorB64Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SLshlB64Sop2 : public Sop2 {
-public:
-  SLshlB64Sop2(const MachineInst *inst);
+class SLshlB32Sop2 : public Sop2
+{
+  public:
+   SLshlB32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SLshrB32Sop2 : public Sop2 {
-public:
-  SLshrB32Sop2(const MachineInst *inst);
+class SLshlB64Sop2 : public Sop2
+{
+  public:
+   SLshlB64Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SLshrB64Sop2 : public Sop2 {
-public:
-  SLshrB64Sop2(const MachineInst *inst);
+class SLshrB32Sop2 : public Sop2
+{
+  public:
+   SLshrB32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SAshrI32Sop2 : public Sop2 {
-public:
-  SAshrI32Sop2(const MachineInst *inst);
+class SLshrB64Sop2 : public Sop2
+{
+  public:
+   SLshrB64Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SAshrI64Sop2 : public Sop2 {
-public:
-  SAshrI64Sop2(const MachineInst *inst);
+class SAshrI32Sop2 : public Sop2
+{
+  public:
+   SAshrI32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SBfmB32Sop2 : public Sop2 {
-public:
-  SBfmB32Sop2(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand sdst;
-  Operand ssrc0;
-  Operand ssrc1;
-};
-
-class SBfmB64Sop2 : public Sop2 {
-public:
-  SBfmB64Sop2(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand sdst;
-  Operand ssrc0;
-  Operand ssrc1;
-};
-
-class SMulI32Sop2 : public Sop2 {
-public:
-  SMulI32Sop2(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand sdst;
-  Operand ssrc0;
-  Operand ssrc1;
-};
-
-class SBfeU32Sop2 : public Sop2 {
-public:
-  SBfeU32Sop2(const MachineInst *inst);
+class SAshrI64Sop2 : public Sop2
+{
+  public:
+   SAshrI64Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SBfeI32Sop2 : public Sop2 {
-public:
-  SBfeI32Sop2(const MachineInst *inst);
+class SBfmB32Sop2 : public Sop2
+{
+  public:
+   SBfmB32Sop2(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand sdst;
+  Operand ssrc0;
+  Operand ssrc1;
+} ;
+
+class SBfmB64Sop2 : public Sop2
+{
+  public:
+   SBfmB64Sop2(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand sdst;
+  Operand ssrc0;
+  Operand ssrc1;
+} ;
+
+class SMulI32Sop2 : public Sop2
+{
+  public:
+   SMulI32Sop2(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand sdst;
+  Operand ssrc0;
+  Operand ssrc1;
+} ;
+
+class SBfeU32Sop2 : public Sop2
+{
+  public:
+   SBfeU32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SBfeU64Sop2 : public Sop2 {
-public:
-  SBfeU64Sop2(const MachineInst *inst);
+class SBfeI32Sop2 : public Sop2
+{
+  public:
+   SBfeI32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SBfeI64Sop2 : public Sop2 {
-public:
-  SBfeI64Sop2(const MachineInst *inst);
+class SBfeU64Sop2 : public Sop2
+{
+  public:
+   SBfeU64Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SCbranchGForkSop2 : public Sop2 {
-public:
-  SCbranchGForkSop2(const MachineInst *inst);
+class SBfeI64Sop2 : public Sop2
+{
+  public:
+   SBfeI64Sop2(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand sdst;
+  Operand ssrc0;
+  Operand ssrc1;
+  Operand scc;
+} ;
+
+class SCbranchGForkSop2 : public Sop2
+{
+  public:
+   SCbranchGForkSop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand pc;
-};
+} ;
 
-class SAbsdiffI32Sop2 : public Sop2 {
-public:
-  SAbsdiffI32Sop2(const MachineInst *inst);
+class SAbsdiffI32Sop2 : public Sop2
+{
+  public:
+   SAbsdiffI32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SRfeRestoreB64Sop2 : public Sop2 {
-public:
-  SRfeRestoreB64Sop2(const MachineInst *inst);
+class SRfeRestoreB64Sop2 : public Sop2
+{
+  public:
+   SRfeRestoreB64Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand pc;
-};
+} ;
 
-class SMulHiU32Sop2 : public Sop2 {
-public:
-  SMulHiU32Sop2(const MachineInst *inst);
+class SMulHiU32Sop2 : public Sop2
+{
+  public:
+   SMulHiU32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
-};
+} ;
 
-class SMulHiI32Sop2 : public Sop2 {
-public:
-  SMulHiI32Sop2(const MachineInst *inst);
+class SMulHiI32Sop2 : public Sop2
+{
+  public:
+   SMulHiI32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
-};
+} ;
 
-class SLshl1AddU32Sop2 : public Sop2 {
-public:
-  SLshl1AddU32Sop2(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand sdst;
-  Operand ssrc0;
-  Operand ssrc1;
-  Operand scc;
-};
-
-class SLshl2AddU32Sop2 : public Sop2 {
-public:
-  SLshl2AddU32Sop2(const MachineInst *inst);
+class SLshl1AddU32Sop2 : public Sop2
+{
+  public:
+   SLshl1AddU32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SLshl3AddU32Sop2 : public Sop2 {
-public:
-  SLshl3AddU32Sop2(const MachineInst *inst);
+class SLshl2AddU32Sop2 : public Sop2
+{
+  public:
+   SLshl2AddU32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SLshl4AddU32Sop2 : public Sop2 {
-public:
-  SLshl4AddU32Sop2(const MachineInst *inst);
+class SLshl3AddU32Sop2 : public Sop2
+{
+  public:
+   SLshl3AddU32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-};
+} ;
 
-class SPackLlB32B16Sop2 : public Sop2 {
-public:
-  SPackLlB32B16Sop2(const MachineInst *inst);
+class SLshl4AddU32Sop2 : public Sop2
+{
+  public:
+   SLshl4AddU32Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
-};
+  Operand scc;
+} ;
 
-class SPackLhB32B16Sop2 : public Sop2 {
-public:
-  SPackLhB32B16Sop2(const MachineInst *inst);
+class SPackLlB32B16Sop2 : public Sop2
+{
+  public:
+   SPackLlB32B16Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
-};
+} ;
 
-class SPackHhB32B16Sop2 : public Sop2 {
-public:
-  SPackHhB32B16Sop2(const MachineInst *inst);
+class SPackLhB32B16Sop2 : public Sop2
+{
+  public:
+   SPackLhB32B16Sop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
-};
+} ;
+
+class SPackHhB32B16Sop2 : public Sop2
+{
+  public:
+   SPackHhB32B16Sop2(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand sdst;
+  Operand ssrc0;
+  Operand ssrc1;
+} ;
 
 } // namespace cdna3
 } // namespace rocjitsu

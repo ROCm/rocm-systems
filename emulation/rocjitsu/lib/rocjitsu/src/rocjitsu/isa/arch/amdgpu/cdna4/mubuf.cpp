@@ -5,28 +5,29 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/cdna4/mubuf.h"
+#include "util/except.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/addr_calc.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx940_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
-#include "rocjitsu/vm/amdgpu/register_access.h"
+#include <cstring>
+#include <memory>
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
-#include "util/except.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
-#include <cstring>
 #include <limits>
-#include <memory>
+#include "rocjitsu/vm/amdgpu/register_access.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 
 namespace rocjitsu {
 namespace cdna4 {
 
 namespace {
-template <typename BufferMachineInst> uint32_t buffer_vaddr_bits(const BufferMachineInst *inst) {
+template <typename BufferMachineInst>
+uint32_t buffer_vaddr_bits(const BufferMachineInst *inst) {
   if (inst->idxen && inst->offen)
     return 64;
   if (inst->idxen || inst->offen)
@@ -35,477 +36,71 @@ template <typename BufferMachineInst> uint32_t buffer_vaddr_bits(const BufferMac
 }
 } // namespace
 
-BufferLoadFormatXMubuf::BufferLoadFormatXMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_format_x", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadFormatXMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &srsrc;
-  src_operands_[2] = &soffset;
-  src_operands_[3] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-}
+BufferLoadFormatXMubuf::BufferLoadFormatXMubuf(const MachineInst *inst) : Mubuf("buffer_load_format_x", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferLoadFormatXMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdata;src_operands_[0] = &vaddr;src_operands_[1] = &srsrc;src_operands_[2] = &soffset;src_operands_[3] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);}
 
-void BufferLoadFormatXMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void BufferLoadFormatXMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-BufferLoadFormatXyMubuf::BufferLoadFormatXyMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_format_xy", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadFormatXyMubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(64, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &srsrc;
-  src_operands_[2] = &soffset;
-  src_operands_[3] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-}
+BufferLoadFormatXyMubuf::BufferLoadFormatXyMubuf(const MachineInst *inst) : Mubuf("buffer_load_format_xy", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferLoadFormatXyMubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(64, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdata;src_operands_[0] = &vaddr;src_operands_[1] = &srsrc;src_operands_[2] = &soffset;src_operands_[3] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);}
 
-void BufferLoadFormatXyMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void BufferLoadFormatXyMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-BufferLoadFormatXyzMubuf::BufferLoadFormatXyzMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadFormatXyzMubuf>()),
-      vdata(96, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(96, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &srsrc;
-  src_operands_[2] = &soffset;
-  src_operands_[3] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-}
+BufferLoadFormatXyzMubuf::BufferLoadFormatXyzMubuf(const MachineInst *inst) : Mubuf("buffer_load_format_xyz", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferLoadFormatXyzMubuf>()), vdata(96, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(96, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdata;src_operands_[0] = &vaddr;src_operands_[1] = &srsrc;src_operands_[2] = &soffset;src_operands_[3] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);}
 
-void BufferLoadFormatXyzMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void BufferLoadFormatXyzMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-BufferLoadFormatXyzwMubuf::BufferLoadFormatXyzwMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadFormatXyzwMubuf>()),
-      vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(128, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &srsrc;
-  src_operands_[2] = &soffset;
-  src_operands_[3] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-}
+BufferLoadFormatXyzwMubuf::BufferLoadFormatXyzwMubuf(const MachineInst *inst) : Mubuf("buffer_load_format_xyzw", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferLoadFormatXyzwMubuf>()), vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(128, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdata;src_operands_[0] = &vaddr;src_operands_[1] = &srsrc;src_operands_[2] = &soffset;src_operands_[3] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);}
 
-void BufferLoadFormatXyzwMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void BufferLoadFormatXyzwMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-BufferStoreFormatXMubuf::BufferStoreFormatXMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_format_x", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreFormatXMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-}
+BufferStoreFormatXMubuf::BufferStoreFormatXMubuf(const MachineInst *inst) : Mubuf("buffer_store_format_x", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferStoreFormatXMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);}
 
-void BufferStoreFormatXMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void BufferStoreFormatXMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-BufferStoreFormatXyMubuf::BufferStoreFormatXyMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_format_xy", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreFormatXyMubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(64, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-}
+BufferStoreFormatXyMubuf::BufferStoreFormatXyMubuf(const MachineInst *inst) : Mubuf("buffer_store_format_xy", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferStoreFormatXyMubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);}
 
-void BufferStoreFormatXyMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void BufferStoreFormatXyMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-BufferStoreFormatXyzMubuf::BufferStoreFormatXyzMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreFormatXyzMubuf>()),
-      vdata(96, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(96, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-}
+BufferStoreFormatXyzMubuf::BufferStoreFormatXyzMubuf(const MachineInst *inst) : Mubuf("buffer_store_format_xyz", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferStoreFormatXyzMubuf>()), vdata(96, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(96, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);}
 
-void BufferStoreFormatXyzMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void BufferStoreFormatXyzMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-BufferStoreFormatXyzwMubuf::BufferStoreFormatXyzwMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreFormatXyzwMubuf>()),
-      vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(128, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-}
+BufferStoreFormatXyzwMubuf::BufferStoreFormatXyzwMubuf(const MachineInst *inst) : Mubuf("buffer_store_format_xyzw", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferStoreFormatXyzwMubuf>()), vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(128, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);}
 
-void BufferStoreFormatXyzwMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void BufferStoreFormatXyzwMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-BufferLoadFormatD16XMubuf::BufferLoadFormatD16XMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_format_d16_x", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadFormatD16XMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &srsrc;
-  src_operands_[2] = &soffset;
-  src_operands_[3] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-}
+BufferLoadFormatD16XMubuf::BufferLoadFormatD16XMubuf(const MachineInst *inst) : Mubuf("buffer_load_format_d16_x", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferLoadFormatD16XMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdata;src_operands_[0] = &vaddr;src_operands_[1] = &srsrc;src_operands_[2] = &soffset;src_operands_[3] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);}
 
-void BufferLoadFormatD16XMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void BufferLoadFormatD16XMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-BufferLoadFormatD16XyMubuf::BufferLoadFormatD16XyMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_format_d16_xy", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadFormatD16XyMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(64, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &srsrc;
-  src_operands_[2] = &soffset;
-  src_operands_[3] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-}
+BufferLoadFormatD16XyMubuf::BufferLoadFormatD16XyMubuf(const MachineInst *inst) : Mubuf("buffer_load_format_d16_xy", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferLoadFormatD16XyMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(64, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdata;src_operands_[0] = &vaddr;src_operands_[1] = &srsrc;src_operands_[2] = &soffset;src_operands_[3] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);}
 
-void BufferLoadFormatD16XyMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void BufferLoadFormatD16XyMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-BufferLoadFormatD16XyzMubuf::BufferLoadFormatD16XyzMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_format_d16_xyz", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadFormatD16XyzMubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(96, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &srsrc;
-  src_operands_[2] = &soffset;
-  src_operands_[3] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-}
+BufferLoadFormatD16XyzMubuf::BufferLoadFormatD16XyzMubuf(const MachineInst *inst) : Mubuf("buffer_load_format_d16_xyz", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferLoadFormatD16XyzMubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(96, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdata;src_operands_[0] = &vaddr;src_operands_[1] = &srsrc;src_operands_[2] = &soffset;src_operands_[3] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);}
 
-void BufferLoadFormatD16XyzMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void BufferLoadFormatD16XyzMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-BufferLoadFormatD16XyzwMubuf::BufferLoadFormatD16XyzwMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_format_d16_xyzw", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadFormatD16XyzwMubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(128, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &srsrc;
-  src_operands_[2] = &soffset;
-  src_operands_[3] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-}
+BufferLoadFormatD16XyzwMubuf::BufferLoadFormatD16XyzwMubuf(const MachineInst *inst) : Mubuf("buffer_load_format_d16_xyzw", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferLoadFormatD16XyzwMubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(128, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdata;src_operands_[0] = &vaddr;src_operands_[1] = &srsrc;src_operands_[2] = &soffset;src_operands_[3] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);}
 
-void BufferLoadFormatD16XyzwMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void BufferLoadFormatD16XyzwMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-BufferStoreFormatD16XMubuf::BufferStoreFormatD16XMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_format_d16_x", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreFormatD16XMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-}
+BufferStoreFormatD16XMubuf::BufferStoreFormatD16XMubuf(const MachineInst *inst) : Mubuf("buffer_store_format_d16_x", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferStoreFormatD16XMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);}
 
-void BufferStoreFormatD16XMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void BufferStoreFormatD16XMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-BufferStoreFormatD16XyMubuf::BufferStoreFormatD16XyMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_format_d16_xy", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreFormatD16XyMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(64, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-}
+BufferStoreFormatD16XyMubuf::BufferStoreFormatD16XyMubuf(const MachineInst *inst) : Mubuf("buffer_store_format_d16_xy", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferStoreFormatD16XyMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);}
 
-void BufferStoreFormatD16XyMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void BufferStoreFormatD16XyMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-BufferStoreFormatD16XyzMubuf::BufferStoreFormatD16XyzMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_format_d16_xyz", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreFormatD16XyzMubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(96, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-}
+BufferStoreFormatD16XyzMubuf::BufferStoreFormatD16XyzMubuf(const MachineInst *inst) : Mubuf("buffer_store_format_d16_xyz", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferStoreFormatD16XyzMubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(96, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);}
 
-void BufferStoreFormatD16XyzMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void BufferStoreFormatD16XyzMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-BufferStoreFormatD16XyzwMubuf::BufferStoreFormatD16XyzwMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_format_d16_xyzw", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreFormatD16XyzwMubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(128, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-}
+BufferStoreFormatD16XyzwMubuf::BufferStoreFormatD16XyzwMubuf(const MachineInst *inst) : Mubuf("buffer_store_format_d16_xyzw", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferStoreFormatD16XyzwMubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(128, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);}
 
-void BufferStoreFormatD16XyzwMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void BufferStoreFormatD16XyzwMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-BufferLoadUbyteMubuf::BufferLoadUbyteMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_ubyte", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadUbyteMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &srsrc;
-  src_operands_[2] = &soffset;
-  src_operands_[3] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferLoadUbyteMubuf::BufferLoadUbyteMubuf(const MachineInst *inst) : Mubuf("buffer_load_ubyte", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferLoadUbyteMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdata;src_operands_[0] = &vaddr;src_operands_[1] = &srsrc;src_operands_[2] = &soffset;src_operands_[3] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferLoadUbyteMubuf::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.lds) {
@@ -534,29 +129,7 @@ void BufferLoadUbyteMubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferLoadSbyteMubuf::BufferLoadSbyteMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_sbyte", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadSbyteMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &srsrc;
-  src_operands_[2] = &soffset;
-  src_operands_[3] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferLoadSbyteMubuf::BufferLoadSbyteMubuf(const MachineInst *inst) : Mubuf("buffer_load_sbyte", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferLoadSbyteMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdata;src_operands_[0] = &vaddr;src_operands_[1] = &srsrc;src_operands_[2] = &soffset;src_operands_[3] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferLoadSbyteMubuf::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.lds) {
@@ -586,29 +159,7 @@ void BufferLoadSbyteMubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferLoadUshortMubuf::BufferLoadUshortMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_ushort", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadUshortMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(16, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &srsrc;
-  src_operands_[2] = &soffset;
-  src_operands_[3] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferLoadUshortMubuf::BufferLoadUshortMubuf(const MachineInst *inst) : Mubuf("buffer_load_ushort", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferLoadUshortMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(16, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdata;src_operands_[0] = &vaddr;src_operands_[1] = &srsrc;src_operands_[2] = &soffset;src_operands_[3] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferLoadUshortMubuf::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.lds) {
@@ -637,29 +188,7 @@ void BufferLoadUshortMubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferLoadSshortMubuf::BufferLoadSshortMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_sshort", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadSshortMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(16, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &srsrc;
-  src_operands_[2] = &soffset;
-  src_operands_[3] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferLoadSshortMubuf::BufferLoadSshortMubuf(const MachineInst *inst) : Mubuf("buffer_load_sshort", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferLoadSshortMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(16, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdata;src_operands_[0] = &vaddr;src_operands_[1] = &srsrc;src_operands_[2] = &soffset;src_operands_[3] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferLoadSshortMubuf::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.lds) {
@@ -689,29 +218,7 @@ void BufferLoadSshortMubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferLoadDwordMubuf::BufferLoadDwordMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_dword", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadDwordMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &srsrc;
-  src_operands_[2] = &soffset;
-  src_operands_[3] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferLoadDwordMubuf::BufferLoadDwordMubuf(const MachineInst *inst) : Mubuf("buffer_load_dword", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferLoadDwordMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdata;src_operands_[0] = &vaddr;src_operands_[1] = &srsrc;src_operands_[2] = &soffset;src_operands_[3] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferLoadDwordMubuf::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.lds) {
@@ -740,29 +247,7 @@ void BufferLoadDwordMubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferLoadDwordx2Mubuf::BufferLoadDwordx2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadDwordx2Mubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(64, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &srsrc;
-  src_operands_[2] = &soffset;
-  src_operands_[3] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferLoadDwordx2Mubuf::BufferLoadDwordx2Mubuf(const MachineInst *inst) : Mubuf("buffer_load_dwordx2", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferLoadDwordx2Mubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(64, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdata;src_operands_[0] = &vaddr;src_operands_[1] = &srsrc;src_operands_[2] = &soffset;src_operands_[3] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferLoadDwordx2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.lds) {
@@ -791,29 +276,7 @@ void BufferLoadDwordx2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferLoadDwordx3Mubuf::BufferLoadDwordx3Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_dwordx3", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadDwordx3Mubuf>()),
-      vdata(96, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(96, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &srsrc;
-  src_operands_[2] = &soffset;
-  src_operands_[3] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferLoadDwordx3Mubuf::BufferLoadDwordx3Mubuf(const MachineInst *inst) : Mubuf("buffer_load_dwordx3", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferLoadDwordx3Mubuf>()), vdata(96, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(96, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdata;src_operands_[0] = &vaddr;src_operands_[1] = &srsrc;src_operands_[2] = &soffset;src_operands_[3] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferLoadDwordx3Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.lds) {
@@ -842,29 +305,7 @@ void BufferLoadDwordx3Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferLoadDwordx4Mubuf::BufferLoadDwordx4Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadDwordx4Mubuf>()),
-      vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(128, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &srsrc;
-  src_operands_[2] = &soffset;
-  src_operands_[3] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferLoadDwordx4Mubuf::BufferLoadDwordx4Mubuf(const MachineInst *inst) : Mubuf("buffer_load_dwordx4", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferLoadDwordx4Mubuf>()), vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(128, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdata;src_operands_[0] = &vaddr;src_operands_[1] = &srsrc;src_operands_[2] = &soffset;src_operands_[3] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferLoadDwordx4Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.lds) {
@@ -893,29 +334,7 @@ void BufferLoadDwordx4Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferStoreByteMubuf::BufferStoreByteMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_byte", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreByteMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferStoreByteMubuf::BufferStoreByteMubuf(const MachineInst *inst) : Mubuf("buffer_store_byte", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferStoreByteMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(8, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferStoreByteMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -931,37 +350,14 @@ void BufferStoreByteMubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 1);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
   set_data(std::move(d));
 }
 
-BufferStoreByteD16HiMubuf::BufferStoreByteD16HiMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_byte_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreByteD16HiMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferStoreByteD16HiMubuf::BufferStoreByteD16HiMubuf(const MachineInst *inst) : Mubuf("buffer_store_byte_d16_hi", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferStoreByteD16HiMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(8, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferStoreByteD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -977,8 +373,7 @@ void BufferStoreByteD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 1);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     val0 >>= 16;
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
@@ -986,29 +381,7 @@ void BufferStoreByteD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferStoreShortMubuf::BufferStoreShortMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_short", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreShortMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(16, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferStoreShortMubuf::BufferStoreShortMubuf(const MachineInst *inst) : Mubuf("buffer_store_short", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferStoreShortMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(16, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferStoreShortMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1024,37 +397,14 @@ void BufferStoreShortMubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 2);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
   set_data(std::move(d));
 }
 
-BufferStoreShortD16HiMubuf::BufferStoreShortD16HiMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_short_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreShortD16HiMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(16, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferStoreShortD16HiMubuf::BufferStoreShortD16HiMubuf(const MachineInst *inst) : Mubuf("buffer_store_short_d16_hi", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferStoreShortD16HiMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(16, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferStoreShortD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1070,8 +420,7 @@ void BufferStoreShortD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 2);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     val0 >>= 16;
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
@@ -1079,29 +428,7 @@ void BufferStoreShortD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferStoreDwordMubuf::BufferStoreDwordMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_dword", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreDwordMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferStoreDwordMubuf::BufferStoreDwordMubuf(const MachineInst *inst) : Mubuf("buffer_store_dword", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferStoreDwordMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferStoreDwordMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1117,37 +444,14 @@ void BufferStoreDwordMubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-BufferStoreDwordx2Mubuf::BufferStoreDwordx2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreDwordx2Mubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(64, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferStoreDwordx2Mubuf::BufferStoreDwordx2Mubuf(const MachineInst *inst) : Mubuf("buffer_store_dwordx2", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferStoreDwordx2Mubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferStoreDwordx2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1163,8 +467,7 @@ void BufferStoreDwordx2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1173,29 +476,7 @@ void BufferStoreDwordx2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferStoreDwordx3Mubuf::BufferStoreDwordx3Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_dwordx3", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreDwordx3Mubuf>()),
-      vdata(96, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(96, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferStoreDwordx3Mubuf::BufferStoreDwordx3Mubuf(const MachineInst *inst) : Mubuf("buffer_store_dwordx3", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferStoreDwordx3Mubuf>()), vdata(96, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(96, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferStoreDwordx3Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1211,8 +492,7 @@ void BufferStoreDwordx3Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 12);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 12 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1223,29 +503,7 @@ void BufferStoreDwordx3Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferStoreDwordx4Mubuf::BufferStoreDwordx4Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreDwordx4Mubuf>()),
-      vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(128, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferStoreDwordx4Mubuf::BufferStoreDwordx4Mubuf(const MachineInst *inst) : Mubuf("buffer_store_dwordx4", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferStoreDwordx4Mubuf>()), vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(128, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferStoreDwordx4Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1261,8 +519,7 @@ void BufferStoreDwordx4Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 16);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1275,29 +532,7 @@ void BufferStoreDwordx4Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferLoadUbyteD16Mubuf::BufferLoadUbyteD16Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_ubyte_d16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadUbyteD16Mubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &srsrc;
-  src_operands_[2] = &soffset;
-  src_operands_[3] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferLoadUbyteD16Mubuf::BufferLoadUbyteD16Mubuf(const MachineInst *inst) : Mubuf("buffer_load_ubyte_d16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferLoadUbyteD16Mubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdata;src_operands_[0] = &vaddr;src_operands_[1] = &srsrc;src_operands_[2] = &soffset;src_operands_[3] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferLoadUbyteD16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.lds) {
@@ -1327,29 +562,7 @@ void BufferLoadUbyteD16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferLoadUbyteD16HiMubuf::BufferLoadUbyteD16HiMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_ubyte_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadUbyteD16HiMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &srsrc;
-  src_operands_[2] = &soffset;
-  src_operands_[3] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferLoadUbyteD16HiMubuf::BufferLoadUbyteD16HiMubuf(const MachineInst *inst) : Mubuf("buffer_load_ubyte_d16_hi", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferLoadUbyteD16HiMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdata;src_operands_[0] = &vaddr;src_operands_[1] = &srsrc;src_operands_[2] = &soffset;src_operands_[3] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferLoadUbyteD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.lds) {
@@ -1379,29 +592,7 @@ void BufferLoadUbyteD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferLoadSbyteD16Mubuf::BufferLoadSbyteD16Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_sbyte_d16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadSbyteD16Mubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &srsrc;
-  src_operands_[2] = &soffset;
-  src_operands_[3] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferLoadSbyteD16Mubuf::BufferLoadSbyteD16Mubuf(const MachineInst *inst) : Mubuf("buffer_load_sbyte_d16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferLoadSbyteD16Mubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdata;src_operands_[0] = &vaddr;src_operands_[1] = &srsrc;src_operands_[2] = &soffset;src_operands_[3] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferLoadSbyteD16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.lds) {
@@ -1432,29 +623,7 @@ void BufferLoadSbyteD16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferLoadSbyteD16HiMubuf::BufferLoadSbyteD16HiMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_sbyte_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadSbyteD16HiMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &srsrc;
-  src_operands_[2] = &soffset;
-  src_operands_[3] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferLoadSbyteD16HiMubuf::BufferLoadSbyteD16HiMubuf(const MachineInst *inst) : Mubuf("buffer_load_sbyte_d16_hi", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferLoadSbyteD16HiMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdata;src_operands_[0] = &vaddr;src_operands_[1] = &srsrc;src_operands_[2] = &soffset;src_operands_[3] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferLoadSbyteD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.lds) {
@@ -1485,29 +654,7 @@ void BufferLoadSbyteD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferLoadShortD16Mubuf::BufferLoadShortD16Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_short_d16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadShortD16Mubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(16, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &srsrc;
-  src_operands_[2] = &soffset;
-  src_operands_[3] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferLoadShortD16Mubuf::BufferLoadShortD16Mubuf(const MachineInst *inst) : Mubuf("buffer_load_short_d16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferLoadShortD16Mubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(16, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdata;src_operands_[0] = &vaddr;src_operands_[1] = &srsrc;src_operands_[2] = &soffset;src_operands_[3] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferLoadShortD16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.lds) {
@@ -1537,29 +684,7 @@ void BufferLoadShortD16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferLoadShortD16HiMubuf::BufferLoadShortD16HiMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_short_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadShortD16HiMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(16, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &srsrc;
-  src_operands_[2] = &soffset;
-  src_operands_[3] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferLoadShortD16HiMubuf::BufferLoadShortD16HiMubuf(const MachineInst *inst) : Mubuf("buffer_load_short_d16_hi", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferLoadShortD16HiMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(16, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdata;src_operands_[0] = &vaddr;src_operands_[1] = &srsrc;src_operands_[2] = &soffset;src_operands_[3] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferLoadShortD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.lds) {
@@ -1589,111 +714,27 @@ void BufferLoadShortD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferLoadFormatD16HiXMubuf::BufferLoadFormatD16HiXMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_format_d16_hi_x", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadFormatD16HiXMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &srsrc;
-  src_operands_[2] = &soffset;
-  src_operands_[3] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-}
+BufferLoadFormatD16HiXMubuf::BufferLoadFormatD16HiXMubuf(const MachineInst *inst) : Mubuf("buffer_load_format_d16_hi_x", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferLoadFormatD16HiXMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdata;src_operands_[0] = &vaddr;src_operands_[1] = &srsrc;src_operands_[2] = &soffset;src_operands_[3] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);}
 
-void BufferLoadFormatD16HiXMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void BufferLoadFormatD16HiXMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-BufferStoreFormatD16HiXMubuf::BufferStoreFormatD16HiXMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_format_d16_hi_x", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreFormatD16HiXMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-}
+BufferStoreFormatD16HiXMubuf::BufferStoreFormatD16HiXMubuf(const MachineInst *inst) : Mubuf("buffer_store_format_d16_hi_x", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferStoreFormatD16HiXMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);}
 
-void BufferStoreFormatD16HiXMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void BufferStoreFormatD16HiXMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-BufferWbl2Mubuf::BufferWbl2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_wbl2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferWbl2Mubuf>()) {
-  num_src_ = 0;
-  num_dst_ = 0;
-}
+BufferWbl2Mubuf::BufferWbl2Mubuf(const MachineInst *inst) : Mubuf("buffer_wbl2", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferWbl2Mubuf>()) {num_src_ = 0;num_dst_ = 0;}
 
 void BufferWbl2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_buffer_wbl2_mubuf(*this, wf);
 }
 
-BufferInvMubuf::BufferInvMubuf(const MachineInst *inst)
-    : Mubuf("buffer_inv", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferInvMubuf>()) {
-  num_src_ = 0;
-  num_dst_ = 0;
-}
+BufferInvMubuf::BufferInvMubuf(const MachineInst *inst) : Mubuf("buffer_inv", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferInvMubuf>()) {num_src_ = 0;num_dst_ = 0;}
 
 void BufferInvMubuf::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_buffer_inv_mubuf(*this, wf);
 }
 
-BufferAtomicSwapMubuf::BufferAtomicSwapMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_swap", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicSwapMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicSwapMubuf::BufferAtomicSwapMubuf(const MachineInst *inst) : Mubuf("buffer_atomic_swap", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicSwapMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicSwapMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1710,46 +751,14 @@ void BufferAtomicSwapMubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-BufferAtomicCmpswapMubuf::BufferAtomicCmpswapMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicCmpswapMubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vdata_return(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-                   (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-                    (reinterpret_cast<const OpEncoding *>(inst)->acc
-                         ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                         : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata_return;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicCmpswapMubuf::BufferAtomicCmpswapMubuf(const MachineInst *inst) : Mubuf("buffer_atomic_cmpswap", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicCmpswapMubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vdata_return(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata_return;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicCmpswapMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1766,8 +775,7 @@ void BufferAtomicCmpswapMubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1776,33 +784,7 @@ void BufferAtomicCmpswapMubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferAtomicAddMubuf::BufferAtomicAddMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_add", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicAddMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicAddMubuf::BufferAtomicAddMubuf(const MachineInst *inst) : Mubuf("buffer_atomic_add", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicAddMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicAddMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1819,41 +801,14 @@ void BufferAtomicAddMubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-BufferAtomicSubMubuf::BufferAtomicSubMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_sub", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicSubMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicSubMubuf::BufferAtomicSubMubuf(const MachineInst *inst) : Mubuf("buffer_atomic_sub", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicSubMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicSubMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1870,41 +825,14 @@ void BufferAtomicSubMubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-BufferAtomicSminMubuf::BufferAtomicSminMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_smin", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicSminMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicSminMubuf::BufferAtomicSminMubuf(const MachineInst *inst) : Mubuf("buffer_atomic_smin", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicSminMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicSminMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1921,41 +849,14 @@ void BufferAtomicSminMubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-BufferAtomicUminMubuf::BufferAtomicUminMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_umin", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicUminMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicUminMubuf::BufferAtomicUminMubuf(const MachineInst *inst) : Mubuf("buffer_atomic_umin", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicUminMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicUminMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1972,41 +873,14 @@ void BufferAtomicUminMubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-BufferAtomicSmaxMubuf::BufferAtomicSmaxMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_smax", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicSmaxMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicSmaxMubuf::BufferAtomicSmaxMubuf(const MachineInst *inst) : Mubuf("buffer_atomic_smax", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicSmaxMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicSmaxMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2023,41 +897,14 @@ void BufferAtomicSmaxMubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-BufferAtomicUmaxMubuf::BufferAtomicUmaxMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_umax", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicUmaxMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicUmaxMubuf::BufferAtomicUmaxMubuf(const MachineInst *inst) : Mubuf("buffer_atomic_umax", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicUmaxMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicUmaxMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2074,41 +921,14 @@ void BufferAtomicUmaxMubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-BufferAtomicAndMubuf::BufferAtomicAndMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_and", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicAndMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicAndMubuf::BufferAtomicAndMubuf(const MachineInst *inst) : Mubuf("buffer_atomic_and", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicAndMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicAndMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2125,41 +945,14 @@ void BufferAtomicAndMubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-BufferAtomicOrMubuf::BufferAtomicOrMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_or", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicOrMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicOrMubuf::BufferAtomicOrMubuf(const MachineInst *inst) : Mubuf("buffer_atomic_or", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicOrMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicOrMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2176,41 +969,14 @@ void BufferAtomicOrMubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-BufferAtomicXorMubuf::BufferAtomicXorMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_xor", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicXorMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicXorMubuf::BufferAtomicXorMubuf(const MachineInst *inst) : Mubuf("buffer_atomic_xor", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicXorMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicXorMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2227,41 +993,14 @@ void BufferAtomicXorMubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-BufferAtomicIncMubuf::BufferAtomicIncMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_inc", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicIncMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicIncMubuf::BufferAtomicIncMubuf(const MachineInst *inst) : Mubuf("buffer_atomic_inc", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicIncMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicIncMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2278,41 +1017,14 @@ void BufferAtomicIncMubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-BufferAtomicDecMubuf::BufferAtomicDecMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_dec", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicDecMubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicDecMubuf::BufferAtomicDecMubuf(const MachineInst *inst) : Mubuf("buffer_atomic_dec", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicDecMubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicDecMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2329,41 +1041,14 @@ void BufferAtomicDecMubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-BufferAtomicAddF32Mubuf::BufferAtomicAddF32Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicAddF32Mubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicAddF32Mubuf::BufferAtomicAddF32Mubuf(const MachineInst *inst) : Mubuf("buffer_atomic_add_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicAddF32Mubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicAddF32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2380,41 +1065,14 @@ void BufferAtomicAddF32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-BufferAtomicPkAddF16Mubuf::BufferAtomicPkAddF16Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicPkAddF16Mubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicPkAddF16Mubuf::BufferAtomicPkAddF16Mubuf(const MachineInst *inst) : Mubuf("buffer_atomic_pk_add_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicPkAddF16Mubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicPkAddF16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2431,41 +1089,14 @@ void BufferAtomicPkAddF16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-BufferAtomicAddF64Mubuf::BufferAtomicAddF64Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_add_f64", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicAddF64Mubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicAddF64Mubuf::BufferAtomicAddF64Mubuf(const MachineInst *inst) : Mubuf("buffer_atomic_add_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicAddF64Mubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicAddF64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2482,8 +1113,7 @@ void BufferAtomicAddF64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -2492,33 +1122,7 @@ void BufferAtomicAddF64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferAtomicMinF64Mubuf::BufferAtomicMinF64Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_min_f64", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicMinF64Mubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicMinF64Mubuf::BufferAtomicMinF64Mubuf(const MachineInst *inst) : Mubuf("buffer_atomic_min_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicMinF64Mubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicMinF64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2535,8 +1139,7 @@ void BufferAtomicMinF64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -2545,33 +1148,7 @@ void BufferAtomicMinF64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferAtomicMaxF64Mubuf::BufferAtomicMaxF64Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_max_f64", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicMaxF64Mubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicMaxF64Mubuf::BufferAtomicMaxF64Mubuf(const MachineInst *inst) : Mubuf("buffer_atomic_max_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicMaxF64Mubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicMaxF64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2588,8 +1165,7 @@ void BufferAtomicMaxF64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -2598,33 +1174,7 @@ void BufferAtomicMaxF64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferAtomicPkAddBf16Mubuf::BufferAtomicPkAddBf16Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicPkAddBf16Mubuf>()),
-      vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicPkAddBf16Mubuf::BufferAtomicPkAddBf16Mubuf(const MachineInst *inst) : Mubuf("buffer_atomic_pk_add_bf16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicPkAddBf16Mubuf>()), vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicPkAddBf16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2641,41 +1191,14 @@ void BufferAtomicPkAddBf16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-BufferAtomicSwapX2Mubuf::BufferAtomicSwapX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_swap_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicSwapX2Mubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicSwapX2Mubuf::BufferAtomicSwapX2Mubuf(const MachineInst *inst) : Mubuf("buffer_atomic_swap_x2", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicSwapX2Mubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicSwapX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2692,8 +1215,7 @@ void BufferAtomicSwapX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -2702,38 +1224,7 @@ void BufferAtomicSwapX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferAtomicCmpswapX2Mubuf::BufferAtomicCmpswapX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_cmpswap_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicCmpswapX2Mubuf>()),
-      vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vdata_return(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-                   (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-                    (reinterpret_cast<const OpEncoding *>(inst)->acc
-                         ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                         : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata_return;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicCmpswapX2Mubuf::BufferAtomicCmpswapX2Mubuf(const MachineInst *inst) : Mubuf("buffer_atomic_cmpswap_x2", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicCmpswapX2Mubuf>()), vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vdata_return(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata_return;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicCmpswapX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2750,8 +1241,7 @@ void BufferAtomicCmpswapX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 16);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -2764,33 +1254,7 @@ void BufferAtomicCmpswapX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferAtomicAddX2Mubuf::BufferAtomicAddX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_add_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicAddX2Mubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicAddX2Mubuf::BufferAtomicAddX2Mubuf(const MachineInst *inst) : Mubuf("buffer_atomic_add_x2", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicAddX2Mubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicAddX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2807,8 +1271,7 @@ void BufferAtomicAddX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -2817,33 +1280,7 @@ void BufferAtomicAddX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferAtomicSubX2Mubuf::BufferAtomicSubX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_sub_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicSubX2Mubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicSubX2Mubuf::BufferAtomicSubX2Mubuf(const MachineInst *inst) : Mubuf("buffer_atomic_sub_x2", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicSubX2Mubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicSubX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2860,8 +1297,7 @@ void BufferAtomicSubX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -2870,33 +1306,7 @@ void BufferAtomicSubX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferAtomicSminX2Mubuf::BufferAtomicSminX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_smin_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicSminX2Mubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicSminX2Mubuf::BufferAtomicSminX2Mubuf(const MachineInst *inst) : Mubuf("buffer_atomic_smin_x2", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicSminX2Mubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicSminX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2913,8 +1323,7 @@ void BufferAtomicSminX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -2923,33 +1332,7 @@ void BufferAtomicSminX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferAtomicUminX2Mubuf::BufferAtomicUminX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_umin_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicUminX2Mubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicUminX2Mubuf::BufferAtomicUminX2Mubuf(const MachineInst *inst) : Mubuf("buffer_atomic_umin_x2", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicUminX2Mubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicUminX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2966,8 +1349,7 @@ void BufferAtomicUminX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -2976,33 +1358,7 @@ void BufferAtomicUminX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferAtomicSmaxX2Mubuf::BufferAtomicSmaxX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_smax_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicSmaxX2Mubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicSmaxX2Mubuf::BufferAtomicSmaxX2Mubuf(const MachineInst *inst) : Mubuf("buffer_atomic_smax_x2", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicSmaxX2Mubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicSmaxX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -3019,8 +1375,7 @@ void BufferAtomicSmaxX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3029,33 +1384,7 @@ void BufferAtomicSmaxX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferAtomicUmaxX2Mubuf::BufferAtomicUmaxX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_umax_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicUmaxX2Mubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicUmaxX2Mubuf::BufferAtomicUmaxX2Mubuf(const MachineInst *inst) : Mubuf("buffer_atomic_umax_x2", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicUmaxX2Mubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicUmaxX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -3072,8 +1401,7 @@ void BufferAtomicUmaxX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3082,33 +1410,7 @@ void BufferAtomicUmaxX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferAtomicAndX2Mubuf::BufferAtomicAndX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_and_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicAndX2Mubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicAndX2Mubuf::BufferAtomicAndX2Mubuf(const MachineInst *inst) : Mubuf("buffer_atomic_and_x2", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicAndX2Mubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicAndX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -3125,8 +1427,7 @@ void BufferAtomicAndX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3135,33 +1436,7 @@ void BufferAtomicAndX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferAtomicOrX2Mubuf::BufferAtomicOrX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_or_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicOrX2Mubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicOrX2Mubuf::BufferAtomicOrX2Mubuf(const MachineInst *inst) : Mubuf("buffer_atomic_or_x2", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicOrX2Mubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicOrX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -3178,8 +1453,7 @@ void BufferAtomicOrX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3188,33 +1462,7 @@ void BufferAtomicOrX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferAtomicXorX2Mubuf::BufferAtomicXorX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_xor_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicXorX2Mubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicXorX2Mubuf::BufferAtomicXorX2Mubuf(const MachineInst *inst) : Mubuf("buffer_atomic_xor_x2", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicXorX2Mubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicXorX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -3231,8 +1479,7 @@ void BufferAtomicXorX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3241,33 +1488,7 @@ void BufferAtomicXorX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferAtomicIncX2Mubuf::BufferAtomicIncX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_inc_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicIncX2Mubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicIncX2Mubuf::BufferAtomicIncX2Mubuf(const MachineInst *inst) : Mubuf("buffer_atomic_inc_x2", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicIncX2Mubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicIncX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -3284,8 +1505,7 @@ void BufferAtomicIncX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3294,33 +1514,7 @@ void BufferAtomicIncX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-BufferAtomicDecX2Mubuf::BufferAtomicDecX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_dec_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicDecX2Mubuf>()),
-      vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
-            (reinterpret_cast<const OpEncoding *>(inst)->vdata +
-             (reinterpret_cast<const OpEncoding *>(inst)->acc
-                  ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))),
-      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
-      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
-  src_operands_[3] = &soffset;
-  dst_operands_[0] = &gpumem;
-  src_operands_[4] = &gpumem_in;
-  num_src_ = 5;
-  num_dst_ = 1;
-  if ((inst_.sc0 != 0))
-    dst_operands_[num_dst_++] = &vdata;
-  gpumem.apply_fieldless_caps(false, false, false);
-  gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+BufferAtomicDecX2Mubuf::BufferAtomicDecX2Mubuf(const MachineInst *inst) : Mubuf("buffer_atomic_dec_x2", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<BufferAtomicDecX2Mubuf>()), vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR, (reinterpret_cast<const OpEncoding*>(inst)->vdata + (reinterpret_cast<const OpEncoding*>(inst)->acc ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))), vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)), soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding*>(inst)->soffset), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vdata;src_operands_[1] = &vaddr;src_operands_[2] = &srsrc;src_operands_[3] = &soffset;dst_operands_[0] = &gpumem;src_operands_[4] = &gpumem_in;num_src_ = 5;num_dst_ = 1;if ((inst_.sc0 != 0)) dst_operands_[num_dst_++] = &vdata;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void BufferAtomicDecX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -3337,8 +1531,7 @@ void BufferAtomicDecX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);

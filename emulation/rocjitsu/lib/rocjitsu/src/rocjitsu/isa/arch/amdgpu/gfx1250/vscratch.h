@@ -14,251 +14,274 @@
 namespace rocjitsu {
 namespace gfx1250 {
 
-class ScratchLoadU8Vscratch : public Vscratch {
-public:
-  ScratchLoadU8Vscratch(const MachineInst *inst);
+class ScratchLoadU8Vscratch : public Vscratch
+{
+  public:
+   ScratchLoadU8Vscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class ScratchLoadI8Vscratch : public Vscratch {
-public:
-  ScratchLoadI8Vscratch(const MachineInst *inst);
+class ScratchLoadI8Vscratch : public Vscratch
+{
+  public:
+   ScratchLoadI8Vscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class ScratchLoadU16Vscratch : public Vscratch {
-public:
-  ScratchLoadU16Vscratch(const MachineInst *inst);
+class ScratchLoadU16Vscratch : public Vscratch
+{
+  public:
+   ScratchLoadU16Vscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class ScratchLoadI16Vscratch : public Vscratch {
-public:
-  ScratchLoadI16Vscratch(const MachineInst *inst);
+class ScratchLoadI16Vscratch : public Vscratch
+{
+  public:
+   ScratchLoadI16Vscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class ScratchLoadB32Vscratch : public Vscratch {
-public:
-  ScratchLoadB32Vscratch(const MachineInst *inst);
+class ScratchLoadB32Vscratch : public Vscratch
+{
+  public:
+   ScratchLoadB32Vscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class ScratchLoadB64Vscratch : public Vscratch {
-public:
-  ScratchLoadB64Vscratch(const MachineInst *inst);
+class ScratchLoadB64Vscratch : public Vscratch
+{
+  public:
+   ScratchLoadB64Vscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class ScratchLoadB96Vscratch : public Vscratch {
-public:
-  ScratchLoadB96Vscratch(const MachineInst *inst);
+class ScratchLoadB96Vscratch : public Vscratch
+{
+  public:
+   ScratchLoadB96Vscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class ScratchLoadB128Vscratch : public Vscratch {
-public:
-  ScratchLoadB128Vscratch(const MachineInst *inst);
+class ScratchLoadB128Vscratch : public Vscratch
+{
+  public:
+   ScratchLoadB128Vscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class ScratchStoreB8Vscratch : public Vscratch {
-public:
-  ScratchStoreB8Vscratch(const MachineInst *inst);
+class ScratchStoreB8Vscratch : public Vscratch
+{
+  public:
+   ScratchStoreB8Vscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class ScratchStoreB16Vscratch : public Vscratch {
-public:
-  ScratchStoreB16Vscratch(const MachineInst *inst);
+class ScratchStoreB16Vscratch : public Vscratch
+{
+  public:
+   ScratchStoreB16Vscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class ScratchStoreB32Vscratch : public Vscratch {
-public:
-  ScratchStoreB32Vscratch(const MachineInst *inst);
+class ScratchStoreB32Vscratch : public Vscratch
+{
+  public:
+   ScratchStoreB32Vscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class ScratchStoreB64Vscratch : public Vscratch {
-public:
-  ScratchStoreB64Vscratch(const MachineInst *inst);
+class ScratchStoreB64Vscratch : public Vscratch
+{
+  public:
+   ScratchStoreB64Vscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class ScratchStoreB96Vscratch : public Vscratch {
-public:
-  ScratchStoreB96Vscratch(const MachineInst *inst);
+class ScratchStoreB96Vscratch : public Vscratch
+{
+  public:
+   ScratchStoreB96Vscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class ScratchStoreB128Vscratch : public Vscratch {
-public:
-  ScratchStoreB128Vscratch(const MachineInst *inst);
+class ScratchStoreB128Vscratch : public Vscratch
+{
+  public:
+   ScratchStoreB128Vscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class ScratchLoadD16U8Vscratch : public Vscratch {
-public:
-  ScratchLoadD16U8Vscratch(const MachineInst *inst);
+class ScratchLoadD16U8Vscratch : public Vscratch
+{
+  public:
+   ScratchLoadD16U8Vscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class ScratchLoadD16I8Vscratch : public Vscratch {
-public:
-  ScratchLoadD16I8Vscratch(const MachineInst *inst);
+class ScratchLoadD16I8Vscratch : public Vscratch
+{
+  public:
+   ScratchLoadD16I8Vscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class ScratchLoadD16B16Vscratch : public Vscratch {
-public:
-  ScratchLoadD16B16Vscratch(const MachineInst *inst);
+class ScratchLoadD16B16Vscratch : public Vscratch
+{
+  public:
+   ScratchLoadD16B16Vscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class ScratchLoadD16HiU8Vscratch : public Vscratch {
-public:
-  ScratchLoadD16HiU8Vscratch(const MachineInst *inst);
+class ScratchLoadD16HiU8Vscratch : public Vscratch
+{
+  public:
+   ScratchLoadD16HiU8Vscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class ScratchLoadD16HiI8Vscratch : public Vscratch {
-public:
-  ScratchLoadD16HiI8Vscratch(const MachineInst *inst);
+class ScratchLoadD16HiI8Vscratch : public Vscratch
+{
+  public:
+   ScratchLoadD16HiI8Vscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class ScratchLoadD16HiB16Vscratch : public Vscratch {
-public:
-  ScratchLoadD16HiB16Vscratch(const MachineInst *inst);
+class ScratchLoadD16HiB16Vscratch : public Vscratch
+{
+  public:
+   ScratchLoadD16HiB16Vscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class ScratchStoreD16HiB8Vscratch : public Vscratch {
-public:
-  ScratchStoreD16HiB8Vscratch(const MachineInst *inst);
+class ScratchStoreD16HiB8Vscratch : public Vscratch
+{
+  public:
+   ScratchStoreD16HiB8Vscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class ScratchStoreD16HiB16Vscratch : public Vscratch {
-public:
-  ScratchStoreD16HiB16Vscratch(const MachineInst *inst);
+class ScratchStoreD16HiB16Vscratch : public Vscratch
+{
+  public:
+   ScratchStoreD16HiB16Vscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class ScratchLoadBlockVscratch : public Vscratch {
-public:
-  ScratchLoadBlockVscratch(const MachineInst *inst);
+class ScratchLoadBlockVscratch : public Vscratch
+{
+  public:
+   ScratchLoadBlockVscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -266,11 +289,12 @@ public:
   Operand gpumem;
   Operand m0;
   static const bool execute_registered_;
-};
+} ;
 
-class ScratchStoreBlockVscratch : public Vscratch {
-public:
-  ScratchStoreBlockVscratch(const MachineInst *inst);
+class ScratchStoreBlockVscratch : public Vscratch
+{
+  public:
+   ScratchStoreBlockVscratch(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
@@ -278,7 +302,7 @@ public:
   Operand gpumem;
   Operand m0;
   static const bool execute_registered_;
-};
+} ;
 
 } // namespace gfx1250
 } // namespace rocjitsu

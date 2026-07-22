@@ -5,45 +5,31 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/cdna1/sopp.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "util/except.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
-#include "util/except.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
 #include <limits>
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 
 namespace rocjitsu {
 namespace cdna1 {
 
-SNopSopp::SNopSopp(const MachineInst *inst)
-    : Sopp("s_nop", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SNopSopp>()),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
+SNopSopp::SNopSopp(const MachineInst *inst) : Sopp("s_nop", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SNopSopp>()), simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
+
+void SNopSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_nop_sopp(*this, wf);
 }
 
-void SNopSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_nop_sopp(*this, wf); }
+SEndpgmSopp::SEndpgmSopp(const MachineInst *inst) : Sopp("s_endpgm", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SEndpgmSopp>()) {num_src_ = 0;num_dst_ = 0;flags_ |= PROGRAM_TERMINATOR;}
 
-SEndpgmSopp::SEndpgmSopp(const MachineInst *inst)
-    : Sopp("s_endpgm", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SEndpgmSopp>()) {
-  num_src_ = 0;
-  num_dst_ = 0;
-  flags_ |= PROGRAM_TERMINATOR;
+void SEndpgmSopp::execute_impl(amdgpu::Wavefront &wf) {
+  wf.end();
 }
 
-void SEndpgmSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }
-
-SBranchSopp::SBranchSopp(const MachineInst *inst)
-    : Sopp("s_branch", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SBranchSopp>()),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-  flags_ |= BRANCH;
-}
+SBranchSopp::SBranchSopp(const MachineInst *inst) : Sopp("s_branch", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SBranchSopp>()), simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;flags_ |= BRANCH;}
 
 std::optional<int64_t> SBranchSopp::branch_offset_bytes() const {
   // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
@@ -55,26 +41,13 @@ void SBranchSopp::execute_impl(amdgpu::Wavefront &wf) {
   wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
 }
 
-SWakeupSopp::SWakeupSopp(const MachineInst *inst)
-    : Sopp("s_wakeup", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SWakeupSopp>()) {
-  num_src_ = 0;
-  num_dst_ = 0;
+SWakeupSopp::SWakeupSopp(const MachineInst *inst) : Sopp("s_wakeup", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SWakeupSopp>()) {num_src_ = 0;num_dst_ = 0;}
+
+void SWakeupSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_wakeup_sopp(*this, wf);
 }
 
-void SWakeupSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_wakeup_sopp(*this, wf); }
-
-SCbranchScc0Sopp::SCbranchScc0Sopp(const MachineInst *inst)
-    : Sopp("s_cbranch_scc0", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCbranchScc0Sopp>()),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
-      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
-  src_operands_[0] = &simm16;
-  src_operands_[1] = &scc;
-  num_src_ = 2;
-  num_dst_ = 0;
-  scc.apply_fieldless_caps(false, false, false);
-  flags_ |= COND_BRANCH;
-}
+SCbranchScc0Sopp::SCbranchScc0Sopp(const MachineInst *inst) : Sopp("s_cbranch_scc0", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SCbranchScc0Sopp>()), simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding*>(inst)->simm16), scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {src_operands_[0] = &simm16;src_operands_[1] = &scc;num_src_ = 2;num_dst_ = 0;scc.apply_fieldless_caps(false, false, false);flags_ |= COND_BRANCH;}
 
 std::optional<int64_t> SCbranchScc0Sopp::branch_offset_bytes() const {
   // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
@@ -88,18 +61,7 @@ void SCbranchScc0Sopp::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-SCbranchScc1Sopp::SCbranchScc1Sopp(const MachineInst *inst)
-    : Sopp("s_cbranch_scc1", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCbranchScc1Sopp>()),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
-      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
-  src_operands_[0] = &simm16;
-  src_operands_[1] = &scc;
-  num_src_ = 2;
-  num_dst_ = 0;
-  scc.apply_fieldless_caps(false, false, false);
-  flags_ |= COND_BRANCH;
-}
+SCbranchScc1Sopp::SCbranchScc1Sopp(const MachineInst *inst) : Sopp("s_cbranch_scc1", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SCbranchScc1Sopp>()), simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding*>(inst)->simm16), scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {src_operands_[0] = &simm16;src_operands_[1] = &scc;num_src_ = 2;num_dst_ = 0;scc.apply_fieldless_caps(false, false, false);flags_ |= COND_BRANCH;}
 
 std::optional<int64_t> SCbranchScc1Sopp::branch_offset_bytes() const {
   // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
@@ -113,18 +75,7 @@ void SCbranchScc1Sopp::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-SCbranchVcczSopp::SCbranchVcczSopp(const MachineInst *inst)
-    : Sopp("s_cbranch_vccz", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCbranchVcczSopp>()),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
-      vcc(64, OperandType::OPR_VCC, 0) {
-  src_operands_[0] = &simm16;
-  src_operands_[1] = &vcc;
-  num_src_ = 2;
-  num_dst_ = 0;
-  vcc.apply_fieldless_caps(false, false, false);
-  flags_ |= COND_BRANCH;
-}
+SCbranchVcczSopp::SCbranchVcczSopp(const MachineInst *inst) : Sopp("s_cbranch_vccz", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SCbranchVcczSopp>()), simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding*>(inst)->simm16), vcc(64, OperandType::OPR_VCC, 0) {src_operands_[0] = &simm16;src_operands_[1] = &vcc;num_src_ = 2;num_dst_ = 0;vcc.apply_fieldless_caps(false, false, false);flags_ |= COND_BRANCH;}
 
 std::optional<int64_t> SCbranchVcczSopp::branch_offset_bytes() const {
   // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
@@ -132,26 +83,14 @@ std::optional<int64_t> SCbranchVcczSopp::branch_offset_bytes() const {
 }
 
 void SCbranchVcczSopp::execute_impl(amdgpu::Wavefront &wf) {
-  const uint64_t live_vcc =
-      wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL));
+  const uint64_t live_vcc = wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL));
   if (live_vcc == 0) {
     int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
     wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
   }
 }
 
-SCbranchVccnzSopp::SCbranchVccnzSopp(const MachineInst *inst)
-    : Sopp("s_cbranch_vccnz", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCbranchVccnzSopp>()),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
-      vcc(64, OperandType::OPR_VCC, 0) {
-  src_operands_[0] = &simm16;
-  src_operands_[1] = &vcc;
-  num_src_ = 2;
-  num_dst_ = 0;
-  vcc.apply_fieldless_caps(false, false, false);
-  flags_ |= COND_BRANCH;
-}
+SCbranchVccnzSopp::SCbranchVccnzSopp(const MachineInst *inst) : Sopp("s_cbranch_vccnz", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SCbranchVccnzSopp>()), simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding*>(inst)->simm16), vcc(64, OperandType::OPR_VCC, 0) {src_operands_[0] = &simm16;src_operands_[1] = &vcc;num_src_ = 2;num_dst_ = 0;vcc.apply_fieldless_caps(false, false, false);flags_ |= COND_BRANCH;}
 
 std::optional<int64_t> SCbranchVccnzSopp::branch_offset_bytes() const {
   // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
@@ -159,26 +98,14 @@ std::optional<int64_t> SCbranchVccnzSopp::branch_offset_bytes() const {
 }
 
 void SCbranchVccnzSopp::execute_impl(amdgpu::Wavefront &wf) {
-  const uint64_t live_vcc =
-      wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL));
+  const uint64_t live_vcc = wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL));
   if (live_vcc != 0) {
     int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
     wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
   }
 }
 
-SCbranchExeczSopp::SCbranchExeczSopp(const MachineInst *inst)
-    : Sopp("s_cbranch_execz", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCbranchExeczSopp>()),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
-      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
-  src_operands_[0] = &simm16;
-  src_operands_[1] = &sdst_exec;
-  num_src_ = 2;
-  num_dst_ = 0;
-  sdst_exec.apply_fieldless_caps(false, false, false);
-  flags_ |= COND_BRANCH;
-}
+SCbranchExeczSopp::SCbranchExeczSopp(const MachineInst *inst) : Sopp("s_cbranch_execz", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SCbranchExeczSopp>()), simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding*>(inst)->simm16), sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {src_operands_[0] = &simm16;src_operands_[1] = &sdst_exec;num_src_ = 2;num_dst_ = 0;sdst_exec.apply_fieldless_caps(false, false, false);flags_ |= COND_BRANCH;}
 
 std::optional<int64_t> SCbranchExeczSopp::branch_offset_bytes() const {
   // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
@@ -192,18 +119,7 @@ void SCbranchExeczSopp::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-SCbranchExecnzSopp::SCbranchExecnzSopp(const MachineInst *inst)
-    : Sopp("s_cbranch_execnz", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCbranchExecnzSopp>()),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
-      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
-  src_operands_[0] = &simm16;
-  src_operands_[1] = &sdst_exec;
-  num_src_ = 2;
-  num_dst_ = 0;
-  sdst_exec.apply_fieldless_caps(false, false, false);
-  flags_ |= COND_BRANCH;
-}
+SCbranchExecnzSopp::SCbranchExecnzSopp(const MachineInst *inst) : Sopp("s_cbranch_execnz", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SCbranchExecnzSopp>()), simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding*>(inst)->simm16), sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {src_operands_[0] = &simm16;src_operands_[1] = &sdst_exec;num_src_ = 2;num_dst_ = 0;sdst_exec.apply_fieldless_caps(false, false, false);flags_ |= COND_BRANCH;}
 
 std::optional<int64_t> SCbranchExecnzSopp::branch_offset_bytes() const {
   // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
@@ -217,37 +133,19 @@ void SCbranchExecnzSopp::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-SBarrierSopp::SBarrierSopp(const MachineInst *inst)
-    : Sopp("s_barrier", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SBarrierSopp>()) {
-  num_src_ = 0;
-  num_dst_ = 0;
-  flags_ |= BARRIER;
-}
+SBarrierSopp::SBarrierSopp(const MachineInst *inst) : Sopp("s_barrier", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SBarrierSopp>()) {num_src_ = 0;num_dst_ = 0;flags_ |= BARRIER;}
 
 void SBarrierSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_barrier_sopp(*this, wf);
 }
 
-SSetkillSopp::SSetkillSopp(const MachineInst *inst)
-    : Sopp("s_setkill", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SSetkillSopp>()),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+SSetkillSopp::SSetkillSopp(const MachineInst *inst) : Sopp("s_setkill", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SSetkillSopp>()), simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
 void SSetkillSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_setkill_sopp(*this, wf);
 }
 
-SWaitcntSopp::SWaitcntSopp(const MachineInst *inst)
-    : Sopp("s_waitcnt", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SWaitcntSopp>()),
-      simm16(32, OperandType::OPR_WAITCNT, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-  flags_ |= WAITCNT;
-}
+SWaitcntSopp::SWaitcntSopp(const MachineInst *inst) : Sopp("s_waitcnt", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SWaitcntSopp>()), simm16(32, OperandType::OPR_WAITCNT, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;flags_ |= WAITCNT;}
 
 void SWaitcntSopp::execute_impl(amdgpu::Wavefront &wf) {
   uint16_t imm = static_cast<uint16_t>(simm16.encoding_value_);
@@ -257,232 +155,113 @@ void SWaitcntSopp::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_wait_target(vm, lgkm, exp);
 }
 
-SSethaltSopp::SSethaltSopp(const MachineInst *inst)
-    : Sopp("s_sethalt", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SSethaltSopp>()),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+SSethaltSopp::SSethaltSopp(const MachineInst *inst) : Sopp("s_sethalt", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SSethaltSopp>()), simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
 void SSethaltSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_sethalt_sopp(*this, wf);
 }
 
-SSleepSopp::SSleepSopp(const MachineInst *inst)
-    : Sopp("s_sleep", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SSleepSopp>()),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
+SSleepSopp::SSleepSopp(const MachineInst *inst) : Sopp("s_sleep", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SSleepSopp>()), simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
+
+void SSleepSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_sleep_sopp(*this, wf);
 }
 
-void SSleepSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_sleep_sopp(*this, wf); }
-
-SSetprioSopp::SSetprioSopp(const MachineInst *inst)
-    : Sopp("s_setprio", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SSetprioSopp>()),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+SSetprioSopp::SSetprioSopp(const MachineInst *inst) : Sopp("s_setprio", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SSetprioSopp>()), simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
 void SSetprioSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_setprio_sopp(*this, wf);
 }
 
-SSendmsgSopp::SSendmsgSopp(const MachineInst *inst)
-    : Sopp("s_sendmsg", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SSendmsgSopp>()),
-      simm16(32, OperandType::OPR_SENDMSG, reinterpret_cast<const OpEncoding *>(inst)->simm16),
-      m0(32, OperandType::OPR_SDST_M0, 124) {
-  src_operands_[0] = &simm16;
-  src_operands_[1] = &m0;
-  num_src_ = 2;
-  num_dst_ = 0;
-  m0.apply_fieldless_caps(false, false, false);
-}
+SSendmsgSopp::SSendmsgSopp(const MachineInst *inst) : Sopp("s_sendmsg", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SSendmsgSopp>()), simm16(32, OperandType::OPR_SENDMSG, reinterpret_cast<const OpEncoding*>(inst)->simm16), m0(32, OperandType::OPR_SDST_M0, 124) {src_operands_[0] = &simm16;src_operands_[1] = &m0;num_src_ = 2;num_dst_ = 0;m0.apply_fieldless_caps(false, false, false);}
 
 void SSendmsgSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_sendmsg_sopp(*this, wf);
 }
 
-SSendmsghaltSopp::SSendmsghaltSopp(const MachineInst *inst)
-    : Sopp("s_sendmsghalt", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SSendmsghaltSopp>()),
-      simm16(32, OperandType::OPR_SENDMSG, reinterpret_cast<const OpEncoding *>(inst)->simm16),
-      m0(32, OperandType::OPR_SDST_M0, 124) {
-  src_operands_[0] = &simm16;
-  src_operands_[1] = &m0;
-  num_src_ = 2;
-  num_dst_ = 0;
-  m0.apply_fieldless_caps(false, false, false);
-}
+SSendmsghaltSopp::SSendmsghaltSopp(const MachineInst *inst) : Sopp("s_sendmsghalt", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SSendmsghaltSopp>()), simm16(32, OperandType::OPR_SENDMSG, reinterpret_cast<const OpEncoding*>(inst)->simm16), m0(32, OperandType::OPR_SDST_M0, 124) {src_operands_[0] = &simm16;src_operands_[1] = &m0;num_src_ = 2;num_dst_ = 0;m0.apply_fieldless_caps(false, false, false);}
 
 void SSendmsghaltSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_sendmsghalt_sopp(*this, wf);
 }
 
-STrapSopp::STrapSopp(const MachineInst *inst)
-    : Sopp("s_trap", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<STrapSopp>()),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
+STrapSopp::STrapSopp(const MachineInst *inst) : Sopp("s_trap", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<STrapSopp>()), simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
+
+void STrapSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_trap_sopp(*this, wf);
 }
 
-void STrapSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_trap_sopp(*this, wf); }
-
-SIcacheInvSopp::SIcacheInvSopp(const MachineInst *inst)
-    : Sopp("s_icache_inv", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SIcacheInvSopp>()) {
-  num_src_ = 0;
-  num_dst_ = 0;
-}
+SIcacheInvSopp::SIcacheInvSopp(const MachineInst *inst) : Sopp("s_icache_inv", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SIcacheInvSopp>()) {num_src_ = 0;num_dst_ = 0;}
 
 void SIcacheInvSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_icache_inv_sopp(*this, wf);
 }
 
-SIncperflevelSopp::SIncperflevelSopp(const MachineInst *inst)
-    : Sopp("s_incperflevel", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SIncperflevelSopp>()),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+SIncperflevelSopp::SIncperflevelSopp(const MachineInst *inst) : Sopp("s_incperflevel", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SIncperflevelSopp>()), simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
 void SIncperflevelSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_incperflevel_sopp(*this, wf);
 }
 
-SDecperflevelSopp::SDecperflevelSopp(const MachineInst *inst)
-    : Sopp("s_decperflevel", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SDecperflevelSopp>()),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+SDecperflevelSopp::SDecperflevelSopp(const MachineInst *inst) : Sopp("s_decperflevel", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SDecperflevelSopp>()), simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
 void SDecperflevelSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_decperflevel_sopp(*this, wf);
 }
 
-STtracedataSopp::STtracedataSopp(const MachineInst *inst)
-    : Sopp("s_ttracedata", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<STtracedataSopp>()),
-      m0(32, OperandType::OPR_SDST_M0, 124) {
-  src_operands_[0] = &m0;
-  num_src_ = 1;
-  num_dst_ = 0;
-  m0.apply_fieldless_caps(false, false, false);
-}
+STtracedataSopp::STtracedataSopp(const MachineInst *inst) : Sopp("s_ttracedata", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<STtracedataSopp>()), m0(32, OperandType::OPR_SDST_M0, 124) {src_operands_[0] = &m0;num_src_ = 1;num_dst_ = 0;m0.apply_fieldless_caps(false, false, false);}
 
 void STtracedataSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_ttracedata_sopp(*this, wf);
 }
 
-SCbranchCdbgsysSopp::SCbranchCdbgsysSopp(const MachineInst *inst)
-    : Sopp("s_cbranch_cdbgsys", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCbranchCdbgsysSopp>()),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+SCbranchCdbgsysSopp::SCbranchCdbgsysSopp(const MachineInst *inst) : Sopp("s_cbranch_cdbgsys", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SCbranchCdbgsysSopp>()), simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
 void SCbranchCdbgsysSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_cbranch_cdbgsys_sopp(*this, wf);
 }
 
-SCbranchCdbguserSopp::SCbranchCdbguserSopp(const MachineInst *inst)
-    : Sopp("s_cbranch_cdbguser", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCbranchCdbguserSopp>()),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+SCbranchCdbguserSopp::SCbranchCdbguserSopp(const MachineInst *inst) : Sopp("s_cbranch_cdbguser", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SCbranchCdbguserSopp>()), simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
 void SCbranchCdbguserSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_cbranch_cdbguser_sopp(*this, wf);
 }
 
-SCbranchCdbgsysOrUserSopp::SCbranchCdbgsysOrUserSopp(const MachineInst *inst)
-    : Sopp("s_cbranch_cdbgsys_or_user", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCbranchCdbgsysOrUserSopp>()),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+SCbranchCdbgsysOrUserSopp::SCbranchCdbgsysOrUserSopp(const MachineInst *inst) : Sopp("s_cbranch_cdbgsys_or_user", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SCbranchCdbgsysOrUserSopp>()), simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
 void SCbranchCdbgsysOrUserSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_cbranch_cdbgsys_or_user_sopp(*this, wf);
 }
 
-SCbranchCdbgsysAndUserSopp::SCbranchCdbgsysAndUserSopp(const MachineInst *inst)
-    : Sopp("s_cbranch_cdbgsys_and_user", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCbranchCdbgsysAndUserSopp>()),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+SCbranchCdbgsysAndUserSopp::SCbranchCdbgsysAndUserSopp(const MachineInst *inst) : Sopp("s_cbranch_cdbgsys_and_user", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SCbranchCdbgsysAndUserSopp>()), simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
 void SCbranchCdbgsysAndUserSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_cbranch_cdbgsys_and_user_sopp(*this, wf);
 }
 
-SEndpgmSavedSopp::SEndpgmSavedSopp(const MachineInst *inst)
-    : Sopp("s_endpgm_saved", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SEndpgmSavedSopp>()) {
-  num_src_ = 0;
-  num_dst_ = 0;
-  flags_ |= PROGRAM_TERMINATOR;
+SEndpgmSavedSopp::SEndpgmSavedSopp(const MachineInst *inst) : Sopp("s_endpgm_saved", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SEndpgmSavedSopp>()) {num_src_ = 0;num_dst_ = 0;flags_ |= PROGRAM_TERMINATOR;}
+
+void SEndpgmSavedSopp::execute_impl(amdgpu::Wavefront &wf) {
+  wf.end();
 }
 
-void SEndpgmSavedSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }
-
-SSetGprIdxOffSopp::SSetGprIdxOffSopp(const MachineInst *inst)
-    : Sopp("s_set_gpr_idx_off", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SSetGprIdxOffSopp>()) {
-  num_src_ = 0;
-  num_dst_ = 0;
-}
+SSetGprIdxOffSopp::SSetGprIdxOffSopp(const MachineInst *inst) : Sopp("s_set_gpr_idx_off", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SSetGprIdxOffSopp>()) {num_src_ = 0;num_dst_ = 0;}
 
 void SSetGprIdxOffSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_set_gpr_idx_off_sopp(*this, wf);
 }
 
-SSetGprIdxModeSopp::SSetGprIdxModeSopp(const MachineInst *inst)
-    : Sopp("s_set_gpr_idx_mode", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SSetGprIdxModeSopp>()),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
-      m0(32, OperandType::OPR_SDST_M0, 124), m0_in(32, OperandType::OPR_SDST_M0, 124) {
-  src_operands_[0] = &simm16;
-  dst_operands_[0] = &m0;
-  src_operands_[1] = &m0_in;
-  num_src_ = 2;
-  num_dst_ = 1;
-  m0.apply_fieldless_caps(false, false, false);
-  m0_in.apply_fieldless_caps(false, false, false);
-}
+SSetGprIdxModeSopp::SSetGprIdxModeSopp(const MachineInst *inst) : Sopp("s_set_gpr_idx_mode", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SSetGprIdxModeSopp>()), simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16), m0(32, OperandType::OPR_SDST_M0, 124), m0_in(32, OperandType::OPR_SDST_M0, 124) {src_operands_[0] = &simm16;dst_operands_[0] = &m0;src_operands_[1] = &m0_in;num_src_ = 2;num_dst_ = 1;m0.apply_fieldless_caps(false, false, false);m0_in.apply_fieldless_caps(false, false, false);}
 
 void SSetGprIdxModeSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_set_gpr_idx_mode_sopp(*this, wf);
 }
 
-SEndpgmOrderedPsDoneSopp::SEndpgmOrderedPsDoneSopp(const MachineInst *inst)
-    : Sopp("s_endpgm_ordered_ps_done", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SEndpgmOrderedPsDoneSopp>()) {
-  num_src_ = 0;
-  num_dst_ = 0;
-  flags_ |= PROGRAM_TERMINATOR;
-}
+SEndpgmOrderedPsDoneSopp::SEndpgmOrderedPsDoneSopp(const MachineInst *inst) : Sopp("s_endpgm_ordered_ps_done", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SEndpgmOrderedPsDoneSopp>()) {num_src_ = 0;num_dst_ = 0;flags_ |= PROGRAM_TERMINATOR;}
 
-void SEndpgmOrderedPsDoneSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }
+void SEndpgmOrderedPsDoneSopp::execute_impl(amdgpu::Wavefront &wf) {
+  wf.end();
+}
 
 } // namespace cdna1
 } // namespace rocjitsu

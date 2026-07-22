@@ -5,471 +5,59 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vscratch.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "util/except.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 
 namespace rocjitsu {
 namespace gfx1250 {
 
-ScratchLoadU8Vscratch::ScratchLoadU8Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_u8", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchLoadU8Vscratch>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadU8Vscratch::ScratchLoadU8Vscratch(const MachineInst *inst) : Vscratch("scratch_load_u8", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchLoadU8Vscratch>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);flags_ |= MEMORY_OP;}
 
-ScratchLoadI8Vscratch::ScratchLoadI8Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_i8", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchLoadI8Vscratch>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadI8Vscratch::ScratchLoadI8Vscratch(const MachineInst *inst) : Vscratch("scratch_load_i8", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchLoadI8Vscratch>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);flags_ |= MEMORY_OP;}
 
-ScratchLoadU16Vscratch::ScratchLoadU16Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_u16", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchLoadU16Vscratch>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(16, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadU16Vscratch::ScratchLoadU16Vscratch(const MachineInst *inst) : Vscratch("scratch_load_u16", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchLoadU16Vscratch>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(16, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);flags_ |= MEMORY_OP;}
 
-ScratchLoadI16Vscratch::ScratchLoadI16Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_i16", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchLoadI16Vscratch>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(16, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadI16Vscratch::ScratchLoadI16Vscratch(const MachineInst *inst) : Vscratch("scratch_load_i16", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchLoadI16Vscratch>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(16, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);flags_ |= MEMORY_OP;}
 
-ScratchLoadB32Vscratch::ScratchLoadB32Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_b32", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchLoadB32Vscratch>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(32, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadB32Vscratch::ScratchLoadB32Vscratch(const MachineInst *inst) : Vscratch("scratch_load_b32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchLoadB32Vscratch>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);flags_ |= MEMORY_OP;}
 
-ScratchLoadB64Vscratch::ScratchLoadB64Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_b64", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchLoadB64Vscratch>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(64, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadB64Vscratch::ScratchLoadB64Vscratch(const MachineInst *inst) : Vscratch("scratch_load_b64", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchLoadB64Vscratch>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(64, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);flags_ |= MEMORY_OP;}
 
-ScratchLoadB96Vscratch::ScratchLoadB96Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_b96", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchLoadB96Vscratch>()),
-      vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(96, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadB96Vscratch::ScratchLoadB96Vscratch(const MachineInst *inst) : Vscratch("scratch_load_b96", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchLoadB96Vscratch>()), vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(96, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);flags_ |= MEMORY_OP;}
 
-ScratchLoadB128Vscratch::ScratchLoadB128Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_b128", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchLoadB128Vscratch>()),
-      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(128, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadB128Vscratch::ScratchLoadB128Vscratch(const MachineInst *inst) : Vscratch("scratch_load_b128", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchLoadB128Vscratch>()), vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(128, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);flags_ |= MEMORY_OP;}
 
-ScratchStoreB8Vscratch::ScratchStoreB8Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_store_b8", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchStoreB8Vscratch>()),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &vsrc;
-  src_operands_[2] = &saddr;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
-}
+ScratchStoreB8Vscratch::ScratchStoreB8Vscratch(const MachineInst *inst) : Vscratch("scratch_store_b8", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchStoreB8Vscratch>()), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;src_operands_[2] = &saddr;dst_operands_[0] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);flags_ |= MEMORY_OP;}
 
-ScratchStoreB16Vscratch::ScratchStoreB16Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_store_b16", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchStoreB16Vscratch>()),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(16, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &vsrc;
-  src_operands_[2] = &saddr;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
-}
+ScratchStoreB16Vscratch::ScratchStoreB16Vscratch(const MachineInst *inst) : Vscratch("scratch_store_b16", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchStoreB16Vscratch>()), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(16, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;src_operands_[2] = &saddr;dst_operands_[0] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);flags_ |= MEMORY_OP;}
 
-ScratchStoreB32Vscratch::ScratchStoreB32Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_store_b32", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchStoreB32Vscratch>()),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &vsrc;
-  src_operands_[2] = &saddr;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
-}
+ScratchStoreB32Vscratch::ScratchStoreB32Vscratch(const MachineInst *inst) : Vscratch("scratch_store_b32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchStoreB32Vscratch>()), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;src_operands_[2] = &saddr;dst_operands_[0] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);flags_ |= MEMORY_OP;}
 
-ScratchStoreB64Vscratch::ScratchStoreB64Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_store_b64", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchStoreB64Vscratch>()),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(64, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &vsrc;
-  src_operands_[2] = &saddr;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
-}
+ScratchStoreB64Vscratch::ScratchStoreB64Vscratch(const MachineInst *inst) : Vscratch("scratch_store_b64", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchStoreB64Vscratch>()), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;src_operands_[2] = &saddr;dst_operands_[0] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);flags_ |= MEMORY_OP;}
 
-ScratchStoreB96Vscratch::ScratchStoreB96Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_store_b96", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchStoreB96Vscratch>()),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(96, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &vsrc;
-  src_operands_[2] = &saddr;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
-}
+ScratchStoreB96Vscratch::ScratchStoreB96Vscratch(const MachineInst *inst) : Vscratch("scratch_store_b96", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchStoreB96Vscratch>()), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(96, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;src_operands_[2] = &saddr;dst_operands_[0] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);flags_ |= MEMORY_OP;}
 
-ScratchStoreB128Vscratch::ScratchStoreB128Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_store_b128", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchStoreB128Vscratch>()),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(128, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &vsrc;
-  src_operands_[2] = &saddr;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
-}
+ScratchStoreB128Vscratch::ScratchStoreB128Vscratch(const MachineInst *inst) : Vscratch("scratch_store_b128", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchStoreB128Vscratch>()), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(128, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;src_operands_[2] = &saddr;dst_operands_[0] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);flags_ |= MEMORY_OP;}
 
-ScratchLoadD16U8Vscratch::ScratchLoadD16U8Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchLoadD16U8Vscratch>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadD16U8Vscratch::ScratchLoadD16U8Vscratch(const MachineInst *inst) : Vscratch("scratch_load_d16_u8", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchLoadD16U8Vscratch>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);flags_ |= MEMORY_OP;}
 
-ScratchLoadD16I8Vscratch::ScratchLoadD16I8Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchLoadD16I8Vscratch>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadD16I8Vscratch::ScratchLoadD16I8Vscratch(const MachineInst *inst) : Vscratch("scratch_load_d16_i8", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchLoadD16I8Vscratch>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);flags_ |= MEMORY_OP;}
 
-ScratchLoadD16B16Vscratch::ScratchLoadD16B16Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_d16_b16", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchLoadD16B16Vscratch>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(16, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadD16B16Vscratch::ScratchLoadD16B16Vscratch(const MachineInst *inst) : Vscratch("scratch_load_d16_b16", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchLoadD16B16Vscratch>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(16, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);flags_ |= MEMORY_OP;}
 
-ScratchLoadD16HiU8Vscratch::ScratchLoadD16HiU8Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchLoadD16HiU8Vscratch>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadD16HiU8Vscratch::ScratchLoadD16HiU8Vscratch(const MachineInst *inst) : Vscratch("scratch_load_d16_hi_u8", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchLoadD16HiU8Vscratch>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);flags_ |= MEMORY_OP;}
 
-ScratchLoadD16HiI8Vscratch::ScratchLoadD16HiI8Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_d16_hi_i8", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchLoadD16HiI8Vscratch>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadD16HiI8Vscratch::ScratchLoadD16HiI8Vscratch(const MachineInst *inst) : Vscratch("scratch_load_d16_hi_i8", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchLoadD16HiI8Vscratch>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);flags_ |= MEMORY_OP;}
 
-ScratchLoadD16HiB16Vscratch::ScratchLoadD16HiB16Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchLoadD16HiB16Vscratch>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(16, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadD16HiB16Vscratch::ScratchLoadD16HiB16Vscratch(const MachineInst *inst) : Vscratch("scratch_load_d16_hi_b16", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchLoadD16HiB16Vscratch>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(16, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);flags_ |= MEMORY_OP;}
 
-ScratchStoreD16HiB8Vscratch::ScratchStoreD16HiB8Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_store_d16_hi_b8", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchStoreD16HiB8Vscratch>()),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &vsrc;
-  src_operands_[2] = &saddr;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
-}
+ScratchStoreD16HiB8Vscratch::ScratchStoreD16HiB8Vscratch(const MachineInst *inst) : Vscratch("scratch_store_d16_hi_b8", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchStoreD16HiB8Vscratch>()), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;src_operands_[2] = &saddr;dst_operands_[0] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);flags_ |= MEMORY_OP;}
 
-ScratchStoreD16HiB16Vscratch::ScratchStoreD16HiB16Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchStoreD16HiB16Vscratch>()),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(16, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &vsrc;
-  src_operands_[2] = &saddr;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
-}
+ScratchStoreD16HiB16Vscratch::ScratchStoreD16HiB16Vscratch(const MachineInst *inst) : Vscratch("scratch_store_d16_hi_b16", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchStoreD16HiB16Vscratch>()), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(16, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;src_operands_[2] = &saddr;dst_operands_[0] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);flags_ |= MEMORY_OP;}
 
-ScratchLoadBlockVscratch::ScratchLoadBlockVscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_block", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchLoadBlockVscratch>()),
-      vdst(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(1024, OperandType::OPR_GPUMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  m0.apply_fieldless_caps(false, false, false);
-  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadBlockVscratch::ScratchLoadBlockVscratch(const MachineInst *inst) : Vscratch("scratch_load_block", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchLoadBlockVscratch>()), vdst(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(1024, OperandType::OPR_GPUMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;src_operands_[3] = &m0;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);m0.apply_fieldless_caps(false, false, false);vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);flags_ |= MEMORY_OP;}
 
-ScratchStoreBlockVscratch::ScratchStoreBlockVscratch(const MachineInst *inst)
-    : Vscratch("scratch_store_block", reinterpret_cast<const OpEncoding *>(inst),
-               registered_exec_fn<ScratchStoreBlockVscratch>()),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(1024, OperandType::OPR_GPUMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &vsrc;
-  src_operands_[2] = &saddr;
-  dst_operands_[0] = &gpumem;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  m0.apply_fieldless_caps(false, false, false);
-  vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
-}
+ScratchStoreBlockVscratch::ScratchStoreBlockVscratch(const MachineInst *inst) : Vscratch("scratch_store_block", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<ScratchStoreBlockVscratch>()), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(1024, OperandType::OPR_GPUMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;src_operands_[2] = &saddr;dst_operands_[0] = &gpumem;src_operands_[3] = &m0;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);m0.apply_fieldless_caps(false, false, false);vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);flags_ |= MEMORY_OP;}
 
 } // namespace gfx1250
 } // namespace rocjitsu

@@ -303,6 +303,11 @@ class TestCdnaProfile:
     def test_field_renames_other_enc_empty(self):
         assert self.p.field_renames('ENC_VOP2') == {}
 
+    def test_hwreg_ids(self):
+        assert self.p.use_hwreg_helpers
+        assert self.p.hwreg_mode_id == 1
+        assert self.p.hwreg_status_id == 2
+
 
 class TestCdna1Profile:
     """Cdna1Profile: no AccVGPR, GFX9_GLC coherency, sgpr_pair scratch."""
@@ -331,6 +336,11 @@ class TestCdna1Profile:
     def test_wave_size_inherited(self):
         assert self.p.wave_size == 64
 
+    def test_hwreg_ids_follow_xml(self):
+        assert self.p.use_hwreg_helpers
+        assert self.p.hwreg_mode_id == 1
+        assert self.p.hwreg_status_id == 2
+
 
 class TestCdna2Profile:
     """Cdna2Profile: AccVGPR base 512, GFX9_GLC coherency, sgpr_pair scratch."""
@@ -349,6 +359,11 @@ class TestCdna2Profile:
 
     def test_flat_scratch_mechanism(self):
         assert self.p.flat_scratch_mechanism == 'sgpr_pair'
+
+    def test_hwreg_ids_follow_xml(self):
+        assert self.p.use_hwreg_helpers
+        assert self.p.hwreg_mode_id == 1
+        assert self.p.hwreg_status_id == 2
 
 
 class TestRdna1Profile:
@@ -400,6 +415,11 @@ class TestRdna3Profile:
     def test_has_vopd3_false(self):
         assert self.p.has_vopd3 is False
 
+    def test_hwreg_ids_follow_xml(self):
+        assert self.p.use_hwreg_helpers
+        assert self.p.hwreg_mode_id == 1
+        assert self.p.hwreg_status_id == 2
+
     def test_operand_read64_zero_extends_simm32_literal(self, tmp_path):
         generator = CodeGenerator(
             SimpleNamespace(
@@ -443,6 +463,11 @@ class TestRdna4Profile:
 
     def test_has_vopd3_false(self):
         assert self.p.has_vopd3 is False
+
+    def test_hwreg_ids(self):
+        assert self.p.use_hwreg_helpers
+        assert self.p.hwreg_mode_id == 1
+        assert self.p.hwreg_status_id == 2
 
 
 class TestGfx1250Profile:
@@ -620,6 +645,7 @@ class TestGfx1250Profile:
         assert self.p.hwreg_mode_id == 1
         assert self.p.hwreg_status_id == 2
         assert self.p.hwreg_ib_sts2_id == 28
+        assert self.p.hwreg_wave_sched_mode_id == 26
 
     def test_detect_profile_uses_filename_override(self, tmp_path):
         xml = tmp_path / 'amdgpu_isa_gfx1250.xml'

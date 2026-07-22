@@ -15,538 +15,352 @@
 namespace rocjitsu {
 namespace gfx1250 {
 
-class VPkMadI16Vop3p : public Vop3p {
-public:
-  VPkMadI16Vop3p(const MachineInst *inst);
+class VPkMadI16Vop3p : public Vop3p
+{
+  public:
+   VPkMadI16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VPkMulLoU16Vop3p : public Vop3p {
-public:
-  VPkMulLoU16Vop3p(const MachineInst *inst);
+class VPkMulLoU16Vop3p : public Vop3p
+{
+  public:
+   VPkMulLoU16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   static const bool execute_registered_;
-};
+} ;
 
-class VPkAddI16Vop3p : public Vop3p {
-public:
-  VPkAddI16Vop3p(const MachineInst *inst);
+class VPkAddI16Vop3p : public Vop3p
+{
+  public:
+   VPkAddI16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   static const bool execute_registered_;
-};
+} ;
 
-class VPkSubI16Vop3p : public Vop3p {
-public:
-  VPkSubI16Vop3p(const MachineInst *inst);
+class VPkSubI16Vop3p : public Vop3p
+{
+  public:
+   VPkSubI16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   static const bool execute_registered_;
-};
+} ;
 
-class VPkLshlrevB16Vop3p : public Vop3p {
-public:
-  VPkLshlrevB16Vop3p(const MachineInst *inst);
+class VPkLshlrevB16Vop3p : public Vop3p
+{
+  public:
+   VPkLshlrevB16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   static const bool execute_registered_;
-};
+} ;
 
-class VPkLshrrevB16Vop3p : public Vop3p {
-public:
-  VPkLshrrevB16Vop3p(const MachineInst *inst);
+class VPkLshrrevB16Vop3p : public Vop3p
+{
+  public:
+   VPkLshrrevB16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   static const bool execute_registered_;
-};
+} ;
 
-class VPkAshrrevI16Vop3p : public Vop3p {
-public:
-  VPkAshrrevI16Vop3p(const MachineInst *inst);
+class VPkAshrrevI16Vop3p : public Vop3p
+{
+  public:
+   VPkAshrrevI16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   static const bool execute_registered_;
-};
+} ;
 
-class VPkMaxI16Vop3p : public Vop3p {
-public:
-  VPkMaxI16Vop3p(const MachineInst *inst);
+class VPkMaxI16Vop3p : public Vop3p
+{
+  public:
+   VPkMaxI16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   static const bool execute_registered_;
-};
+} ;
 
-class VPkMinI16Vop3p : public Vop3p {
-public:
-  VPkMinI16Vop3p(const MachineInst *inst);
+class VPkMinI16Vop3p : public Vop3p
+{
+  public:
+   VPkMinI16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   static const bool execute_registered_;
-};
+} ;
 
-class VPkMadU16Vop3p : public Vop3p {
-public:
-  VPkMadU16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VPkAddU16Vop3p : public Vop3p {
-public:
-  VPkAddU16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  static const bool execute_registered_;
-};
-
-class VPkSubU16Vop3p : public Vop3p {
-public:
-  VPkSubU16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  static const bool execute_registered_;
-};
-
-class VPkMaxU16Vop3p : public Vop3p {
-public:
-  VPkMaxU16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  static const bool execute_registered_;
-};
-
-class VPkMinU16Vop3p : public Vop3p {
-public:
-  VPkMinU16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  static const bool execute_registered_;
-};
-
-class VPkFmaF16Vop3p : public Vop3p {
-public:
-  VPkFmaF16Vop3p(const MachineInst *inst);
+class VPkMadU16Vop3p : public Vop3p
+{
+  public:
+   VPkMadU16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VPkAddF16Vop3p : public Vop3p {
-public:
-  VPkAddF16Vop3p(const MachineInst *inst);
+class VPkAddU16Vop3p : public Vop3p
+{
+  public:
+   VPkAddU16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   static const bool execute_registered_;
-};
+} ;
 
-class VPkMulF16Vop3p : public Vop3p {
-public:
-  VPkMulF16Vop3p(const MachineInst *inst);
+class VPkSubU16Vop3p : public Vop3p
+{
+  public:
+   VPkSubU16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   static const bool execute_registered_;
-};
+} ;
 
-class VPkFmaBf16Vop3p : public Vop3p {
-public:
-  VPkFmaBf16Vop3p(const MachineInst *inst);
+class VPkMaxU16Vop3p : public Vop3p
+{
+  public:
+   VPkMaxU16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
-  Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VPkAddMaxI16Vop3p : public Vop3p {
-public:
-  VPkAddMaxI16Vop3p(const MachineInst *inst);
+class VPkMinU16Vop3p : public Vop3p
+{
+  public:
+   VPkMinU16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
-  Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VPkAddMaxU16Vop3p : public Vop3p {
-public:
-  VPkAddMaxU16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VDot4I32Iu8Vop3p : public Vop3p {
-public:
-  VDot4I32Iu8Vop3p(const MachineInst *inst);
+class VPkFmaF16Vop3p : public Vop3p
+{
+  public:
+   VPkFmaF16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VDot4U32U8Vop3p : public Vop3p {
-public:
-  VDot4U32U8Vop3p(const MachineInst *inst);
+class VPkAddF16Vop3p : public Vop3p
+{
+  public:
+   VPkAddF16Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  static const bool execute_registered_;
+} ;
+
+class VPkMulF16Vop3p : public Vop3p
+{
+  public:
+   VPkMulF16Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  static const bool execute_registered_;
+} ;
+
+class VPkFmaBf16Vop3p : public Vop3p
+{
+  public:
+   VPkFmaBf16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VDot8I32Iu4Vop3p : public Vop3p {
-public:
-  VDot8I32Iu4Vop3p(const MachineInst *inst);
+class VPkAddMaxI16Vop3p : public Vop3p
+{
+  public:
+   VPkAddMaxI16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VDot8U32U4Vop3p : public Vop3p {
-public:
-  VDot8U32U4Vop3p(const MachineInst *inst);
+class VPkAddMaxU16Vop3p : public Vop3p
+{
+  public:
+   VPkAddMaxU16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VPkMinNumF16Vop3p : public Vop3p {
-public:
-  VPkMinNumF16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  static const bool execute_registered_;
-};
-
-class VPkMaxNumF16Vop3p : public Vop3p {
-public:
-  VPkMaxNumF16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  static const bool execute_registered_;
-};
-
-class VPkMinimumF16Vop3p : public Vop3p {
-public:
-  VPkMinimumF16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  static const bool execute_registered_;
-};
-
-class VPkMaximumF16Vop3p : public Vop3p {
-public:
-  VPkMaximumF16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  static const bool execute_registered_;
-};
-
-class VPkFmaF32Vop3p : public Vop3p {
-public:
-  VPkFmaF32Vop3p(const MachineInst *inst);
+class VDot4I32Iu8Vop3p : public Vop3p
+{
+  public:
+   VDot4I32Iu8Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VFmaMixF32Vop3p : public Vop3p {
-public:
-  VFmaMixF32Vop3p(const MachineInst *inst);
+class VDot4U32U8Vop3p : public Vop3p
+{
+  public:
+   VDot4U32U8Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VFmaMixloF16Vop3p : public Vop3p {
-public:
-  VFmaMixloF16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VFmaMixhiF16Vop3p : public Vop3p {
-public:
-  VFmaMixhiF16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VPkAddBf16Vop3p : public Vop3p {
-public:
-  VPkAddBf16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  static const bool execute_registered_;
-};
-
-class VPkMulF32Vop3p : public Vop3p {
-public:
-  VPkMulF32Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  static const bool execute_registered_;
-};
-
-class VPkAddF32Vop3p : public Vop3p {
-public:
-  VPkAddF32Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  static const bool execute_registered_;
-};
-
-class VPkMulBf16Vop3p : public Vop3p {
-public:
-  VPkMulBf16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  static const bool execute_registered_;
-};
-
-class VPkMinNumBf16Vop3p : public Vop3p {
-public:
-  VPkMinNumBf16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  static const bool execute_registered_;
-};
-
-class VPkMaxNumBf16Vop3p : public Vop3p {
-public:
-  VPkMaxNumBf16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  static const bool execute_registered_;
-};
-
-class VPkAddMinI16Vop3p : public Vop3p {
-public:
-  VPkAddMinI16Vop3p(const MachineInst *inst);
+class VDot8I32Iu4Vop3p : public Vop3p
+{
+  public:
+   VDot8I32Iu4Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VPkAddMinU16Vop3p : public Vop3p {
-public:
-  VPkAddMinU16Vop3p(const MachineInst *inst);
+class VDot8U32U4Vop3p : public Vop3p
+{
+  public:
+   VDot8U32U4Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VPkMax3I16Vop3p : public Vop3p {
-public:
-  VPkMax3I16Vop3p(const MachineInst *inst);
+class VPkMinNumF16Vop3p : public Vop3p
+{
+  public:
+   VPkMinNumF16Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  static const bool execute_registered_;
+} ;
+
+class VPkMaxNumF16Vop3p : public Vop3p
+{
+  public:
+   VPkMaxNumF16Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  static const bool execute_registered_;
+} ;
+
+class VPkMinimumF16Vop3p : public Vop3p
+{
+  public:
+   VPkMinimumF16Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  static const bool execute_registered_;
+} ;
+
+class VPkMaximumF16Vop3p : public Vop3p
+{
+  public:
+   VPkMaximumF16Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  static const bool execute_registered_;
+} ;
+
+class VPkFmaF32Vop3p : public Vop3p
+{
+  public:
+   VPkFmaF32Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VPkMax3U16Vop3p : public Vop3p {
-public:
-  VPkMax3U16Vop3p(const MachineInst *inst);
+class VFmaMixF32Vop3p : public Vop3p
+{
+  public:
+   VFmaMixF32Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VPkMin3I16Vop3p : public Vop3p {
-public:
-  VPkMin3I16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VPkMin3U16Vop3p : public Vop3p {
-public:
-  VPkMin3U16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VWmmaF3216x16x128F8f6f4Vop3p : public Vop3p {
-public:
-  VWmmaF3216x16x128F8f6f4Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  void build_modifiers(std::string &out) const override;
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VPkMinimum3F16Vop3p : public Vop3p {
-public:
-  VPkMinimum3F16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VPkMaximum3F16Vop3p : public Vop3p {
-public:
-  VPkMaximum3F16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VPkMin3NumF16Vop3p : public Vop3p {
-public:
-  VPkMin3NumF16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VPkMax3NumF16Vop3p : public Vop3p {
-public:
-  VPkMax3NumF16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VFmaMixF32Bf16Vop3p : public Vop3p {
-public:
-  VFmaMixF32Bf16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VFmaMixloBf16Vop3p : public Vop3p {
-public:
-  VFmaMixloBf16Vop3p(const MachineInst *inst);
+class VFmaMixloF16Vop3p : public Vop3p
+{
+  public:
+   VFmaMixloF16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
@@ -554,11 +368,12 @@ public:
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VFmaMixhiBf16Vop3p : public Vop3p {
-public:
-  VFmaMixhiBf16Vop3p(const MachineInst *inst);
+class VFmaMixhiF16Vop3p : public Vop3p
+{
+  public:
+   VFmaMixhiF16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
@@ -566,236 +381,150 @@ public:
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VWmmaF3216x16x4F32Vop3p : public Vop3p {
-public:
-  VWmmaF3216x16x4F32Vop3p(const MachineInst *inst);
+class VPkAddBf16Vop3p : public Vop3p
+{
+  public:
+   VPkAddBf16Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  static const bool execute_registered_;
+} ;
+
+class VPkMulF32Vop3p : public Vop3p
+{
+  public:
+   VPkMulF32Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  static const bool execute_registered_;
+} ;
+
+class VPkAddF32Vop3p : public Vop3p
+{
+  public:
+   VPkAddF32Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  static const bool execute_registered_;
+} ;
+
+class VPkMulBf16Vop3p : public Vop3p
+{
+  public:
+   VPkMulBf16Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  static const bool execute_registered_;
+} ;
+
+class VPkMinNumBf16Vop3p : public Vop3p
+{
+  public:
+   VPkMinNumBf16Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  static const bool execute_registered_;
+} ;
+
+class VPkMaxNumBf16Vop3p : public Vop3p
+{
+  public:
+   VPkMaxNumBf16Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  static const bool execute_registered_;
+} ;
+
+class VPkAddMinI16Vop3p : public Vop3p
+{
+  public:
+   VPkAddMinI16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VWmmaF3216x16x32F16Vop3p : public Vop3p {
-public:
-  VWmmaF3216x16x32F16Vop3p(const MachineInst *inst);
+class VPkAddMinU16Vop3p : public Vop3p
+{
+  public:
+   VPkAddMinU16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VWmmaF1616x16x32F16Vop3p : public Vop3p {
-public:
-  VWmmaF1616x16x32F16Vop3p(const MachineInst *inst);
+class VPkMax3I16Vop3p : public Vop3p
+{
+  public:
+   VPkMax3I16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VWmmaF3216x16x32Bf16Vop3p : public Vop3p {
-public:
-  VWmmaF3216x16x32Bf16Vop3p(const MachineInst *inst);
+class VPkMax3U16Vop3p : public Vop3p
+{
+  public:
+   VPkMax3U16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VWmmaBf1616x16x32Bf16Vop3p : public Vop3p {
-public:
-  VWmmaBf1616x16x32Bf16Vop3p(const MachineInst *inst);
+class VPkMin3I16Vop3p : public Vop3p
+{
+  public:
+   VPkMin3I16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VWmmaBf16f3216x16x32Bf16Vop3p : public Vop3p {
-public:
-  VWmmaBf16f3216x16x32Bf16Vop3p(const MachineInst *inst);
+class VPkMin3U16Vop3p : public Vop3p
+{
+  public:
+   VPkMin3U16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VSwmmacF3216x16x64F16Vop3p : public Vop3p {
-public:
-  VSwmmacF3216x16x64F16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  void build_modifiers(std::string &out) const override;
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VSwmmacF3216x16x64Bf16Vop3p : public Vop3p {
-public:
-  VSwmmacF3216x16x64Bf16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  void build_modifiers(std::string &out) const override;
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VSwmmacF1616x16x64F16Vop3p : public Vop3p {
-public:
-  VSwmmacF1616x16x64F16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  void build_modifiers(std::string &out) const override;
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VSwmmacBf1616x16x64Bf16Vop3p : public Vop3p {
-public:
-  VSwmmacBf1616x16x64Bf16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  void build_modifiers(std::string &out) const override;
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VSwmmacBf16f3216x16x64Bf16Vop3p : public Vop3p {
-public:
-  VSwmmacBf16f3216x16x64Bf16Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  void build_modifiers(std::string &out) const override;
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VWmmaF3216x16x64Fp8Fp8Vop3p : public Vop3p {
-public:
-  VWmmaF3216x16x64Fp8Fp8Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VWmmaF3216x16x64Fp8Bf8Vop3p : public Vop3p {
-public:
-  VWmmaF3216x16x64Fp8Bf8Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VWmmaF3216x16x64Bf8Fp8Vop3p : public Vop3p {
-public:
-  VWmmaF3216x16x64Bf8Fp8Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VWmmaF3216x16x64Bf8Bf8Vop3p : public Vop3p {
-public:
-  VWmmaF3216x16x64Bf8Bf8Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VWmmaF1616x16x64Fp8Fp8Vop3p : public Vop3p {
-public:
-  VWmmaF1616x16x64Fp8Fp8Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VWmmaF1616x16x64Fp8Bf8Vop3p : public Vop3p {
-public:
-  VWmmaF1616x16x64Fp8Bf8Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VWmmaF1616x16x64Bf8Fp8Vop3p : public Vop3p {
-public:
-  VWmmaF1616x16x64Bf8Fp8Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VWmmaF1616x16x64Bf8Bf8Vop3p : public Vop3p {
-public:
-  VWmmaF1616x16x64Bf8Bf8Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VWmmaI3216x16x64Iu8Vop3p : public Vop3p {
-public:
-  VWmmaI3216x16x64Iu8Vop3p(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand src1;
-  Operand src2;
-  static const bool execute_registered_;
-};
-
-class VSwmmacF3216x16x128Fp8Fp8Vop3p : public Vop3p {
-public:
-  VSwmmacF3216x16x128Fp8Fp8Vop3p(const MachineInst *inst);
+class VWmmaF3216x16x128F8f6f4Vop3p : public Vop3p
+{
+  public:
+   VWmmaF3216x16x128F8f6f4Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void build_modifiers(std::string &out) const override;
   Operand vdst;
@@ -803,11 +532,170 @@ public:
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VSwmmacF3216x16x128Fp8Bf8Vop3p : public Vop3p {
-public:
-  VSwmmacF3216x16x128Fp8Bf8Vop3p(const MachineInst *inst);
+class VPkMinimum3F16Vop3p : public Vop3p
+{
+  public:
+   VPkMinimum3F16Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VPkMaximum3F16Vop3p : public Vop3p
+{
+  public:
+   VPkMaximum3F16Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VPkMin3NumF16Vop3p : public Vop3p
+{
+  public:
+   VPkMin3NumF16Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VPkMax3NumF16Vop3p : public Vop3p
+{
+  public:
+   VPkMax3NumF16Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VFmaMixF32Bf16Vop3p : public Vop3p
+{
+  public:
+   VFmaMixF32Bf16Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VFmaMixloBf16Vop3p : public Vop3p
+{
+  public:
+   VFmaMixloBf16Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VFmaMixhiBf16Vop3p : public Vop3p
+{
+  public:
+   VFmaMixhiBf16Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VWmmaF3216x16x4F32Vop3p : public Vop3p
+{
+  public:
+   VWmmaF3216x16x4F32Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VWmmaF3216x16x32F16Vop3p : public Vop3p
+{
+  public:
+   VWmmaF3216x16x32F16Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VWmmaF1616x16x32F16Vop3p : public Vop3p
+{
+  public:
+   VWmmaF1616x16x32F16Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VWmmaF3216x16x32Bf16Vop3p : public Vop3p
+{
+  public:
+   VWmmaF3216x16x32Bf16Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VWmmaBf1616x16x32Bf16Vop3p : public Vop3p
+{
+  public:
+   VWmmaBf1616x16x32Bf16Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VWmmaBf16f3216x16x32Bf16Vop3p : public Vop3p
+{
+  public:
+   VWmmaBf16f3216x16x32Bf16Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VSwmmacF3216x16x64F16Vop3p : public Vop3p
+{
+  public:
+   VSwmmacF3216x16x64F16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void build_modifiers(std::string &out) const override;
   Operand vdst;
@@ -815,11 +703,12 @@ public:
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VSwmmacF3216x16x128Bf8Fp8Vop3p : public Vop3p {
-public:
-  VSwmmacF3216x16x128Bf8Fp8Vop3p(const MachineInst *inst);
+class VSwmmacF3216x16x64Bf16Vop3p : public Vop3p
+{
+  public:
+   VSwmmacF3216x16x64Bf16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void build_modifiers(std::string &out) const override;
   Operand vdst;
@@ -827,11 +716,12 @@ public:
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VSwmmacF3216x16x128Bf8Bf8Vop3p : public Vop3p {
-public:
-  VSwmmacF3216x16x128Bf8Bf8Vop3p(const MachineInst *inst);
+class VSwmmacF1616x16x64F16Vop3p : public Vop3p
+{
+  public:
+   VSwmmacF1616x16x64F16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void build_modifiers(std::string &out) const override;
   Operand vdst;
@@ -839,11 +729,12 @@ public:
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VSwmmacF1616x16x128Fp8Fp8Vop3p : public Vop3p {
-public:
-  VSwmmacF1616x16x128Fp8Fp8Vop3p(const MachineInst *inst);
+class VSwmmacBf1616x16x64Bf16Vop3p : public Vop3p
+{
+  public:
+   VSwmmacBf1616x16x64Bf16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void build_modifiers(std::string &out) const override;
   Operand vdst;
@@ -851,11 +742,12 @@ public:
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VSwmmacF1616x16x128Fp8Bf8Vop3p : public Vop3p {
-public:
-  VSwmmacF1616x16x128Fp8Bf8Vop3p(const MachineInst *inst);
+class VSwmmacBf16f3216x16x64Bf16Vop3p : public Vop3p
+{
+  public:
+   VSwmmacBf16f3216x16x64Bf16Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void build_modifiers(std::string &out) const override;
   Operand vdst;
@@ -863,11 +755,120 @@ public:
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VSwmmacF1616x16x128Bf8Fp8Vop3p : public Vop3p {
-public:
-  VSwmmacF1616x16x128Bf8Fp8Vop3p(const MachineInst *inst);
+class VWmmaF3216x16x64Fp8Fp8Vop3p : public Vop3p
+{
+  public:
+   VWmmaF3216x16x64Fp8Fp8Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VWmmaF3216x16x64Fp8Bf8Vop3p : public Vop3p
+{
+  public:
+   VWmmaF3216x16x64Fp8Bf8Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VWmmaF3216x16x64Bf8Fp8Vop3p : public Vop3p
+{
+  public:
+   VWmmaF3216x16x64Bf8Fp8Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VWmmaF3216x16x64Bf8Bf8Vop3p : public Vop3p
+{
+  public:
+   VWmmaF3216x16x64Bf8Bf8Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VWmmaF1616x16x64Fp8Fp8Vop3p : public Vop3p
+{
+  public:
+   VWmmaF1616x16x64Fp8Fp8Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VWmmaF1616x16x64Fp8Bf8Vop3p : public Vop3p
+{
+  public:
+   VWmmaF1616x16x64Fp8Bf8Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VWmmaF1616x16x64Bf8Fp8Vop3p : public Vop3p
+{
+  public:
+   VWmmaF1616x16x64Bf8Fp8Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VWmmaF1616x16x64Bf8Bf8Vop3p : public Vop3p
+{
+  public:
+   VWmmaF1616x16x64Bf8Bf8Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VWmmaI3216x16x64Iu8Vop3p : public Vop3p
+{
+  public:
+   VWmmaI3216x16x64Iu8Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VSwmmacF3216x16x128Fp8Fp8Vop3p : public Vop3p
+{
+  public:
+   VSwmmacF3216x16x128Fp8Fp8Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void build_modifiers(std::string &out) const override;
   Operand vdst;
@@ -875,11 +876,12 @@ public:
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VSwmmacF1616x16x128Bf8Bf8Vop3p : public Vop3p {
-public:
-  VSwmmacF1616x16x128Bf8Bf8Vop3p(const MachineInst *inst);
+class VSwmmacF3216x16x128Fp8Bf8Vop3p : public Vop3p
+{
+  public:
+   VSwmmacF3216x16x128Fp8Bf8Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void build_modifiers(std::string &out) const override;
   Operand vdst;
@@ -887,11 +889,12 @@ public:
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VSwmmacI3216x16x128Iu8Vop3p : public Vop3p {
-public:
-  VSwmmacI3216x16x128Iu8Vop3p(const MachineInst *inst);
+class VSwmmacF3216x16x128Bf8Fp8Vop3p : public Vop3p
+{
+  public:
+   VSwmmacF3216x16x128Bf8Fp8Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void build_modifiers(std::string &out) const override;
   Operand vdst;
@@ -899,106 +902,193 @@ public:
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VWmmaF3216x16x128Fp8Fp8Vop3p : public Vop3p {
-public:
-  VWmmaF3216x16x128Fp8Fp8Vop3p(const MachineInst *inst);
+class VSwmmacF3216x16x128Bf8Bf8Vop3p : public Vop3p
+{
+  public:
+   VSwmmacF3216x16x128Bf8Bf8Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  void build_modifiers(std::string &out) const override;
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VSwmmacF1616x16x128Fp8Fp8Vop3p : public Vop3p
+{
+  public:
+   VSwmmacF1616x16x128Fp8Fp8Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  void build_modifiers(std::string &out) const override;
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VSwmmacF1616x16x128Fp8Bf8Vop3p : public Vop3p
+{
+  public:
+   VSwmmacF1616x16x128Fp8Bf8Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  void build_modifiers(std::string &out) const override;
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VSwmmacF1616x16x128Bf8Fp8Vop3p : public Vop3p
+{
+  public:
+   VSwmmacF1616x16x128Bf8Fp8Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  void build_modifiers(std::string &out) const override;
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VSwmmacF1616x16x128Bf8Bf8Vop3p : public Vop3p
+{
+  public:
+   VSwmmacF1616x16x128Bf8Bf8Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  void build_modifiers(std::string &out) const override;
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VSwmmacI3216x16x128Iu8Vop3p : public Vop3p
+{
+  public:
+   VSwmmacI3216x16x128Iu8Vop3p(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  void build_modifiers(std::string &out) const override;
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  static const bool execute_registered_;
+} ;
+
+class VWmmaF3216x16x128Fp8Fp8Vop3p : public Vop3p
+{
+  public:
+   VWmmaF3216x16x128Fp8Fp8Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VWmmaF3216x16x128Fp8Bf8Vop3p : public Vop3p {
-public:
-  VWmmaF3216x16x128Fp8Bf8Vop3p(const MachineInst *inst);
+class VWmmaF3216x16x128Fp8Bf8Vop3p : public Vop3p
+{
+  public:
+   VWmmaF3216x16x128Fp8Bf8Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VWmmaF3216x16x128Bf8Fp8Vop3p : public Vop3p {
-public:
-  VWmmaF3216x16x128Bf8Fp8Vop3p(const MachineInst *inst);
+class VWmmaF3216x16x128Bf8Fp8Vop3p : public Vop3p
+{
+  public:
+   VWmmaF3216x16x128Bf8Fp8Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VWmmaF3216x16x128Bf8Bf8Vop3p : public Vop3p {
-public:
-  VWmmaF3216x16x128Bf8Bf8Vop3p(const MachineInst *inst);
+class VWmmaF3216x16x128Bf8Bf8Vop3p : public Vop3p
+{
+  public:
+   VWmmaF3216x16x128Bf8Bf8Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VWmmaF1616x16x128Fp8Fp8Vop3p : public Vop3p {
-public:
-  VWmmaF1616x16x128Fp8Fp8Vop3p(const MachineInst *inst);
+class VWmmaF1616x16x128Fp8Fp8Vop3p : public Vop3p
+{
+  public:
+   VWmmaF1616x16x128Fp8Fp8Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VWmmaF1616x16x128Fp8Bf8Vop3p : public Vop3p {
-public:
-  VWmmaF1616x16x128Fp8Bf8Vop3p(const MachineInst *inst);
+class VWmmaF1616x16x128Fp8Bf8Vop3p : public Vop3p
+{
+  public:
+   VWmmaF1616x16x128Fp8Bf8Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VWmmaF1616x16x128Bf8Fp8Vop3p : public Vop3p {
-public:
-  VWmmaF1616x16x128Bf8Fp8Vop3p(const MachineInst *inst);
+class VWmmaF1616x16x128Bf8Fp8Vop3p : public Vop3p
+{
+  public:
+   VWmmaF1616x16x128Bf8Fp8Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VWmmaF1616x16x128Bf8Bf8Vop3p : public Vop3p {
-public:
-  VWmmaF1616x16x128Bf8Bf8Vop3p(const MachineInst *inst);
+class VWmmaF1616x16x128Bf8Bf8Vop3p : public Vop3p
+{
+  public:
+   VWmmaF1616x16x128Bf8Bf8Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
-class VWmmaF3232x16x128F4Vop3p : public Vop3p {
-public:
-  VWmmaF3232x16x128F4Vop3p(const MachineInst *inst);
+class VWmmaF3232x16x128F4Vop3p : public Vop3p
+{
+  public:
+   VWmmaF3232x16x128F4Vop3p(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
   static const bool execute_registered_;
-};
+} ;
 
 class VWmmaScaleF32Vop3px2 : public Vop3p {
 public:

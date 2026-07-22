@@ -311,17 +311,17 @@ class IsaProfile(ABC):
 
     @property
     def use_hwreg_helpers(self) -> bool:
-        """True when generated SOPK getreg/setreg should use target hwreg helpers."""
+        """True when SOPK getreg/setreg/setreg_imm route through VM HWREG helpers."""
         return False
 
     @property
     def hwreg_mode_id(self) -> int | None:
-        """Hardware-register ID for MODE, when modeled by generated setreg code."""
+        """Architecture HWREG ID for MODE, used by helper-table sanity checks."""
         return None
 
     @property
     def hwreg_status_id(self) -> int:
-        """Hardware-register ID for STATUS in generated getreg/setreg code."""
+        """Architecture HWREG ID for STATUS, used by helper-table sanity checks."""
         return 1
 
     @property
@@ -1100,6 +1100,18 @@ class CdnaProfile(_AmdgpuProfileBase):
         # zero the upper half; see the CDNA ISA OP_SEL field description.
         return True
 
+    @property
+    def use_hwreg_helpers(self) -> bool:
+        return True
+
+    @property
+    def hwreg_mode_id(self) -> int | None:
+        return 1
+
+    @property
+    def hwreg_status_id(self) -> int:
+        return 2
+
 
 class Cdna1Profile(CdnaProfile):
     """ISA profile for CDNA1 (GFX908 / MI100).
@@ -1251,6 +1263,18 @@ class Rdna1Profile(_AmdgpuProfileBase):
     @property
     def descriptor_sgpr_count_encoded(self) -> bool:
         return False
+
+    @property
+    def use_hwreg_helpers(self) -> bool:
+        return True
+
+    @property
+    def hwreg_mode_id(self) -> int | None:
+        return 1
+
+    @property
+    def hwreg_status_id(self) -> int:
+        return 2
 
     @property
     def waitcnt_family(self) -> str:
@@ -1414,6 +1438,18 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def use_hwreg_helpers(self) -> bool:
+        return True
+
+    @property
+    def hwreg_mode_id(self) -> int | None:
+        return 1
+
+    @property
+    def hwreg_status_id(self) -> int:
+        return 2
+
+    @property
     def smem_direct_offset_field(self) -> str | None:
         return 'offset'
 
@@ -1550,6 +1586,18 @@ class Rdna4Profile(_AmdgpuProfileBase):
     @property
     def uses_true16_vop3_opsel(self) -> bool:
         return True
+
+    @property
+    def use_hwreg_helpers(self) -> bool:
+        return True
+
+    @property
+    def hwreg_mode_id(self) -> int | None:
+        return 1
+
+    @property
+    def hwreg_status_id(self) -> int:
+        return 2
 
     def mnemonic_rule(self, enc_name: str) -> MnemonicRule:
         """RDNA4 mnemonic rules.

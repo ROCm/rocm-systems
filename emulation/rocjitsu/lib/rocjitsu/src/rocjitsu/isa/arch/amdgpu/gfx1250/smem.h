@@ -14,305 +14,333 @@
 namespace rocjitsu {
 namespace gfx1250 {
 
-class SLoadB32Smem : public Smem {
-public:
-  SLoadB32Smem(const MachineInst *inst);
+class SLoadB32Smem : public Smem
+{
+  public:
+   SLoadB32Smem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class SLoadB64Smem : public Smem {
-public:
-  SLoadB64Smem(const MachineInst *inst);
+class SLoadB64Smem : public Smem
+{
+  public:
+   SLoadB64Smem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class SLoadB128Smem : public Smem {
-public:
-  SLoadB128Smem(const MachineInst *inst);
+class SLoadB128Smem : public Smem
+{
+  public:
+   SLoadB128Smem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class SLoadB256Smem : public Smem {
-public:
-  SLoadB256Smem(const MachineInst *inst);
+class SLoadB256Smem : public Smem
+{
+  public:
+   SLoadB256Smem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class SLoadB512Smem : public Smem {
-public:
-  SLoadB512Smem(const MachineInst *inst);
+class SLoadB512Smem : public Smem
+{
+  public:
+   SLoadB512Smem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class SLoadB96Smem : public Smem {
-public:
-  SLoadB96Smem(const MachineInst *inst);
+class SLoadB96Smem : public Smem
+{
+  public:
+   SLoadB96Smem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class SLoadI8Smem : public Smem {
-public:
-  SLoadI8Smem(const MachineInst *inst);
+class SLoadI8Smem : public Smem
+{
+  public:
+   SLoadI8Smem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class SLoadU8Smem : public Smem {
-public:
-  SLoadU8Smem(const MachineInst *inst);
+class SLoadU8Smem : public Smem
+{
+  public:
+   SLoadU8Smem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class SLoadI16Smem : public Smem {
-public:
-  SLoadI16Smem(const MachineInst *inst);
+class SLoadI16Smem : public Smem
+{
+  public:
+   SLoadI16Smem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class SLoadU16Smem : public Smem {
-public:
-  SLoadU16Smem(const MachineInst *inst);
+class SLoadU16Smem : public Smem
+{
+  public:
+   SLoadU16Smem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class SBufferLoadB32Smem : public Smem {
-public:
-  SBufferLoadB32Smem(const MachineInst *inst);
+class SBufferLoadB32Smem : public Smem
+{
+  public:
+   SBufferLoadB32Smem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class SBufferLoadB64Smem : public Smem {
-public:
-  SBufferLoadB64Smem(const MachineInst *inst);
+class SBufferLoadB64Smem : public Smem
+{
+  public:
+   SBufferLoadB64Smem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class SBufferLoadB128Smem : public Smem {
-public:
-  SBufferLoadB128Smem(const MachineInst *inst);
+class SBufferLoadB128Smem : public Smem
+{
+  public:
+   SBufferLoadB128Smem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class SBufferLoadB256Smem : public Smem {
-public:
-  SBufferLoadB256Smem(const MachineInst *inst);
+class SBufferLoadB256Smem : public Smem
+{
+  public:
+   SBufferLoadB256Smem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class SBufferLoadB512Smem : public Smem {
-public:
-  SBufferLoadB512Smem(const MachineInst *inst);
+class SBufferLoadB512Smem : public Smem
+{
+  public:
+   SBufferLoadB512Smem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class SBufferLoadB96Smem : public Smem {
-public:
-  SBufferLoadB96Smem(const MachineInst *inst);
+class SBufferLoadB96Smem : public Smem
+{
+  public:
+   SBufferLoadB96Smem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class SBufferLoadI8Smem : public Smem {
-public:
-  SBufferLoadI8Smem(const MachineInst *inst);
+class SBufferLoadI8Smem : public Smem
+{
+  public:
+   SBufferLoadI8Smem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class SBufferLoadU8Smem : public Smem {
-public:
-  SBufferLoadU8Smem(const MachineInst *inst);
+class SBufferLoadU8Smem : public Smem
+{
+  public:
+   SBufferLoadU8Smem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class SBufferLoadI16Smem : public Smem {
-public:
-  SBufferLoadI16Smem(const MachineInst *inst);
+class SBufferLoadI16Smem : public Smem
+{
+  public:
+   SBufferLoadI16Smem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class SBufferLoadU16Smem : public Smem {
-public:
-  SBufferLoadU16Smem(const MachineInst *inst);
+class SBufferLoadU16Smem : public Smem
+{
+  public:
+   SBufferLoadU16Smem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class SDcacheInvSmem : public Smem {
-public:
-  SDcacheInvSmem(const MachineInst *inst);
+class SDcacheInvSmem : public Smem
+{
+  public:
+   SDcacheInvSmem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   static const bool execute_registered_;
-};
+} ;
 
-class SAtcProbeSmem : public Smem {
-public:
-  SAtcProbeSmem(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand sdata;
-  Operand sbase;
-  Operand soffset;
-  static const bool execute_registered_;
-};
-
-class SAtcProbeBufferSmem : public Smem {
-public:
-  SAtcProbeBufferSmem(const MachineInst *inst);
+class SAtcProbeSmem : public Smem
+{
+  public:
+   SAtcProbeSmem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
   static const bool execute_registered_;
-};
+} ;
 
-class SPrefetchInstSmem : public Smem {
-public:
-  SPrefetchInstSmem(const MachineInst *inst);
+class SAtcProbeBufferSmem : public Smem
+{
+  public:
+   SAtcProbeBufferSmem(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand sdata;
+  Operand sbase;
+  Operand soffset;
+  static const bool execute_registered_;
+} ;
+
+class SPrefetchInstSmem : public Smem
+{
+  public:
+   SPrefetchInstSmem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sbase;
   Operand ioffset;
   Operand soffset;
   Operand sdata;
   static const bool execute_registered_;
-};
+} ;
 
-class SPrefetchInstPcRelSmem : public Smem {
-public:
-  SPrefetchInstPcRelSmem(const MachineInst *inst);
+class SPrefetchInstPcRelSmem : public Smem
+{
+  public:
+   SPrefetchInstPcRelSmem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ioffset;
   Operand soffset;
   Operand sdata;
   static const bool execute_registered_;
-};
+} ;
 
-class SPrefetchDataSmem : public Smem {
-public:
-  SPrefetchDataSmem(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand sbase;
-  Operand ioffset;
-  Operand soffset;
-  Operand sdata;
-  static const bool execute_registered_;
-};
-
-class SBufferPrefetchDataSmem : public Smem {
-public:
-  SBufferPrefetchDataSmem(const MachineInst *inst);
+class SPrefetchDataSmem : public Smem
+{
+  public:
+   SPrefetchDataSmem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sbase;
   Operand ioffset;
   Operand soffset;
   Operand sdata;
   static const bool execute_registered_;
-};
+} ;
 
-class SPrefetchDataPcRelSmem : public Smem {
-public:
-  SPrefetchDataPcRelSmem(const MachineInst *inst);
+class SBufferPrefetchDataSmem : public Smem
+{
+  public:
+   SBufferPrefetchDataSmem(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand sbase;
+  Operand ioffset;
+  Operand soffset;
+  Operand sdata;
+  static const bool execute_registered_;
+} ;
+
+class SPrefetchDataPcRelSmem : public Smem
+{
+  public:
+   SPrefetchDataPcRelSmem(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ioffset;
   Operand soffset;
   Operand sdata;
   static const bool execute_registered_;
-};
+} ;
 
 } // namespace gfx1250
 } // namespace rocjitsu

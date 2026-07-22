@@ -14,9 +14,10 @@
 namespace rocjitsu {
 namespace rdna4 {
 
-class ExportVexport : public Vexport {
-public:
-  ExportVexport(const MachineInst *inst);
+class ExportVexport : public Vexport
+{
+  public:
+   ExportVexport(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand tgt;
   Operand vsrc0;
@@ -25,7 +26,7 @@ public:
   Operand vsrc3;
   Operand sdst_exec;
   Operand m0;
-};
+} ;
 
 } // namespace rdna4
 } // namespace rocjitsu

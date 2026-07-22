@@ -14,287 +14,274 @@
 namespace rocjitsu {
 namespace cdna2 {
 
-class FlatLoadUbyteFlat : public Flat {
-public:
-  FlatLoadUbyteFlat(const MachineInst *inst);
+class FlatLoadUbyteFlat : public Flat
+{
+  public:
+   FlatLoadUbyteFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatLoadSbyteFlat : public Flat {
-public:
-  FlatLoadSbyteFlat(const MachineInst *inst);
+class FlatLoadSbyteFlat : public Flat
+{
+  public:
+   FlatLoadSbyteFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatLoadUshortFlat : public Flat {
-public:
-  FlatLoadUshortFlat(const MachineInst *inst);
+class FlatLoadUshortFlat : public Flat
+{
+  public:
+   FlatLoadUshortFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatLoadSshortFlat : public Flat {
-public:
-  FlatLoadSshortFlat(const MachineInst *inst);
+class FlatLoadSshortFlat : public Flat
+{
+  public:
+   FlatLoadSshortFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatLoadDwordFlat : public Flat {
-public:
-  FlatLoadDwordFlat(const MachineInst *inst);
+class FlatLoadDwordFlat : public Flat
+{
+  public:
+   FlatLoadDwordFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatLoadDwordx2Flat : public Flat {
-public:
-  FlatLoadDwordx2Flat(const MachineInst *inst);
+class FlatLoadDwordx2Flat : public Flat
+{
+  public:
+   FlatLoadDwordx2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatLoadDwordx3Flat : public Flat {
-public:
-  FlatLoadDwordx3Flat(const MachineInst *inst);
+class FlatLoadDwordx3Flat : public Flat
+{
+  public:
+   FlatLoadDwordx3Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatLoadDwordx4Flat : public Flat {
-public:
-  FlatLoadDwordx4Flat(const MachineInst *inst);
+class FlatLoadDwordx4Flat : public Flat
+{
+  public:
+   FlatLoadDwordx4Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatStoreByteFlat : public Flat {
-public:
-  FlatStoreByteFlat(const MachineInst *inst);
+class FlatStoreByteFlat : public Flat
+{
+  public:
+   FlatStoreByteFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatStoreByteD16HiFlat : public Flat {
-public:
-  FlatStoreByteD16HiFlat(const MachineInst *inst);
+class FlatStoreByteD16HiFlat : public Flat
+{
+  public:
+   FlatStoreByteD16HiFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatStoreShortFlat : public Flat {
-public:
-  FlatStoreShortFlat(const MachineInst *inst);
+class FlatStoreShortFlat : public Flat
+{
+  public:
+   FlatStoreShortFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatStoreShortD16HiFlat : public Flat {
-public:
-  FlatStoreShortD16HiFlat(const MachineInst *inst);
+class FlatStoreShortD16HiFlat : public Flat
+{
+  public:
+   FlatStoreShortD16HiFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatStoreDwordFlat : public Flat {
-public:
-  FlatStoreDwordFlat(const MachineInst *inst);
+class FlatStoreDwordFlat : public Flat
+{
+  public:
+   FlatStoreDwordFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatStoreDwordx2Flat : public Flat {
-public:
-  FlatStoreDwordx2Flat(const MachineInst *inst);
+class FlatStoreDwordx2Flat : public Flat
+{
+  public:
+   FlatStoreDwordx2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatStoreDwordx3Flat : public Flat {
-public:
-  FlatStoreDwordx3Flat(const MachineInst *inst);
+class FlatStoreDwordx3Flat : public Flat
+{
+  public:
+   FlatStoreDwordx3Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatStoreDwordx4Flat : public Flat {
-public:
-  FlatStoreDwordx4Flat(const MachineInst *inst);
+class FlatStoreDwordx4Flat : public Flat
+{
+  public:
+   FlatStoreDwordx4Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatLoadUbyteD16Flat : public Flat {
-public:
-  FlatLoadUbyteD16Flat(const MachineInst *inst);
+class FlatLoadUbyteD16Flat : public Flat
+{
+  public:
+   FlatLoadUbyteD16Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatLoadUbyteD16HiFlat : public Flat {
-public:
-  FlatLoadUbyteD16HiFlat(const MachineInst *inst);
+class FlatLoadUbyteD16HiFlat : public Flat
+{
+  public:
+   FlatLoadUbyteD16HiFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatLoadSbyteD16Flat : public Flat {
-public:
-  FlatLoadSbyteD16Flat(const MachineInst *inst);
+class FlatLoadSbyteD16Flat : public Flat
+{
+  public:
+   FlatLoadSbyteD16Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatLoadSbyteD16HiFlat : public Flat {
-public:
-  FlatLoadSbyteD16HiFlat(const MachineInst *inst);
+class FlatLoadSbyteD16HiFlat : public Flat
+{
+  public:
+   FlatLoadSbyteD16HiFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatLoadShortD16Flat : public Flat {
-public:
-  FlatLoadShortD16Flat(const MachineInst *inst);
+class FlatLoadShortD16Flat : public Flat
+{
+  public:
+   FlatLoadShortD16Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatLoadShortD16HiFlat : public Flat {
-public:
-  FlatLoadShortD16HiFlat(const MachineInst *inst);
+class FlatLoadShortD16HiFlat : public Flat
+{
+  public:
+   FlatLoadShortD16HiFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicSwapFlat : public Flat {
-public:
-  FlatAtomicSwapFlat(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand data;
-  Operand flat_scratch;
-  Operand m0;
-  Operand saddr;
-};
-
-class FlatAtomicCmpswapFlat : public Flat {
-public:
-  FlatAtomicCmpswapFlat(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand data;
-  Operand flat_scratch;
-  Operand m0;
-  Operand saddr;
-};
-
-class FlatAtomicAddFlat : public Flat {
-public:
-  FlatAtomicAddFlat(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand data;
-  Operand flat_scratch;
-  Operand m0;
-  Operand saddr;
-};
-
-class FlatAtomicSubFlat : public Flat {
-public:
-  FlatAtomicSubFlat(const MachineInst *inst);
+class FlatAtomicSwapFlat : public Flat
+{
+  public:
+   FlatAtomicSwapFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -302,11 +289,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicSminFlat : public Flat {
-public:
-  FlatAtomicSminFlat(const MachineInst *inst);
+class FlatAtomicCmpswapFlat : public Flat
+{
+  public:
+   FlatAtomicCmpswapFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -314,11 +302,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicUminFlat : public Flat {
-public:
-  FlatAtomicUminFlat(const MachineInst *inst);
+class FlatAtomicAddFlat : public Flat
+{
+  public:
+   FlatAtomicAddFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -326,11 +315,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicSmaxFlat : public Flat {
-public:
-  FlatAtomicSmaxFlat(const MachineInst *inst);
+class FlatAtomicSubFlat : public Flat
+{
+  public:
+   FlatAtomicSubFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -338,11 +328,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicUmaxFlat : public Flat {
-public:
-  FlatAtomicUmaxFlat(const MachineInst *inst);
+class FlatAtomicSminFlat : public Flat
+{
+  public:
+   FlatAtomicSminFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -350,11 +341,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicAndFlat : public Flat {
-public:
-  FlatAtomicAndFlat(const MachineInst *inst);
+class FlatAtomicUminFlat : public Flat
+{
+  public:
+   FlatAtomicUminFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -362,11 +354,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicOrFlat : public Flat {
-public:
-  FlatAtomicOrFlat(const MachineInst *inst);
+class FlatAtomicSmaxFlat : public Flat
+{
+  public:
+   FlatAtomicSmaxFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -374,11 +367,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicXorFlat : public Flat {
-public:
-  FlatAtomicXorFlat(const MachineInst *inst);
+class FlatAtomicUmaxFlat : public Flat
+{
+  public:
+   FlatAtomicUmaxFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -386,11 +380,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicIncFlat : public Flat {
-public:
-  FlatAtomicIncFlat(const MachineInst *inst);
+class FlatAtomicAndFlat : public Flat
+{
+  public:
+   FlatAtomicAndFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -398,11 +393,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicDecFlat : public Flat {
-public:
-  FlatAtomicDecFlat(const MachineInst *inst);
+class FlatAtomicOrFlat : public Flat
+{
+  public:
+   FlatAtomicOrFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -410,11 +406,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicAddF64Flat : public Flat {
-public:
-  FlatAtomicAddF64Flat(const MachineInst *inst);
+class FlatAtomicXorFlat : public Flat
+{
+  public:
+   FlatAtomicXorFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -422,11 +419,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicMinF64Flat : public Flat {
-public:
-  FlatAtomicMinF64Flat(const MachineInst *inst);
+class FlatAtomicIncFlat : public Flat
+{
+  public:
+   FlatAtomicIncFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -434,11 +432,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicMaxF64Flat : public Flat {
-public:
-  FlatAtomicMaxF64Flat(const MachineInst *inst);
+class FlatAtomicDecFlat : public Flat
+{
+  public:
+   FlatAtomicDecFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -446,11 +445,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicSwapX2Flat : public Flat {
-public:
-  FlatAtomicSwapX2Flat(const MachineInst *inst);
+class FlatAtomicAddF64Flat : public Flat
+{
+  public:
+   FlatAtomicAddF64Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -458,11 +458,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicCmpswapX2Flat : public Flat {
-public:
-  FlatAtomicCmpswapX2Flat(const MachineInst *inst);
+class FlatAtomicMinF64Flat : public Flat
+{
+  public:
+   FlatAtomicMinF64Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -470,11 +471,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicAddX2Flat : public Flat {
-public:
-  FlatAtomicAddX2Flat(const MachineInst *inst);
+class FlatAtomicMaxF64Flat : public Flat
+{
+  public:
+   FlatAtomicMaxF64Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -482,11 +484,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicSubX2Flat : public Flat {
-public:
-  FlatAtomicSubX2Flat(const MachineInst *inst);
+class FlatAtomicSwapX2Flat : public Flat
+{
+  public:
+   FlatAtomicSwapX2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -494,11 +497,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicSminX2Flat : public Flat {
-public:
-  FlatAtomicSminX2Flat(const MachineInst *inst);
+class FlatAtomicCmpswapX2Flat : public Flat
+{
+  public:
+   FlatAtomicCmpswapX2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -506,11 +510,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicUminX2Flat : public Flat {
-public:
-  FlatAtomicUminX2Flat(const MachineInst *inst);
+class FlatAtomicAddX2Flat : public Flat
+{
+  public:
+   FlatAtomicAddX2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -518,11 +523,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicSmaxX2Flat : public Flat {
-public:
-  FlatAtomicSmaxX2Flat(const MachineInst *inst);
+class FlatAtomicSubX2Flat : public Flat
+{
+  public:
+   FlatAtomicSubX2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -530,11 +536,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicUmaxX2Flat : public Flat {
-public:
-  FlatAtomicUmaxX2Flat(const MachineInst *inst);
+class FlatAtomicSminX2Flat : public Flat
+{
+  public:
+   FlatAtomicSminX2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -542,11 +549,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicAndX2Flat : public Flat {
-public:
-  FlatAtomicAndX2Flat(const MachineInst *inst);
+class FlatAtomicUminX2Flat : public Flat
+{
+  public:
+   FlatAtomicUminX2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -554,11 +562,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicOrX2Flat : public Flat {
-public:
-  FlatAtomicOrX2Flat(const MachineInst *inst);
+class FlatAtomicSmaxX2Flat : public Flat
+{
+  public:
+   FlatAtomicSmaxX2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -566,11 +575,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicXorX2Flat : public Flat {
-public:
-  FlatAtomicXorX2Flat(const MachineInst *inst);
+class FlatAtomicUmaxX2Flat : public Flat
+{
+  public:
+   FlatAtomicUmaxX2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -578,11 +588,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicIncX2Flat : public Flat {
-public:
-  FlatAtomicIncX2Flat(const MachineInst *inst);
+class FlatAtomicAndX2Flat : public Flat
+{
+  public:
+   FlatAtomicAndX2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -590,11 +601,12 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
 
-class FlatAtomicDecX2Flat : public Flat {
-public:
-  FlatAtomicDecX2Flat(const MachineInst *inst);
+class FlatAtomicOrX2Flat : public Flat
+{
+  public:
+   FlatAtomicOrX2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -602,7 +614,46 @@ public:
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
-};
+} ;
+
+class FlatAtomicXorX2Flat : public Flat
+{
+  public:
+   FlatAtomicXorX2Flat(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data;
+  Operand flat_scratch;
+  Operand m0;
+  Operand saddr;
+} ;
+
+class FlatAtomicIncX2Flat : public Flat
+{
+  public:
+   FlatAtomicIncX2Flat(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data;
+  Operand flat_scratch;
+  Operand m0;
+  Operand saddr;
+} ;
+
+class FlatAtomicDecX2Flat : public Flat
+{
+  public:
+   FlatAtomicDecX2Flat(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data;
+  Operand flat_scratch;
+  Operand m0;
+  Operand saddr;
+} ;
 
 } // namespace cdna2
 } // namespace rocjitsu

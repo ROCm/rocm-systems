@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import xml.etree.ElementTree as elem_tree
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1075,8 +1076,9 @@ def test_cdna3_fp8_cvt_uses_fnuz_helper_variant():
     assert 'util::fp8_e4m3_to_f32' not in widen
 
     narrow = gen_cvt_fp8(SimpleNamespace(**ctx.__dict__, op='pk_fp8_f32'))
-    assert 'util::f32_to_fp8_e4m3_fnuz_rne' in narrow
-    assert 'util::f32_to_fp8_e4m3_rne' not in narrow
+    assert 'util::f32_to_fp8_e4m3_fnuz_rne_mode' in narrow
+    assert 'util::f32_to_fp8_e4m3_rne_mode' not in narrow
+    assert 'wf.fp16_ovfl()' in narrow
 
     packed = gen_vector_cvt_pk(
         ['vdst'],
@@ -1116,8 +1118,9 @@ def test_cdna4_fp8_cvt_keeps_ocp_helper_variant():
     assert 'util::fp8_e4m3_fnuz_to_f32' not in widen
 
     narrow = gen_cvt_fp8(SimpleNamespace(**ctx.__dict__, op='pk_fp8_f32'))
-    assert 'util::f32_to_fp8_e4m3_rne' in narrow
-    assert 'util::f32_to_fp8_e4m3_fnuz_rne' not in narrow
+    assert 'util::f32_to_fp8_e4m3_rne_mode' in narrow
+    assert 'util::f32_to_fp8_e4m3_fnuz_rne_mode' not in narrow
+    assert 'wf.fp16_ovfl()' in narrow
 
     unary = gen_vector_unary(
         ['vdst'],
@@ -1128,6 +1131,28 @@ def test_cdna4_fp8_cvt_keeps_ocp_helper_variant():
     )
     assert 'util::fp8_e4m3_to_f32' in unary
     assert 'util::fp8_e4m3_fnuz_to_f32' not in unary
+
+
+def test_f32_to_f16_vector_conversion_threads_fp16_ovfl():
+    unary = gen_vector_unary(['vdst'], ['src0'], 'cvt', 'f16_f32')
+
+    assert 'util::f32_to_f16_mode(s, wf.fp16_ovfl())' in unary
+
+
+def test_fp16_ovfl_sensitive_f16_simd_probes_stay_vectorized():
+    cvt_probe = simd_probe_line('v_cvt_f16_f32_vop1')
+    assert cvt_probe is not None
+    assert 'if (wf.fp16_ovfl())' in cvt_probe
+    assert 'util::f32_to_f16_ovfl_simd' in cvt_probe
+    assert 'util::f32_to_f16_simd' in cvt_probe
+    assert 'ROCJITSU_TRY_SIMD_VOP1_UNARY' in cvt_probe
+
+    add_probe = simd_probe_line('v_add_f16_vop3', true16_vop3=True)
+    assert add_probe is not None
+    assert 'if (wf.fp16_ovfl())' in add_probe
+    assert 'util::f32_to_f16_ovfl_simd' in add_probe
+    assert 'util::f32_to_f16_simd' in add_probe
+    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16' in add_probe
 
 
 def test_cdna_f64_mfma_uses_blgp_as_neg_immediate():
@@ -1164,7 +1189,10 @@ def test_gfx1250_profile_enables_generator_backed_quirks():
     assert profile.uses_true16_vop3_opsel
     assert profile.vbuffer_store_data_uses_dst_vgpr_msb_role
     assert profile.use_hwreg_helpers
+    assert profile.hwreg_mode_id == 1
+    assert profile.hwreg_status_id == 2
     assert profile.hwreg_wave_sched_mode_id == 26
+    assert profile.hwreg_ib_sts2_id == 28
     assert profile.generate_scaled_wmma_vop3px2
     assert profile.smem_address_uses_access_size
     assert profile.vop3_cmp_sdst_size_bits == 32
@@ -1205,13 +1233,15 @@ def test_rdna3_profile_enables_gfx11_vop3_true16_only():
     assert not profile.vbuffer_store_data_uses_dst_vgpr_msb_role
 
 
-def test_rdna4_profile_enables_gfx12_true16_but_keeps_gfx1250_quirks_disabled():
+def test_rdna4_profile_enables_gfx12_true16_and_mode_hwregs_only():
     profile = Rdna4Profile()
 
     assert profile.uses_packed_16bit_e32_source_selectors
     assert profile.uses_true16_vop3_opsel
     assert not profile.vbuffer_store_data_uses_dst_vgpr_msb_role
-    assert not profile.use_hwreg_helpers
+    assert profile.use_hwreg_helpers
+    assert profile.hwreg_mode_id == 1
+    assert profile.hwreg_status_id == 2
     assert profile.hwreg_wave_sched_mode_id is None
     assert not profile.generate_scaled_wmma_vop3px2
     assert not profile.smem_address_uses_access_size
@@ -1705,6 +1735,33 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     assert 'inst.vdst.write_lane' not in true16_ternary
 
 
+def test_generated_scalar_f16_arithmetic_does_not_consume_fp16_ovfl(
+    execute_shared_path: Path,
+):
+    execute_shared = execute_shared_path.read_text()
+    body = _shared_execute_body(execute_shared, 's_add_f16_sop2', 's_add_f32_sop2')
+
+    assert 'util::f32_to_f16(result)' in body
+    assert 'wf.fp16_ovfl()' not in body
+
+
+def test_generated_vector_f16_arithmetic_consumes_fp16_ovfl(
+    execute_shared_path: Path,
+):
+    execute_shared = execute_shared_path.read_text()
+    vop2 = _shared_execute_body(execute_shared, 'v_add_f16_vop2', 'v_add_f16_vop3')
+    vop3 = _shared_execute_body(execute_shared, 'v_add_f16_vop3', 'v_add_f32_vop2')
+
+    assert 'if (wf.fp16_ovfl())' in vop2
+    assert 'f32_to_f16_ovfl_simd' in vop2
+    assert 'util::f32_to_f16_mode' in vop2
+    assert 'wf.fp16_ovfl()' in vop2
+    assert 'if (wf.fp16_ovfl())' in vop3
+    assert 'f32_to_f16_ovfl_simd' in vop3
+    assert 'util::f32_to_f16_mode' in vop3
+    assert 'wf.fp16_ovfl()' in vop3
+
+
 def test_local_true16_vop3_probe_is_guarded_before_dpp_cleanup(tmp_path):
     args = SimpleNamespace(
         multi=[f'rdna4:{_mrisa_dir() / "amdgpu_isa_rdna4.xml"}'],
@@ -2054,10 +2111,10 @@ def test_cdna3_generated_cvt_and_mfma_use_same_fnuz_format(
     assert 'util::bf8_e5m2_fnuz_to_f32' in cdna3_vop1
     assert 'util::fp8_e4m3_fnuz_to_f32' in cdna3_vop3
     assert 'util::bf8_e5m2_fnuz_to_f32' in cdna3_vop3
-    assert 'util::f32_to_fp8_e4m3_fnuz_rne' in cdna3_vop3
-    assert 'util::f32_to_bf8_e5m2_fnuz_rne' in cdna3_vop3
-    assert 'util::f32_to_fp8_e4m3_fnuz_sr' in cdna3_vop3
-    assert 'util::f32_to_bf8_e5m2_fnuz_sr' in cdna3_vop3
+    assert 'util::f32_to_fp8_e4m3_fnuz_rne_mode' in cdna3_vop3
+    assert 'util::f32_to_bf8_e5m2_fnuz_rne_mode' in cdna3_vop3
+    assert 'util::f32_to_fp8_e4m3_fnuz_sr_mode' in cdna3_vop3
+    assert 'util::f32_to_bf8_e5m2_fnuz_sr_mode' in cdna3_vop3
     assert 'amdgpu::smfmac_read_fp8_fnuz' in cdna3_vop3p
     assert 'amdgpu::smfmac_read_bf8_fnuz' in cdna3_vop3p
 
@@ -2078,11 +2135,15 @@ def test_cdna4_generated_cvt_keeps_ocp_format(
     assert 'util::bf8_e5m2_to_f32' in cdna4_vop1
     assert 'util::fp8_e4m3_to_f32' in cdna4_vop3
     assert 'util::bf8_e5m2_to_f32' in cdna4_vop3
-    assert 'util::f32_to_fp8_e4m3_rne' in cdna4_vop3
+    assert 'util::f32_to_fp8_e4m3_rne_mode' in cdna4_vop3
+    assert 'util::f32_to_bf8_e5m2_rne_mode' in cdna4_vop3
+    assert 'util::f32_to_fp8_e4m3_sr_mode' in cdna4_vop3
+    assert 'util::f32_to_bf8_e5m2_sr_mode' in cdna4_vop3
     assert 'util::fp8_e4m3_fnuz_to_f32' not in shared
     assert 'util::fp8_e4m3_fnuz_to_f32' not in cdna4_vop1
     assert 'util::fp8_e4m3_fnuz_to_f32' not in cdna4_vop3
-    assert 'util::f32_to_fp8_e4m3_fnuz_rne' not in cdna4_vop3
+    assert 'util::f32_to_fp8_e4m3_fnuz_rne_mode' not in cdna4_vop3
+    assert 'util::f32_to_bf8_e5m2_fnuz_rne_mode' not in cdna4_vop3
 
 
 def test_generated_vop3_dot2_true16_uses_true16_helpers(
@@ -2099,7 +2160,7 @@ def test_generated_vop3_dot2_true16_uses_true16_helpers(
     assert 'uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);' in body
     assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in body
     assert 'util::f16_to_f32' in body
-    assert 'util::f32_to_f16' in body
+    assert 'util::f32_to_f16_mode(result, wf.fp16_ovfl())' in body
     assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true)' in body
     assert 'throw util::UnimplementedInst' not in body
 
@@ -2280,29 +2341,233 @@ def test_generated_execute_shared_calls_have_definitions(amdgpu_generated_root: 
     assert not missing
 
 
-def test_gfx1250_helper_blocks_emit_hwreg_and_scaled_wmma_hooks():
+def test_gfx1250_helper_blocks_emit_scaled_wmma_hooks():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
         arch_name='gfx1250',
         profile=Gfx1250Profile(),
     )
 
-    hwreg = codegen._emit_hwreg_helpers()
-    assert 'HW_REG_WAVE_SCHED_MODE = 26' in hwreg
-    assert 'wf.wave_sched_mode_raw()' in hwreg
-    assert 'wf.set_wave_sched_mode_raw' in hwreg
-    assert '[[maybe_unused]] bool read_hwreg' in hwreg
-    assert '[[maybe_unused]] bool write_hwreg' in hwreg
-    assert 'HW_REG_IB_STS2_CLUSTER_ID_SHIFT = 6' in hwreg
-    assert 'wf.cluster_size() > 1 ? 1u : 0u' in hwreg
-    assert 'HW_REG_IB_STS2_WG_IN_CLUSTER_SHIFT = 21' in hwreg
-    assert 'wf.cluster_rank() & HW_REG_IB_STS2_WG_IN_CLUSTER_MASK' in hwreg
-
     assert codegen._supports_gfx1250_scaled_wmma_vop3px2()
     assert 'VWmmaScaleF32Vop3px2' in (codegen._emit_gfx1250_scaled_wmma_vop3px2_class())
     assert 'isWmmaScaleF32Vop3px2' in (
         codegen._emit_gfx1250_scaled_wmma_vop3px2_decoder_helpers()
     )
+
+
+@pytest.mark.parametrize(
+    ('arch_name', 'profile'),
+    [
+        ('cdna1', Cdna1Profile()),
+        ('cdna2', Cdna2Profile()),
+        ('cdna3', CdnaProfile()),
+        ('cdna4', CdnaProfile()),
+        ('rdna1', Rdna1Profile()),
+        ('rdna2', Rdna2Profile()),
+        ('rdna3', Rdna3Profile()),
+        ('rdna3_5', Rdna3_5Profile()),
+        ('rdna4', Rdna4Profile()),
+    ],
+)
+def test_mode_status_hwreg_semantics_call_central_vm_helpers(arch_name, profile):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name=arch_name,
+        profile=profile,
+        inst_encodings=[],
+        encoding_map={},
+    )
+    getreg_inst = Instruction(
+        'S_GETREG_B32',
+        'ENC_SOPK',
+        17,
+        [
+            Operand('sdst', 32, 'OPR_SDST', False, True, False, True, 1),
+            Operand('simm16', 16, 'OPR_HWREG', True, False, False, True, 2),
+        ],
+    )
+    setreg_inst = Instruction(
+        'S_SETREG_B32',
+        'ENC_SOPK',
+        18,
+        [
+            Operand('simm16', 16, 'OPR_HWREG', False, True, False, True, 1),
+            Operand('sdst', 32, 'OPR_SDST', True, False, False, True, 2),
+        ],
+    )
+    setreg_imm_inst = Instruction(
+        'S_SETREG_IMM32_B32',
+        'SOPK_INST_LITERAL',
+        20,
+        [Operand('simm16', 16, 'OPR_HWREG', False, True, False, True, 1)],
+        is_implied_literal_enc=True,
+    )
+
+    getreg = codegen._gen_execute_body(
+        getreg_inst, InstructionSemantics('S_GETREG_B32', 'scalar_getreg')
+    )
+    setreg = codegen._gen_execute_body(
+        setreg_inst, InstructionSemantics('S_SETREG_B32', 'scalar_setreg')
+    )
+    setreg_imm = codegen._gen_execute_body(
+        setreg_imm_inst,
+        InstructionSemantics('S_SETREG_IMM32_B32', 'scalar_setreg_imm'),
+    )
+
+    assert 'amdgpu::read_hwreg_field(wf, hwreg, reg_val)' in getreg
+    assert 'amdgpu::write_hwreg_field(wf, hwreg, src)' in setreg
+    assert 'amdgpu::write_hwreg_field(wf, hwreg, src)' in setreg_imm
+    assert 'wf.status_raw()' not in getreg
+    assert 'wf.set_status_raw' not in setreg
+    assert 'wf.set_status_raw' not in setreg_imm
+
+
+def test_hwreg_scalar_codegen_rejects_non_helper_profiles():
+    class NonHelperProfile(CdnaProfile):
+        @property
+        def use_hwreg_helpers(self):
+            return False
+
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='nonhelper',
+        profile=NonHelperProfile(),
+        inst_encodings=[],
+        encoding_map={},
+    )
+    instructions = [
+        (
+            Instruction(
+                'S_GETREG_B32',
+                'ENC_SOPK',
+                17,
+                [
+                    Operand('sdst', 32, 'OPR_SDST', False, True, False, True, 1),
+                    Operand('simm16', 16, 'OPR_HWREG', True, False, False, True, 2),
+                ],
+            ),
+            InstructionSemantics('S_GETREG_B32', 'scalar_getreg'),
+        ),
+        (
+            Instruction(
+                'S_SETREG_B32',
+                'ENC_SOPK',
+                18,
+                [
+                    Operand('simm16', 16, 'OPR_HWREG', False, True, False, True, 1),
+                    Operand('sdst', 32, 'OPR_SDST', True, False, False, True, 2),
+                ],
+            ),
+            InstructionSemantics('S_SETREG_B32', 'scalar_setreg'),
+        ),
+        (
+            Instruction(
+                'S_SETREG_IMM32_B32',
+                'SOPK_INST_LITERAL',
+                20,
+                [Operand('simm16', 16, 'OPR_HWREG', False, True, False, True, 1)],
+                is_implied_literal_enc=True,
+            ),
+            InstructionSemantics('S_SETREG_IMM32_B32', 'scalar_setreg_imm'),
+        ),
+    ]
+
+    for inst, semantics in instructions:
+        with pytest.raises(RuntimeError, match='use_hwreg_helpers'):
+            codegen._gen_execute_body(inst, semantics)
+
+
+def _hwreg_predefined_values(isa_name: str) -> dict[str, int]:
+    root = elem_tree.parse(_mrisa_dir() / f'amdgpu_isa_{isa_name}.xml').getroot()
+    for operand_type in root.iter('OperandType'):
+        if operand_type.findtext('OperandTypeName') != 'OPR_HWREG':
+            continue
+        values: dict[str, int] = {}
+        for predefined in operand_type.iter('PredefinedValue'):
+            name = predefined.findtext('Name')
+            value = predefined.findtext('Value')
+            if name is not None and value is not None:
+                values[name.lower()] = int(value)
+        return values
+    raise AssertionError(f'OPR_HWREG not found in {isa_name} XML')
+
+
+def _normalized_hwreg_xml_values(isa_name: str) -> dict[int, str]:
+    return {
+        value: name.removeprefix('hw_reg_').upper()
+        for name, value in _hwreg_predefined_values(isa_name).items()
+    }
+
+
+def _cpp_hwreg_table_values(source: str, table_name: str) -> dict[int, str]:
+    start = source.index(f'constexpr HwregDescriptor {table_name}[] = {{')
+    body = source[start : source.index('};', start)]
+    return {
+        int(match.group(1)): match.group(2)
+        for match in re.finditer(r'\{\s*(\d+),\s*"([^"]+)"', body)
+    }
+
+
+@pytest.mark.parametrize(
+    ('isa_name', 'profile'),
+    [
+        ('cdna1', Cdna1Profile()),
+        ('cdna2', Cdna2Profile()),
+        ('cdna3', CdnaProfile()),
+        ('cdna4', CdnaProfile()),
+        ('rdna1', Rdna1Profile()),
+        ('rdna2', Rdna2Profile()),
+        ('rdna3', Rdna3Profile()),
+        ('rdna3_5', Rdna3_5Profile()),
+        ('rdna4', Rdna4Profile()),
+    ],
+)
+def test_mode_status_hwreg_profiles_match_checked_in_xml(isa_name, profile):
+    values = _hwreg_predefined_values(isa_name)
+    mode_value = values.get('hw_reg_mode', values.get('hw_reg_wave_mode'))
+    status_value = values.get('hw_reg_status', values.get('hw_reg_wave_status'))
+
+    assert mode_value == 1
+    assert status_value == 2
+    assert profile.use_hwreg_helpers
+    assert profile.hwreg_mode_id == mode_value
+    assert profile.hwreg_status_id == status_value
+
+
+@pytest.mark.parametrize(
+    ('isa_name', 'table_name'),
+    [
+        ('cdna1', 'CDNA1_2_HWREGS'),
+        ('cdna2', 'CDNA1_2_HWREGS'),
+        ('cdna3', 'CDNA3_4_HWREGS'),
+        ('cdna4', 'CDNA3_4_HWREGS'),
+        ('rdna1', 'RDNA1_HWREGS'),
+        ('rdna2', 'RDNA2_HWREGS'),
+        ('rdna3', 'RDNA3_HWREGS'),
+        ('rdna3_5', 'RDNA3_HWREGS'),
+        ('rdna4', 'RDNA4_HWREGS'),
+    ],
+)
+def test_hwreg_descriptor_tables_cover_checked_in_xml(
+    rocjitsu_source_root: Path,
+    isa_name,
+    table_name,
+):
+    source = (
+        rocjitsu_source_root
+        / 'lib'
+        / 'rocjitsu'
+        / 'src'
+        / 'rocjitsu'
+        / 'vm'
+        / 'amdgpu'
+        / 'hwreg.cpp'
+    ).read_text()
+    xml_values = _normalized_hwreg_xml_values(isa_name)
+    cpp_values = _cpp_hwreg_table_values(source, table_name)
+
+    for value, name in xml_values.items():
+        assert cpp_values.get(value) == name
 
 
 def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):

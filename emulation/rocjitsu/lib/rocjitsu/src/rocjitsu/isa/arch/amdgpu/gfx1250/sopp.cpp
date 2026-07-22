@@ -10,460 +10,126 @@
 namespace rocjitsu {
 namespace gfx1250 {
 
-SNopSopp::SNopSopp(const MachineInst *inst)
-    : Sopp("s_nop", reinterpret_cast<const OpEncoding *>(inst), registered_exec_fn<SNopSopp>()),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+SNopSopp::SNopSopp(const MachineInst *inst) : Sopp("s_nop", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SNopSopp>()), simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
-SSethaltSopp::SSethaltSopp(const MachineInst *inst)
-    : Sopp("s_sethalt", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SSethaltSopp>()),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+SSethaltSopp::SSethaltSopp(const MachineInst *inst) : Sopp("s_sethalt", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SSethaltSopp>()), simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
-SSleepSopp::SSleepSopp(const MachineInst *inst)
-    : Sopp("s_sleep", reinterpret_cast<const OpEncoding *>(inst), registered_exec_fn<SSleepSopp>()),
-      simm16(16, OperandType::OPR_SLEEP, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+SSleepSopp::SSleepSopp(const MachineInst *inst) : Sopp("s_sleep", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SSleepSopp>()), simm16(16, OperandType::OPR_SLEEP, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
-SMonitorSleepSopp::SMonitorSleepSopp(const MachineInst *inst)
-    : Sopp("s_monitor_sleep", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SMonitorSleepSopp>()),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+SMonitorSleepSopp::SMonitorSleepSopp(const MachineInst *inst) : Sopp("s_monitor_sleep", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SMonitorSleepSopp>()), simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
-SClauseSopp::SClauseSopp(const MachineInst *inst)
-    : Sopp("s_clause", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SClauseSopp>()),
-      simm16(16, OperandType::OPR_CLAUSE, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+SClauseSopp::SClauseSopp(const MachineInst *inst) : Sopp("s_clause", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SClauseSopp>()), simm16(16, OperandType::OPR_CLAUSE, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
-SSetVgprMsbSopp::SSetVgprMsbSopp(const MachineInst *inst)
-    : Sopp("s_set_vgpr_msb", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SSetVgprMsbSopp>()),
-      simm16(16, OperandType::OPR_SET_VGPR_MSB,
-             reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+SSetVgprMsbSopp::SSetVgprMsbSopp(const MachineInst *inst) : Sopp("s_set_vgpr_msb", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SSetVgprMsbSopp>()), simm16(16, OperandType::OPR_SET_VGPR_MSB, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
-SDelayAluSopp::SDelayAluSopp(const MachineInst *inst)
-    : Sopp("s_delay_alu", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SDelayAluSopp>()),
-      simm16(16, OperandType::OPR_DELAY, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+SDelayAluSopp::SDelayAluSopp(const MachineInst *inst) : Sopp("s_delay_alu", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SDelayAluSopp>()), simm16(16, OperandType::OPR_DELAY, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
-SWaitAluSopp::SWaitAluSopp(const MachineInst *inst)
-    : Sopp("s_wait_alu", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SWaitAluSopp>()),
-      simm16(16, OperandType::OPR_WAIT_ALU, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-  flags_ |= WAITCNT;
-}
+SWaitAluSopp::SWaitAluSopp(const MachineInst *inst) : Sopp("s_wait_alu", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SWaitAluSopp>()), simm16(16, OperandType::OPR_WAIT_ALU, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;flags_ |= WAITCNT;}
 
-SWaitIdleSopp::SWaitIdleSopp(const MachineInst *inst)
-    : Sopp("s_wait_idle", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SWaitIdleSopp>()) {
-  num_src_ = 0;
-  num_dst_ = 0;
-  flags_ |= WAITCNT;
-}
+SWaitIdleSopp::SWaitIdleSopp(const MachineInst *inst) : Sopp("s_wait_idle", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SWaitIdleSopp>()) {num_src_ = 0;num_dst_ = 0;flags_ |= WAITCNT;}
 
-STrapSopp::STrapSopp(const MachineInst *inst)
-    : Sopp("s_trap", reinterpret_cast<const OpEncoding *>(inst), registered_exec_fn<STrapSopp>()),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+STrapSopp::STrapSopp(const MachineInst *inst) : Sopp("s_trap", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<STrapSopp>()), simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
-SRoundModeSopp::SRoundModeSopp(const MachineInst *inst)
-    : Sopp("s_round_mode", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SRoundModeSopp>()),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+SRoundModeSopp::SRoundModeSopp(const MachineInst *inst) : Sopp("s_round_mode", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SRoundModeSopp>()), simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
-SDenormModeSopp::SDenormModeSopp(const MachineInst *inst)
-    : Sopp("s_denorm_mode", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SDenormModeSopp>()),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+SDenormModeSopp::SDenormModeSopp(const MachineInst *inst) : Sopp("s_denorm_mode", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SDenormModeSopp>()), simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
-SBarrierWaitSopp::SBarrierWaitSopp(const MachineInst *inst)
-    : Sopp("s_barrier_wait", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SBarrierWaitSopp>()),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-  flags_ |= BARRIER;
-}
+SBarrierWaitSopp::SBarrierWaitSopp(const MachineInst *inst) : Sopp("s_barrier_wait", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SBarrierWaitSopp>()), simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;flags_ |= BARRIER;}
 
-SBarrierLeaveSopp::SBarrierLeaveSopp(const MachineInst *inst)
-    : Sopp("s_barrier_leave", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SBarrierLeaveSopp>()),
-      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
-  dst_operands_[0] = &scc;
-  num_src_ = 0;
-  num_dst_ = 1;
-  scc.apply_fieldless_caps(false, false, false);
-}
+SBarrierLeaveSopp::SBarrierLeaveSopp(const MachineInst *inst) : Sopp("s_barrier_leave", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SBarrierLeaveSopp>()), scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {dst_operands_[0] = &scc;num_src_ = 0;num_dst_ = 1;scc.apply_fieldless_caps(false, false, false);}
 
-SCodeEndSopp::SCodeEndSopp(const MachineInst *inst)
-    : Sopp("s_code_end", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SCodeEndSopp>()) {
-  num_src_ = 0;
-  num_dst_ = 0;
-}
+SCodeEndSopp::SCodeEndSopp(const MachineInst *inst) : Sopp("s_code_end", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SCodeEndSopp>()) {num_src_ = 0;num_dst_ = 0;}
 
-SBranchSopp::SBranchSopp(const MachineInst *inst)
-    : Sopp("s_branch", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SBranchSopp>()),
-      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-  flags_ |= BRANCH;
-}
+SBranchSopp::SBranchSopp(const MachineInst *inst) : Sopp("s_branch", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SBranchSopp>()), simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;flags_ |= BRANCH;}
 
 std::optional<int64_t> SBranchSopp::branch_offset_bytes() const {
   // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
   return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
-SCbranchScc0Sopp::SCbranchScc0Sopp(const MachineInst *inst)
-    : Sopp("s_cbranch_scc0", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SCbranchScc0Sopp>()),
-      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
-      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
-  src_operands_[0] = &simm16;
-  src_operands_[1] = &scc;
-  num_src_ = 2;
-  num_dst_ = 0;
-  scc.apply_fieldless_caps(false, false, false);
-  flags_ |= COND_BRANCH;
-}
+SCbranchScc0Sopp::SCbranchScc0Sopp(const MachineInst *inst) : Sopp("s_cbranch_scc0", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SCbranchScc0Sopp>()), simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding*>(inst)->simm16), scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {src_operands_[0] = &simm16;src_operands_[1] = &scc;num_src_ = 2;num_dst_ = 0;scc.apply_fieldless_caps(false, false, false);flags_ |= COND_BRANCH;}
 
 std::optional<int64_t> SCbranchScc0Sopp::branch_offset_bytes() const {
   // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
   return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
-SCbranchScc1Sopp::SCbranchScc1Sopp(const MachineInst *inst)
-    : Sopp("s_cbranch_scc1", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SCbranchScc1Sopp>()),
-      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
-      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
-  src_operands_[0] = &simm16;
-  src_operands_[1] = &scc;
-  num_src_ = 2;
-  num_dst_ = 0;
-  scc.apply_fieldless_caps(false, false, false);
-  flags_ |= COND_BRANCH;
-}
+SCbranchScc1Sopp::SCbranchScc1Sopp(const MachineInst *inst) : Sopp("s_cbranch_scc1", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SCbranchScc1Sopp>()), simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding*>(inst)->simm16), scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {src_operands_[0] = &simm16;src_operands_[1] = &scc;num_src_ = 2;num_dst_ = 0;scc.apply_fieldless_caps(false, false, false);flags_ |= COND_BRANCH;}
 
 std::optional<int64_t> SCbranchScc1Sopp::branch_offset_bytes() const {
   // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
   return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
-SCbranchVcczSopp::SCbranchVcczSopp(const MachineInst *inst)
-    : Sopp("s_cbranch_vccz", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SCbranchVcczSopp>()),
-      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
-      vcc(64, OperandType::OPR_VCC, 106) {
-  src_operands_[0] = &simm16;
-  src_operands_[1] = &vcc;
-  num_src_ = 2;
-  num_dst_ = 0;
-  vcc.apply_fieldless_caps(false, false, false);
-  flags_ |= COND_BRANCH;
-}
+SCbranchVcczSopp::SCbranchVcczSopp(const MachineInst *inst) : Sopp("s_cbranch_vccz", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SCbranchVcczSopp>()), simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding*>(inst)->simm16), vcc(64, OperandType::OPR_VCC, 106) {src_operands_[0] = &simm16;src_operands_[1] = &vcc;num_src_ = 2;num_dst_ = 0;vcc.apply_fieldless_caps(false, false, false);flags_ |= COND_BRANCH;}
 
 std::optional<int64_t> SCbranchVcczSopp::branch_offset_bytes() const {
   // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
   return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
-SCbranchVccnzSopp::SCbranchVccnzSopp(const MachineInst *inst)
-    : Sopp("s_cbranch_vccnz", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SCbranchVccnzSopp>()),
-      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
-      vcc(64, OperandType::OPR_VCC, 106) {
-  src_operands_[0] = &simm16;
-  src_operands_[1] = &vcc;
-  num_src_ = 2;
-  num_dst_ = 0;
-  vcc.apply_fieldless_caps(false, false, false);
-  flags_ |= COND_BRANCH;
-}
+SCbranchVccnzSopp::SCbranchVccnzSopp(const MachineInst *inst) : Sopp("s_cbranch_vccnz", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SCbranchVccnzSopp>()), simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding*>(inst)->simm16), vcc(64, OperandType::OPR_VCC, 106) {src_operands_[0] = &simm16;src_operands_[1] = &vcc;num_src_ = 2;num_dst_ = 0;vcc.apply_fieldless_caps(false, false, false);flags_ |= COND_BRANCH;}
 
 std::optional<int64_t> SCbranchVccnzSopp::branch_offset_bytes() const {
   // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
   return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
-SCbranchExeczSopp::SCbranchExeczSopp(const MachineInst *inst)
-    : Sopp("s_cbranch_execz", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SCbranchExeczSopp>()),
-      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
-      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
-  src_operands_[0] = &simm16;
-  src_operands_[1] = &sdst_exec;
-  num_src_ = 2;
-  num_dst_ = 0;
-  sdst_exec.apply_fieldless_caps(false, false, false);
-  flags_ |= COND_BRANCH;
-}
+SCbranchExeczSopp::SCbranchExeczSopp(const MachineInst *inst) : Sopp("s_cbranch_execz", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SCbranchExeczSopp>()), simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding*>(inst)->simm16), sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {src_operands_[0] = &simm16;src_operands_[1] = &sdst_exec;num_src_ = 2;num_dst_ = 0;sdst_exec.apply_fieldless_caps(false, false, false);flags_ |= COND_BRANCH;}
 
 std::optional<int64_t> SCbranchExeczSopp::branch_offset_bytes() const {
   // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
   return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
-SCbranchExecnzSopp::SCbranchExecnzSopp(const MachineInst *inst)
-    : Sopp("s_cbranch_execnz", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SCbranchExecnzSopp>()),
-      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
-      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
-  src_operands_[0] = &simm16;
-  src_operands_[1] = &sdst_exec;
-  num_src_ = 2;
-  num_dst_ = 0;
-  sdst_exec.apply_fieldless_caps(false, false, false);
-  flags_ |= COND_BRANCH;
-}
+SCbranchExecnzSopp::SCbranchExecnzSopp(const MachineInst *inst) : Sopp("s_cbranch_execnz", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SCbranchExecnzSopp>()), simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding*>(inst)->simm16), sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {src_operands_[0] = &simm16;src_operands_[1] = &sdst_exec;num_src_ = 2;num_dst_ = 0;sdst_exec.apply_fieldless_caps(false, false, false);flags_ |= COND_BRANCH;}
 
 std::optional<int64_t> SCbranchExecnzSopp::branch_offset_bytes() const {
   // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
   return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
-SEndpgmSopp::SEndpgmSopp(const MachineInst *inst)
-    : Sopp("s_endpgm", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SEndpgmSopp>()) {
-  num_src_ = 0;
-  num_dst_ = 0;
-  flags_ |= PROGRAM_TERMINATOR;
-}
+SEndpgmSopp::SEndpgmSopp(const MachineInst *inst) : Sopp("s_endpgm", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SEndpgmSopp>()) {num_src_ = 0;num_dst_ = 0;flags_ |= PROGRAM_TERMINATOR;}
 
-SEndpgmSavedSopp::SEndpgmSavedSopp(const MachineInst *inst)
-    : Sopp("s_endpgm_saved", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SEndpgmSavedSopp>()) {
-  num_src_ = 0;
-  num_dst_ = 0;
-  flags_ |= PROGRAM_TERMINATOR;
-}
+SEndpgmSavedSopp::SEndpgmSavedSopp(const MachineInst *inst) : Sopp("s_endpgm_saved", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SEndpgmSavedSopp>()) {num_src_ = 0;num_dst_ = 0;flags_ |= PROGRAM_TERMINATOR;}
 
-SWakeupSopp::SWakeupSopp(const MachineInst *inst)
-    : Sopp("s_wakeup", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SWakeupSopp>()) {
-  num_src_ = 0;
-  num_dst_ = 0;
-}
+SWakeupSopp::SWakeupSopp(const MachineInst *inst) : Sopp("s_wakeup", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SWakeupSopp>()) {num_src_ = 0;num_dst_ = 0;}
 
-SSetprioSopp::SSetprioSopp(const MachineInst *inst)
-    : Sopp("s_setprio", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SSetprioSopp>()),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+SSetprioSopp::SSetprioSopp(const MachineInst *inst) : Sopp("s_setprio", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SSetprioSopp>()), simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
-SSendmsgSopp::SSendmsgSopp(const MachineInst *inst)
-    : Sopp("s_sendmsg", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SSendmsgSopp>()),
-      simm16(16, OperandType::OPR_SENDMSG, reinterpret_cast<const OpEncoding *>(inst)->simm16),
-      m0(32, OperandType::OPR_SDST_M0, 125) {
-  src_operands_[0] = &simm16;
-  src_operands_[1] = &m0;
-  num_src_ = 2;
-  num_dst_ = 0;
-  m0.apply_fieldless_caps(false, false, false);
-}
+SSendmsgSopp::SSendmsgSopp(const MachineInst *inst) : Sopp("s_sendmsg", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SSendmsgSopp>()), simm16(16, OperandType::OPR_SENDMSG, reinterpret_cast<const OpEncoding*>(inst)->simm16), m0(32, OperandType::OPR_SDST_M0, 125) {src_operands_[0] = &simm16;src_operands_[1] = &m0;num_src_ = 2;num_dst_ = 0;m0.apply_fieldless_caps(false, false, false);}
 
-SSendmsghaltSopp::SSendmsghaltSopp(const MachineInst *inst)
-    : Sopp("s_sendmsghalt", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SSendmsghaltSopp>()),
-      simm16(16, OperandType::OPR_SENDMSG, reinterpret_cast<const OpEncoding *>(inst)->simm16),
-      m0(32, OperandType::OPR_SDST_M0, 125) {
-  src_operands_[0] = &simm16;
-  src_operands_[1] = &m0;
-  num_src_ = 2;
-  num_dst_ = 0;
-  m0.apply_fieldless_caps(false, false, false);
-}
+SSendmsghaltSopp::SSendmsghaltSopp(const MachineInst *inst) : Sopp("s_sendmsghalt", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SSendmsghaltSopp>()), simm16(16, OperandType::OPR_SENDMSG, reinterpret_cast<const OpEncoding*>(inst)->simm16), m0(32, OperandType::OPR_SDST_M0, 125) {src_operands_[0] = &simm16;src_operands_[1] = &m0;num_src_ = 2;num_dst_ = 0;m0.apply_fieldless_caps(false, false, false);}
 
-SIncperflevelSopp::SIncperflevelSopp(const MachineInst *inst)
-    : Sopp("s_incperflevel", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SIncperflevelSopp>()),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+SIncperflevelSopp::SIncperflevelSopp(const MachineInst *inst) : Sopp("s_incperflevel", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SIncperflevelSopp>()), simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
-SDecperflevelSopp::SDecperflevelSopp(const MachineInst *inst)
-    : Sopp("s_decperflevel", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SDecperflevelSopp>()),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+SDecperflevelSopp::SDecperflevelSopp(const MachineInst *inst) : Sopp("s_decperflevel", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SDecperflevelSopp>()), simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
-STtracedataSopp::STtracedataSopp(const MachineInst *inst)
-    : Sopp("s_ttracedata", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<STtracedataSopp>()),
-      m0(32, OperandType::OPR_SDST_M0, 125) {
-  src_operands_[0] = &m0;
-  num_src_ = 1;
-  num_dst_ = 0;
-  m0.apply_fieldless_caps(false, false, false);
-}
+STtracedataSopp::STtracedataSopp(const MachineInst *inst) : Sopp("s_ttracedata", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<STtracedataSopp>()), m0(32, OperandType::OPR_SDST_M0, 125) {src_operands_[0] = &m0;num_src_ = 1;num_dst_ = 0;m0.apply_fieldless_caps(false, false, false);}
 
-STtracedataImmSopp::STtracedataImmSopp(const MachineInst *inst)
-    : Sopp("s_ttracedata_imm", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<STtracedataImmSopp>()),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+STtracedataImmSopp::STtracedataImmSopp(const MachineInst *inst) : Sopp("s_ttracedata_imm", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<STtracedataImmSopp>()), simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
-SIcacheInvSopp::SIcacheInvSopp(const MachineInst *inst)
-    : Sopp("s_icache_inv", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SIcacheInvSopp>()) {
-  num_src_ = 0;
-  num_dst_ = 0;
-}
+SIcacheInvSopp::SIcacheInvSopp(const MachineInst *inst) : Sopp("s_icache_inv", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SIcacheInvSopp>()) {num_src_ = 0;num_dst_ = 0;}
 
-SSetprioIncWgSopp::SSetprioIncWgSopp(const MachineInst *inst)
-    : Sopp("s_setprio_inc_wg", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SSetprioIncWgSopp>()),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+SSetprioIncWgSopp::SSetprioIncWgSopp(const MachineInst *inst) : Sopp("s_setprio_inc_wg", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SSetprioIncWgSopp>()), simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;}
 
-SWaitLoadcntSopp::SWaitLoadcntSopp(const MachineInst *inst)
-    : Sopp("s_wait_loadcnt", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SWaitLoadcntSopp>()),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-  flags_ |= WAITCNT;
-}
+SWaitLoadcntSopp::SWaitLoadcntSopp(const MachineInst *inst) : Sopp("s_wait_loadcnt", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SWaitLoadcntSopp>()), simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;flags_ |= WAITCNT;}
 
-SWaitStorecntSopp::SWaitStorecntSopp(const MachineInst *inst)
-    : Sopp("s_wait_storecnt", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SWaitStorecntSopp>()),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-  flags_ |= WAITCNT;
-}
+SWaitStorecntSopp::SWaitStorecntSopp(const MachineInst *inst) : Sopp("s_wait_storecnt", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SWaitStorecntSopp>()), simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;flags_ |= WAITCNT;}
 
-SWaitXcntSopp::SWaitXcntSopp(const MachineInst *inst)
-    : Sopp("s_wait_xcnt", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SWaitXcntSopp>()),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-  flags_ |= WAITCNT;
-}
+SWaitXcntSopp::SWaitXcntSopp(const MachineInst *inst) : Sopp("s_wait_xcnt", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SWaitXcntSopp>()), simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;flags_ |= WAITCNT;}
 
-SWaitDscntSopp::SWaitDscntSopp(const MachineInst *inst)
-    : Sopp("s_wait_dscnt", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SWaitDscntSopp>()),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-  flags_ |= WAITCNT;
-}
+SWaitDscntSopp::SWaitDscntSopp(const MachineInst *inst) : Sopp("s_wait_dscnt", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SWaitDscntSopp>()), simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;flags_ |= WAITCNT;}
 
-SWaitKmcntSopp::SWaitKmcntSopp(const MachineInst *inst)
-    : Sopp("s_wait_kmcnt", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SWaitKmcntSopp>()),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-  flags_ |= WAITCNT;
-}
+SWaitKmcntSopp::SWaitKmcntSopp(const MachineInst *inst) : Sopp("s_wait_kmcnt", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SWaitKmcntSopp>()), simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;flags_ |= WAITCNT;}
 
-SWaitLoadcntDscntSopp::SWaitLoadcntDscntSopp(const MachineInst *inst)
-    : Sopp("s_wait_loadcnt_dscnt", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SWaitLoadcntDscntSopp>()),
-      simm16(16, OperandType::OPR_WAIT_MEM_DS, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-  flags_ |= WAITCNT;
-}
+SWaitLoadcntDscntSopp::SWaitLoadcntDscntSopp(const MachineInst *inst) : Sopp("s_wait_loadcnt_dscnt", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SWaitLoadcntDscntSopp>()), simm16(16, OperandType::OPR_WAIT_MEM_DS, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;flags_ |= WAITCNT;}
 
-SWaitStorecntDscntSopp::SWaitStorecntDscntSopp(const MachineInst *inst)
-    : Sopp("s_wait_storecnt_dscnt", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SWaitStorecntDscntSopp>()),
-      simm16(16, OperandType::OPR_WAIT_MEM_DS, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-  flags_ |= WAITCNT;
-}
+SWaitStorecntDscntSopp::SWaitStorecntDscntSopp(const MachineInst *inst) : Sopp("s_wait_storecnt_dscnt", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SWaitStorecntDscntSopp>()), simm16(16, OperandType::OPR_WAIT_MEM_DS, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;flags_ |= WAITCNT;}
 
-SWaitAsynccntSopp::SWaitAsynccntSopp(const MachineInst *inst)
-    : Sopp("s_wait_asynccnt", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SWaitAsynccntSopp>()),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-  flags_ |= WAITCNT;
-}
+SWaitAsynccntSopp::SWaitAsynccntSopp(const MachineInst *inst) : Sopp("s_wait_asynccnt", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SWaitAsynccntSopp>()), simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;flags_ |= WAITCNT;}
 
-SWaitTensorcntSopp::SWaitTensorcntSopp(const MachineInst *inst)
-    : Sopp("s_wait_tensorcnt", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SWaitTensorcntSopp>()),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
-  src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 0;
-  flags_ |= WAITCNT;
-}
+SWaitTensorcntSopp::SWaitTensorcntSopp(const MachineInst *inst) : Sopp("s_wait_tensorcnt", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<SWaitTensorcntSopp>()), simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding*>(inst)->simm16) {src_operands_[0] = &simm16;num_src_ = 1;num_dst_ = 0;flags_ |= WAITCNT;}
 
 } // namespace gfx1250
 } // namespace rocjitsu

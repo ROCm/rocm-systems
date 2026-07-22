@@ -14,223 +14,248 @@
 namespace rocjitsu {
 namespace rdna3_5 {
 
-class SMovkI32Sopk : public Sopk {
-public:
-  SMovkI32Sopk(const MachineInst *inst);
+class SMovkI32Sopk : public Sopk
+{
+  public:
+   SMovkI32Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
-};
+} ;
 
-class SVersionSopk : public Sopk {
-public:
-  SVersionSopk(const MachineInst *inst);
+class SVersionSopk : public Sopk
+{
+  public:
+   SVersionSopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class SCmovkI32Sopk : public Sopk {
-public:
-  SCmovkI32Sopk(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand sdst;
-  Operand simm16;
-  Operand scc;
-};
-
-class SCmpkEqI32Sopk : public Sopk {
-public:
-  SCmpkEqI32Sopk(const MachineInst *inst);
+class SCmovkI32Sopk : public Sopk
+{
+  public:
+   SCmovkI32Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
   Operand scc;
-};
+} ;
 
-class SCmpkLgI32Sopk : public Sopk {
-public:
-  SCmpkLgI32Sopk(const MachineInst *inst);
+class SCmpkEqI32Sopk : public Sopk
+{
+  public:
+   SCmpkEqI32Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
   Operand scc;
-};
+} ;
 
-class SCmpkGtI32Sopk : public Sopk {
-public:
-  SCmpkGtI32Sopk(const MachineInst *inst);
+class SCmpkLgI32Sopk : public Sopk
+{
+  public:
+   SCmpkLgI32Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
   Operand scc;
-};
+} ;
 
-class SCmpkGeI32Sopk : public Sopk {
-public:
-  SCmpkGeI32Sopk(const MachineInst *inst);
+class SCmpkGtI32Sopk : public Sopk
+{
+  public:
+   SCmpkGtI32Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
   Operand scc;
-};
+} ;
 
-class SCmpkLtI32Sopk : public Sopk {
-public:
-  SCmpkLtI32Sopk(const MachineInst *inst);
+class SCmpkGeI32Sopk : public Sopk
+{
+  public:
+   SCmpkGeI32Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
   Operand scc;
-};
+} ;
 
-class SCmpkLeI32Sopk : public Sopk {
-public:
-  SCmpkLeI32Sopk(const MachineInst *inst);
+class SCmpkLtI32Sopk : public Sopk
+{
+  public:
+   SCmpkLtI32Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
   Operand scc;
-};
+} ;
 
-class SCmpkEqU32Sopk : public Sopk {
-public:
-  SCmpkEqU32Sopk(const MachineInst *inst);
+class SCmpkLeI32Sopk : public Sopk
+{
+  public:
+   SCmpkLeI32Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
   Operand scc;
-};
+} ;
 
-class SCmpkLgU32Sopk : public Sopk {
-public:
-  SCmpkLgU32Sopk(const MachineInst *inst);
+class SCmpkEqU32Sopk : public Sopk
+{
+  public:
+   SCmpkEqU32Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
   Operand scc;
-};
+} ;
 
-class SCmpkGtU32Sopk : public Sopk {
-public:
-  SCmpkGtU32Sopk(const MachineInst *inst);
+class SCmpkLgU32Sopk : public Sopk
+{
+  public:
+   SCmpkLgU32Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
   Operand scc;
-};
+} ;
 
-class SCmpkGeU32Sopk : public Sopk {
-public:
-  SCmpkGeU32Sopk(const MachineInst *inst);
+class SCmpkGtU32Sopk : public Sopk
+{
+  public:
+   SCmpkGtU32Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
   Operand scc;
-};
+} ;
 
-class SCmpkLtU32Sopk : public Sopk {
-public:
-  SCmpkLtU32Sopk(const MachineInst *inst);
+class SCmpkGeU32Sopk : public Sopk
+{
+  public:
+   SCmpkGeU32Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
   Operand scc;
-};
+} ;
 
-class SCmpkLeU32Sopk : public Sopk {
-public:
-  SCmpkLeU32Sopk(const MachineInst *inst);
+class SCmpkLtU32Sopk : public Sopk
+{
+  public:
+   SCmpkLtU32Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
   Operand scc;
-};
+} ;
 
-class SAddkI32Sopk : public Sopk {
-public:
-  SAddkI32Sopk(const MachineInst *inst);
+class SCmpkLeU32Sopk : public Sopk
+{
+  public:
+   SCmpkLeU32Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
   Operand scc;
-};
+} ;
 
-class SMulkI32Sopk : public Sopk {
-public:
-  SMulkI32Sopk(const MachineInst *inst);
+class SAddkI32Sopk : public Sopk
+{
+  public:
+   SAddkI32Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
-};
+  Operand scc;
+} ;
 
-class SGetregB32Sopk : public Sopk {
-public:
-  SGetregB32Sopk(const MachineInst *inst);
+class SMulkI32Sopk : public Sopk
+{
+  public:
+   SMulkI32Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
-};
+} ;
 
-class SSetregB32Sopk : public Sopk {
-public:
-  SSetregB32Sopk(const MachineInst *inst);
+class SGetregB32Sopk : public Sopk
+{
+  public:
+   SGetregB32Sopk(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand sdst;
+  Operand simm16;
+} ;
+
+class SSetregB32Sopk : public Sopk
+{
+  public:
+   SSetregB32Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   Operand simm16;
   Operand sdst;
-};
+} ;
 
-class SSetregImm32B32Sopk : public Sopk {
-public:
-  SSetregImm32B32Sopk(const MachineInst *inst);
+class SSetregImm32B32Sopk : public Sopk
+{
+  public:
+   SSetregImm32B32Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   Operand simm16;
   Operand simm32;
-};
+} ;
 
-class SCallB64Sopk : public Sopk {
-public:
-  SCallB64Sopk(const MachineInst *inst);
+class SCallB64Sopk : public Sopk
+{
+  public:
+   SCallB64Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   std::optional<int64_t> branch_offset_bytes() const override;
   Operand sdst;
   Operand simm16;
   Operand pc;
   Operand pc_in;
-};
+} ;
 
-class SWaitcntVscntSopk : public Sopk {
-public:
-  SWaitcntVscntSopk(const MachineInst *inst);
+class SWaitcntVscntSopk : public Sopk
+{
+  public:
+   SWaitcntVscntSopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
-};
+} ;
 
-class SWaitcntVmcntSopk : public Sopk {
-public:
-  SWaitcntVmcntSopk(const MachineInst *inst);
+class SWaitcntVmcntSopk : public Sopk
+{
+  public:
+   SWaitcntVmcntSopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
-};
+} ;
 
-class SWaitcntExpcntSopk : public Sopk {
-public:
-  SWaitcntExpcntSopk(const MachineInst *inst);
+class SWaitcntExpcntSopk : public Sopk
+{
+  public:
+   SWaitcntExpcntSopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
-};
+} ;
 
-class SWaitcntLgkmcntSopk : public Sopk {
-public:
-  SWaitcntLgkmcntSopk(const MachineInst *inst);
+class SWaitcntLgkmcntSopk : public Sopk
+{
+  public:
+   SWaitcntLgkmcntSopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
-};
+} ;
 
 } // namespace rdna3_5
 } // namespace rocjitsu

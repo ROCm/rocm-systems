@@ -14,290 +14,274 @@
 namespace rocjitsu {
 namespace gfx1250 {
 
-class FlatLoadU8Vflat : public Vflat {
-public:
-  FlatLoadU8Vflat(const MachineInst *inst);
+class FlatLoadU8Vflat : public Vflat
+{
+  public:
+   FlatLoadU8Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatLoadI8Vflat : public Vflat {
-public:
-  FlatLoadI8Vflat(const MachineInst *inst);
+class FlatLoadI8Vflat : public Vflat
+{
+  public:
+   FlatLoadI8Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatLoadU16Vflat : public Vflat {
-public:
-  FlatLoadU16Vflat(const MachineInst *inst);
+class FlatLoadU16Vflat : public Vflat
+{
+  public:
+   FlatLoadU16Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatLoadI16Vflat : public Vflat {
-public:
-  FlatLoadI16Vflat(const MachineInst *inst);
+class FlatLoadI16Vflat : public Vflat
+{
+  public:
+   FlatLoadI16Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatLoadB32Vflat : public Vflat {
-public:
-  FlatLoadB32Vflat(const MachineInst *inst);
+class FlatLoadB32Vflat : public Vflat
+{
+  public:
+   FlatLoadB32Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatLoadB64Vflat : public Vflat {
-public:
-  FlatLoadB64Vflat(const MachineInst *inst);
+class FlatLoadB64Vflat : public Vflat
+{
+  public:
+   FlatLoadB64Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatLoadB96Vflat : public Vflat {
-public:
-  FlatLoadB96Vflat(const MachineInst *inst);
+class FlatLoadB96Vflat : public Vflat
+{
+  public:
+   FlatLoadB96Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatLoadB128Vflat : public Vflat {
-public:
-  FlatLoadB128Vflat(const MachineInst *inst);
+class FlatLoadB128Vflat : public Vflat
+{
+  public:
+   FlatLoadB128Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatStoreB8Vflat : public Vflat {
-public:
-  FlatStoreB8Vflat(const MachineInst *inst);
+class FlatStoreB8Vflat : public Vflat
+{
+  public:
+   FlatStoreB8Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatStoreB16Vflat : public Vflat {
-public:
-  FlatStoreB16Vflat(const MachineInst *inst);
+class FlatStoreB16Vflat : public Vflat
+{
+  public:
+   FlatStoreB16Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatStoreB32Vflat : public Vflat {
-public:
-  FlatStoreB32Vflat(const MachineInst *inst);
+class FlatStoreB32Vflat : public Vflat
+{
+  public:
+   FlatStoreB32Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatStoreB64Vflat : public Vflat {
-public:
-  FlatStoreB64Vflat(const MachineInst *inst);
+class FlatStoreB64Vflat : public Vflat
+{
+  public:
+   FlatStoreB64Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatStoreB96Vflat : public Vflat {
-public:
-  FlatStoreB96Vflat(const MachineInst *inst);
+class FlatStoreB96Vflat : public Vflat
+{
+  public:
+   FlatStoreB96Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatStoreB128Vflat : public Vflat {
-public:
-  FlatStoreB128Vflat(const MachineInst *inst);
+class FlatStoreB128Vflat : public Vflat
+{
+  public:
+   FlatStoreB128Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatLoadD16U8Vflat : public Vflat {
-public:
-  FlatLoadD16U8Vflat(const MachineInst *inst);
+class FlatLoadD16U8Vflat : public Vflat
+{
+  public:
+   FlatLoadD16U8Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatLoadD16I8Vflat : public Vflat {
-public:
-  FlatLoadD16I8Vflat(const MachineInst *inst);
+class FlatLoadD16I8Vflat : public Vflat
+{
+  public:
+   FlatLoadD16I8Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatLoadD16B16Vflat : public Vflat {
-public:
-  FlatLoadD16B16Vflat(const MachineInst *inst);
+class FlatLoadD16B16Vflat : public Vflat
+{
+  public:
+   FlatLoadD16B16Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatLoadD16HiU8Vflat : public Vflat {
-public:
-  FlatLoadD16HiU8Vflat(const MachineInst *inst);
+class FlatLoadD16HiU8Vflat : public Vflat
+{
+  public:
+   FlatLoadD16HiU8Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatLoadD16HiI8Vflat : public Vflat {
-public:
-  FlatLoadD16HiI8Vflat(const MachineInst *inst);
+class FlatLoadD16HiI8Vflat : public Vflat
+{
+  public:
+   FlatLoadD16HiI8Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatLoadD16HiB16Vflat : public Vflat {
-public:
-  FlatLoadD16HiB16Vflat(const MachineInst *inst);
+class FlatLoadD16HiB16Vflat : public Vflat
+{
+  public:
+   FlatLoadD16HiB16Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatStoreD16HiB8Vflat : public Vflat {
-public:
-  FlatStoreD16HiB8Vflat(const MachineInst *inst);
+class FlatStoreD16HiB8Vflat : public Vflat
+{
+  public:
+   FlatStoreD16HiB8Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatStoreD16HiB16Vflat : public Vflat {
-public:
-  FlatStoreD16HiB16Vflat(const MachineInst *inst);
+class FlatStoreD16HiB16Vflat : public Vflat
+{
+  public:
+   FlatStoreD16HiB16Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicSwapB32Vflat : public Vflat {
-public:
-  FlatAtomicSwapB32Vflat(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand vaddr;
-  Operand vsrc;
-  Operand saddr;
-  Operand gpumem;
-  Operand gpumem_in;
-  static const bool execute_registered_;
-};
-
-class FlatAtomicCmpswapB32Vflat : public Vflat {
-public:
-  FlatAtomicCmpswapB32Vflat(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand vaddr;
-  Operand vsrc;
-  Operand saddr;
-  Operand gpumem;
-  Operand gpumem_in;
-  static const bool execute_registered_;
-};
-
-class FlatAtomicAddU32Vflat : public Vflat {
-public:
-  FlatAtomicAddU32Vflat(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand vaddr;
-  Operand vsrc;
-  Operand saddr;
-  Operand gpumem;
-  Operand gpumem_in;
-  static const bool execute_registered_;
-};
-
-class FlatAtomicSubU32Vflat : public Vflat {
-public:
-  FlatAtomicSubU32Vflat(const MachineInst *inst);
+class FlatAtomicSwapB32Vflat : public Vflat
+{
+  public:
+   FlatAtomicSwapB32Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -306,11 +290,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicSubClampU32Vflat : public Vflat {
-public:
-  FlatAtomicSubClampU32Vflat(const MachineInst *inst);
+class FlatAtomicCmpswapB32Vflat : public Vflat
+{
+  public:
+   FlatAtomicCmpswapB32Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -319,11 +304,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicMinI32Vflat : public Vflat {
-public:
-  FlatAtomicMinI32Vflat(const MachineInst *inst);
+class FlatAtomicAddU32Vflat : public Vflat
+{
+  public:
+   FlatAtomicAddU32Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -332,11 +318,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicMinU32Vflat : public Vflat {
-public:
-  FlatAtomicMinU32Vflat(const MachineInst *inst);
+class FlatAtomicSubU32Vflat : public Vflat
+{
+  public:
+   FlatAtomicSubU32Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -345,11 +332,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicMaxI32Vflat : public Vflat {
-public:
-  FlatAtomicMaxI32Vflat(const MachineInst *inst);
+class FlatAtomicSubClampU32Vflat : public Vflat
+{
+  public:
+   FlatAtomicSubClampU32Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -358,11 +346,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicMaxU32Vflat : public Vflat {
-public:
-  FlatAtomicMaxU32Vflat(const MachineInst *inst);
+class FlatAtomicMinI32Vflat : public Vflat
+{
+  public:
+   FlatAtomicMinI32Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -371,11 +360,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicAndB32Vflat : public Vflat {
-public:
-  FlatAtomicAndB32Vflat(const MachineInst *inst);
+class FlatAtomicMinU32Vflat : public Vflat
+{
+  public:
+   FlatAtomicMinU32Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -384,11 +374,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicOrB32Vflat : public Vflat {
-public:
-  FlatAtomicOrB32Vflat(const MachineInst *inst);
+class FlatAtomicMaxI32Vflat : public Vflat
+{
+  public:
+   FlatAtomicMaxI32Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -397,11 +388,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicXorB32Vflat : public Vflat {
-public:
-  FlatAtomicXorB32Vflat(const MachineInst *inst);
+class FlatAtomicMaxU32Vflat : public Vflat
+{
+  public:
+   FlatAtomicMaxU32Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -410,11 +402,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicIncU32Vflat : public Vflat {
-public:
-  FlatAtomicIncU32Vflat(const MachineInst *inst);
+class FlatAtomicAndB32Vflat : public Vflat
+{
+  public:
+   FlatAtomicAndB32Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -423,11 +416,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicDecU32Vflat : public Vflat {
-public:
-  FlatAtomicDecU32Vflat(const MachineInst *inst);
+class FlatAtomicOrB32Vflat : public Vflat
+{
+  public:
+   FlatAtomicOrB32Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -436,11 +430,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicSwapB64Vflat : public Vflat {
-public:
-  FlatAtomicSwapB64Vflat(const MachineInst *inst);
+class FlatAtomicXorB32Vflat : public Vflat
+{
+  public:
+   FlatAtomicXorB32Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -449,11 +444,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicCmpswapB64Vflat : public Vflat {
-public:
-  FlatAtomicCmpswapB64Vflat(const MachineInst *inst);
+class FlatAtomicIncU32Vflat : public Vflat
+{
+  public:
+   FlatAtomicIncU32Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -462,11 +458,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicAddU64Vflat : public Vflat {
-public:
-  FlatAtomicAddU64Vflat(const MachineInst *inst);
+class FlatAtomicDecU32Vflat : public Vflat
+{
+  public:
+   FlatAtomicDecU32Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -475,11 +472,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicSubU64Vflat : public Vflat {
-public:
-  FlatAtomicSubU64Vflat(const MachineInst *inst);
+class FlatAtomicSwapB64Vflat : public Vflat
+{
+  public:
+   FlatAtomicSwapB64Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -488,11 +486,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicMinI64Vflat : public Vflat {
-public:
-  FlatAtomicMinI64Vflat(const MachineInst *inst);
+class FlatAtomicCmpswapB64Vflat : public Vflat
+{
+  public:
+   FlatAtomicCmpswapB64Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -501,11 +500,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicMinU64Vflat : public Vflat {
-public:
-  FlatAtomicMinU64Vflat(const MachineInst *inst);
+class FlatAtomicAddU64Vflat : public Vflat
+{
+  public:
+   FlatAtomicAddU64Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -514,11 +514,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicMaxI64Vflat : public Vflat {
-public:
-  FlatAtomicMaxI64Vflat(const MachineInst *inst);
+class FlatAtomicSubU64Vflat : public Vflat
+{
+  public:
+   FlatAtomicSubU64Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -527,11 +528,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicMaxU64Vflat : public Vflat {
-public:
-  FlatAtomicMaxU64Vflat(const MachineInst *inst);
+class FlatAtomicMinI64Vflat : public Vflat
+{
+  public:
+   FlatAtomicMinI64Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -540,11 +542,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicAndB64Vflat : public Vflat {
-public:
-  FlatAtomicAndB64Vflat(const MachineInst *inst);
+class FlatAtomicMinU64Vflat : public Vflat
+{
+  public:
+   FlatAtomicMinU64Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -553,11 +556,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicOrB64Vflat : public Vflat {
-public:
-  FlatAtomicOrB64Vflat(const MachineInst *inst);
+class FlatAtomicMaxI64Vflat : public Vflat
+{
+  public:
+   FlatAtomicMaxI64Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -566,11 +570,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicXorB64Vflat : public Vflat {
-public:
-  FlatAtomicXorB64Vflat(const MachineInst *inst);
+class FlatAtomicMaxU64Vflat : public Vflat
+{
+  public:
+   FlatAtomicMaxU64Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -579,11 +584,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicIncU64Vflat : public Vflat {
-public:
-  FlatAtomicIncU64Vflat(const MachineInst *inst);
+class FlatAtomicAndB64Vflat : public Vflat
+{
+  public:
+   FlatAtomicAndB64Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -592,11 +598,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicDecU64Vflat : public Vflat {
-public:
-  FlatAtomicDecU64Vflat(const MachineInst *inst);
+class FlatAtomicOrB64Vflat : public Vflat
+{
+  public:
+   FlatAtomicOrB64Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -605,11 +612,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicCondSubU32Vflat : public Vflat {
-public:
-  FlatAtomicCondSubU32Vflat(const MachineInst *inst);
+class FlatAtomicXorB64Vflat : public Vflat
+{
+  public:
+   FlatAtomicXorB64Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -618,11 +626,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicMinNumF32Vflat : public Vflat {
-public:
-  FlatAtomicMinNumF32Vflat(const MachineInst *inst);
+class FlatAtomicIncU64Vflat : public Vflat
+{
+  public:
+   FlatAtomicIncU64Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -631,11 +640,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicMaxNumF32Vflat : public Vflat {
-public:
-  FlatAtomicMaxNumF32Vflat(const MachineInst *inst);
+class FlatAtomicDecU64Vflat : public Vflat
+{
+  public:
+   FlatAtomicDecU64Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -644,11 +654,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicAddF64Vflat : public Vflat {
-public:
-  FlatAtomicAddF64Vflat(const MachineInst *inst);
+class FlatAtomicCondSubU32Vflat : public Vflat
+{
+  public:
+   FlatAtomicCondSubU32Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -657,11 +668,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicAddF32Vflat : public Vflat {
-public:
-  FlatAtomicAddF32Vflat(const MachineInst *inst);
+class FlatAtomicMinNumF32Vflat : public Vflat
+{
+  public:
+   FlatAtomicMinNumF32Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -670,11 +682,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicPkAddF16Vflat : public Vflat {
-public:
-  FlatAtomicPkAddF16Vflat(const MachineInst *inst);
+class FlatAtomicMaxNumF32Vflat : public Vflat
+{
+  public:
+   FlatAtomicMaxNumF32Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -683,11 +696,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicPkAddBf16Vflat : public Vflat {
-public:
-  FlatAtomicPkAddBf16Vflat(const MachineInst *inst);
+class FlatAtomicAddF64Vflat : public Vflat
+{
+  public:
+   FlatAtomicAddF64Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -696,11 +710,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicMinNumF64Vflat : public Vflat {
-public:
-  FlatAtomicMinNumF64Vflat(const MachineInst *inst);
+class FlatAtomicAddF32Vflat : public Vflat
+{
+  public:
+   FlatAtomicAddF32Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -709,11 +724,12 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatAtomicMaxNumF64Vflat : public Vflat {
-public:
-  FlatAtomicMaxNumF64Vflat(const MachineInst *inst);
+class FlatAtomicPkAddF16Vflat : public Vflat
+{
+  public:
+   FlatAtomicPkAddF16Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
@@ -722,50 +738,96 @@ public:
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatPrefetchB8Vflat : public Vflat {
-public:
-  FlatPrefetchB8Vflat(const MachineInst *inst);
+class FlatAtomicPkAddBf16Vflat : public Vflat
+{
+  public:
+   FlatAtomicPkAddBf16Vflat(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand vaddr;
+  Operand vsrc;
+  Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
+  static const bool execute_registered_;
+} ;
+
+class FlatAtomicMinNumF64Vflat : public Vflat
+{
+  public:
+   FlatAtomicMinNumF64Vflat(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand vaddr;
+  Operand vsrc;
+  Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
+  static const bool execute_registered_;
+} ;
+
+class FlatAtomicMaxNumF64Vflat : public Vflat
+{
+  public:
+   FlatAtomicMaxNumF64Vflat(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand vaddr;
+  Operand vsrc;
+  Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
+  static const bool execute_registered_;
+} ;
+
+class FlatPrefetchB8Vflat : public Vflat
+{
+  public:
+   FlatPrefetchB8Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatLoadMonitorB32Vflat : public Vflat {
-public:
-  FlatLoadMonitorB32Vflat(const MachineInst *inst);
+class FlatLoadMonitorB32Vflat : public Vflat
+{
+  public:
+   FlatLoadMonitorB32Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatLoadMonitorB64Vflat : public Vflat {
-public:
-  FlatLoadMonitorB64Vflat(const MachineInst *inst);
+class FlatLoadMonitorB64Vflat : public Vflat
+{
+  public:
+   FlatLoadMonitorB64Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
-class FlatLoadMonitorB128Vflat : public Vflat {
-public:
-  FlatLoadMonitorB128Vflat(const MachineInst *inst);
+class FlatLoadMonitorB128Vflat : public Vflat
+{
+  public:
+   FlatLoadMonitorB128Vflat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
   static const bool execute_registered_;
-};
+} ;
 
 } // namespace gfx1250
 } // namespace rocjitsu

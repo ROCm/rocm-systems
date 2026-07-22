@@ -5,14 +5,14 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vimage.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
+#include "util/except.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
-#include "util/except.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
 #include <limits>
+#include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
 
 namespace rocjitsu {
 namespace gfx1250 {
@@ -23,8 +23,7 @@ void TensorLoadToLdsVimage::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_tensor_load_to_lds(*this, wf);
 }
 
-const bool TensorStoreFromLdsVimage::execute_registered_ =
-    register_exec_fn<TensorStoreFromLdsVimage>();
+const bool TensorStoreFromLdsVimage::execute_registered_ = register_exec_fn<TensorStoreFromLdsVimage>();
 
 void TensorStoreFromLdsVimage::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_tensor_store_from_lds(*this, wf);

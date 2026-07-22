@@ -17,18 +17,17 @@ namespace rdna3 {
 
 class Operand : public AmdgpuIsaOperand<Isa> {
 public:
-  Operand(int size_bits, OperandType opr_type, int encoding_value, bool packed_16bit_source = false,
-          bool packed_16bit_dst = false);
+  Operand(int size_bits, OperandType opr_type, int encoding_value,
+          bool packed_16bit_source = false, bool packed_16bit_dst = false);
   Operand(int size_bits, OperandType opr_type, unsigned short encoding_value,
           bool packed_16bit_source, bool packed_16bit_dst = false);
-  Operand(int size_bits, OperandType opr_type, int encoding_value, uint16_t literal16_display_value,
-          bool has_literal16_display);
+  Operand(int size_bits, OperandType opr_type, int encoding_value,
+          uint16_t literal16_display_value, bool has_literal16_display);
   Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64);
   std::string name() const override;
   std::optional<uint64_t> literal64_value() const override;
   std::optional<RegisterRef> to_register_ref() const override;
   bool simd_capable() const override;
-
 private:
   void read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
                        uint32_t *out) const override;
@@ -42,7 +41,6 @@ private:
   void write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const override;
   uint64_t read_scalar64(const amdgpu::Wavefront &wf) const override;
   void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const override;
-
 private:
   uint16_t literal16_display_value_ = 0;
   bool has_literal16_display_ = false;

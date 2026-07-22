@@ -3120,126 +3120,6 @@ class CodeGenerator:
         )
         return _ImplOutputs(model=[model], execution=[execution])
 
-    def _emit_hwreg_helpers(self) -> str:
-        """Emit C++ helpers for target-specific generated SOPK hwreg access."""
-        profile = self.isa_spec.profile
-        mode_id = profile.hwreg_mode_id
-        status_id = profile.hwreg_status_id
-        wave_sched_id = profile.hwreg_wave_sched_mode_id
-        ib_sts2_id = profile.hwreg_ib_sts2_id
-        constexprs = []
-        if mode_id is not None:
-            constexprs.append(f'constexpr uint32_t HW_REG_MODE = {mode_id};')
-        constexprs.append(f'constexpr uint32_t HW_REG_STATUS = {status_id};')
-        constexprs.extend(
-            [
-                'constexpr uint32_t HW_REG_HW_ID1 = 4;',
-                'constexpr uint32_t HW_REG_HW_ID2 = 5;',
-                'constexpr uint32_t HW_REG_GPR_ALLOC = 6;',
-                'constexpr uint32_t HW_REG_VGPR_ALLOC = 7;',
-            ]
-        )
-        if wave_sched_id is not None:
-            constexprs.append(
-                f'constexpr uint32_t HW_REG_WAVE_SCHED_MODE = {wave_sched_id};'
-            )
-        if ib_sts2_id is not None:
-            constexprs.append(f'constexpr uint32_t HW_REG_IB_STS2 = {ib_sts2_id};')
-            constexprs.extend(
-                [
-                    'constexpr uint32_t HW_REG_IB_STS2_CLUSTER_ID_SHIFT = 6;',
-                    'constexpr uint32_t HW_REG_IB_STS2_CLUSTER_ID_MASK = 0xFu;',
-                    'constexpr uint32_t HW_REG_IB_STS2_WG_IN_CLUSTER_SHIFT = 21;',
-                    'constexpr uint32_t HW_REG_IB_STS2_WG_IN_CLUSTER_MASK = 0xFu;',
-                ]
-            )
-
-        read_cases = []
-        if mode_id is not None:
-            read_cases.append(
-                '  case HW_REG_MODE:\n'
-                '    reg_val = wf.mode_raw();\n'
-                '    return true;'
-            )
-        read_cases.extend(
-            [
-                '  case HW_REG_STATUS:\n'
-                '    reg_val = wf.status_raw();\n'
-                '    return true;',
-                '  case HW_REG_HW_ID1:\n'
-                '    reg_val = static_cast<uint32_t>(wf.cu().id());\n'
-                '    return true;',
-                '  case HW_REG_HW_ID2:\n'
-                '    reg_val = static_cast<uint32_t>(wf.cu().id() >> 16);\n'
-                '    return true;',
-                '  case HW_REG_GPR_ALLOC:\n'
-                '    reg_val = (wf.sgpr_alloc().count & 0xFFu) | ((wf.sgpr_alloc().base & 0xFFu) << 8);\n'
-                '    return true;',
-                '  case HW_REG_VGPR_ALLOC:\n'
-                '    reg_val = (wf.vgpr_alloc().count & 0xFFu) | ((wf.vgpr_alloc().base & 0xFFu) << 8);\n'
-                '    return true;',
-            ]
-        )
-        if wave_sched_id is not None:
-            read_cases.append(
-                '  case HW_REG_WAVE_SCHED_MODE:\n'
-                '    reg_val = wf.wave_sched_mode_raw();\n'
-                '    return true;'
-            )
-        if ib_sts2_id is not None:
-            read_cases.append(
-                '  case HW_REG_IB_STS2:\n'
-                '    reg_val =\n'
-                '        (((wf.cluster_size() > 1 ? 1u : 0u) & HW_REG_IB_STS2_CLUSTER_ID_MASK)\n'
-                '         << HW_REG_IB_STS2_CLUSTER_ID_SHIFT) |\n'
-                '        ((wf.cluster_rank() & HW_REG_IB_STS2_WG_IN_CLUSTER_MASK)\n'
-                '         << HW_REG_IB_STS2_WG_IN_CLUSTER_SHIFT);\n'
-                '    return true;'
-            )
-
-        write_cases = []
-        if mode_id is not None:
-            write_cases.append(
-                '  case HW_REG_MODE:\n'
-                '    wf.set_mode_raw(insert_hwreg_field(wf.mode_raw(), src, offset, mask));\n'
-                '    return true;'
-            )
-        write_cases.append(
-            '  case HW_REG_STATUS:\n'
-            '    wf.set_status_raw(insert_hwreg_field(wf.status_raw(), src, offset, mask));\n'
-            '    return true;'
-        )
-        if wave_sched_id is not None:
-            write_cases.append(
-                '  case HW_REG_WAVE_SCHED_MODE:\n'
-                '    wf.set_wave_sched_mode_raw(insert_hwreg_field(wf.wave_sched_mode_raw(), src, offset, mask));\n'
-                '    return true;'
-            )
-
-        return (
-            'namespace {\n' + '\n'.join(constexprs) + '\n\n'
-            '[[maybe_unused]] uint32_t insert_hwreg_field(uint32_t reg_val, uint32_t src, uint32_t offset, uint32_t mask) {\n'
-            '  return (reg_val & ~(mask << offset)) | ((src & mask) << offset);\n'
-            '}\n'
-            '\n'
-            '[[maybe_unused]] bool read_hwreg(amdgpu::Wavefront &wf, uint32_t reg_id, uint32_t &reg_val) {\n'
-            '  switch (reg_id) {\n' + '\n'.join(read_cases) + '\n'
-            '  default:\n'
-            '    return false;\n'
-            '  }\n'
-            '}\n'
-            '\n'
-            '[[maybe_unused]] bool write_hwreg(amdgpu::Wavefront &wf, uint32_t reg_id, uint32_t offset, uint32_t mask,\n'
-            '                 uint32_t src) {\n'
-            '  switch (reg_id) {\n' + '\n'.join(write_cases) + '\n'
-            '  default:\n'
-            '    return false;\n'
-            '  }\n'
-            '}\n'
-            '\n'
-            '} // namespace'
-        )
-
     @staticmethod
     def _emit_gfx1250_scaled_wmma_vop3px2_class() -> str:
         return textwrap.dedent('''\
@@ -3649,6 +3529,10 @@ class CodeGenerator:
                     exec_model=sema_block.pragma,
                     operand_map=omap,
                     arch_name=self.isa_spec.arch_name,
+                    # Generic generated scalar F16 arithmetic stays out of
+                    # FP16_OVFL clamping. Explicit scalar F32->F16 converts are
+                    # lowered through sema_lower's mode-aware conversion helper.
+                    mode_sensitive_f16_dst=not cls.startswith('scalar_'),
                 )
                 if cls == 'vector_cmp':
                     # V_CMP writes a fresh wave mask initialized to zero, so false
@@ -4187,104 +4071,46 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'scalar_getreg':
-            mode_id = profile.hwreg_mode_id
-            status_id = profile.hwreg_status_id
-            ib_sts2_id = profile.hwreg_ib_sts2_id
+            if not profile.use_hwreg_helpers:
+                raise RuntimeError(
+                    'HWREG scalar codegen requires profile.use_hwreg_helpers'
+                )
             L.append(f'  uint16_t hwreg = {src_ops[0]}.encoding_value_;')
-            L.append('  uint32_t reg_id = hwreg & 0x3Fu;')
-            L.append('  uint32_t offset = (hwreg >> 6) & 0x1Fu;')
-            L.append('  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;')
             L.append('  uint32_t reg_val = 0;')
-            if profile.use_hwreg_helpers:
-                L.append('  if (!read_hwreg(wf, reg_id, reg_val))')
-                L.append(
-                    '    util::Logger::warn("s_getreg_b32: unhandled hwreg id=", reg_id);'
-                )
-            else:
-                L.append('  switch (reg_id) {')
-                if mode_id is not None:
-                    L.append(f'  case {mode_id}: reg_val = wf.mode_raw(); break;')
-                L.append(f'  case {status_id}: reg_val = wf.status_raw(); break;')
-                L.append(
-                    '  case 4: reg_val = static_cast<uint32_t>(wf.cu().id()); break;'
-                )
-                L.append(
-                    '  case 5: reg_val = static_cast<uint32_t>(wf.cu().id() >> 16); break;'
-                )
-                L.append(
-                    '  case 6: reg_val = (wf.sgpr_alloc().count & 0xFFu) | ((wf.sgpr_alloc().base & 0xFFu) << 8); break;'
-                )
-                L.append(
-                    '  case 7: reg_val = (wf.vgpr_alloc().count & 0xFFu) | ((wf.vgpr_alloc().base & 0xFFu) << 8); break;'
-                )
-                if ib_sts2_id is not None:
-                    L.append(f'  case {ib_sts2_id}: reg_val = 0; break;')
-                L.append(
-                    '  default: util::Logger::warn("s_getreg_b32: unhandled hwreg id=", reg_id); break;'
-                )
-                L.append('  }')
-            L.append('  if (offset + size > 32) size = 32 - offset;')
+            L.append('  auto result = amdgpu::read_hwreg_field(wf, hwreg, reg_val);')
+            L.append('  if (result != amdgpu::HwregAccessResult::Success)')
             L.append(
-                '  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);'
+                '    util::Logger::warn("s_getreg_b32: ", amdgpu::hwreg_access_result_name(result), '
+                '" hwreg=", amdgpu::hwreg_name(wf, hwreg), " id=", amdgpu::hwreg_id(hwreg));'
             )
             L.append(
-                f'  amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, (reg_val >> offset) & mask);'
+                f'  amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, reg_val);'
             )
             return '\n'.join(L)
 
         if cls == 'scalar_setreg':
-            mode_id = profile.hwreg_mode_id
-            status_id = profile.hwreg_status_id
+            if not profile.use_hwreg_helpers:
+                raise RuntimeError(
+                    'HWREG scalar codegen requires profile.use_hwreg_helpers'
+                )
             L.append(f'  uint16_t hwreg = {dst_ops[0]}.encoding_value_;')
-            L.append('  uint32_t reg_id = hwreg & 0x3Fu;')
-            L.append('  uint32_t offset = (hwreg >> 6) & 0x1Fu;')
-            L.append('  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;')
-            L.append('  if (offset + size > 32) size = 32 - offset;')
-            L.append(
-                '  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);'
-            )
             L.append(
                 f'  uint32_t src = amdgpu::RegisterAccess(wf).read_scalar({src_ops[0]});'
             )
-            if profile.use_hwreg_helpers:
-                L.append('  if (!write_hwreg(wf, reg_id, offset, mask, src))')
-                L.append(
-                    '    util::Logger::warn("s_setreg_b32: unhandled hwreg id=", reg_id);'
-                )
-            else:
-                L.append('  switch (reg_id) {')
-                if mode_id is not None:
-                    L.append(f'  case {mode_id}: {{')
-                    L.append('    uint32_t s = wf.mode_raw();')
-                    L.append(
-                        '    s = (s & ~(mask << offset)) | ((src & mask) << offset);'
-                    )
-                    L.append('    wf.set_mode_raw(s);')
-                    L.append('    break;')
-                    L.append('  }')
-                L.append(f'  case {status_id}: {{')
-                L.append('    uint32_t s = wf.status_raw();')
-                L.append('    s = (s & ~(mask << offset)) | ((src & mask) << offset);')
-                L.append('    wf.set_status_raw(s);')
-                L.append('    break;')
-                L.append('  }')
-                L.append(
-                    '  default: util::Logger::warn("s_setreg_b32: unhandled hwreg id=", reg_id); break;'
-                )
-                L.append('  }')
+            L.append('  auto result = amdgpu::write_hwreg_field(wf, hwreg, src);')
+            L.append('  if (result != amdgpu::HwregAccessResult::Success)')
+            L.append(
+                '    util::Logger::warn("s_setreg_b32: ", amdgpu::hwreg_access_result_name(result), '
+                '" hwreg=", amdgpu::hwreg_name(wf, hwreg), " id=", amdgpu::hwreg_id(hwreg));'
+            )
             return '\n'.join(L)
 
         if cls == 'scalar_setreg_imm':
-            mode_id = profile.hwreg_mode_id
-            status_id = profile.hwreg_status_id
+            if not profile.use_hwreg_helpers:
+                raise RuntimeError(
+                    'HWREG scalar codegen requires profile.use_hwreg_helpers'
+                )
             L.append(f'  uint16_t hwreg = {dst_ops[0]}.encoding_value_;')
-            L.append('  uint32_t reg_id = hwreg & 0x3Fu;')
-            L.append('  uint32_t offset = (hwreg >> 6) & 0x1Fu;')
-            L.append('  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;')
-            L.append('  if (offset + size > 32) size = 32 - offset;')
-            L.append(
-                '  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);'
-            )
             # S_SETREG_IMM32_B32's source is the extension literal. When it is
             # modeled as a fieldless simm32 operand it appears in src_ops and is
             # read through the observed RegisterAccess facade; when an ISA carries
@@ -4298,32 +4124,13 @@ class CodeGenerator:
                 else 'literal_'
             )
             L.append(f'  uint32_t src = {src_expr};')
-            if profile.use_hwreg_helpers:
-                L.append('  if (!write_hwreg(wf, reg_id, offset, mask, src))')
-                L.append(
-                    '    util::Logger::warn("s_setreg_imm32_b32: unhandled hwreg id=", reg_id);'
-                )
-            else:
-                L.append('  switch (reg_id) {')
-                if mode_id is not None:
-                    L.append(f'  case {mode_id}: {{')
-                    L.append('    uint32_t s = wf.mode_raw();')
-                    L.append(
-                        '    s = (s & ~(mask << offset)) | ((src & mask) << offset);'
-                    )
-                    L.append('    wf.set_mode_raw(s);')
-                    L.append('    break;')
-                    L.append('  }')
-                L.append(f'  case {status_id}: {{')
-                L.append('    uint32_t s = wf.status_raw();')
-                L.append('    s = (s & ~(mask << offset)) | ((src & mask) << offset);')
-                L.append('    wf.set_status_raw(s);')
-                L.append('    break;')
-                L.append('  }')
-                L.append(
-                    '  default: util::Logger::warn("s_setreg_imm32_b32: unhandled hwreg id=", reg_id); break;'
-                )
-                L.append('  }')
+            L.append('  auto result = amdgpu::write_hwreg_field(wf, hwreg, src);')
+            L.append('  if (result != amdgpu::HwregAccessResult::Success)')
+            L.append(
+                '    util::Logger::warn("s_setreg_imm32_b32: ", '
+                'amdgpu::hwreg_access_result_name(result), " hwreg=", '
+                'amdgpu::hwreg_name(wf, hwreg), " id=", amdgpu::hwreg_id(hwreg));'
+            )
             return '\n'.join(L)
 
         if cls == 'vector_readfirstlane':
@@ -4385,7 +4192,7 @@ class CodeGenerator:
                     f'    float s2 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({s2_expr}, lane)));'
                 )
                 L.append(
-                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, util::f32_to_f16(std::fma(s0, k, s2)));'
+                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, util::f32_to_f16_mode(std::fma(s0, k, s2), wf.fp16_ovfl()));'
                 )
             else:
                 L.append(
@@ -4422,7 +4229,7 @@ class CodeGenerator:
                     f'    float k = util::f16_to_f32(static_cast<uint16_t>({k_expr}));'
                 )
                 L.append(
-                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, util::f32_to_f16(std::fma(s0, s1, k)));'
+                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, util::f32_to_f16_mode(std::fma(s0, s1, k), wf.fp16_ovfl()));'
                 )
             else:
                 L.append(
@@ -8146,19 +7953,28 @@ class CodeGenerator:
                             ('format', True),
                         ]
                     )
-                has_getreg = any(
+                has_hwreg_access = any(
                     self.semantics
                     and (s := self.semantics.instructions.get(i.name))
-                    and s.semantic_class in ('scalar_getreg', 'scalar_setreg')
+                    and (
+                        s.semantic_class
+                        in (
+                            'scalar_getreg',
+                            'scalar_setreg',
+                            'scalar_setreg_imm',
+                        )
+                    )
                     for i in all_insts
                 )
-                if has_getreg and not is_mem_enc:
+                if has_hwreg_access and not is_mem_enc:
                     cpp_includes.extend(
                         [
                             ('rocjitsu/vm/amdgpu/compute_unit.h', False),
                             ('util/log.h', False),
                         ]
                     )
+                    if profile.use_hwreg_helpers:
+                        cpp_includes.append(('rocjitsu/vm/amdgpu/hwreg.h', False))
 
                 # Include the unified shared execute template header when
                 # any instruction in this encoding delegates to a template.
@@ -8301,11 +8117,6 @@ class CodeGenerator:
                         class_func_impls.model.insert(
                             0, cgen.Line(self._emit_cdna4_matrix_fmt_helpers())
                         )
-
-                if has_getreg and profile.use_hwreg_helpers and not is_mem_enc:
-                    class_func_impls.execution_target(
-                        profile.split_execution_sources
-                    ).insert(0, self._emit_hwreg_helpers())
 
                 if is_smem:
                     direct_field = self.isa_spec.profile.smem_direct_offset_field

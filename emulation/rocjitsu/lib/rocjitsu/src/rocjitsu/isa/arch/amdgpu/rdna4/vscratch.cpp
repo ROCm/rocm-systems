@@ -5,40 +5,25 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/rdna4/vscratch.h"
+#include "util/except.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
-#include "rocjitsu/vm/amdgpu/register_access.h"
+#include <cstring>
+#include <memory>
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
-#include "util/except.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
-#include <cstring>
 #include <limits>
-#include <memory>
+#include "rocjitsu/vm/amdgpu/register_access.h"
 
 namespace rocjitsu {
 namespace rdna4 {
 
-ScratchLoadU8Vscratch::ScratchLoadU8Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_u8", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchLoadU8Vscratch>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadU8Vscratch::ScratchLoadU8Vscratch(const MachineInst *inst) : Vscratch("scratch_load_u8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchLoadU8Vscratch>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchLoadU8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -53,22 +38,7 @@ void ScratchLoadU8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-ScratchLoadI8Vscratch::ScratchLoadI8Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_i8", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchLoadI8Vscratch>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadI8Vscratch::ScratchLoadI8Vscratch(const MachineInst *inst) : Vscratch("scratch_load_i8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchLoadI8Vscratch>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchLoadI8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -84,22 +54,7 @@ void ScratchLoadI8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-ScratchLoadU16Vscratch::ScratchLoadU16Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_u16", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchLoadU16Vscratch>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(16, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadU16Vscratch::ScratchLoadU16Vscratch(const MachineInst *inst) : Vscratch("scratch_load_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchLoadU16Vscratch>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(16, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchLoadU16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -114,22 +69,7 @@ void ScratchLoadU16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-ScratchLoadI16Vscratch::ScratchLoadI16Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_i16", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchLoadI16Vscratch>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(16, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadI16Vscratch::ScratchLoadI16Vscratch(const MachineInst *inst) : Vscratch("scratch_load_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchLoadI16Vscratch>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(16, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchLoadI16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -145,22 +85,7 @@ void ScratchLoadI16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-ScratchLoadB32Vscratch::ScratchLoadB32Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_b32", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchLoadB32Vscratch>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(32, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadB32Vscratch::ScratchLoadB32Vscratch(const MachineInst *inst) : Vscratch("scratch_load_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchLoadB32Vscratch>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchLoadB32Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -175,22 +100,7 @@ void ScratchLoadB32Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-ScratchLoadB64Vscratch::ScratchLoadB64Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_b64", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchLoadB64Vscratch>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(64, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadB64Vscratch::ScratchLoadB64Vscratch(const MachineInst *inst) : Vscratch("scratch_load_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchLoadB64Vscratch>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(64, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchLoadB64Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -205,22 +115,7 @@ void ScratchLoadB64Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-ScratchLoadB96Vscratch::ScratchLoadB96Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_b96", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchLoadB96Vscratch>()),
-      vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(96, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadB96Vscratch::ScratchLoadB96Vscratch(const MachineInst *inst) : Vscratch("scratch_load_b96", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchLoadB96Vscratch>()), vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(96, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchLoadB96Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -235,22 +130,7 @@ void ScratchLoadB96Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-ScratchLoadB128Vscratch::ScratchLoadB128Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_b128", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchLoadB128Vscratch>()),
-      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(128, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadB128Vscratch::ScratchLoadB128Vscratch(const MachineInst *inst) : Vscratch("scratch_load_b128", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchLoadB128Vscratch>()), vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(128, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchLoadB128Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -265,22 +145,7 @@ void ScratchLoadB128Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-ScratchStoreB8Vscratch::ScratchStoreB8Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_store_b8", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchStoreB8Vscratch>()),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &vsrc;
-  src_operands_[2] = &saddr;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchStoreB8Vscratch::ScratchStoreB8Vscratch(const MachineInst *inst) : Vscratch("scratch_store_b8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchStoreB8Vscratch>()), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;src_operands_[2] = &saddr;dst_operands_[0] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchStoreB8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -296,30 +161,14 @@ void ScratchStoreB8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 1);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
   set_data(std::move(d));
 }
 
-ScratchStoreB16Vscratch::ScratchStoreB16Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_store_b16", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchStoreB16Vscratch>()),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(16, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &vsrc;
-  src_operands_[2] = &saddr;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchStoreB16Vscratch::ScratchStoreB16Vscratch(const MachineInst *inst) : Vscratch("scratch_store_b16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchStoreB16Vscratch>()), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(16, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;src_operands_[2] = &saddr;dst_operands_[0] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchStoreB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -335,30 +184,14 @@ void ScratchStoreB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 2);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
   set_data(std::move(d));
 }
 
-ScratchStoreB32Vscratch::ScratchStoreB32Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_store_b32", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchStoreB32Vscratch>()),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &vsrc;
-  src_operands_[2] = &saddr;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchStoreB32Vscratch::ScratchStoreB32Vscratch(const MachineInst *inst) : Vscratch("scratch_store_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchStoreB32Vscratch>()), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;src_operands_[2] = &saddr;dst_operands_[0] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchStoreB32Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -374,30 +207,14 @@ void ScratchStoreB32Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-ScratchStoreB64Vscratch::ScratchStoreB64Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_store_b64", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchStoreB64Vscratch>()),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(64, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &vsrc;
-  src_operands_[2] = &saddr;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchStoreB64Vscratch::ScratchStoreB64Vscratch(const MachineInst *inst) : Vscratch("scratch_store_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchStoreB64Vscratch>()), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;src_operands_[2] = &saddr;dst_operands_[0] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchStoreB64Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -413,8 +230,7 @@ void ScratchStoreB64Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -423,22 +239,7 @@ void ScratchStoreB64Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-ScratchStoreB96Vscratch::ScratchStoreB96Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_store_b96", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchStoreB96Vscratch>()),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(96, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &vsrc;
-  src_operands_[2] = &saddr;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchStoreB96Vscratch::ScratchStoreB96Vscratch(const MachineInst *inst) : Vscratch("scratch_store_b96", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchStoreB96Vscratch>()), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(96, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;src_operands_[2] = &saddr;dst_operands_[0] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchStoreB96Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -454,8 +255,7 @@ void ScratchStoreB96Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 12);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 12 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -466,22 +266,7 @@ void ScratchStoreB96Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-ScratchStoreB128Vscratch::ScratchStoreB128Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_store_b128", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchStoreB128Vscratch>()),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(128, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &vsrc;
-  src_operands_[2] = &saddr;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchStoreB128Vscratch::ScratchStoreB128Vscratch(const MachineInst *inst) : Vscratch("scratch_store_b128", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchStoreB128Vscratch>()), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(128, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;src_operands_[2] = &saddr;dst_operands_[0] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchStoreB128Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -497,8 +282,7 @@ void ScratchStoreB128Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 16);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -511,22 +295,7 @@ void ScratchStoreB128Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-ScratchLoadD16U8Vscratch::ScratchLoadD16U8Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchLoadD16U8Vscratch>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadD16U8Vscratch::ScratchLoadD16U8Vscratch(const MachineInst *inst) : Vscratch("scratch_load_d16_u8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchLoadD16U8Vscratch>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchLoadD16U8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -542,22 +311,7 @@ void ScratchLoadD16U8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-ScratchLoadD16I8Vscratch::ScratchLoadD16I8Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchLoadD16I8Vscratch>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadD16I8Vscratch::ScratchLoadD16I8Vscratch(const MachineInst *inst) : Vscratch("scratch_load_d16_i8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchLoadD16I8Vscratch>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchLoadD16I8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -574,22 +328,7 @@ void ScratchLoadD16I8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-ScratchLoadD16B16Vscratch::ScratchLoadD16B16Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_d16_b16", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchLoadD16B16Vscratch>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(16, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadD16B16Vscratch::ScratchLoadD16B16Vscratch(const MachineInst *inst) : Vscratch("scratch_load_d16_b16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchLoadD16B16Vscratch>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(16, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchLoadD16B16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -605,22 +344,7 @@ void ScratchLoadD16B16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-ScratchLoadD16HiU8Vscratch::ScratchLoadD16HiU8Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchLoadD16HiU8Vscratch>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadD16HiU8Vscratch::ScratchLoadD16HiU8Vscratch(const MachineInst *inst) : Vscratch("scratch_load_d16_hi_u8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchLoadD16HiU8Vscratch>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchLoadD16HiU8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -636,22 +360,7 @@ void ScratchLoadD16HiU8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-ScratchLoadD16HiI8Vscratch::ScratchLoadD16HiI8Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_d16_hi_i8", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchLoadD16HiI8Vscratch>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadD16HiI8Vscratch::ScratchLoadD16HiI8Vscratch(const MachineInst *inst) : Vscratch("scratch_load_d16_hi_i8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchLoadD16HiI8Vscratch>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchLoadD16HiI8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -668,22 +377,7 @@ void ScratchLoadD16HiI8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-ScratchLoadD16HiB16Vscratch::ScratchLoadD16HiB16Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchLoadD16HiB16Vscratch>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(16, OperandType::OPR_GPUMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadD16HiB16Vscratch::ScratchLoadD16HiB16Vscratch(const MachineInst *inst) : Vscratch("scratch_load_d16_hi_b16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchLoadD16HiB16Vscratch>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(16, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchLoadD16HiB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -699,22 +393,7 @@ void ScratchLoadD16HiB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-ScratchStoreD16HiB8Vscratch::ScratchStoreD16HiB8Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_store_d16_hi_b8", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchStoreD16HiB8Vscratch>()),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(8, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &vsrc;
-  src_operands_[2] = &saddr;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchStoreD16HiB8Vscratch::ScratchStoreD16HiB8Vscratch(const MachineInst *inst) : Vscratch("scratch_store_d16_hi_b8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchStoreD16HiB8Vscratch>()), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;src_operands_[2] = &saddr;dst_operands_[0] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchStoreD16HiB8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -730,8 +409,7 @@ void ScratchStoreD16HiB8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 1);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     val0 >>= 16;
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
@@ -739,22 +417,7 @@ void ScratchStoreD16HiB8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-ScratchStoreD16HiB16Vscratch::ScratchStoreD16HiB16Vscratch(const MachineInst *inst)
-    : Vscratch("scratch_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchStoreD16HiB16Vscratch>()),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(16, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &vsrc;
-  src_operands_[2] = &saddr;
-  dst_operands_[0] = &gpumem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchStoreD16HiB16Vscratch::ScratchStoreD16HiB16Vscratch(const MachineInst *inst) : Vscratch("scratch_store_d16_hi_b16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchStoreD16HiB16Vscratch>()), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(16, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;src_operands_[2] = &saddr;dst_operands_[0] = &gpumem;num_src_ = 3;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchStoreD16HiB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -770,8 +433,7 @@ void ScratchStoreD16HiB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 2);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     val0 >>= 16;
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
@@ -779,24 +441,7 @@ void ScratchStoreD16HiB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-ScratchLoadBlockVscratch::ScratchLoadBlockVscratch(const MachineInst *inst)
-    : Vscratch("scratch_load_block", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchLoadBlockVscratch>()),
-      vdst(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(1024, OperandType::OPR_GPUMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &saddr;
-  src_operands_[2] = &gpumem;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchLoadBlockVscratch::ScratchLoadBlockVscratch(const MachineInst *inst) : Vscratch("scratch_load_block", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchLoadBlockVscratch>()), vdst(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(1024, OperandType::OPR_GPUMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &saddr;src_operands_[2] = &gpumem;src_operands_[3] = &m0;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);m0.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchLoadBlockVscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -811,24 +456,7 @@ void ScratchLoadBlockVscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-ScratchStoreBlockVscratch::ScratchStoreBlockVscratch(const MachineInst *inst)
-    : Vscratch("scratch_store_block", reinterpret_cast<const OpEncoding *>(inst),
-               make_exec_fn<ScratchStoreBlockVscratch>()),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
-      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
-      gpumem(1024, OperandType::OPR_GPUMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &vsrc;
-  src_operands_[2] = &saddr;
-  dst_operands_[0] = &gpumem;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
-  num_dst_ = 1;
-  gpumem.apply_fieldless_caps(false, false, false);
-  m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+ScratchStoreBlockVscratch::ScratchStoreBlockVscratch(const MachineInst *inst) : Vscratch("scratch_store_block", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ScratchStoreBlockVscratch>()), vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(1024, OperandType::OPR_GPUMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;src_operands_[2] = &saddr;dst_operands_[0] = &gpumem;src_operands_[3] = &m0;num_src_ = 4;num_dst_ = 1;gpumem.apply_fieldless_caps(false, false, false);m0.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void ScratchStoreBlockVscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -844,8 +472,7 @@ void ScratchStoreBlockVscratch::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 128);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 128 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);

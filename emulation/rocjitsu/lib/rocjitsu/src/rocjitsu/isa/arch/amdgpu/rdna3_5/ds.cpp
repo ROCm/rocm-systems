@@ -5,40 +5,26 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/ds.h"
+#include "util/except.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/addr_calc.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_cache_flags.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
-#include "rocjitsu/vm/amdgpu/register_access.h"
+#include <cstring>
+#include <memory>
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
-#include "util/except.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
-#include <cstring>
 #include <limits>
-#include <memory>
+#include "rocjitsu/vm/amdgpu/register_access.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 
 namespace rocjitsu {
 namespace rdna3_5 {
 
-DsAddU32Ds::DsAddU32Ds(const MachineInst *inst)
-    : Ds("ds_add_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsAddU32Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsAddU32Ds::DsAddU32Ds(const MachineInst *inst) : Ds("ds_add_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsAddU32Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsAddU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -56,29 +42,14 @@ void DsAddU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsSubU32Ds::DsSubU32Ds(const MachineInst *inst)
-    : Ds("ds_sub_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsSubU32Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsSubU32Ds::DsSubU32Ds(const MachineInst *inst) : Ds("ds_sub_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsSubU32Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsSubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -96,29 +67,14 @@ void DsSubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsRsubU32Ds::DsRsubU32Ds(const MachineInst *inst)
-    : Ds("ds_rsub_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsRsubU32Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsRsubU32Ds::DsRsubU32Ds(const MachineInst *inst) : Ds("ds_rsub_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsRsubU32Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsRsubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -136,29 +92,14 @@ void DsRsubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsIncU32Ds::DsIncU32Ds(const MachineInst *inst)
-    : Ds("ds_inc_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsIncU32Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsIncU32Ds::DsIncU32Ds(const MachineInst *inst) : Ds("ds_inc_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsIncU32Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsIncU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -176,29 +117,14 @@ void DsIncU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsDecU32Ds::DsDecU32Ds(const MachineInst *inst)
-    : Ds("ds_dec_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsDecU32Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsDecU32Ds::DsDecU32Ds(const MachineInst *inst) : Ds("ds_dec_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsDecU32Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsDecU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -216,29 +142,14 @@ void DsDecU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsMinI32Ds::DsMinI32Ds(const MachineInst *inst)
-    : Ds("ds_min_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsMinI32Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMinI32Ds::DsMinI32Ds(const MachineInst *inst) : Ds("ds_min_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMinI32Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMinI32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -256,29 +167,14 @@ void DsMinI32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsMaxI32Ds::DsMaxI32Ds(const MachineInst *inst)
-    : Ds("ds_max_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsMaxI32Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMaxI32Ds::DsMaxI32Ds(const MachineInst *inst) : Ds("ds_max_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMaxI32Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMaxI32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -296,29 +192,14 @@ void DsMaxI32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsMinU32Ds::DsMinU32Ds(const MachineInst *inst)
-    : Ds("ds_min_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsMinU32Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMinU32Ds::DsMinU32Ds(const MachineInst *inst) : Ds("ds_min_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMinU32Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMinU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -336,29 +217,14 @@ void DsMinU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsMaxU32Ds::DsMaxU32Ds(const MachineInst *inst)
-    : Ds("ds_max_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsMaxU32Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMaxU32Ds::DsMaxU32Ds(const MachineInst *inst) : Ds("ds_max_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMaxU32Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMaxU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -376,29 +242,14 @@ void DsMaxU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsAndB32Ds::DsAndB32Ds(const MachineInst *inst)
-    : Ds("ds_and_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsAndB32Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsAndB32Ds::DsAndB32Ds(const MachineInst *inst) : Ds("ds_and_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsAndB32Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsAndB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -416,29 +267,14 @@ void DsAndB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsOrB32Ds::DsOrB32Ds(const MachineInst *inst)
-    : Ds("ds_or_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsOrB32Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsOrB32Ds::DsOrB32Ds(const MachineInst *inst) : Ds("ds_or_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsOrB32Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsOrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -456,29 +292,14 @@ void DsOrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsXorB32Ds::DsXorB32Ds(const MachineInst *inst)
-    : Ds("ds_xor_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsXorB32Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsXorB32Ds::DsXorB32Ds(const MachineInst *inst) : Ds("ds_xor_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsXorB32Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsXorB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -496,31 +317,14 @@ void DsXorB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsMskorB32Ds::DsMskorB32Ds(const MachineInst *inst)
-    : Ds("ds_mskor_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsMskorB32Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  dst_operands_[0] = &dsmem;
-  src_operands_[3] = &dsmem_in;
-  num_src_ = 4;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMskorB32Ds::DsMskorB32Ds(const MachineInst *inst) : Ds("ds_mskor_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMskorB32Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data1), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;src_operands_[2] = &data1;dst_operands_[0] = &dsmem;src_operands_[3] = &dsmem_in;num_src_ = 4;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMskorB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -538,8 +342,7 @@ void DsMskorB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src_base = wf.vgpr_alloc().base + 0u + inst_.data1;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t mask0 = amdgpu::RegisterAccess(cu).read_vgpr(mask_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &mask0, 4);
     uint32_t src0 = amdgpu::RegisterAccess(cu).read_vgpr(src_base + 0, lane);
@@ -548,19 +351,7 @@ void DsMskorB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsStoreB32Ds::DsStoreB32Ds(const MachineInst *inst)
-    : Ds("ds_store_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsStoreB32Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsStoreB32Ds::DsStoreB32Ds(const MachineInst *inst) : Ds("ds_store_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsStoreB32Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsStoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -576,30 +367,14 @@ void DsStoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsStore2addrB32Ds::DsStore2addrB32Ds(const MachineInst *inst)
-    : Ds("ds_store_2addr_b32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsStore2addrB32Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
-      dsmem(32, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  dst_operands_[0] = &dsmem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsStore2addrB32Ds::DsStore2addrB32Ds(const MachineInst *inst) : Ds("ds_store_2addr_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsStore2addrB32Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data1), dsmem(32, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;src_operands_[2] = &data1;dst_operands_[0] = &dsmem;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsStore2addrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -620,8 +395,7 @@ void DsStore2addrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data0_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
     d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 4U + wf.lds_base();
     d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 4U + wf.lds_base();
@@ -633,22 +407,7 @@ void DsStore2addrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsStore2addrStride64B32Ds::DsStore2addrStride64B32Ds(const MachineInst *inst)
-    : Ds("ds_store_2addr_stride64_b32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsStore2addrStride64B32Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
-      dsmem(32, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  dst_operands_[0] = &dsmem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsStore2addrStride64B32Ds::DsStore2addrStride64B32Ds(const MachineInst *inst) : Ds("ds_store_2addr_stride64_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsStore2addrStride64B32Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data1), dsmem(32, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;src_operands_[2] = &data1;dst_operands_[0] = &dsmem;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsStore2addrStride64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -669,8 +428,7 @@ void DsStore2addrStride64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data0_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
     d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 256U + wf.lds_base();
     d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 256U + wf.lds_base();
@@ -682,24 +440,7 @@ void DsStore2addrStride64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsCmpstoreB32Ds::DsCmpstoreB32Ds(const MachineInst *inst)
-    : Ds("ds_cmpstore_b32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsCmpstoreB32Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  dst_operands_[0] = &dsmem;
-  src_operands_[3] = &dsmem_in;
-  num_src_ = 4;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsCmpstoreB32Ds::DsCmpstoreB32Ds(const MachineInst *inst) : Ds("ds_cmpstore_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsCmpstoreB32Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data1), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;src_operands_[2] = &data1;dst_operands_[0] = &dsmem;src_operands_[3] = &dsmem_in;num_src_ = 4;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsCmpstoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -718,8 +459,7 @@ void DsCmpstoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
@@ -728,24 +468,7 @@ void DsCmpstoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsCmpstoreF32Ds::DsCmpstoreF32Ds(const MachineInst *inst)
-    : Ds("ds_cmpstore_f32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsCmpstoreF32Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  dst_operands_[0] = &dsmem;
-  src_operands_[3] = &dsmem_in;
-  num_src_ = 4;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsCmpstoreF32Ds::DsCmpstoreF32Ds(const MachineInst *inst) : Ds("ds_cmpstore_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsCmpstoreF32Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data1), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;src_operands_[2] = &data1;dst_operands_[0] = &dsmem;src_operands_[3] = &dsmem_in;num_src_ = 4;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsCmpstoreF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -764,8 +487,7 @@ void DsCmpstoreF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
@@ -774,21 +496,7 @@ void DsCmpstoreF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsMinF32Ds::DsMinF32Ds(const MachineInst *inst)
-    : Ds("ds_min_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsMinF32Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMinF32Ds::DsMinF32Ds(const MachineInst *inst) : Ds("ds_min_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMinF32Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMinF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -806,29 +514,14 @@ void DsMinF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsMaxF32Ds::DsMaxF32Ds(const MachineInst *inst)
-    : Ds("ds_max_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsMaxF32Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMaxF32Ds::DsMaxF32Ds(const MachineInst *inst) : Ds("ds_max_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMaxF32Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMaxF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -846,37 +539,20 @@ void DsMaxF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsNopDs::DsNopDs(const MachineInst *inst)
-    : Ds("ds_nop", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsNopDs>()) {
-  num_src_ = 0;
-  num_dst_ = 0;
+DsNopDs::DsNopDs(const MachineInst *inst) : Ds("ds_nop", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsNopDs>()) {num_src_ = 0;num_dst_ = 0;}
+
+void DsNopDs::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_ds_nop_ds(*this, wf);
 }
 
-void DsNopDs::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_ds_nop_ds(*this, wf); }
-
-DsAddF32Ds::DsAddF32Ds(const MachineInst *inst)
-    : Ds("ds_add_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsAddF32Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsAddF32Ds::DsAddF32Ds(const MachineInst *inst) : Ds("ds_add_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsAddF32Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsAddF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -894,104 +570,38 @@ void DsAddF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsGwsSemaReleaseAllDs::DsGwsSemaReleaseAllDs(const MachineInst *inst)
-    : Ds("ds_gws_sema_release_all", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsGwsSemaReleaseAllDs>()) {
-  num_src_ = 0;
-  num_dst_ = 0;
-}
+DsGwsSemaReleaseAllDs::DsGwsSemaReleaseAllDs(const MachineInst *inst) : Ds("ds_gws_sema_release_all", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsGwsSemaReleaseAllDs>()) {num_src_ = 0;num_dst_ = 0;}
 
-void DsGwsSemaReleaseAllDs::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void DsGwsSemaReleaseAllDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-DsGwsInitDs::DsGwsInitDs(const MachineInst *inst)
-    : Ds("ds_gws_init", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsGwsInitDs>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
-  src_operands_[0] = &addr;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+DsGwsInitDs::DsGwsInitDs(const MachineInst *inst) : Ds("ds_gws_init", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsGwsInitDs>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr) {src_operands_[0] = &addr;num_src_ = 1;num_dst_ = 0;}
 
-void DsGwsInitDs::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void DsGwsInitDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-DsGwsSemaVDs::DsGwsSemaVDs(const MachineInst *inst)
-    : Ds("ds_gws_sema_v", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsGwsSemaVDs>()) {
-  num_src_ = 0;
-  num_dst_ = 0;
-}
+DsGwsSemaVDs::DsGwsSemaVDs(const MachineInst *inst) : Ds("ds_gws_sema_v", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsGwsSemaVDs>()) {num_src_ = 0;num_dst_ = 0;}
 
-void DsGwsSemaVDs::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void DsGwsSemaVDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-DsGwsSemaBrDs::DsGwsSemaBrDs(const MachineInst *inst)
-    : Ds("ds_gws_sema_br", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsGwsSemaBrDs>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
-  src_operands_[0] = &addr;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+DsGwsSemaBrDs::DsGwsSemaBrDs(const MachineInst *inst) : Ds("ds_gws_sema_br", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsGwsSemaBrDs>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr) {src_operands_[0] = &addr;num_src_ = 1;num_dst_ = 0;}
 
-void DsGwsSemaBrDs::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void DsGwsSemaBrDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-DsGwsSemaPDs::DsGwsSemaPDs(const MachineInst *inst)
-    : Ds("ds_gws_sema_p", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsGwsSemaPDs>()) {
-  num_src_ = 0;
-  num_dst_ = 0;
-}
+DsGwsSemaPDs::DsGwsSemaPDs(const MachineInst *inst) : Ds("ds_gws_sema_p", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsGwsSemaPDs>()) {num_src_ = 0;num_dst_ = 0;}
 
-void DsGwsSemaPDs::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void DsGwsSemaPDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-DsGwsBarrierDs::DsGwsBarrierDs(const MachineInst *inst)
-    : Ds("ds_gws_barrier", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsGwsBarrierDs>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
-  src_operands_[0] = &addr;
-  num_src_ = 1;
-  num_dst_ = 0;
-}
+DsGwsBarrierDs::DsGwsBarrierDs(const MachineInst *inst) : Ds("ds_gws_barrier", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsGwsBarrierDs>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr) {src_operands_[0] = &addr;num_src_ = 1;num_dst_ = 0;}
 
-void DsGwsBarrierDs::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void DsGwsBarrierDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-DsStoreB8Ds::DsStoreB8Ds(const MachineInst *inst)
-    : Ds("ds_store_b8", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsStoreB8Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(8, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(8, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsStoreB8Ds::DsStoreB8Ds(const MachineInst *inst) : Ds("ds_store_b8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsStoreB8Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(8, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(8, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsStoreB8Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -1007,27 +617,14 @@ void DsStoreB8Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 1);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
   set_data(std::move(d));
 }
 
-DsStoreB16Ds::DsStoreB16Ds(const MachineInst *inst)
-    : Ds("ds_store_b16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsStoreB16Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(16, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsStoreB16Ds::DsStoreB16Ds(const MachineInst *inst) : Ds("ds_store_b16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsStoreB16Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(16, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsStoreB16Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -1043,32 +640,14 @@ void DsStoreB16Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 2);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
   set_data(std::move(d));
 }
 
-DsAddRtnU32Ds::DsAddRtnU32Ds(const MachineInst *inst)
-    : Ds("ds_add_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsAddRtnU32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsAddRtnU32Ds::DsAddRtnU32Ds(const MachineInst *inst) : Ds("ds_add_rtn_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsAddRtnU32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsAddRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -1086,32 +665,14 @@ void DsAddRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsSubRtnU32Ds::DsSubRtnU32Ds(const MachineInst *inst)
-    : Ds("ds_sub_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsSubRtnU32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsSubRtnU32Ds::DsSubRtnU32Ds(const MachineInst *inst) : Ds("ds_sub_rtn_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsSubRtnU32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsSubRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -1129,32 +690,14 @@ void DsSubRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsRsubRtnU32Ds::DsRsubRtnU32Ds(const MachineInst *inst)
-    : Ds("ds_rsub_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsRsubRtnU32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsRsubRtnU32Ds::DsRsubRtnU32Ds(const MachineInst *inst) : Ds("ds_rsub_rtn_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsRsubRtnU32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsRsubRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -1172,32 +715,14 @@ void DsRsubRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsIncRtnU32Ds::DsIncRtnU32Ds(const MachineInst *inst)
-    : Ds("ds_inc_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsIncRtnU32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsIncRtnU32Ds::DsIncRtnU32Ds(const MachineInst *inst) : Ds("ds_inc_rtn_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsIncRtnU32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsIncRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -1215,32 +740,14 @@ void DsIncRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsDecRtnU32Ds::DsDecRtnU32Ds(const MachineInst *inst)
-    : Ds("ds_dec_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsDecRtnU32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsDecRtnU32Ds::DsDecRtnU32Ds(const MachineInst *inst) : Ds("ds_dec_rtn_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsDecRtnU32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsDecRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -1258,32 +765,14 @@ void DsDecRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsMinRtnI32Ds::DsMinRtnI32Ds(const MachineInst *inst)
-    : Ds("ds_min_rtn_i32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsMinRtnI32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMinRtnI32Ds::DsMinRtnI32Ds(const MachineInst *inst) : Ds("ds_min_rtn_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMinRtnI32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMinRtnI32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -1301,32 +790,14 @@ void DsMinRtnI32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsMaxRtnI32Ds::DsMaxRtnI32Ds(const MachineInst *inst)
-    : Ds("ds_max_rtn_i32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsMaxRtnI32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMaxRtnI32Ds::DsMaxRtnI32Ds(const MachineInst *inst) : Ds("ds_max_rtn_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMaxRtnI32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMaxRtnI32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -1344,32 +815,14 @@ void DsMaxRtnI32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsMinRtnU32Ds::DsMinRtnU32Ds(const MachineInst *inst)
-    : Ds("ds_min_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsMinRtnU32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMinRtnU32Ds::DsMinRtnU32Ds(const MachineInst *inst) : Ds("ds_min_rtn_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMinRtnU32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMinRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -1387,32 +840,14 @@ void DsMinRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsMaxRtnU32Ds::DsMaxRtnU32Ds(const MachineInst *inst)
-    : Ds("ds_max_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsMaxRtnU32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMaxRtnU32Ds::DsMaxRtnU32Ds(const MachineInst *inst) : Ds("ds_max_rtn_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMaxRtnU32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMaxRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -1430,32 +865,14 @@ void DsMaxRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsAndRtnB32Ds::DsAndRtnB32Ds(const MachineInst *inst)
-    : Ds("ds_and_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsAndRtnB32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsAndRtnB32Ds::DsAndRtnB32Ds(const MachineInst *inst) : Ds("ds_and_rtn_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsAndRtnB32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsAndRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -1473,31 +890,14 @@ void DsAndRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsOrRtnB32Ds::DsOrRtnB32Ds(const MachineInst *inst)
-    : Ds("ds_or_rtn_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsOrRtnB32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsOrRtnB32Ds::DsOrRtnB32Ds(const MachineInst *inst) : Ds("ds_or_rtn_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsOrRtnB32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsOrRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -1515,32 +915,14 @@ void DsOrRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsXorRtnB32Ds::DsXorRtnB32Ds(const MachineInst *inst)
-    : Ds("ds_xor_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsXorRtnB32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsXorRtnB32Ds::DsXorRtnB32Ds(const MachineInst *inst) : Ds("ds_xor_rtn_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsXorRtnB32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsXorRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -1558,34 +940,14 @@ void DsXorRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsMskorRtnB32Ds::DsMskorRtnB32Ds(const MachineInst *inst)
-    : Ds("ds_mskor_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsMskorRtnB32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  dst_operands_[1] = &dsmem;
-  src_operands_[3] = &dsmem_in;
-  num_src_ = 4;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMskorRtnB32Ds::DsMskorRtnB32Ds(const MachineInst *inst) : Ds("ds_mskor_rtn_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMskorRtnB32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data1), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;src_operands_[2] = &data1;dst_operands_[1] = &dsmem;src_operands_[3] = &dsmem_in;num_src_ = 4;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMskorRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -1604,8 +966,7 @@ void DsMskorRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src_base = wf.vgpr_alloc().base + 0u + inst_.data1;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t mask0 = amdgpu::RegisterAccess(cu).read_vgpr(mask_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &mask0, 4);
     uint32_t src0 = amdgpu::RegisterAccess(cu).read_vgpr(src_base + 0, lane);
@@ -1614,24 +975,7 @@ void DsMskorRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsStorexchgRtnB32Ds::DsStorexchgRtnB32Ds(const MachineInst *inst)
-    : Ds("ds_storexchg_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsStorexchgRtnB32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsStorexchgRtnB32Ds::DsStorexchgRtnB32Ds(const MachineInst *inst) : Ds("ds_storexchg_rtn_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsStorexchgRtnB32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsStorexchgRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -1649,34 +993,14 @@ void DsStorexchgRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsStorexchg2addrRtnB32Ds::DsStorexchg2addrRtnB32Ds(const MachineInst *inst)
-    : Ds("ds_storexchg_2addr_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsStorexchg2addrRtnB32Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  dst_operands_[1] = &dsmem;
-  src_operands_[3] = &dsmem_in;
-  num_src_ = 4;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsStorexchg2addrRtnB32Ds::DsStorexchg2addrRtnB32Ds(const MachineInst *inst) : Ds("ds_storexchg_2addr_rtn_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsStorexchg2addrRtnB32Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data1), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;src_operands_[2] = &data1;dst_operands_[1] = &dsmem;src_operands_[3] = &dsmem_in;num_src_ = 4;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsStorexchg2addrRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -1694,34 +1018,14 @@ void DsStorexchg2addrRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsStorexchg2addrStride64RtnB32Ds::DsStorexchg2addrStride64RtnB32Ds(const MachineInst *inst)
-    : Ds("ds_storexchg_2addr_stride64_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsStorexchg2addrStride64RtnB32Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  dst_operands_[1] = &dsmem;
-  src_operands_[3] = &dsmem_in;
-  num_src_ = 4;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsStorexchg2addrStride64RtnB32Ds::DsStorexchg2addrStride64RtnB32Ds(const MachineInst *inst) : Ds("ds_storexchg_2addr_stride64_rtn_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsStorexchg2addrStride64RtnB32Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data1), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;src_operands_[2] = &data1;dst_operands_[1] = &dsmem;src_operands_[3] = &dsmem_in;num_src_ = 4;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsStorexchg2addrStride64RtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -1739,34 +1043,14 @@ void DsStorexchg2addrStride64RtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsCmpstoreRtnB32Ds::DsCmpstoreRtnB32Ds(const MachineInst *inst)
-    : Ds("ds_cmpstore_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsCmpstoreRtnB32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  dst_operands_[1] = &dsmem;
-  src_operands_[3] = &dsmem_in;
-  num_src_ = 4;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsCmpstoreRtnB32Ds::DsCmpstoreRtnB32Ds(const MachineInst *inst) : Ds("ds_cmpstore_rtn_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsCmpstoreRtnB32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data1), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;src_operands_[2] = &data1;dst_operands_[1] = &dsmem;src_operands_[3] = &dsmem_in;num_src_ = 4;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsCmpstoreRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -1785,8 +1069,7 @@ void DsCmpstoreRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
@@ -1795,26 +1078,7 @@ void DsCmpstoreRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsCmpstoreRtnF32Ds::DsCmpstoreRtnF32Ds(const MachineInst *inst)
-    : Ds("ds_cmpstore_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsCmpstoreRtnF32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  dst_operands_[1] = &dsmem;
-  src_operands_[3] = &dsmem_in;
-  num_src_ = 4;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsCmpstoreRtnF32Ds::DsCmpstoreRtnF32Ds(const MachineInst *inst) : Ds("ds_cmpstore_rtn_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsCmpstoreRtnF32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data1), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;src_operands_[2] = &data1;dst_operands_[1] = &dsmem;src_operands_[3] = &dsmem_in;num_src_ = 4;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsCmpstoreRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -1833,8 +1097,7 @@ void DsCmpstoreRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
@@ -1843,24 +1106,7 @@ void DsCmpstoreRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsMinRtnF32Ds::DsMinRtnF32Ds(const MachineInst *inst)
-    : Ds("ds_min_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsMinRtnF32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMinRtnF32Ds::DsMinRtnF32Ds(const MachineInst *inst) : Ds("ds_min_rtn_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMinRtnF32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMinRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -1878,32 +1124,14 @@ void DsMinRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsMaxRtnF32Ds::DsMaxRtnF32Ds(const MachineInst *inst)
-    : Ds("ds_max_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsMaxRtnF32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMaxRtnF32Ds::DsMaxRtnF32Ds(const MachineInst *inst) : Ds("ds_max_rtn_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMaxRtnF32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMaxRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -1921,67 +1149,24 @@ void DsMaxRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsWrapRtnB32Ds::DsWrapRtnB32Ds(const MachineInst *inst)
-    : Ds("ds_wrap_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsWrapRtnB32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  dst_operands_[1] = &dsmem;
-  src_operands_[3] = &dsmem_in;
-  num_src_ = 4;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-}
+DsWrapRtnB32Ds::DsWrapRtnB32Ds(const MachineInst *inst) : Ds("ds_wrap_rtn_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsWrapRtnB32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data1), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;src_operands_[2] = &data1;dst_operands_[1] = &dsmem;src_operands_[3] = &dsmem_in;num_src_ = 4;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);}
 
-void DsWrapRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void DsWrapRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-DsSwizzleB32Ds::DsSwizzleB32Ds(const MachineInst *inst)
-    : Ds("ds_swizzle_b32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsSwizzleB32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+DsSwizzleB32Ds::DsSwizzleB32Ds(const MachineInst *inst) : Ds("ds_swizzle_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsSwizzleB32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;num_src_ = 1;num_dst_ = 1;}
 
 void DsSwizzleB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_ds_swizzle_b32_ds(*this, wf);
 }
 
-DsLoadB32Ds::DsLoadB32Ds(const MachineInst *inst)
-    : Ds("ds_load_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsLoadB32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      dsmem(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsLoadB32Ds::DsLoadB32Ds(const MachineInst *inst) : Ds("ds_load_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsLoadB32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), dsmem(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsLoadB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -1996,20 +1181,7 @@ void DsLoadB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsLoad2addrB32Ds::DsLoad2addrB32Ds(const MachineInst *inst)
-    : Ds("ds_load_2addr_b32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsLoad2addrB32Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      dsmem(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsLoad2addrB32Ds::DsLoad2addrB32Ds(const MachineInst *inst) : Ds("ds_load_2addr_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsLoad2addrB32Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), dsmem(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsLoad2addrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2028,8 +1200,7 @@ void DsLoad2addrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 1;
   uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
     d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 4U + wf.lds_base();
     d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 4U + wf.lds_base();
@@ -2037,20 +1208,7 @@ void DsLoad2addrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsLoad2addrStride64B32Ds::DsLoad2addrStride64B32Ds(const MachineInst *inst)
-    : Ds("ds_load_2addr_stride64_b32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsLoad2addrStride64B32Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      dsmem(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsLoad2addrStride64B32Ds::DsLoad2addrStride64B32Ds(const MachineInst *inst) : Ds("ds_load_2addr_stride64_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsLoad2addrStride64B32Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), dsmem(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsLoad2addrStride64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2069,8 +1227,7 @@ void DsLoad2addrStride64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 1;
   uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
     d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 256U + wf.lds_base();
     d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 256U + wf.lds_base();
@@ -2078,19 +1235,7 @@ void DsLoad2addrStride64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsLoadI8Ds::DsLoadI8Ds(const MachineInst *inst)
-    : Ds("ds_load_i8", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsLoadI8Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      dsmem(8, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsLoadI8Ds::DsLoadI8Ds(const MachineInst *inst) : Ds("ds_load_i8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsLoadI8Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), dsmem(8, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsLoadI8Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2106,19 +1251,7 @@ void DsLoadI8Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsLoadU8Ds::DsLoadU8Ds(const MachineInst *inst)
-    : Ds("ds_load_u8", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsLoadU8Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      dsmem(8, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsLoadU8Ds::DsLoadU8Ds(const MachineInst *inst) : Ds("ds_load_u8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsLoadU8Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), dsmem(8, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsLoadU8Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2133,19 +1266,7 @@ void DsLoadU8Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsLoadI16Ds::DsLoadI16Ds(const MachineInst *inst)
-    : Ds("ds_load_i16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsLoadI16Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      dsmem(16, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsLoadI16Ds::DsLoadI16Ds(const MachineInst *inst) : Ds("ds_load_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsLoadI16Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), dsmem(16, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsLoadI16Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2161,19 +1282,7 @@ void DsLoadI16Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsLoadU16Ds::DsLoadU16Ds(const MachineInst *inst)
-    : Ds("ds_load_u16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsLoadU16Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      dsmem(16, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsLoadU16Ds::DsLoadU16Ds(const MachineInst *inst) : Ds("ds_load_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsLoadU16Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), dsmem(16, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsLoadU16Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2188,19 +1297,7 @@ void DsLoadU16Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsConsumeDs::DsConsumeDs(const MachineInst *inst)
-    : Ds("ds_consume", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsConsumeDs>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  dst_operands_[1] = &dsmem;
-  src_operands_[0] = &dsmem_in;
-  num_src_ = 1;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsConsumeDs::DsConsumeDs(const MachineInst *inst) : Ds("ds_consume", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsConsumeDs>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;dst_operands_[1] = &dsmem;src_operands_[0] = &dsmem_in;num_src_ = 1;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsConsumeDs::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2227,19 +1324,7 @@ void DsConsumeDs::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsAppendDs::DsAppendDs(const MachineInst *inst)
-    : Ds("ds_append", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsAppendDs>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  dst_operands_[1] = &dsmem;
-  src_operands_[0] = &dsmem_in;
-  num_src_ = 1;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsAppendDs::DsAppendDs(const MachineInst *inst) : Ds("ds_append", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsAppendDs>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;dst_operands_[1] = &dsmem;src_operands_[0] = &dsmem_in;num_src_ = 1;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsAppendDs::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2266,45 +1351,11 @@ void DsAppendDs::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsOrderedCountDs::DsOrderedCountDs(const MachineInst *inst)
-    : Ds("ds_ordered_count", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsOrderedCountDs>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0),
-      m0(32, OperandType::OPR_SDST_M0, 125) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  dst_operands_[1] = &dsmem;
-  src_operands_[1] = &dsmem_in;
-  src_operands_[2] = &m0;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  m0.apply_fieldless_caps(false, false, false);
-}
+DsOrderedCountDs::DsOrderedCountDs(const MachineInst *inst) : Ds("ds_ordered_count", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsOrderedCountDs>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;dst_operands_[1] = &dsmem;src_operands_[1] = &dsmem_in;src_operands_[2] = &m0;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);m0.apply_fieldless_caps(false, false, false);}
 
-void DsOrderedCountDs::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void DsOrderedCountDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-DsAddU64Ds::DsAddU64Ds(const MachineInst *inst)
-    : Ds("ds_add_u64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsAddU64Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsAddU64Ds::DsAddU64Ds(const MachineInst *inst) : Ds("ds_add_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsAddU64Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsAddU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2322,8 +1373,7 @@ void DsAddU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -2332,21 +1382,7 @@ void DsAddU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsSubU64Ds::DsSubU64Ds(const MachineInst *inst)
-    : Ds("ds_sub_u64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsSubU64Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsSubU64Ds::DsSubU64Ds(const MachineInst *inst) : Ds("ds_sub_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsSubU64Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsSubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2364,8 +1400,7 @@ void DsSubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -2374,21 +1409,7 @@ void DsSubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsRsubU64Ds::DsRsubU64Ds(const MachineInst *inst)
-    : Ds("ds_rsub_u64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsRsubU64Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsRsubU64Ds::DsRsubU64Ds(const MachineInst *inst) : Ds("ds_rsub_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsRsubU64Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsRsubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2406,8 +1427,7 @@ void DsRsubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -2416,21 +1436,7 @@ void DsRsubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsIncU64Ds::DsIncU64Ds(const MachineInst *inst)
-    : Ds("ds_inc_u64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsIncU64Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsIncU64Ds::DsIncU64Ds(const MachineInst *inst) : Ds("ds_inc_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsIncU64Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsIncU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2448,8 +1454,7 @@ void DsIncU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -2458,21 +1463,7 @@ void DsIncU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsDecU64Ds::DsDecU64Ds(const MachineInst *inst)
-    : Ds("ds_dec_u64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsDecU64Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsDecU64Ds::DsDecU64Ds(const MachineInst *inst) : Ds("ds_dec_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsDecU64Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsDecU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2490,8 +1481,7 @@ void DsDecU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -2500,21 +1490,7 @@ void DsDecU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsMinI64Ds::DsMinI64Ds(const MachineInst *inst)
-    : Ds("ds_min_i64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsMinI64Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMinI64Ds::DsMinI64Ds(const MachineInst *inst) : Ds("ds_min_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMinI64Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMinI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2532,8 +1508,7 @@ void DsMinI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -2542,21 +1517,7 @@ void DsMinI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsMaxI64Ds::DsMaxI64Ds(const MachineInst *inst)
-    : Ds("ds_max_i64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsMaxI64Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMaxI64Ds::DsMaxI64Ds(const MachineInst *inst) : Ds("ds_max_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMaxI64Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMaxI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2574,8 +1535,7 @@ void DsMaxI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -2584,21 +1544,7 @@ void DsMaxI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsMinU64Ds::DsMinU64Ds(const MachineInst *inst)
-    : Ds("ds_min_u64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsMinU64Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMinU64Ds::DsMinU64Ds(const MachineInst *inst) : Ds("ds_min_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMinU64Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMinU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2616,8 +1562,7 @@ void DsMinU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -2626,21 +1571,7 @@ void DsMinU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsMaxU64Ds::DsMaxU64Ds(const MachineInst *inst)
-    : Ds("ds_max_u64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsMaxU64Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMaxU64Ds::DsMaxU64Ds(const MachineInst *inst) : Ds("ds_max_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMaxU64Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMaxU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2658,8 +1589,7 @@ void DsMaxU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -2668,21 +1598,7 @@ void DsMaxU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsAndB64Ds::DsAndB64Ds(const MachineInst *inst)
-    : Ds("ds_and_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsAndB64Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsAndB64Ds::DsAndB64Ds(const MachineInst *inst) : Ds("ds_and_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsAndB64Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsAndB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2700,8 +1616,7 @@ void DsAndB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -2710,21 +1625,7 @@ void DsAndB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsOrB64Ds::DsOrB64Ds(const MachineInst *inst)
-    : Ds("ds_or_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsOrB64Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsOrB64Ds::DsOrB64Ds(const MachineInst *inst) : Ds("ds_or_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsOrB64Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsOrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2742,8 +1643,7 @@ void DsOrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -2752,21 +1652,7 @@ void DsOrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsXorB64Ds::DsXorB64Ds(const MachineInst *inst)
-    : Ds("ds_xor_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsXorB64Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsXorB64Ds::DsXorB64Ds(const MachineInst *inst) : Ds("ds_xor_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsXorB64Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsXorB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2784,8 +1670,7 @@ void DsXorB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -2794,23 +1679,7 @@ void DsXorB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsMskorB64Ds::DsMskorB64Ds(const MachineInst *inst)
-    : Ds("ds_mskor_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsMskorB64Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  dst_operands_[0] = &dsmem;
-  src_operands_[3] = &dsmem_in;
-  num_src_ = 4;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMskorB64Ds::DsMskorB64Ds(const MachineInst *inst) : Ds("ds_mskor_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMskorB64Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data1), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;src_operands_[2] = &data1;dst_operands_[0] = &dsmem;src_operands_[3] = &dsmem_in;num_src_ = 4;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMskorB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2828,8 +1697,7 @@ void DsMskorB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src_base = wf.vgpr_alloc().base + 0u + inst_.data1;
   d->store_data.resize(wf.wf_size() * 16);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t mask0 = amdgpu::RegisterAccess(cu).read_vgpr(mask_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &mask0, 4);
     uint32_t mask1 = amdgpu::RegisterAccess(cu).read_vgpr(mask_base + 1, lane);
@@ -2842,19 +1710,7 @@ void DsMskorB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsStoreB64Ds::DsStoreB64Ds(const MachineInst *inst)
-    : Ds("ds_store_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsStoreB64Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsStoreB64Ds::DsStoreB64Ds(const MachineInst *inst) : Ds("ds_store_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsStoreB64Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsStoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2870,8 +1726,7 @@ void DsStoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t lo0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     uint32_t hi0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &lo0, 4);
@@ -2880,22 +1735,7 @@ void DsStoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsStore2addrB64Ds::DsStore2addrB64Ds(const MachineInst *inst)
-    : Ds("ds_store_2addr_b64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsStore2addrB64Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
-      dsmem(64, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  dst_operands_[0] = &dsmem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsStore2addrB64Ds::DsStore2addrB64Ds(const MachineInst *inst) : Ds("ds_store_2addr_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsStore2addrB64Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data1), dsmem(64, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;src_operands_[2] = &data1;dst_operands_[0] = &dsmem;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsStore2addrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2916,8 +1756,7 @@ void DsStore2addrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data0_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
     d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 8U + wf.lds_base();
     d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 8U + wf.lds_base();
@@ -2933,22 +1772,7 @@ void DsStore2addrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsStore2addrStride64B64Ds::DsStore2addrStride64B64Ds(const MachineInst *inst)
-    : Ds("ds_store_2addr_stride64_b64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsStore2addrStride64B64Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
-      dsmem(64, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  dst_operands_[0] = &dsmem;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsStore2addrStride64B64Ds::DsStore2addrStride64B64Ds(const MachineInst *inst) : Ds("ds_store_2addr_stride64_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsStore2addrStride64B64Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data1), dsmem(64, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;src_operands_[2] = &data1;dst_operands_[0] = &dsmem;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsStore2addrStride64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -2969,8 +1793,7 @@ void DsStore2addrStride64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data0_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
     d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 512U + wf.lds_base();
     d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 512U + wf.lds_base();
@@ -2986,24 +1809,7 @@ void DsStore2addrStride64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsCmpstoreB64Ds::DsCmpstoreB64Ds(const MachineInst *inst)
-    : Ds("ds_cmpstore_b64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsCmpstoreB64Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  dst_operands_[0] = &dsmem;
-  src_operands_[3] = &dsmem_in;
-  num_src_ = 4;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsCmpstoreB64Ds::DsCmpstoreB64Ds(const MachineInst *inst) : Ds("ds_cmpstore_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsCmpstoreB64Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data1), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;src_operands_[2] = &data1;dst_operands_[0] = &dsmem;src_operands_[3] = &dsmem_in;num_src_ = 4;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsCmpstoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -3022,8 +1828,7 @@ void DsCmpstoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
   d->store_data.resize(wf.wf_size() * 16);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3036,24 +1841,7 @@ void DsCmpstoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsCmpstoreF64Ds::DsCmpstoreF64Ds(const MachineInst *inst)
-    : Ds("ds_cmpstore_f64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsCmpstoreF64Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  dst_operands_[0] = &dsmem;
-  src_operands_[3] = &dsmem_in;
-  num_src_ = 4;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsCmpstoreF64Ds::DsCmpstoreF64Ds(const MachineInst *inst) : Ds("ds_cmpstore_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsCmpstoreF64Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data1), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;src_operands_[2] = &data1;dst_operands_[0] = &dsmem;src_operands_[3] = &dsmem_in;num_src_ = 4;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsCmpstoreF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -3072,8 +1860,7 @@ void DsCmpstoreF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
   d->store_data.resize(wf.wf_size() * 16);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3086,21 +1873,7 @@ void DsCmpstoreF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsMinF64Ds::DsMinF64Ds(const MachineInst *inst)
-    : Ds("ds_min_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsMinF64Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMinF64Ds::DsMinF64Ds(const MachineInst *inst) : Ds("ds_min_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMinF64Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMinF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -3118,8 +1891,7 @@ void DsMinF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3128,21 +1900,7 @@ void DsMinF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsMaxF64Ds::DsMaxF64Ds(const MachineInst *inst)
-    : Ds("ds_max_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsMaxF64Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMaxF64Ds::DsMaxF64Ds(const MachineInst *inst) : Ds("ds_max_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMaxF64Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMaxF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -3160,8 +1918,7 @@ void DsMaxF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3170,24 +1927,7 @@ void DsMaxF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsAddRtnU64Ds::DsAddRtnU64Ds(const MachineInst *inst)
-    : Ds("ds_add_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsAddRtnU64Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsAddRtnU64Ds::DsAddRtnU64Ds(const MachineInst *inst) : Ds("ds_add_rtn_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsAddRtnU64Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsAddRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -3205,8 +1945,7 @@ void DsAddRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3215,24 +1954,7 @@ void DsAddRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsSubRtnU64Ds::DsSubRtnU64Ds(const MachineInst *inst)
-    : Ds("ds_sub_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsSubRtnU64Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsSubRtnU64Ds::DsSubRtnU64Ds(const MachineInst *inst) : Ds("ds_sub_rtn_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsSubRtnU64Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsSubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -3250,8 +1972,7 @@ void DsSubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3260,24 +1981,7 @@ void DsSubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsRsubRtnU64Ds::DsRsubRtnU64Ds(const MachineInst *inst)
-    : Ds("ds_rsub_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsRsubRtnU64Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsRsubRtnU64Ds::DsRsubRtnU64Ds(const MachineInst *inst) : Ds("ds_rsub_rtn_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsRsubRtnU64Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsRsubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -3295,8 +1999,7 @@ void DsRsubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3305,24 +2008,7 @@ void DsRsubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsIncRtnU64Ds::DsIncRtnU64Ds(const MachineInst *inst)
-    : Ds("ds_inc_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsIncRtnU64Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsIncRtnU64Ds::DsIncRtnU64Ds(const MachineInst *inst) : Ds("ds_inc_rtn_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsIncRtnU64Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsIncRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -3340,8 +2026,7 @@ void DsIncRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3350,24 +2035,7 @@ void DsIncRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsDecRtnU64Ds::DsDecRtnU64Ds(const MachineInst *inst)
-    : Ds("ds_dec_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsDecRtnU64Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsDecRtnU64Ds::DsDecRtnU64Ds(const MachineInst *inst) : Ds("ds_dec_rtn_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsDecRtnU64Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsDecRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -3385,8 +2053,7 @@ void DsDecRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3395,24 +2062,7 @@ void DsDecRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsMinRtnI64Ds::DsMinRtnI64Ds(const MachineInst *inst)
-    : Ds("ds_min_rtn_i64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsMinRtnI64Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMinRtnI64Ds::DsMinRtnI64Ds(const MachineInst *inst) : Ds("ds_min_rtn_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMinRtnI64Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMinRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -3430,8 +2080,7 @@ void DsMinRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3440,24 +2089,7 @@ void DsMinRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsMaxRtnI64Ds::DsMaxRtnI64Ds(const MachineInst *inst)
-    : Ds("ds_max_rtn_i64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsMaxRtnI64Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMaxRtnI64Ds::DsMaxRtnI64Ds(const MachineInst *inst) : Ds("ds_max_rtn_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMaxRtnI64Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMaxRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -3475,8 +2107,7 @@ void DsMaxRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3485,24 +2116,7 @@ void DsMaxRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsMinRtnU64Ds::DsMinRtnU64Ds(const MachineInst *inst)
-    : Ds("ds_min_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsMinRtnU64Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMinRtnU64Ds::DsMinRtnU64Ds(const MachineInst *inst) : Ds("ds_min_rtn_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMinRtnU64Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMinRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -3520,8 +2134,7 @@ void DsMinRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3530,24 +2143,7 @@ void DsMinRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsMaxRtnU64Ds::DsMaxRtnU64Ds(const MachineInst *inst)
-    : Ds("ds_max_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsMaxRtnU64Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMaxRtnU64Ds::DsMaxRtnU64Ds(const MachineInst *inst) : Ds("ds_max_rtn_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMaxRtnU64Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMaxRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -3565,8 +2161,7 @@ void DsMaxRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3575,24 +2170,7 @@ void DsMaxRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsAndRtnB64Ds::DsAndRtnB64Ds(const MachineInst *inst)
-    : Ds("ds_and_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsAndRtnB64Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsAndRtnB64Ds::DsAndRtnB64Ds(const MachineInst *inst) : Ds("ds_and_rtn_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsAndRtnB64Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsAndRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -3610,8 +2188,7 @@ void DsAndRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3620,23 +2197,7 @@ void DsAndRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsOrRtnB64Ds::DsOrRtnB64Ds(const MachineInst *inst)
-    : Ds("ds_or_rtn_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsOrRtnB64Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsOrRtnB64Ds::DsOrRtnB64Ds(const MachineInst *inst) : Ds("ds_or_rtn_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsOrRtnB64Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsOrRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -3654,8 +2215,7 @@ void DsOrRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3664,24 +2224,7 @@ void DsOrRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsXorRtnB64Ds::DsXorRtnB64Ds(const MachineInst *inst)
-    : Ds("ds_xor_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsXorRtnB64Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsXorRtnB64Ds::DsXorRtnB64Ds(const MachineInst *inst) : Ds("ds_xor_rtn_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsXorRtnB64Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsXorRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -3699,8 +2242,7 @@ void DsXorRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3709,26 +2251,7 @@ void DsXorRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsMskorRtnB64Ds::DsMskorRtnB64Ds(const MachineInst *inst)
-    : Ds("ds_mskor_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsMskorRtnB64Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  dst_operands_[1] = &dsmem;
-  src_operands_[3] = &dsmem_in;
-  num_src_ = 4;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMskorRtnB64Ds::DsMskorRtnB64Ds(const MachineInst *inst) : Ds("ds_mskor_rtn_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMskorRtnB64Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data1), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;src_operands_[2] = &data1;dst_operands_[1] = &dsmem;src_operands_[3] = &dsmem_in;num_src_ = 4;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMskorRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -3747,8 +2270,7 @@ void DsMskorRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src_base = wf.vgpr_alloc().base + 0u + inst_.data1;
   d->store_data.resize(wf.wf_size() * 16);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t mask0 = amdgpu::RegisterAccess(cu).read_vgpr(mask_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &mask0, 4);
     uint32_t mask1 = amdgpu::RegisterAccess(cu).read_vgpr(mask_base + 1, lane);
@@ -3761,24 +2283,7 @@ void DsMskorRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsStorexchgRtnB64Ds::DsStorexchgRtnB64Ds(const MachineInst *inst)
-    : Ds("ds_storexchg_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsStorexchgRtnB64Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsStorexchgRtnB64Ds::DsStorexchgRtnB64Ds(const MachineInst *inst) : Ds("ds_storexchg_rtn_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsStorexchgRtnB64Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsStorexchgRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -3796,8 +2301,7 @@ void DsStorexchgRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3806,26 +2310,7 @@ void DsStorexchgRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsStorexchg2addrRtnB64Ds::DsStorexchg2addrRtnB64Ds(const MachineInst *inst)
-    : Ds("ds_storexchg_2addr_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsStorexchg2addrRtnB64Ds>()),
-      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  dst_operands_[1] = &dsmem;
-  src_operands_[3] = &dsmem_in;
-  num_src_ = 4;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsStorexchg2addrRtnB64Ds::DsStorexchg2addrRtnB64Ds(const MachineInst *inst) : Ds("ds_storexchg_2addr_rtn_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsStorexchg2addrRtnB64Ds>()), vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data1), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;src_operands_[2] = &data1;dst_operands_[1] = &dsmem;src_operands_[3] = &dsmem_in;num_src_ = 4;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsStorexchg2addrRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -3843,8 +2328,7 @@ void DsStorexchg2addrRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3853,26 +2337,7 @@ void DsStorexchg2addrRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsStorexchg2addrStride64RtnB64Ds::DsStorexchg2addrStride64RtnB64Ds(const MachineInst *inst)
-    : Ds("ds_storexchg_2addr_stride64_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsStorexchg2addrStride64RtnB64Ds>()),
-      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  dst_operands_[1] = &dsmem;
-  src_operands_[3] = &dsmem_in;
-  num_src_ = 4;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsStorexchg2addrStride64RtnB64Ds::DsStorexchg2addrStride64RtnB64Ds(const MachineInst *inst) : Ds("ds_storexchg_2addr_stride64_rtn_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsStorexchg2addrStride64RtnB64Ds>()), vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data1), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;src_operands_[2] = &data1;dst_operands_[1] = &dsmem;src_operands_[3] = &dsmem_in;num_src_ = 4;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsStorexchg2addrStride64RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -3890,8 +2355,7 @@ void DsStorexchg2addrStride64RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3900,26 +2364,7 @@ void DsStorexchg2addrStride64RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsCmpstoreRtnB64Ds::DsCmpstoreRtnB64Ds(const MachineInst *inst)
-    : Ds("ds_cmpstore_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsCmpstoreRtnB64Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  dst_operands_[1] = &dsmem;
-  src_operands_[3] = &dsmem_in;
-  num_src_ = 4;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsCmpstoreRtnB64Ds::DsCmpstoreRtnB64Ds(const MachineInst *inst) : Ds("ds_cmpstore_rtn_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsCmpstoreRtnB64Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data1), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;src_operands_[2] = &data1;dst_operands_[1] = &dsmem;src_operands_[3] = &dsmem_in;num_src_ = 4;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsCmpstoreRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -3938,8 +2383,7 @@ void DsCmpstoreRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
   d->store_data.resize(wf.wf_size() * 16);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -3952,26 +2396,7 @@ void DsCmpstoreRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsCmpstoreRtnF64Ds::DsCmpstoreRtnF64Ds(const MachineInst *inst)
-    : Ds("ds_cmpstore_rtn_f64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsCmpstoreRtnF64Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  dst_operands_[1] = &dsmem;
-  src_operands_[3] = &dsmem_in;
-  num_src_ = 4;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsCmpstoreRtnF64Ds::DsCmpstoreRtnF64Ds(const MachineInst *inst) : Ds("ds_cmpstore_rtn_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsCmpstoreRtnF64Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data1), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;src_operands_[2] = &data1;dst_operands_[1] = &dsmem;src_operands_[3] = &dsmem_in;num_src_ = 4;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsCmpstoreRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -3990,8 +2415,7 @@ void DsCmpstoreRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
   d->store_data.resize(wf.wf_size() * 16);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -4004,24 +2428,7 @@ void DsCmpstoreRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsMinRtnF64Ds::DsMinRtnF64Ds(const MachineInst *inst)
-    : Ds("ds_min_rtn_f64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsMinRtnF64Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMinRtnF64Ds::DsMinRtnF64Ds(const MachineInst *inst) : Ds("ds_min_rtn_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMinRtnF64Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMinRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -4039,8 +2446,7 @@ void DsMinRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -4049,24 +2455,7 @@ void DsMinRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsMaxRtnF64Ds::DsMaxRtnF64Ds(const MachineInst *inst)
-    : Ds("ds_max_rtn_f64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsMaxRtnF64Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsMaxRtnF64Ds::DsMaxRtnF64Ds(const MachineInst *inst) : Ds("ds_max_rtn_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsMaxRtnF64Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsMaxRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -4084,8 +2473,7 @@ void DsMaxRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -4094,19 +2482,7 @@ void DsMaxRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsLoadB64Ds::DsLoadB64Ds(const MachineInst *inst)
-    : Ds("ds_load_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsLoadB64Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      dsmem(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsLoadB64Ds::DsLoadB64Ds(const MachineInst *inst) : Ds("ds_load_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsLoadB64Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), dsmem(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsLoadB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -4121,20 +2497,7 @@ void DsLoadB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsLoad2addrB64Ds::DsLoad2addrB64Ds(const MachineInst *inst)
-    : Ds("ds_load_2addr_b64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsLoad2addrB64Ds>()),
-      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      dsmem(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsLoad2addrB64Ds::DsLoad2addrB64Ds(const MachineInst *inst) : Ds("ds_load_2addr_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsLoad2addrB64Ds>()), vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), dsmem(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsLoad2addrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -4153,8 +2516,7 @@ void DsLoad2addrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 2;
   uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
     d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 8U + wf.lds_base();
     d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 8U + wf.lds_base();
@@ -4162,20 +2524,7 @@ void DsLoad2addrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsLoad2addrStride64B64Ds::DsLoad2addrStride64B64Ds(const MachineInst *inst)
-    : Ds("ds_load_2addr_stride64_b64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsLoad2addrStride64B64Ds>()),
-      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      dsmem(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsLoad2addrStride64B64Ds::DsLoad2addrStride64B64Ds(const MachineInst *inst) : Ds("ds_load_2addr_stride64_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsLoad2addrStride64B64Ds>()), vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), dsmem(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsLoad2addrStride64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -4194,8 +2543,7 @@ void DsLoad2addrStride64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 2;
   uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
     d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 512U + wf.lds_base();
     d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 512U + wf.lds_base();
@@ -4203,24 +2551,7 @@ void DsLoad2addrStride64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsAddRtnF32Ds::DsAddRtnF32Ds(const MachineInst *inst)
-    : Ds("ds_add_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsAddRtnF32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsAddRtnF32Ds::DsAddRtnF32Ds(const MachineInst *inst) : Ds("ds_add_rtn_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsAddRtnF32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsAddRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -4238,64 +2569,22 @@ void DsAddRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsAddGsRegRtnDs::DsAddGsRegRtnDs(const MachineInst *inst)
-    : Ds("ds_add_gs_reg_rtn", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsAddGsRegRtnDs>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &data0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+DsAddGsRegRtnDs::DsAddGsRegRtnDs(const MachineInst *inst) : Ds("ds_add_gs_reg_rtn", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsAddGsRegRtnDs>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0) {dst_operands_[0] = &vdst;src_operands_[0] = &data0;num_src_ = 1;num_dst_ = 1;}
 
-void DsAddGsRegRtnDs::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void DsAddGsRegRtnDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-DsSubGsRegRtnDs::DsSubGsRegRtnDs(const MachineInst *inst)
-    : Ds("ds_sub_gs_reg_rtn", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsSubGsRegRtnDs>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &data0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+DsSubGsRegRtnDs::DsSubGsRegRtnDs(const MachineInst *inst) : Ds("ds_sub_gs_reg_rtn", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsSubGsRegRtnDs>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0) {dst_operands_[0] = &vdst;src_operands_[0] = &data0;num_src_ = 1;num_dst_ = 1;}
 
-void DsSubGsRegRtnDs::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void DsSubGsRegRtnDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-DsCondxchg32RtnB64Ds::DsCondxchg32RtnB64Ds(const MachineInst *inst)
-    : Ds("ds_condxchg32_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsCondxchg32RtnB64Ds>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[1] = &dsmem;
-  src_operands_[2] = &dsmem_in;
-  num_src_ = 3;
-  num_dst_ = 2;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsCondxchg32RtnB64Ds::DsCondxchg32RtnB64Ds(const MachineInst *inst) : Ds("ds_condxchg32_rtn_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsCondxchg32RtnB64Ds>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[1] = &dsmem;src_operands_[2] = &dsmem_in;num_src_ = 3;num_dst_ = 2;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsCondxchg32RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -4314,8 +2603,7 @@ void DsCondxchg32RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
   d->store_data.resize(wf.wf_size() * 16);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -4328,20 +2616,7 @@ void DsCondxchg32RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsStoreB8D16HiDs::DsStoreB8D16HiDs(const MachineInst *inst)
-    : Ds("ds_store_b8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsStoreB8D16HiDs>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(8, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsStoreB8D16HiDs::DsStoreB8D16HiDs(const MachineInst *inst) : Ds("ds_store_b8_d16_hi", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsStoreB8D16HiDs>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(8, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsStoreB8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -4357,8 +2632,7 @@ void DsStoreB8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 1);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     val0 >>= 16;
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
@@ -4366,20 +2640,7 @@ void DsStoreB8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsStoreB16D16HiDs::DsStoreB16D16HiDs(const MachineInst *inst)
-    : Ds("ds_store_b16_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsStoreB16D16HiDs>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(16, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsStoreB16D16HiDs::DsStoreB16D16HiDs(const MachineInst *inst) : Ds("ds_store_b16_d16_hi", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsStoreB16D16HiDs>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(16, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsStoreB16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -4395,8 +2656,7 @@ void DsStoreB16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 2);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     val0 >>= 16;
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
@@ -4404,20 +2664,7 @@ void DsStoreB16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsLoadU8D16Ds::DsLoadU8D16Ds(const MachineInst *inst)
-    : Ds("ds_load_u8_d16", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsLoadU8D16Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      dsmem(8, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsLoadU8D16Ds::DsLoadU8D16Ds(const MachineInst *inst) : Ds("ds_load_u8_d16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsLoadU8D16Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), dsmem(8, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsLoadU8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -4433,20 +2680,7 @@ void DsLoadU8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsLoadU8D16HiDs::DsLoadU8D16HiDs(const MachineInst *inst)
-    : Ds("ds_load_u8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsLoadU8D16HiDs>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      dsmem(8, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsLoadU8D16HiDs::DsLoadU8D16HiDs(const MachineInst *inst) : Ds("ds_load_u8_d16_hi", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsLoadU8D16HiDs>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), dsmem(8, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsLoadU8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -4462,20 +2696,7 @@ void DsLoadU8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsLoadI8D16Ds::DsLoadI8D16Ds(const MachineInst *inst)
-    : Ds("ds_load_i8_d16", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsLoadI8D16Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      dsmem(8, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsLoadI8D16Ds::DsLoadI8D16Ds(const MachineInst *inst) : Ds("ds_load_i8_d16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsLoadI8D16Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), dsmem(8, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsLoadI8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -4492,20 +2713,7 @@ void DsLoadI8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsLoadI8D16HiDs::DsLoadI8D16HiDs(const MachineInst *inst)
-    : Ds("ds_load_i8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsLoadI8D16HiDs>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      dsmem(8, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsLoadI8D16HiDs::DsLoadI8D16HiDs(const MachineInst *inst) : Ds("ds_load_i8_d16_hi", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsLoadI8D16HiDs>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), dsmem(8, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsLoadI8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -4522,20 +2730,7 @@ void DsLoadI8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsLoadU16D16Ds::DsLoadU16D16Ds(const MachineInst *inst)
-    : Ds("ds_load_u16_d16", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsLoadU16D16Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      dsmem(16, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsLoadU16D16Ds::DsLoadU16D16Ds(const MachineInst *inst) : Ds("ds_load_u16_d16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsLoadU16D16Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), dsmem(16, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsLoadU16D16Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -4551,20 +2746,7 @@ void DsLoadU16D16Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsLoadU16D16HiDs::DsLoadU16D16HiDs(const MachineInst *inst)
-    : Ds("ds_load_u16_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsLoadU16D16HiDs>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      dsmem(16, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsLoadU16D16HiDs::DsLoadU16D16HiDs(const MachineInst *inst) : Ds("ds_load_u16_d16_hi", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsLoadU16D16HiDs>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), dsmem(16, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsLoadU16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -4580,46 +2762,11 @@ void DsLoadU16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsBvhStackRtnB32Ds::DsBvhStackRtnB32Ds(const MachineInst *inst)
-    : Ds("ds_bvh_stack_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsBvhStackRtnB32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
-      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  dst_operands_[1] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  dst_operands_[2] = &dsmem;
-  src_operands_[3] = &dsmem_in;
-  num_src_ = 4;
-  num_dst_ = 3;
-  dsmem.apply_fieldless_caps(false, false, false);
-  dsmem_in.apply_fieldless_caps(false, false, false);
-}
+DsBvhStackRtnB32Ds::DsBvhStackRtnB32Ds(const MachineInst *inst) : Ds("ds_bvh_stack_rtn_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsBvhStackRtnB32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), data1(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data1), dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;dst_operands_[1] = &addr;src_operands_[1] = &data0;src_operands_[2] = &data1;dst_operands_[2] = &dsmem;src_operands_[3] = &dsmem_in;num_src_ = 4;num_dst_ = 3;dsmem.apply_fieldless_caps(false, false, false);dsmem_in.apply_fieldless_caps(false, false, false);}
 
-void DsBvhStackRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void DsBvhStackRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; throw util::UnimplementedInst(mnemonic()); }
 
-DsStoreAddtidB32Ds::DsStoreAddtidB32Ds(const MachineInst *inst)
-    : Ds("ds_store_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsStoreAddtidB32Ds>()),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(32, OperandType::OPR_DSMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
-  src_operands_[0] = &data0;
-  dst_operands_[0] = &dsmem;
-  src_operands_[1] = &m0;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsStoreAddtidB32Ds::DsStoreAddtidB32Ds(const MachineInst *inst) : Ds("ds_store_addtid_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsStoreAddtidB32Ds>()), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(32, OperandType::OPR_DSMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {src_operands_[0] = &data0;dst_operands_[0] = &dsmem;src_operands_[1] = &m0;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);m0.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsStoreAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -4635,80 +2782,32 @@ void DsStoreAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-DsLoadAddtidB32Ds::DsLoadAddtidB32Ds(const MachineInst *inst)
-    : Ds("ds_load_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsLoadAddtidB32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      dsmem(32, OperandType::OPR_DSMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &dsmem;
-  src_operands_[1] = &m0;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsLoadAddtidB32Ds::DsLoadAddtidB32Ds(const MachineInst *inst) : Ds("ds_load_addtid_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsLoadAddtidB32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), dsmem(32, OperandType::OPR_DSMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {dst_operands_[0] = &vdst;src_operands_[0] = &dsmem;src_operands_[1] = &m0;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);m0.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsLoadAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_ds_load_addtid_b32_ds(*this, wf);
 }
 
-DsPermuteB32Ds::DsPermuteB32Ds(const MachineInst *inst)
-    : Ds("ds_permute_b32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsPermuteB32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+DsPermuteB32Ds::DsPermuteB32Ds(const MachineInst *inst) : Ds("ds_permute_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsPermuteB32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;num_src_ = 2;num_dst_ = 1;}
 
 void DsPermuteB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_ds_permute_b32_ds(*this, wf);
 }
 
-DsBpermuteB32Ds::DsBpermuteB32Ds(const MachineInst *inst)
-    : Ds("ds_bpermute_b32", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsBpermuteB32Ds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+DsBpermuteB32Ds::DsBpermuteB32Ds(const MachineInst *inst) : Ds("ds_bpermute_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsBpermuteB32Ds>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &data0;num_src_ = 2;num_dst_ = 1;}
 
 void DsBpermuteB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_ds_bpermute_b32_ds(*this, wf);
 }
 
-DsStoreB96Ds::DsStoreB96Ds(const MachineInst *inst)
-    : Ds("ds_store_b96", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsStoreB96Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(96, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsStoreB96Ds::DsStoreB96Ds(const MachineInst *inst) : Ds("ds_store_b96", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsStoreB96Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(96, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsStoreB96Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -4724,8 +2823,7 @@ void DsStoreB96Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 12);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 12 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -4736,20 +2834,7 @@ void DsStoreB96Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsStoreB128Ds::DsStoreB128Ds(const MachineInst *inst)
-    : Ds("ds_store_b128", reinterpret_cast<const OpEncoding *>(inst),
-         make_exec_fn<DsStoreB128Ds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      dsmem(128, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &addr;
-  src_operands_[1] = &data0;
-  dst_operands_[0] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsStoreB128Ds::DsStoreB128Ds(const MachineInst *inst) : Ds("ds_store_b128", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsStoreB128Ds>()), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data0(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data0), dsmem(128, OperandType::OPR_DSMEM, 0) {src_operands_[0] = &addr;src_operands_[1] = &data0;dst_operands_[0] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsStoreB128Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -4765,8 +2850,7 @@ void DsStoreB128Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 16);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -4779,19 +2863,7 @@ void DsStoreB128Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsLoadB96Ds::DsLoadB96Ds(const MachineInst *inst)
-    : Ds("ds_load_b96", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsLoadB96Ds>()),
-      vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      dsmem(96, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsLoadB96Ds::DsLoadB96Ds(const MachineInst *inst) : Ds("ds_load_b96", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsLoadB96Ds>()), vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), dsmem(96, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsLoadB96Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
@@ -4806,19 +2878,7 @@ void DsLoadB96Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-DsLoadB128Ds::DsLoadB128Ds(const MachineInst *inst)
-    : Ds("ds_load_b128", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsLoadB128Ds>()),
-      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      dsmem(128, OperandType::OPR_DSMEM, 0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
-  num_dst_ = 1;
-  dsmem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
-}
+DsLoadB128Ds::DsLoadB128Ds(const MachineInst *inst) : Ds("ds_load_b128", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<DsLoadB128Ds>()), vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), dsmem(128, OperandType::OPR_DSMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &dsmem;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
 
 void DsLoadB128Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)

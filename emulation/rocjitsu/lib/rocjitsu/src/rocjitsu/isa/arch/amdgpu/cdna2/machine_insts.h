@@ -7,9 +7,9 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_CDNA2_MACHINE_INSTS_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_CDNA2_MACHINE_INSTS_H_
 
+#include <cstdint>
 #include "rocjitsu/isa/arch/amdgpu/shared/machine_insts_cdna.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/machine_insts_scalar.h"
-#include <cstdint>
 
 namespace rocjitsu {
 namespace cdna2 {
@@ -34,7 +34,8 @@ using VopcMachineInst = amdgpu::VopcMachineInst;
 
 using Vop2MachineInst = amdgpu::Vop2MachineInst;
 
-struct Vop3pMachineInst {
+struct Vop3pMachineInst
+{
   uint32_t vdst : 8;
   uint32_t neg_hi : 3;
   uint32_t op_sel : 3;
@@ -47,11 +48,12 @@ struct Vop3pMachineInst {
   uint32_t src2 : 9;
   uint32_t op_sel_hi : 2;
   uint32_t neg : 3;
-};
+} ;
 
 using Vop3MachineInst = amdgpu::Vop3MachineInst;
 
-struct DsMachineInst {
+struct DsMachineInst
+{
   uint32_t offset0 : 8;
   uint32_t offset1 : 8;
   uint32_t gds : 1;
@@ -62,9 +64,10 @@ struct DsMachineInst {
   uint32_t data0 : 8;
   uint32_t data1 : 8;
   uint32_t vdst : 8;
-};
+} ;
 
-struct MubufMachineInst {
+struct MubufMachineInst
+{
   uint32_t offset : 12;
   uint32_t offen : 1;
   uint32_t idxen : 1;
@@ -81,9 +84,10 @@ struct MubufMachineInst {
   uint32_t pad_53_54 : 2;
   uint32_t acc : 1;
   uint32_t soffset : 8;
-};
+} ;
 
-struct MtbufMachineInst {
+struct MtbufMachineInst
+{
   uint32_t offset : 12;
   uint32_t offen : 1;
   uint32_t idxen : 1;
@@ -99,9 +103,10 @@ struct MtbufMachineInst {
   uint32_t slc : 1;
   uint32_t acc : 1;
   uint32_t soffset : 8;
-};
+} ;
 
-struct MimgMachineInst {
+struct MimgMachineInst
+{
   uint32_t opm : 1;
   uint32_t pad_1_6 : 6;
   uint32_t scc : 1;
@@ -121,9 +126,10 @@ struct MimgMachineInst {
   uint32_t ssamp : 5;
   uint32_t pad_58_62 : 5;
   uint32_t d16 : 1;
-};
+} ;
 
-struct FlatMachineInst {
+struct FlatMachineInst
+{
   uint32_t offset : 12;
   uint32_t pad_12 : 1;
   uint32_t lds : 1;
@@ -138,9 +144,10 @@ struct FlatMachineInst {
   uint32_t saddr : 7;
   uint32_t acc : 1;
   uint32_t vdst : 8;
-};
+} ;
 
-struct FlatGlblMachineInst {
+struct FlatGlblMachineInst
+{
   uint32_t offset : 13;
   uint32_t lds : 1;
   uint32_t seg : 2;
@@ -154,9 +161,10 @@ struct FlatGlblMachineInst {
   uint32_t saddr : 7;
   uint32_t acc : 1;
   uint32_t vdst : 8;
-};
+} ;
 
-struct FlatScratchMachineInst {
+struct FlatScratchMachineInst
+{
   uint32_t offset : 13;
   uint32_t lds : 1;
   uint32_t seg : 2;
@@ -170,7 +178,7 @@ struct FlatScratchMachineInst {
   uint32_t saddr : 7;
   uint32_t acc : 1;
   uint32_t vdst : 8;
-};
+} ;
 
 using Sop1InstLiteralMachineInst = amdgpu::Sop1InstLiteralMachineInst;
 
@@ -182,7 +190,8 @@ using SopkInstLiteralMachineInst = amdgpu::SopkInstLiteralMachineInst;
 
 using Vop1InstLiteralMachineInst = amdgpu::Vop1InstLiteralMachineInst;
 
-struct Vop1VopDppMachineInst {
+struct Vop1VopDppMachineInst
+{
   uint32_t src0 : 9;
   uint32_t op : 8;
   uint32_t vdst : 8;
@@ -197,9 +206,10 @@ struct Vop1VopDppMachineInst {
   uint32_t src1_abs : 1;
   uint32_t bank_mask : 4;
   uint32_t row_mask : 4;
-};
+} ;
 
-struct Vop1VopSdwaMachineInst {
+struct Vop1VopSdwaMachineInst
+{
   uint32_t src0 : 9;
   uint32_t op : 8;
   uint32_t vdst : 8;
@@ -221,11 +231,12 @@ struct Vop1VopSdwaMachineInst {
   uint32_t src1_abs : 1;
   uint32_t pad_62 : 1;
   uint32_t s1 : 1;
-};
+} ;
 
 using Vop2InstLiteralMachineInst = amdgpu::Vop2InstLiteralMachineInst;
 
-struct Vop2VopDppMachineInst {
+struct Vop2VopDppMachineInst
+{
   uint32_t src0 : 9;
   uint32_t vsrc1 : 8;
   uint32_t vdst : 8;
@@ -241,9 +252,10 @@ struct Vop2VopDppMachineInst {
   uint32_t src1_abs : 1;
   uint32_t bank_mask : 4;
   uint32_t row_mask : 4;
-};
+} ;
 
-struct Vop2VopSdwaMachineInst {
+struct Vop2VopSdwaMachineInst
+{
   uint32_t src0 : 9;
   uint32_t vsrc1 : 8;
   uint32_t vdst : 8;
@@ -266,9 +278,10 @@ struct Vop2VopSdwaMachineInst {
   uint32_t src1_abs : 1;
   uint32_t pad_62 : 1;
   uint32_t s1 : 1;
-};
+} ;
 
-struct Vop2VopSdwaSdstEncMachineInst {
+struct Vop2VopSdwaSdstEncMachineInst
+{
   uint32_t src0 : 9;
   uint32_t vsrc1 : 8;
   uint32_t vdst : 8;
@@ -289,11 +302,12 @@ struct Vop2VopSdwaSdstEncMachineInst {
   uint32_t src1_abs : 1;
   uint32_t pad_62 : 1;
   uint32_t s1 : 1;
-};
+} ;
 
 using Vop3SdstEncMachineInst = amdgpu::Vop3SdstEncMachineInst;
 
-struct Vop3pMfmaMachineInst {
+struct Vop3pMfmaMachineInst
+{
   uint32_t vdst : 8;
   uint32_t cbsz : 3;
   uint32_t abid : 4;
@@ -305,11 +319,12 @@ struct Vop3pMfmaMachineInst {
   uint32_t src2 : 9;
   uint32_t acc : 2;
   uint32_t blgp : 3;
-};
+} ;
 
 using VopcInstLiteralMachineInst = amdgpu::VopcInstLiteralMachineInst;
 
-struct VopcVopSdwaSdstEncMachineInst {
+struct VopcVopSdwaSdstEncMachineInst
+{
   uint32_t src0 : 9;
   uint32_t vsrc1 : 8;
   uint32_t op : 8;
@@ -329,7 +344,7 @@ struct VopcVopSdwaSdstEncMachineInst {
   uint32_t src1_abs : 1;
   uint32_t pad_62 : 1;
   uint32_t s1 : 1;
-};
+} ;
 
 } // namespace cdna2
 } // namespace rocjitsu

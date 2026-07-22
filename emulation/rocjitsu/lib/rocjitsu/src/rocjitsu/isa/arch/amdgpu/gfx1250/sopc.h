@@ -14,465 +14,511 @@
 namespace rocjitsu {
 namespace gfx1250 {
 
-class SCmpEqI32Sopc : public Sopc {
-public:
-  SCmpEqI32Sopc(const MachineInst *inst);
+class SCmpEqI32Sopc : public Sopc
+{
+  public:
+   SCmpEqI32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpLgI32Sopc : public Sopc {
-public:
-  SCmpLgI32Sopc(const MachineInst *inst);
+class SCmpLgI32Sopc : public Sopc
+{
+  public:
+   SCmpLgI32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpGtI32Sopc : public Sopc {
-public:
-  SCmpGtI32Sopc(const MachineInst *inst);
+class SCmpGtI32Sopc : public Sopc
+{
+  public:
+   SCmpGtI32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpGeI32Sopc : public Sopc {
-public:
-  SCmpGeI32Sopc(const MachineInst *inst);
+class SCmpGeI32Sopc : public Sopc
+{
+  public:
+   SCmpGeI32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpLtI32Sopc : public Sopc {
-public:
-  SCmpLtI32Sopc(const MachineInst *inst);
+class SCmpLtI32Sopc : public Sopc
+{
+  public:
+   SCmpLtI32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpLeI32Sopc : public Sopc {
-public:
-  SCmpLeI32Sopc(const MachineInst *inst);
+class SCmpLeI32Sopc : public Sopc
+{
+  public:
+   SCmpLeI32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpEqU32Sopc : public Sopc {
-public:
-  SCmpEqU32Sopc(const MachineInst *inst);
+class SCmpEqU32Sopc : public Sopc
+{
+  public:
+   SCmpEqU32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpLgU32Sopc : public Sopc {
-public:
-  SCmpLgU32Sopc(const MachineInst *inst);
+class SCmpLgU32Sopc : public Sopc
+{
+  public:
+   SCmpLgU32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpGtU32Sopc : public Sopc {
-public:
-  SCmpGtU32Sopc(const MachineInst *inst);
+class SCmpGtU32Sopc : public Sopc
+{
+  public:
+   SCmpGtU32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpGeU32Sopc : public Sopc {
-public:
-  SCmpGeU32Sopc(const MachineInst *inst);
+class SCmpGeU32Sopc : public Sopc
+{
+  public:
+   SCmpGeU32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpLtU32Sopc : public Sopc {
-public:
-  SCmpLtU32Sopc(const MachineInst *inst);
+class SCmpLtU32Sopc : public Sopc
+{
+  public:
+   SCmpLtU32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpLeU32Sopc : public Sopc {
-public:
-  SCmpLeU32Sopc(const MachineInst *inst);
+class SCmpLeU32Sopc : public Sopc
+{
+  public:
+   SCmpLeU32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SBitcmp0B32Sopc : public Sopc {
-public:
-  SBitcmp0B32Sopc(const MachineInst *inst);
+class SBitcmp0B32Sopc : public Sopc
+{
+  public:
+   SBitcmp0B32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SBitcmp1B32Sopc : public Sopc {
-public:
-  SBitcmp1B32Sopc(const MachineInst *inst);
+class SBitcmp1B32Sopc : public Sopc
+{
+  public:
+   SBitcmp1B32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SBitcmp0B64Sopc : public Sopc {
-public:
-  SBitcmp0B64Sopc(const MachineInst *inst);
+class SBitcmp0B64Sopc : public Sopc
+{
+  public:
+   SBitcmp0B64Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SBitcmp1B64Sopc : public Sopc {
-public:
-  SBitcmp1B64Sopc(const MachineInst *inst);
+class SBitcmp1B64Sopc : public Sopc
+{
+  public:
+   SBitcmp1B64Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpEqU64Sopc : public Sopc {
-public:
-  SCmpEqU64Sopc(const MachineInst *inst);
+class SCmpEqU64Sopc : public Sopc
+{
+  public:
+   SCmpEqU64Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpLgU64Sopc : public Sopc {
-public:
-  SCmpLgU64Sopc(const MachineInst *inst);
+class SCmpLgU64Sopc : public Sopc
+{
+  public:
+   SCmpLgU64Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpLtF32Sopc : public Sopc {
-public:
-  SCmpLtF32Sopc(const MachineInst *inst);
+class SCmpLtF32Sopc : public Sopc
+{
+  public:
+   SCmpLtF32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpLtF16Sopc : public Sopc {
-public:
-  SCmpLtF16Sopc(const MachineInst *inst);
+class SCmpLtF16Sopc : public Sopc
+{
+  public:
+   SCmpLtF16Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpEqF32Sopc : public Sopc {
-public:
-  SCmpEqF32Sopc(const MachineInst *inst);
+class SCmpEqF32Sopc : public Sopc
+{
+  public:
+   SCmpEqF32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpEqF16Sopc : public Sopc {
-public:
-  SCmpEqF16Sopc(const MachineInst *inst);
+class SCmpEqF16Sopc : public Sopc
+{
+  public:
+   SCmpEqF16Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpLeF32Sopc : public Sopc {
-public:
-  SCmpLeF32Sopc(const MachineInst *inst);
+class SCmpLeF32Sopc : public Sopc
+{
+  public:
+   SCmpLeF32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpLeF16Sopc : public Sopc {
-public:
-  SCmpLeF16Sopc(const MachineInst *inst);
+class SCmpLeF16Sopc : public Sopc
+{
+  public:
+   SCmpLeF16Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpGtF32Sopc : public Sopc {
-public:
-  SCmpGtF32Sopc(const MachineInst *inst);
+class SCmpGtF32Sopc : public Sopc
+{
+  public:
+   SCmpGtF32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpGtF16Sopc : public Sopc {
-public:
-  SCmpGtF16Sopc(const MachineInst *inst);
+class SCmpGtF16Sopc : public Sopc
+{
+  public:
+   SCmpGtF16Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpLgF32Sopc : public Sopc {
-public:
-  SCmpLgF32Sopc(const MachineInst *inst);
+class SCmpLgF32Sopc : public Sopc
+{
+  public:
+   SCmpLgF32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpLgF16Sopc : public Sopc {
-public:
-  SCmpLgF16Sopc(const MachineInst *inst);
+class SCmpLgF16Sopc : public Sopc
+{
+  public:
+   SCmpLgF16Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpGeF32Sopc : public Sopc {
-public:
-  SCmpGeF32Sopc(const MachineInst *inst);
+class SCmpGeF32Sopc : public Sopc
+{
+  public:
+   SCmpGeF32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpGeF16Sopc : public Sopc {
-public:
-  SCmpGeF16Sopc(const MachineInst *inst);
+class SCmpGeF16Sopc : public Sopc
+{
+  public:
+   SCmpGeF16Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpOF32Sopc : public Sopc {
-public:
-  SCmpOF32Sopc(const MachineInst *inst);
+class SCmpOF32Sopc : public Sopc
+{
+  public:
+   SCmpOF32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpOF16Sopc : public Sopc {
-public:
-  SCmpOF16Sopc(const MachineInst *inst);
+class SCmpOF16Sopc : public Sopc
+{
+  public:
+   SCmpOF16Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpUF32Sopc : public Sopc {
-public:
-  SCmpUF32Sopc(const MachineInst *inst);
+class SCmpUF32Sopc : public Sopc
+{
+  public:
+   SCmpUF32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpUF16Sopc : public Sopc {
-public:
-  SCmpUF16Sopc(const MachineInst *inst);
+class SCmpUF16Sopc : public Sopc
+{
+  public:
+   SCmpUF16Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpNgeF32Sopc : public Sopc {
-public:
-  SCmpNgeF32Sopc(const MachineInst *inst);
+class SCmpNgeF32Sopc : public Sopc
+{
+  public:
+   SCmpNgeF32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpNgeF16Sopc : public Sopc {
-public:
-  SCmpNgeF16Sopc(const MachineInst *inst);
+class SCmpNgeF16Sopc : public Sopc
+{
+  public:
+   SCmpNgeF16Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpNlgF32Sopc : public Sopc {
-public:
-  SCmpNlgF32Sopc(const MachineInst *inst);
+class SCmpNlgF32Sopc : public Sopc
+{
+  public:
+   SCmpNlgF32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpNlgF16Sopc : public Sopc {
-public:
-  SCmpNlgF16Sopc(const MachineInst *inst);
+class SCmpNlgF16Sopc : public Sopc
+{
+  public:
+   SCmpNlgF16Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpNgtF32Sopc : public Sopc {
-public:
-  SCmpNgtF32Sopc(const MachineInst *inst);
+class SCmpNgtF32Sopc : public Sopc
+{
+  public:
+   SCmpNgtF32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpNgtF16Sopc : public Sopc {
-public:
-  SCmpNgtF16Sopc(const MachineInst *inst);
+class SCmpNgtF16Sopc : public Sopc
+{
+  public:
+   SCmpNgtF16Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpNleF32Sopc : public Sopc {
-public:
-  SCmpNleF32Sopc(const MachineInst *inst);
+class SCmpNleF32Sopc : public Sopc
+{
+  public:
+   SCmpNleF32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpNleF16Sopc : public Sopc {
-public:
-  SCmpNleF16Sopc(const MachineInst *inst);
+class SCmpNleF16Sopc : public Sopc
+{
+  public:
+   SCmpNleF16Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpNeqF32Sopc : public Sopc {
-public:
-  SCmpNeqF32Sopc(const MachineInst *inst);
+class SCmpNeqF32Sopc : public Sopc
+{
+  public:
+   SCmpNeqF32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpNeqF16Sopc : public Sopc {
-public:
-  SCmpNeqF16Sopc(const MachineInst *inst);
+class SCmpNeqF16Sopc : public Sopc
+{
+  public:
+   SCmpNeqF16Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpNltF32Sopc : public Sopc {
-public:
-  SCmpNltF32Sopc(const MachineInst *inst);
+class SCmpNltF32Sopc : public Sopc
+{
+  public:
+   SCmpNltF32Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
-class SCmpNltF16Sopc : public Sopc {
-public:
-  SCmpNltF16Sopc(const MachineInst *inst);
+class SCmpNltF16Sopc : public Sopc
+{
+  public:
+   SCmpNltF16Sopc(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
   static const bool execute_registered_;
-};
+} ;
 
 } // namespace gfx1250
 } // namespace rocjitsu

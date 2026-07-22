@@ -14,478 +14,528 @@
 namespace rocjitsu {
 namespace rdna1 {
 
-class VCndmaskB32Vop2 : public Vop2 {
-public:
-  VCndmaskB32Vop2(const MachineInst *inst);
+class VCndmaskB32Vop2 : public Vop2
+{
+  public:
+   VCndmaskB32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
   Operand vcc;
-};
+} ;
 
-class VDot2cF32F16Vop2 : public Vop2 {
-public:
-  VDot2cF32F16Vop2(const MachineInst *inst);
+class VDot2cF32F16Vop2 : public Vop2
+{
+  public:
+   VDot2cF32F16Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VAddF32Vop2 : public Vop2 {
-public:
-  VAddF32Vop2(const MachineInst *inst);
+class VAddF32Vop2 : public Vop2
+{
+  public:
+   VAddF32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VSubF32Vop2 : public Vop2 {
-public:
-  VSubF32Vop2(const MachineInst *inst);
+class VSubF32Vop2 : public Vop2
+{
+  public:
+   VSubF32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VSubrevF32Vop2 : public Vop2 {
-public:
-  VSubrevF32Vop2(const MachineInst *inst);
+class VSubrevF32Vop2 : public Vop2
+{
+  public:
+   VSubrevF32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VMacLegacyF32Vop2 : public Vop2 {
-public:
-  VMacLegacyF32Vop2(const MachineInst *inst);
+class VMacLegacyF32Vop2 : public Vop2
+{
+  public:
+   VMacLegacyF32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VMulLegacyF32Vop2 : public Vop2 {
-public:
-  VMulLegacyF32Vop2(const MachineInst *inst);
+class VMulLegacyF32Vop2 : public Vop2
+{
+  public:
+   VMulLegacyF32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VMulF32Vop2 : public Vop2 {
-public:
-  VMulF32Vop2(const MachineInst *inst);
+class VMulF32Vop2 : public Vop2
+{
+  public:
+   VMulF32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VMulI32I24Vop2 : public Vop2 {
-public:
-  VMulI32I24Vop2(const MachineInst *inst);
+class VMulI32I24Vop2 : public Vop2
+{
+  public:
+   VMulI32I24Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VMulHiI32I24Vop2 : public Vop2 {
-public:
-  VMulHiI32I24Vop2(const MachineInst *inst);
+class VMulHiI32I24Vop2 : public Vop2
+{
+  public:
+   VMulHiI32I24Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VMulU32U24Vop2 : public Vop2 {
-public:
-  VMulU32U24Vop2(const MachineInst *inst);
+class VMulU32U24Vop2 : public Vop2
+{
+  public:
+   VMulU32U24Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VMulHiU32U24Vop2 : public Vop2 {
-public:
-  VMulHiU32U24Vop2(const MachineInst *inst);
+class VMulHiU32U24Vop2 : public Vop2
+{
+  public:
+   VMulHiU32U24Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VDot4cI32I8Vop2 : public Vop2 {
-public:
-  VDot4cI32I8Vop2(const MachineInst *inst);
+class VDot4cI32I8Vop2 : public Vop2
+{
+  public:
+   VDot4cI32I8Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VMinF32Vop2 : public Vop2 {
-public:
-  VMinF32Vop2(const MachineInst *inst);
+class VMinF32Vop2 : public Vop2
+{
+  public:
+   VMinF32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VMaxF32Vop2 : public Vop2 {
-public:
-  VMaxF32Vop2(const MachineInst *inst);
+class VMaxF32Vop2 : public Vop2
+{
+  public:
+   VMaxF32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VMinI32Vop2 : public Vop2 {
-public:
-  VMinI32Vop2(const MachineInst *inst);
+class VMinI32Vop2 : public Vop2
+{
+  public:
+   VMinI32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VMaxI32Vop2 : public Vop2 {
-public:
-  VMaxI32Vop2(const MachineInst *inst);
+class VMaxI32Vop2 : public Vop2
+{
+  public:
+   VMaxI32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VMinU32Vop2 : public Vop2 {
-public:
-  VMinU32Vop2(const MachineInst *inst);
+class VMinU32Vop2 : public Vop2
+{
+  public:
+   VMinU32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VMaxU32Vop2 : public Vop2 {
-public:
-  VMaxU32Vop2(const MachineInst *inst);
+class VMaxU32Vop2 : public Vop2
+{
+  public:
+   VMaxU32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VLshrrevB32Vop2 : public Vop2 {
-public:
-  VLshrrevB32Vop2(const MachineInst *inst);
+class VLshrrevB32Vop2 : public Vop2
+{
+  public:
+   VLshrrevB32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VAshrrevI32Vop2 : public Vop2 {
-public:
-  VAshrrevI32Vop2(const MachineInst *inst);
+class VAshrrevI32Vop2 : public Vop2
+{
+  public:
+   VAshrrevI32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VLshlrevB32Vop2 : public Vop2 {
-public:
-  VLshlrevB32Vop2(const MachineInst *inst);
+class VLshlrevB32Vop2 : public Vop2
+{
+  public:
+   VLshlrevB32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VAndB32Vop2 : public Vop2 {
-public:
-  VAndB32Vop2(const MachineInst *inst);
+class VAndB32Vop2 : public Vop2
+{
+  public:
+   VAndB32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VOrB32Vop2 : public Vop2 {
-public:
-  VOrB32Vop2(const MachineInst *inst);
+class VOrB32Vop2 : public Vop2
+{
+  public:
+   VOrB32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VXorB32Vop2 : public Vop2 {
-public:
-  VXorB32Vop2(const MachineInst *inst);
+class VXorB32Vop2 : public Vop2
+{
+  public:
+   VXorB32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VXnorB32Vop2 : public Vop2 {
-public:
-  VXnorB32Vop2(const MachineInst *inst);
+class VXnorB32Vop2 : public Vop2
+{
+  public:
+   VXnorB32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VMacF32Vop2 : public Vop2 {
-public:
-  VMacF32Vop2(const MachineInst *inst);
+class VMacF32Vop2 : public Vop2
+{
+  public:
+   VMacF32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VMadmkF32Vop2 : public Vop2 {
-public:
-  VMadmkF32Vop2(const MachineInst *inst);
+class VMadmkF32Vop2 : public Vop2
+{
+  public:
+   VMadmkF32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand simm32;
   Operand vsrc1;
-};
+} ;
 
-class VMadakF32Vop2 : public Vop2 {
-public:
-  VMadakF32Vop2(const MachineInst *inst);
+class VMadakF32Vop2 : public Vop2
+{
+  public:
+   VMadakF32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
   Operand simm32;
-};
+} ;
 
-class VAddNcU32Vop2 : public Vop2 {
-public:
-  VAddNcU32Vop2(const MachineInst *inst);
+class VAddNcU32Vop2 : public Vop2
+{
+  public:
+   VAddNcU32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VSubNcU32Vop2 : public Vop2 {
-public:
-  VSubNcU32Vop2(const MachineInst *inst);
+class VSubNcU32Vop2 : public Vop2
+{
+  public:
+   VSubNcU32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VSubrevNcU32Vop2 : public Vop2 {
-public:
-  VSubrevNcU32Vop2(const MachineInst *inst);
+class VSubrevNcU32Vop2 : public Vop2
+{
+  public:
+   VSubrevNcU32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VAddCoCiU32Vop2 : public Vop2 {
-public:
-  VAddCoCiU32Vop2(const MachineInst *inst);
+class VAddCoCiU32Vop2 : public Vop2
+{
+  public:
+   VAddCoCiU32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vcc;
   Operand src0;
   Operand vsrc1;
   Operand vcc_in;
-};
+} ;
 
-class VSubCoCiU32Vop2 : public Vop2 {
-public:
-  VSubCoCiU32Vop2(const MachineInst *inst);
+class VSubCoCiU32Vop2 : public Vop2
+{
+  public:
+   VSubCoCiU32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vcc;
   Operand src0;
   Operand vsrc1;
   Operand vcc_in;
-};
+} ;
 
-class VSubrevCoCiU32Vop2 : public Vop2 {
-public:
-  VSubrevCoCiU32Vop2(const MachineInst *inst);
+class VSubrevCoCiU32Vop2 : public Vop2
+{
+  public:
+   VSubrevCoCiU32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vcc;
   Operand src0;
   Operand vsrc1;
   Operand vcc_in;
-};
+} ;
 
-class VFmacF32Vop2 : public Vop2 {
-public:
-  VFmacF32Vop2(const MachineInst *inst);
+class VFmacF32Vop2 : public Vop2
+{
+  public:
+   VFmacF32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VFmamkF32Vop2 : public Vop2 {
-public:
-  VFmamkF32Vop2(const MachineInst *inst);
+class VFmamkF32Vop2 : public Vop2
+{
+  public:
+   VFmamkF32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand simm32;
   Operand vsrc1;
-};
+} ;
 
-class VFmaakF32Vop2 : public Vop2 {
-public:
-  VFmaakF32Vop2(const MachineInst *inst);
+class VFmaakF32Vop2 : public Vop2
+{
+  public:
+   VFmaakF32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
   Operand simm32;
-};
+} ;
 
-class VCvtPkrtzF16F32Vop2 : public Vop2 {
-public:
-  VCvtPkrtzF16F32Vop2(const MachineInst *inst);
+class VCvtPkrtzF16F32Vop2 : public Vop2
+{
+  public:
+   VCvtPkrtzF16F32Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VAddF16Vop2 : public Vop2 {
-public:
-  VAddF16Vop2(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  Operand vdst;
-  Operand src0;
-  Operand vsrc1;
-};
-
-class VSubF16Vop2 : public Vop2 {
-public:
-  VSubF16Vop2(const MachineInst *inst);
+class VAddF16Vop2 : public Vop2
+{
+  public:
+   VAddF16Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VSubrevF16Vop2 : public Vop2 {
-public:
-  VSubrevF16Vop2(const MachineInst *inst);
+class VSubF16Vop2 : public Vop2
+{
+  public:
+   VSubF16Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VMulF16Vop2 : public Vop2 {
-public:
-  VMulF16Vop2(const MachineInst *inst);
+class VSubrevF16Vop2 : public Vop2
+{
+  public:
+   VSubrevF16Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VFmacF16Vop2 : public Vop2 {
-public:
-  VFmacF16Vop2(const MachineInst *inst);
+class VMulF16Vop2 : public Vop2
+{
+  public:
+   VMulF16Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VFmamkF16Vop2 : public Vop2 {
-public:
-  VFmamkF16Vop2(const MachineInst *inst);
+class VFmacF16Vop2 : public Vop2
+{
+  public:
+   VFmacF16Vop2(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+} ;
+
+class VFmamkF16Vop2 : public Vop2
+{
+  public:
+   VFmamkF16Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand simm32;
   Operand vsrc1;
-};
+} ;
 
-class VFmaakF16Vop2 : public Vop2 {
-public:
-  VFmaakF16Vop2(const MachineInst *inst);
+class VFmaakF16Vop2 : public Vop2
+{
+  public:
+   VFmaakF16Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand vsrc1;
   Operand simm32;
-};
+} ;
 
-class VMaxF16Vop2 : public Vop2 {
-public:
-  VMaxF16Vop2(const MachineInst *inst);
+class VMaxF16Vop2 : public Vop2
+{
+  public:
+   VMaxF16Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VMinF16Vop2 : public Vop2 {
-public:
-  VMinF16Vop2(const MachineInst *inst);
+class VMinF16Vop2 : public Vop2
+{
+  public:
+   VMinF16Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VLdexpF16Vop2 : public Vop2 {
-public:
-  VLdexpF16Vop2(const MachineInst *inst);
+class VLdexpF16Vop2 : public Vop2
+{
+  public:
+   VLdexpF16Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
-class VPkFmacF16Vop2 : public Vop2 {
-public:
-  VPkFmacF16Vop2(const MachineInst *inst);
+class VPkFmacF16Vop2 : public Vop2
+{
+  public:
+   VPkFmacF16Vop2(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-};
+} ;
 
 } // namespace rdna1
 } // namespace rocjitsu

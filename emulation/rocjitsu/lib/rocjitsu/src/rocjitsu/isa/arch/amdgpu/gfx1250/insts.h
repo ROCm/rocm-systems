@@ -7,23 +7,23 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_INSTS_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_INSTS_H_
 
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/smem.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/sop1.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/sop2.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/sopc.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/sopk.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/sopp.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vbuffer.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vds.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vflat.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vglobal.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vimage.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/sopk.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/sop2.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/smem.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vop2.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vop3p.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vopc.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vopd.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/vds.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/vbuffer.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/vimage.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/vflat.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vscratch.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/vglobal.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/vopd.h"
 
 #endif // ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_INSTS_H_
