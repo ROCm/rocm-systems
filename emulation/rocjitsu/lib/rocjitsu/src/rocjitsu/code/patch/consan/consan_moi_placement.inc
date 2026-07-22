@@ -1674,6 +1674,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   const bool component_local_sampled =
       options.moi_engine == ConSanMoiEngine::Sampled &&
       (arch == ROCJITSU_CODE_ARCH_GFX1250 || arch == ROCJITSU_CODE_ARCH_CDNA4);
+  const bool gfx1250_sampled = component_local_sampled && arch == ROCJITSU_CODE_ARCH_GFX1250;
   if ((options.moi_engine != ConSanMoiEngine::RecordReplay &&
        options.moi_engine != ConSanMoiEngine::InlineShadow && !component_local_sampled) ||
       !options.automatic_moi_partial_exec_save_sgprs || !options.moi_exec_save_sgpr)
