@@ -38,9 +38,19 @@ namespace rocjitsu::test {
 //==============================================================================
 
 // VOP1 v_mov_b32 encodings (gfx950: [31:25]=0x3F, vdst[24:17], op=1<<9,
-// src0[8:0]; VGPR src = 256 + index, inline 0 = 128, inline 1..64 = 129..192).
+// src0[8:0]; VGPR src = 256 + index, SGPR src = index, inline 0 = 128,
+// inline 1..64 = 129..192).
 inline constexpr uint32_t kMovV3V2 = 0x7E060302u;   // v_mov_b32 v3, v2 -> reads v2.
 inline constexpr uint32_t kMovV2Zero = 0x7E040280u; // v_mov_b32 v2, 0  -> clobbers v2.
+inline constexpr uint32_t kMovV3S8 = 0x7E060208u;   // v_mov_b32 v3, s8 -> reads s8 (s8 live).
+inline constexpr uint32_t kMovS8Zero = 0xbe880080u; // s_mov_b32 s8, 0  -> clobbers s8.
+
+// s_mov_b32 <special>, 0: probe bodies that clobber special machine state the
+// trampoline preserves across the call (exec_lo=126, vcc_lo=106, m0=124).
+inline constexpr uint32_t kMovExecLoZero = 0xbefe0080u;    // s_mov_b32 exec_lo, 0 -> clobbers EXEC.
+inline constexpr uint32_t kMovVccLoZero = 0xbeea0080u;     // s_mov_b32 vcc_lo, 0  -> clobbers VCC.
+inline constexpr uint32_t kMovM0Zero = 0xbefc0080u;        // s_mov_b32 m0, 0      -> clobbers M0.
+inline constexpr uint32_t kMovFlatScrLoZero = 0xbee60080u; // s_mov_b32 flat_scratch_lo, 0.
 
 // v_mov_b32 v2, <inline const K> for K in [0, 64]. Inline constant 0 is encoded
 // as 128, and 1..64 as 129..192, in the src0 field (bits [8:0]).
@@ -52,6 +62,21 @@ inline constexpr uint32_t kMovV2Zero = 0x7E040280u; // v_mov_b32 v2, 0  -> clobb
 // s_setpc_b64 s[30:31] (GFX9 family): a minimal probe body tail that returns
 // through the link pair, so build_probe_callable accepts it.
 inline constexpr uint32_t kProbeSetpcS30S31 = 0xbe801d1eu;
+
+// s_mov_b32 s30, 0 (GFX9 family): overwrites the low half of the return-link
+// pair. A body running this before the closing s_setpc still passes
+// build_probe_callable (which only inspects the final instruction) but must be
+// rejected because it would return through a corrupted PC.
+inline constexpr uint32_t kProbeMovS30_0 = 0xbe9e0080u;
+
+// Distinguishable leading marker words for multi-probe layout tests. Each is a
+// harmless, self-contained op the probe verifier accepts (not a call, scratch
+// access, nor a write to the link pair). They must not collide with the anchor
+// instruction (s_nop) nor any envelope opcode, so a test can tell one copied
+// probe body from another in the appended cave. s5/s6 are dead in the fixtures
+// and are not the low registers the planner picks for target/scc.
+inline constexpr uint32_t kProbeMarkerMovS5 = 0xbe850080u; // s_mov_b32 s5, 0
+inline constexpr uint32_t kProbeMarkerMovS6 = 0xbe860080u; // s_mov_b32 s6, 0
 
 //==============================================================================
 // ELF-image string/alignment helpers
