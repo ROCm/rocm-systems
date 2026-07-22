@@ -62,7 +62,7 @@ described below rather than repeated in every row.
 | Synchronization model | None for detection. Barrier/atomic **fault injection** can compose with the value perturbation, but SuperCollider does not reconstruct ordering. | Supported barriers and selected atomics/fences are recorded and modeled during replay. | Supported synchronization metadata is associated with the same sampled causal identity and interpreted during the deferred scan. | Supported barriers advance device epoch state; selected release/acquire atomics use bounded device ordering tables. |
 | Retained evidence | One sticky mismatch signal per relevant code object in ordinary automatic mode. | A bounded snapshot of static site slots and synchronization records; optional expert per-lane dynamic append is also bounded. | Bounded immutable watchpoint banks and paired synchronization metadata for selected windows. | Exact shadow slots for admitted LDS cells, bounded ordering state, and first-N structured diagnostics. |
 | Main strength | Smallest and easiest perturbation/value-instability signal. | Clearest reference/debug semantics and easiest engine for inspecting the modeled event history. | Broad statistical coverage with bounded retained state and automatic sampling settings. | Strongest supported-form attribution without retaining an exhaustive event trace. |
-| Fundamental limitation | A mismatch is not proof of a race, and same-value races can be invisible. | Repeated static sites can overwrite their slot; retained evidence is a bounded snapshot, not execution history. | Sampling can miss races; a clean run is intentionally inconclusive. | Device shadowing and ordering cost more, diagnostics are bounded, and unsupported instruction/order forms remain outside the claim. |
+| Fundamental limitation | A mismatch is not proof of a race, and same-value races can be invisible. | Each static site slot retains only its first publisher for the loaded code object. Generation filtering prevents invalid cross-dispatch comparisons, but repeated dispatches can leave a mixed-generation snapshot without a useful pair. | Sampling can miss races; a clean run is intentionally inconclusive. | Device shadowing and ordering cost more, diagnostics are bounded, and unsupported instruction/order forms remain outside the claim. |
 
 ## What is common, and what is not
 
@@ -144,10 +144,11 @@ instrumentation. Loading the hook selects MOI Record/Replay by default;
 `RJ_CONSAN_MODE=record-replay` may be stated explicitly in a saved command.
 
 That recommendation is not a completeness claim. Record/Replay retains a
-bounded snapshot, and repeated executions of a static site can overwrite
-earlier dynamic evidence. Consequently, complete static patch coverage does
-not imply complete dynamic-history retention or fault-detection sensitivity;
-a clean replay remains inconclusive.
+bounded first-light snapshot: each static slot is claimed once for a loaded
+code object, and generation filtering compares only records from the same
+hardware dispatch. Consequently, complete static patch coverage does not
+imply complete dynamic-history retention or fault-detection sensitivity; a
+clean replay remains inconclusive.
 
 - Choose **MOI Inline Shadow** when the strongest current supported-form,
   immediate device-side attribution matters more than its higher device work.

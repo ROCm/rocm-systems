@@ -20,12 +20,14 @@ not manufacture old colors. The 2026-07-16 campaign demonstrated that rule by
 temporarily demoting five cells when stronger evidence contradicted them, then
 restoring them only after focused fixes and exact-tip reruns.
 
-The completed gfx1201 certificate uses executable commit `640e575da2` and hook
-SHA-256 `c45aa0fece5a9aa7ef8b3ad24bcbb2077e477586df6b4eecf12990f7fafa693d`.
-It accepts all 55 clean baseline/profile rows, all 14 reviewed exact fault
-policies, and all 66 paired-overhead result rows across 11 workloads. The
-unrounded ratios and raw commands remain in the generated artifacts; the
-rounded current-tip values are published in [STATUS_RDNA4.md](STATUS_RDNA4.md).
+The latest gfx1201 Record/Replay audit uses executable commit `5af82ade33` and
+hook SHA-256
+`0edfe1985a2ee4512b65185a6ad625fe1160e0d080be5edd160d2a12b75dd82b`.
+It accepts all 19 clean rows and all 57 baseline-before, Record/Replay, and
+baseline-after overhead rows.  The reviewed-fault campaign accepts 17/19 rows;
+the two corrected fault-sensitivity gaps and repeated-trial evidence are
+published in [STATUS_RDNA4.md](STATUS_RDNA4.md).  Unrounded ratios, raw
+commands, and source/hook provenance remain in the generated artifacts.
 
 ## Workspace contract
 
