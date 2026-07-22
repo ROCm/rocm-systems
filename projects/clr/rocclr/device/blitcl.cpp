@@ -196,9 +196,22 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
       // op index g maps to (copy c, local element) via a binary search over the
       // prefix-sum array, with the last-found copy index cached across strides.
       ulong c = 0;
+      // Per-batch metadata cache. All of these are loop-invariant per copy, so
+      // they are loaded once per batch change and held in registers across the
+      // strided iterations that land in the same copy. Sentinel bounds
+      // (lo_bound=1, hi_bound=0) form an empty range so the first iteration
+      // always misses and performs the initial refresh; this also avoids
+      // speculative loads when the loop body never executes (gid >= total_ops).
+      ulong lo_bound = 1;  // cached body_prefix[c]
+      ulong hi_bound = 0;  // cached body_prefix[c + 1]
+      ulong src_c = 0;     // cached srcs[c]
+      ulong dst_c = 0;     // cached dsts[c]
+      uchar s = 0;         // cached op_size[c]
+      uchar head_c = 0;    // cached head_size[c]
       for (ulong g = gid; g < total_ops; g += copy_stride) {
-        // Resolve copy index c = largest index with body_prefix[c] <= g.
-        if (!(g >= body_prefix[c] && g < body_prefix[c + 1])) {
+        // Resolve copy index c = largest index with body_prefix[c] <= g, and
+        // refresh the metadata cache, only when g leaves the cached copy range.
+        if (!(g >= lo_bound && g < hi_bound)) {
           ulong lo = 0;
           ulong hi = n_batches;  // upper_bound over body_prefix[0..n_batches]
           while (lo < hi) {
@@ -210,14 +223,19 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
             }
           }
           c = lo - 1;  // upper_bound - 1
+          lo_bound = body_prefix[c];
+          hi_bound = body_prefix[c + 1];
+          src_c = srcs[c];
+          dst_c = dsts[c];
+          s = op_size[c];
+          head_c = head_size[c];
         }
 
-        ulong elem = g - body_prefix[c];
-        uchar s = op_size[c];
+        ulong elem = g - lo_bound;
         __global uchar *sp =
-            (__global uchar *)(srcs[c] + head_size[c]) + elem * (ulong)s;
+            (__global uchar *)(src_c + head_c) + elem * (ulong)s;
         __global uchar *dp =
-            (__global uchar *)(dsts[c] + head_size[c]) + elem * (ulong)s;
+            (__global uchar *)(dst_c + head_c) + elem * (ulong)s;
 
         // Swap one element of width s. Addresses are aligned to s by the CPU
         // side head computation.
