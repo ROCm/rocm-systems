@@ -22,6 +22,7 @@
 
 #include <hip/hip_runtime.h>
 #include <rocshmem/rocshmem.hpp>
+using namespace rocshmem;
 
 namespace
 {

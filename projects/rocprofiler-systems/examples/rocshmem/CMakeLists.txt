@@ -35,6 +35,14 @@ if(NOT TARGET roc::rocshmem)
     return()
 endif()
 
+# rocSHMEM's cmake config omits find_dependency(rocprofiler-register) despite
+# roc::rocshmem carrying it as a transitive link dependency.  Ensure the
+# imported target exists so the linker receives a library path rather than the
+# raw target name when building against an installed rocSHMEM package.
+if(NOT TARGET rocprofiler-register::rocprofiler-register)
+    find_package(rocprofiler-register QUIET)
+endif()
+
 # MPI is optional at the source level — rocshmem_init() handles MPI setup
 # internally — but linking MPI ensures correct symbol resolution when the
 # demo is launched via mpirun.
