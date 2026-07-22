@@ -26,6 +26,15 @@ namespace rocjitsu {
 
 namespace {
 
+/// @brief gfx1250 special-scalar operand encodings.
+/// @details CRITICAL: on gfx1250 these are the INVERSE of CDNA — M0 = 125 and
+/// NULL = 124, whereas CDNA encodes M0 = 124. Every hand-written encoding below
+/// must use kGfx1250M0 where the machine reads/writes M0 and kGfx1250Null only
+/// where a discarded/zero NULL operand is genuinely intended. See
+/// gfx1250/operand_types.h (OPR_SRC_NULL = 124, OPR_SRC_M0 = 125).
+constexpr uint8_t kGfx1250Null = 124;
+constexpr uint8_t kGfx1250M0 = 125;
+
 /// @brief Append a generated instruction's words to one replacement sequence.
 template <size_t N>
 void append_words(std::vector<uint32_t> &output, const std::array<uint32_t, N> &words) {
@@ -290,10 +299,9 @@ ExpandResult expand_gfx1250_tensor_load_to_lds(const Instruction &inst, uint32_t
 
   gfx1250::VimageMachineInst source{};
   std::memcpy(&source, inst.raw_encoding(), sizeof(source));
-  constexpr uint8_t kSgprNull = 124;
   constexpr uint8_t kLastOrdinarySgpr = 105;
   const uint8_t descriptor_base = static_cast<uint8_t>(source.vaddr1);
-  if (descriptor_base == kSgprNull || descriptor_base > kLastOrdinarySgpr - 7u) {
+  if (descriptor_base == kGfx1250Null || descriptor_base > kLastOrdinarySgpr - 7u) {
     return ExpandResult::failed(
         "gfx1250 tensor-load group-1 descriptor is not a valid eight-SGPR tuple",
         {"Provide TENSOR_LOAD_TO_LDS VADDR1 as an ordinary eight-SGPR descriptor."});
@@ -729,49 +737,36 @@ ExpandResult expand_gfx1250_wmma_iu8_spacing(const Instruction &inst, uint32_t, 
   return ExpandResult::success(std::move(words));
 }
 
-[[nodiscard]] uint16_t gfx1250_cluster_load_replacement(uint16_t opcode) {
+/// @brief True if @p opcode is a gfx1250 cluster-load form this rule covers
+/// (both the plain and async-to-LDS families, all widths).
+[[nodiscard]] bool is_gfx1250_cluster_load(uint16_t opcode) {
   switch (opcode) {
   case gfx1250::kClusterLoadB32Vglobal:
-    return gfx1250::kGlobalLoadB32Vglobal;
   case gfx1250::kClusterLoadB64Vglobal:
-    return gfx1250::kGlobalLoadB64Vglobal;
   case gfx1250::kClusterLoadB128Vglobal:
-    return gfx1250::kGlobalLoadB128Vglobal;
   case gfx1250::kClusterLoadAsyncToLdsB8Vglobal:
-    return gfx1250::kGlobalLoadAsyncToLdsB8Vglobal;
   case gfx1250::kClusterLoadAsyncToLdsB32Vglobal:
-    return gfx1250::kGlobalLoadAsyncToLdsB32Vglobal;
   case gfx1250::kClusterLoadAsyncToLdsB64Vglobal:
-    return gfx1250::kGlobalLoadAsyncToLdsB64Vglobal;
   case gfx1250::kClusterLoadAsyncToLdsB128Vglobal:
-    return gfx1250::kGlobalLoadAsyncToLdsB128Vglobal;
+    return true;
   default:
-    return 0;
+    return false;
   }
 }
 
-/// @brief Apply the two A0 cluster-load workarounds.
+/// @brief Rewrite a gfx1250 cluster load to run with M0 = 0.
 ///
-/// Off-form loads do not require cluster semantics and become ordinary global
-/// loads. SADDR forms remain cluster loads but must execute with M0.wg_mask
-/// cleared, preserving the original M0 value through a dead SGPR.
+/// @details Every cluster-load form (both SADDR and off/NULL-saddr, all widths)
+/// is left as a cluster load and wrapped so it executes with M0 forced to zero:
+/// save M0 to a dead SGPR, set M0 = 0, run the load, then restore M0. The opcode
+/// is not changed.
 ExpandResult expand_gfx1250_cluster_load(const Instruction &inst, uint32_t, uint64_t,
                                          std::span<const uint8_t>, const LivenessAnalysis &liveness,
                                          TranslationContext &, const LaneLayout *,
                                          const LaneLayout *) {
-  const uint16_t replacement = gfx1250_cluster_load_replacement(inst.opcode());
-  if (replacement == 0 || inst.size() != 3 * static_cast<int>(sizeof(uint32_t)) ||
-      inst.raw_encoding() == nullptr) {
+  if (!is_gfx1250_cluster_load(inst.opcode()) ||
+      inst.size() != 3 * static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr) {
     return ExpandResult::failed("gfx1250 cluster-load rule received an unsupported instruction");
-  }
-
-  gfx1250::VglobalMachineInst source{};
-  std::memcpy(&source, inst.raw_encoding(), sizeof(source));
-  constexpr uint8_t kSgprNull = 124;
-  if (source.saddr == kSgprNull) {
-    std::vector<uint32_t> words(inst.raw_encoding(), inst.raw_encoding() + 3);
-    set_word_field(words[0], replacement, 14, 8);
-    return ExpandResult::success(std::move(words));
   }
 
   const std::optional<uint16_t> scratch = liveness.find_free_sgpr(&inst);
@@ -780,17 +775,25 @@ ExpandResult expand_gfx1250_cluster_load(const Instruction &inst, uint32_t, uint
         "gfx1250 cluster load could not allocate a dead SGPR for M0 preservation");
   }
 
+  // Save M0 to scratch, set M0 = 0, run the load, then restore M0. A binary
+  // translator cannot prove M0 is dead after the load, so it saves and restores
+  // the original value around it.
+  //
+  // Inline constant 0 encodes as 128 in a scalar source. Every M0 reference here
+  // MUST use kGfx1250M0 (125): on gfx1250 M0 encodes as 125 and NULL as 124 (the
+  // inverse of CDNA), so a write to 124 would be a discarded NULL write.
+  constexpr uint8_t kInlineZero = 128;
   std::vector<uint32_t> words;
   words.reserve(6);
   append_words(words,
                gfx1250::build_sop1(gfx1250::kSMovB32Sop1,
-                                   {.ssrc0 = kSgprNull, .sdst = static_cast<uint8_t>(*scratch)}));
-  append_words(words, gfx1250::build_sop2(gfx1250::kSPackHhB32B16Sop2,
-                                          {.ssrc0 = 128, .ssrc1 = kSgprNull, .sdst = kSgprNull}));
+                                   {.ssrc0 = kGfx1250M0, .sdst = static_cast<uint8_t>(*scratch)}));
+  append_words(words, gfx1250::build_sop1(gfx1250::kSMovB32Sop1,
+                                          {.ssrc0 = kInlineZero, .sdst = kGfx1250M0}));
   words.insert(words.end(), inst.raw_encoding(), inst.raw_encoding() + 3);
   append_words(words,
                gfx1250::build_sop1(gfx1250::kSMovB32Sop1,
-                                   {.ssrc0 = static_cast<uint8_t>(*scratch), .sdst = kSgprNull}));
+                                   {.ssrc0 = static_cast<uint8_t>(*scratch), .sdst = kGfx1250M0}));
   return ExpandResult::success(std::move(words));
 }
 
@@ -856,7 +859,7 @@ ExpandResult expand_gfx1250_ds_addtid(const Instruction &inst, uint32_t, uint64_
                                                                .src1 = gfx1250_vgpr_src(temp)}));
   append_words(words,
                gfx1250::build_vop3(gfx1250::kVAddNcU32Vop3, {.vdst = static_cast<uint8_t>(temp),
-                                                             .src0 = 124, // M0
+                                                             .src0 = kGfx1250M0,
                                                              .src1 = gfx1250_vgpr_src(temp)}));
   append_words(words,
                gfx1250::build_vop3(gfx1250::kVBfeU32Vop3, {.vdst = static_cast<uint8_t>(temp),

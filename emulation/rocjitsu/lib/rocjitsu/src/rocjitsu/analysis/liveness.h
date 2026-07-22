@@ -104,6 +104,14 @@ struct LivenessAnalysisOptions {
   /// instruction-level snapshots. Pointers outside the analyzed block scope are
   /// ignored.
   std::span<const Instruction *const> live_before_instructions = {};
+
+  /// @brief Raw .text image for the analyzed kernel scope.
+  ///
+  /// @details Forwarded to the gfx1250 VGPR_MSB analysis so it can read
+  /// S_SETREG_IMM32_B32 literals safely from the instruction stream (at
+  /// src_loc()+4) instead of indexing past a decoded instruction's encoding word.
+  /// Empty is tolerated: such writes then mark the affected banks ambiguous.
+  std::span<const uint8_t> text = {};
 };
 
 /// @brief Reverse-post-order traversal of one kernel's implicit CFG.

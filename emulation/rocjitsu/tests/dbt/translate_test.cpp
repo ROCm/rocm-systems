@@ -8363,11 +8363,12 @@ TEST(BinaryTranslatorE2E, Gfx1250SplitsEveryK128Fp8Bf8WmmaForA0) {
   }
 }
 
-TEST(BinaryTranslatorE2E, Gfx1250DemotesOffFormClusterLoadForA0) {
+TEST(BinaryTranslatorE2E, Gfx1250MasksM0AroundOffFormClusterLoadForA0) {
+  // An off-form (NULL-saddr) cluster load is NOT demoted to a global load. Like
+  // every cluster-load form, it stays a cluster load and is wrapped so it runs
+  // with M0 = 0; the opcode is unchanged.
   constexpr auto cluster = gfx1250::build_vglobal(gfx1250::kClusterLoadB32Vglobal,
                                                   {.saddr = 124, .vdst = 8, .vaddr = 12});
-  constexpr auto global = gfx1250::build_vglobal(gfx1250::kGlobalLoadB32Vglobal,
-                                                 {.saddr = 124, .vdst = 8, .vaddr = 12});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
       {cluster[0], cluster[1], cluster[2], kGfx1250SEndpgm});
@@ -8380,10 +8381,28 @@ TEST(BinaryTranslatorE2E, Gfx1250DemotesOffFormClusterLoadForA0) {
   ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
                                                           : result.diagnostics.front().message);
   rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
-  const auto *words = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
-  EXPECT_EQ(words[0], global[0]);
-  EXPECT_EQ(words[1], global[1]);
-  EXPECT_EQ(words[2], global[2]);
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  // The load stays a cluster load (no demotion to global_load).
+  EXPECT_EQ(std::ranges::count_if(
+                decoded, [](const auto &inst) { return inst->mnemonic() == "cluster_load_b32"; }),
+            1);
+  EXPECT_EQ(std::ranges::count_if(
+                decoded, [](const auto &inst) { return inst->mnemonic() == "global_load_b32"; }),
+            0);
+  // And it is framed by an M0=0 save/clear/restore. M0 encodes as 125 on gfx1250,
+  // inline 0 as 128; SOP1 s_mov is SSRC0[7:0], SDST[22:16].
+  constexpr uint16_t kGfx1250M0Operand = 125;
+  constexpr uint16_t kInlineZeroOperand = 128;
+  bool cleared_m0 = false;
+  for (const auto &inst : decoded) {
+    if (inst->mnemonic() != "s_mov_b32" || inst->raw_encoding() == nullptr)
+      continue;
+    const uint32_t word = inst->raw_encoding()[0];
+    if (((word >> 16) & 0x7fu) == kGfx1250M0Operand && (word & 0xffu) == kInlineZeroOperand)
+      cleared_m0 = true;
+  }
+  EXPECT_TRUE(cleared_m0) << "off-form cluster load must still set M0 (125) = inline 0 (128)";
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250MasksM0AroundSaddrClusterLoadForA0) {
@@ -8406,9 +8425,33 @@ TEST(BinaryTranslatorE2E, Gfx1250MasksM0AroundSaddrClusterLoadForA0) {
   EXPECT_EQ(std::ranges::count_if(
                 decoded, [](const auto &inst) { return inst->mnemonic() == "cluster_load_b64"; }),
             1);
-  EXPECT_EQ(std::ranges::count_if(
-                decoded, [](const auto &inst) { return inst->mnemonic() == "s_pack_hh_b32_b16"; }),
-            1);
+  // The load is wrapped to run with M0 = 0, saving/restoring the original M0
+  // through a dead SGPR. Assert operands, not just mnemonics: M0 encodes as 125 on
+  // gfx1250 and NULL as 124, so a write to 124 would be a discarded NULL write.
+  // SOP1 (s_mov): SSRC0[7:0], SDST[22:16]; inline 0 encodes as 128. The sequence
+  // is: s_mov scratch, M0 (save) / s_mov M0, 0 (clear) / cluster_load /
+  // s_mov M0, scratch (restore).
+  constexpr uint16_t kGfx1250M0Operand = 125;
+  constexpr uint16_t kInlineZeroOperand = 128;
+  bool saved_m0 = false;    // some s_mov reads M0 as source
+  bool cleared_m0 = false;  // some s_mov writes M0 from inline 0
+  bool restored_m0 = false; // some s_mov writes M0 from a non-inline (scratch) source
+  for (const auto &inst : decoded) {
+    if (inst->mnemonic() != "s_mov_b32" || inst->raw_encoding() == nullptr)
+      continue;
+    const uint32_t word = inst->raw_encoding()[0];
+    const uint16_t ssrc0 = word & 0xffu;
+    const uint16_t sdst = (word >> 16) & 0x7fu;
+    if (ssrc0 == kGfx1250M0Operand)
+      saved_m0 = true;
+    if (sdst == kGfx1250M0Operand && ssrc0 == kInlineZeroOperand)
+      cleared_m0 = true;
+    if (sdst == kGfx1250M0Operand && ssrc0 != kInlineZeroOperand)
+      restored_m0 = true;
+  }
+  EXPECT_TRUE(saved_m0) << "no s_mov_b32 reads M0 (125) to save it";
+  EXPECT_TRUE(cleared_m0) << "no s_mov_b32 sets M0 (125) = inline 0 (128)";
+  EXPECT_TRUE(restored_m0) << "no s_mov_b32 restores M0 (125) from the saved scratch";
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250MaterializesDsAddtidAddressForA0) {
@@ -8440,6 +8483,43 @@ TEST(BinaryTranslatorE2E, Gfx1250MaterializesDsAddtidAddressForA0) {
                                            inst->mnemonic() == "v_mbcnt_hi_u32_b32";
                                   }),
             2);
+  // The address materialization must add the LDS base held in M0, encoded 125 on
+  // gfx1250 (NULL is 124 — the inverse of CDNA). Assert the operand, not just the
+  // mnemonic: reading NULL here would compute the address from base 0 and every
+  // translated ds_*_addtid would target the wrong LDS offset. VOP3 SRC0 is the low
+  // 9 bits of the second instruction word.
+  constexpr uint16_t kGfx1250M0Operand = 125;
+  auto v_add = std::ranges::find_if(
+      decoded, [](const auto &inst) { return inst->mnemonic() == "v_add_nc_u32"; });
+  ASSERT_NE(v_add, decoded.end());
+  ASSERT_NE((*v_add)->raw_encoding(), nullptr);
+  EXPECT_EQ((*v_add)->raw_encoding()[1] & 0x1ffu, kGfx1250M0Operand);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250FailsClosedOnUnsupportedBarrierSignalIsfirst) {
+  // s_barrier_signal_isfirst is classified as needing an expansion but has no rule
+  // yet, so the translation must fail closed (ExpandMissing) rather than pass the
+  // instruction through. This pins the NOT-YET-SUPPORTED contract for the
+  // classifier-only mnemonics.
+  constexpr auto barrier = gfx1250::build_sop1(gfx1250::kSBarrierSignalIsfirstSop1, {.ssrc0 = 0});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({barrier[0], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.elf_bytes, image) << "a fail-closed translation must leave the object unchanged";
+  const auto diagnostic = std::ranges::find_if(result.diagnostics, [](const auto &d) {
+    return d.kind == rocjitsu::DiagnosticKind::ExpandMissing;
+  });
+  ASSERT_NE(diagnostic, result.diagnostics.end());
+  EXPECT_EQ(diagnostic->severity, rocjitsu::DiagnosticSeverity::Error);
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250GeneratedVgprMsbTransitionsCarryPreviousState) {

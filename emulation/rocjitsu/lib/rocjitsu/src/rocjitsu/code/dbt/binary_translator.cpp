@@ -1201,9 +1201,18 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     return true;
   };
 
+  // Per-scope relocation output. Declared before fail_or_skip_kernel so a skip can
+  // truncate them back to their pre-scope sizes together with translated_text —
+  // otherwise a scope that fails AFTER appending relocations (e.g. during branch
+  // fixup or descriptor recompute) would leave stale entries whose source mapping
+  // then applies to the replacement stub or a later kernel.
+  std::vector<TextOffsetRelocation> text_relocations;
+  std::vector<PcRelativeDataRelocation> data_relocations;
+
   auto fail_or_skip_kernel =
       [&](const KernelTranslationScope &scope, KernelFailure failure, size_t output_begin,
-          const std::vector<DescriptorVariantCheckpoint> &descriptor_snapshot) -> bool {
+          const std::vector<DescriptorVariantCheckpoint> &descriptor_snapshot,
+          size_t text_relocations_begin, size_t data_relocations_begin) -> bool {
     if (!skip_failed_kernels) {
       append_error(result.diagnostics, failure.kind, std::move(failure.message),
                    failure.guest_offset, std::move(failure.mnemonic),
@@ -1213,6 +1222,9 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
     const uint64_t source_entry = scope.translation->entry_text_offset;
     translated_text.resize(output_begin);
+    // Discard any relocation records this scope committed before failing.
+    text_relocations.resize(text_relocations_begin);
+    data_relocations.resize(data_relocations_begin);
     for (const DescriptorVariantCheckpoint &saved : descriptor_snapshot) {
       if (saved.index >= descriptor_translations.size()) {
         append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
@@ -1247,8 +1259,6 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     return base;
   };
 
-  std::vector<TextOffsetRelocation> text_relocations;
-  std::vector<PcRelativeDataRelocation> data_relocations;
   for (const KernelTranslationScope &scope : scopes) {
     if (scope.blocks.empty())
       continue;
@@ -1257,6 +1267,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       continue;
 
     const size_t output_begin = translated_text.size();
+    const size_t text_relocations_begin = text_relocations.size();
+    const size_t data_relocations_begin = data_relocations.size();
     const auto descriptor_snapshot =
         checkpoint_scope_descriptors(descriptor_translations, *scope.translation);
     bool skip_scope = false;
@@ -1275,7 +1287,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         failure.required_work = diagnostic.required_work;
         break;
       }
-      if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot))
+      if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                              text_relocations_begin, data_relocations_begin))
         continue;
       return leave_unchanged();
     }
@@ -1290,7 +1303,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           make_kernel_failure(DiagnosticKind::Legalization,
                               "reachable kernel code falls through into undecodable .text bytes",
                               (*opaque_fallthrough)->end_offset());
-      if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot))
+      if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                              text_relocations_begin, data_relocations_begin))
         continue;
       return leave_unchanged();
     }
@@ -1315,7 +1329,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         auto failure = make_kernel_failure(
             DiagnosticKind::ResourceLimit,
             "virtual LDS lowering cannot reserve a backing-buffer SGPR pair", layout.source_entry);
-        if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot))
+        if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                text_relocations_begin, data_relocations_begin))
           continue;
         return leave_unchanged();
       }
@@ -1342,7 +1357,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
             DiagnosticKind::KernelDescriptor,
             "virtual LDS lowering cannot materialize backing-buffer pointer entry prologue",
             layout.source_entry);
-        if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot))
+        if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                text_relocations_begin, data_relocations_begin))
           continue;
         return leave_unchanged();
       }
@@ -1360,7 +1376,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           "kernel descriptor prologue does not fit in the 256-byte kernarg preload compatibility "
           "window",
           layout.source_entry);
-      if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot))
+      if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                              text_relocations_begin, data_relocations_begin))
         continue;
       return leave_unchanged();
     }
@@ -1371,6 +1388,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         static_cast<uint16_t>(isa_properties(host_arch_).max_addressable_vgprs_per_wf);
     liveness_options.arch = guest_arch_;
     liveness_options.entry_block = scope.entry;
+    liveness_options.text = text;
     if (options_.debug_min_free_vgpr)
       liveness_options.min_free_vgpr = *options_.debug_min_free_vgpr;
     std::vector<const Instruction *> live_before_instructions;
@@ -1431,7 +1449,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
               make_kernel_failure(DiagnosticKind::Legalization,
                                   "recovered indirect branch has inconsistent consumer metadata",
                                   source_call_offset, "indirect branch");
-          if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot)) {
+          if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                  text_relocations_begin, data_relocations_begin)) {
             skip_scope = true;
             break;
           }
@@ -1515,7 +1534,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
               continue;
             }
           }
-          if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot)) {
+          if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                  text_relocations_begin, data_relocations_begin)) {
             skip_scope = true;
             break;
           }
@@ -1544,7 +1564,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                 continue;
               }
             }
-            if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot)) {
+            if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                    text_relocations_begin, data_relocations_begin)) {
               skip_scope = true;
               break;
             }
@@ -1563,7 +1584,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
             auto failure = make_kernel_failure(DiagnosticKind::Legalization,
                                                "direct branch is missing raw encoding", offset,
                                                std::string(inst.mnemonic()));
-            if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot)) {
+            if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                    text_relocations_begin, data_relocations_begin)) {
               skip_scope = true;
               break;
             }
@@ -1634,7 +1656,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                 continue;
               }
             }
-            if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot)) {
+            if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                    text_relocations_begin, data_relocations_begin)) {
               skip_scope = true;
               break;
             }
@@ -1667,7 +1690,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                 continue;
               }
             }
-            if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot)) {
+            if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                    text_relocations_begin, data_relocations_begin)) {
               skip_scope = true;
               break;
             }
@@ -1695,7 +1719,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
               continue;
             }
           }
-          if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot)) {
+          if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                  text_relocations_begin, data_relocations_begin)) {
             skip_scope = true;
             break;
           }
@@ -1738,7 +1763,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
               continue;
             }
           }
-          if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot)) {
+          if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                  text_relocations_begin, data_relocations_begin)) {
             skip_scope = true;
             break;
           }
@@ -1787,7 +1813,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
             DiagnosticKind::Legalization,
             "recovered indirect branch builder is not fully present in the relocated body",
             fixup.source_call_offset, "indirect branch");
-        if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot)) {
+        if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                text_relocations_begin, data_relocations_begin)) {
           skip_scope = true;
           break;
         }
@@ -1807,7 +1834,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     if (!materialized.ok) {
       auto failure = make_kernel_failure(materialization_diagnostic_kind(materialized),
                                          materialized.message, materialized.source_offset);
-      if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot))
+      if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                              text_relocations_begin, data_relocations_begin))
         continue;
       return leave_unchanged();
     }
@@ -1850,7 +1878,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       auto failure = make_kernel_failure(relocation_diagnostic_kind(patched_direct_branches),
                                          patched_direct_branches.message,
                                          patched_direct_branches.source_offset);
-      if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot))
+      if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                              text_relocations_begin, data_relocations_begin))
         continue;
       return leave_unchanged();
     }
@@ -1859,7 +1888,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         !patched.ok) {
       auto failure = make_kernel_failure(relocation_diagnostic_kind(patched), patched.message,
                                          patched.source_offset, "indirect branch");
-      if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot))
+      if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                              text_relocations_begin, data_relocations_begin))
         continue;
       return leave_unchanged();
     }
@@ -1868,7 +1898,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         !patched.ok) {
       auto failure = make_kernel_failure(relocation_diagnostic_kind(patched), patched.message,
                                          patched.source_offset, "indirect branch");
-      if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot))
+      if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                              text_relocations_begin, data_relocations_begin))
         continue;
       return leave_unchanged();
     }
@@ -1914,7 +1945,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           auto failure =
               make_kernel_failure(DiagnosticKind::KernelDescriptor,
                                   "kernel descriptor translation could not be recomputed");
-          if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot)) {
+          if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                  text_relocations_begin, data_relocations_begin)) {
             skip_scope = true;
             break;
           }
@@ -1932,7 +1964,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           auto failure = make_kernel_failure(
               DiagnosticKind::KernelDescriptor,
               "virtual LDS lowering cannot materialize backing-buffer pointer entry prologue");
-          if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot)) {
+          if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                  text_relocations_begin, data_relocations_begin)) {
             skip_scope = true;
             break;
           }
@@ -1954,7 +1987,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
               failure.required_work = diagnostic.required_work;
               break;
             }
-            if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot)) {
+            if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                    text_relocations_begin, data_relocations_begin)) {
               skip_scope = true;
               break;
             }
@@ -1971,7 +2005,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           auto failure = make_kernel_failure(
               DiagnosticKind::KernelDescriptor,
               "kernel descriptor prologue changed after relocated text was emitted");
-          if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot)) {
+          if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                  text_relocations_begin, data_relocations_begin)) {
             skip_scope = true;
             break;
           }
@@ -1989,7 +2024,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       if (!recomputed_descriptor) {
         auto failure = make_kernel_failure(DiagnosticKind::KernelDescriptor,
                                            "kernel descriptor translation could not be recomputed");
-        if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot))
+        if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                text_relocations_begin, data_relocations_begin))
           continue;
         return leave_unchanged();
       }

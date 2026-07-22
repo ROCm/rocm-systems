@@ -16,6 +16,7 @@
 #include <bit>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -264,6 +265,31 @@ void remove_got_reference(std::vector<uint8_t> &image) {
   std::memcpy(image.data() + rela->sh_offset, &first, sizeof(first));
 }
 
+// Mutate the first R_AMDGPU_RELATIVE64 relocation in the .rela section via a
+// caller-supplied editor, so negative tests can corrupt one table entry's slot
+// offset or addend and confirm discovery rejects just that entry.
+void edit_first_relative64(std::vector<uint8_t> &image,
+                           const std::function<void(Elf64_Rela &)> &editor) {
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  std::vector<Elf64_Shdr> sections(ehdr.e_shnum);
+  std::memcpy(sections.data(), image.data() + ehdr.e_shoff, sections.size() * sizeof(Elf64_Shdr));
+  const auto rela_shdr = std::ranges::find(sections, SHT_RELA, &Elf64_Shdr::sh_type);
+  ASSERT_NE(rela_shdr, sections.end());
+  const size_t count = rela_shdr->sh_size / sizeof(Elf64_Rela);
+  for (size_t i = 0; i < count; ++i) {
+    const uint64_t off = rela_shdr->sh_offset + i * sizeof(Elf64_Rela);
+    Elf64_Rela rela{};
+    std::memcpy(&rela, image.data() + off, sizeof(rela));
+    if (elf_reloc_type(rela.r_info) != R_AMDGPU_RELATIVE64)
+      continue;
+    editor(rela);
+    std::memcpy(image.data() + off, &rela, sizeof(rela));
+    return;
+  }
+  FAIL() << "no R_AMDGPU_RELATIVE64 relocation found to edit";
+}
+
 TEST(RelocationFunctionTable, DiscoversGotReferencedRelativeTextPointers) {
   const auto image = make_relocation_function_table_elf();
   const AmdGpuCodeObject object(image.data(), image.size());
@@ -279,6 +305,39 @@ TEST(RelocationFunctionTable, DiscoversGotReferencedRelativeTextPointers) {
   EXPECT_EQ(tables[0].entries[0].target_text_offset, 4u);
   EXPECT_EQ(tables[0].entries[1].slot_vaddr, 0x2010u);
   EXPECT_EQ(tables[0].entries[1].target_text_offset, 12u);
+}
+
+TEST(RelocationFunctionTable, DiscoveryRejectsMisalignedTableSlot) {
+  // The first table entry's RELATIVE64 relocation points at table_vaddr + 4, which
+  // is not a multiple of the 8-byte pointer stride from the table base. Discovery
+  // must drop that entry (it cannot be a valid function-pointer slot) while keeping
+  // the well-formed second entry.
+  auto image = make_relocation_function_table_elf();
+  edit_first_relative64(image, [](Elf64_Rela &rela) { rela.r_offset = 0x2000u + 4u; });
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+
+  const auto tables = discover_relocation_function_tables(object);
+  ASSERT_EQ(tables.size(), 1u);
+  ASSERT_EQ(tables[0].entries.size(), 1u);
+  EXPECT_EQ(tables[0].entries[0].slot_vaddr, 0x2010u);
+  EXPECT_EQ(tables[0].entries[0].target_text_offset, 12u);
+}
+
+TEST(RelocationFunctionTable, DiscoveryRejectsOutOfTextAddend) {
+  // The first table entry's RELATIVE64 addend points outside .text (into the table
+  // section itself). A function-pointer slot must resolve into .text, so discovery
+  // must drop that entry while keeping the in-text second entry.
+  auto image = make_relocation_function_table_elf();
+  edit_first_relative64(image, [](Elf64_Rela &rela) { rela.r_addend = 0x2000; });
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+
+  const auto tables = discover_relocation_function_tables(object);
+  ASSERT_EQ(tables.size(), 1u);
+  ASSERT_EQ(tables[0].entries.size(), 1u);
+  EXPECT_EQ(tables[0].entries[0].slot_vaddr, 0x2010u);
+  EXPECT_EQ(tables[0].entries[0].target_text_offset, 12u);
 }
 
 TEST(RelocationFunctionTable, PatcherRetargetsRelativeTextAddends) {

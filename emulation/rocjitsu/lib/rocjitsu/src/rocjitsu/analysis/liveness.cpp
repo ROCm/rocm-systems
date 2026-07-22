@@ -106,8 +106,8 @@ LivenessAnalysis &LivenessAnalysis::operator=(LivenessAnalysis &&) noexcept = de
 void LivenessAnalysis::analyze(KernelBlockScope blocks, const LivenessAnalysisOptions &options,
                                std::span<const ScopedCfgEdge> extra_edges) {
   if (options.arch == ROCJITSU_CODE_ARCH_GFX1250 && options.entry_block != nullptr) {
-    gfx1250_vgpr_msb_ =
-        std::make_unique<Gfx1250VgprMsbAnalysis>(blocks, options.entry_block, extra_edges);
+    gfx1250_vgpr_msb_ = std::make_unique<Gfx1250VgprMsbAnalysis>(blocks, options.entry_block,
+                                                                 extra_edges, options.text);
   }
   liveness_.resize(blocks.size());
   block_index_.reserve(blocks.size());

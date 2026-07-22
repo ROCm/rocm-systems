@@ -1202,12 +1202,14 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
     if (inst.mnemonic() == "s_prefetch_inst_pc_rel")
       return true;
     // The compiler also emits a scalar immediate move to configure the
-    // prefetch.  It is safe to skip only when its destination is outside the
-    // getpc pair being proven.
+    // prefetch. It is safe to skip only when its destination is outside the
+    // getpc pair being proven AND is not tmp_sreg — a move into tmp_sreg would
+    // change the value the following s_add/s_abs consumes while recovery keeps
+    // computing the target from the original literal.
     if (inst.mnemonic() != "s_mov_b32" || inst.size() != sizeof(uint32_t))
       return false;
     const uint16_t dst = static_cast<uint16_t>((ctx.facts[index].word >> 16) & 0x7fu);
-    return dst != pair_lo && dst != static_cast<uint16_t>(pair_lo + 1u);
+    return dst != pair_lo && dst != static_cast<uint16_t>(pair_lo + 1u) && dst != tmp_sreg;
   };
 
   size_t high_index = block.first_index + 1;
@@ -1262,10 +1264,12 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
     const Instruction &inst = *ctx.insts[index];
     if (inst.mnemonic() == "s_prefetch_inst_pc_rel")
       return true;
+    // Skip a prefetch-config move only when it clobbers neither the getpc pair
+    // nor tmp_sreg (whose value s_abs_i32/s_sub_u32 below consume).
     if (inst.mnemonic() != "s_mov_b32" || inst.size() != sizeof(uint32_t))
       return false;
     const uint16_t dst = static_cast<uint16_t>((ctx.facts[index].word >> 16) & 0x7fu);
-    return dst != pair_lo && dst != static_cast<uint16_t>(pair_lo + 1u);
+    return dst != pair_lo && dst != static_cast<uint16_t>(pair_lo + 1u) && dst != tmp_sreg;
   };
 
   size_t abs_index = block.first_index;
@@ -1644,8 +1648,26 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
   // back into an SGPR pair immediately before swappc. Track only fixed-lane
   // writelane/readlane transport. Any ordinary write to the VGPR invalidates
   // every recorded lane, and any SGPR write invalidates a reconstructed half.
+  //
+  // This recovery is intentionally BLOCK-LOCAL and fails closed rather than
+  // reasoning across the CFG. The lane-slot map is scanned in source order, so a
+  // writelane that is jumped over, reached on only one predecessor, or belongs to
+  // an earlier region must not seed a later consumer. Two guards enforce this:
+  //   1. Clear `slots` at every block terminator (below), so a stash only feeds a
+  //      readlane in the SAME straight-line block. The real compiler idiom emits
+  //      writelane/readlane/swappc contiguously, so true positives are preserved.
+  //   2. Clear `slots` on any S_SET_VGPR_MSB / MODE write, because gfx1250 encodes
+  //      only the low VGPR selector: the same VectorLaneSlot key can name a
+  //      different physical VGPR once the DST/SRC0 MSB bank changes. Rather than
+  //      key slots by proven physical bank (a full CFG bank analysis), drop stale
+  //      slots when the bank state may have moved.
   if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
     return;
+
+  const auto changes_vgpr_msb_bank = [](std::string_view mnemonic) {
+    return mnemonic == "s_set_vgpr_msb" || mnemonic == "s_setreg_b32" ||
+           mnemonic == "s_setreg_imm32_b32";
+  };
 
   BlockState builders;
   std::unordered_map<VectorLaneSlot, StashedPcHalf, VectorLaneSlotHash> slots;
@@ -1731,10 +1753,18 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
 
     if (!builders.active_pairs().empty())
       invalidate_written_sgprs(ctx, index, builders);
+    // A VGPR-MSB/MODE change can repoint the low VGPR selector at a different
+    // physical register, so any lane slot recorded under the old bank is no longer
+    // trustworthy. Drop them (fail closed).
+    if (changes_vgpr_msb_bank(mnemonic))
+      slots.clear();
     if (is_block_terminator(inst)) {
       builders = BlockState{};
       read_halves.fill(std::nullopt);
       active_read_halves.clear();
+      // Block-local recovery: a stash cannot flow across a terminator to a later
+      // block, so clearing here prevents a path-insensitive false single target.
+      slots.clear();
     }
     if (is_program_terminator(inst)) {
       slots.clear();

@@ -23,7 +23,14 @@ namespace {
 /// @details Keep this list aligned with the implemented B0-to-A0 semantic
 /// rules. Prefix-classified WMMA/SWMMAC and cluster-load instructions are
 /// handled separately because their contextual workarounds apply to families.
-inline constexpr std::array<std::string_view, 19> kExactErrataMnemonics = {
+///
+/// NOT-YET-SUPPORTED (classified here but with no semantic expander):
+/// s_barrier_signal_isfirst, v_cvt_pk_fp8_f32, and v_cvt_sr_fp8_f32 are classified
+/// as needing an expansion but have no rule to produce one, so translating a kernel
+/// that uses them hard-fails (fail-closed) rather than passing the instruction
+/// through unchanged. Classifying them keeps that failure explicit and located.
+/// Add the semantic rule (and drop this note) once the expansion is implemented.
+inline constexpr std::array<std::string_view, 18> kExactErrataMnemonics = {
     "s_barrier_signal_isfirst",
     "ds_load_2addr_b32",
     "ds_load_2addr_b64",

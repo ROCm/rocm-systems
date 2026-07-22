@@ -181,14 +181,6 @@ inline constexpr uint32_t SHT_DYNSYM = 11;
 inline constexpr uint32_t R_AMDGPU_ABS64 = 3;
 inline constexpr uint32_t R_AMDGPU_RELATIVE64 = 13;
 
-inline constexpr uint32_t elf64_relocation_type(uint64_t info) {
-  return static_cast<uint32_t>(info);
-}
-
-inline constexpr uint32_t elf64_relocation_symbol(uint64_t info) {
-  return static_cast<uint32_t>(info >> 32);
-}
-
 inline constexpr uint8_t kElfSymbolBindGlobal = 1;
 inline constexpr uint8_t kElfSymbolTypeNone = 0;    // STT_NOTYPE
 inline constexpr uint8_t kElfSymbolTypeObject = 1;  // STT_OBJECT

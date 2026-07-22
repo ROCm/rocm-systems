@@ -287,7 +287,7 @@ discover_relocation_function_tables(const AmdGpuCodeObject &object) {
       Elf64_Rela rela{};
       if (!read_object(image, relocations.sh_offset + index * sizeof(Elf64_Rela), rela))
         continue;
-      const uint32_t type = elf64_relocation_type(rela.r_info);
+      const uint32_t type = elf_reloc_type(rela.r_info);
       if (type == R_AMDGPU_RELATIVE64) {
         ObjectCandidate *candidate = containing_candidate(candidates, rela.r_offset);
         if (candidate == nullptr || ((rela.r_offset - candidate->vaddr) % sizeof(uint64_t)) != 0 ||
@@ -305,7 +305,7 @@ discover_relocation_function_tables(const AmdGpuCodeObject &object) {
           linked_symbols->sh_entsize != sizeof(Elf64_Sym) ||
           !range_in_image(image, linked_symbols->sh_offset, linked_symbols->sh_size))
         continue;
-      const uint32_t symbol_index = elf64_relocation_symbol(rela.r_info);
+      const uint32_t symbol_index = elf_reloc_sym(rela.r_info);
       if (symbol_index >= linked_symbols->sh_size / sizeof(Elf64_Sym))
         continue;
       Elf64_Sym symbol{};
@@ -373,12 +373,21 @@ discover_relocation_table_dispatches(std::span<const std::unique_ptr<BasicBlock>
   std::vector<bool> initialized(blocks.size(), false);
   std::vector<bool> queued(blocks.size(), false);
   std::queue<size_t> worklist;
-  for (size_t i = 0; i < blocks.size(); ++i) {
-    if (blocks[i] != nullptr && blocks[i]->predecessors().empty()) {
+  auto seed = [&](size_t i) {
+    if (i < blocks.size() && blocks[i] != nullptr && !queued[i]) {
       worklist.push(i);
       queued[i] = true;
     }
+  };
+  for (size_t i = 0; i < blocks.size(); ++i) {
+    if (blocks[i] != nullptr && blocks[i]->predecessors().empty())
+      seed(i);
   }
+  // Always seed the entry block. A kernel whose entry has an in-edge (e.g. a
+  // back-edge from a loop that re-enters the first block) has no zero-predecessor
+  // block, so the loop above would seed nothing and the analysis would silently
+  // find no dispatches. blocks[0] is the entry by construction.
+  seed(0);
 
   while (!worklist.empty()) {
     const size_t index = worklist.front();

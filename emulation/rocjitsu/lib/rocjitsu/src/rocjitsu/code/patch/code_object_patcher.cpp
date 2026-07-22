@@ -467,7 +467,7 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
     for (size_t i = 0; i < count; ++i) {
       Elf64_Rela rela{};
       std::memcpy(&rela, image.data() + relocs.sh_offset + i * sizeof(rela), sizeof(rela));
-      const uint32_t symbol_index = elf64_relocation_symbol(rela.r_info);
+      const uint32_t symbol_index = elf_reloc_sym(rela.r_info);
       if (symbol_index == 0 ||
           static_cast<uint64_t>(symbol_index) * sizeof(Elf64_Sym) + sizeof(Elf64_Sym) >
               symtab.sh_size) {
@@ -550,10 +550,26 @@ relocate_relative_text_addends(std::vector<uint8_t> &image, const Elf64_Ehdr &eh
 
   std::unordered_map<uint64_t, uint64_t> target_by_source;
   target_by_source.reserve(relocations.size());
+  // A shared helper block is emitted once per kernel-local scope, so the same
+  // source offset can appear here with DIFFERENT target placements — and the
+  // scopes are not interchangeable (e.g. a hardware-LDS clone vs a virtual-LDS
+  // sidecar clone with different LDS lowering, liveness, and resources). For a
+  // RELATIVE64 addend (a RUNTIME-DEREFERENCED function pointer) we cannot know
+  // which clone a given dispatcher belongs to from the source offset alone, so
+  // collapsing to one clone would let a sidecar dispatch jump into the wrong one.
+  // Record which source offsets have conflicting placements and fail closed below
+  // if any such offset is actually referenced by a function-table addend. Source
+  // offsets that are copied to multiple scopes but never used as a RELATIVE64
+  // pointer are harmless (control-flow fixups stay kernel-local), so a conflict
+  // that is never dereferenced does not reject the translation.
+  std::unordered_set<uint64_t> conflicting_sources;
   for (const TextOffsetRelocation &relocation : relocations) {
     if (relocation.source_offset > old_text_size || relocation.target_offset > new_text_size)
       return false;
-    target_by_source.try_emplace(relocation.source_offset, relocation.target_offset);
+    auto [it, inserted] =
+        target_by_source.try_emplace(relocation.source_offset, relocation.target_offset);
+    if (!inserted && it->second != relocation.target_offset)
+      conflicting_sources.insert(relocation.source_offset);
   }
 
   const Elf64_Shdr &text = shdrs[text_index];
@@ -568,7 +584,7 @@ relocate_relative_text_addends(std::vector<uint8_t> &image, const Elf64_Ehdr &eh
       const uint64_t rela_offset = relocs.sh_offset + i * sizeof(Elf64_Rela);
       Elf64_Rela rela{};
       std::memcpy(&rela, image.data() + rela_offset, sizeof(rela));
-      if (elf64_relocation_type(rela.r_info) != R_AMDGPU_RELATIVE64 || rela.r_addend < 0)
+      if (elf_reloc_type(rela.r_info) != R_AMDGPU_RELATIVE64 || rela.r_addend < 0)
         continue;
 
       const uint64_t addend = static_cast<uint64_t>(rela.r_addend);
@@ -578,6 +594,11 @@ relocate_relative_text_addends(std::vector<uint8_t> &image, const Elf64_Ehdr &eh
       if (source_offset >= old_text_size)
         continue;
 
+      // This addend IS dereferenced as a function pointer. If its source block
+      // was emitted at conflicting placements across scopes, no single rewrite is
+      // correct — fail closed rather than pick an arbitrary clone.
+      if (conflicting_sources.contains(source_offset))
+        return false;
       const auto relocated = target_by_source.find(source_offset);
       // Leaving an in-text addend unchanged would silently preserve a stale PC.
       // Compatibility was established from the relocation form, but final

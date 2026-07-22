@@ -12,6 +12,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <deque>
 #include <optional>
 #include <unordered_map>
@@ -66,6 +67,24 @@ struct VgprMsbState {
 /// S_SET_VGPR_MSB byte, which is ordered {DST,SRC2,SRC1,SRC0}.
 constexpr std::array<uint8_t, kRoleCount> kModeBitOffset = {14, 16, 18, 12};
 
+/// @brief The MODE hardware register id in an S_SETREG* HWREG immediate.
+constexpr uint16_t kModeHwreg = 1;
+
+/// @brief Decoded fields of an S_SETREG* HWREG immediate: register id, and the
+/// [begin, begin+width) bit slice it writes.
+struct HwregSlice {
+  uint16_t id;
+  uint16_t begin;
+  uint16_t width;
+};
+
+/// @brief Decode the HWREG immediate fields (id[5:0], offset[10:6], size-1[15:11]).
+[[nodiscard]] constexpr HwregSlice decode_hwreg(uint16_t hwreg) {
+  return HwregSlice{.id = static_cast<uint16_t>(hwreg & 0x3f),
+                    .begin = static_cast<uint16_t>((hwreg >> 6) & 0x1f),
+                    .width = static_cast<uint16_t>(((hwreg >> 11) & 0x1f) + 1)};
+}
+
 /// @brief Join @p incoming into @p destination.
 [[nodiscard]] bool merge_state(VgprMsbState &destination, const VgprMsbState &incoming) {
   if (!incoming.reachable)
@@ -89,13 +108,11 @@ constexpr std::array<uint8_t, kRoleCount> kModeBitOffset = {14, 16, 18, 12};
 
 /// @brief Apply a scalar write to one WAVE_MODE bit slice.
 void apply_mode_write(VgprMsbState &state, uint16_t hwreg, std::optional<uint32_t> value) {
-  constexpr uint16_t kModeHwreg = 1;
-  const uint16_t id = hwreg & 0x3f;
-  const uint16_t begin = (hwreg >> 6) & 0x1f;
-  uint16_t width = static_cast<uint16_t>(((hwreg >> 11) & 0x1f) + 1);
-  if (id != kModeHwreg || begin >= 32)
+  const HwregSlice slice = decode_hwreg(hwreg);
+  const uint16_t begin = slice.begin;
+  if (slice.id != kModeHwreg || begin >= 32)
     return;
-  width = std::min<uint16_t>(width, static_cast<uint16_t>(32 - begin));
+  const uint16_t width = std::min<uint16_t>(slice.width, static_cast<uint16_t>(32 - begin));
   const uint16_t end = static_cast<uint16_t>(begin + width);
 
   for (size_t role = 0; role < kRoleCount; ++role) {
@@ -140,14 +157,24 @@ void apply_mode_write(VgprMsbState &state, uint16_t hwreg, std::optional<uint32_
 /// bits [19:12]. Model the hardware result rather than the architectural mask.
 void apply_immediate_mode_vgpr_msb_side_effect(VgprMsbState &state, uint16_t hwreg,
                                                uint32_t literal) {
-  constexpr uint16_t kModeHwreg = 1;
-  if ((hwreg & 0x3f) != kModeHwreg)
+  if (decode_hwreg(hwreg).id != kModeHwreg)
     return;
   for (size_t role = 0; role < kRoleCount; ++role)
     state.banks[role] = static_cast<uint8_t>((literal >> kModeBitOffset[role]) & 0x3u);
 }
 
-void transfer_instruction(VgprMsbState &state, const Instruction &inst) {
+/// @brief Read a 32-bit little-endian word from the .text image at @p offset.
+/// @returns nullopt when the four bytes are not fully present.
+[[nodiscard]] std::optional<uint32_t> text_word_at(std::span<const uint8_t> text, uint64_t offset) {
+  if (text.empty() || offset + sizeof(uint32_t) > text.size())
+    return std::nullopt;
+  uint32_t word = 0;
+  std::memcpy(&word, text.data() + offset, sizeof(uint32_t));
+  return word;
+}
+
+void transfer_instruction(VgprMsbState &state, const Instruction &inst,
+                          std::span<const uint8_t> text) {
   if (inst.opcode() == gfx1250::kSSetVgprMsbSopp && inst.mnemonic() == "s_set_vgpr_msb") {
     const Operand *immediate = inst.src_operand(0);
     if (immediate == nullptr) {
@@ -176,22 +203,29 @@ void transfer_instruction(VgprMsbState &state, const Instruction &inst) {
     return;
   }
 
-  const uint32_t *raw = inst.raw_encoding();
-  if (raw == nullptr || inst.size() < 2 * static_cast<int>(sizeof(uint32_t))) {
+  // Read the 32-bit immediate from the text image at src_loc()+4 rather than
+  // raw_encoding()[1]: raw_encoding() points at the 4-byte SOPK inst_ subobject,
+  // so [1] indexes past it and only happens to land on the adjacent literal_
+  // member — a layout-dependent out-of-bounds read. The literal follows the
+  // encoding word in the instruction stream, so the text image is authoritative.
+  const std::optional<uint32_t> literal = text_word_at(text, inst.src_loc() + sizeof(uint32_t));
+  if (!literal || inst.size() < 2 * static_cast<int>(sizeof(uint32_t))) {
     apply_mode_write(state, hwreg, std::nullopt);
-    if ((hwreg & 0x3f) == 1)
+    if (decode_hwreg(hwreg).id == kModeHwreg)
       state.banks.fill(std::nullopt);
     return;
   }
-  apply_mode_write(state, hwreg, raw[1]);
-  apply_immediate_mode_vgpr_msb_side_effect(state, hwreg, raw[1]);
+  apply_mode_write(state, hwreg, *literal);
+  apply_immediate_mode_vgpr_msb_side_effect(state, hwreg, *literal);
 }
 
 } // namespace
 
 class Gfx1250VgprMsbAnalysis::Impl {
 public:
-  Impl(KernelBlockScope blocks, BasicBlock *entry, std::span<const ScopedCfgEdge> extra_edges) {
+  Impl(KernelBlockScope blocks, BasicBlock *entry, std::span<const ScopedCfgEdge> extra_edges,
+       std::span<const uint8_t> text)
+      : text_(text) {
     analyze(blocks, entry, extra_edges);
   }
 
@@ -264,7 +298,7 @@ private:
 
       VgprMsbState state = in[index];
       for (const Instruction &inst : block->instructions())
-        transfer_instruction(state, inst);
+        transfer_instruction(state, inst, text_);
       if (state == out[index])
         continue;
       out[index] = state;
@@ -283,17 +317,19 @@ private:
       VgprMsbState state = in[index];
       for (const Instruction &inst : block->instructions()) {
         before_.emplace(&inst, state);
-        transfer_instruction(state, inst);
+        transfer_instruction(state, inst, text_);
       }
     }
   }
 
+  std::span<const uint8_t> text_;
   std::unordered_map<const Instruction *, VgprMsbState> before_;
 };
 
 Gfx1250VgprMsbAnalysis::Gfx1250VgprMsbAnalysis(KernelBlockScope blocks, BasicBlock *entry,
-                                               std::span<const ScopedCfgEdge> extra_edges)
-    : impl_(std::make_unique<Impl>(blocks, entry, extra_edges)) {}
+                                               std::span<const ScopedCfgEdge> extra_edges,
+                                               std::span<const uint8_t> text)
+    : impl_(std::make_unique<Impl>(blocks, entry, extra_edges, text)) {}
 
 Gfx1250VgprMsbAnalysis::~Gfx1250VgprMsbAnalysis() = default;
 Gfx1250VgprMsbAnalysis::Gfx1250VgprMsbAnalysis(Gfx1250VgprMsbAnalysis &&) noexcept = default;

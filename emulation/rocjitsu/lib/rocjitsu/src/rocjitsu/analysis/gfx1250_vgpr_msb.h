@@ -16,6 +16,8 @@
 
 namespace rocjitsu {
 
+class Instruction;
+
 /// @brief Resolve gfx1250 encoded VGPR operands to their 256-register bank.
 ///
 /// @details gfx1250 stores only the low eight bits of a VGPR index in vector
@@ -26,8 +28,12 @@ namespace rocjitsu {
 /// std::nullopt so clients can behave conservatively.
 class Gfx1250VgprMsbAnalysis {
 public:
+  /// @param text Raw .text image, used to read S_SETREG_IMM32_B32 literals safely
+  ///        at src_loc()+4. Empty is tolerated: such writes then mark the affected
+  ///        banks ambiguous rather than reading a literal.
   Gfx1250VgprMsbAnalysis(KernelBlockScope blocks, BasicBlock *entry,
-                         std::span<const ScopedCfgEdge> extra_edges = {});
+                         std::span<const ScopedCfgEdge> extra_edges = {},
+                         std::span<const uint8_t> text = {});
   ~Gfx1250VgprMsbAnalysis();
 
   Gfx1250VgprMsbAnalysis(const Gfx1250VgprMsbAnalysis &) = delete;
