@@ -3992,9 +3992,9 @@ class CodeGenerator:
                 )
             else:
                 L.append('  switch (reg_id) {')
-                if mode_id is not None:
-                    L.append(f'  case {mode_id}: reg_val = wf.mode_raw(); break;')
-                L.append(f'  case {status_id}: reg_val = wf.status_raw(); break;')
+                L.append('  case 1: reg_val = wf.mode_raw(); break;')
+                L.append('  case 2: reg_val = wf.status_raw(); break;')
+                L.append('  case 3: reg_val = wf.trapsts(); break;')
                 L.append(
                     '  case 4: reg_val = static_cast<uint32_t>(wf.cu().id()); break;'
                 )
@@ -4043,16 +4043,19 @@ class CodeGenerator:
                 )
             else:
                 L.append('  switch (reg_id) {')
-                if mode_id is not None:
-                    L.append(f'  case {mode_id}: {{')
-                    L.append('    uint32_t s = wf.mode_raw();')
-                    L.append(
-                        '    s = (s & ~(mask << offset)) | ((src & mask) << offset);'
-                    )
-                    L.append('    wf.set_mode_raw(s);')
-                    L.append('    break;')
-                    L.append('  }')
-                L.append(f'  case {status_id}: {{')
+                L.append('  case 3: {')
+                L.append('    uint32_t s = wf.trapsts();')
+                L.append('    s = (s & ~(mask << offset)) | ((src & mask) << offset);')
+                L.append('    wf.set_trapsts(s);')
+                L.append('    break;')
+                L.append('  }')
+                L.append('  case 1: {')
+                L.append('    uint32_t s = wf.mode_raw();')
+                L.append('    s = (s & ~(mask << offset)) | ((src & mask) << offset);')
+                L.append('    wf.set_mode_raw(s);')
+                L.append('    break;')
+                L.append('  }')
+                L.append('  case 2: {')
                 L.append('    uint32_t s = wf.status_raw();')
                 L.append('    s = (s & ~(mask << offset)) | ((src & mask) << offset);')
                 L.append('    wf.set_status_raw(s);')
@@ -4083,16 +4086,19 @@ class CodeGenerator:
                 )
             else:
                 L.append('  switch (reg_id) {')
-                if mode_id is not None:
-                    L.append(f'  case {mode_id}: {{')
-                    L.append('    uint32_t s = wf.mode_raw();')
-                    L.append(
-                        '    s = (s & ~(mask << offset)) | ((src & mask) << offset);'
-                    )
-                    L.append('    wf.set_mode_raw(s);')
-                    L.append('    break;')
-                    L.append('  }')
-                L.append(f'  case {status_id}: {{')
+                L.append('  case 3: {')
+                L.append('    uint32_t s = wf.trapsts();')
+                L.append('    s = (s & ~(mask << offset)) | ((src & mask) << offset);')
+                L.append('    wf.set_trapsts(s);')
+                L.append('    break;')
+                L.append('  }')
+                L.append('  case 1: {')
+                L.append('    uint32_t s = wf.mode_raw();')
+                L.append('    s = (s & ~(mask << offset)) | ((src & mask) << offset);')
+                L.append('    wf.set_mode_raw(s);')
+                L.append('    break;')
+                L.append('  }')
+                L.append('  case 2: {')
                 L.append('    uint32_t s = wf.status_raw();')
                 L.append('    s = (s & ~(mask << offset)) | ((src & mask) << offset);')
                 L.append('    wf.set_status_raw(s);')
@@ -9473,7 +9479,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '  if (ev == 107)\n'
             '    return static_cast<uint32_t>(wf.vcc() >> 32);\n'
             '  if (ev >= 108 && ev <= 123)\n'
-            '    return amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
+            '    return wf.ttmp(static_cast<uint32_t>(ev - 108));\n'
             + (
                 '  if (ev == 124)\n'
                 '    return 0u; // NULL\n'
@@ -9589,8 +9595,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '  if (ev == 106)\n'
             '    return wf.vcc();\n'
             '  if (ev >= 108 && ev <= 122) {\n'
-            '    uint32_t lo = amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
-            '    uint32_t hi = amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));\n'
+            '    uint32_t lo = wf.ttmp(static_cast<uint32_t>(ev - 108));\n'
+            '    uint32_t hi = wf.ttmp(static_cast<uint32_t>(ev - 107));\n'
             '    return static_cast<uint64_t>(hi) << 32 | lo;\n'
             '  }\n'
             + (
@@ -9662,7 +9668,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    return;\n'
             '  }\n'
             '  if (ev >= 108 && ev <= 123) {\n'
-            '    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);\n'
+            '    wf.set_ttmp(static_cast<uint32_t>(ev - 108), val);\n'
             '    return;\n'
             '  }\n'
             + (
@@ -9704,8 +9710,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    return;\n'
             '  }\n'
             '  if (ev >= 108 && ev <= 122) {\n'
-            '    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), static_cast<uint32_t>(val));\n'
-            '    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1), static_cast<uint32_t>(val >> 32));\n'
+            '    wf.set_ttmp(static_cast<uint32_t>(ev - 108), static_cast<uint32_t>(val));\n'
+            '    wf.set_ttmp(static_cast<uint32_t>(ev - 107), static_cast<uint32_t>(val >> 32));\n'
             '    return;\n'
             '  }\n'
             '  if (ev == 124)\n'

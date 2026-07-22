@@ -3923,14 +3923,14 @@ TEST(HwregTest, SetregImm32WritesStatus) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
 
-  // Encode s_setreg_imm32_b32 targeting STATUS (hwreg=1), offset=0, size=32.
+  // Encode s_setreg_imm32_b32 targeting STATUS (hwreg=2), offset=0, size=32.
   // SOPK encoding: [31:28]=0xB, [27:23]=op(20), [22:16]=sdst(0), [15:0]=simm16(hwreg)
   // hwreg encoding: reg_id | (offset << 6) | ((size-1) << 11)
-  //               = 1 | (0 << 6) | (31 << 11) = 0xF801
+  //               = 2 | (0 << 6) | (31 << 11) = 0xF802
   // Word 1: imm32 literal value to write
   constexpr uint32_t kSopkEncoding = 0xBu << 28;
   constexpr uint32_t kSetregImm32Op = 20u << 23;
-  constexpr uint32_t kHwregStatus32 = 1u | (0u << 6) | (31u << 11);
+  constexpr uint32_t kHwregStatus32 = 2u | (0u << 6) | (31u << 11);
   constexpr uint32_t kImm32Value = 0xDEADBEEF;
   const uint32_t words[] = {kSopkEncoding | kSetregImm32Op | kHwregStatus32, kImm32Value};
 
@@ -3969,10 +3969,10 @@ TEST(HwregTest, SetregImm32PartialBitfield) {
   ASSERT_NE(decoder, nullptr);
 
   // Write bits[11:8] of STATUS (offset=8, size=4).
-  // hwreg = 1 | (8 << 6) | (3 << 11) = 1 | 0x200 | 0x1800 = 0x1A01
+  // hwreg = 2 | (8 << 6) | (3 << 11) = 2 | 0x200 | 0x1800 = 0x1A02
   constexpr uint32_t kSopk = 0xBu << 28;
   constexpr uint32_t kOp = 20u << 23;
-  constexpr uint32_t kHwreg = 1u | (8u << 6) | (3u << 11);
+  constexpr uint32_t kHwreg = 2u | (8u << 6) | (3u << 11);
   constexpr uint32_t kImm32 = 0xFFFFFFFF;
   const uint32_t words[] = {kSopk | kOp | kHwreg, kImm32};
 

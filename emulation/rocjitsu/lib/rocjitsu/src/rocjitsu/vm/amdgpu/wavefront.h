@@ -471,10 +471,7 @@ public:
   //
   // These model the wave-level state the AMD trap handler maintains for
   // rocm-dbgapi: the trap temporary registers (TTMP0-15), the trap status
-  // register (TRAPSTS), and the debug halt/single-step bits. The emulator
-  // models the trap handler's observable effect directly (it does not execute
-  // the trap-handler shader), so a wave that hits an s_trap stops here and its
-  // state can later be serialized into the queue's context-save area.
+  // register (TRAPSTS), and the debug halt/single-step bits.
 
   /// @brief Read a trap temporary register (TTMP0-15).
   uint32_t ttmp(uint32_t idx) const { return idx < 16 ? ttmp_[idx] : 0; }
@@ -484,6 +481,16 @@ public:
     if (idx < 16)
       ttmp_[idx] = val;
   }
+
+  /// @brief Whether the wave is currently fetching from its configured TBA.
+  bool in_trap_handler() const { return in_trap_handler_; }
+  void set_in_trap_handler(bool value) { in_trap_handler_ = value; }
+
+  bool trap_interrupt_sent() const { return trap_interrupt_sent_; }
+  void set_trap_interrupt_sent(bool value) { trap_interrupt_sent_ = value; }
+
+  /// @brief Record the trap id supplied by hardware trap entry.
+  void set_trap_id(uint32_t value) { trap_id_ = value; }
 
   /// @brief Read the trap status register (TRAPSTS / EXCP flags).
   uint32_t trapsts() const { return trapsts_; }
@@ -593,6 +600,8 @@ public:
     for (auto &t : ttmp_)
       t = 0;
     trapsts_ = 0;
+    in_trap_handler_ = false;
+    trap_interrupt_sent_ = false;
     debug_halted_ = false;
     single_step_ = false;
     trap_id_ = 0;
@@ -657,12 +666,14 @@ private:
   WfState state_ = WfState::HALTED; ///< Current execution state.
   WaitCounters wait_counters_;      ///< Outstanding memory operation counters.
 
-  uint32_t ttmp_[16] = {};     ///< Trap temporary registers (TTMP0-15).
-  uint32_t trapsts_ = 0;       ///< Trap status register (EXCP flags).
-  bool debug_halted_ = false;  ///< Stopped by the debugger (skipped by scheduler).
-  bool single_step_ = false;   ///< Execute one instruction on resume, then re-stop.
-  uint32_t trap_id_ = 0;       ///< Trap id from the last s_trap (breakpoint = 1).
-  uint64_t debug_wave_id_ = 0; ///< Stable debugger wave id (TTMP4:5); 0 until assigned.
+  uint32_t ttmp_[16] = {};           ///< Trap temporary registers (TTMP0-15).
+  uint32_t trapsts_ = 0;             ///< Trap status register (EXCP flags).
+  bool in_trap_handler_ = false;     ///< Executing the configured trap-handler shader.
+  bool trap_interrupt_sent_ = false; ///< Handler issued MSG_INTERRUPT for this entry.
+  bool debug_halted_ = false;        ///< Stopped by the debugger (skipped by scheduler).
+  bool single_step_ = false;         ///< Execute one instruction on resume, then re-stop.
+  uint32_t trap_id_ = 0;             ///< Trap id from the last s_trap (breakpoint = 1).
+  uint64_t debug_wave_id_ = 0;       ///< Stable debugger wave id (TTMP4:5); 0 until assigned.
 
 public:
   uint32_t trace_inst_count_ = 0; ///< Debug: instruction count for trace.

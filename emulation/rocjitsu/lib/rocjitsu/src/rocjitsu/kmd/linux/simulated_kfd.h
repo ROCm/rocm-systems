@@ -286,12 +286,10 @@ private:
   void raise_process_debug_event(pid_t target_pid, uint64_t exception_mask);
   void runtime_enable_debugger_handshake(pid_t target_pid);
 
-  /// @brief s_trap handler installed on every compute unit's wavefronts.
-  /// @details Runs on the engine thread when a wave executes s_trap. Returns
-  /// true (stop the wave) if the wave's process is being debugged, having
-  /// serialized the queue's stopped waves into its CWSR area and raised an
-  /// EC_QUEUE_WAVE_TRAP event to the debugger; false otherwise.
-  bool on_wave_trap(amdgpu::Wavefront &wf, uint32_t trap_id);
+  std::optional<amdgpu::ComputeUnitCore::TrapHandlerConfig>
+  resolve_trap_handler(const amdgpu::Wavefront &wf, uint32_t gpu_ordinal);
+  bool on_wave_sendmsg(amdgpu::Wavefront &wf, uint32_t message);
+  void on_wave_trap_complete(amdgpu::Wavefront &wf);
 
   /// @brief True if any wave of the given queue is still executing (may yet trap
   /// or complete). Used to defer the debugger report until all waves of a

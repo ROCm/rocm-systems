@@ -1886,15 +1886,18 @@ TEST_F(KfdIoctlTest, DbgTrapQueueSnapshotEnumeratesQueues) {
 
 TEST_F(KfdIoctlTest, DbgTrapRealWaveTrapPublishesCwsrAndEvent) {
   constexpr uint64_t kKernelAddress = 0x600000000ULL;
+  constexpr uint64_t kTrapHandlerAddress = 0x600080000ULL;
   constexpr uint64_t kCwsrAddress = 0x600100000ULL;
   constexpr uint32_t kCwsrSize = 0x40000;
   constexpr uint32_t kSTrapBreakpoint = 0xBF920001u;
 
   std::vector<uint8_t> code_page(4096);
+  std::vector<uint8_t> trap_handler_page(4096);
   std::vector<uint8_t> cwsr(kCwsrSize);
   auto process = driver_->find_process(driver_->local_process_id());
   ASSERT_NE(process, nullptr);
   process->map_pages(kKernelAddress, code_page.data(), code_page.size());
+  process->map_pages(kTrapHandlerAddress, trap_handler_page.data(), trap_handler_page.size());
   process->map_pages(kCwsrAddress, cwsr.data(), cwsr.size());
 
   int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
@@ -1907,6 +1910,11 @@ TEST_F(KfdIoctlTest, DbgTrapRealWaveTrapPublishesCwsrAndEvent) {
   enable.enable.dbg_fd = notifier;
   enable.enable.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  kfd_ioctl_set_trap_handler_args set_handler{};
+  set_handler.gpu_id = kGpuId;
+  set_handler.tba_addr = kTrapHandlerAddress;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_SET_TRAP_HANDLER, &set_handler), 0);
 
   std::vector<uint8_t> ring(4096);
   uint64_t read_pointer = 0;
@@ -1932,13 +1940,24 @@ TEST_F(KfdIoctlTest, DbgTrapRealWaveTrapPublishesCwsrAndEvent) {
   auto *memory = soc_->memory();
   ASSERT_NE(memory, nullptr);
   memory->write32(kKernelAddress, kSTrapBreakpoint, driver_->local_process_id());
+  const uint32_t trap_handler[] = {
+      0x806C846Cu,              // s_add_u32 ttmp0, ttmp0, 4
+      0x826D806Du,              // s_addc_u32 ttmp1, ttmp1, 0
+      0xBEF800FFu, 0x00002000u, // s_mov_b32 ttmp12, STATUS.HALT
+      0xBF900001u,              // s_sendmsg sendmsg(MSG_INTERRUPT)
+      0xB978F802u,              // s_setreg_b32 hwreg(HW_REG_STATUS), ttmp12
+      0xBE801F6Cu,              // s_rfe_b64 ttmp[0:1]
+  };
+  for (uint32_t i = 0; i < std::size(trap_handler); ++i)
+    memory->write32(kTrapHandlerAddress + i * 4, trap_handler[i], driver_->local_process_id());
   auto *wave = cu->dispatch_wf(/*wg_id=*/0, kKernelAddress, /*sgprs=*/16, /*vgprs=*/4);
   ASSERT_NE(wave, nullptr);
   wave->set_process_id(driver_->local_process_id());
   wave->set_queue_id(create.queue_id);
   wave->set_dispatch_id(7);
 
-  EXPECT_FALSE(cu->step());
+  for (uint32_t i = 0; i < 8 && !wave->debug_halted(); ++i)
+    cu->step();
   ASSERT_TRUE(wave->debug_halted());
 
   uint64_t notifications = 0;

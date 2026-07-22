@@ -413,20 +413,40 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
 
   plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *inst, *active);
 
-  // s_trap: enter the KFD debugger trap handler. rocm-dbgapi plants an s_trap
-  // (encoded 0xBF9200xx) as a software breakpoint; the low byte is the trap id
-  // (breakpoint = 1). The ISA execute for s_trap intentionally throws (the
-  // emulator does not run the trap-handler shader), so we intercept it here and
-  // model the trap handler's observable effect: advance the PC past the trap
-  // (rocm-dbgapi applies a -4 adjust to recover the breakpoint address), notify
-  // the debug controller, and — if a debugger is attached — stop the wave for
-  // inspection. Without a debugger the s_trap is a no-op so kernels that embed
-  // traps (e.g. llvm.trap in unreached paths) do not abort the emulator.
+  // s_trap enters the per-process handler configured by SET_TRAP_HANDLER. The
+  // hardware saves the interrupted PC/status in TTMPs and begins fetching at
+  // TBA. The handler advances TTMP0:1 for software traps, sends the KFD
+  // interrupt message, restores STATUS, and returns through s_rfe_b64.
   if (std::string_view(inst->mnemonic()) == "s_trap") {
     uint32_t trap_id = words[0] & 0xFFu;
+    if (!active->in_trap_handler() && trap_handler_resolver_) {
+      auto config = trap_handler_resolver_(*active);
+      if (config && config->tba != 0) {
+        const uint64_t saved_pc = active->pc;
+        active->set_ttmp(0, static_cast<uint32_t>(saved_pc));
+        active->set_ttmp(1, static_cast<uint32_t>(saved_pc >> 32) | (trap_id << 16));
+        active->set_ttmp(8, active->wg_id());
+        active->set_ttmp(9, 0);
+        active->set_ttmp(10, 0);
+        active->set_ttmp(11, ((active->aql_packet_id() & 0x1FFFFFFu) << 6) |
+                                 (active->wave_in_group() & 0x3Fu));
+        active->set_ttmp(12, active->status_raw());
+        const uint32_t debug_enabled = config->debug_enabled ? (1u << 23) : 0u;
+        active->set_ttmp(13, (active->ttmp(13) & ~(1u << 23)) | debug_enabled);
+        active->set_ttmp(14, static_cast<uint32_t>(config->tma));
+        active->set_ttmp(15, static_cast<uint32_t>(config->tma >> 32));
+        active->set_trap_id(trap_id);
+        active->set_trap_interrupt_sent(false);
+        active->set_in_trap_handler(true);
+        active->pc = config->tba;
+        delete inst;
+        return;
+      }
+    }
+
+    // With no configured TBA, or for a parked s_trap executed by TBA code,
+    // retire the instruction without inventing a host-side trap handler.
     active->pc += inst_size;
-    if (trap_handler_ && trap_handler_(*active, trap_id))
-      active->debug_trap(trap_id);
     delete inst;
     return;
   }
@@ -516,6 +536,13 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
 
   active->pc += inst_size;
 
+  // s_rfe follows the same target-minus-size convention as other control-flow
+  // instructions. Publish the handler-driven stop only after the common PC
+  // increment has produced the architectural return PC for CWSR serialization.
+  if (std::string_view(inst->mnemonic()) == "s_rfe_b64" && active->debug_halted() &&
+      active->trap_interrupt_sent())
+    notify_trap_complete(*active);
+
   // Debugger per-access checks, after the access completed and the PC advanced
   // (so the serialized wave resumes at the next instruction). A memory fault is
   // more severe than a watchpoint and wins if both would fire on the same
@@ -542,7 +569,7 @@ bool ComputeUnitCore::step() {
     if (wf->state() == WfState::RUNNING && !wf->debug_halted()) {
       const bool single_step = wf->debug_single_step();
       issue_instruction(wf.get());
-      if (single_step && !wf->debug_halted() && single_step_handler_)
+      if (single_step && !wf->in_trap_handler() && !wf->debug_halted() && single_step_handler_)
         single_step_handler_(*wf);
     }
   }

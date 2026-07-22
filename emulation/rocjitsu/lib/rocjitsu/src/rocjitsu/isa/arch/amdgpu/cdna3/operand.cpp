@@ -1025,7 +1025,7 @@ uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {
   if (ev == 107)
     return static_cast<uint32_t>(wf.vcc() >> 32);
   if (ev >= 108 && ev <= 123)
-    return amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
+    return wf.ttmp(static_cast<uint32_t>(ev - 108));
   if (ev == 124)
     return wf.m0();
   if (ev == 126)
@@ -1131,10 +1131,8 @@ uint64_t resolve_src_scalar64(const amdgpu::Wavefront &wf, int ev) {
   if (ev == 106)
     return wf.vcc();
   if (ev >= 108 && ev <= 122) {
-    uint32_t lo =
-        amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
-    uint32_t hi =
-        amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));
+    uint32_t lo = wf.ttmp(static_cast<uint32_t>(ev - 108));
+    uint32_t hi = wf.ttmp(static_cast<uint32_t>(ev - 107));
     return static_cast<uint64_t>(hi) << 32 | lo;
   }
   if (ev == 124)
@@ -1200,7 +1198,7 @@ void resolve_dst_write(amdgpu::Wavefront &wf, int ev, uint32_t val) {
     return;
   }
   if (ev >= 108 && ev <= 123) {
-    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
+    wf.set_ttmp(static_cast<uint32_t>(ev - 108), val);
     return;
   }
   if (ev == 124) {
@@ -1235,10 +1233,8 @@ void resolve_dst_write64(amdgpu::Wavefront &wf, int ev, uint64_t val) {
     return;
   }
   if (ev >= 108 && ev <= 122) {
-    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev),
-                                          static_cast<uint32_t>(val));
-    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1),
-                                          static_cast<uint32_t>(val >> 32));
+    wf.set_ttmp(static_cast<uint32_t>(ev - 108), static_cast<uint32_t>(val));
+    wf.set_ttmp(static_cast<uint32_t>(ev - 107), static_cast<uint32_t>(val >> 32));
     return;
   }
   if (ev == 124)

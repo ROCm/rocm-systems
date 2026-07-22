@@ -38,6 +38,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -168,18 +169,32 @@ public:
   /// @param cb Callback to invoke when idle.
   void set_on_idle(std::function<void()> cb) { on_idle_ = std::move(cb); }
 
-  /// @brief Callback invoked when a wavefront executes an s_trap instruction.
-  /// @details Returns true if the debugger stopped the wave (it becomes
-  /// debug-halted and is skipped by the scheduler), false if there is no
-  /// attached debugger (the s_trap is then treated as a no-op). The command
-  /// KFD debug controller wiring can install this callback; unit tests install
-  /// it directly. @param wf The trapping wavefront. @param trap_id s_trap immediate.
-  /// Install this callback before activating the CU; replacing it concurrently
-  /// with execution is not supported.
-  using TrapHandler = std::function<bool(Wavefront &wf, uint32_t trap_id)>;
+  struct TrapHandlerConfig {
+    uint64_t tba = 0;
+    uint64_t tma = 0;
+    bool debug_enabled = false;
+  };
 
-  /// @brief Install the s_trap handler (see @ref TrapHandler).
-  void set_trap_handler(TrapHandler cb) { trap_handler_ = std::move(cb); }
+  /// @brief Resolve the KFD trap handler for a wave's process and GPU.
+  using TrapHandlerResolver = std::function<std::optional<TrapHandlerConfig>(const Wavefront &wf)>;
+  void set_trap_handler_resolver(TrapHandlerResolver cb) { trap_handler_resolver_ = std::move(cb); }
+
+  /// @brief Handle an architected scalar message issued by trap-handler code.
+  using SendmsgHandler = std::function<bool(Wavefront &wf, uint32_t message)>;
+  void set_sendmsg_handler(SendmsgHandler cb) { sendmsg_handler_ = std::move(cb); }
+  bool handle_sendmsg(Wavefront &wf, uint32_t message) {
+    return sendmsg_handler_ && sendmsg_handler_(wf, message);
+  }
+
+  /// @brief Notify KFD after configured TBA code returns with STATUS.HALT.
+  using TrapCompletionHandler = std::function<void(Wavefront &wf)>;
+  void set_trap_completion_handler(TrapCompletionHandler cb) {
+    trap_completion_handler_ = std::move(cb);
+  }
+  void notify_trap_complete(Wavefront &wf) {
+    if (trap_completion_handler_)
+      trap_completion_handler_(wf);
+  }
 
   /// @brief Callback after a single-stepped wave executes one instruction.
   using SingleStepHandler = std::function<bool(Wavefront &wf)>;
@@ -633,7 +648,9 @@ protected:
   GlobalMemPipeline global_mem_pipeline_;
   LocalMemPipeline local_mem_pipeline_;
   std::function<void()> on_idle_; ///< Callback invoked when CU becomes idle.
-  TrapHandler trap_handler_;      ///< s_trap handler (KFD debugger); see set_trap_handler.
+  TrapHandlerResolver trap_handler_resolver_;
+  SendmsgHandler sendmsg_handler_;
+  TrapCompletionHandler trap_completion_handler_;
   SingleStepHandler single_step_handler_;
   WatchpointHandler watchpoint_handler_;
   IllegalInstHandler illegal_inst_handler_;
@@ -682,6 +699,12 @@ inline simdojo::SimulationEngine *InstructionComputeUnitView::engine() const {
 }
 inline void InstructionComputeUnitView::request_functional_yield() {
   raw_cu().request_functional_yield();
+}
+inline bool InstructionComputeUnitView::handle_sendmsg(Wavefront &wf, uint32_t message) {
+  return raw_cu().handle_sendmsg(wf, message);
+}
+inline void InstructionComputeUnitView::notify_trap_complete(Wavefront &wf) {
+  raw_cu().notify_trap_complete(wf);
 }
 inline uint32_t InstructionComputeUnitView::read_sgpr(uint32_t reg_idx) const {
   return raw_cu().read_sgpr(reg_idx);
@@ -750,7 +773,7 @@ public:
 
   void schedule_work_async() override {
     if (this->engine())
-      this->engine()->schedule_event_now(&tick_event_);
+      this->engine()->schedule_event_now(&resume_event_);
   }
 
 private:
@@ -767,6 +790,10 @@ private:
         if (execute_quantum())
           this->schedule_event(&tick_event_, now + std::max<uint64_t>(1, last_quantum_executed_));
       }};
+  // Cross-thread debugger resumes first enter this event. Its handler runs on
+  // the CU partition and can safely update executing_ through schedule_work().
+  simdojo::Event resume_event_{this, simdojo::EventType::TIMER_CALLBACK,
+                               [this](simdojo::Tick, simdojo::Message *) { schedule_work(); }};
   uint64_t last_quantum_executed_ = 0;
   bool executing_ = false;
 };

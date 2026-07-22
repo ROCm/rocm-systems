@@ -296,7 +296,13 @@ void SGetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t reg_val = 0;
   switch (reg_id) {
   case 1:
+    reg_val = wf.mode_raw();
+    break;
+  case 2:
     reg_val = wf.status_raw();
+    break;
+  case 3:
+    reg_val = wf.trapsts();
     break;
   case 4:
     reg_val = static_cast<uint32_t>(wf.cu().id());
@@ -342,11 +348,25 @@ void SSetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src = amdgpu::RegisterAccess(wf).read_scalar(sdst);
   switch (reg_id) {
   case 1: {
+    uint32_t s = wf.mode_raw();
+    s = (s & ~(mask << offset)) | ((src & mask) << offset);
+    wf.set_mode_raw(s);
+    break;
+  }
+  case 2: {
     uint32_t s = wf.status_raw();
     s = (s & ~(mask << offset)) | ((src & mask) << offset);
     wf.set_status_raw(s);
     break;
   }
+  case 3: {
+    uint32_t s = wf.trapsts();
+    s = (s & ~(mask << offset)) | ((src & mask) << offset);
+    wf.set_trapsts(s);
+    break;
+  }
+  case 7:
+    break;
   default:
     util::Logger::warn("s_setreg_b32: unhandled hwreg id=", reg_id);
     break;
@@ -373,9 +393,21 @@ void SSetregImm32B32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src = literal_;
   switch (reg_id) {
   case 1: {
+    uint32_t s = wf.mode_raw();
+    s = (s & ~(mask << offset)) | ((src & mask) << offset);
+    wf.set_mode_raw(s);
+    break;
+  }
+  case 2: {
     uint32_t s = wf.status_raw();
     s = (s & ~(mask << offset)) | ((src & mask) << offset);
     wf.set_status_raw(s);
+    break;
+  }
+  case 3: {
+    uint32_t s = wf.trapsts();
+    s = (s & ~(mask << offset)) | ((src & mask) << offset);
+    wf.set_trapsts(s);
     break;
   }
   default:

@@ -433,7 +433,7 @@ void SimulatedKfd::init_command_processors_locked() {
     uint64_t scratch_base = 0x2000000000000ULL + i * 0x10000000000ULL;
     g.soc->set_apertures(lds_base, lds_base + 0xFFFFFFFFULL, scratch_base,
                          scratch_base + 0xFFFFFFFFULL);
-    g.soc->for_each_cp([this](amdgpu::CommandProcessor *cp) {
+    g.soc->for_each_cp([this, i](amdgpu::CommandProcessor *cp) {
       cp->set_interrupt_callback([this](uint32_t process_id, uint32_t event_id) {
         std::lock_guard<std::mutex> ilk(interrupt_mutex_);
         auto it = event_dispatch_.find(process_id);
@@ -463,8 +463,15 @@ void SimulatedKfd::init_command_processors_locked() {
             return allocate_scratch_backing(process_id, gpu_va, size);
           });
       for (auto *cu : cp->compute_units()) {
-        cu->set_trap_handler(
-            [this](amdgpu::Wavefront &wf, uint32_t trap_id) { return on_wave_trap(wf, trap_id); });
+        const uint32_t gpu_ordinal = static_cast<uint32_t>(i);
+        cu->set_trap_handler_resolver([this, gpu_ordinal](const amdgpu::Wavefront &wf) {
+          return resolve_trap_handler(wf, gpu_ordinal);
+        });
+        cu->set_sendmsg_handler([this](amdgpu::Wavefront &wf, uint32_t message) {
+          return on_wave_sendmsg(wf, message);
+        });
+        cu->set_trap_completion_handler(
+            [this](amdgpu::Wavefront &wf) { on_wave_trap_complete(wf); });
         cu->set_single_step_handler(
             [this](amdgpu::Wavefront &wf) { return on_wave_single_step_complete(wf); });
         cu->set_watchpoint_handler([this](amdgpu::Wavefront &wf, uint64_t address, uint32_t bytes,
@@ -937,11 +944,8 @@ int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *
       auto *a = static_cast<kfd_ioctl_set_trap_handler_args *>(arg);
       uint32_t ord = gpu_ordinal(a->gpu_id);
       {
-        // Held under process_mutex_ for symmetry with SET_SCRATCH_BACKING_VA and
-        // to be race-free once the trap handler is wired into the SoC. NOTE: as of
-        // now trap_tba_addr/trap_tma_addr have no reader anywhere (the CP does not
-        // yet consume them), so this lock currently guards against a non-existent
-        // concurrent access — kept for forward-compatibility.
+        // Trap entry resolves these fields on the engine thread while ioctls may
+        // update them, so publish and consume them under process_mutex_.
         std::lock_guard<std::mutex> plk(process_mutex_);
         proc.gpu(ord).trap_tba_addr = a->tba_addr;
         proc.gpu(ord).trap_tma_addr = a->tma_addr;
@@ -2375,19 +2379,19 @@ void SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t que
     memory->write64(read_pointer, oldest_packet, process_id);
 }
 
-bool SimulatedKfd::on_wave_trap(amdgpu::Wavefront &wave, uint32_t trap_id) {
+void SimulatedKfd::on_wave_trap_complete(amdgpu::Wavefront &wave) {
   const uint32_t process_id = wave.process_id();
   const uint32_t queue_id = wave.queue_id();
   auto proc = find_process(process_id);
   if (!proc)
-    return false;
+    return;
   const pid_t target_pid = proc->client_pid();
 
   {
     std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
     auto session = debug_sessions_.find(target_pid);
     if (session == debug_sessions_.end() || !session->second.enabled)
-      return false;
+      return;
   }
 
   uint64_t ctx_base = 0;
@@ -2397,19 +2401,71 @@ bool SimulatedKfd::on_wave_trap(amdgpu::Wavefront &wave, uint32_t trap_id) {
     std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
     auto queue = proc->queue_snapshot_map_.find(queue_id);
     if (queue == proc->queue_snapshot_map_.end())
-      return false;
+      return;
     ctx_base = queue->second.ctx_save_restore_address;
     ctx_size = queue->second.ctx_save_restore_area_size;
     gpu_id = queue->second.gpu_id;
   }
   if (ctx_base == 0)
-    return false;
-
-  wave.debug_trap(trap_id);
+    return;
 
   if (queue_has_running_waves(process_id, queue_id, gpu_id, &wave))
-    return true;
+    return;
   report_wave_stopped(proc, queue_id, gpu_id, ctx_base, ctx_size);
+}
+
+std::optional<amdgpu::ComputeUnitCore::TrapHandlerConfig>
+SimulatedKfd::resolve_trap_handler(const amdgpu::Wavefront &wave, uint32_t gpu_ordinal) {
+  std::shared_ptr<KfdProcess> proc;
+  uint64_t tba = 0;
+  uint64_t tma = 0;
+  {
+    std::lock_guard<std::mutex> lk(process_mutex_);
+    auto proc_it = processes_.find(wave.process_id());
+    if (proc_it == processes_.end() || gpu_ordinal >= proc_it->second->gpu_state_.size())
+      return std::nullopt;
+    proc = proc_it->second;
+    tba = proc->gpu(gpu_ordinal).trap_tba_addr;
+    tma = proc->gpu(gpu_ordinal).trap_tma_addr;
+  }
+  if (tba == 0)
+    return std::nullopt;
+
+  bool debug_enabled = false;
+  {
+    std::lock_guard<std::mutex> debug_lk(debug_sessions_mutex_);
+    auto session = debug_sessions_.find(proc->client_pid());
+    debug_enabled = session != debug_sessions_.end() && session->second.enabled;
+  }
+  return amdgpu::ComputeUnitCore::TrapHandlerConfig{tba, tma, debug_enabled};
+}
+
+bool SimulatedKfd::on_wave_sendmsg(amdgpu::Wavefront &wave, uint32_t message) {
+  constexpr uint32_t kMessageIdMask = 0xFu;
+  constexpr uint32_t kMessageInterrupt = 1;
+  constexpr uint32_t kMessageGetDoorbell = 10;
+  const uint32_t message_id = message & kMessageIdMask;
+
+  auto proc = find_process(wave.process_id());
+  if (!proc)
+    return false;
+
+  if (message_id == kMessageGetDoorbell) {
+    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+    auto doorbell = proc->queue_doorbell_map_.find(wave.queue_id());
+    if (doorbell == proc->queue_doorbell_map_.end())
+      return false;
+    const uint32_t doorbell_id = (doorbell->second.doorbell_offset / sizeof(uint64_t)) & 0x3FFu;
+    // The handler sets EXEC_LO[31] before issuing MSG_GET_DOORBELL and polls
+    // until hardware clears it. Return the 10-bit ID with the pending bit clear.
+    wave.set_exec((wave.exec() & 0xFFFFFFFF00000000ULL) | doorbell_id);
+    return true;
+  }
+
+  if (message_id != kMessageInterrupt || !wave.in_trap_handler())
+    return false;
+
+  // CWSR publication is deferred until s_rfe applies the handler's STATUS.HALT.
   return true;
 }
 
@@ -2620,22 +2676,37 @@ void SimulatedKfd::set_debug_active_on_all_cus(bool active) {
 
 void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWaveState &state) {
   constexpr uint32_t kModeDebugEnMask = 1u << 11;
+  constexpr uint32_t kStatusHaltMask = 1u << 13;
   wave.pc = state.pc;
   wave.set_exec(state.exec);
   wave.set_vcc(state.vcc);
   wave.set_m0(state.m0);
-  wave.set_status_raw(state.status);
+  wave.set_status_raw((state.status & ~kStatusHaltMask) |
+                      (state.saved_status_halt ? kStatusHaltMask : 0u));
   wave.set_mode_raw(state.mode);
   wave.set_trapsts(state.trapsts);
   wave.set_debug_wave_id(state.wave_id);
-  for (uint32_t s = 0; s < state.num_sgprs && s < state.sgprs.size(); ++s)
-    wave.debug_write_sgpr(s, state.sgprs[s]);
-  for (uint32_t r = 0; r < state.num_vgprs; ++r)
-    for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
-      const size_t index = static_cast<size_t>(r) * 64 + lane;
-      if (index < state.vgprs.size())
-        wave.debug_write_vgpr(r, lane, state.vgprs[index]);
-    }
+  // rocm-dbgapi may submit a lightweight control-state update with no register
+  // payload after displaced stepping. Preserve the SGPR/VGPR values produced
+  // by the displaced instruction in that case rather than restoring zeros.
+  if (!state.sgprs.empty())
+    for (uint32_t s = 0; s < state.num_sgprs && s < state.sgprs.size(); ++s)
+      wave.debug_write_sgpr(s, state.sgprs[s]);
+  // Debugger address writes use x86-style sign extension for 48-bit GPU VAs.
+  // Scalar address pairs are interpreted as unsigned by the ISA emulator, so
+  // strip that extension before resumed code performs address arithmetic.
+  for (uint32_t s = 1; s < state.num_sgprs; s += 2) {
+    const uint32_t hi = wave.debug_read_sgpr(s);
+    if ((hi & 0xFFFF0000u) == 0xFFFF0000u)
+      wave.debug_write_sgpr(s, hi & 0xFFFFu);
+  }
+  if (!state.vgprs.empty())
+    for (uint32_t r = 0; r < state.num_vgprs; ++r)
+      for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+        const size_t index = static_cast<size_t>(r) * 64 + lane;
+        if (index < state.vgprs.size())
+          wave.debug_write_vgpr(r, lane, state.vgprs[index]);
+      }
   const bool single_step = (state.mode & kModeDebugEnMask) != 0;
   wave.set_debug_single_step(single_step);
   wave.set_debug_halted(state.wave_stopped && !single_step);
