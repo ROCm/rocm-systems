@@ -56,8 +56,8 @@ auto  bundles_dtor  = scope::destructor{ []() {
     pthread_create_gotcha::shutdown();
     delete bundles;
     delete bundles_mutex;
-    bundles       = nullptr;
-    bundles_mutex = nullptr;
+    bundles         = nullptr;
+    bundles_mutex   = nullptr;
 } };
 
 template <typename... Args>
@@ -330,7 +330,7 @@ pthread_create_gotcha::wrapper::wrap(void* _arg)
     static thread_local auto _remover = scope::destructor{ []() {
         if(state::process::get() >= rocprofsys::state::process::Finalized) return;
         // remove the handle even if original function aborts
-        auto _lk = locking::atomic_lock{ native_handles_mutex };
+        auto                 _lk      = locking::atomic_lock{ native_handles_mutex };
         native_handles.erase(pthread_self());
     } };
     (void) _remover;
@@ -371,7 +371,7 @@ pthread_create_gotcha::configure()
     pthread_create_gotcha_t::get_initializer() = []() {
         if(!tim::settings::enabled()) return;
         pthread_create_gotcha_t::template configure<
-            0, int, pthread_t*, const pthread_attr_t*, void* (*)(void*), void*>(
+            0, int, pthread_t*, const pthread_attr_t*, void* (*) (void*), void*>(
             "pthread_create");
     };
 
