@@ -39,7 +39,6 @@ enum class domain_type
     PC_SAMPLING_HOST_TRAP,
     ROCDECODE,
     ROCJPEG,
-    HIPFILE,
     PC_SAMPLING_STOCHASTIC,
     KFD,
     SPM_COUNTER_COLLECTION,
@@ -47,6 +46,7 @@ enum class domain_type
     OMPT,
     HIP_GRAPH,
     ROCSHMEM,
+    HIPFILE,
     LAST,
 };
 

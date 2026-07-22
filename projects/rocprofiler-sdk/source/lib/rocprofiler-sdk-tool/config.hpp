@@ -227,7 +227,6 @@ config::get_attach_invariants() const
                            rocdecode_api_trace,
                            rocjpeg_api_trace,
                            ompt_trace,
-                           hipfile_api_trace,
                            advanced_thread_trace,
                            att_no_intercept,
                            att_serialize_all,
@@ -248,7 +247,8 @@ config::get_attach_invariants() const
                            counter_groups_interval,
                            benchmark_mode,
                            spm_counter_collection,
-                           rocshmem_api_trace);
+                           rocshmem_api_trace,
+                           hipfile_api_trace);
 }
 
 inline bool

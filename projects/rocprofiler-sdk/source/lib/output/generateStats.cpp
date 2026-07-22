@@ -238,8 +238,8 @@ generate_stats(const output_config& /*cfg*/,
     return get_stats(rccl_stats);
 }
 
-// NOTE: OMPT and rocSHMEM do not produce direct stats/CSV output; they are exported via
-// `rocpd convert`, so there is intentionally no generate_stats() overload for either.
+// NOTE: OMPT, rocSHMEM, and hipFILE do not produce direct stats/CSV output; they are exported
+// via `rocpd convert`, so there is intentionally no generate_stats() overload for any of them.
 
 stats_entry_t
 generate_stats(const output_config& /*cfg*/,
@@ -275,24 +275,6 @@ generate_stats(const output_config& /*cfg*/,
     }
 
     return get_stats(rocjpeg_stats);
-}
-
-stats_entry_t
-generate_stats(const output_config& /*cfg*/,
-               const metadata&                                                       tool_metadata,
-               const generator<rocprofiler_buffer_tracing_hipfile_api_ext_record_t>& data)
-{
-    auto hipfile_stats = stats_map_t{};
-    for(auto ditr : data)
-    {
-        for(auto record : data.get(ditr))
-        {
-            auto api_name = tool_metadata.get_operation_name(record.kind, record.operation);
-            hipfile_stats[api_name] += (record.end_timestamp - record.start_timestamp);
-        }
-    }
-
-    return get_stats(hipfile_stats);
 }
 
 stats_entry_t

@@ -38,7 +38,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ### Removed
 
 
-## ROCprofiler-SDK 1.3.3
+## ROCprofiler-SDK 1.3.5
 
 ### Added
 - HipFile API tracing support

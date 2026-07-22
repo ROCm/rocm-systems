@@ -99,11 +99,11 @@ ROCPROFILER_CALLBACK_TRACING_KIND_STRING(OMPT)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(RUNTIME_INITIALIZATION)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCDECODE_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCJPEG_API)
-ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIPFILE_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_STREAM)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MARKER_CORE_RANGE_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_GRAPH)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCSHMEM_API)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIPFILE_API)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -298,11 +298,6 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
             val = rocprofiler::rocjpeg::name_by_id<ROCPROFILER_ROCJPEG_TABLE_ID_CORE>(operation);
             break;
         }
-        case ROCPROFILER_CALLBACK_TRACING_HIPFILE_API:
-        {
-            val = rocprofiler::hipfile::name_by_id<ROCPROFILER_HIPFILE_TABLE_ID_CORE>(operation);
-            break;
-        }
         case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
         {
             val = rocprofiler::hip::stream::name_by_id(operation);
@@ -322,6 +317,11 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
         case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
         {
             val = rocprofiler::rocshmem::name_by_id<ROCPROFILER_ROCSHMEM_TABLE_ID_CORE>(operation);
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HIPFILE_API:
+        {
+            val = rocprofiler::hipfile::name_by_id<ROCPROFILER_HIPFILE_TABLE_ID_CORE>(operation);
             break;
         }
     }
@@ -463,11 +463,6 @@ rocprofiler_iterate_callback_tracing_kind_operations(
             ops = rocprofiler::rocjpeg::get_ids<ROCPROFILER_ROCJPEG_TABLE_ID_CORE>();
             break;
         }
-        case ROCPROFILER_CALLBACK_TRACING_HIPFILE_API:
-        {
-            ops = rocprofiler::hipfile::get_ids<ROCPROFILER_HIPFILE_TABLE_ID_CORE>();
-            break;
-        }
         case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
         {
             ops = rocprofiler::hip::stream::get_ids();
@@ -486,6 +481,11 @@ rocprofiler_iterate_callback_tracing_kind_operations(
         case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
         {
             ops = rocprofiler::rocshmem::get_ids<ROCPROFILER_ROCSHMEM_TABLE_ID_CORE>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HIPFILE_API:
+        {
+            ops = rocprofiler::hipfile::get_ids<ROCPROFILER_HIPFILE_TABLE_ID_CORE>();
             break;
         }
     }
