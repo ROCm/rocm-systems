@@ -3837,7 +3837,7 @@ class CodeGenerator:
             L.append(
                 '  if ((encoded >> 32 == 0x1FFFFu || encoded >> 32 == 0xFFFFFFFFu) && wf.code_load_bias() != 0)'
             )
-            L.append('    target = wf.pc + static_cast<int32_t>(encoded);')
+            L.append('    target = next_pc - 20 + static_cast<int32_t>(encoded);')
             L.append('  else if (target & kPcSignBit)')
             L.append('    target |= ~kPcAddressMask;')
             L.append('  wf.pc = target - size_;')

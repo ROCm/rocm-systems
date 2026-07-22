@@ -169,7 +169,9 @@ TEST(WaveDebugTest, SwappcResolvesLinkedRel32AndSetpcReturns) {
   auto *wf = fx.dispatch(kCallerPc);
   ASSERT_NE(wf, nullptr);
   wf->set_code_load_bias(kLoadBias);
-  const int32_t rel32 = static_cast<int32_t>(kCalleePc - kCallerPc);
+  // Linked gfx950 calls place GETPC, ADD_LO, ADDC_HI, then SWAPPC. At SWAPPC
+  // the relocation base is therefore 16 bytes behind the current PC.
+  const int32_t rel32 = static_cast<int32_t>(kCalleePc - (kCallerPc - 16));
   const uint64_t encoded_target = 0x0001FFFF00000000ULL | static_cast<uint32_t>(rel32);
   fx.cu->write_sgpr(wf->sgpr_alloc().base + 0, static_cast<uint32_t>(encoded_target));
   fx.cu->write_sgpr(wf->sgpr_alloc().base + 1, static_cast<uint32_t>(encoded_target >> 32));
