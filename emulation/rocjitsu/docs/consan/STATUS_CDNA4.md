@@ -1,14 +1,22 @@
-# ConSan CDNA4 status
+# ConSan CDNA4 (`gfx950`) status
 
-This is the native `gfx950` workload × instrumentation evidence ledger.  It is
-the CDNA4 counterpart of [STATUS_RDNA4.md](STATUS_RDNA4.md), but it does not
-inherit that document's coverage denominators, machine-code identities, fault
-expectations, timing ratios, or green cells.
+This is the native `gfx950` workload × instrumentation evidence ledger.  It
+follows the acceptance standard of [STATUS_RDNA4.md](STATUS_RDNA4.md) and the
+expanded corpus structure of [STATUS_GFX1250.md](STATUS_GFX1250.md), but it
+inherits no coverage denominator, machine-code identity, fault expectation,
+timing, provenance, or green cell from another architecture.
 
 The executable authority is
 [`consan_validation.py`](../../tests/dbi/consan/consan_validation.py), with the
 experiment contract described by [VALIDATION.md](VALIDATION.md).  Porting work
 and dependencies are tracked in [PLAN_GFX950.md](PLAN_GFX950.md).
+
+End-to-end evidence is the primary project metric.  Focused decoder, builder,
+spill, and resource tests are prerequisites and debugging tools; they cannot
+promote a workload cell by themselves.
+
+All benchmark and workload measurements use exactly one repetition
+(`--benchmark_repetitions=1`, or `--repetitions 1` for the PyTorch runner).
 
 ## Status legend
 
@@ -31,9 +39,12 @@ records a typed reason.
 
 ## Current matrix
 
-No cell is green yet.  Yellow cells have a working clean instrumentation path
-but still await limited row requirements and a frozen-tip rerun; orange cells
-retain useful partial evidence with a more substantial gap.
+No cell is green at the current branch tip.  Yellow cells summarize retained
+native clean execution from the first gfx950 campaign; they still require a
+current-tip clean rerun, paired one-repetition measurement, reviewed fault,
+containment, memory, and frozen provenance.  Orange cells retain useful
+partial evidence with a larger known coverage or execution gap.  Gray cells
+have not been assessed on gfx950.
 
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
@@ -49,6 +60,82 @@ retain useful partial evidence with a more substantial gap.
 | **P4 hip-moi tree atomic-OR** | 🟨 clean 4/4 access accepted | 🟨 clean 4/4 access + 10/10 atomic + 4/4 barrier + 16/16 fence accepted | 🟨 clean 4/4 access + 10/10 atomic accepted | 🟨 clean 4/4 access + 10/10 atomic + 4/4 barrier accepted |
 | **P4 hip-moi Jakub attention** | 🩶 Applicability inventory pending | 🩶 Applicability inventory pending | 🩶 Applicability inventory pending | 🩶 Applicability inventory pending |
 
+## RocJitsu test-corpus expansion
+
+The workspace corpus was surveyed at revision `aa54cc86c9eb`.  Its packaged
+Tensile artifacts are gfx1250-only, so none may be relabeled or executed as
+gfx950 evidence.  The corpus does contain several source-built gfx950 kernel
+cases.  Every cell below remains gray until the case has an independent
+oracle, a retained target-native inventory, and a standard-profile clean run
+for that flavor.
+
+The gfx950 corpus configuration enables HIP matmul, HipKittens, and rocBLAS.
+It has no run-time skip list.  It currently skips compilation of the large
+4096³ HIP matmul case and both four-wave FP8 HipKittens cases; those are useful
+planned rows, not runnable evidence.
+
+| Priority | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow | Why it matters and next proof |
+|---|---|---|---|---|---|---|
+| P0 | `hip_matmul_matmul::m128_n128_k128` | 🩶 Unassessed | 🩶 Unassessed | 🩶 Unassessed | 🩶 Unassessed | Native gfx950 MFMA kernels use shared-memory tiling, repeated workgroup barriers, and a double-buffered LDS path.  Preserve the upstream numeric check as a machine-readable oracle, inventory every selected kernel, then run the four clean profiles. |
+| P0 | `hipkittens_gemm_bf16fp32_16x32::m256_n256_k256` | 🩶 Unassessed | 🩶 Unassessed | 🩶 Unassessed | 🩶 Unassessed | Explicit gfx950 case with dynamic LDS, wide DS reads/writes, direct global-to-LDS traffic, a deep barrier schedule, and MFMA.  This is the highest-signal packaged gfx950 synchronization case. |
+| P1 | `hipkittens_gemm_fp8fp32_4wave::m256_n256_k256` | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | Explicit gfx950 four-wave FP8 case; currently listed in `skip_compile_tests`.  Remove that corpus-level blocker only after recording the compiler failure or confirming a current toolchain build, then inventory its LDS/barrier shapes. |
+| P1 | `hipkittens_gemm_mxfp8_4wave::m256_n256_k256` | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | Explicit gfx950 four-wave microscaling GEMM; also currently compile-skipped.  It is the closest packaged low-precision companion to the BF16 row. |
+| P1 | `hip_streamk_simple::m256_n256_k256` gfx950 port | 🩶 Target enablement pending | 🩶 Target enablement pending | 🩶 Target enablement pending | 🩶 Target enablement pending | Source contains double-buffered LDS, workgroup barriers, and release-store/acquire-load cross-workgroup publication.  Metadata currently admits only gfx942, so gfx950 compilation and numeric equivalence must be established before this becomes a runnable row. |
+| P1 | `hip_streamk_two_tile::m256_n256_k256` gfx950 port | 🩶 Target enablement pending | 🩶 Target enablement pending | 🩶 Target enablement pending | 🩶 Target enablement pending | Adds two-tile ownership and repeated global publication/consumption to the same LDS and ordered-atomic structure.  Treat it as a separate denominator after target enablement. |
+| P2 | `rocblas_sgemm` compact exact cases | 🩶 Unassessed | 🩶 Unassessed | 🩶 Unassessed | 🩶 Unassessed | The gfx950 corpus exposes exact small and rectangular SGEMMs through rocBLAS.  First freeze a deterministic selected solution and prove its synchronization inventory; library dispatch alone is not ConSan signal. |
+
+### gfx950 Tensile follow-on
+
+There is not yet a packaged gfx950 Tensile manifest in
+`rocjitsu-test-corpus`.  The workspace rocm-libraries checkout at revision
+`c2fafc16393d` contains 36 gfx950 GEMM YAML files.  The following bounded
+subset is the proposed gfx950 equivalent of the high-signal gfx1250 Tensile
+rows; it must be generated and added to the corpus before validation.  All
+statuses are deliberately gray.
+
+| Priority | Proposed gfx950 config | SuperCollider | Record/Replay | Sampled | Inline Shadow | Selection rationale |
+|---|---|---|---|---|---|---|
+| P0 | `gemm/gfx950/xfp32.yaml`, reduced Stream-K exact case | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | Combines `StreamK: 3`, `DirectToLds: 1`, optional cluster-local reads, XCC mapping, and exact problem sizes.  This is the first candidate for ordered global publication plus LDS synchronization. |
+| P1 | `gemm/gfx950/general_wgm.yaml`, reduced Stream-K matrix | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | Exercises Stream-K modes 1/2/3, LDS transpose, `StoreSyncOpt`, and workgroup/XCC mapping.  Reduce it to one numerically checked representative per distinct synchronization shape. |
+| P1 | `gemm/gfx950/lds_tr.yaml` | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | Explicit LDS-transpose instructions, single- and multiple-buffer layouts, and exact odd-size cases provide target-specific DS-shape breadth. |
+| P1 | `gemm/gfx950/lds160K.yaml` | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | Single/double-buffer transpose variants near the 160 KiB gfx950 LDS capacity stress descriptor growth and Inline Shadow placement without inventing a synthetic workload. |
+| P1 | `gemm/gfx950/subtile_mxfp8.yaml`, reduced Stream-K case | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | Low-precision Stream-K with direct-to-LDS broadens access widths and high-pressure placement beyond FP32. |
+| P2 | `gemm/gfx950/i8_gsu_gfx950.yaml` | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | GlobalSplitU multiple-buffer execution supplies a non-Stream-K split-reduction control; retain it only if inventory shows synchronization beyond already selected rows. |
+
+Static YAML features are selection evidence only.  Generated code-object
+inventory determines whether a candidate actually contains admitted barriers,
+ordered atomics, fences, or LDS accesses, and numeric execution determines
+which generated solution enters the denominator.
+
+## PyTorch expansion
+
+The existing PyTorch runner has portable exact-oracle operators that are
+appropriate gfx950 candidates.  The installed PyTorch build reports gfx950 in
+its architecture list, but no row below has yet been run on the gfx950 device
+or admitted by the validation registry for gfx950; every cell is therefore
+gray.
+
+The tensor-descriptor-add and cluster-synchronization rows from the gfx1250
+ledger are intentionally not copied.  Their runner implementations call
+target-specific descriptor or cluster APIs.  A gfx950 row must instead come
+from a native gfx950 lowering (for example the Tensile cluster-local-read rows
+above), not from renaming architecture-specific source.
+
+| Priority | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow | Why it matters and next proof |
+|---|---|---|---|---|---|---|
+| P0 | `torch.mode`, large rows | 🩶 Unassessed | 🩶 Unassessed | 🩶 Unassessed | 🩶 Unassessed | Exact values/indices; historically produces a dense LDS/barrier object plus ordered LDS operations on gfx1250.  Inventory the independently generated gfx950 object rather than reusing those counts. |
+| P0 | `torch.topk`, FP64 spill and BF16 coverage cases | 🩶 Unassessed | 🩶 Unassessed | 🩶 Unassessed | 🩶 Unassessed | Exact values/indices across FP64 register pressure and BF16 access-width breadth.  This is the primary PyTorch spill and dense-placement stress row. |
+| P1 | `torch.sort` over segmented rows | 🩶 Unassessed | 🩶 Unassessed | 🩶 Unassessed | 🩶 Unassessed | Exact values/indices and a dense synchronized sorting kernel; useful after `topk` to distinguish operation-specific from generic placement failures. |
+| P1 | `torch.histc` with a shared-memory-sized bin count | 🩶 Unassessed | 🩶 Unassessed | 🩶 Unassessed | 🩶 Unassessed | Exact bin counts; expected to exercise LDS atomics and barriers.  Fresh gfx950 inventory must classify atomic access and ordering roles independently. |
+| P2 | Collision-heavy `torch.scatter_reduce` (`sum`, BF16 and FP32) | 🩶 Unassessed | 🩶 Unassessed | 🩶 Unassessed | 🩶 Unassessed | Exact collision sums and atomic-heavy execution.  Keep only if gfx950 inventory finds an applicable synchronization role or useful atomic-access coverage. |
+| P2 | `torch.linalg.vector_norm` and large-row `torch.softmax` | 🩶 Unassessed | 🩶 Unassessed | 🩶 Unassessed | 🩶 Unassessed | Exact 3-4-5 norms and CPU-referenced softmax reductions.  Provides smaller reduction/barrier objects than sorting and top-k. |
+
+The first PyTorch step is registry and environment enablement followed by one
+uninstrumented execution of each exact oracle.  Then run a single all-profile
+clean pass to inventory target-native objects.  Do not carry gfx1250 site
+counts, fault selectors, timing ratios, or applicability decisions into this
+table.
+
 ## Evidence baseline
 
 The following establishes machine access and corpus availability.  It is not
@@ -56,8 +143,9 @@ instrumentation acceptance evidence.
 
 | Item | Current evidence |
 |---|---|
-| Port branch | `users/bjacob/consan-gfx950-take2` |
-| Branch base | `c59330ca8323ca98fcc75aef5bd722ba1d92ab60` |
+| Working branch | `users/bjacob/sanitizers` |
+| Survey base | `4495672ad45f3b90d0e367916e3231420a5be579`; this refresh records candidates above that committed implementation state |
+| Retained first-campaign provenance | The detailed native evidence below was produced on the former `users/bjacob/consan-gfx950-take2` line.  It remains useful compatibility evidence, but is not current-tip acceptance evidence. |
 | Device | AMD Instinct MI355X, `gfx950`, wave64 |
 | ISA | `amdgcn-amd-amdhsa--gfx950:sramecc+:xnack-` |
 | Driver/runtime | ROCk 6.14.14; workspace TheRock HSA runtime 1.21 |
@@ -65,6 +153,10 @@ instrumentation acceptance evidence.
 | Dispatch smoke | hip-moi `same_thread_store_load` passed; TheRock HIP/HSA/COMGR libraries verified by dynamic-link resolution |
 | Validation corpus | `iree-test-suites` `49f46d6d4370e5aa0a6367751474e20c6c4e95c0`; required Sharktank assets present; LFS fsck clean |
 | Validation doctor | `f5c91c6d1d`: target-aware registry and workload-scoped doctor are active. The gfx950 `d128-block` doctor passes with the current hook, CDNA4 executable, workspace TheRock `rocminfo`, and hip-moi source/build. The all-workload doctor now resolves all five available hip-moi roles to CDNA4/MFMA artifacts and isolates the remaining missing inputs to the Qwen build tree plus a true CDNA4 Jakub counterpart. |
+| RocJitsu test corpus | `rocjitsu-test-corpus` `aa54cc86c9ebff3eb840743b36ff8d9b3b2d43c4`; gfx950 enables source-built HIP matmul, HipKittens, and rocBLAS cases.  Its packaged Tensile artifacts are gfx1250-only. |
+| gfx950 Tensile source pool | `rocm-libraries` `c2fafc16393d0ce47a0a5801d827d43f0d3714a4`; 36 gfx950 GEMM YAMLs are available for reduction and packaging, but none is presently a validation-registry row. |
+| PyTorch discovery | The available PyTorch build advertises gfx950 support.  The portable operator implementations are candidate workloads, but every existing PyTorch registry row is explicitly gfx1250-only and therefore cannot currently dispatch for gfx950. |
+| Registry boundary | Current gfx950 target-specific resolution covers the hip-moi gtest roles only.  The corpus and PyTorch tables above are a planned expansion, not claims that `consan_validation.py` can run those rows today. |
 
 ## Implementation evidence
 
@@ -122,24 +214,50 @@ every accepted row at the same frozen tip.
 
 A workload/profile cell remains non-green until its retained evidence proves:
 
-1. the independent numerical or semantic oracle passes on the clean workload;
-2. ConSan sees an applicable gfx950 code object and patches every admitted
-   supported access, barrier, atomic, and fence site;
-3. the selected engine executes dynamically without incomplete state,
+1. the standard-v1 profile is used, with no forbidden coverage-limiting or
+   manually selected register controls;
+2. the independent numerical or semantic oracle passes on the clean workload;
+3. ConSan sees an applicable gfx950 code object, records the complete typed
+   exclusion ledger, and patches every admitted supported access, barrier,
+   atomic, and fence site;
+4. the selected engine executes dynamically without incomplete state,
    forbidden overflow, or unexpected clean diagnostics;
-4. the clean command contains no forbidden coverage-limiting or manually
-   selected register controls;
 5. each admitted fault has a freshly inventoried and reviewed gfx950 selector,
-   exact-one final-byte mutation proof, precommitted detector/oracle outcome,
-   bounded termination, and before/after GPU-health evidence; and
-6. paired baseline/profile overhead, peak memory, commands, hashes, timeout
-   state, and retained artifact paths are recorded.
+   exact-one final-byte mutation proof, and a precommitted detector/oracle
+   outcome;
+6. every fault terminates within its bound and retains before/after device
+   health evidence; and
+7. one paired baseline/profile repetition, peak memory, commands, hashes,
+   timeout state, and retained artifact paths are recorded at a frozen
+   campaign revision.
 
 Clean execution alone is compatibility evidence, not a green cell.  A timeout,
 trap, crash, output mismatch, or GPU reset is an execution outcome rather than
 a ConSan detection.
 
 ## Progress log
+
+- 2026-07-22: Refreshed this ledger to use the same four-profile matrix and
+  red/orange/yellow/green/gray maturity scale as the expanded gfx1250 ledger.
+  Historical native campaign evidence remains yellow or orange until a
+  current-tip, frozen-provenance campaign satisfies every promotion gate; no
+  historical green status was inferred.
+- 2026-07-22: Surveyed `rocjitsu-test-corpus` at `aa54cc86c9eb`.  Native
+  gfx950 HIP matmul and HipKittens BF16 cases are the first packaged corpus
+  candidates.  The two four-wave low-precision cases are compile-skipped,
+  hip-stream-k metadata is gfx942-only, and the packaged Tensile artifacts
+  are gfx1250-only.  These distinctions are now explicit rather than silently
+  treating source availability as runnable validation support.
+- 2026-07-22: Surveyed the 36 gfx950 GEMM YAMLs in `rocm-libraries` at
+  `c2fafc16393d` and selected a bounded Stream-K, LDS-transpose, 160-KiB LDS,
+  low-precision, and split-reduction follow-on set.  All remain gray until
+  reduced, generated, numerically checked, packaged, inventoried, and added to
+  the validation registry.
+- 2026-07-22: Mapped only architecture-neutral PyTorch operator rows to the
+  proposed gfx950 expansion.  Existing PyTorch validation rows are currently
+  target-restricted to gfx1250, and target-specific descriptor/cluster source
+  was deliberately excluded.  Registry enablement and fresh gfx950 code-object
+  inventories precede any profile assessment.
 
 - 2026-07-18: Stream-K Inline Shadow on the current safe planner is rejected
   before installation, not accepted as the older matrix wording implied.
