@@ -444,6 +444,11 @@ get_bdf_info(const rocprofiler_agent_t* agent)
 
 std::vector<aqlprofile_agent_handle_t>&
 get_aql_handles_storage()
+{
+    static auto*& _v = common::static_object<std::vector<aqlprofile_agent_handle_t>>::construct();
+    return *CHECK_NOTNULL(_v);
+}
+
 // Attempt V2 agent registration with cu_bitmap from DRM for WGP harvesting support.
 // Returns true on success, false if any step fails (caller should fall back to V1).
 //
@@ -510,13 +515,6 @@ try_register_agent_v2(const rocprofiler_agent_t* agent, aqlprofile_agent_handle_
 }
 #endif  // !ROCPROFILER_EXTERNAL_AQLPROFILE
 
-const std::vector<aqlprofile_agent_handle_t>&
-get_aql_handles()
-{
-    static auto*& _v = common::static_object<std::vector<aqlprofile_agent_handle_t>>::construct();
-    return *CHECK_NOTNULL(_v);
-}
-
 // (Re)registers every agent with aqlprofile and stores the returned handles.
 // aqlprofile's RegisterAgent caches cu_num/se_num/shader_arrays_per_se at
 // registration time and never updates an existing entry, so the registration
@@ -559,46 +557,46 @@ register_aql_handles()
         }
 #else
 
-                ROCP_TRACE << fmt::format(
-                    "Registering agent {:04x}:{:02x}:{:02x}.{:x} :: {} with IP discovery",
+        ROCP_TRACE << fmt::format(
+            "Registering agent {:04x}:{:02x}:{:02x}.{:x} :: {} with IP discovery",
+            bdf.domain,
+            bdf.bus,
+            bdf.device,
+            bdf.function,
+            agent->name);
+
+        // Try V2 registration with cu_bitmap from DRM for WGP harvesting support.
+        bool registered_v2 = false;
+        if(agent->type == ROCPROFILER_AGENT_TYPE_GPU && agent->drm_render_minor > 0)
+        {
+            registered_v2 = try_register_agent_v2(agent, &handle);
+        }
+
+        // Fallback to V1 if V2 was unavailable or failed
+        if(!registered_v2)
+        {
+            aqlprofile_agent_info_v1_t agent_info = {
+                .agent_gfxip          = agent->name,
+                .xcc_num              = agent->num_xcc,
+                .se_num               = agent->num_shader_banks,
+                .cu_num               = agent->cu_count,
+                .shader_arrays_per_se = agent->simd_arrays_per_engine,
+                .domain               = agent->domain,
+                .location_id          = agent->location_id,
+            };
+
+            if(aqlprofile_register_agent_info(&handle, &agent_info, AQLPROFILE_AGENT_VERSION_V1) !=
+               HSA_STATUS_SUCCESS)
+            {
+                ROCP_WARNING << fmt::format(
+                    "Failed to register agent {:04x}:{:02x}:{:02x}.{:x} :: {}",
                     bdf.domain,
                     bdf.bus,
                     bdf.device,
                     bdf.function,
                     agent->name);
-
-                // Try V2 registration with cu_bitmap from DRM for WGP harvesting support.
-                bool registered_v2 = false;
-                if(agent->type == ROCPROFILER_AGENT_TYPE_GPU && agent->drm_render_minor > 0)
-                {
-                    registered_v2 = try_register_agent_v2(agent, &handle);
-                }
-
-                // Fallback to V1 if V2 was unavailable or failed
-                if(!registered_v2)
-                {
-                    aqlprofile_agent_info_v1_t agent_info = {
-                        .agent_gfxip          = agent->name,
-                        .xcc_num              = agent->num_xcc,
-                        .se_num               = agent->num_shader_banks,
-                        .cu_num               = agent->cu_count,
-                        .shader_arrays_per_se = agent->simd_arrays_per_engine,
-                        .domain               = agent->domain,
-                        .location_id          = agent->location_id,
-                    };
-
-                    if(aqlprofile_register_agent_info(
-                           &handle, &agent_info, AQLPROFILE_AGENT_VERSION_V1) != HSA_STATUS_SUCCESS)
-                    {
-                        ROCP_WARNING << fmt::format(
-                            "Failed to register agent {:04x}:{:02x}:{:02x}.{:x} :: {}",
-                            bdf.domain,
-                            bdf.bus,
-                            bdf.device,
-                            bdf.function,
-                            agent->name);
-                    }
-                }
+            }
+        }
 #endif
         agent_handles.push_back(handle);
     }
