@@ -14,6 +14,7 @@ import unittest
 from unittest import mock
 
 import consan_validation as validation
+import consan_llama_validation as llama_validation
 from consan_coverage_gate import _COVERAGE_COUNT_FIELDS
 from consan_validation_test_support import temporary_root
 
@@ -109,13 +110,13 @@ class ConSanValidationTest(unittest.TestCase):
 
     def test_manifest_is_the_complete_north_star_matrix(self) -> None:
         manifest = validation._manifest("gfx1201")
-        self.assertEqual(len(manifest["workloads"]), 17)
+        self.assertEqual(len(manifest["workloads"]), 19)
         self.assertEqual(
             [profile["id"] for profile in manifest["profiles"]],
             list(validation.PROFILE_IDS),
         )
         self.assertEqual(
-            len({workload["id"] for workload in manifest["workloads"]}), 17
+            len({workload["id"] for workload in manifest["workloads"]}), 19
         )
         workloads = {workload["id"]: workload for workload in manifest["workloads"]}
         self.assertEqual(
@@ -133,6 +134,12 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(
             workloads["pytorch-torch-histc"]["targets"], ("gfx1250", "gfx1201")
         )
+        self.assertEqual(
+            workloads["llama-rdna4-mul-mat-vec-q"]["targets"], ("gfx1201",)
+        )
+        self.assertEqual(
+            workloads["llama-rdna4-rms-norm"]["targets"], ("gfx1201",)
+        )
 
     def test_text_manifest_filters_target_specific_workloads(self) -> None:
         output = io.StringIO()
@@ -144,6 +151,8 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertIn("pytorch-rdna4-llm-topk", text)
         self.assertIn("pytorch-rdna4-sdpa", text)
         self.assertIn("pytorch-torch-histc", text)
+        self.assertIn("llama-rdna4-mul-mat-vec-q", text)
+        self.assertIn("llama-rdna4-rms-norm", text)
         self.assertNotIn("pytorch-tdm-descriptor-add", text)
         self.assertNotIn("tensile-sk-mxf8gemm-explicit", text)
 
@@ -613,6 +622,53 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(command[0], "/workspace/venv/bin/python")
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
         self.assertEqual(command[command.index("--workload") + 1], "rdna4-sdpa")
+
+    def test_llama_rdna4_command_uses_gpu_cpu_oracle_wrapper(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["llama-rdna4-rms-norm"]
+        command = validation._workload_command(
+            Path("/workspace"),
+            "gfx1201",
+            workload,
+            "clean",
+            Path("/artifacts/benchmark-0.json"),
+        )
+        self.assertTrue(command[1].endswith("consan_llama_validation.py"))
+        self.assertEqual(command[command.index("--workload") + 1], "rms-norm")
+        self.assertEqual(
+            command[command.index("--executable") + 1],
+            (
+                "/workspace/rocjitsu-test-corpus-build/kernels/gfx1201/"
+                "cases/llama.cpp/llama_cpp_rms_norm"
+            ),
+        )
+        self.assertEqual(
+            command[command.index("--output-dir") + 1],
+            "/artifacts/benchmark-0-llama-work",
+        )
+
+    def test_llama_cpu_oracle_environment_scrubs_instrumentation(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "RJ_CONSAN_MODE": "inline-shadow",
+                "HSA_TOOLS_LIB": "/hook.so",
+                "HSA_TOOLS_ROCPROFILER_V1_TOOLS": "1",
+                "HIP_TARGET": "gfx1201",
+                "LD_LIBRARY_PATH": "/runtime",
+            },
+            clear=True,
+        ):
+            environment = llama_validation._cpu_environment()
+        self.assertEqual(environment, {"LD_LIBRARY_PATH": "/runtime"})
+
+    def test_llama_binary_oracle_reads_f32_without_numpy(self) -> None:
+        with temporary_root() as root:
+            path = root / "output.bin"
+            path.write_bytes(b"\x00\x00\x80?\x00\x00\x00@")
+            self.assertEqual(llama_validation._read_f32(path), (1.0, 2.0))
+            path.write_bytes(b"short")
+            with self.assertRaises(ValueError):
+                llama_validation._read_f32(path)
 
     def test_tensile_gfx1250_uses_numeric_runner_once(self) -> None:
         workload = validation.WORKLOAD_BY_ID["tensile-sk-mxf8gemm-explicit"]

@@ -633,6 +633,38 @@ WORKLOADS = (
         targets=("gfx1201",),
     ),
     Workload(
+        id="llama-rdna4-mul-mat-vec-q",
+        priority="P2",
+        corpus="rocjitsu-test-corpus",
+        kind="llama",
+        relative_path="llama_cpp_mul_mat_vec_q",
+        clean_filter=None,
+        overhead_filter=None,
+        sharktank_workload=None,
+        sharktank_mode=None,
+        tracks_barriers=True,
+        tracks_atomics=True,
+        overhead_processes=5,
+        fault_families=("barrier-drop",),
+        targets=("gfx1201",),
+    ),
+    Workload(
+        id="llama-rdna4-rms-norm",
+        priority="P3",
+        corpus="rocjitsu-test-corpus",
+        kind="llama",
+        relative_path="llama_cpp_rms_norm",
+        clean_filter=None,
+        overhead_filter=None,
+        sharktank_workload=None,
+        sharktank_mode=None,
+        tracks_barriers=True,
+        tracks_atomics=False,
+        overhead_processes=5,
+        fault_families=("barrier-drop",),
+        targets=("gfx1201",),
+    ),
+    Workload(
         id="qwen-prefill",
         priority="P0",
         corpus="iree-test-suites",
@@ -1059,6 +1091,8 @@ def _required_paths(
     if any(workload.corpus == "hip-moi" for workload in workloads):
         paths["hip-moi"] = workspace / "hip-moi"
         paths["hip-moi-build"] = workspace / "hip-moi-build"
+    if any(workload.kind == "llama" for workload in workloads):
+        paths["rocjitsu-test-corpus"] = workspace / "rocjitsu-test-corpus"
     if any(workload.kind == "tensile" for workload in workloads):
         paths["rocjitsu-test-corpus"] = workspace / "rocjitsu-test-corpus"
         paths["tensilelite"] = _tensilelite_root(workspace)
@@ -1190,6 +1224,30 @@ def _tensile_client(workspace: Path) -> Path:
     )
 
 
+def _llama_executable(workspace: Path, target: str, name: str) -> Path:
+    candidates = (
+        workspace
+        / "rocjitsu-test-corpus-build"
+        / "kernels"
+        / target
+        / "cases"
+        / "llama.cpp"
+        / name,
+        workspace
+        / "rocjitsu-test-corpus"
+        / ".pytest-artifacts-rdna4-llama-baseline"
+        / "_suite_shards"
+        / "kernels_shard_0"
+        / "kernels"
+        / target
+        / "build"
+        / "cases"
+        / "llama.cpp"
+        / name,
+    )
+    return next((candidate for candidate in candidates if candidate.is_file()), candidates[0])
+
+
 def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, Path]:
     workload = _resolved_workload(target, workload)
     if workload.kind == "pytorch":
@@ -1203,6 +1261,27 @@ def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, 
             "workload-source": Path(__file__).with_name("consan_tensile_validation.py"),
             "config": workspace / "rocjitsu-test-corpus" / workload.relative_path,
             "client": _tensile_client(workspace),
+        }
+    if workload.kind == "llama":
+        case = (
+            "mul_mat_vec_q"
+            if workload.id == "llama-rdna4-mul-mat-vec-q"
+            else "rms_norm"
+        )
+        return {
+            "python": Path(os.path.abspath(Path(sys.executable).expanduser())),
+            "workload-source": Path(__file__).with_name("consan_llama_validation.py"),
+            "case": workspace
+            / "rocjitsu-test-corpus"
+            / "corpus"
+            / "kernels"
+            / "cases"
+            / "llama.cpp"
+            / case
+            / "case.json",
+            "executable": _llama_executable(
+                workspace, target, workload.relative_path
+            ),
         }
     if workload.kind == "qwen":
         root = workspace / workload.relative_path
@@ -1352,10 +1431,10 @@ def _clean_environment(
             "RJ_CONSAN_LOG": "1",
         }
     )
-    if workload.kind == "pytorch":
-        # PyTorch wheels bundle a modern HSA runtime which returns after
-        # successful rocprofiler registration unless legacy environment tools
-        # are explicitly requested.  ConSan is currently such a tool.
+    if workload.kind in {"pytorch", "llama"}:
+        # These clients use a modern HSA runtime which returns after successful
+        # rocprofiler registration unless legacy environment tools are
+        # explicitly requested. ConSan is currently such a tool.
         environment["HSA_TOOLS_ROCPROFILER_V1_TOOLS"] = "1"
     if not workload.moi_record_evidence_expected:
         environment["RJ_CONSAN_MOI_REQUIRE_RECORDS"] = "0"
@@ -1585,6 +1664,22 @@ def _workload_command(
             "--label",
             f"{workload.id}-{phase}",
         ]
+    if workload.kind == "llama":
+        llama_workload = (
+            "mul-mat-vec-q"
+            if workload.id == "llama-rdna4-mul-mat-vec-q"
+            else "rms-norm"
+        )
+        return [
+            sys.executable,
+            str(Path(__file__).with_name("consan_llama_validation.py")),
+            "--executable",
+            str(_llama_executable(workspace, target, workload.relative_path)),
+            "--workload",
+            llama_workload,
+            "--output-dir",
+            str(output.parent / f"{output.stem}-llama-work"),
+        ]
     executable = workspace / workload.relative_path
     selected_filter = (
         workload.fault_filter or workload.clean_filter
@@ -1638,6 +1733,8 @@ def _source_identities(workspace: Path, workload: Workload) -> list[dict | None]
                 workspace / "TheRock" / "rocm-libraries",
             ]
         )
+    if workload.kind == "llama":
+        roots.append(workspace / "rocjitsu-test-corpus")
     if workload.kind == "pytorch":
         roots.append(workspace / "pytorch")
     return [git_identity(root) for root in roots]
@@ -1855,7 +1952,7 @@ def _run_profile(
                     _benchmark_median(path) for path in qwen_json_paths
                 )
             }
-        elif workload.kind in {"sharktank", "pytorch", "tensile"}:
+        elif workload.kind in {"sharktank", "pytorch", "tensile", "llama"}:
             per_run = [_json_medians(log, workload.kind.capitalize()) for log in logs]
             keys = set.intersection(*(set(item) for item in per_run))
             timing = {
