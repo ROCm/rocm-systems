@@ -72,7 +72,7 @@ private:
         MarkerKind Kind;
         std::string Name;
         std::string SourceLoc;
-        uint32_t PreOptSize = 0;       // Function rows only, before inlining.
+        uint32_t PreOptSize = 0;        // Function rows only, before inlining.
         uint32_t ExtraPayloadCount = 0; // Header rows only.
     };
     std::vector<MarkerRecord> Markers;
@@ -157,17 +157,9 @@ private:
         bool StructBuffer;
     };
     static AddrTraceOp classifyAddrTraceOp(llvm::Instruction* I, bool traceMemory, bool traceLDS);
-    void emitAddressTrace(
-        llvm::IRBuilder<>& B,
-        const AddrTraceOp& op,
-        uint32_t headerID,
-        GfxGen gen
-    );
+    void emitAddressTrace(llvm::IRBuilder<>& B, const AddrTraceOp& op, uint32_t headerID, GfxGen gen);
     void emitReadlaneTraceLoop(
-        llvm::IRBuilder<>& B,
-        llvm::Value* firstValue,
-        llvm::Value* secondValue,
-        unsigned waveSize
+        llvm::IRBuilder<>& B, llvm::Value* firstValue, llvm::Value* secondValue, unsigned waveSize
     );
     void emitTraceBoundary(llvm::IRBuilder<>& B, bool after, bool schedBarrier = true);
     void emitTraceBoundaries(
