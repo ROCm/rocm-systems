@@ -30,12 +30,14 @@ RJ_DIAGNOSTIC_POP
 
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -2270,6 +2272,48 @@ TEST(L1ScalarCacheVmidTest, WritebackAllUsesLineOwnerVmidNotCaller) {
 
   mem.unregister_process(kVmidA);
   mem.unregister_process(kVmidB);
+}
+
+TEST(DoorbellMonitorLifecycle, RetiresAfterLastQueueAndRestartsOnNewQueue) {
+  // Regression for the leaked idle CP doorbell poller: the monitor must self-exit
+  // once the last host-accessible (KFD) queue is destroyed, and a later queue
+  // registration must start a fresh monitor. Uses only the queue-registration
+  // lifecycle (no dispatch), so the monitor thread runs on its own and its state
+  // is observed through the test-only accessor.
+  VmFixture f("cdna4", /*num_cus=*/1);
+  amdgpu::CommandProcessor *cp = f.cp();
+
+  auto wait_for_monitor = [&](bool expected) {
+    // The loop retires on a 100us cadence; allow generous slack for CI load.
+    for (int i = 0; i < 2000 && cp->doorbell_monitor_running_for_test() != expected; ++i)
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    return cp->doorbell_monitor_running_for_test();
+  };
+
+  EXPECT_FALSE(cp->doorbell_monitor_running_for_test())
+      << "no monitor should run before any host-accessible queue is registered";
+
+  amdgpu::HwQueue queue{};
+  queue.process_id = 1;
+  queue.queue_id = 7;
+  queue.host_accessible = true;
+  cp->register_queue(queue);
+  EXPECT_TRUE(wait_for_monitor(true)) << "registering a KFD queue must start the monitor";
+
+  cp->unregister_queue(queue.queue_id, queue.process_id);
+  EXPECT_FALSE(wait_for_monitor(false))
+      << "monitor must self-exit after the last host-accessible queue is destroyed";
+
+  // A new queue landing on a CP whose monitor retired must get polling back.
+  amdgpu::HwQueue queue2{};
+  queue2.process_id = 1;
+  queue2.queue_id = 8;
+  queue2.host_accessible = true;
+  cp->register_queue(queue2);
+  EXPECT_TRUE(wait_for_monitor(true)) << "a new KFD queue must restart a retired monitor";
+
+  cp->unregister_queue(queue2.queue_id, queue2.process_id);
+  EXPECT_FALSE(wait_for_monitor(false)) << "monitor must retire again after the last queue";
 }
 
 } // namespace
