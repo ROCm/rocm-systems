@@ -104,7 +104,7 @@ flowchart TD
     SA0["SA0 TODO<br/>Sampled TP2 admission/selection<br/>and broader runtime coverage"]
     SA1["SA1 TODO<br/>Sampled immediate and host-scan agreement"]
     IS0A["IS0A DONE<br/>per-owner CDNA4 persistent tuples<br/>below AccVGPR and VCC boundaries"]
-    IS0["IS0 ACTIVE<br/>TP1 prefill green;<br/>TP1 decode + TP2 fault gates open"]
+    IS0["IS0 ACTIVE<br/>TP1 prefill + decode green;<br/>TP2 fault gate open"]
     IS1["IS1 TODO<br/>Stream-K scalar state installed;<br/>AcqRel metadata race remains"]
     F0["F0 MILESTONE<br/>all four standard-v1 profiles<br/>feature-complete on focused tests"]
   end
@@ -485,6 +485,14 @@ mutation without final-byte proof, or a diagnostic without an independent
 oracle is not an accepted row.
 
 ## Progress log
+
+- 2026-07-22: `IS0` remains ACTIVE/blue with only its TP2 reviewed-fault gate
+  open.  Fresh TP1 decode/combined inventory and a prospectively reviewed
+  exact-one fault complete the current clean/paired/fault bundle: both exact
+  workload oracles pass, the schedule-masked mutation matches its frozen
+  no-diagnosis contract, surviving coverage and cleanup are complete, and
+  physical-device health passes before and after.  The TP1 decode/combined
+  Inline cell is green; the Mermaid box remains blue for TP2 only.
 
 - 2026-07-22: `IS0` remains ACTIVE/blue but its TP1-prefill slice is green.
   The current VCC-safe clean and paired bundle is joined by fresh inventory
