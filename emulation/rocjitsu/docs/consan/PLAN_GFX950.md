@@ -98,8 +98,8 @@ flowchart TD
   subgraph F[Four instrumentation flavors]
     SC0["SC0 DONE<br/>native CDNA4 LDS checks:<br/>CLIP + TP1/TP2 clean"]
     SC1["SC1 DONE<br/>all runnable model bundles green,<br/>including Qwen contained fault"]
-    RR0["RR0 ACTIVE<br/>all model bundles green;<br/>dynamic-stack support open"]
-    RR1["RR1 TODO<br/>Record/Replay barriers, atomics and fences"]
+    RR0["RR0 ACTIVE<br/>all model bundles green;<br/>hip-moi dynamic-stack probes execute"]
+    RR1["RR1 ACTIVE<br/>tree clean and fully covered;<br/>Stream-K helper workgroup identity open"]
     SA0A["SA0A DONE<br/>CDNA4 sampled barrier lowering:<br/>TP1 + CLIP clean"]
     SA0["SA0 TODO<br/>Sampled TP2 admission/selection<br/>and broader runtime coverage"]
     SA1["SA1 TODO<br/>Sampled immediate and host-scan agreement"]
@@ -265,12 +265,24 @@ flowchart TD
   classDef milestone fill:#6f42c1,stroke:#e2d5ff,color:#ffffff,stroke-width:3px
 
   class R0,R1,E0,B0,B1,B2,B3,B4,B5A,S0,S1,S2,S3,S4,S5,S6A,S6B,S7A,S7B,S8A,S8B,S8C,S8D,I4,SC0,SC1,SA0A,IS0A,IS0,V3,V4,V6 done
-  class RR0,V1,V2,V5,V7,ST0 active
-  class R2,E1,C0,B5B,I0,I1,I2,I3,A0,A1,A2,A3,A4,A5,RR1,SA0,SA1,IS1,Q0,Q1,Q2,Q3,V0,V8 todo
+  class RR0,RR1,V1,V2,V5,V7,ST0 active
+  class R2,E1,C0,B5B,I0,I1,I2,I3,A0,A1,A2,A3,A4,A5,SA0,SA1,IS1,Q0,Q1,Q2,Q3,V0,V8 todo
   class F0,G0 milestone
 ```
 
 ## Reconnaissance conclusions
+
+- 2026-07-22: `RR1` becomes ACTIVE/blue after commits `7fbd3b708d`,
+  `cb82107577`, and `cd8230c019`.  The CDNA4 site-local dynamic-frame recipe
+  now instruments all shared-helper accesses, atomics, and fences without
+  corrupting the caller frame base.  Tree atomic-OR is clean and complete at
+  4/4 accesses, 4/4 barriers, 10/10 atomics, and 16/16 fences.  Stream-K
+  reaches the same complete denominator and passes its workload oracle, but
+  exposes one narrower replay-identity defect: synchronization inside the
+  helper rereads clobbered entry workgroup SGPRs and is partitioned away from
+  the correctly keyed LDS accesses.  Entry-captured persistent workgroup-key
+  use is the remaining active implementation boundary; the old dynamic-stack
+  resource blocker is closed.
 
 - 2026-07-22: CLIP Inline Shadow is green inside DONE/green `IS0` after commit
   `c24431f77e` closes a private-state lifetime gap.  Generation-tagged CDNA4
