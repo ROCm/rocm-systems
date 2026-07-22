@@ -49,7 +49,7 @@ Point at a specific `pid-<pid>/` subdirectory when the capture root has multiple
 hrr-playback ./my_capture.hrr/pid-<pid>/ --info
 ```
 
-**Full replay** (requires AMD GPU, `/dev/kfd`, and matching `hrr-playback` + HIP libraries):
+**Full replay** (Windows or Linux; requires AMD GPU and matching `hrr-playback` + HIP libraries):
 
 ```bash
 hrr-playback ./my_capture.hrr/pid-<pid>/
@@ -147,9 +147,10 @@ Capture wire version must match the `hrr-playback` reader (see DESIGN.md wire-fo
 
 ## Agent tooling
 
-Optional Cursor/agent skill: [skills/decode-and-triage/SKILL.md](skills/decode-and-triage/SKILL.md).
-Docker replay uses the image HRR stack by default; set `HRR_DOCKER_MOUNT_CLR=1` to overlay
-a host dev build (`CLR_BUILD` / `HRR_PLAYBACK`).
+Optional Cursor/agent skill: [skills/decode-and-triage/SKILL.md](skills/decode-and-triage/SKILL.md)
+(Windows or Linux native replay; Docker replay on Linux hosts). Docker replay uses the
+image HRR stack by default; set `HRR_DOCKER_MOUNT_CLR=1` to overlay a host dev build
+(`CLR_BUILD` / `HRR_PLAYBACK`).
 
 ## Copyright
 
