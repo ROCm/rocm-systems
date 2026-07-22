@@ -104,7 +104,7 @@ flowchart TD
     SA0["SA0 TODO<br/>Sampled TP2 admission/selection<br/>and broader runtime coverage"]
     SA1["SA1 TODO<br/>Sampled immediate and host-scan agreement"]
     IS0A["IS0A DONE<br/>per-owner CDNA4 persistent tuples<br/>below AccVGPR and VCC boundaries"]
-    IS0["IS0 DONE<br/>VCC-safe scalar spill;<br/>TP1 + TP2 bundles green"]
+    IS0["IS0 DONE<br/>VCC-safe scalar spill and generation-qualified LDS;<br/>TP1 + TP2 bundles green, D128 clean"]
     IS1["IS1 TODO<br/>Stream-K scalar state installed;<br/>AcqRel metadata race remains"]
     F0["F0 MILESTONE<br/>all four standard-v1 profiles<br/>feature-complete on focused tests"]
   end
@@ -123,7 +123,7 @@ flowchart TD
     V3["V3 TODO<br/>P0 Qwen fault inventory and exact policies"]
     V4["V4 TODO<br/>P0 Qwen contained fault campaign"]
     V5["V5 ACTIVE<br/>TP2 SC/RR/Inline clean + paired;<br/>Sampled admission and remaining faults open"]
-    V6["V6 ACTIVE<br/>D128-pressure Inline detects barrier drop;<br/>diagnostic capacity and remaining faults open"]
+    V6["V6 ACTIVE<br/>D128-block Inline clean + paired;<br/>D128-pressure detects fault; capacity/fault gates open"]
     V7["V7 ACTIVE<br/>D128-pressure one-process paired accepted;<br/>peak memory and broader rows open"]
     V8["V8 TODO<br/>freeze one committed tip, rebuild,<br/>and rerun authoritative matrix"]
     ST0["ST0 ACTIVE<br/>maintain STATUS_CDNA4.md<br/>from current physical evidence"]
