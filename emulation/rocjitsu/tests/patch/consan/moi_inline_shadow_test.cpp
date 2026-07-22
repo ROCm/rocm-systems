@@ -1058,6 +1058,50 @@ TEST(ConSanMoi, Gfx1250InlineGlobalShadowUsesLiteralDispatchIdAtFullScalarPressu
   EXPECT_NE(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
 }
 
+TEST(ConSanMoi, Rdna4InlineGlobalShadowSpillsFullScalarPressure) {
+  std::vector<uint32_t> text_words(800, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  size_t cursor = 0;
+  // Reference the top ordinary SGPR, while keeping only scattered scalar
+  // values live across the access. There is no 28-register dead window, but
+  // there are enough dead registers for the external-shadow router.
+  text_words[cursor++] = build_s_mov_b32(0, 105u, ROCJITSU_CODE_ARCH_RDNA4);
+  constexpr std::array<uint16_t, 6> live_sgprs = {15u, 31u, 47u, 63u, 79u, 95u};
+  for (uint16_t sgpr : live_sgprs) {
+    text_words[cursor++] =
+        build_s_mov_b32(sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
+  }
+  const size_t access_word = cursor;
+  text_words[cursor++] = 0xD8340000u;
+  text_words[cursor++] = 0x00000000u; // ds_store_b32 v0, v0
+  for (uint16_t sgpr : live_sgprs)
+    text_words[cursor++] = build_s_mov_b32(0, sgpr, ROCJITSU_CODE_ARCH_RDNA4);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_dispatch_id = 0x1122334455667788ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 16u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
+  EXPECT_EQ(result.moi_report_dispatch_id, options.moi_report_dispatch_id);
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
+    return patch.anchor_offset == access_word * sizeof(uint32_t) &&
+           (patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
+            patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore);
+  }));
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_NE(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
+  EXPECT_TRUE(std::ranges::any_of(result.resolved_moi_transient_sgpr_assignments,
+                                  &ConSanMoiTransientSgprAssignment::spill_backed));
+}
+
 TEST(ConSanMoi, Gfx1250InlineOddShadowSlotCountFallsBackToExactB64Clear) {
   constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
   const std::array<uint32_t, 3> text_words = {

@@ -2505,7 +2505,7 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
   const rj_code_arch_t arch = arch_for_target(replacement.target_id());
   if (replacement.text_sections().size() != 1 ||
       (has_global_exact_patch && !result.resolved_moi_dispatch_id_sgpr &&
-       arch != ROCJITSU_CODE_ARCH_GFX1250)) {
+       !is_rdna4_family_arch(arch))) {
     errors.emplace_back(
         "ConSan final validation found exact-shadow publication without dispatch-ID state");
     return errors;

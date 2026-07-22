@@ -484,7 +484,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           const auto *assignment = find_moi_transient_sgpr_assignment(options, descriptor_offset);
           return assignment != nullptr && !assignment->spill_backed;
         });
-    if (options.moi_inline_workgroup_shadow && !has_unspilled_component_override) {
+    const bool spill_without_visible_evidence = candidate_options.automatic_moi_inline_sgpr_spill &&
+                                                !candidate_options.moi_inline_visible_evidence_sgpr;
+    if (options.moi_inline_workgroup_shadow && !has_unspilled_component_override &&
+        !spill_without_visible_evidence) {
       uint16_t next_compact_token = 0u;
       if (candidate.in_kernel && candidate.kernel_descriptor_file_offset) {
         uint16_t &next = next_compact_token_by_descriptor[*candidate.kernel_descriptor_file_offset];
@@ -1786,7 +1789,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     errors.emplace_back("ConSan MOI runtime sampled probe could not derive a wave owner");
     return std::nullopt;
   }
-  if (runtime_sampled && !options.moi_dispatch_id_sgpr && arch != ROCJITSU_CODE_ARCH_GFX1250) {
+  if (runtime_sampled && !options.moi_dispatch_id_sgpr && !is_rdna4_family_arch(arch)) {
     errors.emplace_back("ConSan MOI runtime sampled probe requires a hardware dispatch ID");
     return std::nullopt;
   }
@@ -2431,7 +2434,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     uint64_t cave_text_offset, uint64_t return_text_offset, uint64_t island_word_count,
     rj_code_arch_t arch) {
   if (!options.moi_exec_save_sgpr || options.moi_runtime_sample_stride <= 1u ||
-      (!options.moi_dispatch_id_sgpr && arch != ROCJITSU_CODE_ARCH_GFX1250))
+      (!options.moi_dispatch_id_sgpr && !is_rdna4_family_arch(arch)))
     return std::nullopt;
   const uint16_t saved_scc = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u);
   const uint16_t quotient = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 5u);
@@ -2545,7 +2548,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     uint64_t gate_text_offset, uint64_t return_text_offset, uint64_t reserved_word_count,
     rj_code_arch_t arch) {
   if (!options.moi_exec_save_sgpr || options.moi_runtime_sample_stride <= 1u ||
-      (!options.moi_dispatch_id_sgpr && arch != ROCJITSU_CODE_ARCH_GFX1250))
+      (!options.moi_dispatch_id_sgpr && !is_rdna4_family_arch(arch)))
     return std::nullopt;
   const uint16_t saved_scc = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u);
   const uint16_t quotient = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 5u);

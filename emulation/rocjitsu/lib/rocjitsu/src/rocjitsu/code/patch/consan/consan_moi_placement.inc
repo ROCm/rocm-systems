@@ -1636,7 +1636,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       }
     }
     if (!selected && options.moi_engine == ConSanMoiEngine::InlineShadow &&
-        arch == ROCJITSU_CODE_ARCH_GFX1250 && !options.moi_dynamic_stack_spill &&
+        is_rdna4_family_arch(arch) && !options.moi_dynamic_stack_spill &&
         address_free_scratch_private_limit(arch)) {
       const auto reserved = [&](uint16_t base, uint16_t width) {
         return (options.moi_owner_sgpr &&
@@ -1675,10 +1675,10 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
             break;
           }
         }
-        for (uint32_t pc = 0; spill_visible && pc + 2u <= limit; pc += 2u) {
+        for (uint32_t pc = 0; pc + 2u <= limit; pc += 2u) {
           const uint16_t candidate = static_cast<uint16_t>(pc);
-          if (!unavailable_or_reserved(candidate, 2u, spill_base) && candidate != *spill_visible &&
-              candidate + 1u != *spill_visible) {
+          if (!unavailable_or_reserved(candidate, 2u, spill_base) &&
+              (!spill_visible || !range_overlaps(candidate, 2u, *spill_visible, 1u))) {
             spill_pc = candidate;
             break;
           }
@@ -1691,19 +1691,19 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
             break;
           }
         }
-        for (uint32_t reg = referenced_end; spill_scc && reg < limit; ++reg) {
+        for (uint32_t reg = 0; spill_scc && reg < limit; ++reg) {
           const uint16_t candidate = static_cast<uint16_t>(reg);
-          if (!unavailable_or_reserved(candidate, 1u, spill_base) && candidate != *spill_visible &&
+          if (!unavailable_or_reserved(candidate, 1u, spill_base) &&
+              (!spill_visible || candidate != *spill_visible) &&
               !range_overlaps(candidate, 1u, *spill_pc, 2u) && candidate != *spill_scc) {
             spill_key = candidate;
             break;
           }
         }
-        for (uint32_t call = util::align_up(referenced_end, 2u); spill_key && call + 2u <= limit;
-             call += 2u) {
+        for (uint32_t call = 0; spill_key && call + 2u <= limit; call += 2u) {
           const uint16_t candidate = static_cast<uint16_t>(call);
           if (!unavailable_or_reserved(candidate, 2u, spill_base) &&
-              !range_overlaps(candidate, 2u, *spill_visible, 1u) &&
+              (!spill_visible || !range_overlaps(candidate, 2u, *spill_visible, 1u)) &&
               !range_overlaps(candidate, 2u, *spill_pc, 2u) &&
               !range_overlaps(candidate, 2u, *spill_scc, 1u) &&
               !range_overlaps(candidate, 2u, *spill_key, 1u)) {
@@ -1786,9 +1786,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     }
     if (!selected)
       continue;
-    const bool spill_backed =
-        spill_pc && spill_scc && spill_key && spill_call_return &&
-        (options.moi_engine != ConSanMoiEngine::InlineShadow || spill_visible);
+    const bool spill_backed = spill_pc && spill_scc && spill_key && spill_call_return;
     for (uint64_t owner : owners) {
       options.moi_transient_sgpr_assignments.push_back({.descriptor_file_offset = owner,
                                                         .exec_save_sgpr = *selected,
@@ -1959,7 +1957,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   // assignments for the independent owners that do not.  Trying this before
   // the monolithic Inline spill fallback avoids spilling every kernel in a
   // generated library merely because one component has high scalar pressure.
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250 && options.moi_engine == ConSanMoiEngine::InlineShadow) {
+  if (is_rdna4_family_arch(arch) && options.moi_engine == ConSanMoiEngine::InlineShadow) {
     const int32_t last_base = static_cast<int32_t>((ordinary_sgpr_limit - count) & ~1u);
     for (int32_t base = last_base; base >= 0; base -= 2) {
       const uint16_t candidate = static_cast<uint16_t>(base);
@@ -2006,12 +2004,12 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     }
   }
 
-  // gfx1250 can expose 28-register Inline access probes in kernels whose
+  // gfx12 can expose 28-register Inline access probes in kernels whose
   // scalar pressure leaves no equally large dead window. The access patcher
   // can preserve a transient window in private memory, but entry islands and
   // cross-site visible-evidence state still require genuinely dead/fresh
   // registers outside that window.
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250 && options.moi_engine == ConSanMoiEngine::InlineShadow &&
+  if (is_rdna4_family_arch(arch) && options.moi_engine == ConSanMoiEngine::InlineShadow &&
       options.moi_inline_access_present && !options.moi_dynamic_stack_spill && state.valid &&
       saw_site) {
     const size_t ordinary_access_count =
@@ -2117,7 +2115,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
           break;
         }
       }
-      if (visible && pc && call_return && dispatch_key && scc) {
+      if (pc && call_return && dispatch_key && scc) {
         options.moi_exec_save_sgpr = spill_base;
         options.automatic_moi_exec_save_sgprs = true;
         options.automatic_moi_inline_sgpr_spill = true;
@@ -2339,6 +2337,12 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     }
   }
 
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
+    result.warnings.emplace_back(
+        "ConSan MOI is using a literal report dispatch ID because no persistent hardware "
+        "dispatch-ID SGPR pair fits");
+    return false;
+  }
   result.outcome = ConSanTransformOutcome::Unsupported;
   result.warnings.emplace_back(
       "ConSan MOI could not place a persistent hardware dispatch-ID SGPR pair");
