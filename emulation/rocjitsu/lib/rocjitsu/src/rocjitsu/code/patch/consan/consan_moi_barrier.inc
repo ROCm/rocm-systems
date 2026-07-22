@@ -1025,7 +1025,11 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             candidate_options.automatic_moi_inline_sgpr_spill &&
             moi_indirect_jump_sgprs(candidate_options) &&
             candidate_options.moi_inline_visible_evidence_sgpr;
-        if (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+        const bool has_dense_router =
+            arch == ROCJITSU_CODE_ARCH_GFX1250 ||
+            (arch == ROCJITSU_CODE_ARCH_RDNA4 &&
+             candidate_options.moi_engine == ConSanMoiEngine::InlineShadow);
+        if (has_dense_router &&
             (candidate_options.moi_exec_save_sgpr || has_spill_backed_dense_router) &&
             candidate.kernel_descriptor_file_offset) {
           dense_fallback_indices.push_back(planned_index);
@@ -1197,6 +1201,13 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       const uint16_t call_return_sgpr =
           spill_backed_router ? jump_pc_sgpr
                               : static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 6u);
+      const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
+        if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+          return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
+        if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+          return build_s_call_b64(call_return_sgpr, simm16, arch);
+        return std::nullopt;
+      };
       const uint64_t island_words_count =
           spill_backed_router ? kSpillBackedIslandWords : kOrdinaryIslandWords;
       const uint64_t host_words_count = island_words_count + 1u;
@@ -1367,8 +1378,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       }
       std::memcpy(new_text.data() + island_offset, island_words.data(),
                   island_words.size() * sizeof(uint32_t));
-      const auto host_call =
-          instrumentation::build_s_call_i64(call_return_sgpr, /*next instruction=*/0, arch);
+      const auto host_call = build_direct_call(/*next instruction=*/0);
       if (!host_call) {
         result.errors.emplace_back("ConSan MOI dense barrier relay could not encode its host call");
         return;
@@ -1455,9 +1465,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         const PlannedInlineEpochBarrier &planned = planned_candidates[body.planned_index];
         const ConSanBarrierSite &site = planned.candidate.site;
         const auto call_delta = compute_sopp_branch_simm16(site.text_offset, island_offset);
-        const auto call =
-            call_delta ? instrumentation::build_s_call_i64(call_return_sgpr, *call_delta, arch)
-                       : std::nullopt;
+        const auto call = call_delta ? build_direct_call(*call_delta) : std::nullopt;
         if (!call) {
           result.errors.emplace_back(
               "ConSan MOI dense barrier relay could not encode a barrier call");
