@@ -537,9 +537,10 @@ def test_fieldless_caps_stmt_emits_policy_caps():
 
 # ---------------------------------------------------------------------------
 # FieldlessCaps.__post_init__ enforces the cross-language contract: writable or
-# is_vgpr each imply reads_value. This mirrors the !reads_value() gate on the
-# SIMD write helpers in isa_operand_simd_inl.h, so pin it directly rather than
-# only through full-regen exercise.
+# is_vgpr each imply reads_value. This mirrors the reads_value() gates on
+# simd_capable() / resolved_vgpr_offset_for_operand in isa_operand_simd_inl.h
+# (a writable-but-!reads_value operand would be dropped from the SIMD path), so
+# pin it directly rather than only through full-regen exercise.
 # ---------------------------------------------------------------------------
 def test_fieldless_caps_rejects_writable_without_reads_value():
     with pytest.raises(ValueError, match='writable/is_vgpr implies reads_value'):

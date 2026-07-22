@@ -266,10 +266,13 @@ protected:
 
   /// @brief Size of the instruction's encoding in bytes.
   int size_ = 0;
-  /// @brief Instruction's source operands (max 6).
+  /// @brief Instruction's source operands (max 6). KEEP IN SYNC with
+  /// CodeGenerator._SRC_OPERANDS_CAPACITY (the generator's overflow tripwire
+  /// mirrors this size); resize both together.
   std::array<Operand *, 6> src_operands_{};
   uint8_t num_src_ = 0;
-  /// @brief Instruction's destination operands (max 3).
+  /// @brief Instruction's destination operands (max 3). KEEP IN SYNC with
+  /// CodeGenerator._DST_OPERANDS_CAPACITY; resize both together.
   std::array<Operand *, 3> dst_operands_{};
   uint8_t num_dst_ = 0;
   /// @brief Append modifier flags to the disassembly string (e.g. " sc0 sc1").

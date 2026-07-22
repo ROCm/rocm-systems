@@ -183,6 +183,14 @@ class CodeGenerator:
         config: Code generation configuration (namespace, include paths).
     """
 
+    # Capacities of the fixed-size operand arrays declared in the hand-written
+    # instruction.h (``std::array<Operand *, N> src_operands_ / dst_operands_``).
+    # Mirrored here to bound the generation-time overflow tripwire. KEEP IN SYNC
+    # with instruction.h: if you resize either std::array, update these too (and
+    # vice versa).
+    _SRC_OPERANDS_CAPACITY = 6
+    _DST_OPERANDS_CAPACITY = 3
+
     def __init__(
         self,
         isa_spec: IsaSpec,
@@ -735,9 +743,9 @@ class CodeGenerator:
             return src_operands
 
         by_name = {op.name: op for op in src_operands}
-        mul_literal = (
-            by_name.get('simm32') or by_name.get('literal') or by_name.get('src2')
-        )
+        # The multiplicand literal is the fieldless simm32 (or the field-bearing
+        # `literal` on ISAs that name it so).
+        mul_literal = by_name.get('simm32') or by_name.get('literal')
         ssrc0 = by_name.get('ssrc0')
         ssrc1 = by_name.get('ssrc1')
         if ssrc0 is None or ssrc1 is None or mul_literal is None:
@@ -6924,20 +6932,17 @@ class CodeGenerator:
                         }
                     )
                     ctor_body_parts = list(opnd_body)
-                    # src_operands_ and dst_operands_ are std::array of these
-                    # capacities in instruction.h; guard against fieldless
-                    # def/use operands (pushed positionally) silently writing
-                    # past the array end. Keep these in sync with instruction.h.
-                    _SRC_OPERANDS_CAPACITY = 6
-                    _DST_OPERANDS_CAPACITY = 3
-                    assert src_idx <= _SRC_OPERANDS_CAPACITY, (
+                    # Guard fieldless def/use operands (pushed positionally) from
+                    # silently writing past the fixed-size operand arrays. The
+                    # capacities mirror instruction.h (see the class constants).
+                    assert src_idx <= self._SRC_OPERANDS_CAPACITY, (
                         f'{inst.name}: {src_idx} src operands exceed '
-                        f'src_operands_ capacity {_SRC_OPERANDS_CAPACITY}; '
+                        f'src_operands_ capacity {self._SRC_OPERANDS_CAPACITY}; '
                         f'grow the std::array in instruction.h.'
                     )
-                    assert dst_idx <= _DST_OPERANDS_CAPACITY, (
+                    assert dst_idx <= self._DST_OPERANDS_CAPACITY, (
                         f'{inst.name}: {dst_idx} dst operands exceed '
-                        f'dst_operands_ capacity {_DST_OPERANDS_CAPACITY}; '
+                        f'dst_operands_ capacity {self._DST_OPERANDS_CAPACITY}; '
                         f'grow the std::array in instruction.h.'
                     )
                     ctor_body_parts.append(f'num_src_ = {src_idx};')
@@ -6987,6 +6992,10 @@ class CodeGenerator:
                     # replace the operand with the 32-bit literal from the
                     # extended instruction encoding. A selector value of 254
                     # carries a 64-bit literal in the next two DWORDs.
+                    # Operands patched by the generic literal loop below, so the
+                    # S_SETREG_IMM32_B32 special-case stays mutually exclusive
+                    # with it (no double-patch of one operand).
+                    _generic_literal_patched: set[str] = set()
                     _lit_info = self._literal_encoding_info(enc, inst_enc_obj, inst)
                     _supports_simm64_literals = self._supports_simm64_literal_operands()
                     if _lit_info and self._has_machine_inst_struct(_lit_info[0]):
@@ -7035,6 +7044,7 @@ class CodeGenerator:
                                     f'if (reinterpret_cast<const OpEncoding*>(inst)->{opnd.name} == 255) '
                                     f'{fixup}'
                                 )
+                                _generic_literal_patched.add(opnd.name)
                                 if _supports_simm64_literals:
                                     ctor_body_parts.append(
                                         f'if (reinterpret_cast<const OpEncoding*>(inst)->{opnd.name} == 254) {{ '
@@ -7052,6 +7062,7 @@ class CodeGenerator:
                                 )
                                 if fixup:
                                     ctor_body_parts.append(fixup)
+                                    _generic_literal_patched.add(opnd.name)
 
                     # SOPK's S_SETREG_IMM32_B32 carries its extension literal
                     # through the encoding base's literal_ member instead of a
@@ -7071,6 +7082,12 @@ class CodeGenerator:
                         # field-bearing literal keeps its default (readable)
                         # caps.
                         for opnd in inst.operands:
+                            # Mutually exclusive with the generic literal loop:
+                            # skip any operand it already patched (otherwise a
+                            # last-wins double-patch on ISAs whose SOPK carries a
+                            # literal machine-inst struct).
+                            if opnd.name in _generic_literal_patched:
+                                continue
                             fixup = self._literal_operand_from_expr_stmt(
                                 opnd,
                                 'literal_',

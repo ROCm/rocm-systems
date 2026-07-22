@@ -14,8 +14,10 @@ columns are
   * ``caps``    -- runtime capability for the normal read/write/SIMD accessors
                    (:class:`FieldlessCaps`),
   * ``display`` -- disassembly display policy (:class:`FieldlessDisplay`),
-  * ``effect``  -- future architectural-effect metadata (stub; populated by the
-                   special-register-effect slice).
+  * ``effect``  -- architectural-effect metadata.
+
+``role`` and ``caps`` are live today: the generator consumes them to classify
+and lower each operand. ``display`` and ``effect`` are staged extension points.
 """
 
 from __future__ import annotations
@@ -84,10 +86,15 @@ class FieldlessCaps:
             placeholder, whose type is ``OPR_VGPR`` but which must NOT behave
             like a real ``v0``.
 
-    Invariant: ``writable`` and ``is_vgpr`` each imply ``reads_value``. The SIMD
-    write helpers in ``isa_operand_simd_inl.h`` gate on ``reads_value()`` (not
-    ``is_writable()``), so a writable-or-VGPR operand that does not read a value
-    would silently bypass the SIMD write path. ``__post_init__`` enforces this.
+    Invariant: ``writable`` and ``is_vgpr`` each imply ``reads_value``. In
+    ``isa_operand_simd_inl.h`` the SIMD write path (``write_lane_chunk``) gates
+    on ``is_writable()``, but ``simd_capable()`` -- required on every operand,
+    including the destination, for the SIMD fast path to run at all -- gates on
+    ``reads_value()``, and ``resolved_vgpr_offset_for_operand`` (the write fast
+    path's address resolution) is inert when ``!reads_value()``. So a writable
+    (or VGPR) operand that does not read a value would be dropped from the SIMD
+    path and its write silently no-op the fast path. ``__post_init__`` enforces
+    the invariant to keep that combination unrepresentable.
     """
 
     reads_value: bool
@@ -99,8 +106,8 @@ class FieldlessCaps:
             raise ValueError(
                 f'FieldlessCaps invariant violated: writable/is_vgpr implies '
                 f'reads_value ({self!r}). Before adding such an entry, revisit '
-                f'the !reads_value() gate on the SIMD write helpers in '
-                f'isa_operand_simd_inl.h.'
+                f'the reads_value() gates on simd_capable() and '
+                f'resolved_vgpr_offset_for_operand in isa_operand_simd_inl.h.'
             )
 
 

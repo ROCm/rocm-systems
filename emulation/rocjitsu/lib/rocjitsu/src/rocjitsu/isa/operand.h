@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/vgpr_msb.h"
 #include "rocjitsu/isa/register_set.h"
 
+#include <cassert>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -135,6 +136,13 @@ public:
   /// read locklessly on the CU thread and are assumed immutable after
   /// construction; mutating them on a live operand is a data race.
   void apply_fieldless_caps(bool reads_value, bool writable, bool is_vgpr) {
+    assert(!fieldless_ && "apply_fieldless_caps must be called once, at construction");
+    // Mirror the FieldlessCaps.__post_init__ invariant: writable/is_vgpr imply
+    // reads_value. Otherwise the SIMD fast path (gated on reads_value via
+    // simd_capable/resolved_vgpr_offset) and the scalar write path would
+    // disagree for a writable-but-!reads_value operand.
+    assert((reads_value || (!writable && !is_vgpr)) &&
+           "fieldless caps: writable/is_vgpr require reads_value");
     fieldless_ = true;
     reads_value_ = reads_value;
     writable_ = writable;
@@ -266,6 +274,10 @@ private:
   }
 
 public:
+  // These stay public: subclass constructors and decode/disassembly paths read
+  // and set size_bits_/encoding_value_/vgpr_msb_role_ directly. The capability
+  // flags below are protected instead because they are construction-only and
+  // read locklessly on the hot path, so only the class hierarchy may set them.
   int size_bits_ = 0;
   int encoding_value_ = 0;
   amdgpu::VgprMsbRole vgpr_msb_role_ = amdgpu::VgprMsbRole::None;
