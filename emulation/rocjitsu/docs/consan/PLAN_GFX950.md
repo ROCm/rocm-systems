@@ -97,7 +97,7 @@ flowchart TD
 
   subgraph F[Four instrumentation flavors]
     SC0["SC0 DONE<br/>native CDNA4 LDS checks:<br/>CLIP + TP1/TP2 clean"]
-    SC1["SC1 ACTIVE<br/>TP1 prefill bundle green;<br/>remaining model fault rotations open"]
+    SC1["SC1 DONE<br/>all runnable model and hip-moi<br/>SuperCollider bundles green"]
     RR0["RR0 ACTIVE<br/>TP1 prefill green; decode + TP2 clean/paired;<br/>dynamic-stack helpers and fault detection open"]
     RR1["RR1 TODO<br/>Record/Replay barriers, atomics and fences"]
     SA0A["SA0A DONE<br/>CDNA4 sampled barrier lowering:<br/>TP1 + CLIP clean"]
@@ -264,13 +264,23 @@ flowchart TD
   classDef blocked fill:#9e2a2b,stroke:#ffd0d0,color:#ffffff,stroke-width:3px
   classDef milestone fill:#6f42c1,stroke:#e2d5ff,color:#ffffff,stroke-width:3px
 
-  class R0,R1,E0,B0,B1,B2,B3,B4,B5A,S0,S1,S2,S3,S4,S5,S6A,S6B,S7A,S7B,S8A,S8B,S8C,S8D,I4,SC0,SA0A,IS0A,IS0,V6 done
-  class SC1,RR0,V5,V7,ST0 active
+  class R0,R1,E0,B0,B1,B2,B3,B4,B5A,S0,S1,S2,S3,S4,S5,S6A,S6B,S7A,S7B,S8A,S8B,S8C,S8D,I4,SC0,SC1,SA0A,IS0A,IS0,V6 done
+  class RR0,V5,V7,ST0 active
   class R2,E1,C0,B5B,I0,I1,I2,I3,A0,A1,A2,A3,A4,A5,RR1,SA0,SA1,IS1,Q0,Q1,Q2,Q3,V0,V1,V2,V3,V4,V8 todo
   class F0,G0 milestone
 ```
 
 ## Reconnaissance conclusions
+
+- 2026-07-22: `SC1` becomes DONE/green after TP1 decode/combined closes the
+  final runnable SuperCollider model cell.  Artifact
+  `consan-validation-gfx950-tp1-decode-supercollider-fault-dpp-phase-20260722-111`
+  applies exactly one reviewed DPP-phase barrier mutation and matches its
+  qualified-miss contract while both decode and combined exact oracles pass.
+  It retains complete 240/240 access coverage, bounded execution, empty
+  cleanup, clean provenance at `d89aa978e2`, and healthy physical probes.
+  Every runnable model and hip-moi SuperCollider row is green; Qwen and Jakub
+  remain explicit asset-blocked gray cells, not engine failures.
 
 - 2026-07-22: CLIP BF16 SuperCollider is green within ACTIVE/blue `SC1`.
   Its retained one-repetition paired artifact passes every cosine oracle with
