@@ -832,10 +832,20 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   // descriptor advertises zero fixed LDS so the launch can fit on gfx942; all
   // LDS accesses in the kernel body must then be lowered to a backing buffer
   // supplied by the dispatch path.
-  result.target_private_size =
-      src.private_segment_fixed_size + options.private_segment_fixed_size_addend;
-  const uint32_t requested_lds_size =
-      src.group_segment_fixed_size + options.group_segment_fixed_size_addend;
+  // The source private/group sizes come from the guest descriptor and can be
+  // near UINT32_MAX; adding a lowering addend in 32 bits could wrap to a tiny
+  // size and silently under-allocate. Use checked addition and fail the
+  // descriptor translation on overflow.
+  const auto target_private_size =
+      util::checked_add(src.private_segment_fixed_size, options.private_segment_fixed_size_addend);
+  if (!target_private_size)
+    append_descriptor_error(result, "private segment size plus lowering addend overflows 32 bits");
+  result.target_private_size = target_private_size.value_or(0);
+  const auto requested_lds_size_checked =
+      util::checked_add(src.group_segment_fixed_size, options.group_segment_fixed_size_addend);
+  if (!requested_lds_size_checked)
+    append_descriptor_error(result, "group segment size plus lowering addend overflows 32 bits");
+  const uint32_t requested_lds_size = requested_lds_size_checked.value_or(0);
   if (options.virtualize_lds) {
     result.target_lds_size = 0;
     result.lds_overflow_size = requested_lds_size;
