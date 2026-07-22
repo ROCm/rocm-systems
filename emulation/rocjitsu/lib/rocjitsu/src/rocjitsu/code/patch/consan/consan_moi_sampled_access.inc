@@ -213,7 +213,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   };
   std::map<uint64_t, DenseEntryHost> dense_entry_hosts;
   std::vector<std::unique_ptr<BasicBlock>> dense_host_blocks;
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250 && use_indirect_appended && !original_text.empty()) {
+  if (is_rdna4_family_arch(arch) && use_indirect_appended && !original_text.empty()) {
     std::unique_ptr<Decoder> decoder = Decoder::create(arch);
     if (decoder) {
       std::vector<uint64_t> leaders;
@@ -235,18 +235,32 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       dense_host_blocks = BasicBlock::build(code_object, *decoder, arch, leaders, code_ranges);
     }
   }
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250 && use_indirect_appended && local_entry_islands) {
+  if (is_rdna4_family_arch(arch) && use_indirect_appended && local_entry_islands) {
     struct DenseGroup {
       std::vector<const ConSanMoiCandidate *> candidates;
       size_t first_candidate_index = 0;
     };
-    std::map<std::pair<bool, std::string>, DenseGroup> groups;
+    std::map<std::pair<bool, std::string>, std::vector<const ConSanMoiCandidate *>> owner_groups;
     for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
       const ConSanMoiCandidate *candidate = candidates[candidate_index];
-      auto [it, inserted] = groups.try_emplace({candidate->in_kernel, candidate->container_name});
-      if (inserted)
-        it->second.first_candidate_index = candidate_index;
-      it->second.candidates.push_back(candidate);
+      owner_groups[{candidate->in_kernel, candidate->container_name}].push_back(candidate);
+    }
+    constexpr uint64_t kMaxCommonRelayAnchorSpan =
+        static_cast<uint64_t>(static_cast<int64_t>(std::numeric_limits<int16_t>::max()) -
+                              static_cast<int64_t>(std::numeric_limits<int16_t>::min())) *
+        sizeof(uint32_t);
+    std::vector<std::pair<std::pair<bool, std::string>, DenseGroup>> groups;
+    for (const auto &[key, owner_candidates] : owner_groups) {
+      for (const ConSanMoiCandidate *candidate : owner_candidates) {
+        if (groups.empty() || groups.back().first != key ||
+            (arch != ROCJITSU_CODE_ARCH_GFX1250 && groups.back().second.candidates.size() == 64u) ||
+            candidate->text_offset - groups.back().second.candidates.front()->text_offset >
+                kMaxCommonRelayAnchorSpan) {
+          groups.push_back(
+              {key, {.candidates = {}, .first_candidate_index = candidate_indices.at(candidate)}});
+        }
+        groups.back().second.candidates.push_back(candidate);
+      }
     }
     for (const auto &[key, group] : groups) {
       bool has_dense_neighbors = false;
@@ -262,7 +276,20 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                 access_island_begin + candidate_index * access_relay_words * sizeof(uint32_t);
             return !compute_sopp_branch_simm16(candidate->text_offset, default_entry);
           });
-      if (!has_dense_neighbors && !has_stranded_entry)
+      const bool explicit_anchors_fit =
+          arch == ROCJITSU_CODE_ARCH_GFX1250 ||
+          std::ranges::all_of(group.candidates, [](const ConSanMoiCandidate *candidate) {
+            return candidate->size >= 2u * sizeof(uint32_t);
+          });
+      const bool singleton_has_direct_island =
+          group.candidates.size() == 1u &&
+          local_entry_islands->has_reachable(group.candidates.front()->text_offset,
+                                             kIndirectIslandWords);
+      // gfx1250 also uses the call relay to compact nearby anchors. RDNA4 has
+      // no scalar call instruction, so use an explicit key plus branch only
+      // when the ordinary per-site relay is stranded.
+      if (!explicit_anchors_fit || singleton_has_direct_island ||
+          (!(arch == ROCJITSU_CODE_ARCH_GFX1250 && has_dense_neighbors) && !has_stranded_entry))
         continue;
       std::vector<uint64_t> anchors;
       anchors.reserve(group.candidates.size());
@@ -677,6 +704,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       const uint16_t base = *options.moi_exec_save_sgpr;
       const uint16_t key_sgpr = static_cast<uint16_t>(base + 5u);
       const uint16_t call_return_sgpr = static_cast<uint16_t>(base + 6u);
+      const bool explicit_dense_key = arch != ROCJITSU_CODE_ARCH_GFX1250;
       const uint64_t island_offset = *group.front()->entry_island_offset;
       const MoiSpecialStateSgprs special_state = *moi_special_state_sgprs(options);
 
@@ -716,16 +744,18 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       patches.push_back(std::move(island_info));
 
       std::vector<uint32_t> dispatcher_words;
-      const auto subtract_pc =
-          instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, base, arch);
-      if (!subtract_pc) {
-        result.errors.emplace_back(
-            "ConSan MOI sampled probe could not encode its dense dispatch key");
-        return;
+      if (!explicit_dense_key) {
+        const auto subtract_pc =
+            instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, base, arch);
+        if (!subtract_pc) {
+          result.errors.emplace_back(
+              "ConSan MOI sampled probe could not encode its dense dispatch key");
+          return;
+        }
+        dispatcher_words.push_back(*subtract_pc);
+        dispatcher_words.push_back(build_s_add_u32(key_sgpr, key_sgpr, /*literal=*/255u, arch));
+        dispatcher_words.push_back(static_cast<uint32_t>(dispatcher_offset - island_offset));
       }
-      dispatcher_words.push_back(*subtract_pc);
-      dispatcher_words.push_back(build_s_add_u32(key_sgpr, key_sgpr, /*literal=*/255u, arch));
-      dispatcher_words.push_back(static_cast<uint32_t>(dispatcher_offset - island_offset));
       if (entry_host != dense_entry_hosts.end()) {
         const auto compare_entry =
             instrumentation::build_s_cmp_eq_u32(key_sgpr, scalar_positive_inline_u32(0), arch);
@@ -738,9 +768,15 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         std::vector<uint32_t> matched_words;
         const uint64_t matched_offset =
             dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
-        if (!append_moi_scc_preserving_indirect_jump(
-                matched_words, matched_offset, entry_host->second.body_offset, base,
-                special_state.scc_save_sgpr, /*capture_scc=*/false, arch)) {
+        const auto direct_entry =
+            explicit_dense_key
+                ? compute_sopp_branch_simm16(matched_offset, entry_host->second.body_offset)
+                : std::nullopt;
+        if (direct_entry) {
+          matched_words.push_back(build_s_branch(*direct_entry, arch));
+        } else if (!append_moi_scc_preserving_indirect_jump(
+                       matched_words, matched_offset, entry_host->second.body_offset, base,
+                       special_state.scc_save_sgpr, /*capture_scc=*/false, arch)) {
           result.errors.emplace_back(
               "ConSan MOI sampled probe could not encode its dense entry-host target");
           return;
@@ -755,19 +791,26 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         dispatcher_words.push_back(*skip);
         dispatcher_words.insert(dispatcher_words.end(), matched_words.begin(), matched_words.end());
       }
-      for (const PlannedSampledPatch *planned_patch : group) {
+      for (size_t group_index = 0; group_index < group.size(); ++group_index) {
+        const PlannedSampledPatch *planned_patch = group[group_index];
         const ConSanMoiCandidate &candidate = *planned_patch->candidate;
-        const auto compare = instrumentation::build_s_cmp_eq_u32(key_sgpr, /*literal=*/255u, arch);
+        const auto compare = instrumentation::build_s_cmp_eq_u32(
+            key_sgpr,
+            explicit_dense_key ? scalar_positive_inline_u32(static_cast<uint16_t>(group_index + 1u))
+                               : 255u,
+            arch);
         if (!compare) {
           result.errors.emplace_back(
               "ConSan MOI sampled probe could not encode its dense dispatch comparison");
           return;
         }
         dispatcher_words.push_back(*compare);
-        dispatcher_words.push_back(
-            static_cast<uint32_t>(candidate.text_offset + sizeof(uint32_t) - island_offset));
+        if (!explicit_dense_key) {
+          dispatcher_words.push_back(
+              static_cast<uint32_t>(candidate.text_offset + sizeof(uint32_t) - island_offset));
+        }
         std::vector<uint32_t> matched_words;
-        if (candidate.size > sizeof(uint32_t)) {
+        if (!explicit_dense_key && candidate.size > sizeof(uint32_t)) {
           const uint32_t adjustment = candidate.size - sizeof(uint32_t);
           matched_words.push_back(
               build_s_add_u32(call_return_sgpr, call_return_sgpr, /*literal=*/255u, arch));
@@ -778,9 +821,15 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         }
         const uint64_t matched_offset =
             dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
-        if (!append_moi_scc_preserving_indirect_jump(
-                matched_words, matched_offset, planned_patch->placement.body_offset, base,
-                special_state.scc_save_sgpr, /*capture_scc=*/false, arch)) {
+        const auto direct_body =
+            explicit_dense_key
+                ? compute_sopp_branch_simm16(matched_offset, planned_patch->placement.body_offset)
+                : std::nullopt;
+        if (direct_body) {
+          matched_words.push_back(build_s_branch(*direct_body, arch));
+        } else if (!append_moi_scc_preserving_indirect_jump(
+                       matched_words, matched_offset, planned_patch->placement.body_offset, base,
+                       special_state.scc_save_sgpr, /*capture_scc=*/false, arch)) {
           result.errors.emplace_back(
               "ConSan MOI sampled probe could not encode a dense dispatch target");
           return;
@@ -820,32 +869,51 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       patches.push_back(std::move(dispatcher_info));
 
       if (entry_host != dense_entry_hosts.end()) {
-        const auto host_call =
-            instrumentation::build_s_call_i64(call_return_sgpr, /*next instruction=*/0, arch);
-        if (!host_call || entry_host->second.host_offset > new_text.size() ||
+        const std::optional<uint32_t> host_entry =
+            explicit_dense_key
+                ? std::optional<uint32_t>(
+                      build_s_mov_b32(key_sgpr, scalar_positive_inline_u32(0), arch))
+                : instrumentation::build_s_call_i64(call_return_sgpr, /*next instruction=*/0, arch);
+        if (!host_entry || entry_host->second.host_offset > new_text.size() ||
             sizeof(uint32_t) > new_text.size() - entry_host->second.host_offset) {
           result.errors.emplace_back(
               "ConSan MOI sampled probe could not encode its dense entry host");
           return;
         }
-        std::memcpy(new_text.data() + entry_host->second.host_offset, &*host_call,
+        std::memcpy(new_text.data() + entry_host->second.host_offset, &*host_entry,
                     sizeof(uint32_t));
       }
 
-      for (const PlannedSampledPatch *planned_patch : group) {
+      for (size_t group_index = 0; group_index < group.size(); ++group_index) {
+        const PlannedSampledPatch *planned_patch = group[group_index];
         const ConSanMoiCandidate &candidate = *planned_patch->candidate;
-        const auto call_delta = compute_sopp_branch_simm16(candidate.text_offset, island_offset);
-        const auto call =
-            call_delta ? instrumentation::build_s_call_i64(call_return_sgpr, *call_delta, arch)
-                       : std::nullopt;
-        if (!call || candidate.size < sizeof(uint32_t) || candidate.text_offset > new_text.size() ||
+        const uint64_t branch_offset =
+            candidate.text_offset + (explicit_dense_key ? sizeof(uint32_t) : 0u);
+        const auto call_delta = compute_sopp_branch_simm16(branch_offset, island_offset);
+        const std::optional<uint32_t> call =
+            !call_delta ? std::nullopt
+                        : instrumentation::build_s_call_i64(call_return_sgpr, *call_delta, arch);
+        if ((!explicit_dense_key && !call) ||
+            candidate.size < (explicit_dense_key ? 2u : 1u) * sizeof(uint32_t) ||
+            candidate.text_offset > new_text.size() ||
             candidate.size > new_text.size() - candidate.text_offset) {
           result.errors.emplace_back(
               "ConSan MOI sampled probe could not encode a dense call anchor");
           return;
         }
         std::vector<uint32_t> anchor_words(candidate.size / sizeof(uint32_t), build_s_nop(0, arch));
-        anchor_words.front() = *call;
+        if (explicit_dense_key) {
+          if (!call_delta || group_index >= 64u) {
+            result.errors.emplace_back(
+                "ConSan MOI sampled probe could not encode an explicit dense branch key");
+            return;
+          }
+          anchor_words[0] = build_s_mov_b32(
+              key_sgpr, scalar_positive_inline_u32(static_cast<uint16_t>(group_index + 1u)), arch);
+          anchor_words[1] = build_s_branch(*call_delta, arch);
+        } else {
+          anchor_words.front() = *call;
+        }
         std::memcpy(new_text.data() + candidate.text_offset, anchor_words.data(), candidate.size);
       }
     }

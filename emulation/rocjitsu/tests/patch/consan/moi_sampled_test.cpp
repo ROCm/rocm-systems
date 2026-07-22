@@ -2414,7 +2414,49 @@ TEST(ConSanMoi, SampledFarBarrierUsesReachableLocalIndirectEntryIsland) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
-TEST(ConSanMoi, SampledFarBarrierWithoutEntryIslandRemainsAQualifiedCoverageGap) {
+TEST(ConSanMoi, Rdna4DenseSampledAccessesShareExplicitKeyRelay) {
+  constexpr uint32_t kAccessCount = 9u;
+  std::vector<uint32_t> text_words(
+      8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_RDNA4));
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
+    text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+  }
+  // Keep the sites near the entry and the per-site appended relays outside
+  // SOPP reach. The shared explicit-key router must retain every dense site
+  // instead of relocating neighboring guest accesses without probes.
+  text_words.resize(33'000u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_RDNA4));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(kAccessCount);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const ConSanResult result =
+      try_patch_consan(make_rdna4_lds_code_object(text_words, "rdna4_dense_sampled"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                               &ConSanPatchInfo::kind),
+            2u); // One local relay plus one appended explicit-key dispatcher.
+  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
+    return warning.find("inside a relocated prefix") != std::string::npos;
+  }));
+}
+
+TEST(ConSanMoi, SampledSharedAccessRelayPreservesEntryIslandForFarBarrier) {
   std::vector<uint32_t> kernel_words;
   for (uint32_t i = 0; i < 9u; ++i) {
     kernel_words.push_back(0xD8340000u); // ds_store_b32 v0, v0
@@ -2426,9 +2468,9 @@ TEST(ConSanMoi, SampledFarBarrierWithoutEntryIslandRemainsAQualifiedCoverageGap)
   kernel_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
   const std::array function_words = {build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)};
   std::vector<uint32_t> far_tail(40000u, build_s_nop(1, ROCJITSU_CODE_ARCH_RDNA4));
-  // The access probes consume these eight indirect-jump islands. The
-  // qualified barrier must then remain an explicit coverage gap rather than
-  // invalidating the otherwise usable transformed object.
+  // There are only eight local islands for nine accesses plus the barrier.
+  // Dense access routing must share one relay so the qualified barrier still
+  // receives an island instead of becoming a placement gap.
   std::fill_n(far_tail.begin(), 8u * 8u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   const std::vector<uint8_t> bytes =
       make_rdna4_code_object_with_local_function(kernel_words, function_words, far_tail);
@@ -2450,8 +2492,8 @@ TEST(ConSanMoi, SampledFarBarrierWithoutEntryIslandRemainsAQualifiedCoverageGap)
   EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
                                &ConSanPatchInfo::kind),
-            0u);
-  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+            1u);
+  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
     return warning.find("no reachable entry island") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
   const auto barrier = std::ranges::find_if(result.site_dispositions, [&](const auto &site) {
@@ -2459,8 +2501,8 @@ TEST(ConSanMoi, SampledFarBarrierWithoutEntryIslandRemainsAQualifiedCoverageGap)
            site.text_offset == barrier_offset + sizeof(uint32_t);
   });
   ASSERT_NE(barrier, result.site_dispositions.end());
-  EXPECT_EQ(barrier->lowering_outcome, ConSanSiteLoweringOutcome::PlacementOrLoweringFailed);
-  EXPECT_EQ(barrier->lowering_reason, ConSanSiteLoweringReason::InstrumentationPatchMissing);
+  EXPECT_EQ(barrier->lowering_outcome, ConSanSiteLoweringOutcome::Patched);
+  EXPECT_EQ(barrier->lowering_reason, ConSanSiteLoweringReason::None);
   EXPECT_TRUE(result.final_validation_passed);
 }
 
