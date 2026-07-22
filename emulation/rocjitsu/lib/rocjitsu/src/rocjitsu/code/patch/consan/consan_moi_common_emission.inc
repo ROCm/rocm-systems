@@ -639,7 +639,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   }
   std::optional<uint16_t> derived_owner_vgpr;
   std::vector<uint32_t> derived_owner_words;
-  if (!options.moi_owner_vgpr && candidate.kernel_descriptor_file_offset) {
+  if (!options.moi_owner_vgpr && !options.moi_persistent_owner_sgpr &&
+      candidate.kernel_descriptor_file_offset) {
     const auto owner_shift =
         moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, errors);
     if (!owner_shift)
@@ -799,6 +800,10 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
            !append_dynamic_access_store_u32_vgpr(
                words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id),
                *derived_owner_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+          (options.moi_persistent_owner_sgpr &&
+           !append_dynamic_access_store_u32_scalar_src(
+               words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id),
+               *options.moi_persistent_owner_sgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
           (options.moi_dispatch_id_sgpr &&
            (!append_dynamic_access_store_u32_scalar_src(
                 words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, generation),
@@ -1018,6 +1023,9 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
                            static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u)) ||
         (options.moi_owner_vgpr &&
          !record.store_vgpr(offsetof(ConSanMoiAccessRecord, wave_id), *options.moi_owner_vgpr)) ||
+        (options.moi_persistent_owner_sgpr &&
+         !record.store_sgpr(offsetof(ConSanMoiAccessRecord, wave_id),
+                            *options.moi_persistent_owner_sgpr)) ||
         (options.moi_epoch_vgpr &&
          !record.store_vgpr(offsetof(ConSanMoiAccessRecord, epoch), *options.moi_epoch_vgpr)) ||
         !record.store_literal(offsetof(ConSanMoiAccessRecord, instruction_offset),

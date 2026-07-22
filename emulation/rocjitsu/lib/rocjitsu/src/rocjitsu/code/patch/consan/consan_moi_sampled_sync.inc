@@ -2039,7 +2039,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
 
   std::optional<uint16_t> derived_owner_vgpr;
   std::optional<uint32_t> derived_owner_word;
-  if (!options.moi_owner_vgpr) {
+  if (!options.moi_owner_vgpr && !options.moi_persistent_owner_sgpr) {
     if (!candidate.kernel_descriptor_file_offset) {
       errors.emplace_back(
           "ConSan MOI fence record patch requires RJ_CONSAN_MOI_OWNER_VGPR for functions");
@@ -2142,8 +2142,14 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       !record.store_workgroup(offsetof(ConSanMoiFenceRecord, workgroup_z), workgroup_sources.z) ||
       (options.moi_owner_vgpr &&
        !record.store_vgpr(offsetof(ConSanMoiFenceRecord, owner_id), *options.moi_owner_vgpr)) ||
+      (options.moi_persistent_owner_sgpr &&
+       !record.store_sgpr(offsetof(ConSanMoiFenceRecord, owner_id),
+                          *options.moi_persistent_owner_sgpr)) ||
       (options.moi_epoch_vgpr &&
        !record.store_vgpr(offsetof(ConSanMoiFenceRecord, epoch), *options.moi_epoch_vgpr)) ||
+      (options.moi_persistent_epoch_sgpr &&
+       !record.store_sgpr(offsetof(ConSanMoiFenceRecord, epoch),
+                          *options.moi_persistent_epoch_sgpr)) ||
       !record.store_literal(offsetof(ConSanMoiFenceRecord, instruction_offset),
                             static_cast<uint32_t>(candidate.fence.text_offset)) ||
       !record.store_literal(offsetof(ConSanMoiFenceRecord, kind), static_cast<uint32_t>(kind)) ||

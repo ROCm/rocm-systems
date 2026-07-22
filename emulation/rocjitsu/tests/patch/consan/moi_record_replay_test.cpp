@@ -3242,6 +3242,17 @@ TEST(ConSanMoi, Cdna4AccvgprBoundaryRecordReplayUsesProvenUnusedScalarHole) {
                             kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
             AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc3,
                             kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET));
+  const auto access = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(access, result.patches.end());
+  ASSERT_TRUE(access->scratch_vgpr);
+  const std::vector<uint32_t> access_words =
+      text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
+  EXPECT_NE(std::ranges::find(access_words,
+                              build_v_mov_b32_e32(static_cast<uint16_t>(*access->scratch_vgpr + 2u),
+                                                  *result.resolved_moi_persistent_owner_sgpr,
+                                                  ROCJITSU_CODE_ARCH_CDNA4)),
+            access_words.end());
 }
 
 TEST(ConSanMoi, Gfx1250PrivateEpochBarrierPreservesGuestVgprMsbMode) {
@@ -4624,17 +4635,14 @@ TEST(ConSanMoi, Cdna4AtomicRecordSpillsThroughSiteLocalDynamicStackFrame) {
   const auto wait = build_cdna4_s_wait_flat0(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(atomic && wait);
   std::vector<uint32_t> text_words;
-  text_words.push_back(build_s_mov_b32(/*sdst=*/18u, /*ssrc=*/33u,
-                                      ROCJITSU_CODE_ARCH_CDNA4));
-  text_words.push_back(build_s_mov_b32(/*sdst=*/33u, /*ssrc=*/32u,
-                                      ROCJITSU_CODE_ARCH_CDNA4));
+  text_words.push_back(build_s_mov_b32(/*sdst=*/18u, /*ssrc=*/33u, ROCJITSU_CODE_ARCH_CDNA4));
+  text_words.push_back(build_s_mov_b32(/*sdst=*/33u, /*ssrc=*/32u, ROCJITSU_CODE_ARCH_CDNA4));
   text_words.insert(text_words.end(), release.begin(), release.end());
   text_words.push_back(*wait);
   text_words.insert(text_words.end(), atomic->begin(), atomic->end());
   text_words.push_back(*wait);
   text_words.insert(text_words.end(), acquire.begin(), acquire.end());
-  text_words.push_back(build_s_mov_b32(/*sdst=*/33u, /*ssrc=*/18u,
-                                      ROCJITSU_CODE_ARCH_CDNA4));
+  text_words.push_back(build_s_mov_b32(/*sdst=*/33u, /*ssrc=*/18u, ROCJITSU_CODE_ARCH_CDNA4));
   text_words.resize(800, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
   text_words.push_back(
       build_v_mov_b32_e32(/*vdst=*/0, vector_source_vgpr(255), ROCJITSU_CODE_ARCH_CDNA4));
@@ -4653,6 +4661,8 @@ TEST(ConSanMoi, Cdna4AtomicRecordSpillsThroughSiteLocalDynamicStackFrame) {
   ConSanOptions options = moi_options();
   options.moi_track_atomics = true;
   options.force_vgpr_spill = true;
+  options.moi_persistent_owner_sgpr = 70u;
+  options.moi_persistent_epoch_sgpr = 71u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -4679,6 +4689,30 @@ TEST(ConSanMoi, Cdna4AtomicRecordSpillsThroughSiteLocalDynamicStackFrame) {
       std::find(cave_words.begin(), cave_words.end(),
                 build_s_mov_b32(saved_frame_sgpr, /*frame base=*/33, ROCJITSU_CODE_ARCH_CDNA4)),
       cave_words.end());
+  const uint16_t record_value_vgpr = static_cast<uint16_t>(patch->scratch_vgpr.value() + 4u);
+  EXPECT_NE(std::find(cave_words.begin(), cave_words.end(),
+                      build_v_mov_b32_e32(record_value_vgpr, *options.moi_persistent_owner_sgpr,
+                                          ROCJITSU_CODE_ARCH_CDNA4)),
+            cave_words.end());
+  EXPECT_NE(std::find(cave_words.begin(), cave_words.end(),
+                      build_v_mov_b32_e32(record_value_vgpr, *options.moi_persistent_epoch_sgpr,
+                                          ROCJITSU_CODE_ARCH_CDNA4)),
+            cave_words.end());
+  const auto fence = std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
+                                       &ConSanPatchInfo::kind);
+  ASSERT_NE(fence, result.patches.end());
+  ASSERT_TRUE(fence->scratch_vgpr);
+  const std::vector<uint32_t> fence_words =
+      text_words_at_offset(patched, fence->trampoline_offset, fence->trampoline_size);
+  const uint16_t fence_value_vgpr = static_cast<uint16_t>(*fence->scratch_vgpr + 2u);
+  EXPECT_NE(std::ranges::find(fence_words, build_v_mov_b32_e32(fence_value_vgpr,
+                                                               *options.moi_persistent_owner_sgpr,
+                                                               ROCJITSU_CODE_ARCH_CDNA4)),
+            fence_words.end());
+  EXPECT_NE(std::ranges::find(fence_words, build_v_mov_b32_e32(fence_value_vgpr,
+                                                               *options.moi_persistent_epoch_sgpr,
+                                                               ROCJITSU_CODE_ARCH_CDNA4)),
+            fence_words.end());
   EXPECT_TRUE(result.final_validation_passed);
 }
 

@@ -361,7 +361,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   (void)record_index;
   std::optional<uint16_t> derived_owner_vgpr;
   std::optional<uint32_t> derived_owner_word;
-  if (!options.moi_owner_vgpr) {
+  if (!options.moi_owner_vgpr && !options.moi_persistent_owner_sgpr) {
     if (!candidate.kernel_descriptor_file_offset) {
       errors.emplace_back(
           "ConSan MOI atomic record patch requires RJ_CONSAN_MOI_OWNER_VGPR for function atomics");
@@ -559,6 +559,10 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
        !append_dynamic_atomic_store_u32_vgpr(
            record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, owner_id),
            *derived_owner_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+      (options.moi_persistent_owner_sgpr &&
+       !append_dynamic_atomic_store_u32_scalar_src(
+           record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, owner_id),
+           *options.moi_persistent_owner_sgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
       (options.moi_dispatch_id_sgpr &&
        (!append_dynamic_atomic_store_u32_scalar_src(
             record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, generation),
@@ -589,6 +593,10 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
        !append_dynamic_atomic_store_u32_vgpr(
            record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, epoch),
            *options.moi_epoch_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+      (options.moi_persistent_epoch_sgpr &&
+       !append_dynamic_atomic_store_u32_scalar_src(
+           record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, epoch),
+           *options.moi_persistent_epoch_sgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
       !append_dynamic_atomic_store_u32_vgpr(
           record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, atomic_address),
           recorded_address_vgpr, slot_vgpr, *options.scratch_vgpr, arch) ||
