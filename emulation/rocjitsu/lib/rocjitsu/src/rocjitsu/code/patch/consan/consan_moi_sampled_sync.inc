@@ -204,84 +204,11 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
   if (restore_guest_vgpr_bank)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
         static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), 0u, arch));
-  // Access probes reject unsampled workgroups before entering their expensive
-  // watchpoint body.  Apply the same spatial sampling predicate here after the
-  // guest barrier has executed, but before scanning causal-window metadata.
-  // This is especially important for barriers in very large dispatches: all
-  // workgroups must still execute the original synchronization, while only
-  // the configured residue class needs to run the Sampled bookkeeping.
-  if (options.moi_runtime_sample_stride > 1u && options.moi_runtime_sample_offset <= 1024u) {
-    const uint16_t saved_scc = static_cast<uint16_t>(temporary_exec + 4u);
-    const uint16_t quotient = static_cast<uint16_t>(temporary_exec + 5u);
-    const uint16_t residue = static_cast<uint16_t>(temporary_exec + 6u);
-    const uint16_t shift =
-        scalar_positive_inline_u32(std::countr_zero(options.moi_runtime_sample_stride));
-    const uint32_t mask = options.moi_runtime_sample_stride - 1u;
-    const uint32_t selected_residue = options.moi_runtime_sample_offset & mask;
-    const auto selected_label = sequence.make_label();
-    const auto save_scc = instrumentation::build_s_cselect_b32(
-        saved_scc, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
-    const uint16_t dispatch_mix = options.moi_dispatch_id_sgpr.value_or(
-        scalar_positive_inline_u32(static_cast<uint32_t>(options.moi_report_dispatch_id) & 63u));
-    const auto mix_dispatch = instrumentation::build_s_sub_u32(
-        residue, scalar_positive_inline_u32(0), dispatch_mix, arch);
-    if (!save_scc || !mix_dispatch)
-      return std::nullopt;
-    words.push_back(*save_scc);
-    words.push_back(*mix_dispatch);
-    const auto append_workgroup_mix = [&](const ConSanMoiWorkgroupSource &source) -> bool {
-      if (!source.scalar_src)
-        return true;
-      uint16_t coordinate = *source.scalar_src;
-      if (source.mask_low_16) {
-        words.push_back(
-            build_s_lshl_b32(quotient, coordinate, scalar_positive_inline_u32(16), arch));
-        words.push_back(build_s_lshr_b32(quotient, quotient, scalar_positive_inline_u32(16), arch));
-        coordinate = quotient;
-      } else if (source.shift_right_16) {
-        words.push_back(
-            build_s_lshr_b32(quotient, coordinate, scalar_positive_inline_u32(16), arch));
-        coordinate = quotient;
-      }
-      const auto mix = instrumentation::build_s_sub_u32(residue, residue, coordinate, arch);
-      if (!mix)
-        return false;
-      words.push_back(*mix);
-      return true;
-    };
-    if (!append_workgroup_mix(workgroup_sources->x) ||
-        !append_workgroup_mix(workgroup_sources->y) || !append_workgroup_mix(workgroup_sources->z))
-      return std::nullopt;
-    words.push_back(build_s_lshr_b32(quotient, residue, shift, arch));
-    words.push_back(build_s_lshl_b32(quotient, quotient, shift, arch));
-    const auto subtract = instrumentation::build_s_sub_u32(residue, residue, quotient, arch);
-    if (!subtract)
-      return std::nullopt;
-    words.push_back(*subtract);
-    for (uint32_t remaining = selected_residue; remaining != 0u;) {
-      const uint32_t chunk = std::min<uint32_t>(remaining, 64u);
-      const auto subtract_selected = instrumentation::build_s_sub_u32(
-          residue, residue, scalar_positive_inline_u32(chunk), arch);
-      if (!subtract_selected)
-        return std::nullopt;
-      words.push_back(*subtract_selected);
-      remaining -= chunk;
-    }
-    const auto compare =
-        instrumentation::build_s_cmp_eq_u32(residue, scalar_positive_inline_u32(0), arch);
-    const auto restore_scc =
-        instrumentation::build_s_cmp_lg_u32(saved_scc, scalar_positive_inline_u32(0), arch);
-    if (!compare || !restore_scc)
-      return std::nullopt;
-    words.push_back(*compare);
-    if (!sequence.emit_branch(selected_label, InstructionSequence::BranchKind::SccNonzero))
-      return std::nullopt;
-    words.push_back(*restore_scc);
-    if (!sequence.emit_branch(fast_return_label, InstructionSequence::BranchKind::Unconditional) ||
-        !sequence.bind(selected_label))
-      return std::nullopt;
-    words.push_back(*restore_scc);
-  }
+  // Runtime sampling selects LDS addresses, not workgroups. Every workgroup
+  // which reaches the guest barrier must therefore inspect its banked causal
+  // window and advance its epoch. A separate workgroup-residue gate can skip a
+  // workgroup which touched a selected address, leaving its recorded accesses
+  // in one epoch with no synchronization metadata.
   if (private_epoch_offset) {
     if (!options.automatic_moi_private_epoch) {
       errors.emplace_back("ConSan MOI sampled barrier has an invalid private epoch plan");

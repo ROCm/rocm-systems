@@ -2597,7 +2597,7 @@ TEST(ConSanMoi, Gfx1250SampledQualifiedBarrierUsesSpill) {
   EXPECT_EQ(trampoline.front(), 0xBF860000u);
 }
 
-TEST(ConSanMoi, Gfx1250SampledBarrierGatesUnsampledWorkgroupsBeforeMetadataScan) {
+TEST(ConSanMoi, Gfx1250SampledBarrierDoesNotGateWorkgroupsForAddressSampling) {
   std::vector<uint32_t> words(540, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
   words[0] = store[0];
@@ -2629,19 +2629,17 @@ TEST(ConSanMoi, Gfx1250SampledBarrierGatesUnsampledWorkgroupsBeforeMetadataScan)
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> trampoline =
       text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
-  const auto gate_shift = build_s_lshr_b32(
+  const auto obsolete_workgroup_gate_shift = build_s_lshr_b32(
       /*sdst=*/85u, /*ssrc0=*/86u, scalar_positive_inline_u32(6u), ROCJITSU_CODE_ARCH_GFX1250);
   const auto owner_election = build_v_cmp_eq_u32_e32_vcc(
       scalar_positive_inline_u32(0), *options.moi_owner_vgpr, ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_TRUE(owner_election);
   const auto barrier = std::ranges::find(trampoline, words[401]);
-  const auto gate = std::ranges::find(trampoline, gate_shift);
   const auto owner = std::ranges::find(trampoline, *owner_election);
   ASSERT_NE(barrier, trampoline.end());
-  ASSERT_NE(gate, trampoline.end());
   ASSERT_NE(owner, trampoline.end());
-  EXPECT_LT(barrier, gate);
-  EXPECT_LT(gate, owner);
+  EXPECT_LT(barrier, owner);
+  EXPECT_EQ(std::ranges::find(trampoline, obsolete_workgroup_gate_shift), trampoline.end());
   EXPECT_TRUE(result.final_validation_passed);
 }
 
