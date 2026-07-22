@@ -81,6 +81,13 @@ if(PROFILER_HUB_ENABLE_COVERAGE)
     profiler_hub_add_coverage_flags(profiler-hub_unit_tests)
 endif()
 
+if(THEROCK_SANITIZER_LAUNCHER)
+    set_target_properties(
+        profiler-hub_unit_tests
+        PROPERTIES CROSSCOMPILING_EMULATOR "${THEROCK_SANITIZER_LAUNCHER}"
+    )
+endif()
+
 gtest_discover_tests(
     profiler-hub_unit_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
