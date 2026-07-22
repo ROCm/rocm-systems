@@ -8,6 +8,7 @@ build-CoMMA: clone-CoMMA
 clone-CoMMA:
 	@if [ ! -d CoMMA ] ; then \
 		git clone https://github.com/google/CoMMA.git; \
+		mkdir -p CoMMA/third_party/nccl/plugins; \
 		ln -s $(PWD)/.. CoMMA/third_party/nccl/plugins/profiler; \
 	fi
 

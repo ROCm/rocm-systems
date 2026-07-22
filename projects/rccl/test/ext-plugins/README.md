@@ -99,12 +99,12 @@ This will compile the plugin and create `libnccl-tuner-example.so` in the same d
 
 #### Building the Profiler Plugin
 
-The profiler plugin is located in the `ext-plugins/example` directory.
+The profiler plugin is located in the `plugins/profiler/example` directory.
 
 **Step 1: Navigate to the plugin directory**
 
 ```bash
-cd rccl/test/ext-plugins/example
+cd rccl/plugins/profiler/example
 ```
 
 **Step 2: Build the plugin**
@@ -113,7 +113,7 @@ cd rccl/test/ext-plugins/example
 make
 ```
 
-This will compile the plugin and create `libnccl-profiler.so` in the same directory. The profiler plugin captures detailed runtime events including:
+This will compile the plugin and create `librccl-profiler-example.so` in the same directory. The profiler plugin captures detailed runtime events including:
 - **Group events**: High-level operation grouping
 - **Collective events**: AllReduce, Broadcast, Reduce, ReduceScatter operations
 - **P2P events**: Send, Recv, AllGather, AllToAll operations
