@@ -173,6 +173,34 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   const auto &dense_host_blocks = resource_state.blocks;
   if ((is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA4) && use_indirect_appended &&
       local_entry_islands) {
+    const auto merge_ranges = [](std::vector<std::pair<uint64_t, uint64_t>> &ranges) {
+      std::ranges::sort(ranges);
+      size_t merged_range_count = 0u;
+      for (const auto &range : ranges) {
+        if (merged_range_count != 0u && ranges[merged_range_count - 1u].second >= range.first) {
+          ranges[merged_range_count - 1u].second =
+              std::max(ranges[merged_range_count - 1u].second, range.second);
+        } else {
+          ranges[merged_range_count++] = range;
+        }
+      }
+      ranges.resize(merged_range_count);
+    };
+    const auto overlaps_ranges = [](const std::vector<std::pair<uint64_t, uint64_t>> &ranges,
+                                    uint64_t begin, uint64_t end) {
+      const auto after =
+          std::ranges::lower_bound(ranges, end, {}, [](const auto &range) { return range.first; });
+      return after != ranges.begin() && std::prev(after)->second > begin;
+    };
+    std::vector<std::pair<uint64_t, uint64_t>> global_access_ranges;
+    global_access_ranges.reserve(candidates.size());
+    for (const ConSanMoiCandidate *candidate : candidates) {
+      if (candidate->size != 0u)
+        global_access_ranges.emplace_back(candidate->text_offset,
+                                          candidate->text_offset + candidate->size);
+    }
+    merge_ranges(global_access_ranges);
+
     struct DenseGroup {
       std::vector<const ConSanMoiCandidate *> candidates;
       size_t first_candidate_index = 0;
@@ -273,21 +301,18 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
               key.first ? kernel->entry_text_offset : function->entry_text_offset;
           const uint64_t owner_end =
               owner_begin + (key.first ? kernel->code_size : function->code_size);
-          std::vector<std::pair<uint64_t, uint64_t>> occupied_ranges;
+          std::vector<std::pair<uint64_t, uint64_t>> owner_sync_ranges;
           const size_t owner_barrier_count =
               key.first ? kernel->barrier_sites.size() : function->barrier_sites.size();
           const size_t owner_fence_count =
               key.first ? kernel->fence_sites.size() : function->fence_sites.size();
           const size_t owner_atomic_count =
               key.first ? kernel->atomic_sites.size() : function->atomic_sites.size();
-          occupied_ranges.reserve(group.candidates.size() + owner_barrier_count +
-                                  owner_fence_count + owner_atomic_count);
+          owner_sync_ranges.reserve(owner_barrier_count + owner_fence_count + owner_atomic_count);
           const auto append_occupied_range = [&](uint64_t begin, uint64_t size) {
             if (size != 0u)
-              occupied_ranges.emplace_back(begin, begin + size);
+              owner_sync_ranges.emplace_back(begin, begin + size);
           };
-          for (const ConSanMoiCandidate *candidate : group.candidates)
-            append_occupied_range(candidate->text_offset, candidate->size);
           const auto append_owner_sites = [&](const auto &owner) {
             for (const ConSanBarrierSite &site : owner.barrier_sites)
               append_occupied_range(site.text_offset, site.size);
@@ -300,22 +325,10 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             append_owner_sites(*kernel);
           else
             append_owner_sites(*function);
-          std::ranges::sort(occupied_ranges);
-          size_t merged_range_count = 0u;
-          for (const auto &range : occupied_ranges) {
-            if (merged_range_count != 0u &&
-                occupied_ranges[merged_range_count - 1u].second >= range.first) {
-              occupied_ranges[merged_range_count - 1u].second =
-                  std::max(occupied_ranges[merged_range_count - 1u].second, range.second);
-            } else {
-              occupied_ranges[merged_range_count++] = range;
-            }
-          }
-          occupied_ranges.resize(merged_range_count);
+          merge_ranges(owner_sync_ranges);
           const auto overlaps_instrumented_site = [&](uint64_t begin, uint64_t end) {
-            const auto after = std::ranges::lower_bound(
-                occupied_ranges, end, {}, [](const auto &range) { return range.first; });
-            return after != occupied_ranges.begin() && std::prev(after)->second > begin;
+            return overlaps_ranges(global_access_ranges, begin, end) ||
+                   overlaps_ranges(owner_sync_ranges, begin, end);
           };
 
           std::optional<DenseEntryHost> best_host;

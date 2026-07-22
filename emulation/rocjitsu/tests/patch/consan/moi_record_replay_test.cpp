@@ -4001,6 +4001,56 @@ TEST(ConSanMoi, Cdna4DenseRecordReplayAccessesDoNotRequireBarrierRouter) {
   }));
 }
 
+TEST(ConSanMoi, Cdna4PartitionedDenseHostsAvoidEveryAccessCandidate) {
+  constexpr uint32_t kAccessCount = 65u;
+  constexpr size_t kLargeTextWords = 33'000u;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, kArch);
+  std::vector<uint32_t> text_words(kLargeTextWords, filler);
+  size_t cursor = 8u;
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    const auto access = build_cdna4_ds_store_b32(
+        /*vaddr=*/2, /*vdata=*/3, (index % 64u) * sizeof(uint32_t), kArch);
+    ASSERT_TRUE(access);
+    std::copy(access->begin(), access->end(), text_words.begin() + cursor);
+    cursor += access->size();
+  }
+  text_words.back() = build_s_endpgm(kArch);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const ConSanResult result = try_patch_consan(
+      make_cdna4_lds_code_object(text_words, "cdna4_partitioned_dense_record_replay"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount);
+  for (const ConSanPatchInfo &host : result.patches) {
+    if (host.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland || host.original_size == 0u)
+      continue;
+    for (const ConSanPatchInfo &access : result.patches) {
+      if (access.kind != ConSanPatchKind::TrampolineMoiAccessRecordStore)
+        continue;
+      EXPECT_FALSE(host.anchor_offset < access.anchor_offset + access.original_size &&
+                   access.anchor_offset < host.anchor_offset + host.original_size)
+          << "host=" << host.anchor_offset << "+" << host.original_size
+          << " access=" << access.anchor_offset << "+" << access.original_size;
+    }
+  }
+}
+
 TEST(ConSanMoi, Rdna4DenseRecordReplayBarriersUseRelocatedRouter) {
   // Seventeen split barriers contribute 34 supported member instructions,
   // exceeding the compact operating point and reserving the dense router.
