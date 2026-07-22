@@ -1528,9 +1528,8 @@ public:
         moi_report_summary.exact_unusable_snapshot_count() +
         moi_report_summary.release_unusable_snapshot_count() +
         moi_report_summary.token_unusable_snapshot_count() +
-        moi_report_summary.inline_unsupported_workgroup_count +
-        moi_report_summary.inline_overflow_count + moi_report_summary.inline_unsupported_count +
-        moi_report_summary.inline_malformed_count +
+        moi_report_summary.inline_undercoverage_count + moi_report_summary.inline_overflow_count +
+        moi_report_summary.inline_unsupported_count + moi_report_summary.inline_malformed_count +
         moi_report_summary.sampled_unsupported_sync_count +
         moi_report_summary.sampled_malformed_sync_count +
         moi_report_summary.replay_dropped_access_count +
@@ -1652,16 +1651,15 @@ public:
       if (moi_forbid_overflow)
         std::_Exit(90);
     }
-    const uint64_t inline_coverage_loss = moi_report_summary.inline_unsupported_workgroup_count +
-                                          moi_report_summary.inline_overflow_count +
-                                          moi_report_summary.inline_unsupported_count +
-                                          moi_report_summary.inline_malformed_count;
+    const uint64_t inline_coverage_loss =
+        moi_report_summary.inline_undercoverage_count + moi_report_summary.inline_overflow_count +
+        moi_report_summary.inline_unsupported_count + moi_report_summary.inline_malformed_count;
     if (inline_coverage_loss != 0) {
       std::fprintf(
           stderr,
           "[rocjitsu-dbi-hooks] ConSan MOI inline coverage loss: undercoverage=%llu "
           "overflow=%llu unsupported=%llu malformed=%llu across %llu auto report buffer(s)\n",
-          static_cast<unsigned long long>(moi_report_summary.inline_unsupported_workgroup_count),
+          static_cast<unsigned long long>(moi_report_summary.inline_undercoverage_count),
           static_cast<unsigned long long>(moi_report_summary.inline_overflow_count),
           static_cast<unsigned long long>(moi_report_summary.inline_unsupported_count),
           static_cast<unsigned long long>(moi_report_summary.inline_malformed_count),
@@ -1699,12 +1697,11 @@ public:
       std::fflush(stderr);
       std::_Exit(87);
     }
-    if (moi_report_summary.inline_unsupported_workgroup_count != 0) {
-      std::fprintf(
-          stderr,
-          "[rocjitsu-dbi-hooks] ConSan MOI inline undercoverage observed: "
-          "%llu lane-site publication(s) were not represented in exact shadow\n",
-          static_cast<unsigned long long>(moi_report_summary.inline_unsupported_workgroup_count));
+    if (moi_report_summary.inline_undercoverage_count != 0) {
+      std::fprintf(stderr,
+                   "[rocjitsu-dbi-hooks] ConSan MOI inline undercoverage observed: "
+                   "%llu lane-site publication(s) were not represented in exact shadow\n",
+                   static_cast<unsigned long long>(moi_report_summary.inline_undercoverage_count));
       std::fflush(stderr);
     }
     const bool moi_has_diagnostics = moi_report_summary.visible_diagnostic_record_count +

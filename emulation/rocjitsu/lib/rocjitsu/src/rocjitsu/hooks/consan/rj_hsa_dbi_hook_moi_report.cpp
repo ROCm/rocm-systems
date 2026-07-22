@@ -309,7 +309,7 @@ public:
       total.token_incomplete_snapshot_count += entry_summary.token_incomplete_snapshot_count;
       total.token_changed_snapshot_count += entry_summary.token_changed_snapshot_count;
       total.token_malformed_snapshot_count += entry_summary.token_malformed_snapshot_count;
-      total.inline_unsupported_workgroup_count += entry_summary.inline_unsupported_workgroup_count;
+      total.inline_undercoverage_count += entry_summary.inline_undercoverage_count;
       total.inline_overflow_count += entry_summary.inline_overflow_count;
       total.inline_unsupported_count += entry_summary.inline_unsupported_count;
       total.inline_malformed_count += entry_summary.inline_malformed_count;
@@ -1036,7 +1036,7 @@ private:
         sampled_watchpoint_capacity != 0 ? header->sampled_unsupported_sync_count : 0;
     summary.sampled_malformed_sync_count +=
         sampled_watchpoint_capacity != 0 ? header->sampled_malformed_sync_count : 0;
-    summary.inline_unsupported_workgroup_count =
+    summary.inline_undercoverage_count =
         entry.inline_shadow && !partition_mask_debug ? header->inline_undercoverage_count : 0;
     summary.inline_overflow_count = entry.inline_shadow ? header->inline_overflow_count : 0;
     summary.inline_unsupported_count = entry.inline_shadow ? header->inline_unsupported_count : 0;
@@ -1076,7 +1076,7 @@ private:
                 "inline_acquired_token_capacity=%u visible_inline_acquired_tokens=%zu "
                 "token_incomplete_snapshots=%llu token_changed_snapshots=%llu "
                 "token_malformed_snapshots=%llu "
-                "inline_unsupported_workgroups=%llu inline_overflow=%llu "
+                "inline_undercoverage=%llu inline_overflow=%llu "
                 "inline_unsupported=%llu inline_malformed=%llu "
                 "sampled_watchpoints=%u visible_sampled=%zu sampled_sync_capacity=%u "
                 "visible_sampled_sync=%u sampled_unsupported_sync=%u sampled_malformed_sync=%llu "
@@ -1113,7 +1113,7 @@ private:
                 static_cast<unsigned long long>(summary.token_incomplete_snapshot_count),
                 static_cast<unsigned long long>(summary.token_changed_snapshot_count),
                 static_cast<unsigned long long>(summary.token_malformed_snapshot_count),
-                static_cast<unsigned long long>(summary.inline_unsupported_workgroup_count),
+                static_cast<unsigned long long>(summary.inline_undercoverage_count),
                 static_cast<unsigned long long>(summary.inline_overflow_count),
                 static_cast<unsigned long long>(summary.inline_unsupported_count),
                 static_cast<unsigned long long>(summary.inline_malformed_count),
@@ -1384,10 +1384,12 @@ private:
       const rocjitsu::ConSanMoiAccessRecord &record = records[i];
       log_message(kLogInfo,
                   "ConSan MOI auto record reader=%llu index=%u event_index=%u kind=%u wave=%u "
-                  "epoch=%u inst=0x%x lds_offset=%u lds_bytes=%u cells=[%u,%u) "
+                  "epoch=%u workgroup=(%u,%u,%u) inst=0x%x lds_offset=%u lds_bytes=%u "
+                  "cells=[%u,%u) "
                   "lane_mask=0x%llx",
                   static_cast<unsigned long long>(entry.reader), i, record.event_index,
-                  record.access_kind, record.wave_id, record.epoch, record.instruction_offset,
+                  record.access_kind, record.wave_id, record.epoch, record.workgroup_x,
+                  record.workgroup_y, record.workgroup_z, record.instruction_offset,
                   record.lds_byte_offset, record.lds_byte_count, record.start_cell,
                   record.start_cell + record.cell_count,
                   static_cast<unsigned long long>(record.lane_mask));

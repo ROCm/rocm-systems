@@ -655,7 +655,7 @@ struct AutoMoiReportSummary {
   uint64_t token_incomplete_snapshot_count = 0;
   uint64_t token_changed_snapshot_count = 0;
   uint64_t token_malformed_snapshot_count = 0;
-  uint64_t inline_unsupported_workgroup_count = 0;
+  uint64_t inline_undercoverage_count = 0;
   uint64_t inline_overflow_count = 0;
   uint64_t inline_unsupported_count = 0;
   uint64_t inline_malformed_count = 0;

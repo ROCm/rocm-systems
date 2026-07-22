@@ -13,8 +13,10 @@ static_assert(alignof(ConSanMoiInlineExactShadowSlot) == 8);
 // independent exact-shadow banks so correct, unrelated workgroups do not
 // serialize every LDS cell through one versioned slot. The full dispatch and
 // packed workgroup identities remain in each slot and are still authoritative;
-// banking only removes avoidable contention.
-inline constexpr uint32_t kConSanMoiInlineExactDispatchBankCount = 32u;
+// banking only removes avoidable contention. Keep enough banks for the broad
+// dispatches produced by real reduction workloads while retaining a full-LDS
+// report below the automatic per-buffer ceiling.
+inline constexpr uint32_t kConSanMoiInlineExactDispatchBankCount = 256u;
 static_assert((kConSanMoiInlineExactDispatchBankCount &
                (kConSanMoiInlineExactDispatchBankCount - 1u)) == 0u);
 
