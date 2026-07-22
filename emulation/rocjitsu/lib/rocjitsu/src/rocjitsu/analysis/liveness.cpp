@@ -4,6 +4,7 @@
 #include "rocjitsu/analysis/liveness.h"
 
 #include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/isa/instruction.h"
 #include "util/bit.h"
@@ -59,6 +60,13 @@ void dfs_reverse_post_order(const BasicBlock &start,
   // Predicated defs and EXEC-masked vector defs preserve old values on at least
   // one path or lane. Until EXEC state is tracked at each program point, those
   // writes cannot be treated as unconditional liveness kills.
+  //
+  // The VGPR/ACC_VGPR kill suppression below is also load-bearing for the gfx1250
+  // VGPR-MSB def handling: InstDefUse records NOTHING for an unknown-bank VGPR def
+  // (see expand_operand_register in def_use_chain.cpp) on the assumption that such
+  // a def never becomes a liveness kill. Every VGPR def is exec-masked, so this
+  // clear is what upholds that assumption. If this suppression is removed or made
+  // conditional, revisit that def handling so an unknown-bank def does not over-kill.
   if (du.has_predicated_def)
     return {};
   if (du.has_exec_masked_vector_def) {
@@ -98,8 +106,16 @@ LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, LivenessAnalysisOpti
   analyze(blocks, options, extra_edges);
 }
 
+LivenessAnalysis::~LivenessAnalysis() = default;
+LivenessAnalysis::LivenessAnalysis(LivenessAnalysis &&) noexcept = default;
+LivenessAnalysis &LivenessAnalysis::operator=(LivenessAnalysis &&) noexcept = default;
+
 void LivenessAnalysis::analyze(KernelBlockScope blocks, const LivenessAnalysisOptions &options,
                                std::span<const ScopedCfgEdge> extra_edges) {
+  if (options.arch == ROCJITSU_CODE_ARCH_GFX1250 && options.entry_block != nullptr) {
+    gfx1250_vgpr_msb_ = std::make_unique<Gfx1250VgprMsbAnalysis>(blocks, options.entry_block,
+                                                                 extra_edges, options.text);
+  }
   liveness_.resize(blocks.size());
   block_index_.reserve(blocks.size());
   for (size_t i = 0; i < blocks.size(); ++i) {
@@ -157,7 +173,7 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, const LivenessAnalysisOp
       ++instruction_count;
       if (filter_live_before && requested_live_before.contains(&inst))
         ++requested_live_before_by_block[i];
-      InstDefUse du(inst);
+      InstDefUse du(inst, gfx1250_vgpr_msb_.get());
       RegisterSet kills = kill_defs(du);
       RegisterSet upward_uses = du.uses;
       upward_uses -= state.kill;
@@ -226,7 +242,7 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, const LivenessAnalysisOp
     for (auto it = insts.end(); it != insts.begin();) {
       --it;
       const Instruction *inst = &*it;
-      InstDefUse du(*inst);
+      InstDefUse du(*inst, gfx1250_vgpr_msb_.get());
       RegisterSet kills = kill_defs(du);
       live -= kills;
       live |= du.uses;
@@ -253,6 +269,13 @@ const RegisterSet &LivenessAnalysis::live_before(const Instruction &inst) const 
 
 bool LivenessAnalysis::is_live_before(const Instruction &inst, RegisterRef ref) const {
   return live_before(inst).contains(ref);
+}
+
+std::optional<uint8_t> LivenessAnalysis::vgpr_msb_bank_before(const Instruction &inst,
+                                                              amdgpu::VgprMsbRole role) const {
+  if (gfx1250_vgpr_msb_ == nullptr)
+    return std::nullopt;
+  return gfx1250_vgpr_msb_->bank_before(inst, role);
 }
 
 std::optional<uint16_t> LivenessAnalysis::find_free_run(const Instruction *inst, uint16_t count,
