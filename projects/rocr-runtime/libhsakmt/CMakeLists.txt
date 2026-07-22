@@ -286,6 +286,7 @@ else()
     target_compile_options(${HSAKMT_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_C_FLAGS})
 
     include(CheckFunctionExists)
+    include(CheckSymbolExists)
     set(CMAKE_REQUIRED_DEFINITIONS -D__USE_GNU=1)
     set(CMAKE_REQUIRED_INCLUDES sys/mman.h)
     check_function_exists(memfd_create HAVE_MEMFD_CREATE)
@@ -293,8 +294,9 @@ else()
       target_compile_definitions(${HSAKMT_TARGET} PRIVATE -DHAVE_MEMFD_CREATE=1)
     endif()
 
-    set(CMAKE_REQUIRED_INCLUDES sys/auxv.h)
-    check_function_exists(getauxval HAVE_GETAUXVAL)
+    # check_symbol_exists (not check_function_exists) so CMAKE_REQUIRED_INCLUDES
+    # is honored and we also verify AT_SECURE / the declaration are visible.
+    check_symbol_exists(getauxval "sys/auxv.h" HAVE_GETAUXVAL)
     if(HAVE_GETAUXVAL)
       target_compile_definitions(${HSAKMT_TARGET} PRIVATE -DHAVE_GETAUXVAL=1)
     endif()

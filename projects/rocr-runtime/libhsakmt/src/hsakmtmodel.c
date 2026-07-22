@@ -63,8 +63,11 @@ static bool hsakmt_is_at_secure(void)
 	return getauxval(AT_SECURE) != 0;
 #else
 	/* If we cannot query the secure-execution state, err on the side of
-	 * caution and behave as if elevated so the trusted-path restriction
-	 * on HSA_MODEL_LIB is always enforced. */
+	 * caution and behave as if elevated. Note this does more than enforce
+	 * the HSA_MODEL_LIB trusted-path restriction: because model_init_env_vars()
+	 * gates on "!at_secure", returning true here disables model mode
+	 * entirely on such a target. getauxval is universal on modern
+	 * glibc/musl, so this fallback is largely theoretical. */
 	return true;
 #endif
 }
