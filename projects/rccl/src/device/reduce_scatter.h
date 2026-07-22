@@ -11,11 +11,7 @@
 
 namespace {
 template <typename T, typename RedOp, typename Proto>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
 __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
-#else
-__device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
-#endif
     // Step 0: Setup
   size_t msgSize = work->count * sizeof(T) * ncclShmem.comm.nRanks;
   if (work->enableDirectReduceScatter && msgSize <= (size_t)work->directReduceScatterLimitBytes) {

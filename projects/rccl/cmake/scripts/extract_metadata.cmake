@@ -18,64 +18,36 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(EXTRACT_TIMEOUT 5 CACHE STRING "Timeout in seconds for llvm-readobj and llvm-objcopy calls")
+## Extract the per-architecture offload bundles from librccl.so.
+## `llvm-objdump --offloading` writes each embedded bundle (host + every gfx
+## arch) out as a sibling file, which is the artifact we want.
+##
+## This script is run via `cmake -P`, so it has no access to the build's cache
+## variables; resolve ROCM_PATH from the environment and locate llvm-objdump,
+## falling back to PATH.
+if(NOT DEFINED ROCM_PATH AND DEFINED ENV{ROCM_PATH})
+    set(ROCM_PATH "$ENV{ROCM_PATH}")
+endif()
 
-## List the objects for each gfx architecture
-execute_process( COMMAND llvm-readobj --offloading librccl.so
+find_program(LLVM_OBJDUMP
+    NAMES llvm-objdump
+    HINTS "${ROCM_PATH}/llvm/bin" "${ROCM_PATH}/bin"
+)
+if(NOT LLVM_OBJDUMP)
+    set(LLVM_OBJDUMP llvm-objdump)
+endif()
+
+execute_process( COMMAND ${LLVM_OBJDUMP} --offloading librccl.so
     RESULT_VARIABLE list_result
     OUTPUT_VARIABLE cmd_output
     ERROR_VARIABLE cmd_error
     OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_STRIP_TRAILING_WHITESPACE
-    TIMEOUT ${EXTRACT_TIMEOUT}
-)
+    ERROR_STRIP_TRAILING_WHITESPACE)
 
 if(list_result EQUAL 0)
-    ## Convert cmd output to list of lines
-    string(REGEX REPLACE "\n$" "" cmd_output "${cmd_output}")
-    string(REPLACE "\n" ";" cmd_output "${cmd_output}")
-
-    ## Extract file paths for the selected gfx archs
-    foreach(line ${cmd_output})
-        if(line MATCHES "(gfx90a|gfx942|gfx950)")
-            string(REGEX MATCH "\\file://(.*)" file_match ${line})
-            if(file_match)
-                list(APPEND file_paths ${file_match})
-            endif()
-        endif()
-    endforeach()
-
-    ## Extract objects from files
-    foreach(file ${file_paths})
-        execute_process(
-          COMMAND llvm-objcopy --dump-offload-bundle=${file}
-          RESULT_VARIABLE extraction_result
-          ERROR_VARIABLE extraction_error
-          OUTPUT_STRIP_TRAILING_WHITESPACE
-          ERROR_STRIP_TRAILING_WHITESPACE
-          TIMEOUT ${EXTRACT_TIMEOUT}
-        )
-        if(extraction_result STREQUAL "TIMEOUT")
-          message(
-            WARNING
-              "[Timeout] Extraction of '${file}' did not finish within ${EXTRACT_TIMEOUT}s. stderr: ${extraction_error}.
-                    Timeouts have been known to happen as a result of mismatched ROCm versions/executables/etc."
-          )
-        elseif(NOT extraction_result EQUAL 0)
-          message(
-            WARNING
-              "[Error ${extraction_result}] Could not extract objects from '${file}'. stderr: ${extraction_error}"
-          )
-        endif()
-    endforeach()
-
-elseif(list_result STREQUAL "TIMEOUT")
-  message(
-    WARNING
-      "[Timeout] llvm-readobj/llvm-objcopy did not finish within ${EXTRACT_TIMEOUT}s. stderr: ${cmd_error}.
-                     Timeouts have been known to happen as a result of mismatched ROCm versions/executables/etc"
-  )
+    message(STATUS "Extracted offload bundles from librccl.so:\n${cmd_output}")
 else()
-    ## We don't want to stop building unit-tests if this command fails.
-    message(WARNING "[Error ${list_result}] llvm-readobj --offloading failed. stderr: ${cmd_error}")
+    ## Don't fail the build if extraction fails; just report it.
+    message(WARNING "[Error ${list_result}] '${LLVM_OBJDUMP} --offloading' failed. stderr: ${cmd_error}")
 endif()
+

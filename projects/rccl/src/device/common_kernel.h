@@ -432,7 +432,6 @@ __device__ __forceinline__ void reduceCopyPacksWithBias(int nThreads, int& threa
   uintptr_t minSrcs[MinSrcs + !MinSrcs];
   uintptr_t minDsts[MinDsts + !MinDsts];
   uintptr_t accPtr = cvta_to_global(accPtrFn()) + threadBytesBehind;
-  BytePack<BytePerPack> bias[Unroll];
 
 #pragma unroll
   for (int s = 0; s < MinSrcs; s++) {
@@ -461,9 +460,6 @@ __device__ __forceinline__ void reduceCopyPacksWithBias(int nThreads, int& threa
         } else {
           // Use volatile loads in case credits are polled for with volatile (instead of acquire).
           acc[u] = ld_volatile_global<BytePerPack>(minSrcs[0]);
-            // coverity[dead_error_condition]
-          bias[u] = ld_volatile_global<BytePerPack>(accPtr);
-          accPtr += WARP_SIZE * BytePerPack;
           if (0 < PreOpSrcs) acc[u] = applyPreOp(redFn, acc[u]);
         }
         minSrcs[0] += WARP_SIZE * BytePerPack;
@@ -474,42 +470,39 @@ __device__ __forceinline__ void reduceCopyPacksWithBias(int nThreads, int& threa
     for (int s = 1; s < MinSrcs; s++) {
       // Yes, for some template arguments this code will be unreachable.  That's fine.
       // coverity[dead_error_begin]
-      BytePack<BytePerPack> tmp[Unroll];
+      // Fuse the load and reduce of each pack so only a single tmp pack is live
+      // at a time instead of tmp[Unroll].
 #pragma unroll Unroll
       for (int u = 0; u < Unroll; u++) {
+        BytePack<BytePerPack> tmp;
         if (s < MultimemSrcs) {
           // applyLoadMultimem uses relaxed semantics for same reason we use volatile below.
           // coverity[dead_error_line]
-          tmp[u] = applyLoadMultimem<RedFn, BytePerPack>(redFn, minSrcs[s]);
+          tmp = applyLoadMultimem<RedFn, BytePerPack>(redFn, minSrcs[s]);
         } else {
           // Use volatile loads in case credits are polled for with volatile (instead of acquire).
-          tmp[u] = ld_volatile_global<BytePerPack>(minSrcs[s]);
+          tmp = ld_volatile_global<BytePerPack>(minSrcs[s]);
         }
         minSrcs[s] += WARP_SIZE * BytePerPack;
-      }
-#pragma unroll Unroll
-      for (int u = 0; u < Unroll; u++) {
         // coverity[dead_error_line]
-        if (s < PreOpSrcs) tmp[u] = applyPreOp(redFn, tmp[u]);
-        acc[u] = applyReduce(redFn, acc[u], tmp[u]);
+        if (s < PreOpSrcs) tmp = applyPreOp(redFn, tmp);
+        acc[u] = applyReduce(redFn, acc[u], tmp);
       }
     }
 
     for (int s = MinSrcs; (MinSrcs < MaxSrcs) && (s < MaxSrcs) && (s < nSrcs); s++) {
       uintptr_t src = cvta_to_global(srcPtrFn(s)) + threadBytesBehind;
-      BytePack<BytePerPack> tmp[Unroll];
+      // Fuse load+reduce per pack (see MinSrcs loop above): keeps only one tmp
+      // pack live instead of tmp[Unroll], reducing scratch on useAcc kernels.
 #pragma unroll Unroll
       for (int u = 0; u < Unroll; u++) {
         // Use volatile loads in case credits are polled for with volatile (instead of acquire).
-        tmp[u] = ld_volatile_global<BytePerPack>(src);
+        BytePack<BytePerPack> tmp = ld_volatile_global<BytePerPack>(src);
         src += WARP_SIZE * BytePerPack;
-      }
-#pragma unroll Unroll
-      for (int u = 0; u < Unroll; u++) {
         // Yes, for some template arguments this code will be unreachable.  That's fine.
         // coverity[dead_error_line]
-        if (s < PreOpSrcs) tmp[u] = applyPreOp(redFn, tmp[u]);
-        acc[u] = applyReduce(redFn, acc[u], tmp[u]);
+        if (s < PreOpSrcs) tmp = applyPreOp(redFn, tmp);
+        acc[u] = applyReduce(redFn, acc[u], tmp);
       }
     }
 
@@ -528,8 +521,13 @@ __device__ __forceinline__ void reduceCopyPacksWithBias(int nThreads, int& threa
         if (d < MultimemDsts) {
           multimem_st_global(minDsts[d], acc[u]);
         } else {
-          if (d == 0) st_global<BytePerPack>(minDsts[d], applyReduce(redFn, acc[u], bias[u]));
-          else st_global<BytePerPack>(minDsts[d], acc[u]);
+          if (d == 0) {
+            // Load the bias/accumulator pack here, at the point of use, rather
+            // than up front.
+            BytePack<BytePerPack> b = ld_volatile_global<BytePerPack>(accPtr + u * WARP_SIZE * BytePerPack);
+            st_global<BytePerPack>(minDsts[d], applyReduce(redFn, acc[u], b));
+          } else
+            st_global<BytePerPack>(minDsts[d], acc[u]);
         }
         minDsts[d] += WARP_SIZE * BytePerPack;
       }
@@ -555,7 +553,8 @@ __device__ __forceinline__ void reduceCopyPacksWithBias(int nThreads, int& threa
     for (int d = 0; d < MinDsts; d++) {
       minDsts[d] += (nWarps - 1) * BytePerHunk;
     }
-    accPtr += (nWarps - 1) * BytePerHunk;
+    // advance the full hunk here to stay in sync with minSrcs/minDsts.
+    accPtr += nWarps * BytePerHunk;
     threadBytesBehind += nWarps * BytePerHunk;
     threadBytesAhead -= nWarps * BytePerHunk;
     nHunksAhead -= nWarps;

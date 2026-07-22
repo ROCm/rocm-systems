@@ -10,11 +10,7 @@
 
 namespace {
 template <typename T, typename RedOp, typename Proto>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
 __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
-#else
-__device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
-#endif
   const int bid = ncclShmem.channelId - work->channelLo;
   const int nranks = ncclShmem.comm.nRanks;
   size_t count, partOffset, partCount, chunkCount;
