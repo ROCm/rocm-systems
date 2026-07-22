@@ -259,14 +259,26 @@ void L2Cache::flush_all(uint32_t vmid) {
 void L2Cache::invalidate_range(uint64_t addr, uint32_t size, uint32_t vmid) {
   if (size == 0)
     return;
-  std::shared_lock maintenance_lock(maintenance_mutex_);
   const uint64_t line_start = CacheStore::line_address(addr);
   const uint64_t requested_lines =
       (static_cast<uint64_t>(CacheStore::line_offset(addr)) + size + LINE_SIZE - 1) / LINE_SIZE;
   const uint64_t addressable_lines =
       (std::numeric_limits<uint64_t>::max() - line_start) / LINE_SIZE + 1;
   const uint64_t line_count = std::min(requested_lines, addressable_lines);
-  auto locks = lock_sets_for_range(line_start, line_count);
+
+  if (line_count <= MAX_INVALIDATE_RANGE_SET_LOCKS) {
+    std::shared_lock maintenance_lock(maintenance_mutex_);
+    auto locks = lock_sets_for_range(line_start, line_count);
+    invalidate_range_locked(addr, size, vmid, line_start, line_count);
+    return;
+  }
+
+  std::unique_lock maintenance_lock(maintenance_mutex_);
+  invalidate_range_locked(addr, size, vmid, line_start, line_count);
+}
+
+void L2Cache::invalidate_range_locked(uint64_t addr, uint32_t size, uint32_t vmid,
+                                      uint64_t line_start, uint64_t line_count) {
   uint64_t remaining = size;
   for (uint64_t i = 0; i < line_count; ++i) {
     const uint64_t line_addr = line_start + i * LINE_SIZE;

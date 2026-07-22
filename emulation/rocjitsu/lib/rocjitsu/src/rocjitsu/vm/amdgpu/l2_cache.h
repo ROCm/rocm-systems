@@ -49,7 +49,8 @@ namespace amdgpu {
 /// but do not invalidate other aliases; CC/UC access or explicit cache
 /// maintenance is required before an alias refetches that data. Dirty lines are
 /// written back through their owning VMID. Atomic RMW is intentionally stronger:
-/// GpuMemory resolves mapped aliases to one backing identity for serialization.
+/// L2Cache serializes dirty writeback and the backing RMW process-wide, above
+/// GPU-VA-to-host mapping differences.
 ///
 /// Serves as the backing store for both L1 Scalar (K$) and L1 Vector (V$).
 ///
@@ -135,11 +136,10 @@ public:
 
   /// @brief Perform an atomic read-modify-write on a cache line.
   ///
-  /// @details Invalidates the local line, then delegates the RMW to GpuMemory,
-  /// which serializes by resolved backing address across all L2 instances.
-  /// Port-only configurations use one conservative process-wide lock. This
-  /// models device-wide atomic arbitration when multiple XCD-local L2s or VMID
-  /// aliases share backing memory.
+  /// @details Serializes process-wide before flushing the local dirty line,
+  /// then delegates the RMW to GpuMemory. Holding the same lock through local
+  /// tag cleanup models device-wide atomic arbitration when multiple XCD-local
+  /// L2s or VMID aliases share backing memory, including port-only setups.
   ///
   /// @param addr The memory address of the atomic target.
   /// @param size Access size in bytes (4 or 8).
@@ -148,6 +148,7 @@ public:
   template <typename F> void atomic_rmw(uint64_t addr, uint32_t size, F &&fn, uint32_t vmid = 0) {
     std::shared_lock maintenance_lock(maintenance_mutex_);
     std::lock_guard set_lock(set_mutex(addr));
+    std::lock_guard atomic_lock(device_atomic_mutex());
     flush_line_locked(addr, vmid);
 
     if (backing_memory_) {
@@ -155,7 +156,6 @@ public:
       backing_write_transactions_.fetch_add(1, std::memory_order_relaxed);
       backing_memory_->atomic_rmw(addr, size, [&](uint8_t *target) { fn(target, 0); }, vmid);
     } else {
-      std::lock_guard atomic_lock(fallback_atomic_mutex());
       ensure_line(addr, vmid);
       uint32_t offset = CacheStore::line_offset(addr);
       uint8_t *line = cache_.line_data_for_write(addr, vmid);
@@ -220,11 +220,15 @@ public:
   const std::vector<simdojo::Port *> &cpl_ports() const { return cpl_ports_; }
 
 private:
+  friend class L2CacheTestAccess;
+
+  static constexpr uint64_t MAX_INVALIDATE_RANGE_SET_LOCKS = 64;
+
   std::mutex &set_mutex(uint64_t addr) const { return set_mutexes_[CacheStore::set_index(addr)]; }
 
-  static std::mutex &fallback_atomic_mutex() {
-    // Port-only configurations cannot expose a resolved backing identity.
-    // Serialize their atomics conservatively rather than keying by GPU VA.
+  static std::mutex &device_atomic_mutex() {
+    // Different host mappings can name the same backing object. Serialize
+    // above address translation so dirty writeback and the RMW stay one unit.
     static std::mutex mutex;
     return mutex;
   }
@@ -281,6 +285,8 @@ private:
 
   void ensure_line(uint64_t addr, uint32_t vmid = 0);
   void flush_line_locked(uint64_t addr, uint32_t vmid = 0);
+  void invalidate_range_locked(uint64_t addr, uint32_t size, uint32_t vmid, uint64_t line_start,
+                               uint64_t line_count);
   void send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo::MessageOp op,
                     uint32_t vmid = 0);
 
@@ -291,8 +297,8 @@ private:
   GpuMemory *backing_memory_ = nullptr; ///< Direct writeback path (functional mode).
   std::vector<simdojo::Port *> cpl_ports_;
   std::atomic<uint64_t> write_count_ = 0; ///< Debug: total L2 writes (for trace).
-  // Relaxed atomics: backing-address-striped atomic_rmw() calls can update
-  // these concurrently.
+  // Relaxed atomics: independent cache operations can update these counters
+  // concurrently; the values are diagnostic only.
   std::atomic<uint64_t> backing_read_transactions_{0};
   std::atomic<uint64_t> backing_write_transactions_{0};
 };
