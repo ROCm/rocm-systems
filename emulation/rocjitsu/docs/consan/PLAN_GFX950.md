@@ -272,6 +272,16 @@ flowchart TD
 
 ## Reconnaissance conclusions
 
+- 2026-07-22: TP2 SuperCollider is green within ACTIVE/blue `SC1`.
+  Prospectively reviewed physical artifact
+  `consan-validation-gfx950-tp2-supercollider-fault-attention-publish-20260722-108`
+  applies exactly one barrier mutation between lane-restricted LDS publication
+  and consumption, reports exactly one instability, and passes combined,
+  decode, and prefill oracles with complete 936/936 access coverage.  It
+  terminates without cleanup residue and passes physical health before and
+  after at clean commit `0e5775387e`.  The earlier schedule-masked fault stays
+  retained as a rejected contract rather than being rewritten.
+
 - 2026-07-22: `SC1` becomes ACTIVE/blue as TP1 prefill SuperCollider turns
   green.  Clean and one-repetition paired evidence already established the
   exact oracle, complete 120/120 access coverage, and 1.13x slowdown.  After
