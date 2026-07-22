@@ -1333,6 +1333,118 @@ TEST(ConSanMoi, Cdna4FirstLightProbeForcedSpillUsesNativePrivateWindow) {
       1u);
 }
 
+TEST(ConSanMoi, Cdna4StaticRecordReplayRestoresOverlappingStoreOperandsBeforeGuest) {
+  const auto guest = build_cdna4_ds_store_b32(
+      /*vaddr=*/0, /*vdata=*/4, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(guest);
+  std::vector<uint32_t> text_words(guest->begin(), guest->end());
+  for (uint16_t vgpr = 1; vgpr < 8; ++vgpr)
+    text_words.push_back(
+        build_v_mov_b32_e32(/*vdst=*/7, vector_source_vgpr(vgpr), ROCJITSU_CODE_ARCH_CDNA4));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+  std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, "record_replay_store_operand_overlap");
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    // Bound ordinary VGPRs to v0..v7. Every aligned three-VGPR window then
+    // intersects either the address v0 or store payload v4.
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 1u);
+  });
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
+  EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::None);
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
+    return item.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
+  });
+  ASSERT_NE(patch, result.patches.end());
+  ASSERT_EQ(patch->scratch_vgpr, 0u);
+  ASSERT_EQ(patch->spilled_vgpr_count, 3u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave_words =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  std::vector<uint32_t> restore;
+  for (uint16_t vgpr = 0; vgpr < patch->spilled_vgpr_count; ++vgpr) {
+    const auto load =
+        build_cdna4_address_free_scratch_load_b32(vgpr, 4u * vgpr, ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_TRUE(load);
+    restore.insert(restore.end(), load->begin(), load->end());
+  }
+  const auto wait = build_cdna4_s_wait_vmcnt0(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(wait);
+  restore.push_back(*wait);
+  const auto restore_position =
+      std::search(cave_words.begin(), cave_words.end(), restore.begin(), restore.end());
+  ASSERT_NE(restore_position, cave_words.end());
+  const auto guest_position =
+      std::search(cave_words.begin(), cave_words.end(), guest->begin(), guest->end());
+  ASSERT_NE(guest_position, cave_words.end());
+  EXPECT_EQ(restore_position + restore.size(), guest_position)
+      << "the store must consume restored address and payload operands";
+}
+
+TEST(ConSanMoi, Cdna4StaticRecordReplayRestoresOverlappingLoadOperandsBeforeGuest) {
+  const auto guest = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 4});
+  std::vector<uint32_t> text_words(guest.begin(), guest.end());
+  for (uint16_t vgpr = 1; vgpr < 8; ++vgpr)
+    text_words.push_back(
+        build_v_mov_b32_e32(/*vdst=*/7, vector_source_vgpr(vgpr), ROCJITSU_CODE_ARCH_CDNA4));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+  std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, "record_replay_load_operand_overlap");
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 1u);
+  });
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
+  EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::None);
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
+    return item.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
+  });
+  ASSERT_NE(patch, result.patches.end());
+  ASSERT_EQ(patch->scratch_vgpr, 0u);
+  ASSERT_EQ(patch->spilled_vgpr_count, 3u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave_words =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  std::vector<uint32_t> restore;
+  for (uint16_t vgpr = 0; vgpr < patch->spilled_vgpr_count; ++vgpr) {
+    const auto load =
+        build_cdna4_address_free_scratch_load_b32(vgpr, 4u * vgpr, ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_TRUE(load);
+    restore.insert(restore.end(), load->begin(), load->end());
+  }
+  const auto wait = build_cdna4_s_wait_vmcnt0(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(wait);
+  restore.push_back(*wait);
+  const auto restore_position =
+      std::search(cave_words.begin(), cave_words.end(), restore.begin(), restore.end());
+  ASSERT_NE(restore_position, cave_words.end());
+  const auto guest_position =
+      std::search(cave_words.begin(), cave_words.end(), guest.begin(), guest.end());
+  ASSERT_NE(guest_position, cave_words.end());
+  EXPECT_EQ(restore_position + restore.size(), guest_position)
+      << "the load must consume the restored address before defining its destination";
+}
+
 TEST(ConSanMoi, DynamicAccessRecordProbeAppendsPerLaneRecords) {
   std::array<uint32_t, 260> text_words{};
   text_words[0] = 0xD8340000u;

@@ -1394,15 +1394,19 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
   }
 
   ConSanRegisterPlan register_plan = plan_consan_registers(request, live_before_all_owners);
+  const bool supports_operand_overlap_spill =
+      options.moi_engine == ConSanMoiEngine::InlineShadow ||
+      (state.arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+       options.moi_engine == ConSanMoiEngine::RecordReplay && !options.moi_dynamic_access_records);
   if (register_plan.source == ConSanRegisterAllocationSource::Unsupported &&
       register_plan.reason == ConSanRegisterPlanReason::NoLegalWindow &&
-      options.moi_engine == ConSanMoiEngine::InlineShadow &&
-      site_kind == ConSanResourceSiteKind::Access && !request.explicit_base) {
-    // Inline access bodies execute in appended caves as save -> probe ->
-    // restore -> displaced guest access. The spill tier may therefore use a
-    // window overlapping the guest instruction's operands: those values are
-    // restored before that instruction executes. Persistent state remains
-    // forbidden because it must survive the complete kernel lifetime.
+      supports_operand_overlap_spill && site_kind == ConSanResourceSiteKind::Access &&
+      !request.explicit_base) {
+    // InlineShadow and CDNA4 static Record/Replay access bodies execute in
+    // appended caves as save -> probe -> restore -> displaced guest access.
+    // Their spill tier may therefore use a window overlapping the guest
+    // instruction's operands. Persistent state remains forbidden because it
+    // must survive the complete kernel lifetime.
     ConSanRegisterRequest spill_request = request;
     spill_request.force_spill = true;
     spill_request.forbidden = {};

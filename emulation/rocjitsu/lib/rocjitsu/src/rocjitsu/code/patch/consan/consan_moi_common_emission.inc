@@ -604,7 +604,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   auto lds_byte_offset_vgpr = candidate_lds_byte_offset_vgpr(candidate, errors);
   if (!lds_byte_offset_vgpr)
     return std::nullopt;
-  if (reject_candidate_scratch_range_overlap(candidate, *options.scratch_vgpr, scratch_count,
+  if (!options.moi_spill_overlaps_guest_operands &&
+      reject_candidate_scratch_range_overlap(candidate, *options.scratch_vgpr, scratch_count,
                                              errors))
     return std::nullopt;
   if (options.moi_dynamic_access_records && has_recent_saveexec(bytes, candidate)) {

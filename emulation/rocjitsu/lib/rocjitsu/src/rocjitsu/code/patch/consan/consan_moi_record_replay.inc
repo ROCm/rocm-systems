@@ -86,6 +86,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     uint32_t persistent_private_state_end = 0;
     uint32_t required_private_bytes = 0;
     uint32_t probe_guest_instruction_offset = 0;
+    bool spill_overlaps_guest_operands = false;
   };
   std::vector<PlannedAccessRecordPatch> planned_patches;
   uint32_t planned_record_count = 0;
@@ -170,8 +171,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   // here (and a third time for component-local scalar assignments) is both
   // redundant and dominant on multi-thousand-kernel generated libraries.
   const auto &dense_host_blocks = resource_state.blocks;
-  if ((is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-      use_indirect_appended && local_entry_islands) {
+  if ((is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA4) && use_indirect_appended &&
+      local_entry_islands) {
     struct DenseGroup {
       std::vector<const ConSanMoiCandidate *> candidates;
       size_t first_candidate_index = 0;
@@ -452,6 +453,13 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           "ConSan MOI first-light probe found no common transient SGPR assignment");
       continue;
     }
+    bool spill_overlaps_guest_operands = false;
+    if (spill && arch == ROCJITSU_CODE_ARCH_CDNA4 && !options.moi_dynamic_access_records) {
+      std::vector<std::string> ignored_overlap_errors;
+      spill_overlaps_guest_operands = reject_candidate_scratch_range_overlap(
+          candidate, resources->base, resources->count, ignored_overlap_errors);
+      candidate_options.moi_spill_overlaps_guest_operands = spill_overlaps_guest_operands;
+    }
     const uint32_t candidate_entry_island_words =
         candidate_options.automatic_moi_record_replay_sgpr_spill ? kIndirectIslandWords + 1u
                                                                  : kIndirectIslandWords;
@@ -617,6 +625,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       planned.persistent_private_state_end = private_layout->ephemeral_base;
     }
     planned.required_private_bytes = required_private_bytes;
+    planned.spill_overlaps_guest_operands = spill_overlaps_guest_operands;
     planned_patches.push_back(std::move(planned));
     if (use_indirect_appended && !use_dense_call)
       planned_anchor_end = candidate.text_offset + placement->original_size;
@@ -949,6 +958,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       const ConSanMoiCandidate &candidate = *planned_patch.candidate;
       ConSanOptions candidate_options = options;
       candidate_options.scratch_vgpr = planned_patch.resources.base;
+      candidate_options.moi_spill_overlaps_guest_operands =
+          planned_patch.spill_overlaps_guest_operands;
       if (!apply_moi_transient_sgpr_assignment(
               candidate_options, planned_patch.resources.owner_descriptor_file_offsets) ||
           !candidate_options.moi_exec_save_sgpr) {
@@ -1034,7 +1045,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                        : std::span<const uint32_t>{},
             planned_patch.gfx1250_vgpr_msb_mode,
             options.moi_dynamic_access_records ? 0u : candidate.size / sizeof(uint32_t), {},
-            planned_patch.probe_guest_instruction_offset, &body_guest_instruction_offset);
+            planned_patch.probe_guest_instruction_offset, &body_guest_instruction_offset,
+            planned_patch.spill_overlaps_guest_operands);
         if (!cave_words)
           return;
         if (planned_patch.dense_call_anchor) {
@@ -1155,6 +1167,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           [&](const PlannedAccessRecordPatch &planned_patch) {
             ConSanOptions candidate_options = options;
             candidate_options.scratch_vgpr = planned_patch.resources.base;
+            candidate_options.moi_spill_overlaps_guest_operands =
+                planned_patch.spill_overlaps_guest_operands;
             if (!apply_moi_transient_sgpr_assignment(
                     candidate_options, planned_patch.resources.owner_descriptor_file_offsets))
               return std::optional<std::vector<uint32_t>>{};
