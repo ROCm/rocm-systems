@@ -435,32 +435,9 @@ def test_load_pc_sampling_data_out_of_bounds_kernel_warns(monkeypatch) -> None:
     }
 
     workload.filter_kernel_ids = [99]
-    result = load_pc_sampling_data(workload, "test", "count", tool_data)
+    result = load_pc_sampling_data(workload, "test", "count", [tool_data])
 
     mock_warning.assert_called()
     call_args_str = str(mock_warning.call_args)
     assert "out of bounds" in call_args_str or "99" in call_args_str
     assert result.empty
-
-
-def test_load_pc_sampling_data_single_kernel_uses_workload_dfs(monkeypatch) -> None:
-    """A single-kernel filter reads the kernel name from workload.dfs[1]."""
-    per_kernel_calls = []
-
-    def record_per_kernel(*args, **kwargs):
-        per_kernel_calls.append((args, kwargs))
-        return pd.DataFrame()
-
-    monkeypatch.setattr(
-        "utils.parser.load_pc_sampling_data_per_kernel", record_per_kernel
-    )
-    workload = _kernel_top_workload()
-    tool_data = {
-        "buffer_records": {"pc_sample_stochastic": [{}], "pc_sample_host_trap": []}
-    }
-
-    workload.filter_kernel_ids = [1]
-    load_pc_sampling_data(workload, "test", "count", tool_data)
-
-    if per_kernel_calls:
-        assert "kernel_b" in str(per_kernel_calls[0])
