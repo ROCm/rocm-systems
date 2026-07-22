@@ -46,6 +46,7 @@ enum class domain_type
     SPM_COUNTER_VALUES,
     OMPT,
     HIP_GRAPH,
+    ROCSHMEM,
     LAST,
 };
 
