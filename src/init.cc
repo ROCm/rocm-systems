@@ -2447,6 +2447,7 @@ static ncclResult_t parseCommConfig(ncclComm_t comm, ncclConfig_t* config) {
       internalConfigPtr->launchOrderImplicit = defaultConfig.launchOrderImplicit;
       internalConfigPtr->numRmaSig = defaultConfig.numRmaSig;
       internalConfigPtr->rmaEagerInit = defaultConfig.rmaEagerInit;
+      internalConfigPtr->hostCftMode = defaultConfig.hostCftMode;
     }
   }
 
@@ -2569,6 +2570,13 @@ static ncclResult_t parseCommConfig(ncclComm_t comm, ncclConfig_t* config) {
     goto fail;
   }
 
+  if (internalConfigPtr->hostCftMode != NCCL_CONFIG_UNDEF_INT &&
+      (internalConfigPtr->hostCftMode < ncclHostCftEnable || internalConfigPtr->hostCftMode > ncclHostCftFallback)) {
+    WARN("Invalid config hostCftMode attribute value %d", internalConfigPtr->hostCftMode);
+    ret = ncclInvalidArgument;
+    goto fail;
+  }
+
   /* default config value can be tuned on different platform. */
   NCCL_CONFIG_DEFAULT(internalConfigPtr, blocking, NCCL_CONFIG_UNDEF_INT, 1, "Blocking", "%d");
   NCCL_CONFIG_DEFAULT(internalConfigPtr, cgaClusterSize, NCCL_CONFIG_UNDEF_INT, 4, "CGA cluster size", "%d");
@@ -2597,6 +2605,8 @@ static ncclResult_t parseCommConfig(ncclComm_t comm, ncclConfig_t* config) {
                       "launchOrderImplicit", "%d");
   NCCL_CONFIG_DEFAULT(internalConfigPtr, numRmaSig, NCCL_CONFIG_UNDEF_INT, 1, "numRmaSig", "%d");
   NCCL_CONFIG_DEFAULT(internalConfigPtr, rmaEagerInit, NCCL_CONFIG_UNDEF_INT, 0, "rmaEagerInit", "%d");
+  NCCL_CONFIG_DEFAULT(internalConfigPtr, hostCftMode, NCCL_CONFIG_UNDEF_INT, (ncclHostCftMode_t)NCCL_CONFIG_UNDEF_INT,
+                      "hostCftMode", "%d");
 
   /* assign config to communicator */
   comm->config.blocking = internalConfigPtr->blocking;
@@ -2620,6 +2630,7 @@ static ncclResult_t parseCommConfig(ncclComm_t comm, ncclConfig_t* config) {
   comm->config.launchOrderImplicit = internalConfigPtr->launchOrderImplicit;
   comm->config.numRmaSig = internalConfigPtr->numRmaSig;
   comm->config.rmaEagerInit = internalConfigPtr->rmaEagerInit;
+  comm->config.hostCftMode = internalConfigPtr->hostCftMode;
   NCCLCHECKGOTO(envConfigOverride(comm), ret, fail);
 
   // Resolve to system default (serialize) if neither user config nor env var set it.
@@ -2627,6 +2638,11 @@ static ncclResult_t parseCommConfig(ncclComm_t comm, ncclConfig_t* config) {
 
   // Resolve to default (lazy init) if neither user config nor env var set it.
   if (comm->config.rmaEagerInit == NCCL_CONFIG_UNDEF_INT) comm->config.rmaEagerInit = 0;
+
+  // In NCCL 2.31, the default host CFT mode is "Disable".
+  if (comm->config.hostCftMode == NCCL_CONFIG_UNDEF_INT) {
+    comm->config.hostCftMode = ncclHostCftDisable;
+  }
 
   // Warn and fall back when graphStreamOrdering=0 is combined with graphUsageMode=2 (unsupported).
   if (comm->config.graphStreamOrdering == 0 && comm->config.graphUsageMode == 2) {

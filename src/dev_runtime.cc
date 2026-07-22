@@ -629,10 +629,12 @@ static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocatio
     int numSegments;
     bool hasSysmemSegment;
     size_t totalSize;
+    int hostCftMode;
   };
   struct segmentInfo* globalSegmentInfo = nullptr;
   const int globalLsaTeamBaseIdx = devr->lsaSize * (comm->rank / devr->lsaSize);
-  ncclCftLeId leUcSelf = NCCL_LE_ID_INVALID;
+  struct ncclDevrTeam *cftUcTeam = nullptr, *cftMcTeam = nullptr;
+  bool cftUcBound = false, cftMcBound = false;
 
   struct ncclDevrMemory* mem = nullptr;
   // New memory.
@@ -654,6 +656,7 @@ static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocatio
   globalSegmentInfo[comm->rank].numSegments = numSegments;
   globalSegmentInfo[comm->rank].hasSysmemSegment = hasSysmemSegment;
   globalSegmentInfo[comm->rank].totalSize = size;
+  globalSegmentInfo[comm->rank].hostCftMode = comm->config.hostCftMode;
   NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, globalSegmentInfo, sizeof(*globalSegmentInfo)), ret, fail_mem);
   mem->globalHasSysmemSegment = false;
   for (int r = 0; r < comm->nRanks; r++) {
@@ -661,6 +664,11 @@ static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocatio
       mem->maxGlobalNumSegments = globalSegmentInfo[r].numSegments;
     }
     if (globalSegmentInfo[r].hasSysmemSegment) mem->globalHasSysmemSegment = true;
+    if (globalSegmentInfo[r].hostCftMode != comm->config.hostCftMode) {
+      WARN("Communicator ranks have mismatched hostCftMode configuration.");
+      ret = ncclInvalidArgument;
+      goto fail_mem;
+    }
   }
 
   NCCLCHECKGOTO(ncclCalloc(&mem->lsaNumSegments, devr->lsaSize), ret, fail_mem);
@@ -686,20 +694,54 @@ static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocatio
     mem->primaryAddr = (char*)devr->lsaFlatBase + devr->lsaSelf * devr->bigSize + mem->bigOffset;
   }
 
-  if (comm->gpuCftSupport > 0 && devr->le.baseId != NCCL_LE_ID_INVALID) {
-    ncclTeam_t flatTeam = ncclTeamCft(comm);
-    struct ncclDevrTeam* tmCft = nullptr;
-    NCCLCHECKGOTO(symTeamObtain(comm, flatTeam, /*multimem=*/false, /*uc=*/true, /*mc=*/false, &tmCft, nullptr), ret,
-                  fail_mem_space_teams);
-    leUcSelf = tmCft->ucLeId + tmCft->team.rank * tmCft->team.stride;
-    // The memory is not on memHead yet, so it must be bound explicitly.
-    NCCLCHECKGOTO(symBindTeamLe(comm, mem, leUcSelf), ret, fail_mem_space_teams);
+  if (comm->gpuCftSupport > 0) {
+    ncclTeam_t ucTeam = ncclTeamCft(comm), mcTeam = ncclTeamCftMultimem(comm);
+    if (comm->config.hostCftMode != ncclHostCftDisable) {
+      // Add the UC and MC team to the teamHead list, and create the corresponding LEs.
+      // In case of failure, "enable" will report the error, fallback will skip it.
+      NOWARN(ret = symTeamObtain(comm, ucTeam, /*multimem=*/false, /*uc=*/true, /*mc=*/false, &cftUcTeam, nullptr),
+             NCCL_INIT);
+      if (ret != ncclSuccess && comm->config.hostCftMode == ncclHostCftEnable) {
+        WARN("Failed to obtain the UC team");
+        goto fail_mem_space_teams;
+      }
+      ret = ncclSuccess;
+
+      NOWARN(ret = symTeamObtain(comm, mcTeam, /*multimem=*/false, /*uc=*/false, /*mc=*/true, &cftMcTeam, nullptr),
+             NCCL_INIT);
+      if (ret != ncclSuccess && comm->config.hostCftMode == ncclHostCftEnable) {
+        WARN("Failed to obtain the MC team");
+        goto fail_mem_space_teams;
+      }
+      ret = ncclSuccess;
+    } else {
+      // look for the UC and MC teams in the already created teams
+      for (struct ncclDevrTeam* t = devr->teamHead; t != nullptr; t = t->next) {
+        if (cftUcTeam == nullptr && t->team.rank == ucTeam.rank && t->team.nRanks == ucTeam.nRanks &&
+            t->team.stride == ucTeam.stride) {
+          cftUcTeam = t;
+        }
+        if (cftMcTeam == nullptr && t->team.rank == mcTeam.rank && t->team.nRanks == mcTeam.nRanks &&
+            t->team.stride == mcTeam.stride) {
+          cftMcTeam = t;
+        }
+        if (cftUcTeam != nullptr && cftMcTeam != nullptr) break;
+      }
+    }
+    if (cftUcTeam != nullptr && cftUcTeam->ucLeId != NCCL_LE_ID_INVALID) {
+      ncclCftLeId_t le = cftUcTeam->ucLeId + cftUcTeam->team.rank * cftUcTeam->team.stride;
+      NCCLCHECKGOTO(symBindTeamLe(comm, mem, le), ret, fail_mem_space_teams);
+      cftUcBound = true;
+    }
+    if (cftMcTeam != nullptr && cftMcTeam->mcLeId != NCCL_LE_ID_INVALID) {
+      NCCLCHECKGOTO(symBindTeamLe(comm, mem, cftMcTeam->mcLeId), ret, fail_mem_space_teams);
+      cftMcBound = true;
+    }
   }
 
-  // Bind new memory with each existing team (multimem and multicast LE).
+  // Bind new memory with each existing team.
   for (struct ncclDevrTeam* t = devr->teamHead; t != nullptr; t = t->next) {
     NCCLCHECKGOTO(symBindTeamMemory(comm, t, mem), ret, fail_mem_space_teams);
-    if (comm->gpuCftSupport > 0) NCCLCHECKGOTO(symBindTeamLe(comm, mem, t->mcLeId), ret, fail_mem_space_teams);
   }
 
   if (devr->ginEnabled) {
@@ -726,11 +768,11 @@ static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocatio
   return ret;
 
 fail_mem_space_teams:
-  symUnbindTeamLe(comm, mem, leUcSelf);
   for (struct ncclDevrTeam* t = devr->teamHead; t != nullptr; t = t->next) {
     symUnbindTeamMemory(comm, t, mem);
-    symUnbindTeamLe(comm, mem, t->mcLeId);
   }
+  if (cftUcBound) symUnbindTeamLe(comm, mem, cftUcTeam->ucLeId + cftUcTeam->team.rank * cftUcTeam->team.stride);
+  if (cftMcBound) symUnbindTeamLe(comm, mem, cftMcTeam->mcLeId);
 fail_mem_space:
   ncclSpaceFree(&devr->bigSpace, bigOffset, mem->lsaMaxSize);
 fail_mem:

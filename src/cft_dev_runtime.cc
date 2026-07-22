@@ -258,7 +258,7 @@ ncclResult_t ncclGetCftDeviceLeInfo(ncclWindow_t window, size_t offset, int peer
 
   ncclCftLeId baseLeId = comm->devrState.le.baseId;
   if (baseLeId == NCCL_LE_ID_INVALID) {
-    WARN("Querying CFT LE before LE creation. One should create a devComm first.");
+    WARN("Querying CFT LE before LE creation. Create a CFT-enabled devComm first or enable hostCftMode.");
     return ncclInvalidUsage;
   }
 
@@ -297,7 +297,7 @@ ncclResult_t ncclGetPeerDeviceLeInfo(ncclWindow_t window, size_t offset, int pee
 
   ncclCftLeId baseLeId = comm->devrState.le.baseId;
   if (baseLeId == NCCL_LE_ID_INVALID) {
-    WARN("Querying CFT LE before LE creation. One should create a devComm first.");
+    WARN("Querying CFT LE before LE creation. Create a CFT-enabled devComm first or enable hostCftMode.");
     return ncclInvalidUsage;
   }
 

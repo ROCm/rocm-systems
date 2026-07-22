@@ -186,6 +186,27 @@ ncclScalarResidence_t
 ncclConfig_t
 ------------
 
+.. c:type:: ncclHostCftMode_t
+
+ Values for the :c:macro:`hostCftMode` communicator configuration.
+
+ .. c:macro:: ncclHostCftDefault
+
+  Use the version-specific default.
+
+ .. c:macro:: ncclHostCftEnable
+
+  Enable host-side CFT support.
+
+ .. c:macro:: ncclHostCftDisable
+
+  Disable host-side CFT support.
+
+ .. c:macro:: ncclHostCftFallback
+
+  Try to create CFT logical endpoints. In case of an error, host-side CFT will be
+  disabled.
+
 .. c:type:: ncclConfig_t
 
  A structure-based configuration users can set to initialize a communicator; a
@@ -367,6 +388,18 @@ ncclConfig_t
 
   If :ref:`NCCL_RMA_EAGER_INIT` is set in the environment, it overrides this field
   before initialization.
+
+ .. c:macro:: hostCftMode
+
+  (since 2.31)
+
+  Controls support for host-side Compute Fabric Transport (CFT) queries.
+  :c:macro:`ncclHostCftEnable` creates the communicator's unicast and multicast
+  logical endpoints during the first :c:func:`ncclCommWindowRegister` call on a
+  CFT-capable communicator. :c:macro:`ncclHostCftDisable` disables support, and
+  :c:macro:`ncclHostCftFallback` tries to create logical endpoints and disables
+  host-side CFT in case of error.
+  :c:macro:`ncclHostCftDefault` selects the library-defined default behavior.
 
 .. _ncclsiminfo:
 
