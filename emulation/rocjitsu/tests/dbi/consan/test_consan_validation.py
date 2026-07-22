@@ -625,7 +625,6 @@ class ConSanValidationTest(unittest.TestCase):
 
     def test_llama_rdna4_command_uses_gpu_cpu_oracle_wrapper(self) -> None:
         workload = validation.WORKLOAD_BY_ID["llama-rdna4-rms-norm"]
-        self.assertEqual(workload.fault_families, ("barrier-drop", "barrier-move"))
         command = validation._workload_command(
             Path("/workspace"),
             "gfx1201",

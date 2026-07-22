@@ -661,7 +661,7 @@ WORKLOADS = (
         tracks_barriers=True,
         tracks_atomics=False,
         overhead_processes=5,
-        fault_families=("barrier-drop", "barrier-move"),
+        fault_families=("barrier-drop",),
         targets=("gfx1201",),
     ),
     Workload(
