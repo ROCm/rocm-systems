@@ -622,7 +622,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                                                    select_guid_nid_pid(
                                                                        "graph_launches")}
                                 : std::optional<rocpd::sql_generator<rocpd::types::graph_launch>>{
-                                      std::in_place};
+                                      std::nullopt};
 
                         auto scratch_memory = rocpd::sql_generator<rocpd::types::scratch_memory>{
                             conn, select_guid_nid_pid("scratch_memory")};
@@ -662,7 +662,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                                       samples,
                                                       kernels,
                                                       memory_copies,
-                                                      *graph_launches,
+                                                      graph_launches ? &*graph_launches : nullptr,
                                                       scratch_memory,
                                                       memory_allocations,
                                                       counters);
