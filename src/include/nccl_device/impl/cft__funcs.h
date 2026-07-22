@@ -275,13 +275,16 @@ NCCL_CFT_RED_TRAIT_NO_PULL(ncclCftOpAdd, double, add_f64)
 template <typename Coop>
 NCCL_DEVICE_INLINE void ncclMemFence(Coop coop, cuda::memory_order order, ncclMemProxyType producer,
                                      ncclMemProxyType consumer, ncclMemFenceScope scope) {
-  coop.sync();
   if (order == cuda::memory_order_relaxed) return;
+  if (nccl::utility::releaseOrderOf(order) == cuda::memory_order_release ||
+      nccl::utility::releaseOrderOf(order) == cuda::memory_order_seq_cst) {
+    coop.sync();
+  }
 #if NCCL_CFT_ENABLE
   if (nccl::cft::internal::elected(coop)) {
     if (scope == ncclMemFenceScope::Cta) {
-      if (order == cuda::memory_order_release || order == cuda::memory_order_acq_rel ||
-          order == cuda::memory_order_seq_cst) {
+      if (nccl::utility::releaseOrderOf(order) == cuda::memory_order_release ||
+          nccl::utility::releaseOrderOf(order) == cuda::memory_order_seq_cst) {
         asm volatile("fence.proxy.async.shared::cta;" ::: "memory");
       }
     } else {
@@ -323,7 +326,10 @@ NCCL_DEVICE_INLINE void ncclMemFence(Coop coop, cuda::memory_order order, ncclMe
       }
     }
   }
-  coop.sync();
+  if (nccl::utility::acquireOrderOf(order) == cuda::memory_order_acquire ||
+      nccl::utility::acquireOrderOf(order) == cuda::memory_order_seq_cst) {
+    coop.sync();
+  }
 #else
   (void)coop;
   (void)order;
@@ -415,6 +421,7 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::flush(Coop coop, bool* hasReport, uint32_
   uint32_t reportValue = 0;
   nccl::cft::internal::waitMbarrier(this->cftSmem, this->phaseParity, &hasReportValue, &reportValue);
   this->phaseParity ^= 1;
+
   if (hasReport) *hasReport = (hasReportValue != 0);
   if (report) *report = reportValue;
 #else
