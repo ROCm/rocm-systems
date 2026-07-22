@@ -4,7 +4,7 @@
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
 
-#include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
@@ -29,12 +29,10 @@ RJ_DIAGNOSTIC_POP
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
-#include <functional>
 #include <limits>
 #include <optional>
 #include <sstream>
 #include <string>
-#include <unordered_set>
 #include <utility>
 
 namespace rocjitsu {
@@ -177,125 +175,6 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   if (arch_supports_wave_size(host_arch, 64))
     return 64;
   return static_cast<uint8_t>(arch_default_wave_size(host_arch));
-}
-
-// -----------------------------------------------------------------------------
-// ELF kernel-descriptor discovery.
-// -----------------------------------------------------------------------------
-
-[[nodiscard]] std::optional<std::string>
-kernel_descriptor_symbol_name(const Elf64_Sym &sym, const char *strtab, size_t strtab_size) {
-  if (sym.st_size != sizeof(KD))
-    return std::nullopt;
-
-  // AMDHSA kernel descriptors are global object symbols. Size alone is not a
-  // durable signal because unrelated data objects can also be 64 bytes.
-  if (elf_symbol_type(sym.st_info) != kElfSymbolTypeObject ||
-      elf_symbol_bind(sym.st_info) != kElfSymbolBindGlobal)
-    return std::nullopt;
-
-  // AMDHSA descriptors are named "<kernel>.kd". An unnamed 64-byte global
-  // object is ambiguous, so require the ABI suffix instead of treating stripped
-  // or minimized symbol records as descriptors.
-  if (strtab == nullptr || strtab_size == 0 || sym.st_name == 0)
-    return std::nullopt;
-  if (sym.st_name >= strtab_size)
-    return std::nullopt;
-
-  const char *name = strtab + sym.st_name;
-  const size_t len = strnlen(name, strtab_size - sym.st_name);
-  if (len <= 3 || std::strcmp(name + len - 3, ".kd") != 0)
-    return std::nullopt;
-  return std::string(name, len - 3);
-}
-
-[[nodiscard]] std::optional<uint64_t> text_vaddr_for_section(uint64_t text_offset,
-                                                             uint64_t text_size,
-                                                             const Elf64_Ehdr &ehdr,
-                                                             const Elf64_Shdr *shdr) {
-  for (int i = 0; i < ehdr.e_shnum; ++i) {
-    if (shdr[i].sh_offset == text_offset && shdr[i].sh_size == text_size)
-      return shdr[i].sh_addr;
-  }
-  return std::nullopt;
-}
-
-using KernelDescriptorVisitor =
-    std::function<void(uint64_t descriptor_file_offset, std::string kernel_name,
-                       uint64_t entry_text_offset, const KD &desc)>;
-
-void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset,
-                              uint64_t text_size, const KernelDescriptorVisitor &callback) {
-  if (image.size() < sizeof(Elf64_Ehdr))
-    return;
-
-  const auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(image.data());
-  if (ehdr->e_shoff + static_cast<uint64_t>(ehdr->e_shnum) * sizeof(Elf64_Shdr) > image.size())
-    return;
-
-  const auto *shdr = reinterpret_cast<const Elf64_Shdr *>(image.data() + ehdr->e_shoff);
-  auto text_vaddr = text_vaddr_for_section(text_offset, text_size, *ehdr, shdr);
-  if (!text_vaddr)
-    return;
-  constexpr uint64_t max_u64 = std::numeric_limits<uint64_t>::max();
-  if (*text_vaddr > max_u64 - text_size)
-    return;
-  const uint64_t text_end = *text_vaddr + text_size;
-
-  // .symtab and .dynsym may both describe the same descriptor. Translation is
-  // keyed by descriptor bytes, so visit each file offset once.
-  std::unordered_set<uint64_t> seen_descriptor_offsets;
-  for (int i = 0; i < ehdr->e_shnum; ++i) {
-    if (shdr[i].sh_type != SHT_SYMTAB && shdr[i].sh_type != SHT_DYNSYM)
-      continue;
-    if (shdr[i].sh_offset + shdr[i].sh_size > image.size() || shdr[i].sh_entsize == 0)
-      continue;
-    if (shdr[i].sh_entsize != sizeof(Elf64_Sym))
-      continue;
-
-    const char *strtab = nullptr;
-    size_t strtab_size = 0;
-    if (shdr[i].sh_link < ehdr->e_shnum) {
-      const auto &strtab_shdr = shdr[shdr[i].sh_link];
-      if (strtab_shdr.sh_offset + strtab_shdr.sh_size <= image.size()) {
-        strtab = reinterpret_cast<const char *>(image.data() + strtab_shdr.sh_offset);
-        strtab_size = strtab_shdr.sh_size;
-      }
-    }
-
-    const auto *symtab = reinterpret_cast<const Elf64_Sym *>(image.data() + shdr[i].sh_offset);
-    const size_t nsyms = shdr[i].sh_size / shdr[i].sh_entsize;
-    for (size_t j = 0; j < nsyms; ++j) {
-      auto kernel_name = kernel_descriptor_symbol_name(symtab[j], strtab, strtab_size);
-      if (!kernel_name)
-        continue;
-
-      const uint16_t sec_idx = symtab[j].st_shndx;
-      if (sec_idx >= ehdr->e_shnum || symtab[j].st_value < shdr[sec_idx].sh_addr)
-        continue;
-
-      const uint64_t file_off =
-          shdr[sec_idx].sh_offset + (symtab[j].st_value - shdr[sec_idx].sh_addr);
-      if (file_off + sizeof(KD) > image.size())
-        continue;
-      if (!seen_descriptor_offsets.insert(file_off).second)
-        continue;
-
-      KD desc;
-      std::memcpy(&desc, image.data() + file_off, sizeof(desc));
-      const int64_t entry_vaddr_signed =
-          static_cast<int64_t>(symtab[j].st_value) + desc.kernel_code_entry_byte_offset;
-
-      if (entry_vaddr_signed < 0)
-        continue;
-      const uint64_t entry_vaddr = static_cast<uint64_t>(entry_vaddr_signed);
-      if (entry_vaddr < *text_vaddr || entry_vaddr >= text_end)
-        continue;
-
-      const uint64_t entry_text_offset = entry_vaddr - *text_vaddr;
-      callback(file_off, std::move(*kernel_name), entry_text_offset, desc);
-    }
-  }
 }
 
 // -----------------------------------------------------------------------------
@@ -966,15 +845,11 @@ std::vector<KdTranslation> KernelDescriptorTranslator::translate_image(
     const KernelDescriptorTranslationOptions &options) const {
   std::vector<KdTranslation> translations;
 
-  visit_kernel_descriptors(image, text_offset, text_size,
-                           [&](uint64_t descriptor_file_offset, std::string kernel_name,
-                               uint64_t entry_text_offset, const KD &src) {
-                             KD desc{};
-                             std::memcpy(&desc, &src, sizeof(desc));
-                             translations.push_back(translate_one_descriptor(
-                                 guest_arch_, host_arch_, descriptor_file_offset,
-                                 std::move(kernel_name), entry_text_offset, desc, options));
-                           });
+  for (ScannedKernelDescriptor &scanned : scan_kernel_descriptors(image, text_offset, text_size)) {
+    translations.push_back(translate_one_descriptor(
+        guest_arch_, host_arch_, scanned.descriptor_file_offset, std::move(scanned.kernel_name),
+        scanned.entry_text_offset, scanned.descriptor, options));
+  }
 
   return translations;
 }
