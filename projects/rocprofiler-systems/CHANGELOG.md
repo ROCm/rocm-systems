@@ -30,7 +30,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   `rocm_rocshmem_api` spans in Perfetto traces and rocpd databases. Requires
   rocprofiler-sdk >= 1.3.4 and rocSHMEM >= 3.6.0 (included in ROCm 7.15).
   As of rocSHMEM 3.6.0, `USE_ROCPROFILER_REGISTER` defaults to `ON`, so
-  package installations automatically include this support. A `rocshmem` example demonstrating two-PE usage of all nine APIs is included under `examples/rocshmem`.
+  package installations automatically include this support. A `rocshmem` example
+  demonstrating two-PE usage of all nine APIs is included under `examples/rocshmem`.
 
 ### Changed
 
