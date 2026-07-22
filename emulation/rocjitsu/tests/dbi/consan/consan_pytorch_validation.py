@@ -621,6 +621,53 @@ def _run_rdna4_compiled_softmax(repetitions: int) -> dict[str, object]:
     }
 
 
+def _run_rdna4_split_softmax(repetitions: int) -> dict[str, object]:
+    """Runs upstream PyTorch's target-native split online-softmax shape."""
+    rows = 1
+    columns = 2**20 + 13
+    host_input = (
+        (((torch.arange(columns, dtype=torch.int64) * 17) % 257) - 128)
+        .to(torch.bfloat16)
+        .reshape(rows, columns)
+    )
+    # Derive the reference independently in FP32, then round it once to the
+    # operation's BF16 result type. This retains an exact output oracle without
+    # loading PyTorch's unrelated precompiled RNG object during setup.
+    expected = torch.softmax(host_input.to(torch.float32), dim=-1).to(
+        torch.bfloat16
+    )
+    input_tensor = host_input.to(device="cuda")
+    compiled_softmax = torch.compile(
+        lambda value: torch.softmax(value, dim=-1), fullgraph=True
+    )
+    elapsed_ms = []
+    actual = None
+    for _ in range(repetitions):
+        start = time.monotonic()
+        actual = compiled_softmax(input_tensor)
+        torch.cuda.synchronize()
+        elapsed_ms.append((time.monotonic() - start) * 1000.0)
+    assert actual is not None
+    host_actual = actual.cpu()
+    if not torch.equal(host_actual, expected):
+        maximum_error = torch.max(
+            torch.abs(host_actual.to(torch.float32) - expected.to(torch.float32))
+        ).item()
+        raise RuntimeError(
+            f"split-softmax oracle failed: maximum error {maximum_error}"
+        )
+    return {
+        "median_ms": statistics.median(elapsed_ms),
+        "repetitions": repetitions,
+        "oracle": "independent-fp32-cpu-softmax-rounded-exactly-to-bf16",
+        "oracle_passed": True,
+        "shape": [rows, columns],
+        "dtype": str(host_input.dtype),
+        "compiler": "torch.compile-fullgraph",
+        "selection_source": "test/inductor/test_online_softmax.py::test_split_reduction",
+    }
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -637,6 +684,7 @@ def _parse_args() -> argparse.Namespace:
             "vector-norm",
             "softmax",
             "rdna4-compiled-softmax",
+            "rdna4-split-softmax",
             "rdna4-llm-topk",
             "rdna4-sdpa",
         ),
@@ -697,6 +745,10 @@ def main() -> int:
                 "rdna4-compiled-softmax": _run_rdna4_compiled_softmax(
                     args.repetitions
                 )
+            }
+        elif args.workload == "rdna4-split-softmax":
+            result = {
+                "rdna4-split-softmax": _run_rdna4_split_softmax(args.repetitions)
             }
         elif args.workload == "rdna4-llm-topk":
             result = _run_rdna4_llm_topk(args.repetitions)

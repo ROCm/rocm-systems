@@ -207,8 +207,9 @@ python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
 `--allow-reference` only permits read-only explanation. The `fault` subcommand
 continues to reject the cumulative reference file.
 
-The current gfx1201 manifest covers Qwen3-0.6B prefill; a native
-PyTorch/Inductor compiled softmax; a target-native PyTorch histogram;
+The current gfx1201 manifest covers Qwen3-0.6B prefill; native
+PyTorch/Inductor compact and split online-softmax clients, collision-heavy
+scatter-reduce, Qwen-vocabulary top-k, causal SDPA, and histogram;
 Sharktank TP1 prefill and
 decode/combined, TP2, and CLIP BF16; and the hip-moi D128, WMMA, Stream-K,
 tree-atomic-OR, and Jakub workloads. The profile IDs are `supercollider`,
