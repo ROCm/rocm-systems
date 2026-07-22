@@ -28,6 +28,7 @@
 namespace rocjitsu {
 
 class BasicBlock;
+class ExecMaskAnalysis;
 class Gfx1250VgprMsbAnalysis;
 class Instruction;
 
@@ -132,7 +133,10 @@ public:
   /// entry being translated, not every block decoded from the containing code
   /// object.
   /// @param blocks Blocks in one kernel CFG scope.
-  LivenessAnalysis(KernelBlockScope blocks, LivenessAnalysisOptions options = {},
+  /// @param exec Program-point EXEC-state analysis over the same @p blocks scope;
+  /// lets EXEC-masked vector defs count as kills where EXEC is provably full.
+  LivenessAnalysis(KernelBlockScope blocks, const ExecMaskAnalysis &exec,
+                   LivenessAnalysisOptions options = {},
                    std::span<const ScopedCfgEdge> extra_edges = {});
   ~LivenessAnalysis();
 
@@ -198,7 +202,8 @@ private:
   /// @throws std::logic_error if liveness data was intentionally not built.
   void require_available() const;
 
-  void analyze(KernelBlockScope blocks, const LivenessAnalysisOptions &options,
+  void analyze(KernelBlockScope blocks, const ExecMaskAnalysis &exec,
+               const LivenessAnalysisOptions &options,
                std::span<const ScopedCfgEdge> extra_edges);
 
   bool available_ = true;

@@ -313,6 +313,18 @@ enum OpSelVgpr {
   }
 }
 
+[[nodiscard]] constexpr bool is_immediate_type(OperandType t) {
+  switch (t) {
+  case OperandType::OPR_SIMM16:
+  case OperandType::OPR_SIMM32:
+  case OperandType::OPR_LABEL:
+  case OperandType::OPR_WAITCNT:
+    return true;
+  default:
+    return false;
+  }
+}
+
 } // namespace rdna3
 } // namespace rocjitsu
 

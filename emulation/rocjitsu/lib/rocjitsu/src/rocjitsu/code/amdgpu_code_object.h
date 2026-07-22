@@ -74,6 +74,13 @@ public:
   /// the fixed per-wave SGPR pool. @p arch selects that interpretation.
   [[nodiscard]] std::optional<uint32_t> min_kernel_sgpr_count(rj_code_arch_t arch) const;
 
+  /// @brief Wavefront size (32 or 64) shared by this object's kernels.
+  ///
+  /// @details CDNA is always Wave64; RDNA opts into Wave32 via the descriptor's
+  /// `ENABLE_WAVEFRONT_SIZE32` bit. Returns 64 when kernels disagree or none is
+  /// readable (the safe value for whole-object EXEC-mask analysis).
+  [[nodiscard]] uint8_t kernel_wavefront_size(rj_code_arch_t arch) const;
+
 private:
   void load_sections();
 

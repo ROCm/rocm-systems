@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/analysis/exec_state.h"
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/dbt/semantic/cdna3_scratch.h"
 #include "rocjitsu/code/dbt/semantic_scratch.h"
@@ -75,7 +76,8 @@ TEST(SemanticScratchAllocator, FallsBackToNonForbiddenSpillVictim) {
   // registers, which deliberately drives the allocator through its spill tier.
   Instruction inst("scratch_test", nullptr);
   std::vector<BasicBlock *> blocks;
-  LivenessAnalysis liveness(blocks);
+  const ExecMaskAnalysis exec(KernelBlockScope(blocks), /*wave_size=*/64);
+  LivenessAnalysis liveness(blocks, exec);
   TranslationContext context(/*vgprs=*/8, /*agprs=*/0, /*accum_base=*/0,
                              /*sgprs=*/8, /*private_bytes=*/20);
   SemanticScratchAllocator allocator(inst, liveness, context,
@@ -98,7 +100,8 @@ TEST(SemanticScratchAllocator, FallsBackToNonForbiddenSpillVictim) {
 TEST(SemanticScratchAllocator, ReportsTargetSpillOffsetLimit) {
   Instruction inst("scratch_test", nullptr);
   std::vector<BasicBlock *> blocks;
-  LivenessAnalysis liveness(blocks);
+  const ExecMaskAnalysis exec(KernelBlockScope(blocks), /*wave_size=*/64);
+  LivenessAnalysis liveness(blocks, exec);
   TranslationContext context(/*vgprs=*/8, /*agprs=*/0, /*accum_base=*/0,
                              /*sgprs=*/8, /*private_bytes=*/32);
   SemanticScratchAllocator allocator(

@@ -47,7 +47,19 @@ enum InstFlags : uint64_t {
   /// @brief AccVGPR move instruction (v_accvgpr_write, v_accvgpr_read, v_accvgpr_mov).
   ACCVGPR = (1ULL << 10),
   /// @brief Destination update is conditional and must not kill the old value.
-  PREDICATED_DEF = (1ULL << 11)
+  PREDICATED_DEF = (1ULL << 11),
+  /// @brief Executes regardless of the EXEC mask (e.g. branches).
+  IGNORES_EXEC = (1ULL << 12),
+  /// @brief Writes the EXEC mask regardless of DST operands.
+  WRITES_EXEC = (1ULL << 13),
+  /// @brief The destination value is a scalar plain copy of a single source operand
+  /// (e.g. s_mov). Lets EXEC-state analysis prove an all-ones EXEC write from an
+  /// all-ones source.
+  RESULT_COPY = (1ULL << 14),
+  /// @brief The destination value is the scalar bitwise pure OR of the source operands
+  /// (e.g. s_or, s_or_saveexec). Pure OR with an all-ones operand is all-ones
+  /// regardless of the others.
+  RESULT_OR = (1ULL << 15)
 };
 
 class BasicBlock;

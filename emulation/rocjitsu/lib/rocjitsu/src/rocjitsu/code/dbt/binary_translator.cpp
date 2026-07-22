@@ -4,6 +4,7 @@
 #include "rocjitsu/code/dbt/binary_translator.h"
 
 #include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/analysis/exec_state.h"
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -1748,7 +1749,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     LivenessAnalysis liveness = LivenessAnalysis::unavailable();
     if (scope_requires_liveness) {
       const auto liveness_edges = scoped_call_liveness_edges(KernelBlockScope(scope.blocks), text);
-      liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), liveness_options, liveness_edges);
+      const ExecMaskAnalysis exec(KernelBlockScope(scope.blocks),
+                                  scope.translation->guest_wavefront_size, liveness_edges);
+      liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), exec, liveness_options,
+                                  liveness_edges);
     }
 
     std::unordered_map<uint64_t, const Instruction *> source_instruction_by_offset;

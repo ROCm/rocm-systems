@@ -312,4 +312,36 @@ std::optional<uint32_t> AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t a
   return min_count;
 }
 
+uint8_t AmdGpuCodeObject::kernel_wavefront_size(rj_code_arch_t arch) const {
+  namespace kd = rocr::llvm::amdhsa;
+  using KD = kd::kernel_descriptor_t;
+
+  // CDNA kernels are always Wave64.
+  if (is_cdna_arch(arch))
+    return 64;
+
+  // RDNA opts into Wave32 via ENABLE_WAVEFRONT_SIZE32; a clear bit means Wave64.
+  // Fall back to 64 unless every readable kernel is Wave32.
+  bool saw_kernel = false;
+  bool all_wave32 = true;
+  for (const auto &[name, kd_vaddr] : kd_offsets_) {
+    for (const auto &section : all_sections()) {
+      const uint64_t base = section->vaddr();
+      if (base == 0 || kd_vaddr < base)
+        continue;
+      const uint64_t off = kd_vaddr - base;
+      if (off + sizeof(KD) > section->size())
+        continue;
+      KD desc;
+      std::memcpy(&desc, section->data() + off, sizeof(desc));
+      const bool wave32 = AMDHSA_BITS_GET(desc.kernel_code_properties,
+                                          kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32);
+      saw_kernel = true;
+      all_wave32 = all_wave32 && wave32;
+      break;
+    }
+  }
+  return (saw_kernel && all_wave32) ? 32 : 64;
+}
+
 } // namespace rocjitsu

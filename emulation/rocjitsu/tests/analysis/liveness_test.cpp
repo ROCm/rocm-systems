@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/analysis/exec_state.h"
 #include "rocjitsu/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
@@ -52,17 +53,42 @@ public:
   TestOperand(RegisterRef ref, int size_bits) : Operand(size_bits, ref.index), ref_(ref) {}
 
   std::optional<RegisterRef> to_register_ref() const override { return ref_; }
+  std::optional<uint64_t> literal64_value() const override { return lit_; }
+  std::optional<uint64_t> const_value() const override {
+    return const_.has_value() ? const_ : literal64_value();
+  }
+
+  // Turn this into a 64-bit literal source operand (no register ref). Models the
+  // literal64 path: both literal64_value() and const_value() report it.
+  void set_literal(uint64_t v) {
+    lit_ = v;
+    size_bits_ = 64;
+  }
+
+  // Turn this into an inline-constant source operand: const_value() reports it
+  // but literal64_value() stays empty (mirrors how inline constants behave).
+  void set_inline_const(uint64_t v) {
+    const_ = v;
+    size_bits_ = 64;
+  }
 
 private:
   std::optional<RegisterRef> ref_;
+  std::optional<uint64_t> lit_;
+  std::optional<uint64_t> const_;
 };
 
 class TestInstruction : public Instruction {
 public:
+  // `literal_src`, when set, appends one literal source operand carrying the
+  // given value via literal64_value() — models an instruction's literal64
+  // (SIMM) immediate, e.g. the all-ones source of `s_mov_b64 exec, <lit>`.
   TestInstruction(std::string_view mnemonic, std::initializer_list<RegisterRef> defs = {},
                   std::initializer_list<RegisterRef> uses = {}, uint64_t flags = 0,
                   std::optional<int64_t> branch_delta = std::nullopt,
-                  std::initializer_list<RegisterRef> implicit_uses = {}, int def_size_bits = 0)
+                  std::initializer_list<RegisterRef> implicit_uses = {},
+                  std::optional<uint64_t> literal_src = std::nullopt,
+                  std::optional<uint64_t> inline_const_src = std::nullopt, int def_size_bits = 0)
       : Instruction(mnemonic, nullptr), implicit_uses_(implicit_uses), branch_delta_(branch_delta) {
     size_ = 4;
     flags_ = flags;
@@ -77,6 +103,16 @@ public:
     }
     for (RegisterRef ref : uses) {
       src_storage_[num_src_] = TestOperand(ref);
+      src_operands_[num_src_] = &src_storage_[num_src_];
+      ++num_src_;
+    }
+    if (literal_src) {
+      src_storage_[num_src_].set_literal(*literal_src);
+      src_operands_[num_src_] = &src_storage_[num_src_];
+      ++num_src_;
+    }
+    if (inline_const_src) {
+      src_storage_[num_src_].set_inline_const(*inline_const_src);
       src_operands_[num_src_] = &src_storage_[num_src_];
       ++num_src_;
     }
@@ -150,7 +186,13 @@ enum class TestOpcode : uint32_t {
   CBranchToElseAfterTwo = 14,
   IndirectCall = 15,
   IndirectBranch = 16,
-  PartialDefSgpr4 = 17,
+  WriteExecFull = 17,
+  WriteExecNarrow = 18,
+  WriteExecFullInline = 19,
+  WriteExecOrAllOnes = 20,
+  WriteExecAndSaveexec = 21,
+  WriteExecLoHalf = 22,
+  PartialDefSgpr4 = 23,
 };
 
 class TestDecoder : public Decoder {
@@ -193,10 +235,40 @@ public:
       return new TestInstruction("test_indirect_call", {}, {}, INDIRECT_CALL);
     case TestOpcode::IndirectBranch:
       return new TestInstruction("test_indirect_branch", {}, {}, INDIRECT_BRANCH);
+    case TestOpcode::WriteExecFull:
+      // s_mov exec, <all-ones literal>: COPY of a single all-ones source.
+      return new TestInstruction("test_write_exec_full", {{RegClass::EXEC, 0, 2}}, {}, RESULT_COPY,
+                                 std::nullopt, {}, ~0ULL);
+    case TestOpcode::WriteExecNarrow:
+      // exec <- sgpr (non-constant): writes EXEC but not provably all-ones.
+      return new TestInstruction("test_write_exec_narrow", {{RegClass::EXEC, 0, 2}},
+                                 {{RegClass::SGPR, 0, 1}}, RESULT_COPY);
+    case TestOpcode::WriteExecFullInline:
+      // s_mov exec, -1: COPY of an inline-constant all-ones source (reports
+      // const_value() but not literal64_value()).
+      return new TestInstruction("test_write_exec_full_inline", {{RegClass::EXEC, 0, 2}}, {},
+                                 RESULT_COPY, std::nullopt, {}, std::nullopt, ~0ULL);
+    case TestOpcode::WriteExecOrAllOnes:
+      // s_or_b64 exec, exec, -1: OR of a (non-constant) source and an all-ones
+      // inline constant -> all-ones regardless of the other operand.
+      return new TestInstruction("test_write_exec_or_allones", {{RegClass::EXEC, 0, 2}},
+                                 {{RegClass::SGPR, 0, 1}}, RESULT_OR, std::nullopt, {},
+                                 std::nullopt, ~0ULL);
+    case TestOpcode::WriteExecAndSaveexec:
+      // s_and_saveexec exec, -1: writes EXEC (flag), single all-ones source, but
+      // exec = exec & -1 = exec -> NOT all-ones. No RESULT_* -> must stay Unknown.
+      return new TestInstruction("test_write_exec_and_saveexec", {{RegClass::SGPR, 0, 2}}, {},
+                                 WRITES_EXEC, std::nullopt, {}, std::nullopt, ~0ULL);
+    case TestOpcode::WriteExecLoHalf:
+      // s_mov_b32 exec_lo, -1: a 32-bit COPY of all-ones into only the low half
+      // of EXEC. Full on Wave32; a partial write on Wave64.
+      return new TestInstruction("test_write_exec_lo_half", {{RegClass::EXEC, 0, 1}}, {},
+                                 RESULT_COPY, std::nullopt, {}, std::nullopt, ~0ULL);
     case TestOpcode::PartialDefSgpr4:
       // 16-bit write to s4: defines only part of the lane, so it also reads s4.
       return new TestInstruction("test_partial_def_s4", {{RegClass::SGPR, 4, 1}}, {}, 0,
-                                 std::nullopt, {}, /*def_size_bits=*/16);
+                                 std::nullopt, {}, std::nullopt, std::nullopt,
+                                 /*def_size_bits=*/16);
     }
     return new TestInstruction("test_end", {}, {}, PROGRAM_TERMINATOR);
   }
@@ -251,7 +323,17 @@ std::span<const uint8_t> text_span(const CodeObject &co) {
 
 LivenessAnalysis analyze_scope(const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
   auto scope = block_scope(blocks);
-  return LivenessAnalysis(KernelBlockScope(scope));
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  return LivenessAnalysis(KernelBlockScope(scope), exec);
+}
+
+// Wire the same scoped call/return edges into BOTH analyses, as BinaryTranslator
+// does; feeding them to only one makes the two disagree around calls and returns.
+LivenessAnalysis analyze_scope_with_edges(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                                          std::span<const ScopedCfgEdge> extra_edges) {
+  auto scope = block_scope(blocks);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64, extra_edges);
+  return LivenessAnalysis(KernelBlockScope(scope), exec, /*options=*/{}, extra_edges);
 }
 
 // CFG/liveness tests care about decoded register effects, not the physical
@@ -2763,7 +2845,8 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbResolvesPhysicalRegisterBank) {
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -2973,7 +3056,8 @@ TEST(LivenessAnalysis, Gfx1250DynamicModeWriteConservativelyUsesEveryBank) {
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -3006,7 +3090,8 @@ TEST(LivenessAnalysis, Gfx1250FullLiteralModeWriteRecoversKnownBank) {
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
 
   auto instruction = blocks.front()->instructions().begin();
   std::advance(instruction, 2);
@@ -3047,7 +3132,8 @@ TEST(LivenessAnalysis, Gfx1250TruncatedLiteralModeWriteMarksBanksAmbiguous) {
   // literal at offset 8.
   const auto full = text_span(co);
   options.text = full.subspan(0, 8);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
 
   auto instruction = blocks.front()->instructions().begin();
   std::advance(instruction, 2);
@@ -3076,7 +3162,8 @@ TEST(LivenessAnalysis, Gfx1250PartialLiteralModeWriteUsesUnmaskedVgprFields) {
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
 
   auto instruction = blocks.front()->instructions().begin();
   std::advance(instruction, 2);
@@ -3108,7 +3195,8 @@ TEST(LivenessAnalysis, Gfx1250ImmediateModeWriteRecoversBanksOutsideRequestedSli
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
 
   auto instruction = blocks.front()->instructions().begin();
   std::advance(instruction, 2);
@@ -3135,7 +3223,8 @@ TEST(LivenessAnalysis, Gfx1250LiteralModeWriteTracksEveryRole) {
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -3163,7 +3252,8 @@ TEST(LivenessAnalysis, Gfx1250ImmediateNonModeWriteDoesNotChangeBanks) {
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -3194,7 +3284,8 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbCfgJoinRequiresPredecessorsToAgree) {
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
 
   const Instruction &joined_move = *join->instructions().begin();
   EXPECT_EQ(liveness.vgpr_msb_bank_before(joined_move, amdgpu::VgprMsbRole::Src0), std::nullopt);
@@ -3222,7 +3313,8 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbCfgJoinPreservesAgreeingBank) {
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
 
   const Instruction &joined_move = *join->instructions().begin();
   EXPECT_EQ(liveness.vgpr_msb_bank_before(joined_move, amdgpu::VgprMsbRole::Src0), 2);
@@ -3259,7 +3351,8 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbJoinExcludesUnreachablePredecessor) {
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
 
   const Instruction *joined_move = nullptr;
   for (const auto &block : blocks) {
@@ -3271,6 +3364,312 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbJoinExcludesUnreachablePredecessor) {
   ASSERT_NE(joined_move, nullptr);
   EXPECT_EQ(liveness.vgpr_msb_bank_before(*joined_move, amdgpu::VgprMsbRole::Src0), 2);
   EXPECT_TRUE(liveness.is_live_before(*joined_move, {RegClass::VGPR, 513, 1}));
+}
+
+// Collect a block's instructions in order for index-based assertions.
+std::vector<const Instruction *> insts_of(BasicBlock &block) {
+  std::vector<const Instruction *> out;
+  for (const auto &inst : block.instructions())
+    out.push_back(&inst);
+  return out;
+}
+
+// Decode real CDNA4 instruction words into a CFG with the production decoder.
+std::vector<std::unique_ptr<BasicBlock>> build_cdna4_blocks(std::vector<uint32_t> words) {
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  return BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+}
+
+// Full end-to-end on real decoded instructions: `s_mov_b64 exec, -1` makes EXEC
+// provably all-ones, so the following EXEC-masked VGPR def overwrites every lane
+// and becomes a real kill — the defined VGPR is dead immediately before it. This
+// exercises the whole chain: decode -> to_register_ref (EXEC dest) + const_value
+// (-1 -> all-ones) -> ExecMaskAnalysis (Full) -> liveness kill.
+TEST(ExecFlagsRealDecode, Cdna4SMovExecAllOnesPromotesVgprDefToKill) {
+  // s_mov_b64 exec, -1 ; v_mov_b32 v0, s0 ; v_mov_b32 v2, v0 ; s_endpgm
+  auto blocks = build_cdna4_blocks({0xBEFE01C1u, 0x7E000200u, 0x7E040300u, 0xBF810000u});
+  ASSERT_FALSE(blocks.empty());
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_GE(insts.size(), 3u);
+
+  // Sanity-check the decode so an encoding typo fails loudly.
+  EXPECT_EQ(insts[0]->mnemonic(), "s_mov_b64");
+  const Instruction &def = *insts[1];
+  EXPECT_TRUE(def.mnemonic().starts_with("v_mov_b32"));
+  ASSERT_NE(def.dst_operand(0), nullptr);
+  auto def_ref = def.dst_operand(0)->to_register_ref();
+  ASSERT_TRUE(def_ref.has_value());
+  EXPECT_EQ(*def_ref, (RegisterRef{RegClass::VGPR, 0, 1}));
+
+  // Proving EXEC=Full from `s_mov exec, -1` needs the s_mov to carry RESULT_COPY,
+  // which only exists once the ISA is regenerated with the combinator metadata.
+  if (!(insts[0]->flags() & RESULT_COPY))
+    GTEST_SKIP() << "s_mov lacks RESULT_COPY; regenerate ISA to enable EXEC-Full tracking";
+
+  // EXEC is provably full at the def, so its vector write is a real kill.
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+  EXPECT_EQ(exec.before(def), ExecState::Full);
+
+  LivenessAnalysis liveness = analyze_scope(blocks);
+  EXPECT_FALSE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+}
+
+// Contrast: without the all-ones EXEC write, EXEC stays Unknown at the def, so
+// the same vector def is not promoted to a kill and the VGPR remains live.
+TEST(ExecFlagsRealDecode, Cdna4VgprDefStaysLiveWithoutFullExec) {
+  // v_mov_b32 v0, s0 ; v_mov_b32 v2, v0 ; s_endpgm
+  auto blocks = build_cdna4_blocks({0x7E000200u, 0x7E040300u, 0xBF810000u});
+  ASSERT_FALSE(blocks.empty());
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_GE(insts.size(), 2u);
+  const Instruction &def = *insts[0];
+  EXPECT_TRUE(def.mnemonic().starts_with("v_mov_b32"));
+
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+  EXPECT_EQ(exec.before(def), ExecState::Unknown);
+
+  LivenessAnalysis liveness = analyze_scope(blocks);
+  EXPECT_TRUE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+}
+
+TEST(ExecMaskAnalysis, EntryIsUnknownAllOnesIsFullNarrowingIsUnknown) {
+  // exec=all-ones; v0=...; exec=narrow; v0=...; end
+  auto blocks =
+      build_test_blocks({TestOpcode::WriteExecFull, TestOpcode::DefVgpr0,
+                         TestOpcode::WriteExecNarrow, TestOpcode::DefVgpr0, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_EQ(insts.size(), 5u);
+  EXPECT_EQ(exec.before(*insts[0]), ExecState::Unknown); // kernel entry
+  EXPECT_EQ(exec.before(*insts[1]), ExecState::Full);    // after exec=all-ones
+  EXPECT_EQ(exec.before(*insts[2]), ExecState::Full);    // narrowing not yet applied
+  EXPECT_EQ(exec.before(*insts[3]), ExecState::Unknown); // after narrowing write
+}
+
+TEST(ExecMaskAnalysis, OrWithAllOnesConstantIsFull) {
+  // exec = exec | -1 -> all-ones regardless of the prior EXEC (RESULT_OR with an
+  // all-ones source operand).
+  auto blocks =
+      build_test_blocks({TestOpcode::WriteExecOrAllOnes, TestOpcode::DefVgpr0, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_GE(insts.size(), 2u);
+  EXPECT_EQ(exec.before(*insts[0]), ExecState::Unknown); // entry
+  EXPECT_EQ(exec.before(*insts[1]), ExecState::Full);    // after exec = exec | -1
+}
+
+TEST(ExecMaskAnalysis, AndSaveexecWithAllOnesStaysUnknown) {
+  // s_and_saveexec exec, -1: exec = exec & -1 = exec, NOT all-ones. The all-ones
+  // source must not be mistaken for an all-ones result (regression guard).
+  auto blocks =
+      build_test_blocks({TestOpcode::WriteExecAndSaveexec, TestOpcode::DefVgpr0, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_GE(insts.size(), 2u);
+  EXPECT_EQ(exec.before(*insts[1]), ExecState::Unknown); // after and-saveexec
+}
+
+TEST(ExecMaskAnalysis, PartialAllOnesWritePreservesButDoesNotEstablishFull) {
+  // s_mov_b32 exec_lo, -1 on Wave64 sets only the low half to all-ones.
+  // Keeps an already-Full mask Full
+  {
+    auto blocks = build_test_blocks({TestOpcode::WriteExecFull, TestOpcode::WriteExecLoHalf,
+                                     TestOpcode::DefVgpr0, TestOpcode::End});
+    auto scope = block_scope(blocks);
+    ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+    auto insts = insts_of(*blocks[0]);
+    ASSERT_GE(insts.size(), 3u);
+    EXPECT_EQ(exec.before(*insts[1]), ExecState::Full); // entering the half write
+    EXPECT_EQ(exec.before(*insts[2]), ExecState::Full); // half all-ones preserved Full
+  }
+  // ...Cannot establish Full from Unknown (exec_hi stays unknown).
+  {
+    auto blocks =
+        build_test_blocks({TestOpcode::WriteExecLoHalf, TestOpcode::DefVgpr0, TestOpcode::End});
+    auto scope = block_scope(blocks);
+    ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+    auto insts = insts_of(*blocks[0]);
+    ASSERT_GE(insts.size(), 2u);
+    EXPECT_EQ(exec.before(*insts[1]), ExecState::Unknown);
+  }
+}
+
+TEST(ExecMaskAnalysis, Wave32ExecLoWriteCoversFullMask) {
+  // On Wave32, exec_lo is the entire EXEC, so an all-ones exec_lo write is Full.
+  auto blocks =
+      build_test_blocks({TestOpcode::WriteExecLoHalf, TestOpcode::DefVgpr0, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 32};
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_GE(insts.size(), 2u);
+  EXPECT_EQ(exec.before(*insts[1]), ExecState::Full);
+}
+
+TEST(LivenessAnalysis, ExecFullPromotesVgprDefToKill) {
+  // exec=all-ones; def v0; use v0; end. Under full EXEC the def overwrites every
+  // lane, so v0 is dead immediately before the def.
+  auto blocks = build_test_blocks(
+      {TestOpcode::WriteExecFull, TestOpcode::DefVgpr0, TestOpcode::UseVgpr0, TestOpcode::End});
+  LivenessAnalysis liveness = analyze_scope(blocks);
+
+  const Instruction &def = *insts_of(*blocks[0])[1];
+  EXPECT_FALSE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  EXPECT_EQ(liveness.find_free_run(&def, 1), 0u);
+}
+
+TEST(LivenessAnalysis, ExecFullViaInlineConstantPromotesVgprDefToKill) {
+  // The all-ones source here is an inline constant (`s_mov exec, -1` style):
+  // it exposes const_value() but not literal64_value(), so this exercises the
+  // const_value() path the analysis relies on.
+  auto blocks = build_test_blocks({TestOpcode::WriteExecFullInline, TestOpcode::DefVgpr0,
+                                   TestOpcode::UseVgpr0, TestOpcode::End});
+  LivenessAnalysis liveness = analyze_scope(blocks);
+
+  const Instruction &def = *insts_of(*blocks[0])[1];
+  EXPECT_FALSE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  EXPECT_EQ(liveness.find_free_run(&def, 1), 0u);
+}
+
+TEST(LivenessAnalysis, NarrowingExecWriteDoesNotPromoteVgprDefToKill) {
+  // Same shape but EXEC is only narrowed (unknown), so the def stays a
+  // non-kill and v0 remains live before it.
+  auto blocks = build_test_blocks(
+      {TestOpcode::WriteExecNarrow, TestOpcode::DefVgpr0, TestOpcode::UseVgpr0, TestOpcode::End});
+  LivenessAnalysis liveness = analyze_scope(blocks);
+
+  const Instruction &def = *insts_of(*blocks[0])[1];
+  EXPECT_TRUE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+
+  auto free_vgpr = liveness.find_free_run(&def, 1);
+  ASSERT_TRUE(free_vgpr.has_value());
+  EXPECT_NE(*free_vgpr, 0u);
+}
+
+TEST(ExecMaskAnalysis, CfgJoinMeetsToUnknownUnlessAllPredecessorsFull) {
+  // Branch byte layout (4 bytes/inst); target = block-end + delta:
+  //   0:  WriteExecFull
+  //   4:  CBranchToElse (delta +4; block ends at 8 -> target 12, skips block@8)
+  //   8:  WriteExecNarrow   (fallthrough block)
+  //   12: DefVgpr0          (join: reached from the Full branch path and the
+  //   16: UseVgpr0           Unknown fallthrough path -> meet is Unknown, so the
+  //   20: End                def must not be promoted to a kill)
+  auto blocks = build_test_blocks({TestOpcode::WriteExecFull, TestOpcode::CBranchToElse,
+                                   TestOpcode::WriteExecNarrow, TestOpcode::DefVgpr0,
+                                   TestOpcode::UseVgpr0, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+
+  BasicBlock *join = block_starting_at(blocks, 12);
+  ASSERT_NE(join, nullptr);
+  const Instruction &def = *join->instructions().begin();
+  EXPECT_EQ(exec.before(def), ExecState::Unknown);
+
+  LivenessAnalysis liveness = analyze_scope(blocks);
+  EXPECT_TRUE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+}
+
+// Regression: EXEC must flow across the scoped caller->callee edge like liveness
+// does. Without the edge the callee looks like a scope entry (Unknown) and its
+// vector def is wrongly left a non-kill; with it EXEC is Full and the def kills.
+TEST(ExecMaskAnalysis, CallEdgeFlowsExecFullIntoCallee) {
+  // Caller: exec=all-ones; end.   Callee: def v0; use v0; end. The caller's End
+  // splits the callee into its own block, reachable only via the scoped edge.
+  auto blocks = build_test_blocks({TestOpcode::WriteExecFull, TestOpcode::End, TestOpcode::DefVgpr0,
+                                   TestOpcode::UseVgpr0, TestOpcode::End});
+  ASSERT_EQ(blocks.size(), 2u);
+  BasicBlock *caller = blocks[0].get();
+  BasicBlock *callee = blocks[1].get();
+  const Instruction &def = *callee->instructions().begin();
+
+  const std::array<ScopedCfgEdge, 1> edges{ScopedCfgEdge{.from = caller, .to = callee}};
+  auto scope = block_scope(blocks);
+
+  // No edge: callee is a scope entry, EXEC Unknown, def stays live.
+  {
+    ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+    EXPECT_EQ(exec.before(def), ExecState::Unknown);
+    LivenessAnalysis liveness = analyze_scope(blocks);
+    EXPECT_TRUE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  }
+
+  // Same edge in both: EXEC Full at the def, so it overwrites every lane and kills v0.
+  {
+    ExecMaskAnalysis exec{KernelBlockScope(scope), 64, edges};
+    EXPECT_EQ(exec.before(def), ExecState::Full);
+    LivenessAnalysis liveness = analyze_scope_with_edges(blocks, edges);
+    EXPECT_FALSE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  }
+}
+
+// Regression: a scoped return->continuation edge must pull the continuation to
+// Unknown when the returning path narrowed EXEC. Omitting it from exec leaves the
+// continuation looking Full (from its local branch pred) and unsoundly kills.
+TEST(ExecMaskAnalysis, ReturnEdgeToContinuationMeetsToUnknown) {
+  //   0:  WriteExecFull         (P0)
+  //   4:  CBranchToElseAfterTwo (delta +8 -> branch target 16)
+  //   8:  WriteExecNarrow       (P1) return block: narrows EXEC
+  //   12: End                    P1 terminates -> reaches cont only via the edge
+  //   16: DefVgpr0              (cont) branch target of P0; 20: UseVgpr0; 24: End
+  auto blocks = build_test_blocks({TestOpcode::WriteExecFull, TestOpcode::CBranchToElseAfterTwo,
+                                   TestOpcode::WriteExecNarrow, TestOpcode::End,
+                                   TestOpcode::DefVgpr0, TestOpcode::UseVgpr0, TestOpcode::End});
+  BasicBlock *ret_block = block_starting_at(blocks, 8);
+  BasicBlock *cont = block_starting_at(blocks, 16);
+  ASSERT_NE(ret_block, nullptr);
+  ASSERT_NE(cont, nullptr);
+  const Instruction &def = *cont->instructions().begin();
+
+  const std::array<ScopedCfgEdge, 1> edges{ScopedCfgEdge{.from = ret_block, .to = cont}};
+  auto scope = block_scope(blocks);
+
+  // No edge: cont sees only its Full branch pred, so EXEC looks Full and def kills.
+  {
+    ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+    EXPECT_EQ(exec.before(def), ExecState::Full);
+    LivenessAnalysis liveness = analyze_scope(blocks);
+    EXPECT_FALSE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  }
+
+  // With edge: meet of the Full branch and the narrowed return path is Unknown,
+  // so the def is not a kill and v0 stays live.
+  {
+    ExecMaskAnalysis exec{KernelBlockScope(scope), 64, edges};
+    EXPECT_EQ(exec.before(def), ExecState::Unknown);
+    LivenessAnalysis liveness = analyze_scope_with_edges(blocks, edges);
+    EXPECT_TRUE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  }
+}
+
+// Regression: a back-edge into the scope entry gives block 0 a predecessor, but
+// EXEC at kernel entry is set by dispatch and must stay Unknown -- the loop
+// back-edge must not let interior blocks' optimistic `Full` seed leak in. Guards
+// the `i == 0` pin in the predecessor-based entry detection.
+TEST(ExecMaskAnalysis, BackEdgeIntoScopeEntryStaysUnknown) {
+  //   0: CBranchToElse (+4)    header/entry: loop or exit at 8
+  //   4: BranchBackToStart(-8) latch: unconditional back-edge to offset 0
+  //   8: End                   loop exit
+  auto blocks = build_test_blocks(
+      {TestOpcode::CBranchToElse, TestOpcode::BranchBackToStart, TestOpcode::End});
+  BasicBlock *entry = blocks[0].get();
+  BasicBlock *latch = block_starting_at(blocks, 4);
+  ASSERT_NE(latch, nullptr);
+
+  // The latch back-edges into the entry, so it is not caught by the empty-pred
+  // case -- only the i==0 pin keeps it an entry.
+  EXPECT_TRUE(has_predecessor(*entry, latch));
+
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+  EXPECT_EQ(exec.before(*entry->instructions().begin()), ExecState::Unknown);
 }
 
 TEST(LivenessAnalysis, FindsDeadSgprAfterLiveSgpr) {
@@ -3314,7 +3713,8 @@ TEST(LivenessAnalysis, MinFreeVgprForcesScratchAllocationAboveFloor) {
   LivenessAnalysisOptions options;
   options.min_free_vgpr = 4;
 
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
 
   const Instruction &use = *blocks[0]->instructions().begin();
   EXPECT_FALSE(liveness.is_live_before(use, {RegClass::VGPR, 0, 4}));
@@ -3327,16 +3727,17 @@ TEST(LivenessAnalysis, FreeVgprAllocationHonorsDestinationLimit) {
   auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
   auto scope = block_scope(blocks);
   const Instruction &use = *blocks[0]->instructions().begin();
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
 
   LivenessAnalysisOptions limited_options;
   limited_options.min_free_vgpr = 256;
-  LivenessAnalysis limited(KernelBlockScope(scope), limited_options);
+  LivenessAnalysis limited(KernelBlockScope(scope), exec, limited_options);
   EXPECT_EQ(limited.find_free_run(&use, 1), std::nullopt);
 
   LivenessAnalysisOptions gfx1250_options;
   gfx1250_options.min_free_vgpr = 256;
   gfx1250_options.max_free_vgpr = 1024;
-  LivenessAnalysis gfx1250(KernelBlockScope(scope), gfx1250_options);
+  LivenessAnalysis gfx1250(KernelBlockScope(scope), exec, gfx1250_options);
   EXPECT_EQ(gfx1250.find_free_run(&use, 1), 256);
 }
 
@@ -3347,7 +3748,8 @@ TEST(LivenessAnalysis, FindFreeRunHonorsBaseAlignment) {
   LivenessAnalysisOptions options;
   options.min_free_vgpr = 93;
 
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
 
   const Instruction &use = *blocks[0]->instructions().begin();
   EXPECT_EQ(liveness.find_free_run(&use, 4, 0, 2), 94);
@@ -3460,7 +3862,8 @@ TEST(LivenessAnalysis, ExplicitBlockSubsetIgnoresOutsideSuccessors) {
   EXPECT_TRUE(all_decoded_liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
 
   std::vector<BasicBlock *> kernel_blocks{kernel0};
-  LivenessAnalysis kernel_liveness{KernelBlockScope(kernel_blocks)};
+  const ExecMaskAnalysis kernel_exec(KernelBlockScope(kernel_blocks), /*wave_size=*/64);
+  LivenessAnalysis kernel_liveness{KernelBlockScope(kernel_blocks), kernel_exec};
   EXPECT_FALSE(kernel_liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
 }
 
@@ -3485,7 +3888,8 @@ TEST(InstDefUse, RWSgpr) {
 
 TEST(InstDefUse, PartialDefIsAlsoUse) {
   const TestInstruction test_inst("test_partial_def_s4", {{RegClass::SGPR, 4, 1}}, {}, 0,
-                                  std::nullopt, {}, /*def_size_bits=*/16);
+                                  std::nullopt, {}, std::nullopt, std::nullopt,
+                                  /*def_size_bits=*/16);
   InstDefUse idu(test_inst);
   EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 4, 1}));
   EXPECT_TRUE(idu.uses.contains({RegClass::SGPR, 4, 1}));
@@ -3493,7 +3897,7 @@ TEST(InstDefUse, PartialDefIsAlsoUse) {
 
 TEST(InstDefUse, FullWidthDefIsNotUse) {
   const TestInstruction test_inst("test_def_s4", {{RegClass::SGPR, 4, 1}}, {}, 0, std::nullopt, {},
-                                  /*def_size_bits=*/32);
+                                  std::nullopt, std::nullopt, /*def_size_bits=*/32);
   InstDefUse idu(test_inst);
   EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 4, 1}));
   EXPECT_FALSE(idu.uses.contains({RegClass::SGPR, 4, 1}));
@@ -3832,6 +4236,33 @@ TEST(GeneratedInstDefUse, Vop3SdstEncDppPartialRowMaskReadsOnlyVgprResult) {
   EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 8, 2}));
   EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 6, 1}));
   EXPECT_FALSE(idu.uses.contains({RegClass::SGPR, 8, 2}));
+}
+
+// v_writelane_b32 writes one lane and preserves the rest of vdst, so it reads
+// the old value. On CDNA4/gfx1250 (XML marks vdst output-only) that read is
+// surfaced via implicit_uses. word0 = VOP3 writelane opcode, vdst=5; word1 =
+// src0=s4, src1=s2 (2 << 9).
+TEST(GeneratedInstDefUse, WritelaneReadsDestinationCdna4) {
+  auto inst = decode_cdna4({0xD28A0005U, 0x00000404U}); // v_writelane_b32 v5, s4, s2
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_writelane_b32");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+TEST(GeneratedInstDefUse, WritelaneReadsDestinationGfx1250) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::array<uint32_t, 4> words{0xD7610005U, 0x00000404U, 0U, 0U};
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_writelane_b32");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
 }
 
 } // namespace

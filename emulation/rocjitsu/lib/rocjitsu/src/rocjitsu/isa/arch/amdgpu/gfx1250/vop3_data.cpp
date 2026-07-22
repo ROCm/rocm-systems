@@ -1682,5 +1682,11 @@ VWritelaneB32Vop3::VWritelaneB32Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
 }
 
+void VWritelaneB32Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 } // namespace gfx1250
 } // namespace rocjitsu

@@ -26,6 +26,7 @@ public:
   Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64);
   std::string name() const override;
   std::optional<uint64_t> literal64_value() const override;
+  std::optional<uint64_t> const_value() const override;
   std::optional<RegisterRef> to_register_ref() const override;
   bool simd_capable() const override;
 

@@ -650,6 +650,7 @@ SOrB32Sop2::SOrB32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= RESULT_OR;
 }
 
 void SOrB32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_or_b32_sop2(*this, wf); }
@@ -675,6 +676,7 @@ SOrB64Sop2::SOrB64Sop2(const MachineInst *inst)
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= RESULT_OR;
 }
 
 void SOrB64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_or_b64_sop2(*this, wf); }

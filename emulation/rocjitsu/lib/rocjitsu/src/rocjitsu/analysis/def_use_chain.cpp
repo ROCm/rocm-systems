@@ -15,7 +15,8 @@ namespace rocjitsu {
 
 namespace {
 
-[[nodiscard]] bool is_exec_masked_def(RegisterRef ref) {
+// Checks if a RegisterRef class is a vector (VGPR/AccVGPR).
+[[nodiscard]] bool is_vector_def(RegisterRef ref) {
   return ref.cls == RegClass::VGPR || ref.cls == RegClass::ACC_VGPR;
 }
 
@@ -55,37 +56,31 @@ void expand_operand_register(RegisterSet &set, const Instruction &inst, const Op
   }
 
   // Must-write with an unknown bank: expanding to all four tuples would falsely
-  // kill three the instruction does not write, so record NOTHING in the def set.
-  // This is only sound because such a def never contributes a liveness kill:
-  // control reaches here only for a VGPR ref (see the early return above), every
-  // VGPR def is exec-masked (is_exec_masked_def), and kill_defs() drops all VGPR
-  // kills once has_exec_masked_vector_def is set. If any of those change (a
-  // non-exec-masked VGPR def, or kill_defs no longer suppressing VGPR kills), an
-  // unknown-bank def would start over-killing and this must record the precise
-  // physical tuple instead. (An assert(is_exec_masked_def(ref)) here would be
-  // tautological — ref is already known to be a VGPR — so the invariant is
-  // documented rather than checked.)
-}
-
-void add_def(InstDefUse &du, const Instruction &inst, const Operand &operand, RegisterRef ref,
-             const Gfx1250VgprMsbAnalysis *vgpr_msb) {
-  expand_operand_register(du.defs, inst, operand, ref, vgpr_msb, OperandExpansionKind::Def);
-  if (is_exec_masked_def(ref))
-    du.has_exec_masked_vector_def = true;
+  // kill three tuples the instruction does not write (an over-kill, which is
+  // unsound for liveness), so record NOTHING in the def set instead. An
+  // unrecorded def can only cause an under-kill, which merely keeps a value live
+  // longer than necessary and is always a sound (conservative) approximation.
+  // Known-bank defs above record the precise physical tuple and kill as usual,
+  // subject to the EXEC-masking rules in kill_defs().
 }
 
 } // namespace
 
 InstDefUse::InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vgpr_msb) {
   has_predicated_def = inst.flags() & PREDICATED_DEF;
+  const bool ignores_exec = inst.flags() & IGNORES_EXEC;
+  bool has_vector_def = false;
 
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const auto *op = inst.dst_operand(i);
     if (op == nullptr)
       continue;
-    if (auto ref = op->to_register_ref())
-      add_def(*this, inst, *op, *ref, vgpr_msb);
+    if (auto ref = op->to_register_ref()) {
+      expand_operand_register(defs, inst, *op, *ref, vgpr_msb, OperandExpansionKind::Def);
+      has_vector_def |= is_vector_def(*ref);
+    }
   }
+  has_exec_masked_vector_def = has_vector_def && !ignores_exec;
   inst.implicit_defs(defs);
 
   for (int i = 0; i < inst.num_src_operands(); ++i) {

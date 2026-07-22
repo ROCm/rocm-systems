@@ -26,10 +26,11 @@ public:
   /// @param inst Decoded instruction whose operands have stable lifetimes.
   InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vgpr_msb = nullptr);
 
-  RegisterSet defs;                        ///< Registers overwritten by the instruction.
-  RegisterSet uses;                        ///< Registers read before the instruction writes defs.
-  bool has_exec_masked_vector_def = false; ///< True if any vector def is predicated by EXEC.
-  bool has_predicated_def = false;         ///< True if defs preserve old values on some paths.
+  RegisterSet defs; ///< Registers overwritten by the instruction.
+  RegisterSet uses; ///< Registers read before the instruction writes defs.
+  bool has_exec_masked_vector_def =
+      false; ///< True if the instruction doesn't ignore EXEC and has a vector def.
+  bool has_predicated_def = false; ///< True if defs preserve old values on some paths.
 };
 
 } // namespace rocjitsu
