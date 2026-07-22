@@ -670,6 +670,19 @@ class ConSanValidationTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 llama_validation._read_f32(path)
 
+    def test_llama_oracle_writes_fault_runner_result(self) -> None:
+        with temporary_root() as root:
+            path = root / "oracle.json"
+            with mock.patch.dict(
+                os.environ, {"CONSAN_ROW_RESULT_PATH": str(path)}, clear=True
+            ):
+                llama_validation._write_oracle_result(
+                    "pass", {"llama-mul-mat-vec-q": {"oracle_passed": True}}
+                )
+            result = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(result["oracle"], "pass")
+        self.assertEqual(result["source_diagnostics"]["outcome"], "not_applicable")
+
     def test_tensile_gfx1250_uses_numeric_runner_once(self) -> None:
         workload = validation.WORKLOAD_BY_ID["tensile-sk-mxf8gemm-explicit"]
         with mock.patch.dict(

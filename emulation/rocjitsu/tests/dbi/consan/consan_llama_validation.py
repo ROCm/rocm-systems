@@ -20,6 +20,29 @@ WORKLOADS = {
 }
 
 
+def _write_oracle_result(outcome: str, detail: object) -> None:
+    result_path = os.environ.get("CONSAN_ROW_RESULT_PATH") or os.environ.get(
+        "CONSAN_WORKLOAD_RESULT_PATH"
+    )
+    if not result_path:
+        return
+    payload = {
+        "schema_version": 1,
+        "oracle": outcome,
+        "detail": detail,
+        "source_diagnostics": {
+            "outcome": "not_applicable",
+            "count": None,
+            "expectation": "not_applicable",
+            "detail": "llama.cpp numeric oracle has no separate source-diagnostic channel",
+        },
+    }
+    path = Path(result_path)
+    temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
+    temporary.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
 def _read_f32(path: Path) -> tuple[float, ...]:
     data = path.read_bytes()
     if len(data) % 4:
@@ -103,23 +126,20 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError) as error:
             detail = str(error)
 
-    print(
-        json.dumps(
-            {
-                f"llama-{args.workload}": {
-                    "median_ms": gpu_elapsed_ms,
-                    "oracle": "independent-cpu-binary-output",
-                    "oracle_passed": oracle_passed,
-                    "max_abs_error": max_abs_error,
-                    "tolerance": WORKLOADS[args.workload]["tolerance"],
-                    "gpu_returncode": gpu_returncode,
-                    "cpu_returncode": cpu_returncode,
-                    "detail": detail,
-                }
-            },
-            sort_keys=True,
-        )
-    )
+    result = {
+        f"llama-{args.workload}": {
+            "median_ms": gpu_elapsed_ms,
+            "oracle": "independent-cpu-binary-output",
+            "oracle_passed": oracle_passed,
+            "max_abs_error": max_abs_error,
+            "tolerance": WORKLOADS[args.workload]["tolerance"],
+            "gpu_returncode": gpu_returncode,
+            "cpu_returncode": cpu_returncode,
+            "detail": detail,
+        }
+    }
+    _write_oracle_result("pass" if oracle_passed else "fail", result)
+    print(json.dumps(result, sort_keys=True))
     if gpu_returncode != 0:
         return gpu_returncode
     if cpu_returncode != 0:
