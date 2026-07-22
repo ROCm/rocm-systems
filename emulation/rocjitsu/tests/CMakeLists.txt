@@ -395,6 +395,7 @@ add_executable(
     code/code_object_target_id_test.cpp
     code/amdgpu_code_object_test.cpp
     code/relocation_function_table_test.cpp
+    code/kernel_descriptor_scan_test.cpp
     dbt/semantic_scratch_test.cpp
     dbt/waitcnt_translator_test.cpp
     dbt/virtual_lds_dispatch_rewrite_test.cpp
