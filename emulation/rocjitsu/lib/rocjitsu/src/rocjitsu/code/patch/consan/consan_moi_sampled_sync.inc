@@ -1470,13 +1470,16 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         const auto local_island = indirect_allocator.claim_reachable(site.text_offset);
         fwd = local_island ? compute_sopp_branch_simm16(site.text_offset, *local_island)
                            : std::nullopt;
-        if (!local_island || !fwd ||
-            !emit_moi_local_indirect_entry_island(
+        if (!local_island || !fwd) {
+          result.warnings.emplace_back(
+              "ConSan MOI sampled barrier sync skipped barrier at text offset " +
+              std::to_string(site.text_offset) + ": no reachable entry island");
+          continue;
+        }
+        if (!emit_moi_local_indirect_entry_island(
                 new_text, *local_island, cave_offset, site.text_offset, options,
                 planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
                 "ConSan MOI sampled barrier sync patch")) {
-          result.errors.emplace_back(
-              "ConSan MOI sampled barrier sync found no reachable entry island");
           return;
         }
       }

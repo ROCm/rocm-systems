@@ -2414,6 +2414,56 @@ TEST(ConSanMoi, SampledFarBarrierUsesReachableLocalIndirectEntryIsland) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
+TEST(ConSanMoi, SampledFarBarrierWithoutEntryIslandRemainsAQualifiedCoverageGap) {
+  std::vector<uint32_t> kernel_words;
+  for (uint32_t i = 0; i < 9u; ++i) {
+    kernel_words.push_back(0xD8340000u); // ds_store_b32 v0, v0
+    kernel_words.push_back(0x00000000u);
+  }
+  const uint64_t barrier_offset = kernel_words.size() * sizeof(uint32_t);
+  kernel_words.push_back(0xBE804EC1u); // s_barrier_signal -1
+  kernel_words.push_back(0xBF94FFFFu); // s_barrier_wait -1
+  kernel_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+  const std::array function_words = {build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)};
+  std::vector<uint32_t> far_tail(40000u, build_s_nop(1, ROCJITSU_CODE_ARCH_RDNA4));
+  // The access probes consume these eight indirect-jump islands. The
+  // qualified barrier must then remain an explicit coverage gap rather than
+  // invalidating the otherwise usable transformed object.
+  std::fill_n(far_tail.begin(), 8u * 8u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  const std::vector<uint8_t> bytes =
+      make_rdna4_code_object_with_local_function(kernel_words, function_words, far_tail);
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_track_barriers = true;
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_dispatch_id_sgpr = 70;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(18);
+  options.moi_runtime_sample_stride = 16384;
+  options.max_patches = 20;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
+                               &ConSanPatchInfo::kind),
+            0u);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("no reachable entry island") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+  const auto barrier = std::ranges::find_if(result.site_dispositions, [&](const auto &site) {
+    return site.site_kind == ConSanResourceSiteKind::Barrier &&
+           site.text_offset == barrier_offset + sizeof(uint32_t);
+  });
+  ASSERT_NE(barrier, result.site_dispositions.end());
+  EXPECT_EQ(barrier->lowering_outcome, ConSanSiteLoweringOutcome::PlacementOrLoweringFailed);
+  EXPECT_EQ(barrier->lowering_reason, ConSanSiteLoweringReason::InstrumentationPatchMissing);
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, SampledQualifiedBarrierAdmitsLongStraightLinePair) {
   std::vector<uint32_t> words(540, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
