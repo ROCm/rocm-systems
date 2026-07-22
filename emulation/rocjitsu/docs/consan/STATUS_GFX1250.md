@@ -51,10 +51,10 @@ preserve an earlier green claim.
 | **P1 Sharktank TP1 decode/combined** | 🟩 Exact decode/combined oracles; 704/704 accesses; current paired 1.09x | 🟩 Exact decode/combined oracles; 704/704 accesses, 74/74 barriers; current paired 1.16x | 🟩 Exact decode/combined oracles; 704/704 accesses, 128/128 applicable barriers; current paired 1.28x | 🟧 Compute-active through 600 seconds; no verdict or accepted overhead |
 | **P2 Sharktank TP2 family** | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained |
 | **P4 hip-moi D128 block attention** | 🟩 Current paired 1.56x; 18/18 accesses | 🟩 Current paired 1.11x; 18/18 accesses, 4/4 barriers | 🟩 Current paired 1.13x; 18/18 accesses, 8/8 applicable barriers | 🟩 Current paired 1.09x; 18/18 accesses, 4/4 barriers |
-| **P4 hip-moi D128 pressure attention** | 🟩 Current paired 1.84x; 40/40 accesses | 🟩 Current paired 1.13x; 40/40 accesses, 4/4 barriers | 🟩 Current paired 1.12x; 40/40 accesses, 8/8 applicable barriers | 🟩 Current paired 1.29x; 40/40 accesses, 4/4 barriers |
-| **P4 hip-moi WMMA attention** | 🟩 Current paired 1.78x; 18/18 accesses | 🟩 Current paired 1.17x; 18/18 accesses, 4/4 barriers | 🟩 Current paired 1.15x; 18/18 accesses, 8/8 applicable barriers | 🟩 Current paired 1.17x; 18/18 accesses, 4/4 barriers |
-| **P4 hip-moi Stream-K arrival** | 🟩 Current paired 7.38x; 4/4 accesses | 🟩 Current paired 2.41x; 4/4 accesses, 4/4 barriers, 10/10 atomics, 16/16 fences | 🟩 Current paired 2.72x; 4/4 accesses, 8/8 applicable barriers, 10/10 atomics | 🟩 Current paired 2.62x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
-| **P4 hip-moi tree atomic-OR** | 🟩 Current paired 6.55x; 4/4 accesses | 🟩 Current paired 2.04x; 4/4 accesses, 4/4 barriers, 10/10 atomics, 16/16 fences | 🟩 Current paired 2.57x; 4/4 accesses, 8/8 applicable barriers, 10/10 atomics | 🟩 Current paired 2.19x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
+| **P4 hip-moi D128 pressure attention** | 🟩 Current paired 1.84x; 40/40 accesses | 🟨 Fresh clean run passes three of four exact cases with 40/40 accesses and 4/4 barriers statically complete; the fourth exceeds the 30-second row deadline | 🟩 Current paired 1.12x; 40/40 accesses, 8/8 applicable barriers | 🟩 Current paired 1.29x; 40/40 accesses, 4/4 barriers |
+| **P4 hip-moi WMMA attention** | 🟩 Current paired 1.78x; 18/18 accesses | 🟩 Fresh clean run exact and complete at 18/18 accesses and 4/4 barriers; prior paired 1.17x retained | 🟩 Current paired 1.15x; 18/18 accesses, 8/8 applicable barriers | 🟩 Current paired 1.17x; 18/18 accesses, 4/4 barriers |
+| **P4 hip-moi Stream-K arrival** | 🟩 Current paired 7.38x; 4/4 accesses | 🟩 Fresh clean run exact and complete at 4/4 accesses, 4/4 barriers, 10/10 atomics, and 16/16 fences; prior paired 2.41x retained | 🟩 Current paired 2.72x; 4/4 accesses, 8/8 applicable barriers, 10/10 atomics | 🟩 Current paired 2.62x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
+| **P4 hip-moi tree atomic-OR** | 🟩 Current paired 6.55x; 4/4 accesses | 🟩 Fresh clean run exact and complete at 4/4 accesses, 4/4 barriers, 10/10 atomics, and 16/16 fences; prior paired 2.04x retained | 🟩 Current paired 2.57x; 4/4 accesses, 8/8 applicable barriers, 10/10 atomics | 🟩 Current paired 2.19x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
 | **P4 Jakub attention variants** | 🟩 Current paired 2.52x; 31/31 accesses | 🟩 Current paired 1.44x; 62/62 accesses, 4/4 barriers | 🟩 Current paired 1.56x; 62/62 accesses, 8/8 applicable barriers | 🟩 Current paired 1.55x; 62/62 accesses, 4/4 barriers |
 
 CLIP BF16 is intentionally omitted from the current acceptance matrix.  Its
@@ -166,6 +166,15 @@ defined zero-generation fallback only for those proven-safe owner components.
 The current exact run is complete at 4,756/4,756 accesses and 2,352/2,352
 barriers, and its paired one-repetition bundle measures 211.06x.  The full
 shared ConSan suite, including the RDNA4 cases, remains green.
+
+A later cheap-row audit at source revision `b6143a2ce1` and hook SHA-256
+`fd67f1ce7ee438952d8f798b395ce1c75ea87e86fdead53eae5327e8a587fd57`
+reran four native Record/Replay rows with one process repetition.  WMMA
+attention, Stream-K arrival, and tree atomic-OR are exact, statically and
+dynamically complete, and finish in 7.81, 2.18, and 2.55 seconds respectively.
+D128 pressure reproducibly passes its first three exact cases, but the fourth
+case crosses the ordinary 30-second aggregate row deadline; that cell is
+yellow pending a complete current-tip verdict.
 
 `007_sk_mxf4gemm_tdm` is the one prior green claim that does not survive this
 audit.  It is statically complete and passes its first five exact rows; the
