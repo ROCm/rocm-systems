@@ -837,6 +837,13 @@ void append_moi_sync_site_dispositions(const ConSanOptions &options, ConSanResul
         result.sync_events, fence.communication_event_identity, &ConSanSyncEvent::identity);
     const bool unowned_communication =
         communication != result.sync_events.end() && communication->execution_owners.empty();
+    const auto fence_event = std::ranges::find(
+        result.sync_events, fence.fence_event_identity, &ConSanSyncEvent::identity);
+    const bool unowned_fence =
+        fence_event != result.sync_events.end() && fence_event->execution_owners.empty();
+    const bool unassociated_cache_operation =
+        fence.rejection_reason ==
+        "fence-not-associated-with-addressed-communication-sequence";
     if (!fence.eligible) {
       reason = ConSanSiteDispositionReason::IneligibleFence;
     } else if (communication == result.sync_events.end() || unowned_communication) {
@@ -848,7 +855,8 @@ void append_moi_sync_site_dispositions(const ConSanOptions &options, ConSanResul
     }
     append_moi_site_disposition(ConSanResourceSiteKind::Fence, fence.container_name,
                                 fence.in_kernel, fence.text_offset, "fence", reason, result,
-                                unowned_communication ||
+                                unowned_communication || unowned_fence ||
+                                    unassociated_cache_operation ||
                                     reason == ConSanSiteDispositionReason::IneligibleFence);
   }
 }

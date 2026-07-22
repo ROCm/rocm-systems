@@ -178,6 +178,29 @@ TEST(ConSanMoi, UnassociatedFenceIsNotApplicableOnEverySupportedTarget) {
   }
 }
 
+TEST(ConSanMoi, Cdna4UnassociatedFenceIsNotApplicable) {
+  const auto fence = build_cdna4_s_dcache_inv_vol(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(fence);
+  std::vector<uint32_t> text_words(fence->begin(), fence->end());
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+  const std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, "unassociated_fence");
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_track_atomics = true;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.moi_fence_candidates.size(), 1u);
+  EXPECT_FALSE(result.moi_fence_candidates.front().eligible);
+  EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [](const auto &site) {
+    return site.site_kind == ConSanResourceSiteKind::Fence &&
+           site.disposition == ConSanSiteDisposition::NotApplicable &&
+           site.reason == ConSanSiteDispositionReason::IneligibleFence &&
+           site.lowering_outcome == ConSanSiteLoweringOutcome::NotApplicable;
+  }));
+}
+
 TEST(ConSanMoi, InventoriesDynamicStackMarker) {
   const std::array<uint32_t, 3> text_words = {
       0xD8340000u,
