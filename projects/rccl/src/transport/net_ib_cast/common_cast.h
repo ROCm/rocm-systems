@@ -391,6 +391,7 @@ struct ncclIbQpRtrAttr {
   union ibv_gid remoteGid;
 
   uint8_t localIbPort;
+  uint8_t localPortFlags;
   union ibv_gid localGid;
   int32_t localGidIndex;
 };
