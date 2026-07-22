@@ -51,6 +51,7 @@ struct DispatchEntry {
   uint32_t aql_packet_id = 0;
 
   uint64_t kernel_entry_pc = 0;
+  uint64_t code_load_bias = 0;
   uint32_t wfs_per_workgroup = 1;
   uint32_t sgprs_per_wf = 104;
   uint32_t vgprs_per_wf = 256;
