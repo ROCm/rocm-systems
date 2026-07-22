@@ -120,7 +120,7 @@ flowchart TD
     XP7["XP7 DONE<br/>histogram Sampled paired and fault bundle<br/>green at 175-access denominator"]
     XP8["XP8 DONE<br/>scatter all four profiles green;<br/>inapplicable fault families recorded as typed N/A"]
     XP2A["XP2A DONE<br/>torch.topk exact oracles and dense Record/Replay<br/>106/106 diagnostic vertical"]
-    XP2B["XP2B DONE<br/>torch.topk Sampled exact client completes;<br/>construction indexes validated"]
+    XP2B["XP2B DONE<br/>torch.topk Sampled exact client completes;<br/>owner-local scalar windows recover bounded coverage"]
     XP2C["XP2C DONE<br/>torch.topk unrestricted Record/Replay exact/dynamic;<br/>113,760/160,848 accesses, all barriers"]
     XP2D["XP2D DONE<br/>torch.topk Record/Replay current-tip regression bounded;<br/>signal follows both complete transformations"]
     XP2E["XP2E DONE<br/>torch.topk Inline construction scaled;<br/>both large objects finish patching"]
@@ -551,6 +551,15 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-22: XP2B remains DONE/green for its bounded bootstrap objective.
+  Gfx1250 Sampled now carries an owner/component-local eight-SGPR transient
+  assignment through planning and every emitted access path.  All 731 ConSan
+  host tests pass, and one-repetition TopK evidence preserves both exact
+  oracles while reducing root resource failures from 5,128 to 4,545.  Those
+  remaining owners have no component-common dead window and need a separate
+  spill-backed scalar-state project; no ACTIVE/blue box is falsely left on
+  this rotated hard tail.
 
 - 2026-07-21: XT3O is DONE/green at clean revision `82a0a1dd8b`.
   Current-tip one-repetition paired artifact

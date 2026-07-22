@@ -1023,6 +1023,57 @@ TEST(ConSanMoi, DirectSampledProbeDoesNotTrustLivenessWithRelativeVgprAccess) {
   EXPECT_EQ(result.patches.front().scratch_vgpr, 9u);
 }
 
+TEST(ConSanMoi, Gfx1250SampledAutomaticExecSaveUsesOwnerLocalWindow) {
+  const auto make_owner = [](uint16_t first_live, uint16_t last_live, uint16_t dead_destination) {
+    std::vector<uint32_t> words = {
+        0xD8340000u,
+        0x00000000u, // ds_store_b32 v0, v0
+    };
+    for (uint16_t sgpr = first_live; sgpr <= last_live; ++sgpr) {
+      words.push_back(build_s_mov_b32(dead_destination, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
+    }
+    words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+    return words;
+  };
+  const std::vector<uint32_t> first_words =
+      make_owner(/*first_live=*/8u, /*last_live=*/105u, /*dead_destination=*/0u);
+  const std::vector<uint32_t> second_words =
+      make_owner(/*first_live=*/0u, /*last_live=*/97u, /*dead_destination=*/97u);
+  const std::vector<uint8_t> bytes = make_gfx1250_code_object_with_local_function(
+      first_words, second_words, {}, kRdna4Wave64AllVgprsGranulated,
+      /*function_is_kernel=*/true);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.scratch_vgpr = 8;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = 2;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  ASSERT_FALSE(result.resolved_moi_transient_sgpr_assignments.empty());
+  EXPECT_EQ(std::ranges::count_if(result.patches,
+                                  [](const ConSanPatchInfo &patch) {
+                                    return patch.kind ==
+                                               ConSanPatchKind::InlineMoiSampledWatchpointStore ||
+                                           patch.kind ==
+                                               ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+                                  }),
+            2u);
+  EXPECT_TRUE(std::ranges::all_of(result.resource_plans, [](const auto &plan) {
+    return plan.site_kind != ConSanResourceSiteKind::Access ||
+           plan.source != ConSanRegisterAllocationSource::Unsupported;
+  }));
+}
+
 TEST(ConSanMoi, DirectSampledProbeSpillsFiveVgprsInAppendedCave) {
   const std::array<uint32_t, 3> text_words = {
       0xD8340000u,

@@ -1647,8 +1647,10 @@ moi_indirect_jump_sgprs(const ConSanOptions &options) {
 configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSanResult &result,
                                                    std::span<const uint8_t> bytes,
                                                    rj_code_arch_t arch) {
+  const bool gfx1250_sampled =
+      options.moi_engine == ConSanMoiEngine::Sampled && arch == ROCJITSU_CODE_ARCH_GFX1250;
   if ((options.moi_engine != ConSanMoiEngine::RecordReplay &&
-       options.moi_engine != ConSanMoiEngine::InlineShadow) ||
+       options.moi_engine != ConSanMoiEngine::InlineShadow && !gfx1250_sampled) ||
       !options.automatic_moi_partial_exec_save_sgprs || !options.moi_exec_save_sgpr)
     return false;
 
@@ -1756,7 +1758,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     std::optional<uint16_t> spill_scc;
     std::optional<uint16_t> spill_key;
     std::optional<uint16_t> spill_visible;
-    if (options.moi_engine == ConSanMoiEngine::RecordReplay) {
+    if (options.moi_engine == ConSanMoiEngine::RecordReplay || gfx1250_sampled) {
       for (uint32_t base = 0; base + count <= limit; base += 2u) {
         const uint16_t candidate = static_cast<uint16_t>(base);
         if (intersects(unavailable, candidate, count) ||
