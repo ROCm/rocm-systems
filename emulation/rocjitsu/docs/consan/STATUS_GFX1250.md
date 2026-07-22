@@ -146,12 +146,12 @@ that remains a separate discovery target rather than an implied result.
 ### 2026-07-22 Record/Replay revalidation
 
 After rebasing `users/bjacob/sanitizers`, all 27 cells that were green in the
-Record/Replay column received a fresh one-repetition clean assessment.  At
-revision `448177858e2c` and hook SHA-256
-`f7a5e0861e8b1f3dd55285838cfb5d4c287529d48a4b2abf5d54c9b987e5d254`,
-25 remain green.  The shared architecture gate passes 775/775 ConSan tests,
-the HSA hook gate passes 20/20, and the validation Python suite passes
-136/136.  This retains the RDNA4 cases while qualifying the gfx1250 changes.
+Record/Replay column received a fresh one-repetition clean assessment.  The
+the norm/softmax evidence hook SHA-256 is
+`c4be4b6fb29f63817a18bb3044def3dca1df4f2af4014639510a74289df3c368`.
+The shared architecture gate passes 764/764 ConSan tests and the validation
+Python suite passes 71/71.  This retains the RDNA4 cases while qualifying the
+gfx1250 changes.
 
 The rebase exposed and the current branch fixes two gfx1250 placement defects:
 singleton spill-backed scalar placement and reuse of relocated dense access
@@ -159,14 +159,19 @@ hosts by far fence probes.  The latter restores `001_sk_mxf8f4gemm_tdm` and
 `004_sk_mxf8gemm_tdm` from 8/24 to 24/24 fences without changing the RDNA4
 path.
 
-Two prior green claims do not survive the audit.  The norm/softmax exact oracle
-still passes, but five full-pressure reduction kernels safely reject a
-persistent dispatch-state overlap, leaving 130 accesses and 45 barriers
-unpatched.  `007_sk_mxf4gemm_tdm` is statically complete and passes its first
-five exact rows, then the instrumented software-GPU execution aborts after an
-84-byte private-segment growth; the matching uninstrumented client completes
-all rows.  These cells are yellow and orange respectively rather than carrying
-forward stale green evidence.
+The norm/softmax regression is fixed.  Five full-pressure reduction kernels
+could not preserve the code-object-wide hardware dispatch-ID pair even though
+they had a complete owner-local scalar ABI.  Record/Replay now uses its
+defined zero-generation fallback only for those proven-safe owner components.
+The current exact run is complete at 4,756/4,756 accesses and 2,352/2,352
+barriers, and its paired one-repetition bundle measures 211.06x.  The full
+shared ConSan suite, including the RDNA4 cases, remains green.
+
+`007_sk_mxf4gemm_tdm` is the one prior green claim that does not survive this
+audit.  It is statically complete and passes its first five exact rows, then
+the instrumented software-GPU execution aborts after an 84-byte private-segment
+growth; the matching uninstrumented client completes all rows.  The cell is
+orange rather than carrying forward stale green evidence.
 
 ### Shared-branch merge revalidation closeout
 
@@ -226,7 +231,7 @@ that workaround consistently.
 | P1 | `torch.sort` over segmented rows | 🟩 Exact values/indices; 48,224/48,224 accesses; current paired 184.68x | 🟩 Exact values/indices; 48,224/48,224 accesses and 6,032/6,032 barriers; current paired 370.29x | 🟩 Exact values/indices; 48,224/48,224 accesses and 12,064/12,064 barrier members; current paired 171.77x; reviewed noncausal fault accepted | 🟩 Exact values/indices; 48,224/48,224 accesses and 6,032/6,032 barriers; current paired 416.22x | All four profile bundles accepted. |
 | P1 | Collision-heavy `torch.scatter_reduce` (`sum`, BF16 and FP32) | 🟩 Exact collision sums; 23/23 accesses; current paired 24.37x | 🟩 Exact collision sums; 23/23 accesses; current paired 42.30x | 🟩 Exact collision sums; 23/23 accesses; current paired 41.91x | 🟩 Exact collision sums; 23/23 accesses; current paired 40.17x | All profiles accepted; ordered-atomic fault modes are typed N/A for this relaxed singleton reduction. |
 | P1 | `torch.histc` with a shared-memory-sized bin count | 🟩 Exact counts; 133/133 supported accesses; current paired 60.11x | 🟩 Exact counts; 175/175 accesses and 84/84 barriers; current paired 72.00x | 🟩 Exact counts; 175/175 accesses and 168/168 applicable barriers; current paired 67.37x | 🟩 Exact counts; 175/175 accesses and 84/84 barriers; current paired 85.86x | All four profile bundles accepted, including causal barrier-fault evidence. |
-| P2 | `torch.linalg.vector_norm` and large-row `torch.softmax` | 🟩 Exact norm/softmax; 4,756/4,756 accesses; current paired 315.57x | 🟨 Current exact oracle passes, but five full-pressure reduction kernels leave 130 accesses and 45 barriers resource-incomplete (4,626/4,756 accesses; 2,307/2,352 barriers) | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 4,572/4,572 barriers; current paired 534.97x | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 2,352/2,352 barriers; current paired 317.24x | Record/Replay now safely rejects dispatch-state overlap in five reduction kernels; the other profiles retain accepted bundles. |
+| P2 | `torch.linalg.vector_norm` and large-row `torch.softmax` | 🟩 Exact norm/softmax; 4,756/4,756 accesses; current paired 315.57x | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 2,352/2,352 barriers; current paired 211.06x; reviewed exact-one fault and health accepted | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 4,572/4,572 barriers; current paired 534.97x | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 2,352/2,352 barriers; current paired 317.24x | Record/Replay uses owner-local zero-generation records where full-pressure kernels cannot preserve the global dispatch-ID pair; all profiles have accepted bundles. |
 | P1 | PyTorch cluster synchronization | 🟩 Exact oracle; 25/25 applicable accesses; current paired 1.02x | 🟩 Exact oracle; 25/25 accesses and 2/2 barriers; current paired 1.03x | 🟩 Exact oracle; 25/25 accesses and 4/4 barrier members; current paired 1.07x | 🟩 Exact oracle; 25/25 accesses and 2/2 barriers; current paired 1.24x | All profiles accepted for the causal cluster-scope synchronization workload. |
 | Survey | Cluster-memory and inter-workgroup synchronization from PyTorch | 🟩 Executable cluster-scope synchronization full bundle accepted | 🟩 Executable cluster-scope synchronization full bundle accepted | 🟩 Executable cluster-scope synchronization full bundle accepted | 🟩 Executable cluster-scope synchronization full bundle accepted | Cluster-scope synchronization is covered; no distinct cluster-memory opcode is claimed. |
 

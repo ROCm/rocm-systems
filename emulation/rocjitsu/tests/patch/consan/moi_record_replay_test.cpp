@@ -2103,6 +2103,58 @@ TEST(ConSanMoi, RecordReplayAutomaticExecSaveOverridesOnlyIncompatibleOwner) {
   }));
 }
 
+TEST(ConSanMoi, Gfx1250RecordReplayKeepsDispatchOnlyFullPressureOwner) {
+  std::vector<uint32_t> low_pressure_words(320u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  low_pressure_words[0] = 0xD8340000u;
+  low_pressure_words[1] = 0x00000000u; // ds_store_b32 v0, v0
+  low_pressure_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+
+  std::vector<uint32_t> full_pressure_words = low_pressure_words;
+  full_pressure_words[2] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/105u, ROCJITSU_CODE_ARCH_GFX1250);
+  const std::vector<uint8_t> bytes = make_gfx1250_code_object_with_local_function(
+      low_pressure_words, full_pressure_words, {}, kRdna4Wave64AllVgprsGranulated,
+      /*function_is_kernel=*/true);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = 2;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
+  EXPECT_EQ(*result.resolved_moi_dispatch_id_sgpr, 104u);
+  EXPECT_EQ(
+      std::ranges::count_if(result.patches,
+                            [](const ConSanPatchInfo &patch) {
+                              return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+                                     patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
+                            }),
+      2u);
+  EXPECT_TRUE(std::ranges::all_of(result.resource_plans, [](const auto &plan) {
+    return plan.site_kind != ConSanResourceSiteKind::Access ||
+           plan.source != ConSanRegisterAllocationSource::Unsupported;
+  }));
+  const auto full_pressure_kernel =
+      std::ranges::find(result.kernels, "lds_helper", &ConSanKernelInfo::name);
+  ASSERT_NE(full_pressure_kernel, result.kernels.end());
+  const auto full_pressure_assignment = std::ranges::find_if(
+      result.resolved_moi_transient_sgpr_assignments, [&](const auto &assignment) {
+        return assignment.descriptor_file_offset == full_pressure_kernel->descriptor_file_offset;
+      });
+  ASSERT_NE(full_pressure_assignment, result.resolved_moi_transient_sgpr_assignments.end());
+  EXPECT_FALSE(full_pressure_assignment->dispatch_id_sgpr);
+  EXPECT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("owner-local zero-generation records") != std::string::npos;
+  }));
+}
+
 TEST(ConSanMoi, RecordReplayOwnerLocalExecSaveRequiresCommonWindowForSharedHelper) {
   TwoKernelSharedFixtureOptions fixture;
   fixture.first_wave32 = true;

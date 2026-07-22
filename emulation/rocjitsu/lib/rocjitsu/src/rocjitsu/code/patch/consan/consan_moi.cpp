@@ -274,6 +274,9 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   if (configure_automatic_moi_exec_save_sgprs(effective_options, result, code_object_bytes, arch))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
+  if (configure_gfx1250_record_replay_dispatch_id_overrides(effective_options, result,
+                                                            code_object_bytes, arch))
+    rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported ||
       !validate_moi_dispatch_id_sgprs(effective_options, result, arch) ||
       !validate_moi_ordinary_scalar_state(effective_options, result, arch)) {
