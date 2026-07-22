@@ -50,6 +50,20 @@ TEST(UniqueHandle, MovesAndReleasesOwnership) {
   EXPECT_EQ(CountingHandleTraits::closed, -1);
 }
 
+TEST(UniqueHandle, MoveAssignmentClosesReplacedHandle) {
+  CountingHandleTraits::closed = -1;
+  CountingHandle source(7);
+  CountingHandle destination(3);
+
+  destination = std::move(source);
+
+  EXPECT_EQ(CountingHandleTraits::closed, 3);
+  EXPECT_FALSE(source);
+  EXPECT_EQ(source.get(), CountingHandleTraits::invalid());
+  ASSERT_TRUE(destination);
+  EXPECT_EQ(destination.get(), 7);
+}
+
 TEST(UniqueHandle, ResetClosesPreviousHandle) {
   CountingHandleTraits::closed = -1;
   CountingHandle handle(3);
