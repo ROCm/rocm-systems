@@ -1436,6 +1436,9 @@ graph:
   Unit_hipGraph_BasicCyclic5:
     <<: *level_2
     tags: [lifecycle]
+  Unit_hipGraph_CyclicChildInstantiation:
+    <<: *level_2
+    tags: [lifecycle]
   Unit_hipGraph_PerfCheck_MemcpyKernelMixCall:
     <<: *level_2
     tags: [exec]

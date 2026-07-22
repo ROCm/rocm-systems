@@ -758,8 +758,9 @@ class Graph {
 
   //! Schedules one node on a virtual stream.
   //! It will also process the nodes in edges, using DFS
-  void ScheduleOneNode(Node node,     //!< Node for scheduling on a virtual stream
-                       int stream_id  //!< Current active virtual stream to use for scheduling
+  hipError_t ScheduleOneNode(
+      Node node,     //!< Node for scheduling on a virtual stream
+      int stream_id  //!< Current active virtual stream to use for scheduling
   );
 
   //! Schedules all nodes in the graph into different streams
@@ -779,15 +780,16 @@ class Graph {
   hipError_t ScheduleNodesIntoBatches();
 
   //! Find execution paths hierarchically, keeping child graphs separate
-  GraphExecutionPaths FindExecutionPathsHierarchical();
+  hipError_t FindExecutionPathsHierarchical(GraphExecutionPaths& graph_paths);
 
   //! Find all paths from a node using an explicit DFS over a node stack, with
   //! hierarchical handling of child graphs (only child graphs recurse)
-  void FindPathsDFS(Node node, std::vector<Node>& current_path,
-                    std::unordered_set<unsigned int>& visited, GraphExecutionPaths& graph_paths);
+  hipError_t FindPathsDFS(Node node, std::vector<Node>& current_path,
+                          std::unordered_set<unsigned int>& visited,
+                          GraphExecutionPaths& graph_paths);
 
   //! Create segments from hierarchical execution paths
-  void CreateSegmentsFromPaths(const GraphExecutionPaths& exec_paths);
+  hipError_t CreateSegmentsFromPaths(const GraphExecutionPaths& exec_paths);
 
   //! Resolve dependencies between segments
   void ResolveSegmentDependencies();
@@ -1159,7 +1161,7 @@ class GraphExecSegmented : public GraphExecBase {
 
   //! Find the number of streams required per device for packet engine mode
   //! This method analyzes segments to determine per-device stream requirements
-  void FindStreamsReqPerDevForSegments();
+  hipError_t FindStreamsReqPerDevForSegments();
   //! Round-robin stream assignment: spreads parallel segments evenly per dependency level
   void RoundRobinStreamAssignment();
   //! DFS stream assignment: preserves chain continuity across segment DAG branches
@@ -1227,6 +1229,12 @@ class GraphExecSegmented : public GraphExecBase {
     std::vector<NodeRange> nodeRanges;
     std::unordered_map<GraphNode*, size_t> nodeToRangeIndex;  // O(1) lookup
     int disabledNodeCount = 0;  // Count of currently disabled nodes
+    // Standalone barrier reserved (at BuildSyncPlan) for the last batch of a
+    // segment whose completion signal is embedded on its last kernel packet.
+    // Only spliced into the *filtered* dispatch buffer by rebuildFilteredLists
+    // when every node packet in this batch is disabled, so the segment can still
+    // emit its completion signal instead of losing it. nullptr when unused.
+    uint8_t* fallbackBarrier = nullptr;
     PacketBatch() {}
     // O(1) enable/disable operations - just update state
     void setEnabled(GraphNode* node, bool enabled);
