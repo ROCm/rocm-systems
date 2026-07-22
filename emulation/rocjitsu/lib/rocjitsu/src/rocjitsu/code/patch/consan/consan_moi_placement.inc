@@ -2633,6 +2633,73 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     // existing MFMA and accumulator operands address and has corrupted native
     // gfx950 workloads. Until persistent tuples are selected per owning kernel,
     // reject a code object whose one global tuple would cross any such boundary.
+    if (options.moi_engine == ConSanMoiEngine::RecordReplay &&
+        !options.force_private_epoch) {
+      constexpr uint16_t scalar_count = 2u;
+      uint32_t first = 0u;
+      for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+        if (plan.source == ConSanRegisterAllocationSource::Unsupported ||
+            plan.owner_descriptor_file_offsets.empty()) {
+          continue;
+        }
+        first = std::max<uint32_t>(first, plan.max_referenced_sgpr_count);
+      }
+      const auto unavailable = [&](uint16_t base) {
+        if ((options.moi_exec_save_sgpr &&
+             range_overlaps(base, scalar_count, *options.moi_exec_save_sgpr,
+                            moi_exec_save_sgpr_count(options, ROCJITSU_CODE_ARCH_CDNA4))) ||
+            (options.moi_dispatch_id_sgpr &&
+             range_overlaps(base, scalar_count, *options.moi_dispatch_id_sgpr,
+                            moi_dispatch_state_sgpr_count(options))) ||
+            (options.moi_owner_sgpr &&
+             range_overlaps(base, scalar_count, *options.moi_owner_sgpr, 1u))) {
+          return true;
+        }
+        return std::ranges::any_of(
+            result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+              if (plan.owner_descriptor_file_offsets.empty() || plan.current_sgpr_count < 2u)
+                return false;
+              return range_overlaps(base, scalar_count,
+                                    static_cast<uint16_t>(plan.current_sgpr_count - 2u), 2u);
+            });
+      };
+      for (uint32_t base = first;
+           base + scalar_count <= moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA4); ++base) {
+        if (unavailable(static_cast<uint16_t>(base)))
+          continue;
+        std::vector<ConSanMoiPrologueScratchVgprAssignment> prologue_scratch;
+        // Record/Replay initializes both persistent values directly in SGPRs;
+        // its shared prologue API does not use the placeholder VGPR pair.
+        // Resource plans are rebuilt after persistent-state selection. Keep a
+        // placeholder for every possible kernel owner so a site admitted by
+        // that rebuild can still receive its scalar prologue. Prologue
+        // lowering itself filters this list to kernels with emitted patches.
+        for (const ConSanKernelInfo &kernel : result.kernels) {
+          if (kernel.has_text_range)
+            prologue_scratch.push_back({kernel.descriptor_file_offset, 0u});
+        }
+        options.moi_persistent_owner_sgpr = static_cast<uint16_t>(base);
+        options.moi_persistent_epoch_sgpr = static_cast<uint16_t>(base + 1u);
+        options.moi_init_owner_epoch = true;
+        options.automatic_moi_persistent_sgprs = true;
+        options.moi_prologue_scratch_vgpr_assignments = std::move(prologue_scratch);
+        result.resolved_moi_persistent_owner_sgpr = options.moi_persistent_owner_sgpr;
+        result.resolved_moi_persistent_epoch_sgpr = options.moi_persistent_epoch_sgpr;
+        result.moi_persistent_sgprs_automatic = true;
+        result.resolved_moi_prologue_scratch_vgpr_assignments =
+            options.moi_prologue_scratch_vgpr_assignments;
+        result.warnings.emplace_back(
+            "ConSan MOI assigned persistent scalar owner/epoch state below a CDNA4 "
+            "AccVGPR boundary for Record/Replay");
+        return true;
+      }
+      result.outcome = ConSanTransformOutcome::Unsupported;
+      result.warnings.emplace_back(
+          "ConSan MOI cannot place persistent scalar owner/epoch state below a CDNA4 "
+          "AccVGPR boundary for Record/Replay");
+      return false;
+    }
+
     std::vector<std::vector<uint64_t>> components;
     for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
       if (plan.source == ConSanRegisterAllocationSource::Unsupported)

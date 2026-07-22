@@ -2909,6 +2909,69 @@ TEST(ConSanMoi, Gfx1250FullVgprRecordReplayUsesScalarEpochCoalescing) {
             access_words.end());
 }
 
+TEST(ConSanMoi, Cdna4AccvgprBoundaryRecordReplayUsesScalarEpochCoalescing) {
+  const auto guest = build_cdna4_ds_store_b32(
+      /*vaddr=*/2, /*vdata=*/3, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto barrier = build_cdna4_s_barrier(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(guest && barrier);
+  std::vector<uint32_t> text_words(320, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  std::copy(guest->begin(), guest->end(), text_words.begin());
+  text_words[guest->size()] = *barrier;
+  text_words[guest->size() + 1u] =
+      build_v_mov_b32_e32(/*vdst=*/0, vector_source_vgpr(7), ROCJITSU_CODE_ARCH_CDNA4);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, "accvgpr_scalar_epoch", /*vgpr_granulated=*/3u);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    // Encoded 1 makes v8 the first accumulator register. The guest references
+    // through v7, leaving no ordinary-VGPR room for the persistent pair.
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 1u);
+  });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_track_barriers = true;
+  options.moi_init_owner_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(64, 1, 0, 0, 64);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
+  EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
+  EXPECT_FALSE(result.moi_private_epoch_automatic);
+  ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr);
+  ASSERT_TRUE(result.resolved_moi_persistent_epoch_sgpr);
+  EXPECT_EQ(*result.resolved_moi_persistent_epoch_sgpr,
+            *result.resolved_moi_persistent_owner_sgpr + 1u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
+                               &ConSanPatchInfo::kind),
+            1u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
+                               &ConSanPatchInfo::kind),
+            1u);
+
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(original.kernels().size(), 1u);
+  ASSERT_EQ(patched.kernels().size(), 1u);
+  KD original_descriptor{};
+  KD patched_descriptor{};
+  std::memcpy(&original_descriptor,
+              bytes.data() + original.kernels().front().descriptor_file_offset,
+              sizeof(original_descriptor));
+  std::memcpy(&patched_descriptor,
+              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              sizeof(patched_descriptor));
+  EXPECT_EQ(AMDHSA_BITS_GET(patched_descriptor.compute_pgm_rsrc3,
+                            kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
+            AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc3,
+                            kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET));
+}
+
 TEST(ConSanMoi, Gfx1250PrivateEpochBarrierPreservesGuestVgprMsbMode) {
   constexpr uint32_t kBarrierSignal = 0xBE804EC1u;
   constexpr uint32_t kBarrierWait = 0xBF94FFFFu;
