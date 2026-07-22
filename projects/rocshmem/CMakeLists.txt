@@ -60,8 +60,6 @@ option(USE_ROCPROFILER_REGISTER "Register rocSHMEM API tables with rocprofiler-r
 option(BUILD_FUNCTIONAL_TESTS "Build the functional tests (uses MPI if available, otherwise SLR)" OFF)
 option(BUILD_EXAMPLES "Build the examples" OFF)
 option(BUILD_UNIT_TESTS "Build the unit tests (Requires MPI)" OFF)
-option(BUILD_PYTHON_TESTS "Install rocshmem4py test assets (RO execution requires MPI launcher, Python, pip)" OFF)
-option(BUILD_PYTHON_BINDING "Build and install the rocshmem4py Python binding" OFF)
 option(BUILD_TESTS_ONLY "Build only tests. Used to link against rocSHMEM in a ROCm Release" OFF)
 option(BUILD_TOOLS "Build binary tools (e.g., rocshmem_info)" ON)
 option(BUILD_CTESTS "Register tests with CTest for tier-based execution" ON)
@@ -614,15 +612,9 @@ if (BUILD_EXAMPLES)
   add_subdirectory(examples)
 endif()
 
-###############################################################################
-# PYTHON BINDING (rocshmem4py)
-#
-# Opt-in build of the rocshmem4py Python extension as a sub-project. Decoupled
-# from BUILD_PYTHON_TESTS so packagers (e.g. TheRock) can ship the binding
-# without test assets, and vice versa. python/CMakeLists.txt detects sub-
-# project mode and links against the in-tree `rocshmem` target directly.
-###############################################################################
-if (BUILD_PYTHON_BINDING AND NOT BUILD_TESTS_ONLY)
-  add_subdirectory(python)
-endif()
+# NOTE: The rocshmem4py Python binding is no longer built from this project.
+# It now lives as a standalone Python project at rocm-systems/python/rocshmem
+# and builds independently against an installed rocSHMEM via
+# `find_package(rocshmem CONFIG)` (CMAKE_PREFIX_PATH). See that project's
+# README for build/packaging.
 

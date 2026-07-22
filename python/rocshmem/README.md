@@ -32,7 +32,9 @@ Host-facing symbols are exported directly from the compiled extension module
 ## Prerequisites
 
 - AMD ROCm 6.0+ with HIP
-- rocSHMEM library (built with RO, IPC, or GDA backend)
+- An **installed** rocSHMEM (built with RO, IPC, or GDA backend, with
+  `-DCMAKE_POSITION_INDEPENDENT_CODE=ON`) exposing its CMake package at
+  `<prefix>/lib/cmake/rocshmem/`, discoverable via `CMAKE_PREFIX_PATH`
 - Python 3.8+
 - CMake 3.20+
 - nanobind 2.12.0+ (binding backend)
@@ -45,21 +47,58 @@ Host-facing symbols are exported directly from the compiled extension module
 
 ## Installation
 
-```bash
-export ROCM_PATH=/opt/rocm
-export ROCSHMEM_HOME=/path/to/rocshmem/build
-export LD_LIBRARY_PATH=$ROCSHMEM_HOME/lib:$ROCM_PATH/lib:$LD_LIBRARY_PATH
+`rocshmem4py` builds as a standalone Python project **on top of an installed
+rocSHMEM** — it does not build the C++ library itself. Build and install
+rocSHMEM first, then point the binding build at that install with
+`CMAKE_PREFIX_PATH`; rocSHMEM is located through its exported CMake package
+(`find_package(rocshmem CONFIG)`).
 
-pip install -e .
+### 1. Build and install rocSHMEM (the C++ library)
+
+```bash
+cmake -S /path/to/rocm-systems/projects/rocshmem -B /tmp/rocshmem-build \
+      -DCMAKE_INSTALL_PREFIX=/opt/rocshmem \
+      -DCMAKE_POSITION_INDEPENDENT_CODE=ON      # required: the wheel links librocshmem.a
+cmake --build /tmp/rocshmem-build -j && cmake --install /tmp/rocshmem-build
 ```
 
-The build requirements (`nanobind`, `cmake`) are declared in
-`pyproject.toml`, so a standard `pip install -e .` pulls them into the build
-isolation environment automatically. If you build with
-`--no-build-isolation`, install them into your environment first:
-`pip install nanobind cmake`.
+### 2. Build the binding against that install
+
+```bash
+export CMAKE_PREFIX_PATH=/opt/rocshmem          # the rocSHMEM install prefix
+export ROCM_PATH=/opt/rocm                      # only if ROCm isn't at /opt/rocm
+
+pip install -e .                                # or: python -m build --wheel
+```
+
+`CMAKE_PREFIX_PATH` is the standard discovery interface and is all that is
+needed to point at a rocSHMEM install; `ROCSHMEM_HOME` is still accepted as a
+convenience alias. The build requirements (`nanobind`, `cmake`) are declared in
+`pyproject.toml`, so a plain `pip install -e .` pulls them into the build
+isolation environment automatically. With `--no-build-isolation`, install them
+first: `pip install nanobind cmake`.
+
+At runtime the extension needs the ROCm libraries on the loader path:
+
+```bash
+export LD_LIBRARY_PATH=$CMAKE_PREFIX_PATH/lib:$ROCM_PATH/lib:$LD_LIBRARY_PATH
+```
 
 > Note: this package is not published to PyPI yet; install from source only.
+
+### One command: build + test
+
+`build_and_test.sh` wires the whole flow together — point it at a rocSHMEM
+install, build the extension, and (optionally) run the suite:
+
+```bash
+./build_and_test.sh --prefix /opt/rocshmem -l torchrun -n 2   # build + test (IPC/GDA)
+./build_and_test.sh --prefix /opt/rocshmem --build-only       # build only
+./build_and_test.sh --prefix /opt/rocshmem --wheel            # produce a wheel in dist/
+```
+
+It exports `CMAKE_PREFIX_PATH`, `ROCM_PATH`, and `LD_LIBRARY_PATH` for you and
+runs `pytest` through `launch_test.sh`. See `--help` for all options.
 
 ### Binding backend
 
@@ -298,14 +337,15 @@ torchrun --standalone --nproc_per_node=2 -m pytest tests/ -v
 Test source layout, the full launcher &times; backend &times; init-tier
 matrix used by `conftest.py`, and CI-author guidance live in the test
 suite's own README:
-<https://github.com/ROCm/rocm-systems/blob/develop/projects/rocshmem/python/tests/README.md>.
+<https://github.com/ROCm/rocm-systems/blob/develop/python/rocshmem/tests/README.md>.
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `ImportError: _rocshmem4py` | rocSHMEM not on the loader path | `export LD_LIBRARY_PATH=$ROCSHMEM_HOME/lib:$ROCM_PATH/lib:$LD_LIBRARY_PATH` |
-| CMake cannot find rocSHMEM at build time | `ROCSHMEM_HOME` unset | `export ROCSHMEM_HOME=/path/to/rocshmem/build` before `pip install -e .` |
+| `ImportError: _rocshmem4py` | ROCm runtime not on the loader path | `export LD_LIBRARY_PATH=$CMAKE_PREFIX_PATH/lib:$ROCM_PATH/lib:$LD_LIBRARY_PATH` |
+| CMake cannot find rocSHMEM at build time | rocSHMEM install prefix not on the search path | `export CMAKE_PREFIX_PATH=/path/to/rocshmem-install` (has `lib/cmake/rocshmem/`) before `pip install -e .` |
+| Build picks up a stale rocSHMEM (e.g. `/opt/rocm`), new APIs undeclared | another rocSHMEM shadows your prefix | ensure `CMAKE_PREFIX_PATH` points at the intended install; `setup.py` forwards it as a `-D` cache var so it takes precedence |
 | Link error: `recompile with -fPIC` | `librocshmem.a` built without PIC | Rebuild rocSHMEM with `-DCMAKE_POSITION_INDEPENDENT_CODE=ON` |
 | RO backend hangs in `mca_btl_vader.so` (`Wrote -1, errno = 14`), aborts with `MPI_ERR_WIN: invalid window`, or hangs at exit in `__run_exit_handlers` &rarr; `libamdhip64` | Non-ROCm-aware Open MPI / UCX cannot handle GPU buffers in the data plane | Use ROCm-aware Open MPI 5.0.x + UCX 1.17+ &mdash; see [below](#rocm-aware-open-mpi-required-for-ro) |
 | `Unsupported configuration to initialize rocSHMEM. Please initialize the MPI library using MPI_Init first` | RO backend launched under `torchrun` &mdash; see *"RO backend requires `mpirun`"* below | Launch with `mpirun` (you can keep `init_with_torch()`), or build an IPC/GDA-only rocSHMEM if you don't need inter-node RDMA |

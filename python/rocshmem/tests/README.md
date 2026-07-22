@@ -3,7 +3,7 @@
 Audience: contributors and CI maintainers running the `rocshmem4py`
 test suite. End users of the package should start at the top-level
 README:
-<https://github.com/ROCm/rocm-systems/blob/develop/projects/rocshmem/python/README.md>.
+<https://github.com/ROCm/rocm-systems/blob/develop/python/rocshmem/README.md>.
 
 ## Layout
 
@@ -14,9 +14,6 @@ README:
 | `test_collective.py` | Multi-PE: stream-based put/get, stream barriers, peer views, `interop.torch` RMA wrappers (data-verified) |
 | `test_memory.py` | Single-PE torch-free tests via ctypes + HIP: `rocshmem_calloc` (zero-init verified), `rocshmem_align` (alignment + invalid-arg), `rocshmem_buffer_register` / `rocshmem_buffer_unregister` / `rocshmem_buffer_unregister_all` |
 | `conftest.py` | Three-tier init ladder, `requires_torch` / `requires_multi_pe` markers |
-
-When `BUILD_PYTHON_TESTS=ON`, CMake installs these assets into the test
-package.
 
 ## Running the tests
 

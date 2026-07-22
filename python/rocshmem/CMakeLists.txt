@@ -1,21 +1,15 @@
 cmake_minimum_required(VERSION 3.16)
 
 ###############################################################################
-# Build mode: Standalone vs Sub-project
+# Standalone rocshmem4py build
 #
-# Standalone:  pip install / direct cmake on python/. This CMakeLists is the
-#              top-level project; we must locate hipcc and pin
-#              CMAKE_CXX_COMPILER ourselves before calling project().
-# Sub-project: added via add_subdirectory() from the parent rocSHMEM CMake
-#              (TheRock super-build). The parent has already run project()
-#              with the right toolchain, so we skip compiler selection.
-#
+# This is a self-contained Python project: `python -m build` (or a direct
+# cmake invocation) drives this file as the top-level CMake project. We locate
+# hipcc and pin CMAKE_CXX_COMPILER ourselves before project(), then build the
+# nanobind extension against an installed rocSHMEM discovered via
+# find_package(rocshmem CONFIG) (CMAKE_PREFIX_PATH). THEROCK_TOOLCHAIN_ROOT is
+# honored as an alternate ROCm toolchain location.
 ###############################################################################
-set(ROCSHMEM4PY_IS_TOP_LEVEL FALSE)
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  set(ROCSHMEM4PY_IS_TOP_LEVEL TRUE)
-endif()
-
 if(DEFINED ENV{THEROCK_TOOLCHAIN_ROOT} AND NOT THEROCK_TOOLCHAIN_ROOT)
   set(THEROCK_TOOLCHAIN_ROOT "$ENV{THEROCK_TOOLCHAIN_ROOT}" CACHE PATH "TheRock toolchain root")
 endif()
@@ -28,22 +22,20 @@ else()
   set(ROCM_PATH "/opt/rocm" CACHE STRING "ROCm install directory")
 endif()
 
-if(ROCSHMEM4PY_IS_TOP_LEVEL)
-  find_program(HIPCC_EXECUTABLE hipcc
-               PATHS
-                 ${ROCM_PATH}/bin
-                 ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin
-               NO_DEFAULT_PATH)
+find_program(HIPCC_EXECUTABLE hipcc
+             PATHS
+               ${ROCM_PATH}/bin
+               ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin
+             NO_DEFAULT_PATH)
 
-  if(NOT HIPCC_EXECUTABLE)
-    message(FATAL_ERROR "hipcc not found under ${ROCM_PATH}/bin or "
-                        "${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin. "
-                        "Set ROCM_PATH or THEROCK_TOOLCHAIN_ROOT.")
-  endif()
-
-  set(CMAKE_CXX_COMPILER "${HIPCC_EXECUTABLE}" CACHE FILEPATH "C++ compiler")
-  project(rocshmem4py LANGUAGES CXX)
+if(NOT HIPCC_EXECUTABLE)
+  message(FATAL_ERROR "hipcc not found under ${ROCM_PATH}/bin or "
+                      "${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin. "
+                      "Set ROCM_PATH or THEROCK_TOOLCHAIN_ROOT.")
 endif()
+
+set(CMAKE_CXX_COMPILER "${HIPCC_EXECUTABLE}" CACHE FILEPATH "C++ compiler")
+project(rocshmem4py LANGUAGES CXX)
 
 # Single Python discovery for the whole file.  nanobind's CMake config
 # requires the modern FindPython module with the Development.Module component
@@ -115,13 +107,9 @@ endif()
 # public API contract.  (Python was already located above with the
 # Development.Module component nanobind needs.)
 #
-# nanobind discovery is two-tiered:
-#   1. Standalone (pip) builds: nanobind is pip-installed, so ask the Python
-#      module for its CMake config directory and add it to the prefix path.
-#   2. TheRock super-build: nanobind is provided as a CMake subproject
-#      (therock-nanobind), so `python -m nanobind` is unavailable -- the
-#      execute_process fails harmlessly and find_package resolves the
-#      subproject-provided package config instead.
+# nanobind is pip-installed in the build environment, so ask the Python module
+# for its CMake config directory and add it to the prefix path before
+# find_package(nanobind).
 execute_process(
   COMMAND ${Python_EXECUTABLE} -m nanobind --cmake_dir
   RESULT_VARIABLE _NB_CMAKE_DIR_OK
@@ -137,59 +125,23 @@ endif()
 find_package(nanobind CONFIG REQUIRED)
 message(STATUS "nanobind found: ${nanobind_DIR}")
 
-# Sub-project: the parent CMake exposes the in-tree rocshmem target.
-# Standalone: locate an installed rocSHMEM via ROCSHMEM_HOME.
-if(TARGET rocshmem)
-  set(ROCSHMEM_FOUND TRUE)
-  set(ROCSHMEM_LINK_TARGET roc::rocshmem)
-  set(ROCSHMEM_INCLUDE_DIRS
-      ${CMAKE_SOURCE_DIR}/include
-      ${CMAKE_BINARY_DIR}/include)
-  message(STATUS "ROCSHMEM target found in parent project: ${ROCSHMEM_LINK_TARGET}")
-else()
-  if(DEFINED ENV{ROCSHMEM_HOME})
-    set(ROCSHMEM_HOME "$ENV{ROCSHMEM_HOME}" CACHE STRING "ROCSHMEM install directory")
-    list(APPEND CMAKE_PREFIX_PATH ${ROCSHMEM_HOME})
-  endif()
-
-  find_path(ROCSHMEM_INCLUDE_DIR
-    NAMES rocshmem/rocshmem.hpp
-    PATHS
-      ${ROCSHMEM_HOME}
-      ${ROCSHMEM_HOME}/../include
-      /opt/rocm
-    PATH_SUFFIXES include
-    NO_DEFAULT_PATH
-  )
-
-  find_library(ROCSHMEM_LIBRARY
-    NAMES rocshmem
-    PATHS
-      ${ROCSHMEM_HOME}
-      ${ROCSHMEM_HOME}/lib
-      /opt/rocm
-    PATH_SUFFIXES lib lib64
-    NO_DEFAULT_PATH
-  )
-
-  if(ROCSHMEM_INCLUDE_DIR AND ROCSHMEM_LIBRARY)
-    set(ROCSHMEM_FOUND TRUE)
-    set(ROCSHMEM_INCLUDE_DIRS ${ROCSHMEM_INCLUDE_DIR})
-    if(EXISTS "${ROCSHMEM_HOME}/include/rocshmem")
-      list(APPEND ROCSHMEM_INCLUDE_DIRS "${ROCSHMEM_HOME}/include/rocshmem")
-    endif()
-    if(EXISTS "${ROCSHMEM_HOME}/include")
-      list(APPEND ROCSHMEM_INCLUDE_DIRS "${ROCSHMEM_HOME}/include")
-    endif()
-    set(ROCSHMEM_LIBRARIES ${ROCSHMEM_LIBRARY})
-    set(ROCSHMEM_LINK_TARGET ${ROCSHMEM_LIBRARIES})
-    message(STATUS "ROCSHMEM found!")
-    message(STATUS "  ROCSHMEM_INCLUDE_DIRS: ${ROCSHMEM_INCLUDE_DIRS}")
-    message(STATUS "  ROCSHMEM_LIBRARIES: ${ROCSHMEM_LIBRARIES}")
-  else()
-    message(FATAL_ERROR "ROCSHMEM not found. Set ROCSHMEM_HOME environment variable.")
-  endif()
+# Locate an installed rocSHMEM through its exported CMake package (installed at
+# <prefix>/lib/cmake/rocshmem by rocm_install). find_package is the standard
+# discovery mechanism and honors CMAKE_PREFIX_PATH, so pointing the build at a
+# rocSHMEM install is just:
+#     CMAKE_PREFIX_PATH=<rocshmem-install> ...
+# ROCSHMEM_HOME is retained only as an optional convenience that seeds the
+# prefix path; it is no longer required.
+if(DEFINED ENV{ROCSHMEM_HOME})
+  list(APPEND CMAKE_PREFIX_PATH "$ENV{ROCSHMEM_HOME}")
 endif()
+
+find_package(rocshmem CONFIG REQUIRED)
+
+set(ROCSHMEM_LINK_TARGET roc::rocshmem)
+set(ROCSHMEM_INCLUDE_DIRS ${rocshmem_INCLUDE_DIRS})
+message(STATUS "ROCSHMEM found via find_package: ${rocshmem_DIR}")
+message(STATUS "  ROCSHMEM_INCLUDE_DIRS: ${ROCSHMEM_INCLUDE_DIRS}")
 
 ###############################################################################
 # Build Extension Module
@@ -265,19 +217,6 @@ target_link_options(_rocshmem4py PRIVATE
   -lhsa-runtime64
 )
 
-if(ROCSHMEM4PY_IS_TOP_LEVEL)
-  # Standalone: setuptools positions the .so via CMAKE_LIBRARY_OUTPUT_DIRECTORY;
-  # install(.) lands the extension at the wheel root for built distributions.
-  install(TARGETS _rocshmem4py LIBRARY DESTINATION .)
-else()
-  # Sub-project (TheRock super-build): ship the binding under the rocSHMEM
-  # subtree alongside lib/*.bc, lib/cmake/rocshmem, share/rocshmem.
-  # Consumers add <prefix>/lib/rocshmem/python to PYTHONPATH.
-  include(GNUInstallDirs)
-  set(_ROCSHMEM4PY_DEST "${CMAKE_INSTALL_LIBDIR}/rocshmem/python/rocshmem4py")
-  install(TARGETS _rocshmem4py LIBRARY DESTINATION ${_ROCSHMEM4PY_DEST})
-  install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/rocshmem4py/
-    DESTINATION ${_ROCSHMEM4PY_DEST}
-    FILES_MATCHING PATTERN "*.py"
-  )
-endif()
+# setuptools positions the .so via CMAKE_LIBRARY_OUTPUT_DIRECTORY; install(.)
+# lands the extension at the wheel root for built distributions.
+install(TARGETS _rocshmem4py LIBRARY DESTINATION .)

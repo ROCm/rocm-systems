@@ -518,7 +518,7 @@ def init_with_torch(group: Optional[Any] = None,
 
     For the launcher x backend matrix and the structural reason RO requires
     ``mpirun``, see the project README:
-    https://github.com/ROCm/rocm-systems/blob/develop/projects/rocshmem/python/README.md#troubleshooting
+    https://github.com/ROCm/rocm-systems/blob/develop/python/rocshmem/README.md#troubleshooting
     """
     try:
         import torch

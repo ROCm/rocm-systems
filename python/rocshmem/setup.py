@@ -37,6 +37,16 @@ class CMakeBuild(build_ext):
             f"-DPYTHON_EXECUTABLE={sys.executable}",
             f"-DCMAKE_BUILD_TYPE={cfg}",
         ]
+        # Forward CMAKE_PREFIX_PATH as a cache variable, not just via the
+        # environment. find_package searches the cache-variable CMAKE_PREFIX_PATH
+        # (which CMakeLists augments with ROCM_PATH for HIP) *before* the
+        # environment variable, so an env-only CMAKE_PREFIX_PATH is shadowed by
+        # any rocSHMEM that ships under /opt/rocm. Passing it as -D keeps the
+        # caller's rocSHMEM install at the front of the search order. Convert
+        # os.pathsep (":") to CMake's list separator (";").
+        if os.environ.get("CMAKE_PREFIX_PATH"):
+            prefix_path = os.environ["CMAKE_PREFIX_PATH"].replace(os.pathsep, ";")
+            cmake_args.append(f"-DCMAKE_PREFIX_PATH={prefix_path}")
         if "ROCM_PATH" in os.environ:
             cmake_args.append(f'-DROCM_PATH={os.environ["ROCM_PATH"]}')
         if "THEROCK_TOOLCHAIN_ROOT" in os.environ:

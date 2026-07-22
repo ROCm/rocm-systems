@@ -76,6 +76,11 @@ done
 ROCM_VERSIONS=("${RESOLVED[@]}")
 
 SRC="${ROCSHMEM_SRC:-/app/rocshmem}"
+# The rocshmem4py Python project is a standalone project that now lives outside
+# the rocSHMEM C++ tree (rocm-systems/python/rocshmem). Default to its location
+# relative to $SRC; the wheel step below is skipped when this path is absent
+# (e.g. when only the rocSHMEM project is mounted).
+PYSRC="${ROCSHMEM_PY_SRC:-$SRC/../../python/rocshmem}"
 OMPI="${OMPI_INSTALL:-/opt/ompi}"
 
 HAS_GPU=false
@@ -126,8 +131,7 @@ for rocm_dir in "${ROCM_VERSIONS[@]}"; do
             -DUSE_RO=ON -DUSE_IPC=ON \
             -DUSE_GDA=ON -DGDA_MLX5=ON -DGDA_BNXT=ON -DGDA_IONIC=ON \
             -DUSE_EXTERNAL_MPI=OFF -DMPI_ROOT="$OMPI" \
-            -DBUILD_FUNCTIONAL_TESTS=ON \
-            -DBUILD_PYTHON_TESTS=ON; then
+            -DBUILD_FUNCTIONAL_TESTS=ON; then
         FAIL+=("$version:configure")
         continue
     fi
@@ -187,20 +191,20 @@ for rocm_dir in "${ROCM_VERSIONS[@]}"; do
     # -----------------------------------------------------------------
     # 3. Python wheel build
     # -----------------------------------------------------------------
-    if [[ "$NO_WHEEL" == false && -d "$SRC/python" ]]; then
+    if [[ "$NO_WHEEL" == false && -d "$PYSRC" ]]; then
         run_step "$version" "python wheel" \
-            env ROCM_PATH="$rocm_dir" ROCSHMEM_HOME="$installdir" \
+            env ROCM_PATH="$rocm_dir" CMAKE_PREFIX_PATH="$installdir" \
                 pip install --no-build-isolation \
-                    -e "$SRC/python" \
+                    -e "$PYSRC" \
             || { FAIL+=("$version:wheel"); ok=false; }
 
         # Python smoke test (needs GPU, run under mpiexec so OMPI_COMM_WORLD_SIZE
         # is set and rocshmem initializes correctly with 2 PEs)
         if [[ "$BUILD_ONLY" == false && "$HAS_GPU" == true ]]; then
             run_step "$version" "python smoke test" \
-                env ROCM_PATH="$rocm_dir" ROCSHMEM_HOME="$installdir" \
+                env ROCM_PATH="$rocm_dir" CMAKE_PREFIX_PATH="$installdir" \
                     LD_LIBRARY_PATH="${rocm_dir}/lib:${LD_LIBRARY_PATH:-}" \
-                mpiexec -n 2 python3 -m pytest "$SRC/python/tests/test_smoke.py" -v \
+                mpiexec -n 2 python3 -m pytest "$PYSRC/tests/test_smoke.py" -v \
                 || { FAIL+=("$version:pytest"); ok=false; }
         fi
     fi
