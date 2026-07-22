@@ -23,7 +23,7 @@ namespace gtest = ::testing;
 
 using ::rocprofsys::mock::rocprofiler_sdk::g_mock_wrapper;
 using ::rocprofsys::mock::rocprofiler_sdk::gmock_wrapper;
-using mock_backend = ::rocprofsys::mock::rocprofiler_sdk::backend;
+using mock_backend = ::rocprofsys::mock::rocprofiler_sdk::wrapper;
 
 // ─── Backend policy ───────────────────────────────────────────────────────────
 //
