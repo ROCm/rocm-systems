@@ -34,11 +34,15 @@ extern char *hsakmt_model_topology;
 
 /**
  * Model-mode environment variables (developer/emulation use only):
- *   HSA_MODEL_TOPOLOGY - Enables model mode when set. Ignored under AT_SECURE.
- *   HSA_MODEL_LIB      - Path to the FFM model shared library. Must reside
- *                        under the ROCm install lib directory configured at
- *                        build time (HSAKMT_INSTALL_LIBDIR). Ignored under
- *                        AT_SECURE.
+ *   HSA_MODEL_TOPOLOGY - Enables model mode when set.
+ *   HSA_MODEL_LIB      - Path to the FFM model shared library. In normal
+ *                        (unprivileged) processes this may be any path. When
+ *                        the process runs with elevated privileges (AT_SECURE,
+ *                        e.g. setuid/setgid or file capabilities), the path is
+ *                        restricted to the ROCm install lib directory
+ *                        configured at build time (HSAKMT_INSTALL_LIBDIR) to
+ *                        prevent arbitrary dlopen() across a privilege
+ *                        boundary.
  */
 void model_init_env_vars(void);
 void model_init(void);
