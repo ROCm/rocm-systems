@@ -291,6 +291,14 @@ def binary_handler_profile_rocprof_compute(request):
                     request.config.getoption("--rocprofiler-sdk-tool-path"),
                 ],
             )
+
+        # Run torch_trace and triton_trace tests in a subprocess instead of calling
+        # main() in-process.
+        force_subprocess = any(
+            request.node.get_closest_marker(marker) is not None
+            for marker in ("torch_trace", "triton_trace")
+        )
+
         if request.config.getoption("--call-binary"):
             baseline_opts = [
                 "./rocprof-compute.bin",
@@ -386,8 +394,9 @@ def binary_handler_profile_rocprof_compute(request):
                     command_rocprof_compute, num_ranks
                 )
 
-            # For capture_output or multi-rank, run the command with subprocess
-            if capture_output or num_ranks > 1:
+            # Run the command in a subprocess for capture_output, multi-rank, or
+            # forced tests.
+            if capture_output or num_ranks > 1 or force_subprocess:
                 # Use rocprof_compute_script_path instead of rocprof-compute
                 if num_ranks == 1:
                     command_rocprof_compute[0] = rocprof_compute_script_path
