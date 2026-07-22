@@ -530,16 +530,6 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
         std::ranges::count_if(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
           return plan.site_kind == ConSanResourceSiteKind::Fence;
         }));
-    const auto add_dynamic_headroom = [](uint64_t count) {
-      if (count >
-          std::numeric_limits<uint64_t>::max() / kConSanMoiRecordReplayDynamicEventHeadroom) {
-        return std::numeric_limits<uint64_t>::max();
-      }
-      return count * kConSanMoiRecordReplayDynamicEventHeadroom;
-    };
-    inventory.barrier_event_count = add_dynamic_headroom(inventory.barrier_event_count);
-    inventory.atomic_event_count = add_dynamic_headroom(inventory.atomic_event_count);
-    inventory.fence_event_count = add_dynamic_headroom(inventory.fence_event_count);
   }
   inventory.diagnostic_count = std::max<uint64_t>(inventory.access_range_count, 1u);
   if (options.moi_engine == ConSanMoiEngine::InlineShadow)
@@ -613,6 +603,8 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     inventory.diagnostic_count = std::max<uint64_t>(
         inventory.diagnostic_count, kConSanMoiInlineShadowDefaultDiagnosticCapacity);
   }
+  if (options.moi_engine == ConSanMoiEngine::RecordReplay)
+    return fit_consan_moi_record_replay_auto_report_inventory(inventory);
   return fit_consan_moi_sampled_auto_report_inventory(inventory);
 }
 

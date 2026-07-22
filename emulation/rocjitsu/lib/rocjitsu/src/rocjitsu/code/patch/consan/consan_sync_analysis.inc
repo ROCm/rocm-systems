@@ -1839,10 +1839,36 @@ ordinary_release_wait_boundary(const ConSanSyncSequence &store,
   return std::nullopt;
 }
 
+[[nodiscard]] std::vector<size_t>
+fence_sequence_indices_by_begin(const ConSanResult &result) {
+  std::vector<size_t> indices;
+  indices.reserve(result.sync_sequences.size());
+  for (size_t index = 0; index < result.sync_sequences.size(); ++index) {
+    if (result.sync_sequences[index].kind == ConSanSyncSequenceKind::Fence)
+      indices.push_back(index);
+  }
+  std::ranges::sort(indices, [&](size_t lhs, size_t rhs) {
+    const uint64_t lhs_offset = result.sync_sequences[lhs].begin_text_offset;
+    const uint64_t rhs_offset = result.sync_sequences[rhs].begin_text_offset;
+    return lhs_offset != rhs_offset ? lhs_offset < rhs_offset : lhs < rhs;
+  });
+  return indices;
+}
+
+[[nodiscard]] auto fence_sequence_lower_bound(const ConSanResult &result,
+                                               const std::vector<size_t> &indices,
+                                               uint64_t text_offset) {
+  return std::lower_bound(indices.begin(), indices.end(), text_offset,
+                          [&](size_t index, uint64_t offset) {
+                            return result.sync_sequences[index].begin_text_offset < offset;
+                          });
+}
+
 void associate_ordinary_release_sync_sequences(const AmdGpuCodeObject &code_object,
                                                Decoder &decoder, rj_code_arch_t arch,
                                                ConSanResult &result) {
   const auto blocks = build_sync_basic_blocks(code_object, decoder, arch, result);
+  const std::vector<size_t> fence_indices = fence_sequence_indices_by_begin(result);
   std::unordered_map<size_t, size_t> associations;
   std::unordered_set<size_t> claimed_cache_sequences;
   for (size_t store_index = 0; store_index < result.sync_sequences.size(); ++store_index) {
@@ -1864,12 +1890,12 @@ void associate_ordinary_release_sync_sequences(const AmdGpuCodeObject &code_obje
     if (!cache_offset)
       continue;
     std::vector<size_t> cache_matches;
-    for (size_t cache_index = 0; cache_index < result.sync_sequences.size(); ++cache_index) {
+    for (auto it = fence_sequence_lower_bound(result, fence_indices, *cache_offset);
+         it != fence_indices.end(); ++it) {
+      const size_t cache_index = *it;
       const ConSanSyncSequence &cache_sequence = result.sync_sequences[cache_index];
-      if (cache_sequence.kind != ConSanSyncSequenceKind::Fence ||
-          cache_sequence.begin_text_offset != *cache_offset) {
-        continue;
-      }
+      if (cache_sequence.begin_text_offset != *cache_offset)
+        break;
       const ConSanSyncEvent *cache = first_sequence_event(result, cache_sequence);
       if (cache != nullptr && consan_ordinary_release_metadata_compatible(*cache, cache_sequence,
                                                                           *store, store_sequence)) {
@@ -1955,6 +1981,7 @@ void associate_ordinary_acquire_sync_sequences(const AmdGpuCodeObject &code_obje
                                                Decoder &decoder, rj_code_arch_t arch,
                                                ConSanResult &result) {
   const auto blocks = build_sync_basic_blocks(code_object, decoder, arch, result);
+  const std::vector<size_t> fence_indices = fence_sequence_indices_by_begin(result);
   std::unordered_map<size_t, size_t> associations;
   std::unordered_set<size_t> claimed_cache_sequences;
   for (size_t load_index = 0; load_index < result.sync_sequences.size(); ++load_index) {
@@ -1968,10 +1995,17 @@ void associate_ordinary_acquire_sync_sequences(const AmdGpuCodeObject &code_obje
       continue;
     std::vector<size_t> cache_matches;
     std::vector<size_t> bounded_metadata_matches;
-    for (size_t cache_index = 0; cache_index < result.sync_sequences.size(); ++cache_index) {
+    const uint64_t maximum_cache_offset =
+        load_sequence.end_text_offset > UINT64_MAX - 64u
+            ? UINT64_MAX
+            : load_sequence.end_text_offset + 64u;
+    for (auto it =
+             fence_sequence_lower_bound(result, fence_indices, load_sequence.end_text_offset);
+         it != fence_indices.end(); ++it) {
+      const size_t cache_index = *it;
       const ConSanSyncSequence &cache_sequence = result.sync_sequences[cache_index];
-      if (cache_sequence.kind != ConSanSyncSequenceKind::Fence)
-        continue;
+      if (cache_sequence.begin_text_offset > maximum_cache_offset)
+        break;
       const ConSanSyncEvent *cache = first_sequence_event(result, cache_sequence);
       if (cache == nullptr ||
           !ordinary_acquire_metadata_compatible_impl(*load, load_sequence, *cache, cache_sequence,

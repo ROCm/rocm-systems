@@ -345,6 +345,32 @@ ConSanMoiAutoReportPlan plan_consan_moi_auto_report(const ConSanMoiAutoReportInv
 }
 
 ConSanMoiAutoReportInventory
+fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory inventory) {
+  if (inventory.engine != ConSanMoiEngine::RecordReplay)
+    return inventory;
+
+  const uint64_t static_barriers = inventory.barrier_event_count;
+  const uint64_t static_atomics = inventory.atomic_event_count;
+  const uint64_t static_fences = inventory.fence_event_count;
+  const auto expanded_count = [](uint64_t count, uint64_t headroom) {
+    return count > std::numeric_limits<uint64_t>::max() / headroom
+               ? std::numeric_limits<uint64_t>::max()
+               : count * headroom;
+  };
+
+  uint64_t headroom = kConSanMoiRecordReplayDynamicEventHeadroom;
+  for (;;) {
+    ConSanMoiAutoReportInventory candidate = inventory;
+    candidate.barrier_event_count = expanded_count(static_barriers, headroom);
+    candidate.atomic_event_count = expanded_count(static_atomics, headroom);
+    candidate.fence_event_count = expanded_count(static_fences, headroom);
+    if (plan_consan_moi_auto_report(candidate).complete() || headroom == 1u)
+      return candidate;
+    headroom = std::max<uint64_t>(headroom / 2u, 1u);
+  }
+}
+
+ConSanMoiAutoReportInventory
 fit_consan_moi_sampled_auto_report_inventory(ConSanMoiAutoReportInventory inventory) {
   if (inventory.engine != ConSanMoiEngine::Sampled || !inventory.sampled_bank_count_adaptive ||
       inventory.access_range_count == 0u ||

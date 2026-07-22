@@ -202,6 +202,13 @@ consan_moi_auto_report_plan_reason_name(ConSanMoiAutoReportPlanReason reason) {
 [[nodiscard]] ConSanMoiAutoReportPlan
 plan_consan_moi_auto_report(const ConSanMoiAutoReportInventory &inventory);
 
+/// Expands static Record/Replay synchronization counts by the largest
+/// power-of-two dynamic headroom that fits the ordinary per-buffer ceiling.
+/// Small objects retain the standard headroom; fat objects retain every static
+/// site with a smaller, still fail-closed dynamic capacity.
+[[nodiscard]] ConSanMoiAutoReportInventory
+fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory inventory);
+
 /// Reduces only an explicitly adaptive Sampled inventory by powers of two
 /// until its complete logical-range population fits the report ceiling or one
 /// bank per range remains. All other inventory dimensions remain exact.

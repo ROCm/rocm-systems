@@ -1405,6 +1405,23 @@ TEST(ConSanMoi, AutoReportInventoryReservesRecordReplaySyncHeadroom) {
   EXPECT_EQ(plan.layout.barrier_record_capacity, kConSanMoiRecordReplayDynamicEventHeadroom);
 }
 
+TEST(ConSanMoi, AutoReportInventoryAdaptsRecordReplayHeadroomForFatObjects) {
+  ConSanMoiAutoReportInventory inventory;
+  inventory.engine = ConSanMoiEngine::RecordReplay;
+  inventory.access_range_count = 47428u;
+  inventory.diagnostic_count = 47428u;
+  inventory.barrier_event_count = 10000u;
+
+  const ConSanMoiAutoReportInventory fitted =
+      fit_consan_moi_record_replay_auto_report_inventory(inventory);
+  const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(fitted);
+
+  ASSERT_TRUE(plan.complete());
+  EXPECT_EQ(fitted.barrier_event_count, 10000u * 256u);
+  EXPECT_LT(fitted.barrier_event_count, 10000u * kConSanMoiRecordReplayDynamicEventHeadroom);
+  EXPECT_LE(plan.required_bytes, kConSanMoiAutoReportBufferCeilingBytes);
+}
+
 TEST(ConSanMoi, FirstLightProbeAddsNativeLdsImmediateOffset) {
   std::array<uint32_t, 180> text_words{};
   text_words[0] = 0xDA980480u;
