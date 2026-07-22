@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cstring>
 
 namespace rocjitsu {
@@ -18,16 +19,9 @@ void L1ScalarCache::ensure_line(uint64_t addr, uint32_t vmid) {
 
   uint64_t line_addr = CacheStore::line_address(addr);
   simdojo::CacheTag evicted;
-  uint8_t evicted_data[CacheStore::LINE_SIZE];
-  cache_.allocate(addr, vmid, &evicted, evicted_data);
+  cache_.allocate(addr, vmid, &evicted);
 
-  if (evicted.valid && evicted.dirty) {
-    constexpr uint32_t set_bits = 6; // log2(NUM_SETS=64)
-    uint64_t evicted_line_addr =
-        (evicted.tag << (LINE_SIZE_BITS + set_bits)) |
-        (static_cast<uint64_t>(CacheStore::set_index(addr)) << LINE_SIZE_BITS);
-    l2_->write(evicted_line_addr, evicted_data, CacheStore::LINE_SIZE, Mtype::RW, evicted.vmid);
-  }
+  assert(!evicted.dirty && "L1 K$ is write-through; lines should never be dirty");
 
   uint8_t line_buf[CacheStore::LINE_SIZE];
   l2_->read(line_addr, line_buf, CacheStore::LINE_SIZE, Mtype::RW, vmid);
@@ -71,23 +65,16 @@ void L1ScalarCache::store(uint64_t addr, uint32_t num_dwords, const uint32_t *sr
       assert(tag != nullptr && "ensure_line must guarantee hit");
 
       cache_.write_line(chunk_addr, buf + copied, line_offset, chunk, vmid);
-      tag->dirty = true;
+      l2_->write(chunk_addr, buf + copied, chunk, mtype, vmid);
+      tag->dirty = false;
       copied += chunk;
     }
   }
 }
 
 void L1ScalarCache::writeback_all(uint32_t vmid) {
-  // Each dirty line is written back under its own owning vmid (recorded in the
-  // tag), not the caller's vmid. A CU can retain dirty K$ lines from process A
-  // and then be flushed while processing process B; using the caller vmid would
-  // install A's line into L2 under B's page table and corrupt another process's
-  // VA. The eviction path in ensure_line() uses evicted.vmid for the same reason.
+  // K$ is write-through, so all stored bytes have already reached L2.
   (void)vmid;
-  cache_.for_each_dirty([this](simdojo::CacheTag &tag, uint64_t line_addr, uint8_t *data) {
-    l2_->write(line_addr, data, CacheStore::LINE_SIZE, Mtype::RW, tag.vmid);
-    tag.dirty = false;
-  });
 }
 
 void L1ScalarCache::flush_line(uint64_t addr, uint32_t vmid) {
@@ -95,12 +82,7 @@ void L1ScalarCache::flush_line(uint64_t addr, uint32_t vmid) {
   if (!cache_.lookup(addr, &tag, vmid))
     return;
 
-  if (tag->dirty) {
-    uint8_t line_buf[CacheStore::LINE_SIZE];
-    cache_.read_line(addr, line_buf, 0, CacheStore::LINE_SIZE, vmid);
-    l2_->write(CacheStore::line_address(addr), line_buf, CacheStore::LINE_SIZE, Mtype::RW,
-               tag->vmid);
-  }
+  assert(!tag->dirty && "L1 K$ is write-through; lines should never be dirty");
   cache_.invalidate(addr, vmid);
 }
 

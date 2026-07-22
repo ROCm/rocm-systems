@@ -2562,15 +2562,10 @@ TEST(DsTransposeTest, ReadB64TrB16_AccBit) {
                           << " should contain LDS data, not the VGPR sentinel";
 }
 
-// L1ScalarCache::writeback_all() must write each dirty K$ line back under its
-// own owning vmid (from the line tag), not the caller-supplied vmid. A CU can
-// retain dirty K$ lines from process A and then be flushed while processing
-// process B (e.g. from an acquire fence or SDMA path). If the bulk writeback
-// used the caller vmid, A's dirty line would be published through B's page
-// table and corrupt B's address space. Two page tables map the same GPU VA to
-// different host pages; a store under VMID 7 followed by writeback_all(8) must
-// land in VMID 7's backing, not VMID 8's.
-TEST(L1ScalarCacheVmidTest, WritebackAllUsesLineOwnerVmidNotCaller) {
+// Write-through scalar stores must use the store's VMID. Two page tables map
+// the same GPU VA to different host pages; a store under VMID 7 followed by the
+// no-op writeback_all(8) must land only in VMID 7's backing.
+TEST(L1ScalarCacheVmidTest, WriteThroughStoreUsesStoreVmid) {
   constexpr uint32_t kVmidA = 7;
   constexpr uint32_t kVmidB = 8;
   constexpr uint64_t kSharedVa = 0x40000; // page-aligned, aliased across procs.
@@ -2596,18 +2591,21 @@ TEST(L1ScalarCacheVmidTest, WritebackAllUsesLineOwnerVmidNotCaller) {
   amdgpu::L1ScalarCache k_cache(&l2);
   k_cache.set_memory(&mem);
 
-  // Store a dword under VMID A, leaving a dirty K$ line owned by VMID A.
+  // Store a dword under VMID A. Write-through must publish it immediately
+  // through VMID A's page table.
   k_cache.store(kSharedVa, /*num_dwords=*/1, &kStoreWord, kVmidA);
+  EXPECT_EQ(mem.read32(kSharedVa, kVmidA), kStoreWord);
+  EXPECT_NE(mem.read32(kSharedVa, kVmidB), kStoreWord);
 
-  // Flush the K$ as if servicing VMID B, then flush L2 to backing. The line
-  // must be published through VMID A's page table (its owner), not B's.
+  // A writeback request from another process is harmless because K$ has no
+  // dirty data to publish.
   k_cache.writeback_all(kVmidB);
   l2.flush_all();
 
   EXPECT_EQ(mem.read32(kSharedVa, kVmidA), kStoreWord)
-      << "dirty K$ line must be written back under its owner VMID A";
+      << "write-through store must remain in VMID A";
   EXPECT_NE(mem.read32(kSharedVa, kVmidB), kStoreWord)
-      << "line must NOT leak into VMID B's address space";
+      << "store must NOT leak into VMID B's address space";
 
   mem.unregister_process(kVmidA);
   mem.unregister_process(kVmidB);

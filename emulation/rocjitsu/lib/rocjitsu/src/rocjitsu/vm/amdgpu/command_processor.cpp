@@ -2001,16 +2001,11 @@ bool sdma_compare_u64(uint32_t func, uint64_t value, uint64_t reference) {
 } // namespace
 
 void CommandProcessor::flush_gpu_caches() {
-  // Write back dirty scalar L1 (K$) lines into L2 first, then flush L2 to
-  // backing, so a dirty K$ line overlapping an SDMA destination is published
-  // before the direct write (which happens after this helper returns) rather
-  // than being written out over it by a later K$ flush. Each line is written
-  // back under its own owning vmid. Vector L1 (V$) is write-through, so it only
-  // needs invalidation. Ordering: K$ -> L2 -> backing, then invalidate V$.
-  for (auto *cu : cus_) {
-    cu->l1_scalar().writeback_all();
+  // Both L1 caches are write-through, so discard their clean snapshots around
+  // direct backing writes. Flush dirty L2 data before the direct write so a
+  // later L2 flush cannot overwrite it.
+  for (auto *cu : cus_)
     cu->l1_scalar().invalidate_all();
-  }
   for (auto *l2 : l2_caches_)
     l2->flush_all();
   for (auto *cu : cus_)
@@ -2152,8 +2147,8 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         // caches. Real SDMA does not snoop GL2; coherence is re-established by
         // the consuming kernel's acquire fence at dispatch. We model that with a
         // coarse writeback+invalidate that runs BEFORE the direct write: the
-        // writeback publishes any dirty L2 lines (e.g. from K$ writeback) so
-        // they are not lost, and — critically — a dirty line overlapping the
+        // writeback publishes any dirty L2 lines so they are not lost, and —
+        // critically — a dirty line overlapping the
         // destination is written back first, so the subsequent SDMA write
         // supersedes it instead of being clobbered by a later flush. After the
         // flush the caches are empty, so the destination re-reads fresh backing.
