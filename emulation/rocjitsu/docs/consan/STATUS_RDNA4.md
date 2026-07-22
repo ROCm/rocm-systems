@@ -126,14 +126,19 @@ tip; a successful smoke or an old artifact is insufficient.
 | **P4 hip-moi tree atomic-OR** | 🟩 Exact oracle; clean 4/4 accesses; exact order and scope weakenings are precommitted qualified misses; overhead 591.81x | 🟨 Exact oracle and clean-complete execution with all 4/4 accesses + 15/15 atomics + 4/4 barriers and 12/16 fences; only four adjacent fences exhaust reachable entry islands | 🟩 Exact oracle; clean-complete 4/4 accesses + 15/15 atomics + 8/8 barrier members; exact order and scope weakenings are precommitted qualified misses; overhead 49.91x | 🟧 Exact oracle and complete 4/4 accesses + 15/15 atomics + 4/4 barriers, but repeated-process qualification still intermittently diagnoses a correct owner-4 read after owner 2 | Current Inline checkpoint `137bcfefe5`, hook `62a17bf5…`: ten isolated clean processes pass, but paired artifact `rdna4-inline-durable-token-final3-overhead` reproduces the diagnostic in 2/3 instrumented processes, so no overhead is claimed. Committed inherited tokens now remain authoritative without re-reading a mutable source slot, deleting 354 hot-path lines and shrinking these access probes from about 3,960 to 2,480 bytes; a second access-time token-visibility gap remains. Current-tip Record/Replay artifact `rdna4-tree-rr-current-recheck`, hook `c9f19b1b…`, retains the isolated four-fence placement gap. Sampled artifacts remain `rdna4-tree-sampled-final-*`; other retained evidence is at checkpoint `79aea7420c` |
 | **P4 hip-moi Jakub attention variants** | 🟩 Exact oracle; clean 31/31 accesses; exact barrier drop is a precommitted qualified miss; overhead 103.75x | 🟩 Exact oracle; clean 31/31 + 4/4; exact barrier drop is a precommitted qualified miss; overhead 11.69x | 🟩 Exact oracle; clean-complete 31/31 accesses + 8/8 barrier members; exact barrier drop is a precommitted qualified miss with the oracle schedule-masked; overhead 10.87x | 🟩 Exact oracle; clean 31/31 + 4/4; exact barrier drop emits an attributed diagnostic; overhead 11.03x | Current hook `2dec0c65…`: Sampled clean `rdna4-jakub-sampled-final-clean`, paired overhead `...-final-overhead`, fresh inventory `...-final-inventory`, and accepted contained fault `...-final-fault`. Record/Replay checkpoint `baed32a85e`; SuperCollider and Inline checkpoint `79aea7420c` |
 
-The current top-k Record/Replay discriminator
-`rdna4-topk-rr-reused-cfg-final-20260722` uses checkpoint `12cd86d879` and
-hook `f28c56eb…`.  It completes semantic report planning, allocates the
-109,229,808-byte automatic report without a knob, and enters the 40 MiB
-object's instrumentation pass, but still produces no typed verdict before the
-fixed 120-second cap.  Reusing the pristine CFG for dense relay selection is
-therefore insufficient to promote this cell; do not extend the timeout again
-without first profiling and removing a distinct Record/Replay lowering cost.
+The latest top-k Record/Replay discriminators retain the fixed 75-second cap.
+Checkpoints `5c3c99c49a` and `da733901b4` replace two quadratic dense-relay
+searches with the indexes already owned by the resource planner: merged local
+instrumentation ranges plus kernel-local CFG ranges, and exact descriptor plus
+block-set lookup for scalar-window liveness.  All 729 ConSan C++ tests pass.
+Artifacts `rdna4-topk-rr-dense-indexed-final-20260722` and
+`rdna4-topk-rr-context-indexed-final-20260722` still complete semantic report
+planning, allocate the 109,229,808-byte automatic report without a knob, and
+enter the 40 MiB object's instrumentation pass without producing a typed
+verdict before the cap.  These generally useful indexing fixes do not promote
+the cell.  This cell has now consumed its bounded optimization attempt: do not
+extend its timeout or resume lowering work without a profiler identifying a
+third distinct cost.
 
 ## Native gfx1201 corpus discovery and qualification (zero gray cells)
 
