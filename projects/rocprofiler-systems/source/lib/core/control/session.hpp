@@ -30,13 +30,12 @@ public:
 
     void subscribe(subscriber sub);
 
-    /// Register a trigger and seed its initial vote.
-    void register_trigger(const trigger& trig);
+    /// Register a trigger and seed its initial action. The returned setter
+    /// is the only way to update this trigger's action afterward.
+    [[nodiscard]] trigger::action_setter register_trigger(const trigger& trig);
 
-    /// Remove a trigger's vote so it no longer contributes to resolution.
+    /// Remove a trigger's action so it no longer contributes to resolution.
     void unregister_trigger(const trigger& trig);
-
-    void publish_vote(const trigger& trig, vote new_vote);
 
     /// If the session is currently paused, fire pause on all subscribers
     /// to reflect the initial state. Subscribers default to "running", so
@@ -49,11 +48,11 @@ public:
     }
 
 private:
-    std::unordered_map<std::string, vote> m_votes;
-    std::vector<subscriber>               m_subscribers;
-    std::atomic<bool>                     m_active{ true };
+    std::unordered_map<std::string, action> m_actions;
+    std::vector<subscriber>                 m_subscribers;
+    std::atomic<bool>                       m_active{ true };
 
-    mutable std::mutex m_votes_mutex;
+    mutable std::mutex m_actions_mutex;
     std::mutex         m_subscribers_mutex;
     std::mutex         m_notify_mutex;
 

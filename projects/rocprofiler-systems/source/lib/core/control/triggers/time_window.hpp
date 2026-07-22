@@ -26,11 +26,13 @@ public:
         clock_duration duration{};
     };
 
-    time_window(session& sess, Clock& clk, config cfg) noexcept
+    time_window(session& sess, Clock& clk, config cfg)
     : m_session{ sess }
     , m_clock{ clk }
     , m_config{ cfg }
-    {}
+    {
+        bind_action_setter(sess.register_trigger(*this));
+    }
 
     ~time_window() override
     {
@@ -48,11 +50,11 @@ public:
         return "time_window";
     }
 
-    [[nodiscard]] vote initial_vote() const noexcept override
+    [[nodiscard]] action initial_action() const noexcept override
     {
-        if(m_config.delay > clock_duration::zero()) return vote::paused;
-        if(m_config.duration > clock_duration::zero()) return vote::active;
-        return vote::abstain;
+        if(m_config.delay > clock_duration::zero()) return action::pause;
+        if(m_config.duration > clock_duration::zero()) return action::trace;
+        return action::skip;
     }
 
     /// Spawn the worker thread that advances the window through delay and
@@ -104,14 +106,14 @@ private:
         if(has_delay)
         {
             if(!m_clock.sleep_until(t0 + m_config.delay)) return;  // interrupted
-            m_session.publish_vote(*this, vote::active);
+            publish_action(action::trace);
         }
 
         if(has_duration)
         {
             const auto end = t0 + m_config.delay + m_config.duration;
-            if(!m_clock.sleep_until(end)) return;         // interrupted
-            m_session.publish_vote(*this, vote::paused);  // terminal
+            if(!m_clock.sleep_until(end)) return;  // interrupted
+            publish_action(action::pause);         // terminal
         }
     }
 };

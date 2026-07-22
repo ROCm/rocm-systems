@@ -100,9 +100,7 @@ roctx_client<MarkerWriterPolicy>::roctx_client(const roctx_client_config& roctx_
 , m_session{ std::make_shared<control::session>() }
 , m_trigger{ std::make_unique<control::triggers::roctx>(
       *m_session, roctx_cfg.selected_trace_regions) }
-{
-    m_session->register_trigger(*m_trigger);
-}
+{}
 
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys
