@@ -17,15 +17,20 @@ Usage from GitHub Actions:
 import argparse
 import logging
 import os
-import re
-import smtplib
 import subprocess
 import sys
 import tempfile
-import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
-from email.mime.text import MIMEText
 from pathlib import Path
+
+from rccl_ci_utils import (
+    find_rccl_library,
+    parse_junit_xml,
+    send_email_report,
+    set_github_output,
+    verify_rccl_override,
+    write_github_summary,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -56,19 +61,6 @@ SMOKE_TESTS = [
 ]
 
 
-def find_rccl_library(artifact_dir: Path) -> Path:
-    """Find librccl.so in the artifact directory tree."""
-    matches = list(artifact_dir.rglob("librccl.so"))
-    if not matches:
-        so_files = list(artifact_dir.rglob("*.so"))[:20]
-        log.error("librccl.so not found in %s", artifact_dir)
-        log.error("Shared libraries found: %s", [str(f) for f in so_files])
-        sys.exit(1)
-    lib_path = matches[0].resolve()
-    log.info("Found librccl.so at: %s", lib_path)
-    return lib_path
-
-
 def find_rocm_lib_dir(artifact_dir: Path) -> Path | None:
     """Find the dist/rocm/lib directory in artifacts."""
     for d in artifact_dir.rglob("dist/rocm/lib"):
@@ -90,15 +82,6 @@ def setup_ld_library_path(rccl_lib_dir: Path, rocm_lib_dir: Path | None) -> str:
     os.environ["LD_LIBRARY_PATH"] = new_path
     log.info("LD_LIBRARY_PATH=%s", new_path)
     return new_path
-
-
-def verify_rccl_override(rccl_lib_dir: Path) -> None:
-    """Verify that the CI-built librccl.so exists on disk."""
-    ci_rccl = rccl_lib_dir.resolve() / "librccl.so"
-    if not ci_rccl.exists():
-        log.error("CI-built librccl.so not found at %s", ci_rccl)
-        sys.exit(1)
-    log.info("CI-built RCCL: %s (%d bytes)", ci_rccl, ci_rccl.stat().st_size)
 
 
 def clone_pytorch_test_sources(pytorch_src: Path) -> None:
@@ -231,53 +214,6 @@ def print_environment_info() -> None:
     for i in range(torch.cuda.device_count()):
         log.info("  GPU %d: %s", i, torch.cuda.get_device_name(i))
     log.info("LD_LIBRARY_PATH: %s", os.environ.get("LD_LIBRARY_PATH", ""))
-
-
-def parse_junit_xml(xml_path: Path) -> dict:
-    """Parse JUnit XML and return structured results."""
-    tree = ET.parse(xml_path)
-    root = tree.getroot()
-
-    passed_tests = []
-    failed_tests = []
-    error_details = []
-    tests_run = 0
-    failures = 0
-    errors = 0
-
-    for suite in root.iter("testsuite"):
-        tests_run = int(suite.get("tests", 0))
-        failures = int(suite.get("failures", 0))
-        errors = int(suite.get("errors", 0))
-
-    for tc in root.iter("testcase"):
-        name = tc.get("name", "")
-        time_s = tc.get("time", "")
-        duration = f"{float(time_s):.2f}s" if time_s else ""
-
-        failure = tc.find("failure")
-        error = tc.find("error")
-        if failure is not None:
-            failed_tests.append(name)
-            error_details.append(
-                f"FAILED: {name}\n  {failure.get('message', '')}"
-            )
-        elif error is not None:
-            failed_tests.append(name)
-            error_details.append(
-                f"ERROR: {name}\n  {error.get('message', '')}"
-            )
-        else:
-            passed_tests.append((name, duration))
-
-    return {
-        "passed": passed_tests,
-        "failed": failed_tests,
-        "error_details": error_details,
-        "tests_run": tests_run,
-        "failures": failures,
-        "errors": errors,
-    }
 
 
 def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -> tuple[int, dict]:
@@ -429,46 +365,6 @@ def generate_summary_report(summary: dict, rccl_lib: Path) -> str:
     return "\n".join(lines)
 
 
-def write_github_summary(report: str) -> None:
-    """Write report to GITHUB_STEP_SUMMARY if available."""
-    summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary_file:
-        with open(summary_file, "a") as f:
-            f.write("```\n")
-            f.write(report)
-            f.write("\n```\n")
-        log.info("Summary written to GITHUB_STEP_SUMMARY")
-
-
-def send_email_report(report: str, recipient: str, status: str) -> None:
-    """Send the summary report via email."""
-    subject = f"RCCL PyTorch c10d Test: {status}"
-    msg = MIMEText(report)
-    msg["Subject"] = subject
-    msg["From"] = "rccl-ci@amd.com"
-    msg["To"] = recipient
-
-    smtp_servers = ["smtp.amd.com", "aussmtp.amd.com", "mail.amd.com", "localhost"]
-    for server in smtp_servers:
-        try:
-            with smtplib.SMTP(server, timeout=10) as s:
-                s.sendmail(msg["From"], [recipient], msg.as_string())
-            log.info("Email sent to %s via %s", recipient, server)
-            return
-        except Exception as e:
-            log.debug("SMTP %s failed: %s", server, e)
-            continue
-    log.warning("Could not send email to %s (tried: %s)", recipient, ", ".join(smtp_servers))
-
-
-def set_github_output(key: str, value: str) -> None:
-    """Write a key=value pair to GITHUB_OUTPUT if available."""
-    output_file = os.environ.get("GITHUB_OUTPUT")
-    if output_file:
-        with open(output_file, "a") as f:
-            f.write(f"{key}={value}\n")
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -544,7 +440,8 @@ def main() -> None:
 
     if args.notify_email:
         status = "PASSED" if exit_code == 0 else "FAILED"
-        send_email_report(report, args.notify_email, status)
+        send_email_report(report, args.notify_email, status,
+                          subject_prefix="RCCL PyTorch c10d Test")
 
     sys.exit(exit_code)
 

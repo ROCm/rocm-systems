@@ -5,6 +5,8 @@
 #include "halt_snapshot_plugin.h"
 
 #include "embedded_schema.h"
+#include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
@@ -28,12 +30,14 @@ RJ_DIAGNOSTIC_POP
 
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -166,6 +170,70 @@ void step_until_halted(simdojo::SimulationEngine &engine,
     else if (saw_work)
       break;
   }
+}
+
+std::vector<uint8_t> make_loaded_kernel_symbol_elf(uint64_t kernel_descriptor_offset,
+                                                   std::string_view symbol_name,
+                                                   bool include_symbol_terminator = true) {
+  constexpr uint64_t dyn_offset = 0x100;
+  constexpr uint64_t symtab_offset = 0x200;
+  constexpr uint64_t strtab_offset = 0x300;
+  constexpr uint64_t hash_offset = 0x380;
+
+  std::vector<uint8_t> image(4096, 0);
+
+  Elf64_Ehdr ehdr{};
+  std::memcpy(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
+  ehdr.e_ident[EI_CLASS] = ELFCLASS64;
+  ehdr.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
+  ehdr.e_type = ET_DYN;
+  ehdr.e_machine = EM_AMDGPU;
+  ehdr.e_version = 1;
+  ehdr.e_phoff = sizeof(Elf64_Ehdr);
+  ehdr.e_ehsize = sizeof(Elf64_Ehdr);
+  ehdr.e_phentsize = sizeof(Elf64_Phdr);
+  ehdr.e_phnum = 1;
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+
+  Elf64_Phdr phdr{};
+  phdr.p_type = PT_DYNAMIC;
+  phdr.p_vaddr = dyn_offset;
+  phdr.p_memsz = 5 * sizeof(Elf64_Dyn);
+  std::memcpy(image.data() + ehdr.e_phoff, &phdr, sizeof(phdr));
+
+  auto *dyn = reinterpret_cast<Elf64_Dyn *>(image.data() + dyn_offset);
+  dyn[0].d_tag = DT_SYMTAB;
+  dyn[0].d_un.d_val = symtab_offset;
+  dyn[1].d_tag = DT_STRTAB;
+  dyn[1].d_un.d_val = strtab_offset;
+  dyn[2].d_tag = DT_STRSZ;
+  dyn[2].d_un.d_val = 1 + symbol_name.size() + (include_symbol_terminator ? 1 : 0);
+  dyn[3].d_tag = DT_HASH;
+  dyn[3].d_un.d_val = hash_offset;
+  dyn[4].d_tag = DT_NULL;
+
+  image[strtab_offset] = '\0';
+  std::memcpy(image.data() + strtab_offset + 1, symbol_name.data(), symbol_name.size());
+
+  auto *sym = reinterpret_cast<Elf64_Sym *>(image.data() + symtab_offset);
+  sym[1].st_name = 1;
+  sym[1].st_value = kernel_descriptor_offset;
+
+  auto *hash = reinterpret_cast<uint32_t *>(image.data() + hash_offset);
+  hash[1] = 2; // nchain: null symbol + kernel descriptor symbol.
+
+  return image;
+}
+
+TEST(KernelSymbolTest, RejectsDynstrSymbolWithoutTerminator) {
+  constexpr uint64_t kernel_descriptor_offset = 0x800;
+  constexpr std::string_view symbol_name = "unterminated_kernel.kd";
+  auto image = make_loaded_kernel_symbol_elf(kernel_descriptor_offset, symbol_name,
+                                             /*include_symbol_terminator=*/false);
+
+  EXPECT_TRUE(
+      find_kernel_symbol(image.data() + kernel_descriptor_offset, image.data(), image.size())
+          .empty());
 }
 
 TEST(GpuMemoryTest, ReadWriteRoundTrip) {
@@ -340,6 +408,35 @@ TEST(RdnaDispatchTest, WgpModeRequiresConfiguredSiblingCuPair) {
   queue.dispatch(ko, 64, 64);
 
   EXPECT_THROW((void)f.engine->step(), std::runtime_error);
+}
+
+TEST(GpuMemoryTest, VmidMappedKernelSymbolUsesTranslatedHostPointer) {
+  amdgpu::GpuMemory mem("vmid_kernel_symbol_mem");
+  KfdProcess process(/*process_id=*/125);
+  constexpr uint64_t gpu_va = 0x5400200000;
+  constexpr uint64_t kernel_descriptor_offset = 0x800;
+  auto image = make_loaded_kernel_symbol_elf(kernel_descriptor_offset, "vmid_kernel.kd");
+
+  mem.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_);
+  process.map_pages(gpu_va, image.data(), image.size());
+
+  uint64_t kernel_object = gpu_va + kernel_descriptor_offset;
+  auto [host_base, host_size] = mem.find_host_range(kernel_object, process.process_id());
+  ASSERT_NE(host_base, 0u);
+
+  // Kernel descriptors arrive as GPU VAs. Symbol lookup needs the translated
+  // host pointer so pointer subtraction against the loaded ELF image produces
+  // the descriptor offset recorded in .dynsym.
+  auto *mapped_page = mem.translate_debug(kernel_object, process.process_id());
+  ASSERT_NE(mapped_page, nullptr);
+  auto *kernel_object_host = mapped_page + (kernel_object & amdgpu::GpuMemory::PAGE_MASK);
+
+  EXPECT_NE(reinterpret_cast<uint64_t>(kernel_object_host), kernel_object);
+  EXPECT_EQ(find_kernel_symbol(kernel_object_host, reinterpret_cast<const uint8_t *>(host_base),
+                               host_size),
+            "vmid_kernel");
+
+  mem.unregister_process(process.process_id());
 }
 
 TEST(VmLifecycleTest, CreateAndDestroy) {
@@ -1007,6 +1104,50 @@ TEST(ClusterDispatchTest, ReclaimsLdsBetweenClusterWaves) {
   EXPECT_EQ(f.mem()->read64(kSignal + kSignalValueOffset), 0u);
   EXPECT_FALSE(f.cu(0)->has_active_wfs());
   EXPECT_FALSE(f.cu(1)->has_active_wfs());
+}
+
+TEST(ClusterDispatchTest, Rdna4ExtendedDispatchKeepsOrdinaryTtmpWorkgroupIds) {
+  VmFixture f("rdna4", 1, 8, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  auto *snap = f.capture_halts();
+
+  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/128);
+
+  amdgpu::AmdExtKernelDispatchPacket ext{};
+  ext.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+  ext.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+  ext.setup = 3;
+  ext.workgroup_size_x = 32;
+  ext.workgroup_size_y = 1;
+  ext.workgroup_size_z = 1;
+  ext.cluster_count_x = 1;
+  ext.cluster_count_y = 1;
+  ext.cluster_count_z = 1;
+  ext.cluster_size_x = 2;
+  ext.cluster_size_y = 2;
+  ext.cluster_size_z = 2;
+  ext.kernel_object = ko;
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(ext);
+  step_until_halted(*f.engine, {f.cu()});
+
+  ASSERT_EQ(snap->snapshots().size(), 8u);
+  std::array<bool, 8> seen{};
+  for (const auto &wf : snap->snapshots()) {
+    const uint32_t workgroup_id = wf.wg_id;
+    ASSERT_LT(workgroup_id, seen.size());
+    seen[workgroup_id] = true;
+
+    const uint32_t workgroup_x = workgroup_id % 2;
+    const uint32_t workgroup_y = (workgroup_id / 2) % 2;
+    const uint32_t workgroup_z = workgroup_id / 4;
+    EXPECT_EQ(wf.sgpr(114), 0u);
+    EXPECT_EQ(wf.sgpr(115), (workgroup_z << 16) | workgroup_y);
+    EXPECT_EQ(wf.sgpr(117), workgroup_x);
+  }
+  for (bool was_seen : seen)
+    EXPECT_TRUE(was_seen);
 }
 
 TEST(ClusterDispatchTest, RejectsExtKernelDispatchWithZeroClusterShape) {
@@ -2131,6 +2272,48 @@ TEST(L1ScalarCacheVmidTest, WritebackAllUsesLineOwnerVmidNotCaller) {
 
   mem.unregister_process(kVmidA);
   mem.unregister_process(kVmidB);
+}
+
+TEST(DoorbellMonitorLifecycle, RetiresAfterLastQueueAndRestartsOnNewQueue) {
+  // Regression for the leaked idle CP doorbell poller: the monitor must self-exit
+  // once the last host-accessible (KFD) queue is destroyed, and a later queue
+  // registration must start a fresh monitor. Uses only the queue-registration
+  // lifecycle (no dispatch), so the monitor thread runs on its own and its state
+  // is observed through the test-only accessor.
+  VmFixture f("cdna4", /*num_cus=*/1);
+  amdgpu::CommandProcessor *cp = f.cp();
+
+  auto wait_for_monitor = [&](bool expected) {
+    // The loop retires on a 100us cadence; allow generous slack for CI load.
+    for (int i = 0; i < 2000 && cp->doorbell_monitor_running_for_test() != expected; ++i)
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    return cp->doorbell_monitor_running_for_test();
+  };
+
+  EXPECT_FALSE(cp->doorbell_monitor_running_for_test())
+      << "no monitor should run before any host-accessible queue is registered";
+
+  amdgpu::HwQueue queue{};
+  queue.process_id = 1;
+  queue.queue_id = 7;
+  queue.host_accessible = true;
+  cp->register_queue(queue);
+  EXPECT_TRUE(wait_for_monitor(true)) << "registering a KFD queue must start the monitor";
+
+  cp->unregister_queue(queue.queue_id, queue.process_id);
+  EXPECT_FALSE(wait_for_monitor(false))
+      << "monitor must self-exit after the last host-accessible queue is destroyed";
+
+  // A new queue landing on a CP whose monitor retired must get polling back.
+  amdgpu::HwQueue queue2{};
+  queue2.process_id = 1;
+  queue2.queue_id = 8;
+  queue2.host_accessible = true;
+  cp->register_queue(queue2);
+  EXPECT_TRUE(wait_for_monitor(true)) << "a new KFD queue must restart a retired monitor";
+
+  cp->unregister_queue(queue2.queue_id, queue2.process_id);
+  EXPECT_FALSE(wait_for_monitor(false)) << "monitor must retire again after the last queue";
 }
 
 } // namespace
