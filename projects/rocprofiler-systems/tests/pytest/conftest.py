@@ -1599,6 +1599,7 @@ def _build_rocprofsys_config_header() -> list[str]:
         "-" * 70,
         "System Capabilities:",
         _row("Detected num procs:", cap.num_procs),
+        _row("Max threads:", cap.max_threads),
         _row("UCX available:", cap.ucx_availability),
         _row("Perf event paranoid:", cap.perf_event_paranoid),
         _row("CAP_SYS_ADMIN:", cap.cap_sys_admin),

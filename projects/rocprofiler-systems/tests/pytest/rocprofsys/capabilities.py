@@ -390,6 +390,33 @@ class SystemCapabilities:
         except (subprocess.SubprocessError, OSError, subprocess.TimeoutExpired):
             return False
 
+    @persistent_cached_property
+    def max_threads(self) -> int:
+        """Compile-time maximum number of threads that can be profiled at once.
+
+        This is the ``ROCPROFSYS_MAX_THREADS`` CMake constant baked into the
+        binaries at build time. It is queried from
+        ``rocprof-sys-avail --max-threads``
+
+        Throws an error if the value cannot be parsed from the output.
+        """
+        result = subprocess.run(
+            [str(self.rocprofsys_avail), "--max-threads"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        )
+        # This should never fail
+        match = re.search(r"ROCPROFSYS_MAX_THREADS\s*=\s*(\d+)", result.stdout)
+        if not match:
+            raise RuntimeError(
+                "Could not parse ROCPROFSYS_MAX_THREADS from "
+                f"'{self.rocprofsys_avail} --max-threads' output: "
+                f"{result.stdout!r}"
+            )
+        return int(match.group(1))
+
     # ---------------------------------------------------------------------------
     # Do NOT make this a persistent_cached_property: the result depends on the
     # per-process --python-versions / --python-root-dirs hints, so it must not be

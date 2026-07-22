@@ -234,6 +234,17 @@ main(int argc, char** argv)
                       "Write the available hardware counters")
         .max_count(1);
 
+    parser
+        .add_argument({ "--max-threads" },
+                      "Print the compile-time limit on the total number of threads that "
+                      "can be profiled in a single process over its lifetime and exit. "
+                      "Thread slots are counted cumulatively and are not reused when a "
+                      "thread exits")
+        .count(0)
+        .action([](parser_t&) {
+            std::cout << "ROCPROFSYS_MAX_THREADS=" << ROCPROFSYS_MAX_THREADS << "\n";
+        });
+
     parser.add_argument({ "-a", "--all" }, "Print all available info")
         .max_count(1)
         .action([&](parser_t& p) {
@@ -676,7 +687,8 @@ main(int argc, char** argv)
     }
 
     if(parser.exists("list-categories") || parser.exists("list-keys") ||
-       parser.exists("list-operations") || parser.exists("list-domains"))
+       parser.exists("list-operations") || parser.exists("list-domains") ||
+       parser.exists("max-threads"))
         return EXIT_SUCCESS;
 
     std::string _pos_regex{};
