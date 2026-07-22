@@ -2769,6 +2769,54 @@ TEST(ConSanMoi, Gfx1250SampledBarrierDoesNotGateWorkgroupsForAddressSampling) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
+TEST(ConSanMoi, Gfx1250SampledBarriersPartitionRelayWindowsAcrossLargeKernel) {
+  constexpr size_t kAccessesPerWindow = 9u;
+  constexpr size_t kFirstStore = 32u;
+  constexpr size_t kFirstSignal = 400u;
+  constexpr size_t kFirstWait = 401u;
+  constexpr size_t kSecondStore = 65'580u;
+  constexpr size_t kSecondSignal = 65'980u;
+  constexpr size_t kSecondWait = 65'981u;
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250);
+  std::vector<uint32_t> words(kSecondWait + 140u, filler);
+  for (size_t index = 0; index < kAccessesPerWindow; ++index) {
+    words[kFirstStore + 2u * index] = 0xD8340000u | static_cast<uint32_t>(index * sizeof(uint32_t));
+    words[kFirstStore + 2u * index + 1u] = 0x00000000u;
+  }
+  words[kFirstSignal] = 0xBE804EC1u; // s_barrier_signal -1
+  words[kFirstWait] = 0xBF94FFFFu;   // s_barrier_wait -1
+  for (size_t index = 0; index < kAccessesPerWindow; ++index) {
+    words[kSecondStore + 2u * index] =
+        0xD8340000u | static_cast<uint32_t>(index * sizeof(uint32_t));
+    words[kSecondStore + 2u * index + 1u] = 0x00000000u;
+  }
+  words[kSecondSignal] = 0xBE804EC1u; // s_barrier_signal -1
+  words[kSecondWait] = 0xBF94FFFFu;   // s_barrier_wait -1
+  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_track_barriers = true;
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_owner_vgpr = 20;
+  options.moi_epoch_vgpr = 21;
+  options.moi_runtime_sample_stride = 1;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2u * kAccessesPerWindow);
+  options.max_patches = 2u * kAccessesPerWindow + 4u;
+
+  const ConSanResult result = try_patch_consan(
+      make_gfx1250_code_object(words, "gfx1250_partitioned_sampled_barriers"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
+                               &ConSanPatchInfo::kind),
+            2u)
+      << testing::PrintToString(result.warnings);
+}
+
 TEST(ConSanMoi, Gfx1250SampledClusterBarrierPublishesClusterScope) {
   std::vector<uint32_t> words(540, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 0});

@@ -1045,10 +1045,31 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     }
     const auto blocks = BasicBlock::build(code_object, *decoder, arch, leaders, code_ranges);
     using ContainerKey = std::pair<bool, std::string>;
-    std::map<ContainerKey, std::vector<size_t>> groups;
+    std::map<ContainerKey, std::vector<size_t>> owner_groups;
     for (size_t index = 0; index < selected.size(); ++index) {
       const SampledBarrierCandidate &candidate = selected[index].candidate;
-      groups[{candidate.sequence->in_kernel, candidate.sequence->container_name}].push_back(index);
+      owner_groups[{candidate.sequence->in_kernel, candidate.sequence->container_name}].push_back(
+          index);
+    }
+    constexpr uint64_t kMaxCommonRelayAnchorSpan =
+        static_cast<uint64_t>(static_cast<int64_t>(std::numeric_limits<int16_t>::max()) -
+                              static_cast<int64_t>(std::numeric_limits<int16_t>::min())) *
+        sizeof(uint32_t);
+    std::vector<std::pair<ContainerKey, std::vector<size_t>>> groups;
+    for (auto &[key, owner_indices] : owner_groups) {
+      std::ranges::sort(owner_indices, [&](size_t lhs, size_t rhs) {
+        return selected[lhs].candidate.barrier.site.text_offset <
+               selected[rhs].candidate.barrier.site.text_offset;
+      });
+      for (size_t index : owner_indices) {
+        const uint64_t anchor = selected[index].candidate.barrier.site.text_offset;
+        if (groups.empty() || groups.back().first != key ||
+            anchor - selected[groups.back().second.front()].candidate.barrier.site.text_offset >
+                kMaxCommonRelayAnchorSpan) {
+          groups.push_back({key, {}});
+        }
+        groups.back().second.push_back(index);
+      }
     }
     std::vector<std::pair<uint64_t, uint64_t>> claimed_hosts;
     std::vector<std::pair<uint64_t, uint64_t>> fixed_claims;

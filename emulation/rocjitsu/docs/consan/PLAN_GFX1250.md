@@ -153,7 +153,7 @@ flowchart TD
     XT3B["XT3B DONE<br/>quick-GEMM SuperCollider assessed;<br/>SGEMM first problem 12/12 exact and fully covered"]
     XT3G["XT3G DONE<br/>quick SGEMM Sampled first problem;<br/>12/12 exact, 640/640 accesses, 40/40 barriers"]
     XT3H["XT3H DONE<br/>quick SGEMM Inline assessed;<br/>first problem exact, aggregate dynamic incomplete"]
-    XT3I["XT3I ACTIVE<br/>SPMM F8 Sampled relay-window fix complete;<br/>paired and reviewed-fault acceptance remain"]
+    XT3I["XT3I ACTIVE<br/>SPMM F8 Sampled access/barrier relay fixes complete;<br/>paired and reviewed-fault acceptance remain"]
     XT3J["XT3J DONE<br/>SPMM F8 Inline standard clean assessed;<br/>MT64x64 wrong-result rows isolate blocker"]
     XT3K["XT3K DONE<br/>SPMM F8 Inline ninth-barrier bank defect fixed;<br/>exact kernel fully passes"]
     XT3D["XT3D DONE<br/>full SGEMM first problem complete;<br/>quadratic 115,776-event frontier isolated"]
@@ -415,6 +415,21 @@ flowchart TD
   third SPMM client accepts all five exact numeric rows and reports complete
   11,154/11,154 access plus 380/380 barrier-member coverage.  The node remains
   ACTIVE/blue for a full paired run and reviewed-fault acceptance.
+
+- 2026-07-22: XT3I's first clean-provenance post-access-fix paired attempt
+  `consan-green-expansion-20260722-spmm-f8-ml-sampled-overhead-relayfix-clean-201`
+  accepts stable one-repetition controls at 228,284.50 and 245,188.64 ms.
+  Sampled reaches complete aggregate 77,418/77,418 access and 2,798/2,798
+  barrier-member coverage before a fifth, larger object fails closed because
+  all 854 qualified barrier sequences in its over-wide owner still require one
+  common signed-branch relay.  Barrier lowering now applies the same sorted
+  per-owner reachability partition as access lowering.  The new two-window
+  barrier regression, all 84 Sampled tests, and all 724 ConSan tests pass.  A
+  direct current-hook replay of the formerly rejected client passes all five
+  exact numeric rows with complete 28,954/28,954 access and 854/854 barrier
+  coverage, 163 visible records, and clean report reclamation.  The paired
+  attempt itself remains rejected, so XT3I stays ACTIVE/blue for a fresh
+  committed-tip paired run and reviewed fault.
 
 - 2026-07-22: V9A is DONE and V9B is the sole ACTIVE/blue node.  The current
   and historical Qwen runs use the same VMFB, and both reach the
