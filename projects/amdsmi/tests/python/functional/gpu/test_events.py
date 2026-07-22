@@ -187,7 +187,8 @@ class TestGpuEvents(unittest.TestCase):
         # when AMDSMI_TEST_TRIGGER_RESET is set to actually generate reset events.
         # Ex. sudo AMDSMI_TEST_TRIGGER_RESET=1 /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "test_events" -v
         # (Note: filter not required, but helpful for fast checks)
-        # Without it, the test will still run and check for events, but will not generate any reset events.
+        # Without AMDSMI_TEST_TRIGGER_RESET=1 the test will still run and check for events,
+        # but will not generate any reset events.
         trigger_reset = bool(os.environ.get("AMDSMI_TEST_TRIGGER_RESET"))
         if trigger_reset and os.geteuid() != 0:
             self.skipTest("AMDSMI_TEST_TRIGGER_RESET requires root to reset the GPU.")
@@ -220,7 +221,7 @@ class TestGpuEvents(unittest.TestCase):
                 continue
 
             # Set Mask
-            msg = f"\t### amdsmi_set_gpu_event_notification_mask(gpu={i}, mask={mask}):"
+            msg = f"\t### amdsmi_set_gpu_event_notification_mask(gpu={i}, mask=0x{mask:X}):"
             try:
                 ret = amdsmi.amdsmi_set_gpu_event_notification_mask(gpu, mask)
                 self.common.print(msg, ret)
@@ -243,17 +244,22 @@ class TestGpuEvents(unittest.TestCase):
                 self.common.print(
                     f"\tSKIPPED (amdsmi_reset_gpu(gpu={i})): opt-in reset disabled "
                     "\n\t(set AMDSMI_TEST_TRIGGER_RESET=1 as root to generate reset events); "
-                    "expecting AMDSMI_STATUS_NO_DATA below."
+                    "expecting AMDSMI_STATUS_NO_DATA (or SUCCESS with no events) below."
                 )
 
             # Get
             msg = f"\t### amdsmi_get_gpu_event_notification(timeout_ms={timeout_ms}):"
             seen_events = set()
+            gpu_addr = gpu.value  # records carry processor_handle as a raw address (int)
             try:
                 ret = amdsmi.amdsmi_get_gpu_event_notification(timeout_ms)
                 self.common.print(msg, f"num_elem={ret['num_elem']}")
                 # Decode each record: 'event' is a raw enum value, 'message' holds details.
                 for event_data in ret["data"]:
+                    # get is process-global, only attribute events for the current GPU.
+                    if event_data["processor_handle"] != gpu_addr:
+                        self.common.print(f"\t\tSKIPPED event for GPU {i}: {event_data}")
+                        continue
                     try:
                         event_name = amdsmi.AmdSmiEvtNotificationType(event_data["event"]).name
                     except ValueError:
@@ -281,6 +287,7 @@ class TestGpuEvents(unittest.TestCase):
             msg = f"\t### amdsmi_stop_gpu_event_notification(gpu={i}):"
             try:
                 ret = amdsmi.amdsmi_stop_gpu_event_notification(gpu)
+                self.common.print(msg, ret)
                 self.common.check_ret("", "", self.common.PASS)
             except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
                 if self.common.check_ret(msg, e, self.common.PASS):
