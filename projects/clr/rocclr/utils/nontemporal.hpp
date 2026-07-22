@@ -431,7 +431,8 @@ static inline void nontemporalWriteAQL(AqlPacket* __restrict dst,
   static_assert(sizeof(AqlPacket) == 64, "AQL packets must be 64 bytes");
   alignas(64) AqlPacket staging;
   std::memcpy(&staging, src, sizeof(AqlPacket));
-  *reinterpret_cast<uint32_t*>(&staging) = header | (static_cast<uint32_t>(rest) << 16);
+  const uint32_t merged = header | (static_cast<uint32_t>(rest) << 16);
+  std::memcpy(&staging, &merged, sizeof(merged));
   movdir64b_copy64(dst, &staging);
 }
 
