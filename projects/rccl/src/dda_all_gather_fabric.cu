@@ -107,7 +107,7 @@ bool ncclAllGatherDdaFabricEligible(ncclComm* comm, const void* sendbuff, void* 
     return false;
   }
 
-  size_t need = sendcount * ncclTypeSize(datatype);
+  size_t need = sendcount * (size_t)comm->nRanks * ncclTypeSize(datatype);
   if (need > comm->ddaScratchBytes) {
     return false;
   }
