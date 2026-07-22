@@ -50,10 +50,10 @@ scratch before promotion.
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
 | **P0 Qwen3-0.6B prefill** | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown |
-| **P1 Sharktank TP1 prefill** | 🟨 current clean and paired: exact oracle, 120/120 accesses, complete analysis, 1.13x; reviewed exact-one fault detected one instability but contradicted its frozen external-oracle policy | 🟩 current accepted bundle: exact clean and paired oracle, complete 120/120 accesses plus 31/31 barriers, 1.29x paired slowdown, reviewed exact-one detected/pass fault, containment, health, and clean provenance | 🩶 historical: clean 104/104 access + 7/7 qualified barrier accepted | 🩶 historical: clean 104/104 access + 31/31 barrier accepted |
-| **P1 Sharktank TP1 decode/combined** | 🟨 current clean and paired: both exact oracles, 240/240 accesses, complete analysis, 1.33x maximum; reviewed exact-one fault was schedule-masked and contradicted its frozen detection policy | 🟥 current decode warmup oracle fails after complete 120/120 access plus 31/31 barrier lowering; the prefill mode remains exact, localizing a mode-sensitive replay defect | 🩶 historical: clean 208/208 access + 14/14 qualified barrier accepted | 🩶 historical: clean 208/208 access + 62/62 barrier accepted across six sequential runs |
-| **P2 Sharktank TP2 family** | 🟨 current clean: prefill, decode, and combined oracles pass; aggregate 936/936 accesses; complete analysis | 🩶 historical: clean 840/840 access + 168/168 barrier accepted | 🩶 historical: aggregate rejected: one 140-access + 10-barrier slice executes 0 | 🩶 historical: aggregate rejected: one 140-access + 28-barrier slice lowers 0 |
-| **P3 CLIP BF16** | 🟨 current clean: cosine oracle passes; 45/45 accesses; complete analysis | 🟨 current one-process clean passes the cosine oracle with complete 45/45 accesses plus 24/24 barriers; a separate ten-process stress keeps full coverage but reproduces a replay conflict in 2/10 processes, so paired evidence is rejected | 🩶 historical: clean 39/39 access + 20/20 qualified barrier accepted | 🩶 historical: clean 39/39 access + 24/24 barrier accepted |
+| **P1 Sharktank TP1 prefill** | 🟨 current clean and paired: exact oracle, 120/120 accesses, complete analysis, 1.13x; reviewed exact-one fault detected one instability but contradicted its frozen external-oracle policy | 🟩 current accepted bundle: exact clean and paired oracle, complete 120/120 accesses plus 31/31 barriers, 1.29x paired slowdown, reviewed exact-one detected/pass fault, containment, health, and clean provenance | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before installing the instrumented object | 🟨 current clean and paired: exact oracle, complete 120/120 accesses plus 31/31 barriers, 246.6x paired slowdown; reviewed exact-one mutation is schedule-masked with a passing oracle and no diagnostic, contradicting its frozen detection policy |
+| **P1 Sharktank TP1 decode/combined** | 🟨 current clean and paired: both exact oracles, 240/240 accesses, complete analysis, 1.33x maximum; reviewed exact-one fault was schedule-masked and contradicted its frozen detection policy | 🟥 current decode warmup oracle fails after complete 120/120 access plus 31/31 barrier lowering; the prefill mode remains exact, localizing a mode-sensitive replay defect | 🩶 historical: clean 208/208 access + 14/14 qualified barrier accepted | 🟧 current clean execution passes both exact oracles with complete 240/240 accesses plus 62/62 barriers; clean-tip paired and fault gates remain |
+| **P2 Sharktank TP2 family** | 🟨 current clean: prefill, decode, and combined oracles pass; aggregate 936/936 accesses; complete analysis | 🟥 current lowering is complete at 624/624 supported accesses plus 112/112 barriers, but the prefill warmup oracle fails (`13.0608`) | 🩶 historical: aggregate rejected: one 140-access + 10-barrier slice executes 0 | 🩶 historical: aggregate rejected: one 140-access + 28-barrier slice lowers 0 |
+| **P3 CLIP BF16** | 🟨 current clean: cosine oracle passes; 45/45 accesses; complete analysis | 🟨 current one-process clean passes the cosine oracle with complete 45/45 accesses plus 24/24 barriers; a separate ten-process stress keeps full coverage but reproduces a replay conflict in 2/10 processes, so paired evidence is rejected | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before installing the instrumented object | 🟥 current lowering is complete at 45/45 accesses plus 24/24 barriers, but the warmup cosine oracle fails with NaN |
 | **P4 hip-moi D128 block attention** | 🟩 current accepted bundle: exact clean, 12/12 coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🟧 current oracle passes with 6/12 accesses and 4/4 barriers; six shared-helper accesses hit the typed dynamic-stack resource limit | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary | 🟥 current scalar fallback lacks entry-local scratch for one connected component |
 | **P4 hip-moi D128 pressure attention** | 🟩 current accepted bundle: four exact clean oracles, 12/12 coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🟧 current four-oracle run passes with 6/12 accesses and 4/4 barriers; six shared-helper accesses hit the typed dynamic-stack resource limit | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary | 🩶 historical: clean 12/12 access + 4/4 barrier accepted |
 | **P4 hip-moi MFMA attention** | 🟩 current accepted bundle: two exact clean oracles, 12/12 group-FLAT coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🟧 current two-oracle run passes with 6/12 accesses and 4/4 barriers; six shared-helper accesses hit the typed dynamic-stack resource limit | 🩶 historical: clean 12/12 access accepted | 🩶 historical: clean 12/12 access + 4/4 barrier accepted |
@@ -286,6 +286,27 @@ trap, crash, output mismatch, or GPU reset is an execution outcome rather than
 a ConSan detection.
 
 ## Progress log
+
+- 2026-07-22: The fast physical-gfx950 lane assessed four previously gray
+  profile cells at clean hook SHA-256 `0832ad97...d594bc`.  TP1 prefill
+  Inline Shadow passes its exact clean and paired oracles with complete
+  120/120 access plus 31/31 barrier coverage; the paired slowdown is 246.6x.
+  Its prospectively frozen exact-one barrier mutation is applied 1/1 with
+  complete evidence and healthy containment, but is schedule-masked: the
+  oracle passes and Inline emits no diagnostic, so the cell is yellow rather
+  than green.  TP1 prefill Sampled and CLIP Sampled both fail closed at the
+  connected ordinary-VGPR/AccVGPR boundary and are red.  CLIP Inline lowers
+  all 45 accesses and 24 barriers but corrupts the warmup cosine oracle to
+  NaN, while TP2 Record/Replay lowers all 624 currently supported accesses
+  and 112 barriers but fails the prefill warmup oracle at `13.0608`; those
+  cells are red.  Retained artifacts end in `-015` through `-021` under
+  `/home/ossci/xx/consan-validation-gfx950-*`.
+
+- 2026-07-22: TP1 decode/combined Inline Shadow passes both exact workload
+  modes with complete 240/240 access plus 62/62 barrier coverage in artifact
+  `consan-validation-gfx950-tp1-decode-combined-inline-20260722-023`.  The
+  source revision is docs-dirty, so this promotes the cell only to orange;
+  clean-tip paired and reviewed-fault evidence remain.
 
 - 2026-07-22: Commit `92678db569` closes the CDNA4 MOI normalization gap for
   `ds_read_b64_tr_b16`, `ds_read2*`, and `ds_write2*`, retaining exact
