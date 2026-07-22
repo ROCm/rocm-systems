@@ -668,7 +668,7 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   return false;
 }
 
-RCCL_PARAM(HierarchicalReduceScatter, "HIERARCHICAL_REDUCE_SCATTER", 1);
+RCCL_PARAM(HierarchicalReduceScatter, "HIERARCHICAL_REDUCE_SCATTER", 0);
 
 bool rcclUseHierarchicalReduceScatter(struct ncclComm* comm, size_t msgSize) {
   if (comm->nNodes < 8) return false;
