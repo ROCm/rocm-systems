@@ -679,18 +679,16 @@ __device__ int IPCContext::reduce_scatter_wave(rocshmem_team_t team, T *dest,
   int pWrk_elems = (int)(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) / sizeof(T));
   int chunk_size = max(1, pWrk_elems / PE_size);
   int n_chunks   = (nreduce + chunk_size - 1) / chunk_size;
-  int64_t flag_val = 1;
   int finish = PE_start + stride * PE_size;
   
   for (int c = 0; c < n_chunks; c++) {
     int offset = c * chunk_size;
     int count  = min(chunk_size, nreduce - offset);
-
+    int64_t flag_val = static_cast<int64_t>(c) + 1;
     // Seed dest[offset..offset+count) from my own contribution.
     for (int j = wave_tid; j < count; j += WF_SIZE) {
       dest[offset + j] = source[team_rank * nreduce + offset + j];
     }
-    __builtin_amdgcn_wave_barrier();
 
     // Send my contribution to each remote PE's pWrk slot, then signal.
     for (int i = PE_start; i < finish; i += stride) {
@@ -701,12 +699,11 @@ __device__ int IPCContext::reduce_scatter_wave(rocshmem_team_t team, T *dest,
                                   source + remote_rank * nreduce + offset),
                               count * sizeof(T), i);
         if (is_thread_zero_in_wave()) {
-          fence(i);
           internal_putmem(&pSync[team_rank], &flag_val, sizeof(*pSync), i);
         }
+	__builtin_amdgcn_wave_barrier();
       }
     }
-    threadfence_system();
     __builtin_amdgcn_wave_barrier();
 
     // Wait for each remote PE's signal, then accumulate into dest.
@@ -716,14 +713,17 @@ __device__ int IPCContext::reduce_scatter_wave(rocshmem_team_t team, T *dest,
         if (is_thread_zero_in_wave()) {
           wait_until(&pSync[remote_rank], ROCSHMEM_CMP_EQ, flag_val);
         }
+	__builtin_amdgcn_wave_barrier();
         T *src_chunk = &pWrk[remote_rank * chunk_size];
         T *dst_chunk = dest + offset;
         for (int j = wave_tid; j < count; j += WF_SIZE) {
           OpWrap<Op>::Calc(src_chunk, dst_chunk, j);
         }
-        threadfence_system();
+        // threadfence_system();
       }
     }
+
+    sync_wave(team);
     __builtin_amdgcn_wave_barrier();
 
     // Reset pSync before reuse.
@@ -733,6 +733,7 @@ __device__ int IPCContext::reduce_scatter_wave(rocshmem_team_t team, T *dest,
 
     // Sync with wave 0 of other PEs
     sync_wave(team);
+    __builtin_amdgcn_wave_barrier();
   }
 
   return ROCSHMEM_SUCCESS;
