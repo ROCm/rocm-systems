@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/rocprofiler-sdk.hpp"
+#include "core/tests/mock_wrapper.hpp"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -20,26 +21,15 @@ namespace rocprofsys::rocprofiler_sdk::testing
 
 namespace gtest = ::testing;
 
-// ─── Mock ─────────────────────────────────────────────────────────────────────
-//
-// Only get_version() needs to be mocked; get_callback_tracing_names() and
-// get_buffer_tracing_names() are inherited from the real backend and return
-// compile-time SDK name tables (no ROCm runtime required).
-
-class gmock_sdk_core_backend
-{
-public:
-    MOCK_METHOD(void, get_version,
-                (std::uint32_t * major, std::uint32_t* minor, std::uint32_t* patch));
-};
-
-inline std::unique_ptr<gmock_sdk_core_backend> g_mock;
+using ::rocprofsys::mock::rocprofiler_sdk::g_mock_wrapper;
+using ::rocprofsys::mock::rocprofiler_sdk::gmock_wrapper;
+using mock_backend = ::rocprofsys::mock::rocprofiler_sdk::backend;
 
 // ─── Backend policy ───────────────────────────────────────────────────────────
 //
-// Inherits from the real backend so all SDK type aliases, enum constants, and
-// name-info table accessors come for free.  Only get_version() is overridden
-// (hidden) by the mock version.
+// tagged_backend is a self-contained mock (no real SDK headers): it inherits
+// mock_backend, whose get_version()/get_callback_tracing_names()/
+// get_buffer_tracing_names() all forward to g_mock_wrapper.
 //
 // Each distinct Tag gives sdk_core<tagged_backend<Tag>>::get_version() its own
 // static _version cache, so tests that verify first-call behaviour don't
@@ -79,29 +69,83 @@ enum backend_tag : int
 };
 
 template <int Tag>
-struct tagged_backend : ::rocprofsys::rocprofiler_sdk::backend
+struct tagged_backend : mock_backend
+{};
+
+// buffered_domains_page_migration simulates a pre-1.0 SDK: below the KFD gate
+// (>= 10000), so get_buffered_domains() falls back to the legacy
+// BUFFER_TRACING_PAGE_MIGRATION path instead of the granular KFD_* domains.
+template <>
+struct tagged_backend<buffered_domains_page_migration> : mock_backend
 {
-    static void get_version(std::uint32_t* major, std::uint32_t* minor,
-                            std::uint32_t* patch)
-    {
-        g_mock->get_version(major, minor, patch);
-    }
+    static constexpr std::uint32_t compile_time_version = 500;
 };
 
-struct legacy_page_migration_backend : tagged_backend<buffered_domains_page_migration>
-{
-    static constexpr std::uint32_t       compile_time_version = 9999;
-    static constexpr buffer_tracing_kind BUFFER_TRACING_PAGE_MIGRATION =
-        static_cast<buffer_tracing_kind>(50);
+// ─── Shared fake name tables ───────────────────────────────────────────────────
+//
+// Every test that calls config_settings()/get_buffered_domains()/
+// get_callback_domains() needs Wrapper::get_buffer_tracing_names()/
+// get_callback_tracing_names() (both GMock methods on mock_backend) to return a
+// populated table, since sdk_core validates/resolves domain names against it.
 
-    static buffer_name_info_t get_buffer_tracing_names()
-    {
-        auto names =
-            tagged_backend<buffered_domains_page_migration>::get_buffer_tracing_names();
-        names.emplace(BUFFER_TRACING_PAGE_MIGRATION, "page_migration");
-        return names;
-    }
-};
+// Names mirror the real SDK's tracing-kind name tables, which are UPPER_SNAKE_CASE
+// (e.g. "MEMORY_COPY", not "memory_copy"): config_settings()'s per-domain
+// operation-filter env var names are built directly from this raw name (not
+// lowercased) — only the ROCPROFSYS_ROCM_DOMAINS choice list is lowercased.
+mock_backend::buffer_name_info_t
+make_buffer_name_info()
+{
+    auto table = mock_backend::buffer_name_info_t{};
+    table.emplace(mock_backend::BUFFER_TRACING_HSA_CORE_API, "HSA_CORE_API");
+    table.emplace(mock_backend::BUFFER_TRACING_HSA_AMD_EXT_API, "HSA_AMD_EXT_API");
+    table.emplace(mock_backend::BUFFER_TRACING_HSA_IMAGE_EXT_API, "HSA_IMAGE_EXT_API");
+    table.emplace(mock_backend::BUFFER_TRACING_HSA_FINALIZE_EXT_API,
+                  "HSA_FINALIZE_EXT_API");
+    table.emplace(mock_backend::BUFFER_TRACING_HIP_COMPILER_API, "HIP_COMPILER_API");
+    table.emplace(mock_backend::BUFFER_TRACING_HIP_RUNTIME_API, "HIP_RUNTIME_API");
+    table.emplace(mock_backend::BUFFER_TRACING_MARKER_CORE_API, "MARKER_CORE_API");
+    table.emplace(mock_backend::BUFFER_TRACING_KERNEL_DISPATCH, "KERNEL_DISPATCH");
+    table.emplace(mock_backend::BUFFER_TRACING_MEMORY_COPY, "MEMORY_COPY");
+    table.emplace(mock_backend::BUFFER_TRACING_MEMORY_COPY, 0, "HOST_TO_DEVICE");
+    table.emplace(mock_backend::BUFFER_TRACING_MEMORY_COPY, 1, "DEVICE_TO_HOST");
+    table.emplace(mock_backend::BUFFER_TRACING_MEMORY_COPY, 2, "DEVICE_TO_DEVICE");
+    table.emplace(mock_backend::BUFFER_TRACING_SCRATCH_MEMORY, "SCRATCH_MEMORY");
+    table.emplace(mock_backend::BUFFER_TRACING_MEMORY_ALLOCATION, "MEMORY_ALLOCATION");
+    table.emplace(mock_backend::BUFFER_TRACING_PAGE_MIGRATION, "PAGE_MIGRATION");
+    table.emplace(mock_backend::BUFFER_TRACING_KFD_PAGE_FAULT, "KFD_PAGE_FAULT");
+    table.emplace(mock_backend::BUFFER_TRACING_KFD_PAGE_MIGRATE, "KFD_PAGE_MIGRATE");
+    table.emplace(mock_backend::BUFFER_TRACING_KFD_QUEUE, "KFD_QUEUE");
+    table.emplace(mock_backend::BUFFER_TRACING_KFD_EVENT_QUEUE, "KFD_EVENT_QUEUE");
+    table.emplace(mock_backend::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
+                  "KFD_EVENT_UNMAP_FROM_GPU");
+    table.emplace(mock_backend::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
+                  "KFD_EVENT_DROPPED_EVENTS");
+    return table;
+}
+
+mock_backend::callback_name_info_t
+make_callback_name_info()
+{
+    auto table = mock_backend::callback_name_info_t{};
+    table.emplace(mock_backend::CALLBACK_TRACING_HSA_CORE_API, "HSA_CORE_API");
+    table.emplace(mock_backend::CALLBACK_TRACING_HSA_AMD_EXT_API, "HSA_AMD_EXT_API");
+    table.emplace(mock_backend::CALLBACK_TRACING_HSA_IMAGE_EXT_API, "HSA_IMAGE_EXT_API");
+    table.emplace(mock_backend::CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
+                  "HSA_FINALIZE_EXT_API");
+    table.emplace(mock_backend::CALLBACK_TRACING_HIP_RUNTIME_API, "HIP_RUNTIME_API");
+    table.emplace(mock_backend::CALLBACK_TRACING_HIP_COMPILER_API, "HIP_COMPILER_API");
+    table.emplace(mock_backend::CALLBACK_TRACING_MARKER_CORE_API, "MARKER_CORE_API");
+    table.emplace(mock_backend::CALLBACK_TRACING_MARKER_CORE_API,
+                  mock_backend::MARKER_CORE_API_ID_roctxMarkA, "roctxMarkA");
+    table.emplace(mock_backend::CALLBACK_TRACING_MARKER_CORE_API,
+                  mock_backend::MARKER_CORE_API_ID_roctxRangePushA, "roctxRangePushA");
+    table.emplace(mock_backend::CALLBACK_TRACING_MARKER_CORE_API,
+                  mock_backend::MARKER_CORE_API_ID_roctxRangePop, "roctxRangePop");
+    table.emplace(mock_backend::CALLBACK_TRACING_CODE_OBJECT, "CODE_OBJECT");
+    table.emplace(mock_backend::CALLBACK_TRACING_RCCL_API, "RCCL_API");
+    table.emplace(mock_backend::CALLBACK_TRACING_OMPT, "OMPT");
+    return table;
+}
 
 // ─── Settings mock (Externals::Settings) ──────────────────────────────────────
 //
@@ -215,9 +259,14 @@ struct mock_sdk_externals
 class sdk_core_test : public ::testing::Test
 {
 protected:
-    void SetUp() override { g_mock = std::make_unique<gmock_sdk_core_backend>(); }
-    void TearDown() override { g_mock.reset(); }
+    void SetUp() override { g_mock_wrapper = std::make_unique<gmock_wrapper>(); }
+    void TearDown() override { g_mock_wrapper.reset(); }
 };
+
+// config_settings() only ever touches Wrapper::get_{buffer,callback}_tracing_names()
+// (never Externals), so it reuses sdk_core_test's g_mock_wrapper-only setup.
+class sdk_core_config_settings_test : public sdk_core_test
+{};
 
 // Fixture for functions that read through the Externals policy
 // (get_callback_domains, get_buffered_domains, get_rocm_events).
@@ -226,12 +275,12 @@ class sdk_core_domains_test : public ::testing::Test
 protected:
     void SetUp() override
     {
-        g_mock           = std::make_unique<gmock_sdk_core_backend>();
+        g_mock_wrapper   = std::make_unique<gmock_wrapper>();
         g_mock_externals = std::make_unique<gtest::StrictMock<gmock_sdk_externals>>();
     }
     void TearDown() override
     {
-        g_mock.reset();
+        g_mock_wrapper.reset();
         g_mock_externals.reset();
     }
 };
@@ -242,11 +291,12 @@ TEST_F(sdk_core_test, get_version_populates_major_minor_patch)
 {
     using sut = sdk_core<tagged_backend<version_fields>>;
 
-    EXPECT_CALL(*g_mock, get_version)
+    EXPECT_CALL(*g_mock_wrapper, get_version)
         .WillOnce([](std::uint32_t* maj, std::uint32_t* min, std::uint32_t* pat) {
             *maj = 1;
             *min = 2;
             *pat = 3;
+            return 0;
         });
 
     auto& ver = sut::get_version();
@@ -259,11 +309,12 @@ TEST_F(sdk_core_test, get_version_formatted_equals_major_10000_minor_100_patch)
 {
     using sut = sdk_core<tagged_backend<version_formatted>>;
 
-    EXPECT_CALL(*g_mock, get_version)
+    EXPECT_CALL(*g_mock_wrapper, get_version)
         .WillOnce([](std::uint32_t* maj, std::uint32_t* min, std::uint32_t* pat) {
             *maj = 1;
             *min = 1;
             *pat = 0;
+            return 0;
         });
 
     EXPECT_EQ(sut::get_version().formatted(), (1u * 10000u) + (1u * 100u) + 0u);
@@ -273,12 +324,13 @@ TEST_F(sdk_core_test, get_version_caches_result_calling_backend_exactly_once)
 {
     using sut = sdk_core<tagged_backend<version_caching>>;
 
-    EXPECT_CALL(*g_mock, get_version)
+    EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* maj, std::uint32_t* min, std::uint32_t* pat) {
             *maj = 2;
             *min = 0;
             *pat = 0;
+            return 0;
         });
 
     auto& ver1 = sut::get_version();
@@ -294,40 +346,45 @@ TEST_F(sdk_core_test, get_version_caches_result_calling_backend_exactly_once)
 //
 // tagged_backend<60> has an empty map — no kind was ever injected — so all
 // get_operations / get_backtrace_operations calls must throw std::runtime_error.
+// These never reach a Wrapper call (the "no options registered" check throws
+// first), so no g_mock_wrapper setup is needed.
 
 using throw_sut = sdk_core<tagged_backend<ops_throw>>;
 
 TEST(sdk_core_throw, get_operations_callback_throws_when_kind_not_registered)
 {
-    EXPECT_THROW(throw_sut::get_operations(ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API),
+    EXPECT_THROW(throw_sut::get_operations(
+                     tagged_backend<ops_throw>::CALLBACK_TRACING_HIP_RUNTIME_API),
                  std::runtime_error);
 }
 
 TEST(sdk_core_throw, get_operations_buffer_throws_when_kind_not_registered)
 {
-    EXPECT_THROW(throw_sut::get_operations(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH),
+    EXPECT_THROW(throw_sut::get_operations(
+                     tagged_backend<ops_throw>::BUFFER_TRACING_KERNEL_DISPATCH),
                  std::runtime_error);
 }
 
 TEST(sdk_core_throw, get_backtrace_callback_throws_when_kind_not_registered)
 {
-    EXPECT_THROW(
-        throw_sut::get_backtrace_operations(ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API),
-        std::runtime_error);
+    EXPECT_THROW(throw_sut::get_backtrace_operations(
+                     tagged_backend<ops_throw>::CALLBACK_TRACING_HIP_RUNTIME_API),
+                 std::runtime_error);
 }
 
 TEST(sdk_core_throw, get_backtrace_buffer_throws_when_kind_not_registered)
 {
-    EXPECT_THROW(
-        throw_sut::get_backtrace_operations(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH),
-        std::runtime_error);
+    EXPECT_THROW(throw_sut::get_backtrace_operations(
+                     tagged_backend<ops_throw>::BUFFER_TRACING_KERNEL_DISPATCH),
+                 std::runtime_error);
 }
 
 TEST(sdk_core_throw, get_operations_error_message_contains_kind_value)
 {
     try
     {
-        throw_sut::get_operations(ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API);
+        throw_sut::get_operations(
+            tagged_backend<ops_throw>::CALLBACK_TRACING_HIP_RUNTIME_API);
         FAIL() << "Expected std::runtime_error";
     } catch(const std::runtime_error& ex)
     {
@@ -337,20 +394,28 @@ TEST(sdk_core_throw, get_operations_error_message_contains_kind_value)
 
 // ─── config_settings ──────────────────────────────────────────────────────────
 //
-// config_settings() never calls Externals::get_*() or Wrapper::get_version(), only
-// Wrapper::get_{buffer,callback}_tracing_names() (the real, compile-time SDK name
-// tables — no ROCm runtime required). Each test uses
-// its own Tag: _option_names inside config_settings() is a function-local static
-// scoped per (Wrapper, Externals) instantiation, so a shared Tag across tests would
-// make the 2nd/3rd test silently skip already-registered operation-filter settings.
+// config_settings() always queries Wrapper::get_{buffer,callback}_tracing_names()
+// exactly once per call (regardless of domain), so every test below sets up
+// exactly matching EXPECT_CALLs. Each test uses its own Tag: _option_names inside
+// config_settings() is a function-local static scoped per (Wrapper, Externals)
+// instantiation, so a shared Tag across tests would make the 2nd/3rd test
+// silently skip already-registered operation-filter settings.
 //
 // mock_sdk_externals is reused purely to supply Externals::Settings = fake_settings;
 // none of its other methods are ever called by config_settings(), so g_mock_externals
 // is never set up here.
 
-TEST(sdk_core_config_settings, registers_rocm_domains_setting_with_expected_choices)
+TEST_F(sdk_core_config_settings_test,
+       registers_rocm_domains_setting_with_expected_choices)
 {
     using sut = sdk_core<tagged_backend<config_domains>, mock_sdk_externals>;
+
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
 
     auto config = std::make_shared<fake_settings>();
     sut::config_settings(config);
@@ -368,9 +433,16 @@ TEST(sdk_core_config_settings, registers_rocm_domains_setting_with_expected_choi
               "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory");
 }
 
-TEST(sdk_core_config_settings, registers_rocm_events_setting)
+TEST_F(sdk_core_config_settings_test, registers_rocm_events_setting)
 {
     using sut = sdk_core<tagged_backend<config_events>, mock_sdk_externals>;
+
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
 
     auto config = std::make_shared<fake_settings>();
     sut::config_settings(config);
@@ -380,9 +452,17 @@ TEST(sdk_core_config_settings, registers_rocm_events_setting)
     EXPECT_EQ(itr->second->get<std::string>().second, std::string{});
 }
 
-TEST(sdk_core_config_settings, registers_operation_filter_settings_for_marker_api_domain)
+TEST_F(sdk_core_config_settings_test,
+       registers_operation_filter_settings_for_marker_api_domain)
 {
     using sut = sdk_core<tagged_backend<config_operations>, mock_sdk_externals>;
+
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
 
     auto config = std::make_shared<fake_settings>();
     sut::config_settings(config);
@@ -398,14 +478,21 @@ TEST(sdk_core_config_settings, registers_operation_filter_settings_for_marker_ap
     }
 }
 
-TEST(sdk_core_config_settings,
-     calling_twice_on_same_config_logs_duplicate_and_keeps_value)
+TEST_F(sdk_core_config_settings_test,
+       calling_twice_on_same_config_logs_duplicate_and_keeps_value)
 {
     // insert_config_setting()'s "already registered" branch only fires when the
     // *same config object* already has that env var — calling config_settings()
     // twice on one fake_settings triggers it for ROCM_DOMAINS/ROCM_EVENTS (which,
     // unlike the per-domain operation settings, aren't guarded by _option_names).
     using sut = sdk_core<tagged_backend<config_duplicate>, mock_sdk_externals>;
+
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(2)
+        .WillRepeatedly(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(2)
+        .WillRepeatedly(gtest::Return(make_callback_name_info()));
 
     auto config = std::make_shared<fake_settings>();
     sut::config_settings(config);
@@ -418,21 +505,33 @@ TEST(sdk_core_config_settings,
 }
 
 // ─── get_callback_domains ─────────────────────────────────────────────────────
+//
+// Every test below calls config_settings() then get_callback_domains(), each of
+// which independently calls Wrapper::get_callback_tracing_names() once (2 total);
+// get_buffer_tracing_names() is only called by config_settings() (1 total).
 
 TEST_F(sdk_core_domains_test, get_callback_domains_aliases_expand_to_exact_domains)
 {
     using backend_t = tagged_backend<callback_domains_aliases>;
     using sut       = sdk_core<backend_t, mock_sdk_externals>;
 
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(2)
+        .WillRepeatedly(gtest::Return(make_callback_name_info()));
+
     auto config = std::make_shared<fake_settings>();
     sut::config_settings(config);
 
-    EXPECT_CALL(*g_mock, get_version)
+    EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
             *major = 1;
             *minor = 2;
             *patch = 2;
+            return 0;
         });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
@@ -460,15 +559,23 @@ TEST_F(sdk_core_domains_test,
     using backend_t = tagged_backend<callback_domains_generic_lookup>;
     using sut       = sdk_core<backend_t, mock_sdk_externals>;
 
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(2)
+        .WillRepeatedly(gtest::Return(make_callback_name_info()));
+
     auto config = std::make_shared<fake_settings>();
     sut::config_settings(config);
 
-    EXPECT_CALL(*g_mock, get_version)
+    EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
             *major = 1;
             *minor = 2;
             *patch = 2;
+            return 0;
         });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
@@ -489,15 +596,23 @@ TEST_F(sdk_core_domains_test,
     using backend_t = tagged_backend<callback_domains_implicit_flags>;
     using sut       = sdk_core<backend_t, mock_sdk_externals>;
 
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(2)
+        .WillRepeatedly(gtest::Return(make_callback_name_info()));
+
     auto config = std::make_shared<fake_settings>();
     sut::config_settings(config);
 
-    EXPECT_CALL(*g_mock, get_version)
+    EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
             *major = 1;
             *minor = 2;
             *patch = 2;
+            return 0;
         });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
@@ -518,15 +633,23 @@ TEST_F(sdk_core_domains_test, get_callback_domains_invalid_domain)
     using backend_t = tagged_backend<callback_domains_invalid>;
     using sut       = sdk_core<backend_t, mock_sdk_externals>;
 
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(2)
+        .WillRepeatedly(gtest::Return(make_callback_name_info()));
+
     auto config = std::make_shared<fake_settings>();
     sut::config_settings(config);
 
-    EXPECT_CALL(*g_mock, get_version)
+    EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
             *major = 1;
             *minor = 2;
             *patch = 2;
+            return 0;
         });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
@@ -554,15 +677,23 @@ TEST_F(sdk_core_domains_test,
     using backend_t = tagged_backend<callback_domains_version_gating>;
     using sut       = sdk_core<backend_t, mock_sdk_externals>;
 
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(2)
+        .WillRepeatedly(gtest::Return(make_callback_name_info()));
+
     auto config = std::make_shared<fake_settings>();
     sut::config_settings(config);
 
-    EXPECT_CALL(*g_mock, get_version)
+    EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
             *major = 0;
             *minor = 5;
             *patch = 99;
+            return 0;
         });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
@@ -577,21 +708,33 @@ TEST_F(sdk_core_domains_test,
 }
 
 // ─── get_buffered_domains ─────────────────────────────────────────────────────
+//
+// Every test below calls config_settings() then get_buffered_domains(), each of
+// which independently calls Wrapper::get_buffer_tracing_names() once (2 total);
+// get_callback_tracing_names() is only called by config_settings() (1 total).
 
 TEST_F(sdk_core_domains_test, get_buffered_domains_memory_copy_returns_memory_copy)
 {
     using backend_t = tagged_backend<buffered_domains_memory_copy>;
     using sut       = sdk_core<backend_t, mock_sdk_externals>;
 
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(2)
+        .WillRepeatedly(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
+
     auto config = std::make_shared<fake_settings>();
     sut::config_settings(config);
 
-    EXPECT_CALL(*g_mock, get_version)
+    EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
             *major = 1;
             *minor = 2;
             *patch = 2;
+            return 0;
         });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
@@ -612,15 +755,23 @@ TEST_F(sdk_core_domains_test, get_buffered_domains_aliases_expand_to_exact_domai
     using backend_t = tagged_backend<buffered_domains_aliases>;
     using sut       = sdk_core<backend_t, mock_sdk_externals>;
 
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(2)
+        .WillRepeatedly(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
+
     auto config = std::make_shared<fake_settings>();
     sut::config_settings(config);
 
-    EXPECT_CALL(*g_mock, get_version)
+    EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
             *major = 1;
             *minor = 2;
             *patch = 2;
+            return 0;
         });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
@@ -648,15 +799,23 @@ TEST_F(sdk_core_domains_test, get_buffered_domains_kfd_events_returns_all_kfd_do
     using backend_t = tagged_backend<buffered_domains_kfd_events>;
     using sut       = sdk_core<backend_t, mock_sdk_externals>;
 
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(2)
+        .WillRepeatedly(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
+
     auto config = std::make_shared<fake_settings>();
     sut::config_settings(config);
 
-    EXPECT_CALL(*g_mock, get_version)
+    EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
             *major = 1;
             *minor = 2;
             *patch = 2;
+            return 0;
         });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
@@ -684,15 +843,23 @@ TEST_F(sdk_core_domains_test,
     using backend_t = tagged_backend<buffered_domains_kfd_individual>;
     using sut       = sdk_core<backend_t, mock_sdk_externals>;
 
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(2)
+        .WillRepeatedly(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
+
     auto config = std::make_shared<fake_settings>();
     sut::config_settings(config);
 
-    EXPECT_CALL(*g_mock, get_version)
+    EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
             *major = 1;
             *minor = 2;
             *patch = 2;
+            return 0;
         });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
@@ -722,15 +889,23 @@ TEST_F(sdk_core_domains_test,
     using backend_t = tagged_backend<buffered_domains_allocation>;
     using sut       = sdk_core<backend_t, mock_sdk_externals>;
 
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(2)
+        .WillRepeatedly(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
+
     auto config = std::make_shared<fake_settings>();
     sut::config_settings(config);
 
-    EXPECT_CALL(*g_mock, get_version)
+    EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
             *major = 1;
             *minor = 2;
             *patch = 2;
+            return 0;
         });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
@@ -752,15 +927,23 @@ TEST_F(sdk_core_domains_test,
     using backend_t = tagged_backend<buffered_domains_unified_memory>;
     using sut       = sdk_core<backend_t, mock_sdk_externals>;
 
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(2)
+        .WillRepeatedly(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
+
     auto config = std::make_shared<fake_settings>();
     sut::config_settings(config);
 
-    EXPECT_CALL(*g_mock, get_version)
+    EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
             *major = 1;
             *minor = 2;
             *patch = 2;
+            return 0;
         });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
@@ -783,15 +966,23 @@ TEST_F(sdk_core_domains_test,
     using backend_t = tagged_backend<buffered_domains_generic_lookup>;
     using sut       = sdk_core<backend_t, mock_sdk_externals>;
 
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(2)
+        .WillRepeatedly(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
+
     auto config = std::make_shared<fake_settings>();
     sut::config_settings(config);
 
-    EXPECT_CALL(*g_mock, get_version)
+    EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
             *major = 1;
             *minor = 2;
             *patch = 2;
+            return 0;
         });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
@@ -812,15 +1003,23 @@ TEST_F(sdk_core_domains_test, get_buffered_domains_invalid_domain_throws)
     using backend_t = tagged_backend<buffered_domains_invalid>;
     using sut       = sdk_core<backend_t, mock_sdk_externals>;
 
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(2)
+        .WillRepeatedly(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
+
     auto config = std::make_shared<fake_settings>();
     sut::config_settings(config);
 
-    EXPECT_CALL(*g_mock, get_version)
+    EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
             *major = 1;
             *minor = 2;
             *patch = 2;
+            return 0;
         });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
@@ -843,7 +1042,15 @@ TEST_F(sdk_core_domains_test, get_buffered_domains_invalid_domain_throws)
 TEST_F(sdk_core_domains_test,
        get_buffered_domains_legacy_page_migration_returns_page_migration)
 {
-    using sut = sdk_core<legacy_page_migration_backend, mock_sdk_externals>;
+    using sut =
+        sdk_core<tagged_backend<buffered_domains_page_migration>, mock_sdk_externals>;
+
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(2)
+        .WillRepeatedly(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
 
     auto config = std::make_shared<fake_settings>();
     sut::config_settings(config);
@@ -857,7 +1064,8 @@ TEST_F(sdk_core_domains_test,
 
     EXPECT_THAT(sut::get_buffered_domains(),
                 gtest::UnorderedElementsAre(
-                    legacy_page_migration_backend::BUFFER_TRACING_PAGE_MIGRATION));
+                    tagged_backend<
+                        buffered_domains_page_migration>::BUFFER_TRACING_PAGE_MIGRATION));
 }
 
 // ─── get_operations ───────────────────────────────────────────────────────────
@@ -867,6 +1075,13 @@ TEST_F(sdk_core_domains_test,
 {
     using backend_t = tagged_backend<callback_operations>;
     using sut       = sdk_core<backend_t, mock_sdk_externals>;
+
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(2)
+        .WillRepeatedly(gtest::Return(make_callback_name_info()));
 
     auto config = std::make_shared<fake_settings>();
     sut::config_settings(config);
@@ -894,6 +1109,18 @@ TEST_F(sdk_core_domains_test,
     using backend_t = tagged_backend<buffered_operations>;
     using sut       = sdk_core<backend_t, mock_sdk_externals>;
 
+    // Memory-copy operation ids: match the order populated by make_buffer_name_info()
+    // ("HOST_TO_DEVICE"=0, "DEVICE_TO_HOST"=1, "DEVICE_TO_DEVICE"=2).
+    constexpr std::int32_t k_memory_copy_host_to_device = 0;
+    constexpr std::int32_t k_memory_copy_device_to_host = 1;
+
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(2)
+        .WillRepeatedly(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
+
     auto config = std::make_shared<fake_settings>();
     sut::config_settings(config);
 
@@ -907,10 +1134,9 @@ TEST_F(sdk_core_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(std::string{ "DEVICE_TO_DEVICE" }));
 
-    EXPECT_THAT(sut::get_operations(backend_t::BUFFER_TRACING_MEMORY_COPY),
-                gtest::ElementsAre(
-                    static_cast<std::int32_t>(ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE),
-                    static_cast<std::int32_t>(ROCPROFILER_MEMORY_COPY_DEVICE_TO_HOST)));
+    EXPECT_THAT(
+        sut::get_operations(backend_t::BUFFER_TRACING_MEMORY_COPY),
+        gtest::ElementsAre(k_memory_copy_host_to_device, k_memory_copy_device_to_host));
 }
 
 // ─── get_backtrace_operations ─────────────────────────────────────────────────
@@ -920,6 +1146,13 @@ TEST_F(sdk_core_domains_test,
 {
     using backend_t = tagged_backend<callback_backtrace_operations>;
     using sut       = sdk_core<backend_t, mock_sdk_externals>;
+
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(2)
+        .WillRepeatedly(gtest::Return(make_callback_name_info()));
 
     auto config = std::make_shared<fake_settings>();
     sut::config_settings(config);
@@ -943,6 +1176,18 @@ TEST_F(sdk_core_domains_test,
     using backend_t = tagged_backend<buffered_backtrace_operations>;
     using sut       = sdk_core<backend_t, mock_sdk_externals>;
 
+    // Memory-copy operation ids: match the order populated by make_buffer_name_info()
+    // ("HOST_TO_DEVICE"=0, "DEVICE_TO_HOST"=1, "DEVICE_TO_DEVICE"=2).
+    constexpr std::int32_t k_memory_copy_host_to_device = 0;
+    constexpr std::int32_t k_memory_copy_device_to_host = 1;
+
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(2)
+        .WillRepeatedly(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
+
     auto config = std::make_shared<fake_settings>();
     sut::config_settings(config);
 
@@ -953,9 +1198,8 @@ TEST_F(sdk_core_domains_test,
         .WillOnce(gtest::Return(std::string{ "HOST_TO_DEVICE|DEVICE_TO_HOST" }));
 
     EXPECT_THAT(sut::get_backtrace_operations(backend_t::BUFFER_TRACING_MEMORY_COPY),
-                gtest::UnorderedElementsAre(
-                    static_cast<std::int32_t>(ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE),
-                    static_cast<std::int32_t>(ROCPROFILER_MEMORY_COPY_DEVICE_TO_HOST)));
+                gtest::UnorderedElementsAre(k_memory_copy_host_to_device,
+                                            k_memory_copy_device_to_host));
 }
 
 // ─── get_rocm_events ──────────────────────────────────────────────────────────

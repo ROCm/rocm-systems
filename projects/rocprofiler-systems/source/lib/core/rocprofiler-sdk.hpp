@@ -743,17 +743,18 @@ sdk_core<Wrapper, Externals>::get_buffered_domains()
         supported.emplace(Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS);
     }
 
-    // rocprofiler-sdk < 1.2.2 has a fatal bug parsing KFD events with
-    // undefined node IDs (0xFFFFFFFF). Guard at compile time via compile_time_version
-    // (= ROCPROFILER_VERSION for production, mock-defined for tests) so the mock can
-    // enable KFD paths without fighting the function-local-static version cache.
+    // rocprofiler-sdk < 1.2.2 has a fatal bug parsing KFD events with undefined
+    // node IDs (0xFFFFFFFF). The compile-time gate above only confirms the SDK
+    // headers declare the KFD enums; the loaded runtime library must be checked
+    // separately since it can be older than the headers this binary was built
+    // against.
     version_info kfd_version{};
     bool         kfd_supported_by_runtime = false;
     if constexpr(Wrapper::compile_time_version >= 10000)
     {
         constexpr std::uint32_t kfd_min_version = 10202;  // 1.2.2
         kfd_version                             = get_version();
-        kfd_supported_by_runtime = (Wrapper::compile_time_version >= kfd_min_version);
+        kfd_supported_by_runtime = (kfd_version.formatted() >= kfd_min_version);
     }
 
     auto data    = std::unordered_set<kind_t>{};
