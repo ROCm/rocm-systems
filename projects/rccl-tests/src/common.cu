@@ -2125,7 +2125,10 @@ testResult_t run() {
 #ifdef MPI_SUPPORT
   MPI_Allreduce(MPI_IN_PLACE, &minCudaArch, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
 #endif
-#if defined(RCCL_FLOAT8)
+#if defined(RCCL_FLOAT8) && !defined(__HIP_PLATFORM_AMD__)
+  // The minCudaArch<900 gate is CUDA-specific (pre-Hopper). On AMD/ROCm the
+  // HIP compute-capability mapping does not correspond to NVIDIA's, so this
+  // filter can wrongly strip fp8 on gfx942/gfx950 which do support it.
   if (NCCL_VERSION_CODE >= NCCL_VERSION(2,24,0) && test_ncclVersion >= NCCL_VERSION(2,24,0)) {
     if (minCudaArch < 900) { // Filter out fp8 on pre-Hopper hardware
       int n = 0;

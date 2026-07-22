@@ -571,7 +571,10 @@ testResult_t AllReduceRunTest(struct threadArgs* args, int root, ncclDataType_t 
   for (int i=0; i<type_count; i++) {
     for (int j=0; j<op_count; j++) {
 #if defined(RCCL_FLOAT8)
-  if((run_types[i] == ncclFloat8e4m3 || run_types[i] == ncclFloat8e5m2) && (run_ops[j] == ncclProd || run_ops[j] == ncclAvg || strcmp(run_opnames[j],"mulsum") == 0))
+  // fp8 prod/avg/mulsum are skipped upstream because verification overflows
+  // easily. Keep the skip only when verification is enabled; allow perf-only
+  // runs (-c 0) so the fp8 reduction kernels can be benchmarked.
+  if (datacheck && (run_types[i] == ncclFloat8e4m3 || run_types[i] == ncclFloat8e5m2) && (run_ops[j] == ncclProd || run_ops[j] == ncclAvg || strcmp(run_opnames[j],"mulsum") == 0))
     continue;
 #endif
       TESTCHECK(TimeTest(args, run_types[i], run_typenames[i], run_ops[j], run_opnames[j], -1));

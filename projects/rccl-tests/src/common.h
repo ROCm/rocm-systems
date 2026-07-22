@@ -409,6 +409,7 @@ static int ncclstringtomtype (char *str) {
 }
 
 extern int is_main_proc;
+extern int datacheck;
 extern thread_local int is_main_thread;
 
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
