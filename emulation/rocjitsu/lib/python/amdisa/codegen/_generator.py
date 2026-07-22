@@ -36,6 +36,11 @@ from amdisa.gpuisa import (
     Operand,
     OperandNamePattern,
 )
+from amdisa.fieldless_policy import (
+    FieldlessCategory,
+    fieldless_policy,
+    operand_participates,
+)
 from amdisa.semantics import InstructionSemantics, SemanticsSpec
 
 from amdisa.codegen.config import CodegenConfig
@@ -178,6 +183,14 @@ class CodeGenerator:
         config: Code generation configuration (namespace, include paths).
     """
 
+    # Capacities of the fixed-size operand arrays declared in the hand-written
+    # instruction.h (``std::array<Operand *, N> src_operands_ / dst_operands_``).
+    # Mirrored here to bound the generation-time overflow tripwire. KEEP IN SYNC
+    # with instruction.h: if you resize either std::array, update these too (and
+    # vice versa).
+    _SRC_OPERANDS_CAPACITY = 6
+    _DST_OPERANDS_CAPACITY = 3
+
     def __init__(
         self,
         isa_spec: IsaSpec,
@@ -193,6 +206,10 @@ class CodeGenerator:
         self.shared_plan = shared_plan
         # Keyed by (mnemonic, enc_name) to avoid cross-encoding conflicts.
         self._shared_execute_bodies: dict[tuple[str, str], tuple] = {}
+        # Canonical fixed encoding value per fieldless operand type, computed
+        # lazily from the spec's selectors on first use (see
+        # _fieldless_canonical_value).
+        self._fieldless_canon_cache: dict[str, int] | None = None
         self._emitter = _SemanticEmitter(isa_spec, semantics)
 
     def _supports_simm64_literal_operands(self) -> bool:
@@ -635,9 +652,9 @@ class CodeGenerator:
         return _LITERAL_ENCODING_OPERANDS.get(lit_enc.enc_name.upper())
 
     @staticmethod
-    def _literal_operand_fixup_stmt(
+    def _literal_operand_from_expr_stmt(
         opnd: Operand,
-        lit_struct: str,
+        literal_expr: str,
         size_expr: str | None = None,
         inst_sem: InstructionSemantics | None = None,
         literal_operand_type: str | None = None,
@@ -653,7 +670,6 @@ class CodeGenerator:
             )
         if operand_type not in ('OPR_SIMM16', 'OPR_SIMM32'):
             return None
-        literal_expr = f'reinterpret_cast<const {lit_struct} *>(inst)->simm32'
         operand_size = size_expr or opnd.size
         if dynamic_true16_opsel_bit is not None:
             display_expr = (
@@ -694,36 +710,29 @@ class CodeGenerator:
         return False
 
     @staticmethod
+    def _literal_operand_fixup_stmt(
+        opnd: Operand,
+        lit_struct: str,
+        size_expr: str | None = None,
+        inst_sem: InstructionSemantics | None = None,
+        literal_operand_type: str | None = None,
+        dynamic_true16_opsel_bit: int | None = None,
+    ) -> str | None:
+        literal_expr = f'reinterpret_cast<const {lit_struct} *>(inst)->simm32'
+        return CodeGenerator._literal_operand_from_expr_stmt(
+            opnd,
+            literal_expr,
+            size_expr,
+            inst_sem,
+            literal_operand_type,
+            dynamic_true16_opsel_bit,
+        )
+
+    @staticmethod
     def _has_inline_literal_operand(inst: Instruction) -> bool:
         return any(
             opnd.name == 'literal' and opnd.operand_type in ('OPR_SIMM16', 'OPR_SIMM32')
             for opnd in inst.operands
-        )
-
-    @staticmethod
-    def _with_scalar_literal_fma_operand(inst: Instruction) -> Instruction:
-        if inst.name not in ('S_FMAAK_F32', 'S_FMAMK_F32') or any(
-            op.name == 'src2' for op in inst.operands
-        ):
-            return inst
-        return Instruction(
-            inst.name,
-            inst.enc_name,
-            inst.opcode,
-            [
-                *inst.operands,
-                Operand(
-                    'src2',
-                    32,
-                    'OPR_SIMM32',
-                    is_input=True,
-                    is_output=False,
-                    is_implicit=False,
-                    is_binary_ucode_required=True,
-                    order=len(inst.operands),
-                ),
-            ],
-            inst.is_implied_literal_enc,
         )
 
     @staticmethod
@@ -734,7 +743,9 @@ class CodeGenerator:
             return src_operands
 
         by_name = {op.name: op for op in src_operands}
-        mul_literal = by_name.get('literal') or by_name.get('src2')
+        # The multiplicand literal is the fieldless simm32 (or the field-bearing
+        # `literal` on ISAs that name it so).
+        mul_literal = by_name.get('simm32') or by_name.get('literal')
         ssrc0 = by_name.get('ssrc0')
         ssrc1 = by_name.get('ssrc1')
         if ssrc0 is None or ssrc1 is None or mul_literal is None:
@@ -744,6 +755,41 @@ class CodeGenerator:
         ordered_names = {op.name for op in ordered}
         ordered.extend(op for op in src_operands if op.name not in ordered_names)
         return ordered
+
+    @classmethod
+    def _execute_operand_participates(cls, opnd: Operand) -> bool:
+        """Whether codegen should expose this operand to execute templates.
+
+        Field-bearing operands always participate. A fieldless operand
+        participates only if it reads a real value (its policy ``reads_value``
+        capability), which today is just the literal ``OPR_SIMM32``. Most
+        fieldless operands are hardwired side effects still handled by the
+        semantic emitters (VCC/EXEC/SCC/M0/PC) and stay out of the positional
+        execute lists. Shares one predicate with ``_operand_signature`` (via
+        ``operand_participates``) so the execute-visible set and the sharing
+        signature cannot drift apart.
+        """
+        return operand_participates(opnd.fieldless, opnd.operand_type)
+
+    @staticmethod
+    def _fieldless_caps_stmt(opnd_name: str, operand_type: str) -> str:
+        """C++ statement marking a fieldless operand and applying its caps.
+
+        Emitted for every fieldless operand in place of a bare fieldless
+        marker: it marks the operand fieldless (structural) AND applies its
+        runtime capability policy (readable / writable / vgpr) from the shared
+        fieldless operand policy table, so the normal accessors query stored
+        flags instead of re-checking ``fieldless_`` plus operand type.
+        """
+        caps = fieldless_policy(operand_type).caps
+
+        def _b(v: bool) -> str:
+            return 'true' if v else 'false'
+
+        return (
+            f'{opnd_name}.apply_fieldless_caps('
+            f'{_b(caps.reads_value)}, {_b(caps.writable)}, {_b(caps.is_vgpr)});'
+        )
 
     def _has_machine_inst_struct(self, struct_name: str) -> bool:
         return struct_name in {
@@ -3377,8 +3423,16 @@ class CodeGenerator:
     def _execute_operand_roles(
         self, inst: Instruction, sem: InstructionSemantics
     ) -> tuple[list[Operand], list[Operand]]:
-        dst_operands = [op for op in inst.operands if not op.is_input]
-        src_operands = [op for op in inst.operands if op.is_input]
+        # TODO: Incorporate fieldless operand side effects into execute bodies.
+        # Execute bodies reference operands positionally (src_ops[i]/dst_ops[i]).
+        # Fieldless side-effect operands (VCC/EXEC/SCC/...) are excluded here
+        # so these indices match the field-bearing operand set exactly as
+        # before. Fieldless OPR_SIMM32 is value-bearing, so it stays visible.
+        visible_operands = [
+            op for op in inst.operands if self._execute_operand_participates(op)
+        ]
+        dst_operands = [op for op in visible_operands if not op.is_input]
+        src_operands = [op for op in visible_operands if op.is_input]
         # Some instructions mark their destination as input (read-modify-write,
         # e.g. S_BITSET0, S_CMOV, V_FMAC, V_SWAP). Recover the destination
         # from src_ops when it looks like one.
@@ -4231,7 +4285,19 @@ class CodeGenerator:
             L.append(
                 '  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);'
             )
-            L.append('  uint32_t src = literal_;')
+            # S_SETREG_IMM32_B32's source is the extension literal. When it is
+            # modeled as a fieldless simm32 operand it appears in src_ops and is
+            # read through the observed RegisterAccess facade; when an ISA carries
+            # it only in the encoding base's literal_ member (no operand emitted),
+            # fall back to that member. Unlike FMAMK/FMAAK, this fallback is
+            # retained because the missing operand here is a legitimate,
+            # ISA-specific encoding shape rather than a spec omission.
+            src_expr = (
+                f'amdgpu::RegisterAccess(wf).read_scalar({src_ops[0]})'
+                if src_ops
+                else 'literal_'
+            )
+            L.append(f'  uint32_t src = {src_expr};')
             if profile.use_hwreg_helpers:
                 L.append('  if (!write_hwreg(wf, reg_id, offset, mask, src))')
                 L.append(
@@ -4299,10 +4365,12 @@ class CodeGenerator:
 
         if cls == 'vector_fmamk':
             # D = S0 * K + S2, K is inline constant (second src operand)
-            # Some ISA specs omit the simm32 operand; fall back to the
-            # simm32_ member populated in the constructor.
-            k_expr = f'{src_ops[1]}.encoding_value_' if len(src_ops) >= 3 else 'simm32_'
-            s2_expr = src_ops[2] if len(src_ops) >= 3 else src_ops[1]
+            if len(src_ops) < 3:
+                raise ValueError(
+                    f'{inst.name}: expected fieldless simm32 operand for {cls}'
+                )
+            k_expr = f'{src_ops[1]}.encoding_value_'
+            s2_expr = src_ops[2]
             L.append('  uint64_t exec = wf.exec();')
             L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
             L.append('    if (!(exec & (1ULL << lane))) continue;')
@@ -4335,9 +4403,11 @@ class CodeGenerator:
 
         if cls == 'vector_fmaak':
             # D = S0 * S1 + K, K is inline constant (third src operand)
-            # Some ISA specs omit the simm32 operand; fall back to the
-            # simm32_ member populated in the constructor.
-            k_expr = f'{src_ops[2]}.encoding_value_' if len(src_ops) >= 3 else 'simm32_'
+            if len(src_ops) < 3:
+                raise ValueError(
+                    f'{inst.name}: expected fieldless simm32 operand for {cls}'
+                )
+            k_expr = f'{src_ops[2]}.encoding_value_'
             L.append('  uint64_t exec = wf.exec();')
             L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
             L.append('    if (!(exec & (1ULL << lane))) continue;')
@@ -4656,6 +4726,13 @@ class CodeGenerator:
             return '\n'.join(L)
 
         # ── Image pipeline stubs ──────────────────────────────────────────
+        # NOTE for image execution: the image ADDRESS is carried as the
+        # fieldless ``vaddr`` operand (OPR_VGPR), currently emitted as an
+        # inert placeholder. The real gfx12 address is NSA -- up to
+        # 5 non-contiguous VGPRs (vaddr0..vaddr4 in the encoding) that a
+        # single base+width Operand cannot express -- so decode it from the
+        # machine-inst fields here. ``vdata`` and ``rsrc`` are field-bearing
+        # and already modeled.
         if cls == 'image_load':
             # Minimal image load: treat as a flat read from the image resource base address.
             # Full image addressing (texture coordinates, dimensions) not yet implemented.
@@ -6096,7 +6173,7 @@ class CodeGenerator:
             # HWREG IDs and helper mappings are profile-specific.
             'scalar_getreg',
             'scalar_setreg',
-            # S_SETREG_IMM32_B32 reads the instruction-local literal_ member.
+            # S_SETREG_IMM32_B32 shares the profile-specific HWREG handling.
             'scalar_setreg_imm',
             # MFMA/WMMA reference ISA-specific headers:
             'mfma',
@@ -6125,14 +6202,6 @@ class CodeGenerator:
             'cvt_scalef32',
             # vector_cvt_pk FP8 pack/unpack uses inst_.op_sel for word sel:
             'vector_cvt_pk',
-        }
-    )
-    _NON_SHAREABLE_MNEMONICS = frozenset(
-        {
-            # FMAAK/FMAMK carry a literal addend/multiplicand through
-            # ISA-specific constructor operands.
-            's_fmaak_f32',
-            's_fmamk_f32',
         }
     )
 
@@ -6246,8 +6315,6 @@ class CodeGenerator:
             return False
         if self._shared_execute_key_denied(mnemonic, inst, enc_name):
             return False
-        if mnemonic in self._NON_SHAREABLE_MNEMONICS:
-            return False
         arch = self.isa_spec.arch_name
         # Check universal
         if mnemonic in self.shared_plan.universal:
@@ -6257,11 +6324,14 @@ class CodeGenerator:
             return arch in info.isa_names and len(info.isa_names) >= 2
         # Check family_shared — keyed by (mnemonic, encoding_name) tuples.
         # A mnemonic may appear in multiple families and with different
-        # encodings. Search all families for any entry matching this mnemonic
-        # that includes the current ISA.
+        # encodings. Match the full (mnemonic, encoding) key when the caller
+        # specifies an encoding. When enc_name is None the caller does not
+        # constrain the encoding, so any entry for the mnemonic is considered.
         for fam_insts in self.shared_plan.family_shared.values():
-            for (mn, enc_name), info in fam_insts.items():
+            for (mn, entry_enc), info in fam_insts.items():
                 if mn != mnemonic:
+                    continue
+                if enc_name is not None and entry_enc != enc_name:
                     continue
                 if info.semantic_class in self._NON_SHAREABLE_CLASSES:
                     return False
@@ -6362,6 +6432,36 @@ class CodeGenerator:
             expr = f'static_cast<unsigned short>({expr})'
         return expr
 
+    def _fieldless_canonical_value(self, operand_type: str) -> int:
+        """Canonical fixed encoding value for a fieldless operand type.
+
+        Fieldless operands have no encoding field to decode, so they are built
+        from a fixed value. That value is the minimum selector value for the
+        type (single-valued selectors -> that value; EXEC LO/HI -> LO; register
+        ranges -> MIN), which is exactly what the generated ``name()`` /
+        ``to_register_ref()`` switch cases gate on (e.g. OPR_PC -> OPR_PC_PC_ALL,
+        OPR_VCC -> OPR_VCC_VCC, OPR_SDST_EXEC -> OPR_SDST_EXEC_EXEC_LO). Computed
+        from the ISA's own selectors rather than a hand-maintained table; falls
+        back to 0 for types without a selector.
+        """
+        cache = self._fieldless_canon_cache
+        if cache is None:
+            cache = {}
+            for sel in self.isa_spec.opnd_selectors:
+                # Selector values are strings; accept decimal and 0x/0o/0b
+                # forms, and skip any non-numeric (symbolic) value rather than
+                # crashing the whole generator on an unexpected spelling.
+                vals = []
+                for _, v in sel.op_sel_vals:
+                    try:
+                        vals.append(int(v, 0))
+                    except (TypeError, ValueError):
+                        continue
+                if vals:
+                    cache[sel.operand_type] = min(vals)
+            self._fieldless_canon_cache = cache
+        return cache.get(operand_type, 0)
+
     def gen_insts(self) -> None:
         """Generate instruction classes deriving from encoding classes.
 
@@ -6409,7 +6509,6 @@ class CodeGenerator:
                         if self.semantics
                         else None
                     )
-                    inst = self._with_scalar_literal_fma_operand(inst)
                     # Resolve the instruction's own encoding field names.
                     # Instructions from alternate sub-encodings (e.g.,
                     # VOP3_SDST_ENC under ENC_VOP3) carry their original
@@ -6592,7 +6691,10 @@ class CodeGenerator:
                                 f'dst_operands_[{dst_idx}] = &{opnd.name};'
                             )
                             dst_idx += 1
-                        if self.isa_spec.profile.uses_vgpr_msb_indexing:
+                        if (
+                            self.isa_spec.profile.uses_vgpr_msb_indexing
+                            and not opnd.fieldless
+                        ):
                             _role = None
                             if self._operand_can_use_vgpr_msb(opnd):
                                 _role = self._fixed_vgpr_msb_role(
@@ -6671,6 +6773,19 @@ class CodeGenerator:
                                         'vdata_return.set_vgpr_msb_role('
                                         'amdgpu::VgprMsbRole::Dst);'
                                     )
+                        elif opnd.fieldless:
+                            # Fieldless operand: no encoding field to decode, so
+                            # construct it from its canonical fixed value. Its
+                            # fieldless marker + capability policy are applied
+                            # once, after any ctor-body reassignment, by the
+                            # apply_fieldless_caps() pass below.
+                            canonical = self._fieldless_canonical_value(
+                                opnd.operand_type
+                            )
+                            opnd_ctor_init.append(
+                                f'{opnd.name}({opnd_size_expr}, '
+                                f'OperandType::{opnd.operand_type}, {canonical})'
+                            )
                         else:
                             opnd_ctor_init.append(
                                 f'{opnd.name}({opnd.size}, '
@@ -6714,11 +6829,17 @@ class CodeGenerator:
                     # implicit uses. Runtime-sized outputs are never sub-dword,
                     # so a static size check suffices. Immediate/label outputs
                     # (e.g. the S_SETREG hwreg selector) never name a register,
-                    # so skip them to avoid dead overrides.
+                    # so skip them to avoid dead overrides. Fieldless outputs
+                    # (e.g. the 1-bit SCC def on OPR_SSRC_SPECIAL_SCC) are inert
+                    # side effects, not partial register writes: their
+                    # to_register_ref() is always nullopt, so including them here
+                    # would emit a dead override AND classify a def as a use.
+                    # Their def/use is owned by the fieldless capability policy.
                     _partial_def_outputs = [
                         o.name
                         for o in inst.operands
                         if o.is_output
+                        and not o.fieldless
                         and operand_size_exprs.get(o.name, str(o.size)) == str(o.size)
                         and 0 < o.size < 32
                         and not any(
@@ -6811,6 +6932,19 @@ class CodeGenerator:
                         }
                     )
                     ctor_body_parts = list(opnd_body)
+                    # Guard fieldless def/use operands (pushed positionally) from
+                    # silently writing past the fixed-size operand arrays. The
+                    # capacities mirror instruction.h (see the class constants).
+                    assert src_idx <= self._SRC_OPERANDS_CAPACITY, (
+                        f'{inst.name}: {src_idx} src operands exceed '
+                        f'src_operands_ capacity {self._SRC_OPERANDS_CAPACITY}; '
+                        f'grow the std::array in instruction.h.'
+                    )
+                    assert dst_idx <= self._DST_OPERANDS_CAPACITY, (
+                        f'{inst.name}: {dst_idx} dst operands exceed '
+                        f'dst_operands_ capacity {self._DST_OPERANDS_CAPACITY}; '
+                        f'grow the std::array in instruction.h.'
+                    )
                     ctor_body_parts.append(f'num_src_ = {src_idx};')
                     ctor_body_parts.append(f'num_dst_ = {dst_idx};')
                     ctor_body_parts.extend(conditional_src_body)
@@ -6858,6 +6992,10 @@ class CodeGenerator:
                     # replace the operand with the 32-bit literal from the
                     # extended instruction encoding. A selector value of 254
                     # carries a 64-bit literal in the next two DWORDs.
+                    # Operands patched by the generic literal loop below, so the
+                    # S_SETREG_IMM32_B32 special-case stays mutually exclusive
+                    # with it (no double-patch of one operand).
+                    _generic_literal_patched: set[str] = set()
                     _lit_info = self._literal_encoding_info(enc, inst_enc_obj, inst)
                     _supports_simm64_literals = self._supports_simm64_literal_operands()
                     if _lit_info and self._has_machine_inst_struct(_lit_info[0]):
@@ -6873,6 +7011,14 @@ class CodeGenerator:
                             if _lit32_info:
                                 _lit32_struct = _lit32_info[0]
                         for opnd in inst.operands:
+                            # The only fieldless operand that needs a fixup
+                            # are LITERAL ones.
+                            if (
+                                opnd.fieldless
+                                and fieldless_policy(opnd.operand_type).role
+                                != FieldlessCategory.LITERAL
+                            ):
+                                continue
                             if (
                                 opnd.name in _lit_fields
                                 and opnd.name in enc_field_names
@@ -6898,6 +7044,7 @@ class CodeGenerator:
                                     f'if (reinterpret_cast<const OpEncoding*>(inst)->{opnd.name} == 255) '
                                     f'{fixup}'
                                 )
+                                _generic_literal_patched.add(opnd.name)
                                 if _supports_simm64_literals:
                                     ctor_body_parts.append(
                                         f'if (reinterpret_cast<const OpEncoding*>(inst)->{opnd.name} == 254) {{ '
@@ -6915,6 +7062,39 @@ class CodeGenerator:
                                 )
                                 if fixup:
                                     ctor_body_parts.append(fixup)
+                                    _generic_literal_patched.add(opnd.name)
+
+                    # SOPK's S_SETREG_IMM32_B32 carries its extension literal
+                    # through the encoding base's literal_ member instead of a
+                    # separate *InstLiteralMachineInst struct.
+                    if inst.name == 'S_SETREG_IMM32_B32':
+                        # Patch the 32-bit immediate operand from the encoding
+                        # base's literal_ member so it reads the real value
+                        # through the normal accessor (execute reads the operand,
+                        # not literal_). This must cover BOTH ways the immediate
+                        # is modeled across ISAs: rdna4 et al. emit a fieldless
+                        # `simm32`, while gfx1250 emits a field-BEARING `literal`
+                        # (OPR_SIMM32). _literal_operand_from_expr_stmt returns
+                        # None for any non-literal operand (e.g. the OPR_HWREG
+                        # selector), so it is safe to offer it every operand.
+                        # Fieldless operands still receive their capability
+                        # policy from the apply_fieldless_caps pass above; a
+                        # field-bearing literal keeps its default (readable)
+                        # caps.
+                        for opnd in inst.operands:
+                            # Mutually exclusive with the generic literal loop:
+                            # skip any operand it already patched (otherwise a
+                            # last-wins double-patch on ISAs whose SOPK carries a
+                            # literal machine-inst struct).
+                            if opnd.name in _generic_literal_patched:
+                                continue
+                            fixup = self._literal_operand_from_expr_stmt(
+                                opnd,
+                                'literal_',
+                                operand_size_exprs.get(opnd.name),
+                            )
+                            if fixup:
+                                ctor_body_parts.append(fixup)
 
                     # DPP fixup: when src0 == amdgpu::SRC_DPP (DPP marker), replace the
                     # src0 operand with vsrc0 from the DPP extension dword.
@@ -7025,32 +7205,19 @@ class CodeGenerator:
                                         + f'{_sdwa_s1_code}}}'
                                     )
 
-                    # Implied literal fixup: FMAMK/FMAAK always carry an
-                    # inline 32-bit literal even when the ISA spec omits the
-                    # simm32 operand. Add a simm32_ member to hold it.
-                    _FMAMK_FMAAK = frozenset(
-                        {
-                            'vector_fmamk',
-                            'vector_fmaak',
-                        }
-                    )
-                    _has_simm32 = any(op.name == 'simm32' for op in inst.operands)
-                    if (
-                        _mem_sem
-                        and _mem_sem.semantic_class in _FMAMK_FMAAK
-                        and not _has_simm32
-                        and not self._has_inline_literal_operand(inst)
-                        and _lit_info
-                    ):
-                        _lit_struct = _lit_info[0]
-                        private_members.append(cgen.Statement('uint32_t simm32_'))
-                        opnd_ctor_init.append('simm32_(0)')
-                        init_list_parts.append('simm32_(0)')
-                        init_list = ', '.join(init_list_parts)
-                        ctor_body_parts.append(
-                            f'simm32_ = reinterpret_cast<const '
-                            f'{_lit_struct}*>(inst)->simm32;'
-                        )
+                    # Apply the fieldless-operand capability policy once, after
+                    # every ctor-body reassignment. Fieldless operands are built
+                    # in the init list with the 3-arg Operand ctor (default
+                    # caps), and the implied-literal / S_SETREG patches reassign
+                    # a fieldless literal via operator= (which resets caps to
+                    # default). Emitting apply_fieldless_caps() here — rather than
+                    # at construction — yields exactly one, always-correct caps
+                    # call per fieldless operand regardless of any reassignment.
+                    for opnd in inst.operands:
+                        if opnd.fieldless:
+                            ctor_body_parts.append(
+                                self._fieldless_caps_stmt(opnd.name, opnd.operand_type)
+                            )
 
                     ctor_body_parts.extend(vgpr_msb_role_body)
 
@@ -7224,13 +7391,35 @@ class CodeGenerator:
                             or _has_sdwa_encoding
                         )
                         if _has_dpp_encoding:
-                            _src0_name = next(
-                                (o.name for o in inst.operands if o.is_input), None
+                            # DPP/SDWA permute the field-bearing vector sources
+                            # only. A fieldless operand (the FMAMK/MADMK inline
+                            # literal simm32, or VCC/M0/... side effects) is never
+                            # permuted, and one can occupy an interior source slot
+                            # -- FMAMK lays out src_operands_ = {src0, simm32,
+                            # vsrc1}, so vsrc1 is NOT at src_operands_[1]. The
+                            # permute path below therefore addresses the real
+                            # sources by name (src0 stays at index 0 and needs no
+                            # change), not by src_operands_[] index.
+                            _src_input_ops = [
+                                o
+                                for o in inst.operands
+                                if o.is_input and not o.fieldless
+                            ]
+                            _src0_name = (
+                                _src_input_ops[0].name if _src_input_ops else None
                             )
-                            _src_inputs = [o.name for o in inst.operands if o.is_input]
                             _src1_name = (
-                                _src_inputs[1] if len(_src_inputs) > 1 else None
+                                _src_input_ops[1].name
+                                if len(_src_input_ops) > 1
+                                else None
                             )
+                            # Tripwire: the permuted sources must be field-bearing,
+                            # so a future change to the selection above cannot
+                            # silently reintroduce reading a fieldless literal as
+                            # a VGPR base.
+                            assert all(
+                                not o.fieldless for o in _src_input_ops[:2]
+                            ), f'{inst.name}: DPP/SDWA permute source is fieldless'
                             _is_vopc = enc.enc_name.upper() == 'ENC_VOPC'
                             _is_cmpx_vopc = (
                                 _is_vopc
@@ -7400,6 +7589,33 @@ class CodeGenerator:
                                     '        dpp_src0_, wf);\n'
                                 )
                             if _has_sdwa_encoding:
+                                # src1 permute references the field-bearing second
+                                # source by name (it may not sit at
+                                # src_operands_[1]; see FMAMK/MADMK note above) and
+                                # redirects reads through its delegate, so the
+                                # src_operands_[] slot is left untouched. Emitted
+                                # only when a field-bearing src1 exists.
+                                _sdwa_src1_block = ''
+                                if _src1_name:
+                                    _sdwa_src1_block = (
+                                        '    if (sdwa_src1_sel_ != amdgpu::sdwa::DWORD && num_src_ > 1) {\n'
+                                        f'      uint32_t vb = wf.vgpr_alloc().base + {_src1_name}.encoding_value_;\n'
+                                        '      uint32_t result1[64];\n'
+                                        '      for (uint32_t i = 0; i < ws; ++i)\n'
+                                        '        result1[i] = amdgpu::sdwa::sdwa_src_select(\n'
+                                        '            amdgpu::RegisterAccess(cu).read_vgpr(vb, i), sdwa_src1_sel_, sdwa_src1_sext_);\n'
+                                        '      if (sdwa_src1_abs_ || sdwa_src1_neg_) {\n'
+                                        '        for (uint32_t i = 0; i < ws; ++i) {\n'
+                                        '          float sv = std::bit_cast<float>(result1[i]);\n'
+                                        '          if (sdwa_src1_abs_) sv = std::fabs(sv);\n'
+                                        '          if (sdwa_src1_neg_) sv = -sv;\n'
+                                        '          result1[i] = std::bit_cast<uint32_t>(sv);\n'
+                                        '        }\n'
+                                        '      }\n'
+                                        f'      dpp_src1_ = std::make_unique<DppOperand>(\n'
+                                        f'          {_src1_name}, result1, static_cast<int>(ws));\n'
+                                        '    }\n'
+                                    )
                                 _dpp_preamble += (
                                     '  if (inst_.src0 == amdgpu::SRC_SDWA) {\n'
                                     '    auto &cu = wf.cu();\n'
@@ -7421,26 +7637,7 @@ class CodeGenerator:
                                     '      dpp_src0_ = std::make_unique<DppOperand>(\n'
                                     '          *src_operands_[0], result, static_cast<int>(ws));\n'
                                     '      src_operands_[0] = dpp_src0_.get();\n'
-                                    '    }\n'
-                                    '    if (sdwa_src1_sel_ != amdgpu::sdwa::DWORD && num_src_ > 1) {\n'
-                                    '      uint32_t vb = wf.vgpr_alloc().base + src_operands_[1]->encoding_value_;\n'
-                                    '      uint32_t result1[64];\n'
-                                    '      for (uint32_t i = 0; i < ws; ++i)\n'
-                                    '        result1[i] = amdgpu::sdwa::sdwa_src_select(\n'
-                                    '            amdgpu::RegisterAccess(cu).read_vgpr(vb, i), sdwa_src1_sel_, sdwa_src1_sext_);\n'
-                                    '      if (sdwa_src1_abs_ || sdwa_src1_neg_) {\n'
-                                    '        for (uint32_t i = 0; i < ws; ++i) {\n'
-                                    '          float sv = std::bit_cast<float>(result1[i]);\n'
-                                    '          if (sdwa_src1_abs_) sv = std::fabs(sv);\n'
-                                    '          if (sdwa_src1_neg_) sv = -sv;\n'
-                                    '          result1[i] = std::bit_cast<uint32_t>(sv);\n'
-                                    '        }\n'
-                                    '      }\n'
-                                    '      dpp_src1_ = std::make_unique<DppOperand>(\n'
-                                    '          *src_operands_[1], result1, static_cast<int>(ws));\n'
-                                    '      src_operands_[1] = dpp_src1_.get();\n'
-                                    '    }\n'
-                                    '  }\n'
+                                    '    }\n' + _sdwa_src1_block + '  }\n'
                                 )
                             _dpp_preamble += (
                                 f'  if (dpp_src0_) {_src0_name}.set_delegate(dpp_src0_.get());\n'
@@ -7616,6 +7813,32 @@ class CodeGenerator:
                         elif can_share or _portable_probe:
                             enc_key = enc.enc_name.lower().replace('enc_', '')
                             tmpl_name = f'{inst.mnemonic}_{enc_key}'
+                            # Tripwire for the hard-coded inline-literal operand
+                            # name in the shared SIMD ternary table. If this ISA
+                            # reaches the shared SIMD path for an inline-literal
+                            # FMA, its instruction must carry the operand the
+                            # template reads `k` from (today `simm32`). gfx1250
+                            # names its literal `literal` and is kept out of this
+                            # path by the sharing preflight; if that ever changes
+                            # this fails loudly at generation instead of emitting
+                            # `inst.simm32` into a C++ file that will not compile.
+                            from amdisa.codegen.execute.simd_codegen import (
+                                simd_ternary_literal_operand_name,
+                            )
+
+                            _lit_name = simd_ternary_literal_operand_name(tmpl_name)
+                            if _lit_name is not None:
+                                assert any(
+                                    o.name == _lit_name for o in inst.operands
+                                ), (
+                                    f'{inst.name}: shared SIMD ternary template '
+                                    f'{tmpl_name!r} reads its inline literal from '
+                                    f'operand {_lit_name!r}, but this instruction '
+                                    f'has no such operand (operands: '
+                                    f'{[o.name for o in inst.operands]}). An ISA '
+                                    f'whose literal is named differently must stay '
+                                    f'out of this shared SIMD path.'
+                                )
                             exec_impl = cgen.Line(
                                 f'void {inst.fmt_name}::execute_impl'
                                 f'(amdgpu::Wavefront &wf) {{\n'
@@ -8563,9 +8786,6 @@ class CodeGenerator:
             prefixed_body = _re.sub(
                 r'(?<!\.)(?<!\w)mnemonic\(\)', 'inst.mnemonic()', prefixed_body
             )
-            prefixed_body = _re.sub(
-                r'(?<!\.)(?<!\w)simm32_(?!\w)', 'inst.simm32_', prefixed_body
-            )
             prefixed_body = prefixed_body.replace(
                 'amdgpu::vop3_fp8_decode_e5m3(*this)',
                 'amdgpu::vop3_fp8_decode_e5m3(inst)',
@@ -9286,6 +9506,16 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             f'std::optional<RegisterRef> Operand::to_register_ref() const {{\n'
             f'if (size_bits_ == 0)\n'
             f'  return std::nullopt;\n'
+            f'// A fieldless operand (no MR ISA encoding field: a hardwired\n'
+            f'// register/side effect like VCC/EXEC/SCC, or the fieldless image\n'
+            f'// address) never denotes a def-use-tracked register: its\n'
+            f'// encoding value is a fixed placeholder, not a decoded index, so\n'
+            f'// mapping it to a RegisterRef would fabricate a spurious def/use.\n'
+            f'// Making this explicit keeps every fieldless operand inert by\n'
+            f'// design (not by per-type coincidence) if it is placed in the\n'
+            f'// operand arrays.\n'
+            f'if (fieldless_)\n'
+            f'  return std::nullopt;\n'
             f'// Liveness tracks operands as contiguous 32-bit register lanes.\n'
             f'const auto reg_width = static_cast<uint8_t>(size_bits_ > 32 ? size_bits_ / 32 : 1);\n'
             f'{packed_16bit_ref_check}'
@@ -9851,9 +10081,27 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             )
             _resolved_vgpr_encoded_call = 'Isa::resolved_vgpr_offset(wf, opr_type_, encoding_value_, vgpr_msb_role())'
 
+        _inert_cond = '!reads_value()'
+
+        def _inert_guard(ret_expr: str = '', cond: str = _inert_cond) -> str:
+            # Benign-inert read/write for placeholder/metadata fieldless
+            # operands, gated on construction-time capability flags. Read /
+            # classify / SIMD paths use the default cond (!reads_value()).
+            # Write accessors pass cond='!is_writable()'. Pass ret_expr=''
+            # for void methods.
+            ret_stmt = f'    return {ret_expr};\n' if ret_expr else '    return;\n'
+            return (
+                '  // Fieldless operands whose capability policy makes this\n'
+                '  // accessor inert (reads yield a benign 0, writes are no-ops).\n'
+                '  // Driven by the construction-time capability flags applied\n'
+                '  // via apply_fieldless_caps() (see fieldless_policy.py).\n'
+                f'  if ({cond})\n' + ret_stmt
+            )
+
         read_lane_lines = [
             'uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {',
             '  if (delegate()) return amdgpu::RegisterAccess(wf).read_lane(*delegate(), lane);',
+            *_inert_guard('0u').rstrip('\n').split('\n'),
             '  int ev = encoding_value_;',
         ]
         if uses_packed_16bit_sources:
@@ -9886,7 +10134,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         _read_lane64_body = (
             'uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const {\n'
             '  if (delegate()) return amdgpu::RegisterAccess(wf).read_lane64(*delegate(), lane);\n'
-            '  int ev = encoding_value_;\n'
+            + _inert_guard('0')
+            + '  int ev = encoding_value_;\n'
             f'  if (auto off = {_resolved_vgpr_read_call}) {{\n'
             '    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;\n'
             '    uint32_t idx = wf.vgpr_alloc().base + voff;\n'
@@ -10312,7 +10561,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             + simd_methods
             + 'uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {\n'
             '  if (delegate()) return amdgpu::RegisterAccess(wf).read_scalar(*delegate());\n'
-            '  if (has_literal64_)\n'
+            + _inert_guard('0u')
+            + '  if (has_literal64_)\n'
             '    return static_cast<uint32_t>(literal64_value_);\n'
             '  if (is_immediate_type(opr_type_))\n'
             '    return static_cast<uint32_t>(encoding_value_);\n'
@@ -10320,10 +10570,12 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '}\n'
             '\n' + _read_lane_body + '\n\n'
             'void Operand::write_scalar(amdgpu::Wavefront &wf, uint32_t val) const {\n'
-            '  resolve_dst_write(wf, encoding_value_, val);\n'
+            + _inert_guard(cond='!is_writable()')
+            + '  resolve_dst_write(wf, encoding_value_, val);\n'
             '}\n'
             '\n'
             'void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const {\n'
+            + _inert_guard(cond='!is_writable()')
             + packed_16bit_write_lane_prefix
             + f'  if (auto off = {_resolved_vgpr_encoded_call}) {{\n'
             '    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;\n'
@@ -10334,7 +10586,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '}\n'
             '\n' + _read_lane64_body + '\n\n'
             'void Operand::write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const {\n'
-            f'  if (auto off = {_resolved_vgpr_encoded_call}) {{\n'
+            + _inert_guard(cond='!is_writable()')
+            + f'  if (auto off = {_resolved_vgpr_encoded_call}) {{\n'
             '    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;\n'
             '    uint32_t idx = wf.vgpr_alloc().base + voff;\n'
             '    amdgpu::RegisterAccess(wf.cu()).write_vgpr64(idx, lane, val);\n'
@@ -10344,7 +10597,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '}\n'
             '\n'
             'uint64_t Operand::read_scalar64(const amdgpu::Wavefront &wf) const {\n'
-            '  if (has_literal64_)\n'
+            + _inert_guard('0')
+            + '  if (has_literal64_)\n'
             '    return literal64_value_;\n'
             '  if (is_immediate_type(opr_type_))\n'
             '    return read_immediate64(opr_type_, encoding_value_);\n'
@@ -10352,7 +10606,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '}\n'
             '\n'
             'void Operand::write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const {\n'
-            '  resolve_dst_write64(wf, encoding_value_, val);\n'
+            + _inert_guard(cond='!is_writable()')
+            + '  resolve_dst_write64(wf, encoding_value_, val);\n'
             '}'
         )
         if self.isa_spec.profile.split_execution_sources:

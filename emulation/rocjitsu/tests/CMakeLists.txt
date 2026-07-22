@@ -384,6 +384,7 @@ add_executable(
     simd_correctness/vop2_simd_correctness_test.cpp
     simd_correctness/vop2_carry_simd_correctness_test.cpp
     simd_correctness/vop2_fma_simd_correctness_test.cpp
+    simd_correctness/vop2_fma_f16_rdna_simd_correctness_test.cpp
     simd_correctness/vop2_fma_f64_simd_correctness_test.cpp
     simd_correctness/vop2_cndmask_simd_correctness_test.cpp
     simd_correctness/vop2_minmax_simd_correctness_test.cpp

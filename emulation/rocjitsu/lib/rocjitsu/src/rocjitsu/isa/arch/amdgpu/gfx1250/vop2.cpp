@@ -16,11 +16,13 @@ VCndmaskB32Vop2::VCndmaskB32Vop2(const MachineInst *inst)
            registered_exec_fn<VCndmaskB32Vop2>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      vcc(64, OperandType::OPR_VCC, 106) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
-  num_src_ = 2;
+  src_operands_[2] = &vcc;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -50,6 +52,7 @@ VCndmaskB32Vop2::VCndmaskB32Vop2(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vcc.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1302,13 +1305,17 @@ VAddCoCiU32Vop2::VAddCoCiU32Vop2(const MachineInst *inst)
     : Vop2("v_add_co_ci_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            registered_exec_fn<VAddCoCiU32Vop2>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      vcc_in(64, OperandType::OPR_VCC, 106) {
   dst_operands_[0] = &vdst;
+  dst_operands_[1] = &vcc;
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
+  src_operands_[2] = &vcc_in;
+  num_src_ = 3;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1337,6 +1344,8 @@ VAddCoCiU32Vop2::VAddCoCiU32Vop2(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vcc.apply_fieldless_caps(false, false, false);
+  vcc_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1346,13 +1355,17 @@ VSubCoCiU32Vop2::VSubCoCiU32Vop2(const MachineInst *inst)
     : Vop2("v_sub_co_ci_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            registered_exec_fn<VSubCoCiU32Vop2>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      vcc_in(64, OperandType::OPR_VCC, 106) {
   dst_operands_[0] = &vdst;
+  dst_operands_[1] = &vcc;
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
+  src_operands_[2] = &vcc_in;
+  num_src_ = 3;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1381,6 +1394,8 @@ VSubCoCiU32Vop2::VSubCoCiU32Vop2(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vcc.apply_fieldless_caps(false, false, false);
+  vcc_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1390,13 +1405,17 @@ VSubrevCoCiU32Vop2::VSubrevCoCiU32Vop2(const MachineInst *inst)
     : Vop2("v_subrev_co_ci_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            registered_exec_fn<VSubrevCoCiU32Vop2>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      vcc_in(64, OperandType::OPR_VCC, 106) {
   dst_operands_[0] = &vdst;
+  dst_operands_[1] = &vcc;
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
+  src_operands_[2] = &vcc_in;
+  num_src_ = 3;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1425,6 +1444,8 @@ VSubrevCoCiU32Vop2::VSubrevCoCiU32Vop2(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vcc.apply_fieldless_caps(false, false, false);
+  vcc_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
