@@ -95,6 +95,7 @@ jobs:
             cxx_compiler: g++
           - name: tsan-sparse-memory
             allow_failure: false
+            run_static_asan_launch: true
             # The simulator-wide stress tests exceed TSan's fixed 128-lock
             # deadlock-tracker capacity; keep the race gate on this change's
             # concurrent SparseMemory surface.
@@ -240,7 +241,7 @@ jobs:
           echo "CXXFLAGS=" >> "${GITHUB_ENV}"
 
       - name: Test static ASan launcher preload
-        if: matrix.name == 'tsan-sparse-memory'
+        if: matrix.run_static_asan_launch
         working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
         shell: bash
         run: |
