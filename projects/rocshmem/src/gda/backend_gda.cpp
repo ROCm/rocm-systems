@@ -589,7 +589,7 @@ int GDABackend::buffer_register(void *addr, size_t length) {
 
   /* Register with QPs */
   for (size_t i = 0; i < num_qps; i++) {
-    err = gpu_qps[i].buffer_register(addr, length);
+    err = host_qps[i].buffer_register(addr, length);
     if (ROCSHMEM_SUCCESS != err) {
       qp_registration_failed = true;
     }
@@ -614,7 +614,7 @@ int GDABackend::buffer_unregister(void *addr) {
 
   /* Deregister with QPs */
   for (size_t i = 0; i < num_qps; i++) {
-    err = gpu_qps[i].buffer_unregister(addr);
+    err = host_qps[i].buffer_unregister(addr);
     if (ROCSHMEM_SUCCESS != err) {
       return ROCSHMEM_ERROR;
     }
@@ -635,7 +635,7 @@ void GDABackend::accumulate_ctx_device_stats() {
 void GDABackend::buffer_unregister_all() {
   /* Deregister all buffers with QPs */
   for (size_t i = 0; i < num_qps; i++) {
-    gpu_qps[i].buffer_unregister_all();
+    host_qps[i].buffer_unregister_all();
   }
 
   /* Clear the ptr cache */
@@ -1267,9 +1267,14 @@ void GDABackend::setup_gpu_qps() {
 
   CHECK_HIP(hipMalloc(&gpu_qps, qp_objs_mem_size));
 
+  host_qps = (QueuePair*) malloc(qp_objs_mem_size);
+  CHECK_NNULL(host_qps, "malloc (host_qps)");
+
   for (size_t i = 0; i < qp_objs_count; i++) {
-    initialize_gpu_qp(&gpu_qps[i], i);
+    initialize_gpu_qp(&host_qps[i], i);
   }
+
+  CHECK_HIP(hipMemcpy(gpu_qps, host_qps, qp_objs_mem_size, hipMemcpyDefault));
 }
 
 void GDABackend::cleanup_gpu_qps() {
@@ -1278,8 +1283,11 @@ void GDABackend::cleanup_gpu_qps() {
   qp_objs_count = num_qps;
 
   for (size_t i = 0; i < qp_objs_count; i++) {
-    gpu_qps[i].~QueuePair();
+    host_qps[i].~QueuePair();
   }
+
+  free(host_qps);
+  host_qps = nullptr;
 
   CHECK_HIP(hipFree(gpu_qps));
   gpu_qps = nullptr;

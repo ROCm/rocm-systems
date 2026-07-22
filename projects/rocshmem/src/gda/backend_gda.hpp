@@ -90,6 +90,7 @@ class GDABackend : public Backend {
   int num_nics_{0};
 
   uint32_t inline_threshold = 8;
+  QueuePair *host_qps = nullptr;
   QueuePair *gpu_qps = nullptr;
   std::vector<ibv_qp*> qps;
   std::vector<ibv_cq*> cqs;
