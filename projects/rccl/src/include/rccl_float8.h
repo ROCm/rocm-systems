@@ -177,6 +177,180 @@ inline __device__ fp8x2_storage_t hadd2_b(fp8x2_storage_t x, fp8x2_storage_t y) 
 #endif
 }
 
+// Packed 2-wide fp8 min/max. Mirrors hadd2: convert the fp8x2 pair up to f16x2
+// (lossless), do a single packed v_pk_{min,max}_f16, convert back.
+inline __device__  fp8x2_storage_t hminmax2(fp8x2_storage_t x, fp8x2_storage_t y, bool isMin)
+{
+#if   __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
+    half2_t vx = __builtin_amdgcn_cvt_scalef32_pk_f16_fp8(x, 1.f, 0);
+    half2_t vy = __builtin_amdgcn_cvt_scalef32_pk_f16_fp8(y, 1.f, 0);
+#if __has_builtin(__builtin_elementwise_minnum)
+    half2_t v1 = isMin ? __builtin_elementwise_minnum(vx, vy)
+                       : __builtin_elementwise_maxnum(vx, vy);
+#else
+    // Workaround for older compilers lacking __builtin_elementwise_{min,max}num
+    // (e.g. ROCm 7.0.2's clang): emit the packed min/max instruction directly.
+    half2_t v1;
+    if (isMin) asm volatile("v_pk_min_f16 %0, %1, %2" : "=v"(v1) : "v"(vx), "v"(vy));
+    else       asm volatile("v_pk_max_f16 %0, %1, %2" : "=v"(v1) : "v"(vx), "v"(vy));
+#endif
+    union {
+      shortx2_t i16_vec;
+      fp8x2_storage_t fp8;
+    } u{0};
+    u.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_fp8_f16(v1, v1, /* scale */ 1.f, 0);
+    return u.fp8;
+#else
+    union {
+      rccl_float8 fp8[2];
+      fp8x2_storage_t fp8x2;
+    } u, v, w;
+    u.fp8x2 = x;
+    v.fp8x2 = y;
+    w.fp8[0] = rccl_float8(isMin ? fminf(float(u.fp8[0]), float(v.fp8[0])) : fmaxf(float(u.fp8[0]), float(v.fp8[0])));
+    w.fp8[1] = rccl_float8(isMin ? fminf(float(u.fp8[1]), float(v.fp8[1])) : fmaxf(float(u.fp8[1]), float(v.fp8[1])));
+    return w.fp8x2;
+#endif
+}
+
+inline __device__  fp8x2_storage_t hminmax2_b(fp8x2_storage_t x, fp8x2_storage_t y, bool isMin)
+{
+#if   __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
+    half2_t vx = __builtin_amdgcn_cvt_scalef32_pk_f16_bf8(x, 1.f, 0);
+    half2_t vy = __builtin_amdgcn_cvt_scalef32_pk_f16_bf8(y, 1.f, 0);
+#if __has_builtin(__builtin_elementwise_minnum)
+    half2_t v1 = isMin ? __builtin_elementwise_minnum(vx, vy)
+                       : __builtin_elementwise_maxnum(vx, vy);
+#else
+    // Workaround for older compilers lacking __builtin_elementwise_{min,max}num
+    // (e.g. ROCm 7.0.2's clang): emit the packed min/max instruction directly.
+    half2_t v1;
+    if (isMin) asm volatile("v_pk_min_f16 %0, %1, %2" : "=v"(v1) : "v"(vx), "v"(vy));
+    else       asm volatile("v_pk_max_f16 %0, %1, %2" : "=v"(v1) : "v"(vx), "v"(vy));
+#endif
+    union {
+      shortx2_t i16_vec;
+      fp8x2_storage_t fp8;
+    } u{0};
+    u.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_bf8_f16(v1, v1, /* scale */ 1.f, 0);
+    return u.fp8;
+#else
+    union {
+      rccl_bfloat8 bfp8[2];
+      fp8x2_storage_t bfp8x2;
+    } u, v, w;
+    u.bfp8x2 = x;
+    v.bfp8x2 = y;
+    w.bfp8[0] = rccl_bfloat8(isMin ? fminf(float(u.bfp8[0]), float(v.bfp8[0])) : fmaxf(float(u.bfp8[0]), float(v.bfp8[0])));
+    w.bfp8[1] = rccl_bfloat8(isMin ? fminf(float(u.bfp8[1]), float(v.bfp8[1])) : fmaxf(float(u.bfp8[1]), float(v.bfp8[1])));
+    return w.bfp8x2;
+#endif
+}
+
+#if   __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
+// Saturating packed f32x2 -> fp8x2 that reproduces the scalar rccl_float8/
+// rccl_bfloat8(float) conversion bit-for-bit. The HIP fp8 constructor
+// (cast_to_f8_from_f32, saturate=true) clamps *finite* lanes to +/-max-finite
+// via fmed3 (leaving NaN/Inf to propagate), then does an RNE cvt_pk_fp8_f32.
+// The raw packed cvt alone does NOT saturate (overflow -> Inf), which is why
+// the earlier packed helpers diverged from the scalar reference on overflow.
+inline __device__ fp8x2_storage_t sat_pack_fp8_f32x2(float2_t v) {
+  union { float f; unsigned u; } b0, b1; b0.f = v[0]; b1.f = v[1];
+  if ((b0.u & 0x7F800000u) != 0x7F800000u) v[0] = __builtin_amdgcn_fmed3f(v[0], 448.f, -448.f);
+  if ((b1.u & 0x7F800000u) != 0x7F800000u) v[1] = __builtin_amdgcn_fmed3f(v[1], 448.f, -448.f);
+  return (fp8x2_storage_t)(__builtin_amdgcn_cvt_pk_fp8_f32(v[0], v[1], 0, false) & 0xFFFFu);
+}
+inline __device__ fp8x2_storage_t sat_pack_bf8_f32x2(float2_t v) {
+  union { float f; unsigned u; } b0, b1; b0.f = v[0]; b1.f = v[1];
+  if ((b0.u & 0x7F800000u) != 0x7F800000u) v[0] = __builtin_amdgcn_fmed3f(v[0], 57344.f, -57344.f);
+  if ((b1.u & 0x7F800000u) != 0x7F800000u) v[1] = __builtin_amdgcn_fmed3f(v[1], 57344.f, -57344.f);
+  return (fp8x2_storage_t)(__builtin_amdgcn_cvt_pk_bf8_f32(v[0], v[1], 0, false) & 0xFFFFu);
+}
+#endif
+
+// Packed 2-wide fp8 multiply. f32 intermediate (f32 exactly holds every
+// fp8*fp8 product) followed by the saturating f32->fp8 pack, so the only
+// rounding/saturation matches the scalar rccl_float8(float(x)*float(y)).
+inline __device__  fp8x2_storage_t hmul2(fp8x2_storage_t x, fp8x2_storage_t y)
+{
+#if   __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
+    float2_t v1 = __builtin_amdgcn_cvt_scalef32_pk_f32_fp8(x, 1.f, 0)
+                * __builtin_amdgcn_cvt_scalef32_pk_f32_fp8(y, 1.f, 0);
+    return sat_pack_fp8_f32x2(v1);
+#else
+    union {
+      rccl_float8 fp8[2];
+      fp8x2_storage_t fp8x2;
+    } u, v, w;
+    u.fp8x2 = x;
+    v.fp8x2 = y;
+    w.fp8[0] = rccl_float8(float(u.fp8[0]) * float(v.fp8[0]));
+    w.fp8[1] = rccl_float8(float(u.fp8[1]) * float(v.fp8[1]));
+    return w.fp8x2;
+#endif
+}
+
+inline __device__  fp8x2_storage_t hmul2_b(fp8x2_storage_t x, fp8x2_storage_t y)
+{
+#if   __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
+    // f32 intermediate (see hmul2), saturating pack matching rccl_bfloat8(float(x)*float(y)).
+    float2_t v1 = __builtin_amdgcn_cvt_scalef32_pk_f32_bf8(x, 1.f, 0)
+                * __builtin_amdgcn_cvt_scalef32_pk_f32_bf8(y, 1.f, 0);
+    return sat_pack_bf8_f32x2(v1);
+#else
+    union {
+      rccl_bfloat8 bfp8[2];
+      fp8x2_storage_t bfp8x2;
+    } u, v, w;
+    u.bfp8x2 = x;
+    v.bfp8x2 = y;
+    w.bfp8[0] = rccl_bfloat8(float(u.bfp8[0]) * float(v.bfp8[0]));
+    w.bfp8[1] = rccl_bfloat8(float(u.bfp8[1]) * float(v.bfp8[1]));
+    return w.bfp8x2;
+#endif
+}
+
+// Packed 2-wide fp8 multiply-by-broadcast-scalar, for PreMulSum's premul step.
+// Same convert/pack shape as hmul2 with the scalar broadcast into f32x2.
+inline __device__  fp8x2_storage_t hpremul2(fp8x2_storage_t x, float s)
+{
+#if   __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
+    // f32 intermediate (see hmul2): packed multiply by the broadcast scalar,
+    // then the saturating pack matching rccl_float8(float(x)*s).
+    float2_t vs = {s, s};
+    float2_t v1 = __builtin_amdgcn_cvt_scalef32_pk_f32_fp8(x, 1.f, 0) * vs;
+    return sat_pack_fp8_f32x2(v1);
+#else
+    union {
+      rccl_float8 fp8[2];
+      fp8x2_storage_t fp8x2;
+    } u, w;
+    u.fp8x2 = x;
+    w.fp8[0] = rccl_float8(float(u.fp8[0]) * s);
+    w.fp8[1] = rccl_float8(float(u.fp8[1]) * s);
+    return w.fp8x2;
+#endif
+}
+
+inline __device__  fp8x2_storage_t hpremul2_b(fp8x2_storage_t x, float s)
+{
+#if   __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
+    // f32 intermediate (see hmul2): packed multiply, saturating pack matching rccl_bfloat8(float(x)*s).
+    float2_t vs = {s, s};
+    float2_t v1 = __builtin_amdgcn_cvt_scalef32_pk_f32_bf8(x, 1.f, 0) * vs;
+    return sat_pack_bf8_f32x2(v1);
+#else
+    union {
+      rccl_bfloat8 bfp8[2];
+      fp8x2_storage_t bfp8x2;
+    } u, w;
+    u.bfp8x2 = x;
+    w.bfp8[0] = rccl_bfloat8(float(u.bfp8[0]) * s);
+    w.bfp8[1] = rccl_bfloat8(float(u.bfp8[1]) * s);
+    return w.bfp8x2;
+#endif
+}
+
 inline std::ostream& operator<<(std::ostream& os, const rccl_float8& f8) {
   return os << float(f8);
 }
@@ -754,6 +928,82 @@ inline __device__ fp8x2_storage_t hadd2_b(fp8x2_storage_t x, fp8x2_storage_t y) 
   w.fp8[1] = hadd_b(u.fp8[1], v.fp8[1]);
 
   return w.fp8x2;
+}
+
+inline __device__  fp8x2_storage_t hminmax2(fp8x2_storage_t x, fp8x2_storage_t y, bool isMin)
+{
+    union {
+      rccl_float8 fp8[2];
+      fp8x2_storage_t fp8x2;
+    } u, v, w;
+    u.fp8x2 = x;
+    v.fp8x2 = y;
+    w.fp8[0] = rccl_float8(isMin ? fminf(float(u.fp8[0]), float(v.fp8[0])) : fmaxf(float(u.fp8[0]), float(v.fp8[0])));
+    w.fp8[1] = rccl_float8(isMin ? fminf(float(u.fp8[1]), float(v.fp8[1])) : fmaxf(float(u.fp8[1]), float(v.fp8[1])));
+    return w.fp8x2;
+}
+
+inline __device__  fp8x2_storage_t hminmax2_b(fp8x2_storage_t x, fp8x2_storage_t y, bool isMin)
+{
+    union {
+      rccl_bfloat8 fp8[2];
+      fp8x2_storage_t fp8x2;
+    } u, v, w;
+    u.fp8x2 = x;
+    v.fp8x2 = y;
+    w.fp8[0] = rccl_bfloat8(isMin ? fminf(float(u.fp8[0]), float(v.fp8[0])) : fmaxf(float(u.fp8[0]), float(v.fp8[0])));
+    w.fp8[1] = rccl_bfloat8(isMin ? fminf(float(u.fp8[1]), float(v.fp8[1])) : fmaxf(float(u.fp8[1]), float(v.fp8[1])));
+    return w.fp8x2;
+}
+
+inline __device__  fp8x2_storage_t hmul2(fp8x2_storage_t x, fp8x2_storage_t y)
+{
+    union {
+      rccl_float8 fp8[2];
+      fp8x2_storage_t fp8x2;
+    } u, v, w;
+    u.fp8x2 = x;
+    v.fp8x2 = y;
+    w.fp8[0] = rccl_float8(float(u.fp8[0]) * float(v.fp8[0]));
+    w.fp8[1] = rccl_float8(float(u.fp8[1]) * float(v.fp8[1]));
+    return w.fp8x2;
+}
+
+inline __device__  fp8x2_storage_t hmul2_b(fp8x2_storage_t x, fp8x2_storage_t y)
+{
+    union {
+      rccl_bfloat8 fp8[2];
+      fp8x2_storage_t fp8x2;
+    } u, v, w;
+    u.fp8x2 = x;
+    v.fp8x2 = y;
+    w.fp8[0] = rccl_bfloat8(float(u.fp8[0]) * float(v.fp8[0]));
+    w.fp8[1] = rccl_bfloat8(float(u.fp8[1]) * float(v.fp8[1]));
+    return w.fp8x2;
+}
+
+inline __device__  fp8x2_storage_t hpremul2(fp8x2_storage_t x, float s)
+{
+    union {
+      rccl_float8 fp8[2];
+      fp8x2_storage_t fp8x2;
+    } u, w;
+    u.fp8x2 = x;
+    w.fp8[0] = rccl_float8(float(u.fp8[0]) * s);
+    w.fp8[1] = rccl_float8(float(u.fp8[1]) * s);
+    return w.fp8x2;
+}
+
+inline __device__  fp8x2_storage_t hpremul2_b(fp8x2_storage_t x, float s)
+{
+    union {
+      rccl_bfloat8 fp8[2];
+      fp8x2_storage_t fp8x2;
+    } u, w;
+    u.fp8x2 = x;
+    w.fp8[0] = rccl_bfloat8(float(u.fp8[0]) * s);
+    w.fp8[1] = rccl_bfloat8(float(u.fp8[1]) * s);
+    return w.fp8x2;
 }
 
 // Special operator overloading

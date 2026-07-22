@@ -244,6 +244,7 @@ if(BUILD_TESTS)
       device/TestOp128.cpp
       device/GinDeviceTests.cpp
       device/GinAnvilIpcDevice_test.cpp
+      device/Fp8Reduce_test.cpp
       DeviceApiTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp

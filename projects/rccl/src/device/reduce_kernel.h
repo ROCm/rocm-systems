@@ -469,14 +469,18 @@ SPECIALIZE_REDUCE(FuncMinMax, __nv_fp8_e5m2, 2, __nv_fp8x2_e5m2,
 SPECIALIZE_REDUCE(FuncSum, rccl_float8, 1, rccl_float8, hadd(x, y))
 SPECIALIZE_REDUCE(FuncSum, rccl_float8, 2, fp8x2_storage_t, hadd2(x, y))
 SPECIALIZE_REDUCE(FuncProd, rccl_float8, 1, rccl_float8, rccl_float8(float(x) * float(y)))
+SPECIALIZE_REDUCE(FuncProd, rccl_float8, 2, fp8x2_storage_t, hmul2(x, y))
 SPECIALIZE_REDUCE(FuncMinMax, rccl_float8, 1, rccl_float8,
                   rccl_float8(fn.isMinNotMax ? fminf(float(x), float(y)) : fmaxf(float(x), float(y))))
+SPECIALIZE_REDUCE(FuncMinMax, rccl_float8, 2, fp8x2_storage_t, hminmax2(x, y, fn.isMinNotMax))
 
 SPECIALIZE_REDUCE(FuncSum, rccl_bfloat8, 1, rccl_bfloat8, hadd_b(x, y))
 SPECIALIZE_REDUCE(FuncSum, rccl_bfloat8, 2, fp8x2_storage_t, hadd2_b(x, y))
 SPECIALIZE_REDUCE(FuncProd, rccl_bfloat8, 1, rccl_bfloat8, rccl_bfloat8(float(x) * float(y)))
+SPECIALIZE_REDUCE(FuncProd, rccl_bfloat8, 2, fp8x2_storage_t, hmul2_b(x, y))
 SPECIALIZE_REDUCE(FuncMinMax, rccl_bfloat8, 1, rccl_bfloat8,
                   rccl_bfloat8(fn.isMinNotMax ? fminf(float(x), float(y)) : fmaxf(float(x), float(y))))
+SPECIALIZE_REDUCE(FuncMinMax, rccl_bfloat8, 2, fp8x2_storage_t, hminmax2_b(x, y, fn.isMinNotMax))
 #endif
 #endif
 
@@ -822,6 +826,15 @@ struct Apply_PreOp<FuncPreMulSum<rccl_float8>, /*EltPerPack=*/1> {
     return toPack<rccl_float8>(rccl_float8(float(fromPack<rccl_float8>(a)) * float(fn.scalar)));
   }
 };
+template <>
+struct Apply_PreOp<FuncPreMulSum<rccl_float8>, /*EltPerPack=*/2> {
+  static constexpr bool IsIdentity = false;
+
+  __device__ static BytePack<sizeof(fp8x2_storage_t)> preOp(FuncPreMulSum<rccl_float8> fn,
+                                                            BytePack<sizeof(fp8x2_storage_t)> a) {
+    return toPack<fp8x2_storage_t>(hpremul2(fromPack<fp8x2_storage_t>(a), float(fn.scalar)));
+  }
+};
 
 template <>
 struct Apply_PreOp<FuncPreMulSum<rccl_bfloat8>, /*EltPerPack=*/1> {
@@ -830,6 +843,15 @@ struct Apply_PreOp<FuncPreMulSum<rccl_bfloat8>, /*EltPerPack=*/1> {
   __device__ static BytePack<sizeof(rccl_bfloat8)> preOp(FuncPreMulSum<rccl_bfloat8> fn,
                                                          BytePack<sizeof(rccl_bfloat8)> a) {
     return toPack<rccl_bfloat8>(rccl_bfloat8(float(fromPack<rccl_bfloat8>(a)) * float(fn.scalar)));
+  }
+};
+template <>
+struct Apply_PreOp<FuncPreMulSum<rccl_bfloat8>, /*EltPerPack=*/2> {
+  static constexpr bool IsIdentity = false;
+
+  __device__ static BytePack<sizeof(fp8x2_storage_t)> preOp(FuncPreMulSum<rccl_bfloat8> fn,
+                                                            BytePack<sizeof(fp8x2_storage_t)> a) {
+    return toPack<fp8x2_storage_t>(hpremul2_b(fromPack<fp8x2_storage_t>(a), float(fn.scalar)));
   }
 };
 #endif

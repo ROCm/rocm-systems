@@ -112,17 +112,16 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
         if (checkAbort(abort, 1, spins)) break;
       }
       if (sendConnFifo) {
-        // Index the send FIFO by sendStep[wid], matching upstream NCCL.
-        // A previous RCCL change used the scalar sendConnHead here (equal to
-        // sendStep[wid] at this point for the connection-owning lane) to let
-        // SROA scalarize sendStep and registerize the Primitives object. A
-        // gfx950 A/B static analysis showed that win does NOT reach the
-        // launched kernels: the 3 Generic_* kernels are byte-identical either
-        // way (same VGPR/AGPR/SGPR/scratch), because the reduce work runs in
-        // indirectly-called device functions whose frames are dynamic. With no
-        // static benefit, we keep the code identical to NCCL to ease future
-        // upstream syncs.
-        sendConnFifo[sendStep[wid] % NCCL_STEPS].size = nbytes;
+        // Use the scalar sendConnHead instead of sendStep[wid]. This lane owns
+        // send connection `wid`, and sendConnHead is initialized to that
+        // connection's step (loadSendSync) and advanced once per waitSend, in
+        // lockstep with sendStep[wid], so the two are always equal here. Using
+        // the scalar avoids a dynamic (wid-indexed) load, which lets SROA
+        // scalarize sendStep and registerize the whole Primitives object,
+        // dropping structural scratch on the LL128 kernels. This matches the
+        // sibling LL primitive (prims_ll.h), which already indexes the FIFO
+        // with sendConnHead.
+        sendConnFifo[sendConnHead % NCCL_STEPS].size = nbytes;
       }
       sendConnHead += 1;
     }
