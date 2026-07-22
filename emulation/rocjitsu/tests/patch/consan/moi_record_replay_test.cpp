@@ -2016,7 +2016,7 @@ TEST(ConSanMoi, RecordReplayDeadSgprWindowRejectsAnyLiveLane) {
   }));
 }
 
-TEST(ConSanMoi, RecordReplayAutomaticExecSaveUsesDistinctOwnerLocalWindows) {
+TEST(ConSanMoi, RecordReplayAutomaticExecSaveOverridesOnlyIncompatibleOwner) {
   const auto make_owner = [](uint16_t first_live, uint16_t last_live, uint16_t dead_destination) {
     std::vector<uint32_t> words = {
         0xD8340000u,
@@ -2055,13 +2055,8 @@ TEST(ConSanMoi, RecordReplayAutomaticExecSaveUsesDistinctOwnerLocalWindows) {
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
-  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 2u);
-  EXPECT_NE(result.resolved_moi_transient_sgpr_assignments[0].descriptor_file_offset,
-            result.resolved_moi_transient_sgpr_assignments[1].descriptor_file_offset);
-  EXPECT_EQ(std::ranges::count_if(
-                result.resolved_moi_transient_sgpr_assignments,
-                [](const auto &assignment) { return assignment.dispatch_id_sgpr.has_value(); }),
-            1u);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  EXPECT_FALSE(result.resolved_moi_transient_sgpr_assignments.front().dispatch_id_sgpr);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             2u);

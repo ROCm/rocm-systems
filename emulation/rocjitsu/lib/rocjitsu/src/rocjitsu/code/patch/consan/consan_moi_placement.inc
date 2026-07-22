@@ -1191,8 +1191,7 @@ struct MoiResourcePlanningState {
 }
 
 [[nodiscard]] RegisterSet
-dynamic_frame_save_registers_for_site(const MoiResourcePlanningState &state,
-                                      uint64_t text_offset) {
+dynamic_frame_save_registers_for_site(const MoiResourcePlanningState &state, uint64_t text_offset) {
   RegisterSet saved;
   constexpr uint64_t kMaxDynamicFramePrologueDistance = 16u * 1024u;
   CodeObjectPatcher patcher(state.code_object);
@@ -1207,12 +1206,10 @@ dynamic_frame_save_registers_for_site(const MoiResourcePlanningState &state,
       uint32_t save_word = 0;
       uint32_t establish_word = 0;
       std::memcpy(&save_word, text.data() + offset, sizeof(save_word));
-      std::memcpy(&establish_word, text.data() + offset + sizeof(uint32_t),
-                  sizeof(establish_word));
+      std::memcpy(&establish_word, text.data() + offset + sizeof(uint32_t), sizeof(establish_word));
       if ((save_word & 0xff800000u) == 0xbe800000u && (save_word & 0xffu) == 33u &&
           establish_word == build_s_mov_b32(/*dst=*/33u, /*src=*/32u, state.arch)) {
-        saved.expand(
-            {RegClass::SGPR, static_cast<uint16_t>((save_word >> 16u) & 0x7fu), 1u});
+        saved.expand({RegClass::SGPR, static_cast<uint16_t>((save_word >> 16u) & 0x7fu), 1u});
         break;
       }
     }
@@ -2006,8 +2003,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     if (!selected &&
         ((options.moi_engine == ConSanMoiEngine::RecordReplay && is_rdna4_family_arch(arch)) ||
          gfx1250_sampled) &&
-        !options.moi_dynamic_stack_spill &&
-        address_free_scratch_private_limit(arch)) {
+        !options.moi_dynamic_stack_spill && address_free_scratch_private_limit(arch)) {
       const auto reserved = [&](uint16_t base, uint16_t width) {
         return (options.moi_owner_sgpr &&
                 range_overlaps(base, width, *options.moi_owner_sgpr, 1u)) ||
@@ -2435,6 +2431,12 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
           break;
         }
       }
+      // A singleton/sparse appended body uses only the indirect PC pair and
+      // SCC save.  The dispatch key is validated as part of the spill-backed
+      // scalar ABI, but is never live in this non-dense path, so let it alias
+      // the SCC save instead of demanding another dead scalar.
+      if (!needs_dense_router && scc)
+        dispatch_key = scc;
       if (pc && call_return && dispatch_key && scc) {
         options.moi_exec_save_sgpr = spill_base;
         options.automatic_moi_exec_save_sgprs = true;
@@ -2506,8 +2508,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   if ((is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
       (options.moi_engine == ConSanMoiEngine::RecordReplay ||
        options.moi_engine == ConSanMoiEngine::InlineShadow ||
-       (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-        options.moi_engine == ConSanMoiEngine::Sampled))) {
+       (arch == ROCJITSU_CODE_ARCH_GFX1250 && options.moi_engine == ConSanMoiEngine::Sampled))) {
     options.moi_exec_save_sgpr = 0u;
     options.automatic_moi_exec_save_sgprs = true;
     options.automatic_moi_partial_exec_save_sgprs = true;

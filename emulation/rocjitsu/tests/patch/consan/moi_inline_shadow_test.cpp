@@ -1186,8 +1186,13 @@ TEST(ConSanMoi, Rdna4InlineGlobalShadowSpillsFullScalarPressure) {
   }));
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_NE(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
-  EXPECT_TRUE(std::ranges::any_of(result.resolved_moi_transient_sgpr_assignments,
-                                  &ConSanMoiTransientSgprAssignment::spill_backed));
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("automatically assigned spill-backed Inline SGPRs") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore &&
+           patch.required_private_segment_size != 0u;
+  }));
 }
 
 TEST(ConSanMoi, Gfx1250InlineOddShadowSlotCountFallsBackToExactB64Clear) {
@@ -3459,7 +3464,7 @@ TEST(ConSanMoi, Cdna4InlineUsesComponentLocalScalarSpillOutsidePreloadsAndPhysic
   EXPECT_TRUE(result.final_validation_passed);
 }
 
-TEST(ConSanMoi, Cdna4InlineFailsClosedWhenOneIncompatibleOwnerHasNoSpillRouter) {
+TEST(ConSanMoi, Cdna4InlineExcludesOnlyOwnerWithoutSpillRouter) {
   const auto guest = build_cdna4_ds_store_b32(
       /*vaddr=*/0, /*vdata=*/0, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);
   const auto barrier = build_cdna4_s_barrier(ROCJITSU_CODE_ARCH_CDNA4);
@@ -3508,17 +3513,21 @@ TEST(ConSanMoi, Cdna4InlineFailsClosedWhenOneIncompatibleOwnerHasNoSpillRouter) 
 
   const ConSanResult result = try_patch_consan(bytes, options);
 
-  EXPECT_TRUE(result.resolved_moi_transient_sgpr_assignments.empty());
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("could not place a fresh automatic EXEC-save SGPR window") !=
+    return warning.find("admitted full-pressure owners with component-local scalar state") !=
            std::string::npos;
   })) << testing::PrintToString(result.warnings);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
-            0u);
+            1u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
                                &ConSanPatchInfo::kind),
-            0u);
+            2u);
+  EXPECT_TRUE(std::ranges::any_of(result.resource_plans, [](const auto &plan) {
+    return plan.site_kind == ConSanResourceSiteKind::Access &&
+           plan.source == ConSanRegisterAllocationSource::Unsupported;
+  }));
 }
 
 TEST(ConSanMoi, InlineShadowPreservesTwoAddressLoadAddressAliasedBySecondResult) {

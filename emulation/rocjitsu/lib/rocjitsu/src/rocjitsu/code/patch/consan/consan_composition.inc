@@ -288,7 +288,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   if ((options.fault_atomic_wrong_address || options.fault_atomic_weaken_order ||
        options.fault_atomic_weaken_scope) &&
       result.errors.empty())
-    try_apply_atomic_fault_patch(code_object, options, result);
+    try_apply_atomic_fault_patch(code_object, arch, options, result);
   if ((options.fault_ordinary_wrong_address || options.fault_ordinary_weaken_order ||
        options.fault_ordinary_weaken_scope) &&
       result.errors.empty())
