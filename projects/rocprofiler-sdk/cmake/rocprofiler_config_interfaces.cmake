@@ -88,8 +88,6 @@ endforeach()
 #
 # ----------------------------------------------------------------------------------------#
 
-target_link_libraries(rocprofiler-sdk-atomic INTERFACE atomic)
-
 # ----------------------------------------------------------------------------------------#
 #
 # filesystem library
@@ -365,11 +363,11 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(rocDecode)
+find_package(rocdecode)
 
-if(rocDecode_FOUND
-   AND rocDecode_INCLUDE_DIR
-   AND EXISTS "${rocDecode_INCLUDE_DIR}/rocdecode/amd_detail/rocdecode_api_trace.h")
+if(rocdecode_FOUND
+   AND rocdecode_INCLUDE_DIR
+   AND EXISTS "${rocdecode_INCLUDE_DIR}/rocdecode/amd_detail/rocdecode_api_trace.h")
     rocprofiler_config_nolink_target(
         rocprofiler-sdk-rocdecode-nolink rocdecode::rocdecode INTERFACE
         ROCPROFILER_SDK_USE_SYSTEM_ROCDECODE=1)
@@ -385,15 +383,47 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(rocJPEG)
+find_package(rocjpeg)
 
-if(rocJPEG_FOUND
-   AND rocJPEG_INCLUDE_DIR
-   AND EXISTS "${rocJPEG_INCLUDE_DIR}/rocjpeg/amd_detail/rocjpeg_api_trace.h")
+if(rocjpeg_FOUND
+   AND rocjpeg_INCLUDE_DIR
+   AND EXISTS "${rocjpeg_INCLUDE_DIR}/rocjpeg/amd_detail/rocjpeg_api_trace.h")
     rocprofiler_config_nolink_target(rocprofiler-sdk-rocjpeg-nolink rocjpeg::rocjpeg
                                      INTERFACE ROCPROFILER_SDK_USE_SYSTEM_ROCJPEG=1)
 else()
     target_compile_definitions(rocprofiler-sdk-rocjpeg-nolink
                                INTERFACE ROCPROFILER_SDK_USE_SYSTEM_ROCJPEG=0)
 
+endif()
+
+# ----------------------------------------------------------------------------------------#
+#
+# rocSHMEM
+#
+# ----------------------------------------------------------------------------------------#
+
+# rocSHMEM's installed config references MPI::MPI_CXX and
+# rocprofiler-register::rocprofiler-register in roc::rocshmem's link interface, so both
+# must be located first or find_package(rocshmem) will fail to define the imported target.
+find_package(MPI COMPONENTS CXX)
+find_package(rocprofiler-register CONFIG HINTS ${rocm_version_DIR} ${ROCM_PATH} PATHS
+             ${rocm_version_DIR} ${ROCM_PATH})
+
+if(MPI_CXX_FOUND AND rocprofiler-register_FOUND)
+    find_package(rocshmem CONFIG HINTS ${rocm_version_DIR} ${ROCM_PATH} PATHS
+                 ${rocm_version_DIR} ${ROCM_PATH})
+endif()
+
+if(rocshmem_FOUND
+   AND TARGET roc::rocshmem
+   AND rocshmem_INCLUDE_DIR
+   AND EXISTS "${rocshmem_INCLUDE_DIR}/rocshmem/api_trace.h")
+    target_include_directories(rocprofiler-sdk-rocshmem-nolink SYSTEM
+                               INTERFACE ${rocshmem_INCLUDE_DIR})
+
+    target_compile_definitions(rocprofiler-sdk-rocshmem-nolink
+                               INTERFACE ROCPROFILER_SDK_USE_SYSTEM_ROCSHMEM=1)
+else()
+    target_compile_definitions(rocprofiler-sdk-rocshmem-nolink
+                               INTERFACE ROCPROFILER_SDK_USE_SYSTEM_ROCSHMEM=0)
 endif()

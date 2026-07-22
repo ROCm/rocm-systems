@@ -341,7 +341,8 @@ public:
   virtual exception_mask_t signaled_exceptions (const wave_t &) const;
   virtual exception_mask_t set_exceptions (wave_t &, exception_mask_t,
                                            exception_mask_t) const;
-  void clear_stop_reasons (wave_t &) const;
+  void clear_stop_reasons (wave_t &,
+                           amd_dbgapi_exceptions_t clear_exceptions) const;
 
   void record_spi_ttmps_setup (const wave_t &wave,
                                bool enabled) const override;
@@ -351,8 +352,8 @@ public:
 
   std::pair<amd_dbgapi_wave_state_t, amd_dbgapi_wave_stop_reasons_t>
   wave_get_state (wave_t &wave) const override;
-  void wave_set_state (wave_t &wave,
-                       amd_dbgapi_wave_state_t state) const override;
+  void wave_set_state (wave_t &wave, amd_dbgapi_wave_state_t state,
+                       amd_dbgapi_exceptions_t keep_exceptions) const override;
 
   bool wave_get_halt (const wave_t &wave) const override;
   void wave_set_halt (wave_t &wave, bool halt) const override;
@@ -1365,11 +1366,8 @@ amdgcn_architecture_t::set_exceptions (wave_t &wave, exception_mask_t mask,
 
   uint32_t trapsts;
   wave.read_register (amdgpu_regnum_t::trapsts, &trapsts);
-  while (mask != 0)
+  utils::for_each_flag (mask, [&] (exception_mask_t single_exception)
     {
-      /* Get the lowest bit that is set.  */
-      auto single_exception = mask ^ (mask & (mask - 1));
-
       /* For each exception, set or clear the corresponding bit in TRAPSTS.  */
       auto trapsts_bit = convert_exception (single_exception);
       if (trapsts_bit != 0)
@@ -1381,47 +1379,57 @@ amdgcn_architecture_t::set_exceptions (wave_t &wave, exception_mask_t mask,
         }
       else
         unhandled_exceptions |= single_exception;
-
-      mask ^= single_exception;
-    }
+    });
   wave.write_register (amdgpu_regnum_t::trapsts, trapsts);
 
   return unhandled_exceptions;
 }
 
 void
-amdgcn_architecture_t::clear_stop_reasons (wave_t &wave) const
+amdgcn_architecture_t::clear_stop_reasons (
+  wave_t &wave, amd_dbgapi_exceptions_t clear_exceptions) const
 {
   amd_dbgapi_wave_stop_reasons_t stop_reason = wave.stop_reason ();
-  exception_mask_t exceptions
-    = exception_mask_t::wave_begin | exception_mask_t::wave_end;
 
-  if (stop_reason & AMD_DBGAPI_WAVE_STOP_REASON_MEMORY_VIOLATION)
+  exception_mask_t exceptions = {};
+  if (!!(clear_exceptions & AMD_DBGAPI_EXCEPTION_WAVE_TRAP))
+    exceptions = exception_mask_t::wave_begin | exception_mask_t::wave_end;
+
+  if (stop_reason & AMD_DBGAPI_WAVE_STOP_REASON_MEMORY_VIOLATION
+      && !!(clear_exceptions & AMD_DBGAPI_EXCEPTION_WAVE_MEMORY_VIOLATION))
     exceptions |= exception_mask_t::mem_viol | exception_mask_t::xnack_error;
-  if (stop_reason & AMD_DBGAPI_WAVE_STOP_REASON_ADDRESS_ERROR)
+  if (stop_reason & AMD_DBGAPI_WAVE_STOP_REASON_ADDRESS_ERROR
+      && !!(clear_exceptions & AMD_DBGAPI_EXCEPTION_WAVE_ADDRESS_ERROR))
     exceptions |= exception_mask_t::mem_viol;
-  if (stop_reason & AMD_DBGAPI_WAVE_STOP_REASON_ILLEGAL_INSTRUCTION)
+  if (stop_reason & AMD_DBGAPI_WAVE_STOP_REASON_ILLEGAL_INSTRUCTION
+      && !!(clear_exceptions & AMD_DBGAPI_EXCEPTION_WAVE_ILLEGAL_INSTRUCTION))
     exceptions |= exception_mask_t::illegal_inst;
-  if (stop_reason & AMD_DBGAPI_WAVE_STOP_REASON_FP_INVALID_OPERATION)
-    exceptions |= exception_mask_t::invalid;
-  if (stop_reason & AMD_DBGAPI_WAVE_STOP_REASON_FP_INPUT_DENORMAL)
-    exceptions |= exception_mask_t::input_denorm;
-  if (stop_reason & AMD_DBGAPI_WAVE_STOP_REASON_FP_DIVIDE_BY_0)
-    exceptions |= exception_mask_t::float_div0;
-  if (stop_reason & AMD_DBGAPI_WAVE_STOP_REASON_FP_OVERFLOW)
-    exceptions |= exception_mask_t::overflow;
-  if (stop_reason & AMD_DBGAPI_WAVE_STOP_REASON_FP_UNDERFLOW)
-    exceptions |= exception_mask_t::underflow;
-  if (stop_reason & AMD_DBGAPI_WAVE_STOP_REASON_FP_INEXACT)
-    exceptions |= exception_mask_t::inexact;
-  if (stop_reason & AMD_DBGAPI_WAVE_STOP_REASON_INT_DIVIDE_BY_0)
-    exceptions |= exception_mask_t::int_div0;
-  if (stop_reason & AMD_DBGAPI_WAVE_STOP_REASON_WATCHPOINT)
-    exceptions |= exception_mask_t::addr_watch0 | exception_mask_t::addr_watch1
-                  | exception_mask_t::addr_watch2
-                  | exception_mask_t::addr_watch3;
+  if (!!(clear_exceptions & AMD_DBGAPI_EXCEPTION_WAVE_MATH_ERROR))
+    {
+      if (stop_reason & AMD_DBGAPI_WAVE_STOP_REASON_FP_INVALID_OPERATION)
+        exceptions |= exception_mask_t::invalid;
+      if (stop_reason & AMD_DBGAPI_WAVE_STOP_REASON_FP_INPUT_DENORMAL)
+        exceptions |= exception_mask_t::input_denorm;
+      if (stop_reason & AMD_DBGAPI_WAVE_STOP_REASON_FP_DIVIDE_BY_0)
+        exceptions |= exception_mask_t::float_div0;
+      if (stop_reason & AMD_DBGAPI_WAVE_STOP_REASON_FP_OVERFLOW)
+        exceptions |= exception_mask_t::overflow;
+      if (stop_reason & AMD_DBGAPI_WAVE_STOP_REASON_FP_UNDERFLOW)
+        exceptions |= exception_mask_t::underflow;
+      if (stop_reason & AMD_DBGAPI_WAVE_STOP_REASON_FP_INEXACT)
+        exceptions |= exception_mask_t::inexact;
+      if (stop_reason & AMD_DBGAPI_WAVE_STOP_REASON_INT_DIVIDE_BY_0)
+        exceptions |= exception_mask_t::int_div0;
+    }
+
+  /* None of the remaining exceptions can meaningfully be forwarded to the
+     runtime (they were caused by the debugger in the first place).  */
   if (stop_reason & AMD_DBGAPI_WAVE_STOP_REASON_SINGLE_STEP)
     exceptions |= exception_mask_t::trap_after_inst;
+  if (stop_reason & AMD_DBGAPI_WAVE_STOP_REASON_WATCHPOINT)
+    exceptions |= exception_mask_t::addr_watch0 | exception_mask_t::addr_watch1
+      | exception_mask_t::addr_watch2
+      | exception_mask_t::addr_watch3;
 
   set_exceptions (wave, exceptions, {});
 }
@@ -1580,8 +1588,9 @@ amdgcn_architecture_t::wave_get_state (wave_t &wave) const
 }
 
 void
-amdgcn_architecture_t::wave_set_state (wave_t &wave,
-                                       amd_dbgapi_wave_state_t state) const
+amdgcn_architecture_t::wave_set_state (
+  wave_t &wave, amd_dbgapi_wave_state_t state,
+  amd_dbgapi_exceptions_t resume_exceptions) const
 {
   uint32_t status_reg, mode_reg, ttmp6;
   wave.read_register (amdgpu_regnum_t::status, &status_reg);
@@ -1609,6 +1618,16 @@ amdgcn_architecture_t::wave_set_state (wave_t &wave,
       break;
 
     case AMD_DBGAPI_WAVE_STATE_RUN:
+      /* We are resuming a wave with exceptions.  This is done when the client
+         resumes the wave, with the intention to have the exception it
+         received be forwarded to the runtime.  In this case, we need to leave
+         the wave as it is (stopped), so the runtime can observe it as it
+         was when the exception was first reported.  This is important if we
+         want the runtime to be able to produce a valid core dump.  */
+      if (resume_exceptions != AMD_DBGAPI_EXCEPTION_NONE
+          && wave.state () == AMD_DBGAPI_WAVE_STATE_STOP)
+        break;
+
       /* Restore status.halt from ttmp6.saved_status_halt, put the wave in the
          run state (ttmp6.wave_stopped=0), and set mode.debug_en=0.  */
       status_reg
@@ -1648,7 +1667,7 @@ amdgcn_architecture_t::wave_set_state (wave_t &wave,
   if (state != AMD_DBGAPI_WAVE_STATE_STOP
       && wave.state () == AMD_DBGAPI_WAVE_STATE_STOP
       && wave.stop_reason () != AMD_DBGAPI_WAVE_STOP_REASON_NONE)
-    clear_stop_reasons (wave);
+    clear_stop_reasons (wave, ~resume_exceptions);
 }
 
 bool
@@ -2501,13 +2520,14 @@ protected:
   };
 
   virtual std::unique_ptr<architecture_t::cwsr_record_t>
-  make_gfx9_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
-                         uint32_t compute_relaunch_wave,
-                         uint32_t compute_relaunch_state,
-                         agent_address_t context_save_address) const
+  make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
+                    uint32_t compute_relaunch_wave,
+                    const std::vector<uint32_t> &compute_relaunch_state,
+                    agent_address_t context_save_address) const
   {
+    dbgapi_assert (compute_relaunch_state.size () == 1);
     return std::make_unique<cwsr_record_t> (
-      queue, xcc_id, compute_relaunch_wave, compute_relaunch_state,
+      queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
       context_save_address);
   }
 
@@ -2708,7 +2728,8 @@ gfx9_architecture_t::wave_get_state (wave_t &wave) const
           instruction && is_sequential (*instruction))
         {
           /* Resume the wave in single-step mode.  */
-          wave_set_state (wave, AMD_DBGAPI_WAVE_STATE_SINGLE_STEP);
+          wave_set_state (wave, AMD_DBGAPI_WAVE_STATE_SINGLE_STEP,
+                          AMD_DBGAPI_EXCEPTION_NONE);
 
           log_info ("%s (pc=%s) ignore spurious single-step",
                     to_cstring (wave.id ()), to_cstring (wave.pc ()));
@@ -3324,7 +3345,7 @@ gfx9_architecture_t::control_stack_iterate (
   const
 {
   size_t wave_count = 0;
-  uint32_t state = 0;
+  std::vector<uint32_t> state{ 0 };
 
   agent_address_t last_wave_area = wave_area_address;
 
@@ -3339,12 +3360,12 @@ gfx9_architecture_t::control_stack_iterate (
         }
       else if (compute_relaunch_is_state (relaunch))
         {
-          state = relaunch;
+          state[0] = relaunch;
         }
       else
         {
-          auto cwsr_record = make_gfx9_cwsr_record (
-            queue, xcc_id, relaunch, state, last_wave_area - 64);
+          auto cwsr_record = make_cwsr_record (queue, xcc_id, relaunch, state,
+                                               last_wave_area - 64);
 
           last_wave_area
             = cwsr_record->register_address (amdgpu_regnum_t::v0_64).value ();
@@ -3517,10 +3538,10 @@ protected:
   };
 
   std::unique_ptr<architecture_t::cwsr_record_t>
-  make_gfx9_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
-                         uint32_t compute_relaunch_wave,
-                         uint32_t compute_relaunch_state,
-                         agent_address_t context_save_address) const override
+  make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
+                    uint32_t compute_relaunch_wave,
+                    const std::vector<uint32_t> &compute_relaunch_state,
+                    agent_address_t context_save_address) const override
     = 0;
 
   mi_architecture_t (elf_amdgpu_machine_t e_machine,
@@ -3666,13 +3687,14 @@ class gfx908_t final : public mi_architecture_t
   };
 
   std::unique_ptr<architecture_t::cwsr_record_t>
-  make_gfx9_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
-                         uint32_t compute_relaunch_wave,
-                         uint32_t compute_relaunch_state,
-                         agent_address_t context_save_address) const override
+  make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
+                    uint32_t compute_relaunch_wave,
+                    const std::vector<uint32_t> &compute_relaunch_state,
+                    agent_address_t context_save_address) const override
   {
+    dbgapi_assert (compute_relaunch_state.size () == 1);
     return std::make_unique<cwsr_record_t> (
-      queue, xcc_id, compute_relaunch_wave, compute_relaunch_state,
+      queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
       context_save_address);
   }
 
@@ -3729,13 +3751,14 @@ protected:
   };
 
   std::unique_ptr<architecture_t::cwsr_record_t>
-  make_gfx9_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
-                         uint32_t compute_relaunch_wave,
-                         uint32_t compute_relaunch_state,
-                         agent_address_t context_save_address) const override
+  make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
+                    uint32_t compute_relaunch_wave,
+                    const std::vector<uint32_t> &compute_relaunch_state,
+                    agent_address_t context_save_address) const override
   {
+    dbgapi_assert (compute_relaunch_state.size () == 1);
     return std::make_unique<cwsr_record_t> (
-      queue, xcc_id, compute_relaunch_wave, compute_relaunch_state,
+      queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
       context_save_address);
   }
 
@@ -3848,13 +3871,14 @@ protected:
   };
 
   std::unique_ptr<architecture_t::cwsr_record_t>
-  make_gfx9_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
-                         uint32_t compute_relaunch_wave,
-                         uint32_t compute_relaunch_state,
-                         agent_address_t context_save_address) const override
+  make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
+                    uint32_t compute_relaunch_wave,
+                    const std::vector<uint32_t> &compute_relaunch_state,
+                    agent_address_t context_save_address) const override
   {
+    dbgapi_assert (compute_relaunch_state.size () == 1);
     return std::make_unique<cwsr_record_t> (
-      queue, xcc_id, compute_relaunch_wave, compute_relaunch_state,
+      queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
       context_save_address);
   }
 
@@ -3940,11 +3964,8 @@ gfx9_4_architecture_t::set_exceptions (wave_t &wave, exception_mask_t mask,
 
   uint32_t trapsts;
   wave.read_register (amdgpu_regnum_t::trapsts, &trapsts);
-  while (mask != 0)
+  utils::for_each_flag (mask, [&] (exception_mask_t single_exception)
     {
-      /* Get the lowest bit that is set.  */
-      auto single_exception = mask ^ (mask & (mask - 1));
-
       /* For each exception, set or clear the corresponding bit in TRAPSTS.  */
       auto trapsts_bit = convert_exception (single_exception);
       if (trapsts_bit != 0)
@@ -3956,9 +3977,7 @@ gfx9_4_architecture_t::set_exceptions (wave_t &wave, exception_mask_t mask,
         }
       else
         unhandled_exceptions |= single_exception;
-
-      mask ^= single_exception;
-    }
+    });
   wave.write_register (amdgpu_regnum_t::trapsts, trapsts);
 
   return unhandled_exceptions;
@@ -4276,13 +4295,14 @@ protected:
   };
 
   std::unique_ptr<architecture_t::cwsr_record_t>
-  make_gfx9_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
-                         uint32_t compute_relaunch_wave,
-                         uint32_t compute_relaunch_state,
-                         agent_address_t context_save_address) const override
+  make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
+                    uint32_t compute_relaunch_wave,
+                    const std::vector<uint32_t> &compute_relaunch_state,
+                    agent_address_t context_save_address) const override
   {
+    dbgapi_assert (compute_relaunch_state.size () == 1);
     return std::make_unique<cwsr_record_t> (
-      queue, xcc_id, compute_relaunch_wave, compute_relaunch_state,
+      queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
       context_save_address);
   }
 
@@ -4384,16 +4404,16 @@ protected:
     register_address (amdgpu_regnum_t regnum) const override;
   };
 
-  virtual std::unique_ptr<architecture_t::cwsr_record_t>
-  make_gfx1x_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
-                          uint32_t compute_relaunch_wave,
-                          uint32_t compute_relaunch_state,
-                          uint32_t compute_relaunch2_state,
-                          agent_address_t context_save_address) const
+  std::unique_ptr<architecture_t::cwsr_record_t>
+  make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
+                    uint32_t compute_relaunch_wave,
+                    const std::vector<uint32_t> &compute_relaunch_state,
+                    agent_address_t context_save_address) const override
   {
+    dbgapi_assert (compute_relaunch_state.size () == 2);
     return std::make_unique<cwsr_record_t> (
-      queue, xcc_id, compute_relaunch_wave, compute_relaunch_state,
-      compute_relaunch2_state, context_save_address);
+      queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
+      compute_relaunch_state[1], context_save_address);
   }
 
   std::optional<amdgpu_regnum_t>
@@ -5300,7 +5320,7 @@ gfx10_architecture_t::control_stack_iterate (
   const
 {
   size_t wave_count = 0;
-  uint32_t state0 = 0, state1 = 0;
+  std::vector<uint32_t> state{ 0, 0 };
 
   agent_address_t last_wave_area = wave_area_address;
 
@@ -5315,15 +5335,15 @@ gfx10_architecture_t::control_stack_iterate (
         }
       else if (compute_relaunch_is_state (relaunch))
         {
-          state0 = relaunch;
+          state[0] = relaunch;
           /* On gfx10 and gfx11, there are 2 COMPUTE_RELAUNCH registers for
              state.  */
-          state1 = control_stack[++i];
+          state[1] = control_stack[++i];
         }
       else
         {
-          auto cwsr_record = make_gfx1x_cwsr_record (
-            queue, xcc_id, relaunch, state0, state1, last_wave_area);
+          auto cwsr_record = make_cwsr_record (queue, xcc_id, relaunch, state,
+                                               last_wave_area);
 
           last_wave_area = cwsr_record->begin ();
           wave_callback (std::move (cwsr_record));
@@ -5484,14 +5504,16 @@ protected:
     uint32_t shader_engine_id () const override;
   };
 
-  std::unique_ptr<architecture_t::cwsr_record_t> make_gfx1x_cwsr_record (
-    compute_queue_t &queue, uint32_t xcc_id, uint32_t compute_relaunch_wave,
-    uint32_t compute_relaunch_state, uint32_t compute_relaunch2_state,
-    agent_address_t context_save_address) const override
+  std::unique_ptr<architecture_t::cwsr_record_t>
+  make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
+                    uint32_t compute_relaunch_wave,
+                    const std::vector<uint32_t> &compute_relaunch_state,
+                    agent_address_t context_save_address) const override
   {
+    dbgapi_assert (compute_relaunch_state.size () == 2);
     return std::make_unique<cwsr_record_t> (
-      queue, xcc_id, compute_relaunch_wave, compute_relaunch_state,
-      compute_relaunch2_state, context_save_address);
+      queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
+      compute_relaunch_state[1], context_save_address);
   }
 
   std::optional<amdgpu_regnum_t>
@@ -5639,11 +5661,8 @@ gfx11_architecture_t::set_exceptions (wave_t &wave, exception_mask_t mask,
 
   uint32_t trapsts;
   wave.read_register (amdgpu_regnum_t::trapsts, &trapsts);
-  while (mask != 0)
+  utils::for_each_flag (mask, [&] (exception_mask_t single_exception)
     {
-      /* Get the lowest bit that is set.  */
-      auto single_exception = mask ^ (mask & (mask - 1));
-
       /* For each exception, set or clear the corresponding bit in TRAPSTS.  */
       auto trapsts_bit = convert_exception (single_exception);
       if (trapsts_bit != 0)
@@ -5655,9 +5674,7 @@ gfx11_architecture_t::set_exceptions (wave_t &wave, exception_mask_t mask,
         }
       else
         unhandled_exceptions |= single_exception;
-
-      mask ^= single_exception;
-    }
+    });
   wave.write_register (amdgpu_regnum_t::trapsts, trapsts);
 
   return unhandled_exceptions;
@@ -6328,14 +6345,16 @@ protected:
     size_t lds_size () const override;
   };
 
-  std::unique_ptr<architecture_t::cwsr_record_t> make_gfx1x_cwsr_record (
-    compute_queue_t &queue, uint32_t xcc_id, uint32_t compute_relaunch_wave,
-    uint32_t compute_relaunch_state, uint32_t compute_relaunch2_state,
-    agent_address_t context_save_address) const override
+  std::unique_ptr<architecture_t::cwsr_record_t>
+  make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
+                    uint32_t compute_relaunch_wave,
+                    const std::vector<uint32_t> &compute_relaunch_state,
+                    agent_address_t context_save_address) const override
   {
+    dbgapi_assert (compute_relaunch_state.size () == 2);
     return std::make_unique<cwsr_record_t> (
-      queue, xcc_id, compute_relaunch_wave, compute_relaunch_state,
-      compute_relaunch2_state, context_save_address);
+      queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
+      compute_relaunch_state[1], context_save_address);
   }
 
   gfx12_architecture_t (elf_amdgpu_machine_t e_machine,
@@ -6359,8 +6378,9 @@ protected:
   exception_mask_t set_exceptions (wave_t &, exception_mask_t,
                                    exception_mask_t) const override;
 
-  void wave_set_state (wave_t &wave,
-                       amd_dbgapi_wave_state_t state) const override;
+  void
+  wave_set_state (wave_t &wave, amd_dbgapi_wave_state_t state,
+                  amd_dbgapi_exceptions_t resume_exceptions) const override;
 
   bool wave_get_halt (const wave_t &wave) const override;
 
@@ -6597,11 +6617,8 @@ gfx12_architecture_t::set_exceptions (wave_t &wave, exception_mask_t mask,
   uint32_t excp_flag_priv_reg, excp_flag_user_reg;
   wave.read_register (amdgpu_regnum_t::excp_flag_priv, &excp_flag_priv_reg);
   wave.read_register (amdgpu_regnum_t::excp_flag_user, &excp_flag_user_reg);
-  while (mask != 0)
+  utils::for_each_flag (mask, [&] (exception_mask_t single_exception)
     {
-      /* Get the lowest bit that is set.  */
-      auto single_exception = mask ^ (mask & (mask - 1));
-
       /* For each exception, set or clear the corresponding bit.  */
       auto excp_flag_priv_bit = convert_priv_exception (single_exception);
       auto excp_flag_user_bit = convert_user_exception (single_exception);
@@ -6623,9 +6640,7 @@ gfx12_architecture_t::set_exceptions (wave_t &wave, exception_mask_t mask,
         }
       else
         unhandled_exceptions |= single_exception;
-
-      mask ^= single_exception;
-    }
+    });
   wave.write_register (amdgpu_regnum_t::excp_flag_priv, excp_flag_priv_reg);
   wave.write_register (amdgpu_regnum_t::excp_flag_user, excp_flag_user_reg);
 
@@ -6633,8 +6648,9 @@ gfx12_architecture_t::set_exceptions (wave_t &wave, exception_mask_t mask,
 }
 
 void
-gfx12_architecture_t::wave_set_state (wave_t &wave,
-                                      amd_dbgapi_wave_state_t state) const
+gfx12_architecture_t::wave_set_state (
+  wave_t &wave, amd_dbgapi_wave_state_t state,
+  amd_dbgapi_exceptions_t resume_exceptions) const
 {
   uint32_t state_priv_reg, ttmp6, trap_ctrl_reg;
 
@@ -6658,6 +6674,16 @@ gfx12_architecture_t::wave_set_state (wave_t &wave,
       break;
 
     case AMD_DBGAPI_WAVE_STATE_RUN:
+      /* We are resuming a wave with exceptions.  This is done when the client
+         resumes the wave, with the intention to have the exception it
+         received be forwarded to the runtime.  In this case, we need to leave
+         the wave as it is (stopped), so the runtime can observe it as it
+         was when the exception was first reported.  This is important if we
+         want the runtime to be able to produce a valid core dump.  */
+      if (resume_exceptions != AMD_DBGAPI_EXCEPTION_NONE
+          && wave.state () == AMD_DBGAPI_WAVE_STATE_STOP)
+        break;
+
       /* Restore status.halt from ttmp6.saved_status_halt, put the wave in the
          run state (ttmp6.wave_stopped=0), and set mode.debug_en=0.  */
       state_priv_reg &= ~sq_wave_state_priv_halt_mask;
@@ -6696,7 +6722,7 @@ gfx12_architecture_t::wave_set_state (wave_t &wave,
   if (state != AMD_DBGAPI_WAVE_STATE_STOP
       && wave.state () == AMD_DBGAPI_WAVE_STATE_STOP
       && wave.stop_reason () != AMD_DBGAPI_WAVE_STOP_REASON_NONE)
-    clear_stop_reasons (wave);
+    clear_stop_reasons (wave, ~resume_exceptions);
 }
 
 bool
@@ -7387,8 +7413,8 @@ gfx12_architecture_t::cwsr_record_t::group_ids () const
   coordinates[0] = ttmp9;
   if (ttmp8 & ttmp8_grid_yz_valid)
     {
-      coordinates[1] = ttmp7 & utils::bit_mask<uint32_t> (0, 15);
-      coordinates[2] = (ttmp7 & utils::bit_mask<uint32_t> (16, 31)) >> 16;
+      coordinates[1] = utils::bit_extract (ttmp7, 0, 15);
+      coordinates[2] = utils::bit_extract (ttmp7, 16, 31);
     }
 
   return coordinates;
@@ -7407,7 +7433,7 @@ gfx12_architecture_t::cwsr_record_t::position_in_group () const
 
   agent ().read_agent_memory (ttmp8_address, &ttmp8);
 
-  return utils::narrow<uint32_t> ((ttmp8 & utils::bit_mask (25, 29)) >> 25);
+  return utils::bit_extract (ttmp8, 25, 29);
 }
 
 size_t
@@ -7642,16 +7668,14 @@ protected:
   };
 
   std::unique_ptr<architecture_t::cwsr_record_t>
-  make_gfx1x_cwsr_record (compute_queue_t &queue,
-                          uint32_t xcc_id,
-                          uint32_t compute_relaunch_wave,
-                          uint32_t compute_relaunch_state,
-                          uint32_t compute_relaunch2_state,
-                          agent_address_t context_save_address) const override
+  make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
+                    uint32_t compute_relaunch_wave,
+                    const std::vector<uint32_t> &compute_relaunch_state,
+                    agent_address_t context_save_address) const override
   {
     return std::make_unique<cwsr_record_t> (
-      queue, xcc_id, compute_relaunch_wave, compute_relaunch_state,
-      compute_relaunch2_state, context_save_address);
+      queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
+      compute_relaunch_state[1], context_save_address);
   }
 
   /* A note regarding all the register methods in this class:

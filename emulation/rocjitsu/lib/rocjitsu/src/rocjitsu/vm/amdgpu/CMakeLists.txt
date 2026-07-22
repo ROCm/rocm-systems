@@ -3,6 +3,7 @@
 
 rj_add_object_library(rocjitsu_vm_amdgpu
     wavefront.cpp
+    cluster_lds_multicast.cpp
     compute_unit.cpp
     memory_pipeline.cpp
     command_processor.cpp

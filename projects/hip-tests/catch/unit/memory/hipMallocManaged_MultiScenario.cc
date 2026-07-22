@@ -14,13 +14,13 @@
    6. Multiple Pointers
  */
 
-#include "hipMallocManagedCommon.hh"
+#include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <atomic>
 
 const size_t MAX_GPU{256};
-static size_t N{4 * 1024 * 1024};
+static size_t N = isQuickLevel() ? (256 * 1024) : (4 * 1024 * 1024);
 static unsigned blocksPerCU{6};
 static unsigned threadsPerBlock{256};
 #define INIT_VAL 123
@@ -61,10 +61,7 @@ void HostKernelDouble(float* Hmm, float* hPtr, size_t n) {
    This testcase verifies the concurrent access of hipMallocManaged Memory on host and device.
  */
 HIP_TEST_CASE(Unit_hipMallocManaged_HostDeviceConcurrent) {
-  auto managed = HmmAttrPrint();
-  if (managed != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   float *Hmm = nullptr, *hPtr = nullptr, *dPtr = nullptr, *resPtr = nullptr;
 
@@ -97,10 +94,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_HostDeviceConcurrent) {
 // kernel is launched on acessed chunk of hmm memory
 // and checks if there are any inconsistencies or access issues
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkSingleDevice) {
-  auto managed = HmmAttrPrint();
-  if (managed != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   std::atomic<int> DataMismatch{0};
   constexpr int Chunks = 4;
@@ -148,10 +142,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkSingleDevice) {
 // kernel is launched on acessed chunk of hmm memory
 // and checks if there are any inconsistencies or access issues
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkMultiDevice) {
-  auto managed = HmmAttrPrint();
-  if (managed != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   std::atomic<int> DataMismatch{0};
   int Counter = 0;
@@ -202,10 +193,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkMultiDevice) {
 
 // The following tests oversubscription hipMallocManaged() api
 HIP_TEST_CASE(Unit_hipMallocManaged_OverSubscription) {
-  auto managed = HmmAttrPrint();
-  if (managed != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
 #if HT_AMD
   int isPageableHMM = 0;
@@ -285,10 +273,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_Negative) {
 // later validate the content without using any Memcpy.
 HIP_TEMPLATE_TEST_CASE(Unit_hipMallocManaged_TwoPointers, int,
                    float, double) {
-  auto managed = HmmAttrPrint();
-  if (managed != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   int NumDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&NumDevices));
@@ -325,10 +310,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocManaged_TwoPointers, int,
 
 HIP_TEMPLATE_TEST_CASE(Unit_hipMallocManaged_DeviceContextChange,
                    unsigned char, int, float, double) {
-  auto managed = HmmAttrPrint();
-  if (managed != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   int NumDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&NumDevices));

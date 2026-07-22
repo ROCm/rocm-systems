@@ -41,18 +41,20 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <regex>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 
 #include "amd_smi/impl/amd_smi_common.h"
 #include "amd_smi/impl/amd_smi_gpu_mutex.h"
 #include "amd_smi/impl/amd_smi_system.h"
 #include "amd_smi/impl/scoped_fd.h"
-#include "config/amd_smi_config.h"
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
@@ -640,7 +642,10 @@ amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device,
   std::string empty = "";
   std::strncpy(version, empty.c_str(), len - 1);
   openFileAndModifyBuffer("/sys/module/amdgpu/version", version, static_cast<size_t>(len));
-  if (version[0] == '\0') return AMDSMI_STATUS_DIRECTORY_NOT_FOUND;
+  if (version[0] == '\0') {
+    std::strncpy(version, "N/A", len - 1);
+    version[len - 1] = '\0';
+  }
 
   return status;
 }
@@ -698,7 +703,7 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
   }
 
   amd::smi::AMDSmiLibraryLoader libdrm_amdgpu_;
-  amdsmi_status_t status = libdrm_amdgpu_.load(LIBDRM_AMDGPU_SONAME);
+  amdsmi_status_t status = libdrm_amdgpu_.load(amd::smi::libdrm_amdgpu_sonames());
   if (status != AMDSMI_STATUS_SUCCESS) {
     libdrm_amdgpu_.unload();
     return status;
@@ -1321,4 +1326,150 @@ std::tuple<uint64_t, uint64_t, uint64_t, uint64_t> parse_bdfid(uint64_t bdfid) {
   uint64_t device_id = (bdfid >> 3) & 0x1f;
   uint64_t function = bdfid & 0x7;
   return std::tuple<uint64_t, uint64_t, uint64_t, uint64_t>(domain, bus, device_id, function);
+}
+
+amdsmi_status_t smi_amdgpu_read_clk_freq_from_pp_dpm(amd::smi::AMDSmiGPUDevice* device,
+                                                     const char* pp_dpm_file,
+                                                     amdsmi_frequencies_t* f) {
+  if (f == nullptr || device == nullptr || pp_dpm_file == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  uint32_t drm_render = device->get_drm_render_minor();
+  std::string sysfs_path =
+      "/sys/class/drm/renderD" + std::to_string(drm_render) + "/device/" + pp_dpm_file;
+
+  std::ifstream file(sysfs_path);
+  if (!file.good()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  f->num_supported = 0;
+  f->current = 0;
+  f->has_deep_sleep = 0;
+
+  std::string line;
+  uint32_t level_index = 0;
+
+  while (std::getline(file, line) && level_index < AMDSMI_MAX_NUM_FREQUENCIES) {
+    // Parse line format: "0: 200Mhz" or "1: 400Mhz *"
+    size_t colon_pos = line.find(':');
+    if (colon_pos == std::string::npos) {
+      continue;
+    }
+
+    std::string freq_str = line.substr(colon_pos + 1);
+
+    // Check if this is the current level (marked with *)
+    bool is_current = (freq_str.find('*') != std::string::npos);
+    if (is_current) {
+      f->current = level_index;
+    }
+
+    // Remove asterisk and surrounding whitespace
+    freq_str.erase(std::remove(freq_str.begin(), freq_str.end(), '*'), freq_str.end());
+    freq_str.erase(0, freq_str.find_first_not_of(" \t"));
+    size_t end = freq_str.find_last_not_of(" \t");
+    if (end != std::string::npos) {
+      freq_str.erase(end + 1);
+    }
+
+    // Parse "200Mhz" / "200 Mhz" / "200MHz"
+    uint64_t freq_value = 0;
+    char unit = 'M';  // Default to MHz
+
+    size_t unit_pos = freq_str.find_first_not_of("0123456789 ");
+    if (unit_pos != std::string::npos) {
+      std::string value_str = freq_str.substr(0, unit_pos);
+      value_str.erase(std::remove(value_str.begin(), value_str.end(), ' '), value_str.end());
+      try {
+        freq_value = std::stoull(value_str);
+      } catch (...) {
+        continue;  // Skip invalid lines
+      }
+      std::string unit_str = freq_str.substr(unit_pos);
+      if (!unit_str.empty()) {
+        unit = static_cast<char>(std::toupper(static_cast<unsigned char>(unit_str[0])));
+      }
+    }
+
+    f->frequency[level_index] = freq_value * amd::smi::get_multiplier_from_char(unit);
+    level_index++;
+  }
+
+  f->num_supported = level_index;
+  return (f->num_supported > 0) ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_NOT_SUPPORTED;
+}
+
+const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type) {
+  switch (clk_type) {
+    case AMDSMI_CLK_TYPE_VCLK0:
+      return "pp_dpm_vclk";
+    case AMDSMI_CLK_TYPE_VCLK1:
+      return "pp_dpm_vclk1";
+    case AMDSMI_CLK_TYPE_DCLK0:
+      return "pp_dpm_dclk";
+    case AMDSMI_CLK_TYPE_DCLK1:
+      return "pp_dpm_dclk1";
+    default:
+      return nullptr;
+  }
+}
+
+// Gfx activity can be silenced (forced to the uint-max N/A sentinel). The
+// affected graphics/RLC-firmware combo is flagged once per handle and cached.
+namespace {
+constexpr uint64_t kFlaggedGfxVersion = 0x1250;  // gfx1250
+constexpr uint64_t kFlaggedRlcFwMin = 0x18;      // RLC fw 24..29
+constexpr uint64_t kFlaggedRlcFwMax = 0x1d;
+
+bool has_flagged_gfx_fw(amdsmi_processor_handle processor_handle) {
+  static std::unordered_map<amdsmi_processor_handle, bool> cache;
+  static std::mutex mtx;
+  std::lock_guard<std::mutex> lock(mtx);
+  auto it = cache.find(processor_handle);
+  if (it != cache.end()) return it->second;
+
+  bool flagged = false;
+  amdsmi_asic_info_t asic{};
+  if (amdsmi_get_gpu_asic_info(processor_handle, &asic) == AMDSMI_STATUS_SUCCESS &&
+      asic.target_graphics_version == kFlaggedGfxVersion) {
+    amdsmi_fw_info_t fw{};
+    if (amdsmi_get_fw_info(processor_handle, &fw) == AMDSMI_STATUS_SUCCESS) {
+      for (uint8_t i = 0; i < fw.num_fw_info; ++i) {
+        if (fw.fw_info_list[i].fw_id == AMDSMI_FW_ID_RLC) {
+          uint64_t rlc = fw.fw_info_list[i].fw_version;
+          flagged = rlc >= kFlaggedRlcFwMin && rlc <= kFlaggedRlcFwMax;
+          break;
+        }
+      }
+    }
+  }
+  cache[processor_handle] = flagged;
+  return flagged;
+}
+}  // namespace
+
+bool is_gfx_activity_silenced(amdsmi_processor_handle processor_handle) {
+  const char* v = std::getenv("AMDSMI_SILENCE_GFX_ACTIVITY");
+  if (v != nullptr) return std::string(v) == "1";
+  return has_flagged_gfx_fw(processor_handle);
+}
+
+void apply_gfx_activity_overrides(amdsmi_processor_handle processor_handle,
+                                  amdsmi_gpu_metrics_t* metrics) {
+  if (metrics == nullptr) return;
+  if (!is_gfx_activity_silenced(processor_handle)) return;
+
+  metrics->average_gfx_activity = std::numeric_limits<uint16_t>::max();
+  metrics->gfx_activity_acc = std::numeric_limits<uint32_t>::max();
+  // Per-XCP busy fields read the same source as the whole-GPU value.
+  for (auto& xcp : metrics->xcp_stats) {
+    for (auto& busy_inst : xcp.gfx_busy_inst) {
+      busy_inst = std::numeric_limits<uint32_t>::max();
+    }
+    for (auto& busy_acc : xcp.gfx_busy_acc) {
+      busy_acc = std::numeric_limits<uint64_t>::max();
+    }
+  }
 }

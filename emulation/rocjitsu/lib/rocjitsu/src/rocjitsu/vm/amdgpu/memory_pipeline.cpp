@@ -3,11 +3,14 @@
 
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
+#include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
+#include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
+#include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "util/log.h"
 
@@ -16,53 +19,118 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <format>
+#include <stdexcept>
+#include <utility>
+#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
 
 namespace {
 
-/// Shared complete_access logic for vector/LDS loads (write VGPRs from
-/// response data). Used by both GlobalMemPipeline and LocalMemPipeline.
-///
-/// For atomics with elem_size=8 and num_elems=1, the 8-byte old value
-/// occupies two consecutive VGPRs (low dword in vdst, high in vdst+1).
-void vector_complete(VectorMemState &d, ComputeUnitCore &cu) {
+uint32_t extend_scalar_load(const uint8_t *bytes, uint32_t elem_size, bool sign_extend) {
+  uint32_t value = 0;
+  std::memcpy(&value, bytes, elem_size);
+  if (!sign_extend)
+    return value;
+  if (elem_size == 1)
+    return static_cast<uint32_t>(static_cast<int32_t>(static_cast<int8_t>(value & 0xffu)));
+  if (elem_size == 2)
+    return static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(value & 0xffffu)));
+  return value;
+}
+
+std::vector<ClusterLdsTarget> resolve_lds_write_targets(VectorMemState &d, Wavefront &wf,
+                                                        ComputeUnitCore &cu) {
+  std::vector<ClusterLdsTarget> targets;
+  if (d.cluster_multicast && d.cluster_mcast_mask != 0) {
+    if (auto *cp = cu.command_processor())
+      targets = cp->cluster_lds_targets(wf.dispatch_id(), wf.wg_id(), d.cluster_mcast_mask);
+  }
+
+  const bool writes_self =
+      !d.cluster_multicast || d.cluster_mcast_mask == 0 ||
+      (d.cluster_mcast_mask & cluster_multicast_rank_mask(wf.cluster_rank())) != 0;
+  if (targets.empty() && writes_self)
+    targets.push_back({&cu, wf.wg_id(), d.lds_base, wf.cluster_rank()});
+  return targets;
+}
+
+void write_lds_dst_load_direct(const VectorMemState &d, Lds &lds, uint32_t per_lane_bytes) {
+  for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
+    if ((d.lane_mask & (1ULL << lane)) == 0)
+      continue;
+    uint32_t data_offset = lane * per_lane_bytes;
+    if (data_offset + per_lane_bytes > d.response_data.size()) {
+      throw std::runtime_error(std::format(
+          "LDS-destination load payload too small: lane={} offset={} bytes={} payload={}", lane,
+          data_offset, per_lane_bytes, d.response_data.size()));
+    }
+    uint32_t lds_addr =
+        d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * per_lane_bytes;
+    lds.write(lds_addr, &d.response_data[data_offset], per_lane_bytes);
+  }
+}
+
+MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, ComputeUnitCore &cu,
+                                             MemoryAccessDeferredCompletion complete) {
+  uint32_t per_lane_bytes = d.num_elems * d.elem_size;
+  std::vector<ClusterLdsTarget> targets;
+  size_t target_count = 1;
+  const bool cluster_downgrades_to_ordinary = d.cluster_multicast && wf.cluster_size() <= 1;
+  if (d.cluster_multicast && !cluster_downgrades_to_ordinary) {
+    targets = resolve_lds_write_targets(d, wf, cu);
+    target_count = targets.size();
+  }
+
+  // Per-lane LDS-dst buffer load trace.
+  util::Logger::vm([&](auto &os) {
+    static thread_local uint64_t lds_dst_trace = 0;
+    if (++lds_dst_trace > 80)
+      return;
+    os << std::format("{} wg[{}] wf[{}] BUF->LDS: lds_base={:#x} plb={} mcast={:#x} targets={}",
+                      d.cu_path, d.wg_id, d.wf_id, d.lds_base, per_lane_bytes, d.cluster_mcast_mask,
+                      target_count);
+    for (uint32_t ln = 0; ln < d.wf_size; ++ln) {
+      if (!(d.lane_mask & (1ULL << ln)))
+        continue;
+      uint32_t v = 0;
+      if (per_lane_bytes >= 4)
+        std::memcpy(&v, &d.response_data[ln * per_lane_bytes], 4);
+      uint32_t lds_addr =
+          d.lds_per_lane_addr ? d.per_lane_lds_addr[ln] : d.lds_base + ln * per_lane_bytes;
+      os << std::format(" L{}:@{:#x}->lds[{:#x}]={:#x}", ln, d.per_lane_addr[ln], lds_addr, v);
+    }
+  });
+
+  if (!d.cluster_multicast || cluster_downgrades_to_ordinary) {
+    write_lds_dst_load_direct(d, wf.lds(), per_lane_bytes);
+    return MemoryAccessCompletion::Complete;
+  }
+
+  auto txn = make_cluster_lds_multicast_transaction(d, wf, std::move(targets));
+  auto result = cu.cluster_lds_multicast_engine().submit(std::move(txn), std::move(complete));
+
+  return result == ClusterLdsMulticastResult::Deferred ? MemoryAccessCompletion::Deferred
+                                                       : MemoryAccessCompletion::Complete;
+}
+
+MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, ComputeUnitCore &cu,
+                                       MemoryAccessDeferredCompletion complete) {
   if (!d.is_load)
-    return;
+    return MemoryAccessCompletion::Complete;
+
+  // D16 memory completion merges a loaded half into the destination dword. The
+  // preserved half is storage state, not an instruction-visible source operand.
+  auto read_dst_lane_storage_for_d16_merge = [&](uint32_t reg, uint32_t lane) {
+    return reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(reg))[lane];
+  };
 
   // Buffer load with LDS bit: scatter loaded data into LDS instead of VGPRs.
   // Each lane writes num_elems * elem_size bytes to LDS at lds_base + lane_offset.
-  if (d.lds_dst) {
-    auto &lds = cu.lds();
-    uint32_t per_lane_bytes = d.num_elems * d.elem_size;
-    for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
-      if (!(d.lane_mask & (1ULL << lane)))
-        continue;
-      uint32_t lds_addr = d.lds_base + lane * per_lane_bytes;
-      uint32_t data_offset = lane * per_lane_bytes;
-      for (uint32_t b = 0; b < per_lane_bytes; ++b)
-        lds.write8(lds_addr + b, d.response_data[data_offset + b]);
-    }
-    // Per-lane LDS-dst buffer load trace.
-    util::Logger::vm([&](auto &os) {
-      static thread_local uint64_t lds_dst_trace = 0;
-      if (++lds_dst_trace > 80)
-        return;
-      os << std::format("{} wg[{}] wf[{}] BUF->LDS: lds_base={:#x} plb={}", d.cu_path, d.wg_id,
-                        d.wf_id, d.lds_base, per_lane_bytes);
-      for (uint32_t ln = 0; ln < d.wf_size; ++ln) {
-        if (!(d.lane_mask & (1ULL << ln)))
-          continue;
-        uint32_t v = 0;
-        if (per_lane_bytes >= 4)
-          std::memcpy(&v, &d.response_data[ln * per_lane_bytes], 4);
-        os << std::format(" L{}:@{:#x}->lds[{:#x}]={:#x}", ln, d.per_lane_addr[ln],
-                          d.lds_base + ln * per_lane_bytes, v);
-      }
-    });
-    return;
-  }
+  if (d.lds_dst)
+    return complete_lds_dst_load(d, wf, cu, std::move(complete));
 
   // Atomics: response layout is [lane * elem_size], regular loads are
   // [lane * (num_elems * elem_size) + elem * elem_size].
@@ -91,8 +159,14 @@ void vector_complete(VectorMemState &d, ComputeUnitCore &cu) {
     for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
       if (!(oob_mask & (1ULL << lane)))
         continue;
-      for (uint32_t i = 0; i < vgpr_count; ++i)
-        cu.write_vgpr(d.dst_reg_base + i, lane, 0);
+      for (uint32_t i = 0; i < vgpr_count; ++i) {
+        uint32_t val = 0;
+        if (!cu.sram_ecc() && d.elem_size <= 2 && (d.d16_hi || d.d16_lo)) {
+          const uint32_t old = read_dst_lane_storage_for_d16_merge(d.dst_reg_base + i, lane);
+          val = d.d16_hi ? (old & 0x0000FFFFu) : (old & 0xFFFF0000u);
+        }
+        cu.write_vgpr(d.dst_reg_base + i, lane, val);
+      }
     }
   }
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
@@ -117,7 +191,7 @@ void vector_complete(VectorMemState &d, ComputeUnitCore &cu) {
           else
             val = val & 0xFFFF;
         } else {
-          uint32_t old = cu.read_vgpr(d.dst_reg_base + i, lane);
+          uint32_t old = read_dst_lane_storage_for_d16_merge(d.dst_reg_base + i, lane);
           if (d.d16_hi)
             val = (old & 0xFFFF) | (val << 16);
           else
@@ -127,24 +201,33 @@ void vector_complete(VectorMemState &d, ComputeUnitCore &cu) {
       cu.write_vgpr(d.dst_reg_base + i, lane, val);
     }
   }
+  return MemoryAccessCompletion::Complete;
 }
 
 } // namespace
 
-void ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront & /*wf*/) {
+void ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<ScalarMemState>();
   if (d.is_load) {
-    l1_->load(d.addr, d.num_dwords, d.response_data);
+    if (d.elem_size < 4) {
+      uint8_t bytes[4] = {};
+      l1_->load_bytes(d.addr, d.elem_size, bytes, wf.process_id());
+      d.response_data[0] = extend_scalar_load(bytes, d.elem_size, d.sign_extend);
+    } else {
+      l1_->load(d.addr, d.num_dwords, d.response_data, wf.process_id());
+    }
   } else {
-    l1_->store(d.addr, d.num_dwords, d.store_data);
+    l1_->store(d.addr, d.num_dwords, d.store_data, wf.process_id());
   }
 }
 
-void ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf) {
+MemoryAccessCompletion
+ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
+                                   MemoryAccessDeferredCompletion /*complete*/) {
   auto &d = *inst.data_as<ScalarMemState>();
   if (!d.is_load)
-    return;
-  auto &cu = wf.cu();
+    return MemoryAccessCompletion::Complete;
+  auto &cu = wf.raw_cu();
   for (uint32_t i = 0; i < d.num_dwords; ++i) {
     cu.write_sgpr(d.dst_reg_base + i, d.response_data[i]);
   }
@@ -161,6 +244,7 @@ void ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf) {
       }
     }
   });
+  return MemoryAccessCompletion::Complete;
 }
 
 namespace {
@@ -173,6 +257,8 @@ template <typename T> T apply_int_atomic(AtomicOp op, T old_val, T src_val, T cm
     return src_val;
   case AtomicOp::CMPSWAP:
     return (old_val == cmp_val) ? src_val : old_val;
+  case AtomicOp::MSKOR:
+    return (old_val & ~src_val) | cmp_val;
   case AtomicOp::ADD:
     return old_val + src_val;
   case AtomicOp::SUB:
@@ -216,72 +302,87 @@ template <typename F> F apply_fp_atomic(AtomicOp op, F old_val, F src_val) {
   }
 }
 
+uint32_t atomic_source_stride(const VectorMemState &d) {
+  const bool uses_two_sources =
+      (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::MSKOR);
+  const uint32_t fallback = uses_two_sources ? d.elem_size * 2 : d.elem_size;
+  if (d.wf_size == 0 || d.store_data.empty())
+    return fallback;
+
+  const size_t per_lane = d.store_data.size() / d.wf_size;
+  return per_lane == 0 ? fallback : static_cast<uint32_t>(per_lane);
+}
+
 /// @brief Perform a per-lane atomic RMW through L2.
 ///
 /// Reads old value from L2, applies the atomic operation, writes new value
 /// back. Invalidates the L1 line to prevent stale reads. Old values are
 /// stored in response_data for GLC return.
-void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, L1VectorCache *l1) {
+void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, L1VectorCache *l1, uint32_t vmid) {
   const uint32_t esz = d.elem_size;
   d.response_data.resize(d.wf_size * esz);
+  const bool uses_two_sources =
+      (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::MSKOR);
+  const uint32_t src_stride = atomic_source_stride(d);
+  const bool is_fp = (d.atomic_op == AtomicOp::FADD || d.atomic_op == AtomicOp::FMIN ||
+                      d.atomic_op == AtomicOp::FMAX);
 
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
     if (!(d.lane_mask & (1ULL << lane)))
       continue;
 
     uint64_t ea = d.per_lane_addr[lane];
-    bool is_cmpswap = (d.atomic_op == AtomicOp::CMPSWAP);
-    uint32_t src_stride = is_cmpswap ? esz * 2 : esz;
-    bool is_fp = (d.atomic_op == AtomicOp::FADD || d.atomic_op == AtomicOp::FMIN ||
-                  d.atomic_op == AtomicOp::FMAX);
 
     // Perform the atomic RMW under L2's atomic lock.
-    l2->atomic_rmw(ea, esz, [&](uint8_t *line_data, uint32_t offset) {
-      if (esz == 4) {
-        uint32_t old_val;
-        std::memcpy(&old_val, line_data + offset, 4);
+    l2->atomic_rmw(
+        ea, esz,
+        [&](uint8_t *line_data, uint32_t offset) {
+          if (esz == 4) {
+            uint32_t old_val;
+            std::memcpy(&old_val, line_data + offset, 4);
 
-        uint32_t new_val;
-        if (is_fp) {
-          float old_f = std::bit_cast<float>(old_val);
-          float src_f;
-          std::memcpy(&src_f, &d.store_data[lane * src_stride], 4);
-          new_val = std::bit_cast<uint32_t>(apply_fp_atomic(d.atomic_op, old_f, src_f));
-        } else {
-          uint32_t src_val = 0, cmp_val = 0;
-          std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
-          if (is_cmpswap)
-            std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 4], 4);
-          new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
-        }
+            uint32_t new_val;
+            if (is_fp) {
+              float old_f = std::bit_cast<float>(old_val);
+              float src_f;
+              std::memcpy(&src_f, &d.store_data[lane * src_stride], 4);
+              new_val = std::bit_cast<uint32_t>(apply_fp_atomic(d.atomic_op, old_f, src_f));
+            } else {
+              uint32_t src_val = 0, cmp_val = 0;
+              std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
+              if (uses_two_sources)
+                std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 4], 4);
+              new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
+            }
 
-        std::memcpy(line_data + offset, &new_val, 4);
-        std::memcpy(&d.response_data[lane * 4], &old_val, 4);
-      } else if (esz == 8) {
-        uint64_t old_val;
-        std::memcpy(&old_val, line_data + offset, 8);
+            std::memcpy(line_data + offset, &new_val, 4);
+            std::memcpy(&d.response_data[lane * 4], &old_val, 4);
+          } else if (esz == 8) {
+            uint64_t old_val;
+            std::memcpy(&old_val, line_data + offset, 8);
 
-        uint64_t new_val;
-        if (is_fp) {
-          double old_f = std::bit_cast<double>(old_val);
-          double src_f;
-          std::memcpy(&src_f, &d.store_data[lane * src_stride], 8);
-          new_val = std::bit_cast<uint64_t>(apply_fp_atomic(d.atomic_op, old_f, src_f));
-        } else {
-          uint64_t src_val = 0, cmp_val = 0;
-          std::memcpy(&src_val, &d.store_data[lane * src_stride], 8);
-          if (is_cmpswap)
-            std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 8], 8);
-          new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
-        }
+            uint64_t new_val;
+            if (is_fp) {
+              double old_f = std::bit_cast<double>(old_val);
+              double src_f;
+              std::memcpy(&src_f, &d.store_data[lane * src_stride], 8);
+              new_val = std::bit_cast<uint64_t>(apply_fp_atomic(d.atomic_op, old_f, src_f));
+            } else {
+              uint64_t src_val = 0, cmp_val = 0;
+              std::memcpy(&src_val, &d.store_data[lane * src_stride], 8);
+              if (uses_two_sources)
+                std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 8], 8);
+              new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
+            }
 
-        std::memcpy(line_data + offset, &new_val, 8);
-        std::memcpy(&d.response_data[lane * 8], &old_val, 8);
-      }
-    });
+            std::memcpy(line_data + offset, &new_val, 8);
+            std::memcpy(&d.response_data[lane * 8], &old_val, 8);
+          }
+        },
+        vmid);
 
     // Invalidate stale L1 line.
-    l1->invalidate(ea);
+    l1->invalidate(ea, vmid);
   }
 }
 
@@ -289,17 +390,47 @@ void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, L1VectorCache *l1) {
 void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds) {
   const uint32_t esz = d.elem_size;
   d.response_data.resize(d.wf_size * esz);
+  const bool uses_two_sources =
+      (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::MSKOR);
+  const uint32_t src_stride = atomic_source_stride(d);
+  const bool is_fp = (d.atomic_op == AtomicOp::FADD || d.atomic_op == AtomicOp::FMIN ||
+                      d.atomic_op == AtomicOp::FMAX);
+
+  if (d.atomic_op == AtomicOp::APPEND || d.atomic_op == AtomicOp::CONSUME) {
+    uint32_t addr = 0;
+    bool any_lane = false;
+    for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
+      if (d.lane_mask & (1ULL << lane)) {
+        addr = static_cast<uint32_t>(d.per_lane_addr[lane]);
+        any_lane = true;
+        break;
+      }
+    }
+    if (!any_lane)
+      return;
+
+    const uint32_t old_val = lds->read32(addr);
+    const uint32_t active_count = static_cast<uint32_t>(std::popcount(d.lane_mask));
+    uint32_t active_rank = 0;
+    for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
+      if (!(d.lane_mask & (1ULL << lane)))
+        continue;
+      const uint32_t result =
+          d.atomic_op == AtomicOp::APPEND ? old_val + active_rank : old_val - active_rank - 1;
+      std::memcpy(&d.response_data[lane * 4], &result, 4);
+      ++active_rank;
+    }
+    const uint32_t new_val =
+        d.atomic_op == AtomicOp::APPEND ? old_val + active_count : old_val - active_count;
+    lds->write32(addr, new_val);
+    return;
+  }
 
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
     if (!(d.lane_mask & (1ULL << lane)))
       continue;
 
     auto addr = static_cast<uint32_t>(d.per_lane_addr[lane]);
-    bool is_cmpswap = (d.atomic_op == AtomicOp::CMPSWAP);
-    uint32_t src_stride = is_cmpswap ? esz * 2 : esz;
-
-    bool is_fp = (d.atomic_op == AtomicOp::FADD || d.atomic_op == AtomicOp::FMIN ||
-                  d.atomic_op == AtomicOp::FMAX);
 
     if (esz == 4) {
       uint32_t old_val = lds->read32(addr);
@@ -312,7 +443,7 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds) {
       } else {
         uint32_t src_val = 0, cmp_val = 0;
         std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
-        if (is_cmpswap)
+        if (uses_two_sources)
           std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 4], 4);
         new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
       }
@@ -321,7 +452,13 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds) {
     } else if (esz == 8) {
       uint64_t old_val = lds->read64(addr);
       uint64_t new_val;
-      if (is_fp) {
+      if (d.atomic_op == AtomicOp::BARRIER_ARRIVE) {
+        uint64_t decrement = 0;
+        const bool has_decrement = d.store_data.size() >= lane * src_stride + 8;
+        if (has_decrement)
+          std::memcpy(&decrement, &d.store_data[lane * src_stride], 8);
+        new_val = lds_barrier_cell_update_arrive(old_val, has_decrement ? decrement : 1);
+      } else if (is_fp) {
         double old_f = std::bit_cast<double>(old_val);
         double src_f;
         std::memcpy(&src_f, &d.store_data[lane * src_stride], 8);
@@ -329,7 +466,7 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds) {
       } else {
         uint64_t src_val = 0, cmp_val = 0;
         std::memcpy(&src_val, &d.store_data[lane * src_stride], 8);
-        if (is_cmpswap)
+        if (uses_two_sources)
           std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 8], 8);
         new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
       }
@@ -350,50 +487,31 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   }
 
   if (d.atomic_op != AtomicOp::NONE) {
-    execute_atomic_rmw(d, l2_, l1_);
+    execute_atomic_rmw(d, l2_, l1_, wf.process_id());
     return;
   }
 
   if (d.is_load) {
     d.response_data.resize(d.wf_size * d.num_elems * d.elem_size);
     l1_->load(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.response_data.data(),
-              d.mtype, d.non_temporal);
+              d.mtype, d.non_temporal, d.request_force_l1_bypass, d.wf_size, wf.process_id());
   } else {
-    // Trace: dump per-lane addresses, hex data, and float values for stores.
-    util::Logger::vm([&](auto &os) {
-      static thread_local uint64_t store_trace = 0;
-      if (++store_trace > 500)
-        return;
-      os << std::format("VMEM store: {} wg[{}] wf[{}] esz={} nelm={} pc={:#x} exec={:#x}",
-                        wf.cu().full_path(), wf.wg_id(), wf.wf_id(), d.elem_size, d.num_elems,
-                        d.issue_pc, d.lane_mask);
-      uint32_t stride = d.num_elems * d.elem_size;
-      for (uint32_t ln = 0; ln < d.wf_size; ++ln) {
-        if (!(d.lane_mask & (1ULL << ln)))
-          continue;
-        uint64_t addr = d.per_lane_addr[ln];
-        os << std::format("\n[rj log VM]   L{}:@{:#x} =", ln, addr);
-        for (uint32_t e = 0; e < d.num_elems; ++e) {
-          uint32_t v = 0;
-          uint32_t off = ln * stride + e * d.elem_size;
-          if (d.elem_size >= 4 && d.store_data.size() >= off + 4)
-            std::memcpy(&v, &d.store_data[off], 4);
-          float fv = std::bit_cast<float>(v);
-          os << std::format(" [{:#x}|{:.6g}]", v, fv);
-        }
-      }
-    });
     l1_->store(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.store_data.data(),
-               d.mtype, d.non_temporal);
+               d.mtype, d.non_temporal, d.wf_size, wf.process_id());
   }
 }
 
-void GlobalMemPipeline::complete_access(Instruction &inst, Wavefront &wf) {
-  vector_complete(*inst.data_as<VectorMemState>(), wf.cu());
+MemoryAccessCompletion GlobalMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
+                                                          MemoryAccessDeferredCompletion complete) {
+  auto &d = *inst.data_as<VectorMemState>();
+  if (d.transpose != 0)
+    transpose_response(d);
+  return vector_complete(d, wf, wf.raw_cu(), std::move(complete));
 }
 
 void LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<VectorMemState>();
+  auto &lds = wf.lds();
   if (d.cu_path.empty()) {
     d.cu_path = wf.cu().full_path();
     d.wg_id = wf.wg_id();
@@ -401,18 +519,18 @@ void LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   }
 
   if (d.atomic_op != AtomicOp::NONE) {
-    execute_lds_atomic_rmw(d, lds_);
+    execute_lds_atomic_rmw(d, &lds);
     return;
   }
 
   if (d.is_load) {
     d.response_data.resize(d.wf_size * d.num_elems * d.elem_size);
-    lds_->vector_load(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
-                      d.response_data.data());
+    lds.vector_load(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
+                    d.response_data.data());
     if (d.ds2_active) {
       d.ds2_response_data.resize(d.wf_size * d.num_elems * d.elem_size);
-      lds_->vector_load(d.ds2_per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
-                        d.ds2_response_data.data());
+      lds.vector_load(d.ds2_per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
+                      d.ds2_response_data.data());
     }
     // Per-lane LDS load trace: log addresses and loaded values for first 4 lanes.
     util::Logger::vm([&](auto &os) {
@@ -475,24 +593,25 @@ void LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
         }
       }
     });
-    lds_->vector_store(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
-                       d.store_data.data());
+    lds.vector_store(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
+                     d.store_data.data());
     if (d.ds2_active) {
-      lds_->vector_store(d.ds2_per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
-                         d.ds2_store_data.data());
+      lds.vector_store(d.ds2_per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
+                       d.ds2_store_data.data());
     }
   }
 }
 
-void LocalMemPipeline::complete_access(Instruction &inst, Wavefront &wf) {
+MemoryAccessCompletion LocalMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
+                                                         MemoryAccessDeferredCompletion complete) {
   auto &d = *inst.data_as<VectorMemState>();
   if (d.transpose != 0)
     transpose_response(d);
-  vector_complete(d, wf.cu());
+  MemoryAccessCompletion completion = vector_complete(d, wf, wf.raw_cu(), std::move(complete));
 
   // DS dual-access (ds_read2/ds_write2): write the second access results.
   if (d.ds2_active && d.is_load) {
-    auto &cu = wf.cu();
+    auto &cu = wf.raw_cu();
     uint32_t vgpr_count = d.elem_size / 4;
     for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
       if (!(d.lane_mask & (1ULL << lane)))
@@ -521,6 +640,7 @@ void LocalMemPipeline::complete_access(Instruction &inst, Wavefront &wf) {
       }
     });
   }
+  return completion;
 }
 
 } // namespace amdgpu

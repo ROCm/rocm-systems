@@ -66,6 +66,7 @@ static constexpr encoding_t bit_encodings[] = {
 
 TokenLookupTable::TokenLookupTable() : std::array<token_info_t, 256>({})
 {
+    for (auto& encoding : *this) encoding = {UNKNOWN, 4, 0, 0};
     for (const auto& encoding : bit_encodings) AddEncoding(encoding);
 }
 

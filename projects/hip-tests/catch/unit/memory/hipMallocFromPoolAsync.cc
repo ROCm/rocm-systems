@@ -434,39 +434,8 @@ static void threadQAsyncCommands(streamMemAllocTest* testObj, hipStream_t strm, 
   testObj->freeDevBuf(strm);
 }
 
-static void thread_Test1(hipStream_t stream, int N, enum eTestValue testtype, int threadNum) {
-  thread_results[threadNum] = checkMaximumAndDefaultThreshold(stream, N, testtype, 0);
-}
-
-static bool test_hipMallocFromPoolAsync_MThread(enum eTestValue testtype) {
-  // create a stream
-  constexpr int N = 1 << 20;
-  std::vector<std::thread> tests;
-  hipStream_t stream[NUMBER_OF_THREADS];
-  // Initialize and create streams
-  for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
-    thread_results[idx] = false;
-    HIP_CHECK(hipStreamCreate(&stream[idx]));
-  }
-  // Spawn the test threads
-  for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
-    tests.push_back(std::thread(thread_Test1, stream[idx], N, testtype, idx));
-  }
-  // Wait for all threads to complete
-  for (std::thread& t : tests) {
-    t.join();
-  }
-  // Wait for thread and destroy stream
-  bool status = true;
-  for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
-    status = status & thread_results[idx];
-    HIP_CHECK(hipStreamDestroy(stream[idx]));
-  }
-  return status;
-}
-
 static void thread_Test2(hipMemPool_t mempool, hipStream_t stream, int N, int threadNum) {
-  streamMemAllocTest testObj(N);
+  streamMemAllocTest testObj(N, true);
   // Create host buffer with test data
   testObj.createHostBufferWithData();
   // Use the common mempool
@@ -480,8 +449,8 @@ static void thread_Test2(hipMemPool_t mempool, hipStream_t stream, int N, int th
     testObj.transferFromMempool(stream);
     testObj.freeDevBuf(stream);
     // verify and validate
-    HIP_CHECK(hipStreamSynchronize(stream));
-    results = testObj.validateResult();
+    HIP_CHECK_THREAD(hipStreamSynchronize(stream));
+    results = testObj.validateResultThreadSafe();
     if (!results) {
       break;
     }
@@ -534,6 +503,8 @@ static bool test_hipMallocFromPoolAsync_MThread_CommonMpool(enum eTestValue test
   if (!bUseDefault) {
     HIP_CHECK(hipMemPoolDestroy(mem_pool_common));
   }
+
+  HIP_CHECK_THREAD_FINALIZE();
   return status;
 }
 

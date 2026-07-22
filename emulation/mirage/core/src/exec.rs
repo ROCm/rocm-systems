@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{common::MaybeRef, session::SessionId};
+use crate::{common::MaybeRef, profile::FileMount, session::SessionId};
 
 /// Concrete process arguments for one program invocation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,9 +112,26 @@ pub struct ExecDef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker_exec: Option<ExecArgs>,
 
+    /// Number of workload processes to launch per node. Defaults to `1`.
+    /// Values greater than one give each node `nproc_per_node` processes,
+    /// each with a distinct `LOCAL_RANK` (`0..nproc_per_node`) and global
+    /// `RANK`, so `torch.distributed` runs without a launcher like
+    /// `torchrun --nproc-per-node`. The total world size is
+    /// `num_nodes * nproc_per_node`.
+    #[serde(default = "one_proc", skip_serializing_if = "is_one_proc")]
+    pub nproc_per_node: u32,
+
     /// If `false`, the host removes the exec directory after it exits.
     #[serde(default)]
     pub keep: bool,
+}
+
+fn one_proc() -> u32 {
+    1
+}
+
+fn is_one_proc(n: &u32) -> bool {
+    *n == 1
 }
 
 /// Aggregate status of an exec (all nodes).
@@ -159,6 +176,37 @@ pub struct InjectionDef {
     pub ld_preload: Option<String>,
     pub files: BTreeMap<String, MaybeRef<Vec<u8>>>,
     pub env: BTreeMap<String, String>,
+
+    /// Host paths the emulator needs bind-mounted into each node's
+    /// container so that the injected `LD_PRELOAD`/env paths resolve
+    /// inside it. Empty for non-containerised sessions (where the
+    /// injected paths are already host paths the workload can see). By
+    /// convention these target locations live under `/mnt/mirage`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mounts: Vec<FileMount>,
+
+    /// Host paths of shared libraries the workload needs available. For
+    /// a containerised session each is bind-mounted into `/mnt/mirage/lib`
+    /// (preserving its file name) and that directory is prepended to
+    /// `LD_LIBRARY_PATH`, so the dynamic loader prefers them over the
+    /// container image's own copies. Used to supply libraries that the
+    /// bind-mounted mirage binary and emulator interposers were built
+    /// against but the image's system libraries are too old to satisfy
+    /// (e.g. a newer `libc.so.6` or `libstdc++.so.6`). Ignored for
+    /// non-containerised sessions, where the workload already sees the
+    /// host's libraries.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub libraries: Vec<String>,
+
+    /// Whether the emulator needs the host's GPUs exposed to each node's
+    /// container. When set, every node container is launched with the
+    /// host's GPU device nodes (`/dev/kfd`, `/dev/dri`) and the
+    /// supplementary groups needed to open them; the group mechanism is
+    /// provider-specific (podman inherits the launching user's groups
+    /// via `--group-add keep-groups`, docker is given the named GPU
+    /// groups explicitly). Only meaningful for containerised sessions.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub host_gpus: bool,
 }
 
 #[cfg(test)]

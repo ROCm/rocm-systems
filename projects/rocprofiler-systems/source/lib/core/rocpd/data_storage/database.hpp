@@ -11,6 +11,7 @@
 #include <sqlite3.h>
 #include <sstream>
 #include <stdexcept>
+#include <type_traits>
 
 namespace rocprofsys
 {
@@ -88,22 +89,29 @@ private:
         throw std::runtime_error(ss.str());
     }
 
-    template <typename T,
-              std::enable_if_t<!(common::traits::is_string_literal<T>() ||
-                                 std::is_floating_point_v<std::decay_t<T>> ||
-                                 std::is_same_v<std::decay_t<T>, std::int64_t> ||
-                                 std::is_same_v<std::decay_t<T>, std::uint64_t> ||
-                                 std::is_same_v<std::decay_t<T>, std::int32_t> ||
-                                 std::is_same_v<std::decay_t<T>, std::uint32_t>),
-                               int> = 0>
+    template <typename T>
+    static constexpr bool sql_int64_v = std::is_same_v<std::decay_t<T>, std::int64_t> ||
+                                        std::is_same_v<std::decay_t<T>, std::uint64_t>;
+
+    template <typename T>
+    static constexpr bool sql_int32_v = std::is_same_v<std::decay_t<T>, std::int32_t> ||
+                                        std::is_same_v<std::decay_t<T>, std::uint32_t>;
+
+    template <typename T>
+    static constexpr bool sql_supported_v =
+        common::traits::is_string_literal<T>() ||
+        std::is_floating_point_v<std::decay_t<T>> || sql_int64_v<T> || sql_int32_v<T>;
+
+    template <typename T>
+        requires(!sql_supported_v<T>)
     void bind_value([[maybe_unused]] sqlite3_stmt* stmt, [[maybe_unused]] int position,
                     [[maybe_unused]] T& _value, [[maybe_unused]] const std::string& query)
     {
         throw std::runtime_error("Unsupported type for binding!");
     }
 
-    template <typename T,
-              std::enable_if_t<common::traits::is_string_literal<T>(), int> = 0>
+    template <typename T>
+        requires(common::traits::is_string_literal<T>())
     void bind_value(sqlite3_stmt* stmt, int position, T&& _value,
                     const std::string& query)
     {
@@ -112,8 +120,8 @@ private:
             "Failed to bind text! Position: ", position, ", Value: ", _value);
     }
 
-    template <typename T,
-              std::enable_if_t<std::is_floating_point_v<std::decay_t<T>>, int> = 0>
+    template <typename T>
+        requires std::is_floating_point_v<std::decay_t<T>>
     void bind_value(sqlite3_stmt* stmt, int position, T&& _value,
                     const std::string& query)
     {
@@ -122,10 +130,8 @@ private:
             "Failed to bind double! Position: ", position, ", Value: ", _value);
     }
 
-    template <typename T,
-              std::enable_if_t<std::is_same_v<std::decay_t<T>, std::int64_t> ||
-                                   std::is_same_v<std::decay_t<T>, std::uint64_t>,
-                               int> = 0>
+    template <typename T>
+        requires sql_int64_v<T>
     void bind_value(sqlite3_stmt* stmt, int position, T&& _value,
                     const std::string& query)
     {
@@ -134,10 +140,8 @@ private:
                                 position, ", Value: ", _value);
     }
 
-    template <typename T,
-              std::enable_if_t<std::is_same_v<std::decay_t<T>, std::int32_t> ||
-                                   std::is_same_v<std::decay_t<T>, std::uint32_t>,
-                               int> = 0>
+    template <typename T>
+        requires sql_int32_v<T>
     void bind_value(sqlite3_stmt* stmt, int position, T&& _value,
                     const std::string& query)
     {

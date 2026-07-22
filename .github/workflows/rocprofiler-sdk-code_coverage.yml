@@ -11,6 +11,8 @@ on:
     paths:
       - 'projects/rocprofiler-sdk/**'
       - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
+      - '.github/actions/rocprofiler-sdk-util/action.yml'
+      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -24,6 +26,8 @@ on:
     paths:
       - 'projects/rocprofiler-sdk/**'
       - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
+      - '.github/actions/rocprofiler-sdk-util/action.yml'
+      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -43,6 +47,7 @@ env:
   ROCM_PATH: "/opt/rocm"
   GPU_TARGETS: "gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
   PATH: "/usr/bin:$PATH"
+  SUBMODULE_PATHS: "projects/rocprofiler-sdk projects/aqlprofile projects/rocprofiler-register projects/rocr-runtime projects/clr projects/hip"
   ## No tests should be excluded here except for extreme emergencies; tests should only be disabled in CMake
   ## A task should be assigned directly to fix the issue
   ## Scratch memory tests need to be fixed for ROCm 7.0 release
@@ -69,10 +74,31 @@ env:
   ENABLE_AQLPROFILE_BUILD: "true"
   ENABLE_ROCDECODE_BUILD: "true"
   ENABLE_ROCJPEG_BUILD: "true"
-  INSTALL_NIGHTLY_ROCM: "true"
 
 jobs:
+  ci_config:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    name: Load CI config
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      gfx94x_runner: ${{ steps.runner.outputs.gfx94x_runner }}
+      gfx94x_sandbox_runner: ${{ steps.runner.outputs.gfx94x_sandbox_runner }}
+    steps:
+      - name: Checkout workflow actions
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
+          set-safe-directory: true
+
+      - name: Resolve runner labels
+        id: runner
+        uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+
   code-coverage:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    needs: ci_config
     name: Code Coverage • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     permissions:
       contents: write
@@ -81,9 +107,9 @@ jobs:
       # fail-fast: false
       matrix:
         system:
-          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'Release', gpu-target: 'gfx94X' }
+          - { gpu: 'mi325', os: 'ubuntu-22.04', build-type: 'Release', gpu-target: 'gfx94X' }
 
-    runs-on: ${{ matrix.system.runner }}
+    runs-on: ${{ needs.ci_config.outputs.gfx94x_runner }}
     container:
       image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
       credentials:
@@ -96,7 +122,7 @@ jobs:
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      GPU_RUNNER: ${{ matrix.system.runner }}
+      GPU_RUNNER: ${{ needs.ci_config.outputs.gfx94x_runner }}
       GCC_COMPILER_VERSION: 11
 
     steps:
@@ -119,25 +145,25 @@ jobs:
       shell: bash
       run: |
         git config --global --add safe.directory '*'
-        git submodule status --recursive | awk '{print $1,$2}' > .git-submodules-status
+        git submodule status --recursive -- ${SUBMODULE_PATHS} > .git-submodules-status-raw
+        awk '{print $1,$2}' .git-submodules-status-raw > .git-submodules-status
         echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-        # collect submodule paths for cache 'path'
-        git config --file .gitmodules --get-regexp path | awk '{print $2}' > .git-submodule-paths
+        # cache scoped submodule working trees plus their .git/modules gitdirs
+        awk '{print $2}' .git-submodules-status-raw > .git-submodule-paths
+        for p in ${SUBMODULE_PATHS}; do echo ".git/modules/${p}"; done >> .git-submodule-paths
         { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
     - name: Restore submodule cache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
-          .git/modules
           ${{ steps.submods.outputs.paths }}
-        key: submods-${{ runner.os }}-${{ steps.submods.outputs.hash }}
+        key: submods-scoped-v1-${{ runner.os }}-${{ steps.submods.outputs.hash }}
         restore-keys: |
-          submods-${{ runner.os }}-
-          submods-
+          submods-scoped-v1-${{ runner.os }}-
 
     - name: Init/Update submodules
-      run: git submodule update --init --recursive --jobs 16
+      run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
 
     - name: Clone ROCDecode
       uses: actions/checkout@v6
@@ -158,7 +184,7 @@ jobs:
     - name: Load Existing XML Code Coverage
       if: github.event_name == 'pull_request'
       id: load-coverage
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         key: ${{ github.event.pull_request.base.sha }}-codecov
         path: .codecov/**
@@ -183,7 +209,7 @@ jobs:
         git config --global --add safe.directory '*'
         apt-get update
         apt-get install -y build-essential ccache python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev
-        python3 -m pip install -U --user cmake==3.24.0
+        python3 -m pip install -U --user cmake==3.25.0
         python3 -m pip install -U --user -r requirements.txt
 
     - name: Sync gcov with compilers
@@ -215,8 +241,7 @@ jobs:
         enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
         enable-rocdecode-build: ${{ env.ENABLE_ROCDECODE_BUILD }}
         enable-rocjpeg-build: ${{ env.ENABLE_ROCJPEG_BUILD }}
-        install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
-        ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
+        ccache-key: ccache-${{ matrix.system.os }}-${{ needs.ci_config.outputs.gfx94x_runner }}-${{ matrix.system.gpu }}
         ccache-variant: ccache
 
     - name: Configure, Build, and Test (Total Code Coverage)
@@ -227,12 +252,11 @@ jobs:
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov
           --build-jobs 16
-          --site ${{ matrix.system.runner }}
+          --site ${{ needs.ci_config.outputs.gfx94x_runner }}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --coverage all
           --run-attempt ${{ github.run_attempt }}
           --
-          -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
           -DPython3_EXECUTABLE=$(which python3)
@@ -250,12 +274,11 @@ jobs:
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov-tests
           --build-jobs 16
-          --site ${{ matrix.system.runner }}
+          --site ${{ needs.ci_config.outputs.gfx94x_runner }}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --coverage tests
           --run-attempt ${{ github.run_attempt }}
           --
-          -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
           -DPython3_EXECUTABLE=$(which python3)
@@ -273,12 +296,11 @@ jobs:
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov-samples
           --build-jobs 16
-          --site ${{ matrix.system.runner }}
+          --site ${{ needs.ci_config.outputs.gfx94x_runner }}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --coverage samples
           --run-attempt ${{ github.run_attempt }}
           --
-          -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
           -DPython3_EXECUTABLE=$(which python3)

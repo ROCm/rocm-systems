@@ -5,12 +5,15 @@
 
 #include "common/defines.h"
 #include "common/delimit.hpp"
+#include "common/env_vars.hpp"
 #include "common/environment.hpp"
-#include "common/join.hpp"
+#include <spdlog/fmt/fmt.h>
 
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
+#include <filesystem>
 #include <fstream>
 #include <link.h>
 #include <linux/limits.h>
@@ -89,21 +92,17 @@ inline std::string
 find_path(const std::string& _path, int _verbose,
           const std::string& _search_paths = {}) ROCPROFSYS_INTERNAL_API;
 
-inline std::string
-dirname(const std::string& _fname) ROCPROFSYS_INTERNAL_API;
+[[nodiscard]] inline std::string
+parent_path(std::string_view fpath, std::uint16_t levels = 1) ROCPROFSYS_INTERNAL_API;
 
-inline std::string
-realpath(const std::string& _relpath,
-         std::string*       _resolved = nullptr) ROCPROFSYS_INTERNAL_API;
+[[nodiscard]] inline std::string
+realpath(const std::string& path) ROCPROFSYS_INTERNAL_API;
 
 inline bool
 is_text_file(const std::string& filename) ROCPROFSYS_INTERNAL_API;
 
-inline bool
-is_link(const std::string& _path) ROCPROFSYS_INTERNAL_API;
-
-inline std::string
-readlink(const std::string& _path) ROCPROFSYS_INTERNAL_API;
+[[nodiscard]] inline std::string
+read_symlink(const std::string& path) ROCPROFSYS_INTERNAL_API;
 
 inline std::string
 get_rocprofsys_root() ROCPROFSYS_INTERNAL_API;
@@ -175,9 +174,9 @@ template <typename RetT>
 RetT
 get_default_lib_search_paths()
 {
-    auto _paths =
-        join(":", get_env("ROCPROFSYS_PATH", ""), get_env("LD_LIBRARY_PATH", ""),
-             get_env("LIBRARY_PATH", ""), get_env("PWD", ""), ".");
+    auto _paths = fmt::format("{}:{}:{}:{}:.", get_env(env_vars::PATH, ""),
+                              get_env("LD_LIBRARY_PATH", ""), get_env("LIBRARY_PATH", ""),
+                              get_env("PWD", ""));
     if constexpr(std::is_same<RetT, std::string>::value)
         return _paths;
     else
@@ -198,7 +197,7 @@ find_path(const std::string& _path, int _verbose, const std::string& _search_pat
     constexpr int _verbose_lvl = 2;
     for(const auto& itr : _paths)
     {
-        auto _f = join('/', itr, _path);
+        auto _f = fmt::format("{}/{}", itr, _path);
         ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl + 1,
                             "searching for '%s' in '%s' ...\n", _path.c_str(),
                             itr.c_str());
@@ -214,14 +213,14 @@ find_path(const std::string& _path, int _verbose, const std::string& _search_pat
     {
         if(std::string_view{ ::basename(itr.c_str()) }.find("lib") ==
                std::string_view::npos &&
-           !dirname(itr).empty())
+           !parent_path(itr).empty())
         {
             for(const auto* sitr : { "lib", "lib64", "../lib", "../lib64" })
             {
-                auto _f = join('/', dirname(itr), sitr, _path);
+                auto _f = fmt::format("{}/{}/{}", parent_path(itr), sitr, _path);
                 ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl + 1,
                                     "searching for '%s' in '%s' ...\n", _path.c_str(),
-                                    common::join('/', itr, sitr).c_str());
+                                    fmt::format("{}/{}", itr, sitr).c_str());
                 if(exists(_f))
                 {
                     ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl,
@@ -236,74 +235,56 @@ find_path(const std::string& _path, int _verbose, const std::string& _search_pat
     return _path;
 }
 
-std::string
-dirname(const std::string& _fname)
+/**
+ * Get parent directory of @p fpath, walking up @p levels times.
+ * Pure lexical operation: no filesystem access and no '.'/'..' resolution.
+ * Absolute paths clamp at "/"; relative paths bottom out at "".
+ * @code parent_path("/a/b/c", 2) @endcode returns "/a".
+ * @param fpath  the path to take the parent of
+ * @param levels number of components to strip (0 returns @p fpath unchanged)
+ * @return the parent path, or "" / "/" at the relative / absolute limit
+ */
+[[nodiscard]] std::string
+parent_path(std::string_view fpath, std::uint16_t levels)
 {
-    if(_fname.find('/') != std::string::npos)
-        return _fname.substr(0, _fname.find_last_of('/'));
-    return std::string{};
+    std::filesystem::path result{ fpath };
+    for(std::uint16_t i = 0; i < levels; ++i)
+    {
+        auto parent = result.parent_path();
+        if(parent == result) break;  // reached root ("/") or relative bottom ("")
+        result = std::move(parent);
+    }
+    return result.string();
 }
 
-bool
-is_link(const std::string& _path)
+/** @brief Read the symbolic link target.
+ *  @param path The filesystem path to inspect.
+ *  @return The link target as a string, or @p path unchanged if @p path is not
+ *          a symbolic link or if any filesystem error occurs.
+ */
+[[nodiscard]] std::string
+read_symlink(const std::string& path)
 {
-    struct stat _buffer;
-    if(lstat(_path.c_str(), &_buffer) == 0) return (S_ISLNK(_buffer.st_mode) != 0);
-    return false;
+    std::error_code error;
+    auto            target = std::filesystem::read_symlink(path, error);
+    return (error) ? path : target.string();
 }
 
-std::string
-readlink(const std::string& _path)
+/**
+ * Resolve @p path to its canonical absolute form.
+ * Filesystem operation: follows symlinks and collapses '.'/'..'; the path
+ * must exist. On any error (missing path, permission denied) @p path is
+ * returned unchanged.
+ * @code realpath("/a/./b/../c") @endcode returns "/a/c" (when it exists).
+ * @param path the path to canonicalize
+ * @return the canonical absolute path, or @p path unchanged on error
+ */
+[[nodiscard]] std::string
+realpath(const std::string& path)
 {
-    constexpr size_t MaxLen = PATH_MAX;
-    // if not a symbolic link, just return the path
-    if(!is_link(_path)) return _path;
-
-    char    _buffer[MaxLen];
-    ssize_t _buffer_len = MaxLen;
-    _buffer_len         = ::readlink(_path.c_str(), _buffer, _buffer_len);
-    if(_buffer_len < 0 || _buffer_len == (MaxLen))
-    {
-        auto* _path_rp = ::realpath(_path.c_str(), nullptr);
-        if(_path_rp)
-        {
-            auto _ret = std::string{ _path_rp };
-            free(_path_rp);
-            return _ret;
-        }
-    }
-    else
-    {
-        _buffer[_buffer_len] = '\0';
-        return _buffer;
-    }
-    return _path;
-}
-
-std::string
-realpath(const std::string& _relpath, std::string* _resolved)
-{
-    constexpr size_t MaxLen = PATH_MAX;
-    auto             _len   = std::min<size_t>(_relpath.length(), MaxLen);
-
-    char        _buffer[MaxLen] = { '\0' };
-    const char* _result         = _buffer;
-
-    if(::realpath(_relpath.c_str(), _buffer) == nullptr)
-    {
-        _result = _relpath.data();
-    }
-
-    if(_resolved)
-    {
-        _resolved->clear();
-        _len = strnlen(_result, MaxLen);
-        _resolved->resize(_len);
-        for(size_t i = 0; i < _len; ++i)
-            (*_resolved)[i] = _result[i];
-    }
-
-    return (_resolved) ? *_resolved : std::string{ _result };
+    std::error_code error;
+    auto            canon = std::filesystem::canonical(path, error);
+    return (error) ? path : canon.string();
 }
 
 bool
@@ -408,10 +389,8 @@ get_origin(const std::string& _filename, std::vector<int>&& _open_modes)
 std::string
 get_rocprofsys_root()
 {
-    auto _exe_rp  = realpath("/proc/self/exe");
-    auto _exe_dir = dirname(_exe_rp);
-    if(_exe_dir.empty()) _exe_dir = "./";
-    return rocprofsys::common::join('/', _exe_dir, "..");
+    // strip 2 levels from exe filepath to reach root
+    return parent_path(realpath("/proc/self/exe"), 2);
 }
 
 std::string
@@ -420,23 +399,23 @@ get_internal_libpath(const std::string& _lib)
     auto _root = get_rocprofsys_root();
     for(const auto* libdir : { "lib", "lib64" })
     {
-        auto _candidate = rocprofsys::common::join('/', _root, libdir, _lib);
+        auto _candidate = fmt::format("{}/{}/{}", _root, libdir, _lib);
         if(exists(_candidate)) return _candidate;
     }
-    return rocprofsys::common::join('/', _root, "lib", _lib);
+    return fmt::format("{}/lib/{}", _root, _lib);
 }
 
 std::string
 get_internal_script_path()
 {
     auto _root = get_rocprofsys_root();
-    return rocprofsys::common::join('/', _root, "libexec", "rocprofiler-systems");
+    return _root + "/libexec/rocprofiler-systems";
 }
 
 std::string
 get_internal_libdir()
 {
-    return rocprofsys::common::join('/', get_rocprofsys_root(), "lib");
+    return get_rocprofsys_root() + "/lib";
 }
 
 }  // namespace path

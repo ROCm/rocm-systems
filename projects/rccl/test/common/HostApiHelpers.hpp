@@ -159,7 +159,8 @@ inline bool VerifyBuf(const void* buf, size_t size, int seed)
     std::vector<uint8_t> staging(size);
     if(hipMemcpy(staging.data(), buf, size, hipMemcpyDeviceToHost) != hipSuccess)
         return false;
-    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    if (hipDeviceSynchronize() != hipSuccess)
+        return false;
     for(size_t i = 0; i < size; ++i)
     {
         if(staging[i] != static_cast<uint8_t>((seed + i) % 256))
@@ -189,7 +190,8 @@ inline bool AllSentinel(const void* buf, size_t size, uint8_t value)
     std::vector<uint8_t> staging(size);
     if(hipMemcpy(staging.data(), buf, size, hipMemcpyDeviceToHost) != hipSuccess)
         return false;
-    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    if (hipDeviceSynchronize() != hipSuccess)
+        return false;
     for(size_t i = 0; i < size; ++i)
     {
         if(staging[i] != value)

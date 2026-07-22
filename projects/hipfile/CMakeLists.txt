@@ -17,7 +17,7 @@ endif()
 # Set the library version in a variable so we can use
 # it in *.in files and avoid version mismatch.
 set(AIS_LIBRARY_MAJOR 0)
-set(AIS_LIBRARY_MINOR 2)
+set(AIS_LIBRARY_MINOR 3)
 set(AIS_LIBRARY_PATCH 0)
 set(AIS_LIBRARY_VERSION "${AIS_LIBRARY_MAJOR}.${AIS_LIBRARY_MINOR}.${AIS_LIBRARY_PATCH}")
 
@@ -46,9 +46,10 @@ set(HIPFILE_NVIDIA_SOURCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/nvidia_detail")
 set(HIPFILE_SRC_COMMON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/common")
 set(HIPFILE_TEST_COMMON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/test/common")
 set(HIPFILE_AMD_TEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/test/amd_detail")
+set(HIPFILE_THIRD_PARTY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third-party")
 
-set(AIS_CXX_STANDARD "17" CACHE STRING "C++ standard to build with")
-set_property(CACHE AIS_CXX_STANDARD PROPERTY STRINGS "17" "20")
+set(AIS_CXX_STANDARD "20" CACHE STRING "C++ standard to build with")
+set_property(CACHE AIS_CXX_STANDARD PROPERTY STRINGS "20" "23" "26")
 
 # Set the list of build types for ccmake/CMake GUI
 #
@@ -233,6 +234,24 @@ option(AIS_INSTALL_EXAMPLES "Install example programs" ON)
 #------------------
 option(AIS_INSTALL_TOOLS "Install tool programs" ON)
 
+#------------------
+# rocprofiler-register integration
+#------------------
+option(HIPFILE_ROCPROFILER_REGISTER "Enable rocprofiler-register API table registration" ON)
+
+
+#------------------
+# Test programs
+#------------------
+# Whether to install the relocatable unit-test assets (binaries + ctest files)
+# so the suite can run from an installed/packaged tree. Default OFF, separate
+# from the build of the tests, matching the convention used by sibling projects
+# (e.g. rocprofiler-systems' ROCPROFSYS_INSTALL_TESTING). Installing the tests
+# requires building them, so enabling this forces BUILD_TESTING on.
+option(AIS_INSTALL_TESTS "Install unit-test programs" OFF)
+if(AIS_INSTALL_TESTS)
+    set(BUILD_TESTING ON CACHE BOOL "Build testing (forced on by AIS_INSTALL_TESTS)" FORCE)
+endif()
 
 #------
 # docs
@@ -255,6 +274,18 @@ if(${hip_FOUND})
     message(STATUS "hip found @  ${hip_DIR} ")
 else()
     message(NOTICE "find_package did NOT find hip")
+endif()
+
+if(HIPFILE_ROCPROFILER_REGISTER AND AIS_BUILD_AMD_DETAIL)
+  find_package(
+    rocprofiler-register
+    REQUIRED
+    HINTS
+      $ENV{rocprofiler_register_ROOT}
+      $ENV{ROCPROFILER_REGISTER_ROOT}
+      ${CMAKE_INSTALL_PREFIX}
+    PATHS
+      ${ROCM_PATH})
 endif()
 
 # Find the cuFile library and headers on NVIDIA
@@ -293,6 +324,7 @@ endif()
 
 # Add the testing directories
 if(BUILD_TESTING)
+    include(AISUseGTest)
     add_subdirectory(test)
 endif()
 if(BUILD_TESTING AND AIS_BUILD_AMD_DETAIL)
@@ -318,4 +350,12 @@ endif()
 # Set up installs (must come AFTER target creation)
 #-----------------------------------------------------------------------------
 include(AISUseROCmCMake)
+# Install the relocatable unit-test assets (binaries + a self-locating
+# CTestTestfile.cmake) so the suite can run from an installed/packaged tree.
+# Gated on AIS_INSTALL_TESTS (which forces BUILD_TESTING on above, so the test
+# targets exist). Must come after the test targets are created
+# (add_subdirectory(test) above).
+if(AIS_INSTALL_TESTS)
+    include(AISInstallTests)
+endif()
 include(AISInstall)

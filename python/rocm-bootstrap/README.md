@@ -39,18 +39,18 @@ gfx1100
 
 $ rocm-bootstrap-detect --hierarchy
 gfx1201 gfx12_0 gfx12
-gfx1100 gfx11_0 gfx11
+gfx1100 gfx110x gfx11
 
 $ rocm-bootstrap-detect --verbose
 Detected 2 AMD GPU(s):
 
   Node 1: gfx1201  major=12 minor=0 stepping=1  PCI=0x7550
-    sub-family: gfx12_0 (GFX12.0 (RDNA 4))  generic: gfx12-generic
-    family: gfx12 (GFX12)
+    sub-family: gfx12_0 (RDNA4)  generic: gfx12-generic
+    family: gfx12 (RDNA4)
 
   Node 2: gfx1100  major=11 minor=0 stepping=0  PCI=0x7448
-    sub-family: gfx11_0 (GFX11.0 (RDNA 3))
-    family: gfx11 (GFX11 (RDNA 3))  generic: gfx11-generic
+    sub-family: gfx110x (RDNA3)
+    family: gfx11 (RDNA3)  generic: gfx11-generic
 ```
 
 ### Environment variables
@@ -86,7 +86,7 @@ from rocm_bootstrap import packaging_chain, lookup_target
 
 target_b, sf_b, fam_b = packaging_chain("gfx1151")
 # target_b.key  = "gfx1151"   (PackagingLevel.TARGET)
-# sf_b.key      = "gfx11_5"   (PackagingLevel.SUB_FAMILY)
+# sf_b.key      = "gfx115x"   (PackagingLevel.SUB_FAMILY)
 # fam_b.key     = "gfx11"     (PackagingLevel.FAMILY)
 ```
 
@@ -98,8 +98,8 @@ from rocm_bootstrap import lookup_target, lookup_bundle
 t = lookup_target("gfx942")
 # GfxTarget(name='gfx942', major=9, minor=4, stepping=2, xnack=SUPPORTED)
 
-b = lookup_bundle("gfx11_5")
-# TargetBundle(key='gfx11_5', level=SUB_FAMILY, ...)
+b = lookup_bundle("gfx115x")
+# TargetBundle(key='gfx115x', level=SUB_FAMILY, ...)
 # b.members -> (gfx1150, gfx1151, gfx1152, gfx1153)
 # b.llvm_generic -> None  (gfx11-generic is at family level)
 ```
@@ -113,7 +113,7 @@ families = all_bundles(PackagingLevel.FAMILY)
 # 4 bundles: gfx9, gfx10, gfx11, gfx12
 
 sub_families = all_bundles(PackagingLevel.SUB_FAMILY)
-# 9 bundles: gfx9_0, gfx9_4, gfx9_5, gfx10_1, ...
+# 9 bundles: gfx9_0, gfx9_4, gfx9_5, gfx10_1, gfx110x, ...
 ```
 
 ### Package naming
@@ -121,13 +121,13 @@ sub_families = all_bundles(PackagingLevel.SUB_FAMILY)
 ```python
 from rocm_bootstrap import bundle_names, device_dist_name, lookup_bundle
 
-b = lookup_bundle("gfx11_5")
+b = lookup_bundle("gfx12_5")
 names = bundle_names(b)
-# names.dist_name   = "gfx11-5"   (pip/wheel safe)
-# names.module_name = "gfx11_5"   (Python identifier)
+# names.dist_name   = "gfx12-5"   (pip/wheel safe)
+# names.module_name = "gfx12_5"   (Python identifier)
 
 device_dist_name("rocm-sdk-device", b)
-# "rocm-sdk-device-gfx11-5"
+# "rocm-sdk-device-gfx12-5"
 ```
 
 ### Sysfs decoding

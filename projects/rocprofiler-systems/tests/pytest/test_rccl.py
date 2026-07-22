@@ -54,7 +54,7 @@ def rccl_rocpd_rules(validation_rules_dir: Path) -> list[Path]:
 # =============================================================================
 
 
-# RCCL test binaries
+# RCCL test binaries.
 RCCL_TARGETS = [
     "all_reduce_perf",
     "all_gather_perf",
@@ -62,15 +62,12 @@ RCCL_TARGETS = [
     "reduce_scatter_perf",
     "reduce_perf",
     "alltoall_perf",
-    "scatter_perf",
-    "gather_perf",
-    "sendrecv_perf",
     "alltoallv_perf",
 ]
 
 
 class TestRCCL(RocprofsysTest):
-    REWRITE_ARGS = [
+    BINARY_REWRITE_ARGS = [
         "-e",
         "-v",
         "2",
@@ -82,7 +79,7 @@ class TestRCCL(RocprofsysTest):
         "return",
         "args",
     ]
-    RUNTIME_ARGS = [
+    RUNTIME_INSTRUMENT_ARGS = [
         "-e",
         "-v",
         "1",
@@ -136,8 +133,8 @@ class TestRCCL(RocprofsysTest):
             mode,
             rccl_target,
             env=rccl_env,
-            rewrite_args=self.REWRITE_ARGS,
-            runtime_args=self.RUNTIME_ARGS,
+            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
+            runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
             run_args=self.RUN_ARGS,
             launcher="mpi",
             num_procs=1,

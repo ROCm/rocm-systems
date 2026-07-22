@@ -6,7 +6,6 @@
 #include "common.hpp"
 #include "core/demangler.hpp"
 
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/type_list.hpp>
 
 #include <algorithm>

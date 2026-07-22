@@ -87,10 +87,24 @@ typedef struct {
     } \
 }
 
+#define CHECK_RANGE_AND_SET_DEFAULT(str, val, min, max, default_val) { \
+    if (val < min || val > max) { \
+        ErrorLog(g_rocdec_logger, ROCDEC_STR(str) + " value out of range: " + ROCDEC_TOSTR(val) + ", allowed (min,max): " + ROCDEC_TOSTR(min) + "," + ROCDEC_TOSTR(max) + ". Using default value: " + ROCDEC_TOSTR(default_val)); \
+        val = default_val; \
+    } \
+}
+
 #define CHECK_ALLOWED_MAX(str, val, max) { \
     if (val > max) { \
         ErrorLog(g_rocdec_logger, ROCDEC_STR(str) +  " value greater than maximum allowed value: " + ROCDEC_TOSTR(val) + ", max: " + ROCDEC_TOSTR(max)); \
         return PARSER_OUT_OF_RANGE; \
+    } \
+}
+
+#define CHECK_MAX_AND_SET_DEFAULT(str, val, max, default_val) { \
+    if (val > max) { \
+        ErrorLog(g_rocdec_logger, ROCDEC_STR(str) + " value greater than maximum allowed value: " + ROCDEC_TOSTR(val) + ", max: " + ROCDEC_TOSTR(max) + ". Using default value: " + ROCDEC_TOSTR(default_val)); \
+        val = default_val; \
     } \
 }
 

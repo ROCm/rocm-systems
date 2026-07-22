@@ -3,12 +3,13 @@
 
 #include "module_function.hpp"
 #include "InstructionCategories.h"
+#include "common/path.hpp"
 #include "fwd.hpp"
 #include "internal_libs.hpp"
 #include "log.hpp"
 #include "rocprof-sys-instrument.hpp"
 
-#include <timemory/utility/join.hpp>
+#include <spdlog/fmt/fmt.h>
 
 #include <stdexcept>
 
@@ -35,6 +36,16 @@ module_function::update_width(const module_function& rhs)
     get_width()[0] = std::max<size_t>(get_width()[0], rhs.module_name.length());
     get_width()[1] = std::max<size_t>(get_width()[1], rhs.function_name.length());
     get_width()[2] = std::max<size_t>(get_width()[2], rhs.signature.get().length());
+}
+
+string_t
+module_function::get_source_object_name(procedure_t* func)
+{
+    if(!func) return string_t{};
+    auto* module = func->getModule();
+    auto* object = (module) ? module->getObject() : nullptr;
+    auto  _name  = (object) ? object->name() : string_t{};
+    return _name;
 }
 
 module_function::module_function(module_t* mod, procedure_t* proc)
@@ -158,7 +169,7 @@ module_function::should_coverage_instrument() const
     {
         messages.emplace_back(
             2, "Skipping", "function",
-            TIMEMORY_JOIN("-", "less-than", absolute_min_instructions, "instructions"),
+            fmt::format("less-than-{}-instructions", absolute_min_instructions),
             function_name);
         return false;
     }
@@ -197,7 +208,7 @@ module_function::should_instrument(bool coverage) const
     {
         messages.emplace_back(
             2, "Skipping", "function",
-            TIMEMORY_JOIN("-", "less-than", absolute_min_instructions, "instructions"),
+            fmt::format("less-than-{}-instructions", absolute_min_instructions),
             function_name);
         return false;
     }
@@ -403,12 +414,8 @@ module_function::get_visibility() const
 bool
 module_function::is_internal_constrained() const
 {
-    using ::timemory::join::join;
     auto _basename = [](std::string_view _v) {
         return std::string{ tim::filepath::basename(_v) };
-    };
-    auto _realpath = [](const std::string& _v) {
-        return tim::filepath::realpath(_v, nullptr, false);
     };
 
     auto _report = [&](const string_t& _action, const std::string& _type,
@@ -420,7 +427,7 @@ module_function::is_internal_constrained() const
     const auto& _gnu_libs = get_internal_libs_data();
 
     auto _module_base = _basename(module_name);
-    auto _module_real = _realpath(module_name);
+    auto _module_real = rocprofsys::path::realpath(module_name);
 
     if(std::regex_search(module_name,
                          std::regex{ "lib(rocprof-sys|rocprofsys|timemory|perfetto)" }))
@@ -453,14 +460,13 @@ module_function::is_internal_constrained() const
            litr.second.find(_module_real) != litr.second.end() ||
            litr.second.find(module_name) != litr.second.end())
             return _report("Excluding", "module",
-                           join(" ", "internal library", litr.first), 3);
+                           fmt::format("internal library {}", litr.first), 3);
 
         for(const auto& fitr : litr.second)
         {
-            using ::timemory::join::join;
             if(fitr.second.find(function_name) != fitr.second.end())
                 return _report("Excluding", "function",
-                               join(" ", "internal library", litr.first), 3);
+                               fmt::format("internal library {}", litr.first), 3);
         }
     }
 
@@ -848,17 +854,30 @@ module_function::is_exit_trap_constrained() const
 
 std::pair<size_t, size_t>
 module_function::operator()(address_space_t* _addr_space, procedure_t* _entr_trace,
-                            procedure_t* _exit_trace) const
+                            procedure_t* _entr_trace_args, procedure_t* _exit_trace) const
 {
     std::pair<size_t, size_t> _count = { 0, 0 };
 
     if(!function || !module) return _count;
 
-    auto _name       = signature.get();
-    auto _trace_entr = rocprofsys_call_expr(_name.c_str());
+    auto _name            = signature.get();
+    auto _source_obj_name = get_source_object_name(function);
+
+    // Arguments passed to rocprofsys_push_trace_with_args must be serialized into
+    // the shared wire format (see rocprofsys::get_args_string)
+    rocprofsys::function_args_t _args{};
+    if(!_source_obj_name.empty())
+        _args.push_back({ 0U, "string", "source_object", _source_obj_name });
+    auto _serialized_args = rocprofsys::get_args_string(_args);
+    bool use_args_entr    = (!_serialized_args.empty() && _entr_trace_args);
+
+    auto _trace_entr = (use_args_entr)
+                           ? rocprofsys_call_expr(_name.c_str(), _serialized_args)
+                           : rocprofsys_call_expr(_name.c_str());
     auto _trace_exit = rocprofsys_call_expr(_name.c_str());
-    auto _entr       = _trace_entr.get(_entr_trace);
-    auto _exit       = _trace_exit.get(_exit_trace);
+
+    auto _entr = _trace_entr.get((use_args_entr) ? _entr_trace_args : _entr_trace);
+    auto _exit = _trace_exit.get(_exit_trace);
 
     if(insert_instr(_addr_space, function, _entr, BPatch_entry) &&
        insert_instr(_addr_space, function, _exit, BPatch_exit))
@@ -906,10 +925,12 @@ module_function::operator()(address_space_t* _addr_space, procedure_t* _entr_tra
                            "loop-exit-point-trap-instrumentation", _lname))
             continue;
 
-        auto _ltrace_entr = rocprofsys_call_expr(_lname.c_str());
+        auto _ltrace_entr = (use_args_entr)
+                                ? rocprofsys_call_expr(_lname.c_str(), _serialized_args)
+                                : rocprofsys_call_expr(_lname.c_str());
         auto _ltrace_exit = rocprofsys_call_expr(_lname.c_str());
-        auto _lentr       = _ltrace_entr.get(_entr_trace);
-        auto _lexit       = _ltrace_exit.get(_exit_trace);
+        auto _lentr = _ltrace_entr.get((use_args_entr) ? _entr_trace_args : _entr_trace);
+        auto _lexit = _ltrace_exit.get(_exit_trace);
 
         if(insert_instr(_addr_space, function, _lentr, BPatch_entry, flow_graph, itr,
                         instr_loop_traps) &&

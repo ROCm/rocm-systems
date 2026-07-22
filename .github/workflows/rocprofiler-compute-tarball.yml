@@ -36,12 +36,13 @@ concurrency:
 
 env:
   ROCM_VERSION: "7.1.0"
+  CONTAINER_ROCM_VERSION: "7.1"
 
 jobs:
   distbuild:
     runs-on: ubuntu-latest
     container:
-      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-24.04
+      image: dgaliffiamd/rocprofiler-systems:ci-rocm-${{ env.CONTAINER_ROCM_VERSION }}-ubuntu-24.04
     name: Create distribution tarball
     env:
       INSTALL_DIR: /tmp/foo1
@@ -77,6 +78,7 @@ jobs:
           apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
           apt-get update
           apt install -y rocm-dev
+          apt install -y libdw-dev pkg-config
           echo "✅ ROCm Dependencies Installed!"
       - name: Install Python
         uses: actions/setup-python@v5
@@ -105,7 +107,7 @@ jobs:
   disttest:
     runs-on: ubuntu-latest
     container:
-      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-24.04
+      image: dgaliffiamd/rocprofiler-systems:ci-rocm-${{ env.CONTAINER_ROCM_VERSION }}-ubuntu-24.04
     needs: [distbuild]
     name: Tarball tests
     env:
@@ -128,6 +130,7 @@ jobs:
           apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
           apt-get update
           apt install -y rocm-dev
+          apt install -y libdw-dev pkg-config
           echo "✅ ROCm Dependencies Installed!"
       - name: Python dependency installs
         run: |

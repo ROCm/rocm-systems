@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef _NCCL_DEVICE_MEM_BARRIER__FUNCS_H_
 #define _NCCL_DEVICE_MEM_BARRIER__FUNCS_H_
@@ -11,60 +12,52 @@
 #include "comm__types.h"
 #include <atomic>
 
-#if __CUDACC__
-template<typename Coop>
-NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>::ncclLsaBarrierSession(
-    Coop coop, ncclDevComm const& comm, ncclTeam team,
-    ncclLsaBarrierHandle handle, uint32_t index,
-    bool multimem, ncclMultimemHandle mmHandle
-  ):
-  ncclLsaBarrierSession_internal<Coop>{
-    coop, comm, team, handle, (int)index,
+#if NCCL_CHECK_CUDACC
+template <typename Coop>
+NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>::ncclLsaBarrierSession(Coop coop, ncclDevComm const& comm, ncclTeam team,
+                                                                      ncclLsaBarrierHandle handle, uint32_t index,
+                                                                      bool multimem, ncclMultimemHandle mmHandle)
+  : ncclLsaBarrierSession_internal<Coop>{coop,     comm,       team, handle, (int)index,
 #if CUDART_VERSION >= 12060
-    multimem,
+                                         multimem,
 #else // WAR for an issue with ptxas in CTK < 12.6
     /*multimem=*/false,
 #endif
-    mmHandle, /*epoch=*/0
-  } {
+                                         mmHandle, /*epoch=*/0} {
   uint32_t* state = (uint32_t*)ncclGetResourceBufferLocalPointer(comm, handle.bufHandle);
-  this->epoch = state[(this->multimem ? 0 : 1)*this->handle.nBarriers + this->index];
+  this->epoch = state[(this->multimem ? 0 : 1) * this->handle.nBarriers + this->index];
 }
 #endif
 
-#if __CUDACC__
-template<typename Coop>
-NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>::ncclLsaBarrierSession(
-    Coop coop, ncclDevComm const& comm, ncclTeamTagLsa, uint32_t index, bool multimem
-  ): ncclLsaBarrierSession(
-    coop, comm, ncclTeamLsa(comm), comm.lsaBarrier, index, multimem, comm.lsaMultimem
-  ) {
-}
+#if NCCL_CHECK_CUDACC
+template <typename Coop>
+NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>::ncclLsaBarrierSession(Coop coop, ncclDevComm const& comm,
+                                                                      ncclTeamTagLsa, uint32_t index, bool multimem)
+  : ncclLsaBarrierSession(coop, comm, ncclTeamLsa(comm), comm.lsaBarrier, index, multimem, comm.lsaMultimem) {}
 #endif
 
-#if __CUDACC__
-template<typename Coop>
+#if NCCL_CHECK_CUDACC
+template <typename Coop>
 NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>::~ncclLsaBarrierSession() {
   uint32_t* state = (uint32_t*)ncclGetResourceBufferLocalPointer(this->comm, this->handle.bufHandle);
   if (this->coop.thread_rank() == 0) {
 #if __CUDA_ARCH__ == 1200 && CUDART_VERSION < 13000
     // WAR for a compiler issue with CTK < 13.0
-    if (this->index == 0)
-      state[(this->multimem ? 0 : 1)*this->handle.nBarriers] = this->epoch;
+    if (this->index == 0) state[(this->multimem ? 0 : 1) * this->handle.nBarriers] = this->epoch;
     else
 #endif
-    state[(this->multimem ? 0 : 1)*this->handle.nBarriers + this->index] = this->epoch;
+      state[(this->multimem ? 0 : 1) * this->handle.nBarriers + this->index] = this->epoch;
   }
   this->coop.sync();
 }
 #endif
 
-#if __CUDACC__
-template<typename Coop>
+#if NCCL_CHECK_CUDACC
+template <typename Coop>
 NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::arrive(Coop, cuda::memory_order order) {
   this->coop.sync();
   if (this->multimem) {
-  #if NCCL_ARCH_HAS_MULTIMEM
+#if NCCL_ARCH_HAS_MULTIMEM
     if (this->coop.thread_rank() == 0) {
       uint32_t* inbox = this->mcInbox(/*multimem=*/true);
       if (nccl::utility::releaseOrderOf(order) != cuda::memory_order_relaxed) {
@@ -73,55 +66,115 @@ NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::arrive(Coop, cuda::memory_o
         nccl_multimem_red_relaxed_add_u32(inbox);
       }
     }
-  #endif
+#endif
   } else {
-    #pragma unroll 1
-    for (int i = this->coop.thread_rank(); i < this->team.nRanks-1; i += this->coop.size()) {
+    if (this->team.nRanks > 1) {
+      cuda::atomic_thread_fence(nccl::utility::releaseOrderOf(order));
+    }
+#pragma unroll 1
+    for (int i = this->coop.thread_rank(); i < this->team.nRanks - 1; i += this->coop.size()) {
       int peer = i + (this->team.rank <= i ? 1 : 0);
       cuda::atomic_ref<uint32_t> inbox(*this->ucInbox(peer, this->team.rank));
-      inbox.store(this->epoch+1, nccl::utility::releaseOrderOf(order));
+      inbox.store(this->epoch + 1, cuda::memory_order_relaxed);
     }
   }
 }
 #endif
 
-#if __CUDACC__
-template<typename Coop>
-NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::wait(Coop, cuda::memory_order order) {
+#if NCCL_CHECK_CUDACC
+template <typename Coop>
+template <bool EnableTimeout>
+NCCL_DEVICE_INLINE ncclResult_t ncclLsaBarrierSession_internal<Coop>::waitInternal(Coop, cuda::memory_order order,
+                                                                                   uint64_t timeoutCycles) {
+  using nccl::utility::testAbort;
+  uint32_t steps;
+  uint64_t startCycle;
+  ncclResult_t ret = ncclSuccess;
+  if NCCL_IF_CONSTEXPR (EnableTimeout) {
+    startCycle = clock64();
+  } else {
+    steps = 0;
+  }
   if (this->multimem) {
-  #if NCCL_ARCH_HAS_MULTIMEM
+#if NCCL_ARCH_HAS_MULTIMEM
     if (this->coop.thread_rank() == 0) {
       cuda::atomic_ref<uint32_t> inbox(*this->mcInbox(/*multimem=*/false));
-      #pragma unroll 1
+#pragma unroll 1
       while (true) {
         uint32_t got = inbox.load(nccl::utility::acquireOrderOf(order));
-        if (got - (this->epoch + this->team.nRanks) <= uint32_t(-1)>>1) break;
+        if (got - (this->epoch + this->team.nRanks) <= uint32_t(-1) >> 1) break;
+
+        if NCCL_IF_CONSTEXPR (EnableTimeout) {
+          if (clock64() - startCycle >= timeoutCycles) {
+            ret = ncclTimeout;
+            goto exit;
+          }
+        } else {
+          if (testAbort(this->comm.abortFlag, steps)) break;
+        }
       }
       this->epoch += this->team.nRanks;
     }
-  #endif
+#endif
   } else {
-    #pragma unroll 1
-    for (int i = this->coop.thread_rank(); i < this->team.nRanks-1; i += this->coop.size()) {
+#pragma unroll 1
+    for (int i = this->coop.thread_rank(); i < this->team.nRanks - 1; i += this->coop.size()) {
       int peer = i + (this->team.rank <= i ? 1 : 0);
       cuda::atomic_ref<uint32_t> inbox(*this->ucInbox(this->team.rank, peer));
-      #pragma unroll 1
+#pragma unroll 1
       while (true) {
         uint32_t got = inbox.load(nccl::utility::acquireOrderOf(order));
-        if (got - (this->epoch + 1) <= uint32_t(-1)>>1) break;
+        if (got - (this->epoch + 1) <= uint32_t(-1) >> 1) break;
+
+        if NCCL_IF_CONSTEXPR (EnableTimeout) {
+          if (clock64() - startCycle >= timeoutCycles) {
+            ret = ncclTimeout;
+            goto exit;
+          }
+        } else {
+          if (testAbort(this->comm.abortFlag, steps)) break;
+        }
       }
     }
     this->epoch += 1;
   }
+  goto exit; // Silence a compiler warning.
+exit:
   this->coop.sync();
+  return ret;
 }
 #endif
 
-#if __CUDACC__
-template<typename Coop>
+#if NCCL_CHECK_CUDACC
+template <typename Coop>
+NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::wait(Coop coop, cuda::memory_order order) {
+  (void)(this->template waitInternal</*EnableTimeout=*/false>(coop, order, 0ULL));
+}
+#endif
+
+#if NCCL_CHECK_CUDACC
+template <typename Coop>
+NCCL_DEVICE_INLINE ncclResult_t ncclLsaBarrierSession<Coop>::wait(Coop coop, cuda::memory_order order,
+                                                                  uint64_t timeoutCycles) {
+  this->coop.sync();
+  return this->template waitInternal</*EnableTimeout=*/true>(coop, order, timeoutCycles);
+}
+#endif
+
+#if NCCL_CHECK_CUDACC
+template <typename Coop>
 NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::sync(Coop coop, cuda::memory_order order) {
   this->arrive(coop, order);
   this->wait(coop, order);
+}
+#endif
+
+#if NCCL_CHECK_CUDACC
+template <typename Coop>
+NCCL_DEVICE_INLINE ncclResult_t ncclLsaBarrierSession<Coop>::sync(Coop coop, cuda::memory_order order,
+                                                                  uint64_t timeoutCycles) {
+  this->arrive(coop, order);
+  return this->wait(coop, order, timeoutCycles);
 }
 #endif
 

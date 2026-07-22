@@ -117,7 +117,7 @@ Collect the following information about the RCCL installation and configuration.
       export NCCL_DEBUG=VERSION
 
 *  Run rccl-tests and collect the results. For information on how to build and run rccl-tests, see the
-   `rccl-tests GitHub <https://github.com/ROCm/rccl-tests/blob/develop/README.md>`_.
+   `rccl-tests GitHub <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl-tests/README.md>`_.
 
 *  Collect the RCCL logging information. Enable the debug logs, 
    then run rccl-tests or any e2e workload to collect the logs. Use the 
@@ -135,7 +135,7 @@ Using the RCCL Replayer
 The RCCL Replayer is a debugging tool designed to analyze and replay the collective logs obtained from RCCL runs. 
 It can be helpful when trying to reproduce problems, because it uses dummy data and doesn't have any dependencies 
 on non-RCCL calls. For more information, 
-see `RCCL Replayer GitHub documentation <https://github.com/ROCm/rccl/tree/develop/tools/RcclReplayer>`_.
+see `RCCL Replayer GitHub documentation <https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl/tools/RcclReplayer>`_.
 
 You must build the RCCL Replayer before you can use it. To build it, run these commands. Ensure ``MPI_DIR`` is set to 
 the path where MPI is installed.
@@ -239,7 +239,7 @@ To use the RCCL tests to collect the RCCL benchmark data, follow these steps:
 
 #. Build MPI, RCCL, and rccl-tests. To download and install MPI, see either 
    `OpenMPI <https://www.open-mpi.org/software/ompi/v5.0/>`_ or `MPICH <https://www.mpich.org/>`_.
-   To learn how to build and run rccl-tests, see the `rccl-tests GitHub <https://github.com/ROCm/rccl-tests/blob/develop/README.md>`_.
+   To learn how to build and run rccl-tests, see the `rccl-tests GitHub <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl-tests/README.md>`_.
 
 #. Run rccl-tests with MPI and collect the performance numbers.
 

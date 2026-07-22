@@ -428,8 +428,7 @@ SSetGprIdxOnSopc::SSetGprIdxOnSopc(const MachineInst *inst)
 }
 
 void SSetGprIdxOnSopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_set_gpr_idx_on_sopc(*this, wf);
 }
 
 SCmpEqU64Sopc::SCmpEqU64Sopc(const MachineInst *inst)

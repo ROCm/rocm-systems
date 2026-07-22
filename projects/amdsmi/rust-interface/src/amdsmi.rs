@@ -32,7 +32,7 @@ use std::ptr::null_mut;
 ///
 /// # Arguments
 ///
-/// * `init_flags` - Use a [`ProcessorTypeT`] for initialization flags.
+/// * `init_flags` - Use a [`AmdsmiInitFlagsT`] for initialization flags.
 ///
 /// # Returns
 ///
@@ -280,7 +280,7 @@ pub fn amdsmi_get_processor_handles(
 ///
 /// # Returns
 ///
-/// * `AmdsmiResult<ProcessorTypeT>` - Returns `Ok(ProcessorTypeT)` containing the [`ProcessorTypeT`] if successful, or an error if it fails.
+/// * `AmdsmiResult<AmdsmiProcessorTypeT>` - Returns `Ok(AmdsmiProcessorTypeT)` containing the [`AmdsmiProcessorTypeT`] if successful, or an error if it fails.
 ///
 /// # Example
 ///
@@ -310,8 +310,8 @@ pub fn amdsmi_get_processor_handles(
 /// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_processor_type` call fails.
 pub fn amdsmi_get_processor_type(
     processor_handle: AmdsmiProcessorHandle,
-) -> AmdsmiResult<ProcessorTypeT> {
-    let mut processor_type = ProcessorTypeT::AmdsmiProcessorTypeUnknown;
+) -> AmdsmiResult<AmdsmiProcessorTypeT> {
+    let mut processor_type = AmdsmiProcessorTypeT::AmdsmiProcessorTypeUnknown;
     call_unsafe!(amdsmi_wrapper::amdsmi_get_processor_type(
         processor_handle,
         &mut processor_type

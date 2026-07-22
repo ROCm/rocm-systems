@@ -73,6 +73,7 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_external_correlation_id_re
     ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_ROCDECODE_API,          ///<
     ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_ROCJPEG_API,            ///<
     ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MARKER_CORE_RANGE_API,  ///<
+    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_ROCSHMEM_API,           ///<
     ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_LAST,
 } rocprofiler_external_correlation_id_request_kind_t;
 
@@ -143,7 +144,7 @@ rocprofiler_configure_external_correlation_id_request_service(
  *
  * @param [in] kind External correlation id request domain
  * @param [out] name If non-null and the name is a constant string that does not require dynamic
- * allocation, this paramter will be set to the address of the string literal, otherwise it will
+ * allocation, this parameter will be set to the address of the string literal, otherwise it will
  * be set to nullptr
  * @param [out] name_len If non-null, this will be assigned the length of the name (regardless of
  * the name is a constant string or requires dynamic allocation)

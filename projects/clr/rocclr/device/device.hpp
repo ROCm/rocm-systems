@@ -8,6 +8,7 @@
 #define DEVICE_HPP_
 
 #include "top.hpp"
+#include <atomic>
 #include "thread/thread.hpp"
 #include "thread/monitor.hpp"
 #include "platform/context.hpp"
@@ -21,6 +22,7 @@
 #include "devkernel.hpp"
 #include "amdocl/cl_profile_amd.h"
 #include "devsignal.hpp"
+#include "utils/nontemporal.hpp"
 
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
@@ -28,6 +30,7 @@
 #endif
 #endif
 
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
@@ -51,6 +54,8 @@ class FillMemoryCommand;
 class CopyMemoryCommand;
 class CopyMemoryP2PCommand;
 class BatchCopyMemoryCommand;
+class BatchWriteMemoryCommand;
+class BatchReadMemoryCommand;
 class MapMemoryCommand;
 class UnmapMemoryCommand;
 class MigrateMemObjectsCommand;
@@ -76,6 +81,7 @@ class SvmMapMemoryCommand;
 class SvmUnmapMemoryCommand;
 class SvmPrefetchAsyncCommand;
 class SvmPrefetchBatchAsyncCommand;
+class SvmDiscardBatchAsyncCommand;
 class StreamOperationCommand;
 class BatchMemoryOperationCommand;
 class VirtualMapCommand;
@@ -109,12 +115,20 @@ enum MemRangeAttribute : uint32_t {
   CoherencyMode = 100,       ///< Current coherency mode for the specified range
 };
 
-enum FuncCache : uint32_t  {
-  kPreferNone = 0,   ///< Default function cache configuration, no preference
-  kPreferLDS = 1,    ///< Prefer larger shared memory and smaller L1 cache
-  kPreferCache = 2,  ///< Prefer larger L1 cache and smaller shared memory
-  kPreferEqual = 3   ///< Prefer equal size L1 cache and shared memory
-};
+//! Maps hipFuncCache_t to group memory carveout percentage.
+//! PreferL1 maps to 1% (not 0%) because 0 means "no preference" in the
+//! AQL packet's group_mem_carveout field; 1% is the minimum value that
+//! signals a preference for cache over LDS.
+inline constexpr std::array<uint8_t, 4> kFuncCacheToGroupMemCarveoutPercent = {0, 100, 1, 50};
+static_assert(kFuncCacheToGroupMemCarveoutPercent.size() == 4,
+              "Must cover all hipFuncCache_t values");
+
+//! Convert hipFuncCache_t to carveout percentage, returning 0 for out-of-range values.
+inline uint8_t funcCacheToCarveoutPercent(uint32_t cacheConfig) {
+  return cacheConfig < kFuncCacheToGroupMemCarveoutPercent.size()
+      ? kFuncCacheToGroupMemCarveoutPercent[cacheConfig]
+      : 0;
+}
 
 constexpr int CpuDeviceId = static_cast<int>(-1);
 constexpr int InvalidDeviceId = static_cast<int>(-2);
@@ -641,6 +655,9 @@ struct Info : public amd::EmbeddedObject {
   //! large bar support.
   bool largeBar_;
 
+  //! CPU supports MOVDIR64B (atomic 64-byte write with WC buffer close).
+  bool movdir64b_;
+
   uint32_t hmmSupported_;            //!< ROCr supports HMM interfaces
   uint32_t hmmCpuMemoryAccessible_;  //!< CPU memory is accessible by GPU without pinning/register
   uint32_t hmmDirectHostAccess_;     //!< HMM memory is accessible from the host without migration
@@ -671,6 +688,7 @@ struct Info : public amd::EmbeddedObject {
 
   uint32_t numberOfXccs_;  //! The number of XCC(s) on the device
 
+  bool fabric_handle_; //!< fabric handle support flag
   bool hasExpertSchedMode_;  //! Device supports expert scheduling mode
 
   bool dmabufSupported_;  //!< DMABuf support flag
@@ -686,10 +704,8 @@ class Settings {
     HostKernelArgs = 0,        //!< Kernel Arguments are put into host memory
     DeviceKernelArgs,          //!< Device memory kernel arguments with no memory
                                //!< ordering workaround (e.g. XGMI)
-    DeviceKernelArgsReadback,  //!< Device memory kernel arguments with kernel
+    DeviceKernelArgsReadback   //!< Device memory kernel arguments with kernel
                                //!< argument readback workaround
-    DeviceKernelArgsHDP        //!< Device memory kernel arguments with kernel
-                               //!< argument readback plus HDP flush workaround.
   };
 
   uint64_t extensions_;  //!< Supported OCL extensions
@@ -715,7 +731,9 @@ class Settings {
       uint kernel_arg_impl_ : 2;              //!< Kernel argument implementation
       uint sdma_swap_supported_ : 1;         //!< SDMA linear swap copy (gfx94x/gfx95x)
       uint groupMemCarveout_ : 1;             //!< Group memory carveout functionality
-      uint reserved_ : 10;
+      uint sdma_indirect_supported_ : 1;     //!< SDMA linear indirect copy (gfx1250+)
+      uint aql_device_ring_buf_ : 1;          //!< Place the AQL queue ring buffer in device memory
+      uint reserved_ : 8;
     };
     uint value_;
   };
@@ -736,13 +754,6 @@ class Settings {
   void enableExtension(uint name) { extensions_ |= static_cast<uint64_t>(1) << name; }
 
   size_t stagedXferSize_ = 0;     //!< Staged buffer size
-  typedef struct CarveoutPref {
-    uint8_t totalSharedBanks;
-    uint8_t preferLDSBanks;
-    uint8_t preferCacheLDSBanks;
-    uint8_t preferEqualLDSBanks;
-  } CarveoutPref;
-  CarveoutPref groupMemPref_;
 
  private:
   //! Disable copy constructor
@@ -1303,6 +1314,8 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitCopyMemory(amd::CopyMemoryCommand& cmd) = 0;
   virtual void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) = 0;
   virtual void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) = 0;
+  virtual void SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) = 0;
+  virtual void SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) = 0;
   virtual void submitMapMemory(amd::MapMemoryCommand& cmd) = 0;
   virtual void submitUnmapMemory(amd::UnmapMemoryCommand& cmd) = 0;
   virtual void submitKernel(amd::NDRangeKernelCommand& command) = 0;
@@ -1330,6 +1343,9 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& cmd) {
     ShouldNotReachHere();
   }
+  virtual void SubmitSvmDiscardBatchAsync(amd::SvmDiscardBatchAsyncCommand& cmd) {
+    ShouldNotReachHere();
+  }
   virtual void submitStreamOperation(amd::StreamOperationCommand& cmd) { ShouldNotReachHere(); }
   virtual void submitBatchMemoryOperation(amd::BatchMemoryOperationCommand& cmd) {
     ShouldNotReachHere();
@@ -1341,6 +1357,8 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void ReleaseSdmaEngines() {}  //!< Release SDMA engine assignments (ROCm specific)
   virtual void ReleaseAllHwQueues() {}
   virtual void ReleaseHwQueue() {}
+  //!< Request a system-scope release fence on the next AQL packet (ROCm specific)
+  virtual void addSystemScope() {}
 
   //! Get the blit manager object
   device::BlitManager& blitMgr() const { return *blitMgr_; }
@@ -1360,13 +1378,13 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void HiddenHeapInit() = 0;
 
   //! Fast-path dispatch using a pre-built contiguous flat packet buffer.
-  virtual bool dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPacketData,
+  virtual bool dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>& flatPacketData,
                                           const std::vector<uint32_t>& validFullHeaders,
                                           amd::AccumulateCommand* vcmd = nullptr,
                                           bool attach_signal = false,
-                                          const std::vector<const std::string*>* kernelNames = nullptr,
                                           bool pre_patched = false,
-                                          bool blocking = false) {
+                                          bool blocking = false,
+                                          const std::vector<uint8_t>* flatMetadataData = nullptr) {
     return false;
   }
 
@@ -1459,6 +1477,8 @@ class MemObjMap : public AllStatic {
 
   //!< Find the mem object based on the input pointer, outputs the offset
   static amd::Memory* FindMemObj(const void* k, size_t* offset = nullptr, Device* dev = nullptr);
+  //!< Find any registered mem object whose range overlaps [ptr, ptr + size).
+  static amd::Memory* FindOverlap(const void* ptr, size_t size);
   //!< Batched version: find multiple mem objects in one lock acquisition
   static void FindMemObjBatch(const void* const* ptrs, size_t count,
                               std::vector<amd::Memory*>& memories,
@@ -1728,8 +1748,17 @@ class Device : public RuntimeObject {
 
   //<! Enum describing the access permissions of Virtual memory
   enum class VmmAccess { kNone = 0x0, kReadOnly = 0x1, kReadWrite = 0x3 };
-  //<! Enum describing the location of Virtual memory
-  enum class VmmLocationType { kNone = 0x0, kDevice = 0x1, kHost = 0x2 };
+  //<! Enum describing the location of Virtual memory. Values mirror hipMemLocationType
+  //<! so hip_vm.cpp can static_cast between them.
+  enum class VmmLocationType {
+    kNone = 0x0,
+    kDevice = 0x1,
+    kHost = 0x2,
+    kHostNuma = 0x3,
+    kHostNumaCurrent = 0x4
+  };
+
+  enum class VmmExportStatus { kSuccess, kError, kResourceNotReady };
 
   typedef std::pair<LinkAttribute, int32_t /* value */> LinkAttrType;
 
@@ -1741,7 +1770,7 @@ class Device : public RuntimeObject {
   // Max Scratch size is based on ISA and thus per device.
   // Def value is as per GFX9 being the least among supported devices.
   size_t maxStackSize_ = kMaxStackSize9X;
-  static cl_int gpu_error_;  //!< Store the GPU error cause during kernel launch
+  static std::atomic<cl_int> gpu_error_;  //!< Store the GPU error cause during kernel launch
 
   typedef std::list<CommandQueue*> CommandQueues;
 
@@ -1997,6 +2026,59 @@ class Device : public RuntimeObject {
   bool DestroyVirtualBuffer(amd::Memory* vaddr_mem_obj);
 
   /**
+   * Shared "map" bookkeeping helper used by both HSA and PAL submitVirtualMap.
+   *
+   * Creates the sub-buffer amd::Memory object that represents the mapped
+   * VA range. The caller is expected to perform the backend-specific
+   * hardware mapping using the returned sub_obj, and then call
+   * FinalizeMapMemObjBookkeeping() on success to wire up MemObjMap and
+   * the bidirectional phys<->vaddr cross-links.
+   *
+   * @param phys     Physical memory object (must be non-null).
+   * @param va_ptr   Virtual address being mapped.
+   * @param va_size  Size of the mapping in bytes.
+   * @return The newly created vaddr sub_obj, or nullptr on failure.
+   */
+  amd::Memory* MapMemObjBookkeeping(amd::Memory* phys, void* va_ptr, size_t va_size) const;
+
+  /**
+   * Completes the "map" bookkeeping after a successful hardware mapping.
+   *
+   * Inserts the sub_obj into MemObjMap, wires the bidirectional
+   * phys<->vaddr cross-links, and (when import_vmm_for_interprocess is
+   * true) flips setVmmImported on the sub_obj if the physical memory
+   * carries ROCCLR_MEM_INTERPROCESS.
+   *
+   * @param vaddr_sub_obj   sub_obj returned by MapMemObjBookkeeping().
+   * @param phys            Physical memory object passed at map time.
+   * @param va_ptr          Virtual address being mapped (MemObjMap key).
+   * @param import_vmm_for_interprocess  HSA backend passes true (matches
+   *                                     pre-refactor behavior); PAL passes
+   *                                     false.
+   */
+  void FinalizeMapMemObjBookkeeping(amd::Memory* vaddr_sub_obj, amd::Memory* phys, void* va_ptr,
+                                    bool import_vmm_for_interprocess) const;
+
+  /**
+   * Shared "unmap" bookkeeping helper used by both HSA and PAL
+   * submitVirtualMap. Should be invoked after a successful hardware
+   * unmap.
+   *
+   * Removes the sub_obj from MemObjMap, tears down the bidirectional
+   * phys<->vaddr cross-links, and -- when requested -- destroys the
+   * virtual buffer view and releases the sub_obj.
+   *
+   * @param vaddr_sub_obj          sub_obj for the mapped VA.
+   * @param va_ptr                 Virtual address being unmapped.
+   * @param destroy_virtual_buffer  HSA passes true; PAL passes false to
+   *                                preserve pre-refactor behavior.
+   * @param release_sub_obj         HSA passes true; PAL passes false to
+   *                                preserve pre-refactor behavior.
+   */
+  void UnmapMemObjBookkeeping(amd::Memory* vaddr_sub_obj, void* va_ptr, bool destroy_virtual_buffer,
+                              bool release_sub_obj) const;
+
+  /**
    * Reserve a VA range with no backing store
    *
    * @param addr Start address requested
@@ -2004,6 +2086,35 @@ class Device : public RuntimeObject {
    * @param alignment Alignment in bytes
    */
   virtual void* virtualAlloc(void* addr, size_t size, size_t alignment) = 0;
+
+  /**
+   * Map a physical allocation into a previously-reserved virtual address
+   * range using the direct synchronous path (bypasses VirtualMapCommand /
+   * the command-event enqueue indirection).
+   *
+   * Performs the shared MapMemObjBookkeeping/FinalizeMapMemObjBookkeeping
+   * protocol around the backend-specific hardware mapping. The caller is
+   * responsible for ensuring no work is using the VA range prior to
+   * invocation (matches CUDA's hipMemMap contract).
+   *
+   * @param va    Virtual address (must lie in a CL_MEM_VA_RANGE_AMD reservation).
+   * @param size  Size of the mapping in bytes.
+   * @param phys  Physical memory object (amd::Memory* from hipMemCreate).
+   * @return CL_SUCCESS on success, or a CL_* error code classifying the
+   *         backend failure (backend also LogErrors the actual error class).
+   */
+  virtual cl_int virtualMap(void* va, size_t size, amd::Memory* phys) = 0;
+
+  /**
+   * Unmap a previously virtualMap'd range using the direct synchronous
+   * path. Performs the shared UnmapMemObjBookkeeping protocol around the
+   * backend-specific hardware unmap.
+   *
+   * @param va    Virtual address previously passed to virtualMap.
+   * @param size  Size of the mapping in bytes.
+   * @return CL_SUCCESS on success, or a CL_* error code on backend failure.
+   */
+  virtual cl_int virtualUnmap(void* va, size_t size) = 0;
 
   /**
    * Set Access permisions for a virtual memory object.
@@ -2014,7 +2125,8 @@ class Device : public RuntimeObject {
    * @param count Number of access permissions
    */
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
-                            VmmLocationType = VmmLocationType::kDevice) = 0;
+                            VmmLocationType = VmmLocationType::kDevice,
+                            int numaNode = -1) = 0;
 
   /**
    * Get Access permisions for a virtual memory object.
@@ -2046,10 +2158,11 @@ class Device : public RuntimeObject {
    * @param flags any flags to be passed
    * @param shareableHandle exported handle, points to fdesc.
    */
-  virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
-                                        void* shareableHandle) {
+  virtual VmmExportStatus ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
+                                                   void* shareableHandle,
+                                                   amd::Memory::HandleType handle_type) {
     ShouldNotCallThis();
-    return false;
+    return VmmExportStatus::kError;
   }
 
   /**
@@ -2058,7 +2171,7 @@ class Device : public RuntimeObject {
    * @param osHandle os handle/fdesc/void*
    * @param amd_mem_obj amd_mem_obj with hsa_handle/memory_obj.
    */
-  virtual amd::Memory* ImportShareableVMMHandle(void* osHandle) {
+  virtual amd::Memory* ImportShareableVMMHandle(void* osHandle, amd::Memory::HandleType handle_type) {
     ShouldNotCallThis();
     return nullptr;
   }
@@ -2111,11 +2224,29 @@ class Device : public RuntimeObject {
     return static_cast<uint32_t>(-1); //!< PAL doesn't support it
   }
 
+  //! Number of host NUMA nodes (CPU agents) usable for host-NUMA VMM allocations.
+  //! Returns 0 when host-NUMA is unsupported (e.g. PAL).
+  virtual uint32_t numHostNumaNodes() const { return 0; }
+
   virtual void ReleaseGlobalSignal(void* signal) const {}
   virtual void RetainGlobalSignal(void* signal) const {}
 
   virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const { return false; }
   virtual void DestroyHwEvent(void* hw_event) const {}
+
+  //! Re-arm already-allocated HW event signals so they can be reused by a new
+  //! graph launch (resets the signal value and cached timing). Used by the
+  //! graph signal pool to avoid create/destroy on every launch.
+  virtual void ResetHwEvents(const std::vector<void*>& hw_events) const {}
+
+  //! Mark pooled HW event signals as idle/completed (store the done value)
+  //! before they are destroyed. Pooled signals rest in the armed state, so this
+  //! prevents signal destruction from blocking on an armed-but-idle signal.
+  virtual void QuiesceHwEvents(const std::vector<void*>& hw_events) const {}
+
+  //! Block until all in-flight HSA async signal handlers (e.g. profiling
+  //! completion callbacks) have finished running.
+  virtual void WaitForHsaAsyncHandlersIdle() {}
 
   struct HwEventPatch {
     static constexpr int kCompletionSignal = -1;
@@ -2125,6 +2256,12 @@ class Device : public RuntimeObject {
     uint8_t* flat_packet; // pointer into flatPacketData (patched directly at launch)
     int hw_event_index;
     int dep_slot;  // kCompletionSignal, kExtDispatchDepSignal, or 0-4 for barrier dep_signal[slot]
+    // Segment that owns this patch (set at BuildSyncPlan time). At launch the
+    // graph layer resolves it to the actual stream's vGPU index into queue_index.
+    int segment_id = -1;
+    // vGPU (queue) index resolved at launch from segment_id. Read by
+    // ApplyHwEventPatches to attribute the signal to its execution stream.
+    uint32_t queue_index = std::numeric_limits<uint32_t>::max();
   };
 
   virtual uint8_t* CreateBarrierPacket() const { return nullptr; }
@@ -2286,42 +2423,21 @@ class Device : public RuntimeObject {
   //! Sets the group memory carveout percentage hint for the device
   void UpdateGroupMemCarveout(uint8_t percent) { group_mem_carveout_hint_ = percent; }
 
-  uint8_t GetGroupMemCarveout(amd::FuncCache cacheConfig) const {
-    uint8_t totalSharedBanks = 0;
-    uint8_t LDSBanks = 0;
-    if (settings().groupMemCarveout_) {
-      totalSharedBanks = settings_->groupMemPref_.totalSharedBanks;
-      switch (cacheConfig) {
-        case kPreferLDS:
-          LDSBanks = settings_->groupMemPref_.preferLDSBanks;
-          break;
-        case kPreferCache:
-          LDSBanks = settings_->groupMemPref_.preferCacheLDSBanks;
-          break;
-        case kPreferEqual:
-          LDSBanks = settings_->groupMemPref_.preferEqualLDSBanks;
-          break;
-        case kPreferNone:
-        default:
-          break;
-      }
-    }
-    return (totalSharedBanks != 0) ? (static_cast<double>(LDSBanks) / totalSharedBanks) * 100 : 0;
-  }
-
-  //! Sets group memory carveout percentage hint for the device for respective cacheConfig
-  void UpdateGroupMemCarveout(amd::FuncCache cacheConfig) {
-    group_mem_carveout_hint_ = GetGroupMemCarveout(cacheConfig);
-  }
-
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
   virtual device::UriLocator* createUriLocator() const = 0;
 #endif
 #endif
 
-  static bool IsGPUInError() { return (gpu_error_ != CL_SUCCESS); }
-  static cl_int GetGPUError() { return gpu_error_; }
+#if defined(__linux__) && defined(__clang__)
+#if __has_feature(address_sanitizer)
+  void reportDeviceMemoryLeaks();
+  static void reportAllDeviceMemoryLeaks();
+#endif
+#endif
+
+  static bool IsGPUInError() { return (gpu_error_.load(std::memory_order_relaxed) != CL_SUCCESS); }
+  static cl_int GetGPUError() { return gpu_error_.load(std::memory_order_relaxed); }
 
   bool GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle);
 
@@ -2376,7 +2492,7 @@ class Device : public RuntimeObject {
   uint64_t initial_heap_size_{HIP_INITIAL_DM_SIZE};     //!< Initial device heap size
   amd::Monitor activeQueuesLock_{};                     //!< Guards access to the activeQueues set
   std::unordered_map<amd::CommandQueue*, bool> activeQueues;  //!< The set of active queues
-  uint8_t group_mem_carveout_hint_; //!< LDS carveout
+  uint8_t group_mem_carveout_hint_{0}; //!< LDS carveout percentage (0 = no preference)
  private:
   const Isa* isa_;  //!< Device isa
   bool IsTypeMatching(cl_device_type type, bool offlineDevices);

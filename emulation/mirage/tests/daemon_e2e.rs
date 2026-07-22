@@ -6,6 +6,10 @@
 //! `mirage host` subprocesses via `MIRAGE_BIN` (set to the test
 //! mirage binary), giving us full end-to-end coverage of the same
 //! code path users hit.
+//!
+//! Gated on the `webui` feature: the `mirage webui` subcommand and the
+//! served SPA only exist when the web UI is compiled in.
+#![cfg(feature = "webui")]
 
 use std::net::TcpListener;
 use std::path::PathBuf;
@@ -72,10 +76,10 @@ impl Daemon {
         let deadline = Instant::now() + Duration::from_secs(15);
         let url = format!("{}/api/paths", self.base);
         while Instant::now() < deadline {
-            if let Ok(resp) = reqwest::blocking::get(&url) {
-                if resp.status().is_success() {
-                    return;
-                }
+            if let Ok(resp) = reqwest::blocking::get(&url)
+                && resp.status().is_success()
+            {
+                return;
             }
             std::thread::sleep(Duration::from_millis(50));
         }
@@ -124,19 +128,23 @@ impl Daemon {
 
 impl Drop for Daemon {
     fn drop(&mut self) {
-        let _ = unsafe { libc::kill(self.child.id() as i32, libc::SIGTERM) };
+        let _ = nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(self.child.id() as i32),
+            nix::sys::signal::Signal::SIGTERM,
+        );
         let _ = self.child.wait();
         // Also kill any host children still alive under our runtime dir
         // (in case session_destroy wasn't called from the test).
         if let Ok(rd) = std::fs::read_dir(self.runtime.join("mirage/session")) {
             for ent in rd.flatten() {
-                let pidf = ent.path().join("host.pid");
-                if let Ok(s) = std::fs::read_to_string(&pidf) {
-                    if let Ok(pid) = s.trim().parse::<i32>() {
-                        unsafe {
-                            libc::kill(pid, libc::SIGKILL);
-                        }
-                    }
+                let pidf = ent.path().join("node/0/pid");
+                if let Ok(s) = std::fs::read_to_string(&pidf)
+                    && let Ok(pid) = s.trim().parse::<i32>()
+                {
+                    let _ = nix::sys::signal::kill(
+                        nix::unistd::Pid::from_raw(pid),
+                        nix::sys::signal::Signal::SIGKILL,
+                    );
                 }
             }
         }
@@ -152,7 +160,7 @@ fn create_profile(d: &Daemon, name: &str) {
             "plugins": {},
             "exec_mode": "Functional",
             "options": {},
-            "topology": {"racks": 1, "nodes_per_rack": 1, "gpus_per_node": 1, "agent": "MI350X"}
+            "topology": {"num_nodes": 1, "gpus_per_node": 1, "agent": "MI350X"}
         }
     });
     let (s, b) = d.put_json(&format!("/api/profiles/{name}"), &prof);
@@ -165,10 +173,18 @@ fn paths_endpoint_reports_overridden_dirs() {
     let (s, v) = d.get_json("/api/paths");
     assert!(s.is_success());
     assert!(
-        v["config"].as_str().unwrap().starts_with(d.config.to_str().unwrap()),
+        v["config"]
+            .as_str()
+            .unwrap()
+            .starts_with(d.config.to_str().unwrap()),
         "expected config under tempdir, got {v}"
     );
-    assert!(v["runtime"].as_str().unwrap().starts_with(d.runtime.to_str().unwrap()));
+    assert!(
+        v["runtime"]
+            .as_str()
+            .unwrap()
+            .starts_with(d.runtime.to_str().unwrap())
+    );
 }
 
 #[test]
@@ -316,7 +332,10 @@ async fn exec_attach_streams_output_via_websocket() {
     // The exec runs under a PTY, so stdout and stderr are merged onto the
     // terminal (the stdout stream), exactly as in a real terminal.
     let combined = format!("{stdout}{stderr}");
-    assert!(combined.contains("hello-from-exec"), "got output: {combined:?}");
+    assert!(
+        combined.contains("hello-from-exec"),
+        "got output: {combined:?}"
+    );
     assert!(combined.contains("err"), "got output: {combined:?}");
     assert_eq!(exit_code, Some(7));
 
@@ -350,7 +369,7 @@ async fn create_profile_async(client: &reqwest::Client, d: &Daemon, name: &str) 
             "plugins": {},
             "exec_mode": "Functional",
             "options": {},
-            "topology": {"racks": 1, "nodes_per_rack": 1, "gpus_per_node": 1, "agent": "MI350X"}
+            "topology": {"num_nodes": 1, "gpus_per_node": 1, "agent": "MI350X"}
         }
     });
     let r = client
@@ -359,7 +378,11 @@ async fn create_profile_async(client: &reqwest::Client, d: &Daemon, name: &str) 
         .send()
         .await
         .unwrap();
-    assert!(r.status().is_success(), "put profile failed: {}", r.status());
+    assert!(
+        r.status().is_success(),
+        "put profile failed: {}",
+        r.status()
+    );
 }
 
 #[test]

@@ -1,5 +1,4 @@
--- Enable foreign key support for cascading
-PRAGMA foreign_keys = ON;
+-- RocPD schema version 3.0.2
 
 CREATE TABLE IF NOT EXISTS
     "rocpd_metadata{{uuid}}" (
@@ -68,7 +67,7 @@ CREATE TABLE IF NOT EXISTS
         "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
         "nid" INTEGER NOT NULL,
         "pid" INTEGER NOT NULL,
-        "type" TEXT CHECK ("type" IN ('CPU', 'GPU')),
+        "type" TEXT CHECK ("type" IN ('CPU', 'GPU', 'NIC')),
         "absolute_index" INTEGER,
         "logical_index" INTEGER,
         "type_index" INTEGER,
@@ -107,8 +106,6 @@ CREATE TABLE IF NOT EXISTS
         FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE
     );
 
--- 2993533, 2269219937, 2993533
--- 2993533, 2269219937, 2993533
 -- Performance monitoring counters (PMC) descriptions
 CREATE TABLE IF NOT EXISTS
     `rocpd_info_pmc{{uuid}}` (
@@ -117,7 +114,7 @@ CREATE TABLE IF NOT EXISTS
         "nid" INTEGER NOT NULL,
         "pid" INTEGER NOT NULL,
         "agent_id" INTEGER,
-        "target_arch" TEXT CHECK ("target_arch" IN ('CPU', 'GPU')),
+        "target_arch" TEXT CHECK ("target_arch" IN ('CPU', 'GPU', 'NIC')),
         "event_code" INT,
         "instance_id" INTEGER,
         "name" TEXT NOT NULL,
@@ -291,6 +288,8 @@ CREATE TABLE IF NOT EXISTS
         "grid_size_x" INTEGER NOT NULL,
         "grid_size_y" INTEGER NOT NULL,
         "grid_size_z" INTEGER NOT NULL,
+        "graph_exec_id" INTEGER NOT NULL DEFAULT 0,
+        "graph_node_id" INTEGER NOT NULL DEFAULT 0,
         "region_name_id" INTEGER,
         "event_id" INTEGER,
         "extdata" JSONB DEFAULT "{}" NOT NULL,
@@ -322,6 +321,8 @@ CREATE TABLE IF NOT EXISTS
         "size" INTEGER NOT NULL,
         "queue_id" INTEGER,
         "stream_id" INTEGER,
+        "graph_exec_id" INTEGER NOT NULL DEFAULT 0,
+        "graph_node_id" INTEGER NOT NULL DEFAULT 0,
         "region_name_id" INTEGER,
         "event_id" INTEGER,
         "extdata" JSONB DEFAULT "{}" NOT NULL,
@@ -365,9 +366,26 @@ CREATE TABLE IF NOT EXISTS
         FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
     );
 
-INSERT INTO
-    `rocpd_metadata{{uuid}}` ("tag", "value")
-VALUES
-    ("schema_version", "3"),
-    ("uuid", "{{uuid}}"),
-    ("guid", "{{guid}}");
+-- HIP graph launch summary records (one per successful hipGraphLaunch).
+CREATE TABLE IF NOT EXISTS
+    `rocpd_graph_launch{{uuid}}` (
+        "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
+        "nid" INTEGER NOT NULL,
+        "pid" INTEGER NOT NULL,
+        "tid" INTEGER,
+        "agent_id" INTEGER,
+        "queue_id" INTEGER,
+        "start" BIGINT NOT NULL,
+        "end" BIGINT NOT NULL,
+        "graph_exec_id" INTEGER NOT NULL,
+        "kernel_dispatch_count" INTEGER NOT NULL DEFAULT 0,
+        "event_id" INTEGER,
+        "extdata" JSONB DEFAULT "{}" NOT NULL,
+        FOREIGN KEY (nid) REFERENCES `rocpd_info_node{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (tid) REFERENCES `rocpd_info_thread{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (agent_id) REFERENCES `rocpd_info_agent{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (queue_id) REFERENCES `rocpd_info_queue{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
+    );

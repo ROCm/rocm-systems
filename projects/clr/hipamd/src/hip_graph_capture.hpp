@@ -28,6 +28,9 @@ hipError_t capturehipModuleLaunchKernel(hipStream_t& stream, hipFunction_t& f, u
                                         uint32_t& sharedMemBytes, void**& kernelParams,
                                         void**& extra);
 
+hipError_t capturehipDrvLaunchKernelEx(hipStream_t& stream, const HIP_LAUNCH_CONFIG*& config,
+                                       hipFunction_t& f, void**& kernelParams, void**& extra);
+
 hipError_t capturehipModuleLaunchCooperativeKernel(hipStream_t& stream, hipFunction_t& f,
                                                    uint32_t& gridDimX, uint32_t& gridDimY,
                                                    uint32_t& gridDimZ, uint32_t& blockDimX,

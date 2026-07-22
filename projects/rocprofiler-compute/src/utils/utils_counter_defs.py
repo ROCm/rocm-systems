@@ -29,16 +29,22 @@ HW_COUNTER_RE = re.compile(HW_COUNTER_BLK + HW_COUNTER_SFX)
 
 # Captures the variable name after '$'.
 VARIABLE_RE = re.compile(r"\$([0-9A-Za-z_]*[0-9A-Za-z])")
+AMMOLITE_VAR_RE = re.compile(r"ammolite__([0-9A-Za-z_]+)")
 
 # ---------------------------------------------------------------------------
 # Built-in variable and denominator definitions
 # ---------------------------------------------------------------------------
 
+# per_kernel denom column, injected at pmc load with 1 per dispatch so
+# SUM($denom) == N and Avg is the mean per dispatch.
+UNIT_COUNTER = "Dispatch_Unit"
+
 SUPPORTED_DENOM: dict[str, str] = {
     "per_wave": "SQ_WAVES",
     "per_cycle": "$GRBM_GUI_ACTIVE_PER_XCD",
     "per_second": "((End_Timestamp - Start_Timestamp) / 1000000000)",
-    "per_kernel": "1",
+    # A vector, not a scalar, so SUM($denom) == N.
+    "per_kernel": UNIT_COUNTER,
 }
 
 
@@ -75,7 +81,7 @@ def get_build_in_vars(gpu_series: str) -> dict[str, str]:
                 "ROUND(AVG((((End_Timestamp - Start_Timestamp) / 1000) * "
                 "$max_sclk)), 0)"
             ),
-            "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_hbm_channels)",
+            "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_memory_channels)",
         },
         "rdna35": {
             "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
@@ -86,7 +92,7 @@ def get_build_in_vars(gpu_series: str) -> dict[str, str]:
 
     if gpu_series.startswith("MI"):
         return build_in_vars["cdna"]
-    elif gpu_series.startswith("NAVI"):
+    elif gpu_series.startswith("RDNA"):
         return build_in_vars["rdna35"]
     else:
         console_error(
@@ -121,34 +127,35 @@ def parse_counters_text(text: str) -> tuple[set[str], set[str]]:
     return hw_counter_matches, variable_matches
 
 
-def extract_counters(text: str, gpu_series: str) -> set[str]:
-    """Return the full set of HW counters referenced by *text*.
-
-    Resolves ``$variable`` references and supported denominators
-    recursively so that all transitive counter dependencies are included.
+def extract_counters_and_variables(
+    text: str, gpu_series: str
+) -> tuple[set[str], set[str]]:
+    """Return (hw_counters, builtin_vars) referenced by text, with transitive
+    resolution. Recognizes both $var and ammolite__var forms.
     """
     hw, variables = parse_counters_text(text)
+    variables.update(AMMOLITE_VAR_RE.findall(text))
 
-    # Include counters from all supported denominators
     for formula in SUPPORTED_DENOM.values():
         hw_d, var_d = parse_counters_text(formula)
         hw.update(hw_d)
         variables.update(var_d)
 
-    # Recursively resolve built-in variables
     build_in_vars = get_build_in_vars(gpu_series)
+    builtin_vars: set[str] = set()
     seen: set[str] = set()
     while variables - seen:
         new_vars: set[str] = set()
         for var in variables - seen:
             seen.add(var)
             if var in build_in_vars:
+                builtin_vars.add(var)
                 hw_v, var_v = parse_counters_text(build_in_vars[var])
                 hw.update(hw_v)
                 new_vars.update(var_v)
         variables.update(new_vars)
 
-    return hw
+    return hw, builtin_vars
 
 
 def counter_to_block(counter: str) -> str:

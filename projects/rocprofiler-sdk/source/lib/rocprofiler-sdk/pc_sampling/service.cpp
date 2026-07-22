@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 ROCm Developer Tools
+// Copyright (c) 2023-2026 ROCm Developer Tools
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -231,6 +231,9 @@ configure_pc_sampling_service(context::context*                ctx,
 bool
 is_pc_sample_service_configured(rocprofiler_agent_id_t agent_id)
 {
+    // Require HSA-level init to be complete so that get_pcs_session_of() will succeed
+    // and the ROCr session exists for every agent this function returns true for.
+    if(!is_hsa_initialized().load()) return false;
     return get_global_pc_sampling_sessions().rlock([agent_id](const auto& sessions) {
         // If the agent_id is in the global sessions map,
         // then the PC sampling service is configured on this agent.

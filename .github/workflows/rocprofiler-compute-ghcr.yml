@@ -1,18 +1,7 @@
-name: Publish GHCR Packages for rocprofiler-compute CI Images
+name: rocprofiler-compute GHCR Packages for CI Images
 
 on:
   workflow_dispatch:
-    inputs:
-      gpu:
-        description: 'GPU target(s) to publish'
-        required: true
-        default: 'all'
-        type: choice
-        options:
-          - all
-          - gfx94X
-          - gfx950
-          - gfx1151
   schedule:
     - cron: 0 5 * * *
   push:
@@ -32,7 +21,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       containers_list: ${{ steps.generate_containers_list.outputs.containers_list }}
-      gpu_list: ${{ steps.generate_gpu_list.outputs.gpu_list }}
 
     steps:
       - uses: actions/checkout@v6
@@ -46,16 +34,6 @@ jobs:
           CONTAINERS_LIST=$(cat containers-ci.yml | yq '.matrix' -I=0 -o=json)
           echo "containers_list=$CONTAINERS_LIST" >> $GITHUB_OUTPUT
 
-      - name: Generate GPU list
-        id: generate_gpu_list
-        run: |
-          GPU_INPUT="${{ github.event.inputs.gpu }}"
-          if [ -z "$GPU_INPUT" ] || [ "$GPU_INPUT" = "all" ]; then
-            echo 'gpu_list=["gfx94X","gfx950","gfx1151"]' >> $GITHUB_OUTPUT
-          else
-            echo "gpu_list=[\"$GPU_INPUT\"]" >> $GITHUB_OUTPUT
-          fi
-
   rocprofiler-compute-ci-gfx:
     needs: prepare_matrix_ci
     runs-on: ubuntu-latest
@@ -67,7 +45,7 @@ jobs:
       fail-fast: false
       matrix:
         system: ${{ fromJSON(needs.prepare_matrix_ci.outputs.containers_list) }}
-        gpu: ${{ fromJSON(needs.prepare_matrix_ci.outputs.gpu_list) }}
+        gpu: [ 'multiarch' ]
 
     steps:
       - name: Checkout Repository
@@ -102,22 +80,6 @@ jobs:
           fi
           echo "docker_file=${DOCKER_FILE}" >> $GITHUB_OUTPUT
 
-      - name: Get the latest build of The Rock tarball
-        id: therock
-        run: |
-          sudo apt-get install -y python3-pip
-          python3 -m pip install -U pip
-          python3 -m pip install -U awscli
-          export PATH=~/.local/bin:$PATH
-          KEY=$(aws s3api list-objects-v2 \
-                --bucket therock-nightly-tarball \
-                --no-sign-request \
-                --output json \
-                --query "sort_by(Contents[?contains(Key, 'linux-${{ matrix.gpu }}')], &LastModified)[-1].Key")
-          KEY=${KEY//\"/}
-          test -n "$KEY" || { echo "No ${{ matrix.gpu }} tarball found"; exit 1; }
-          echo "tarball=${KEY}" >> $GITHUB_OUTPUT
-
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
@@ -135,7 +97,6 @@ jobs:
             DISTRO=${{ steps.setup_vars_gfx.outputs.distro_image }}
             VERSION=${{ matrix.system.version }}
             GPU_TYPE=${{ matrix.gpu }}
-            GPU_TARBALL=${{ steps.therock.outputs.tarball }}
           tags: |
             ghcr.io/rocm/rocprofiler-${{ matrix.system.distro }}:${{ matrix.system.version }}-compute-ci-${{ matrix.gpu }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -152,7 +113,6 @@ jobs:
             DISTRO=${{ steps.setup_vars_gfx.outputs.distro_image }}
             VERSION=${{ matrix.system.version }}
             GPU_TYPE=${{ matrix.gpu }}
-            GPU_TARBALL=${{ steps.therock.outputs.tarball }}
           tags: |
             ghcr.io/rocm/rocprofiler-${{ matrix.system.distro }}:${{ matrix.system.version }}-compute-ci-${{ matrix.gpu }}
           labels: ${{ steps.meta.outputs.labels }}

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "tools/dbt_translate.h"
+#include "dbt_translate.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -23,6 +23,9 @@ using namespace rocjitsu::tools;
 namespace {
 
 constexpr int kUsageError = 1;
+// Matches the translation-failure exit code used by translate_code_object so a
+// non-dispatchable (skipped-kernel) artifact reports the same class of failure.
+constexpr int kTranslationError = 3;
 constexpr int kOutputError = 4;
 
 enum class OutputMode {
@@ -38,6 +41,8 @@ struct TargetInfo {
   rj_code_target_id_t code_object_target;
 };
 
+// \NPI new GPU: add a {"gfxNNNN", ARCH, EF_MACH, TARGET} row here
+// (and bump the  std::array size) so the DBT tool can translate to/from it.
 constexpr std::array<TargetInfo, 4> kTargetInfos = {{
     {"gfx942", ROCJITSU_CODE_ARCH_CDNA3, EF_AMDGPU_MACH_AMDGCN_GFX942, ROCJITSU_CODE_TARGET_GFX942},
     {"gfx950", ROCJITSU_CODE_ARCH_CDNA4, EF_AMDGPU_MACH_AMDGCN_GFX950, ROCJITSU_CODE_TARGET_GFX950},
@@ -78,6 +83,7 @@ void print_help() {
       << "  --output-mode MODE              disasm, code-object, or diff (default: disasm)\n"
       << "  --debug-conservative-liveness N Only allocate free VGPR scratch at or above N\n"
       << "  --debug-continue-after-failure Continue collecting diagnostics after failures\n"
+      << "  --skip-failed-kernels          Preserve failed kernels and continue other kernels\n"
       << "  --list-code-objects             List extractable code objects and exit\n"
       << "  --help                          Show this help\n\n"
       << "Supported target names: ";
@@ -152,6 +158,10 @@ void print_help() {
     }
     if (arg == "--debug-continue-after-failure") {
       options.translate.debug_continue_after_failure = true;
+      continue;
+    }
+    if (arg == "--skip-failed-kernels") {
+      options.translate.skip_failed_kernels = true;
       continue;
     }
 
@@ -229,14 +239,6 @@ struct ReportTotals {
   return totals;
 }
 
-[[nodiscard]] size_t text_section_size(const CodeObjectReport &report) {
-  for (const auto &section : report.sections) {
-    if (section.name == ".text")
-      return section.size_bytes;
-  }
-  return 0;
-}
-
 [[nodiscard]] std::string hex_offset(uint64_t value) {
   std::ostringstream os;
   os << "0x" << std::hex << std::setw(4) << std::setfill('0') << value;
@@ -277,6 +279,8 @@ struct ReportTotals {
     return "expand-failed";
   case DiagnosticKind::ResourceLimit:
     return "resource-limit";
+  case DiagnosticKind::KernelSkipped:
+    return "kernel-skipped";
   }
   return "unknown";
 }
@@ -369,10 +373,9 @@ count_semantic_lowerings(const std::vector<InstructionTranslationReport> &transl
   return count;
 }
 
-[[nodiscard]] std::string target_location(const InstructionTranslationReport &translation,
-                                          size_t text_size) {
-  if (translation.emitted_in_cave && translation.target_offset >= text_size)
-    return ".rj_translations+" + hex_offset(translation.target_offset - text_size);
+[[nodiscard]] std::string target_location(const InstructionTranslationReport &translation) {
+  if (translation.emitted_in_cave)
+    return ".text(local-cave)+" + hex_offset(translation.target_offset);
   return ".text+" + hex_offset(translation.target_offset);
 }
 
@@ -424,14 +427,13 @@ void print_instruction_translation_report(std::ostream &os, const TranslateOutpu
      << " illegal=" << count_action(translations, Action::Illegal)
      << " semantic=" << count_semantic_lowerings(translations) << "\n";
 
-  const size_t text_size = text_section_size(output.source_report);
   for (const auto &translation : translations) {
     if (!should_show_translation(translation))
       continue;
 
     os << "  " << hex_offset(translation.source_offset) << " "
        << translation_action_text(translation) << " .text+" << hex_offset(translation.source_offset)
-       << " -> " << target_location(translation, text_size) << "\n";
+       << " -> " << target_location(translation) << "\n";
     if (!translation.source_words.empty())
       os << "    source_words: " << words_text(translation.source_words) << "\n";
     os << "    source: " << translation.source_instruction << "\n";
@@ -537,6 +539,17 @@ int main(int argc, char **argv) {
     for (const auto &error : result.errors)
       std::cerr << "error: " << error.message << "\n";
     return result.errors.front().exit_code;
+  }
+
+  // A skipped kernel is a warning, so result.ok() stays true, but its
+  // s_trap; s_endpgm stub completes normally without a trap handler and would
+  // silently produce wrong results if dispatched. Refuse to emit an executable
+  // code object in that case (the HSA hook rejects the same load). Diff/Disasm
+  // are diagnostic-only inspection modes and remain available.
+  if (options.output_mode == OutputMode::CodeObject && !result.value.dispatchable()) {
+    std::cerr << "error: translation skipped one or more kernels; the code object is not "
+                 "dispatchable and will not be written\n";
+    return kTranslationError;
   }
 
   if (options.output_mode != OutputMode::Diff && !emit_output(options, result.value)) {

@@ -279,4 +279,56 @@ std::string stringify_bdf(const amdsmi_bdf_t& bdf);
  *  @retval ::Tuple of domain, bus, device, function
  */
 std::tuple<uint64_t, uint64_t, uint64_t, uint64_t> parse_bdfid(uint64_t bdfid);
+
+/**
+ *  @brief Read a pp_dpm_* sysfs file and populate an amdsmi_frequencies_t.
+ *
+ *  @details Parses the kernel's per-domain DPM table (e.g. pp_dpm_vclk,
+ *  pp_dpm_dclk) for the given device. Lines look like:
+ *      0: 200Mhz
+ *      1: 400Mhz *
+ *      2: 800Mhz
+ *  The '*' marker is recorded into @p f->current.
+ *
+ *  @param[in]  device       Device whose render node sysfs is read.
+ *  @param[in]  pp_dpm_file  Basename of the sysfs file (e.g. "pp_dpm_vclk").
+ *  @param[out] f            Frequencies struct to populate.
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS on success.
+ *          ::AMDSMI_STATUS_INVAL if @p f is null.
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if the sysfs file is missing or empty.
+ */
+amdsmi_status_t smi_amdgpu_read_clk_freq_from_pp_dpm(amd::smi::AMDSmiGPUDevice* device,
+                                                     const char* pp_dpm_file,
+                                                     amdsmi_frequencies_t* f);
+
+/**
+ *  @brief Map a VCLK/DCLK clock type to its pp_dpm_* sysfs filename.
+ *
+ *  rsmi does not expose these clock types via gpu_metrics, so amdsmi reads
+ *  them directly from sysfs.
+ *
+ *  @param[in] clk_type Clock type.
+ *
+ *  @retval Pointer to a static filename string, or nullptr for clock types
+ *          that are not VCLK0/VCLK1/DCLK0/DCLK1.
+ */
+const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type);
+
+/**
+ *  @brief Whether gfx activity should be reported as N/A for this GPU.
+ *
+ *  AMDSMI_SILENCE_GFX_ACTIVITY overrides everything ("1" silences, any other
+ *  value shows). When unset, silencing auto-enables for GPUs whose graphics and
+ *  RLC firmware versions fall in the affected ranges.
+ */
+bool is_gfx_activity_silenced(amdsmi_processor_handle processor_handle);
+
+/**
+ *  @brief Force the gfx activity fields of @p metrics to the uint-max N/A
+ *  sentinel when silenced (whole-GPU and per-XCP busy values). No-op otherwise.
+ */
+void apply_gfx_activity_overrides(amdsmi_processor_handle processor_handle,
+                                  amdsmi_gpu_metrics_t* metrics);
+
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_

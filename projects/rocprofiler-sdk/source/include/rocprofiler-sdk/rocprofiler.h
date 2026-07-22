@@ -129,6 +129,7 @@ ROCPROFILER_EXTERN_C_FINI
 #include "rocprofiler-sdk/rccl.h"
 #include "rocprofiler-sdk/rocdecode.h"
 #include "rocprofiler-sdk/rocjpeg.h"
+#include "rocprofiler-sdk/rocshmem.h"
 // #include "rocprofiler-sdk/spm.h"
 
 // subject to removal

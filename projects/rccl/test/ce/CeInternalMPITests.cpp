@@ -34,6 +34,7 @@ ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete,
 ncclResult_t ncclCeInitBatchOpsParams(struct ncclCeBatchOpsParams* params, int nRanks);
 void         ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params);
 ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm,
+                                  struct ncclCeCollArgs* args,
                                   struct ncclCeBatchOpsParams* params,
                                   hipStream_t stream);
 
@@ -384,7 +385,8 @@ TEST_F(CeInternalMPITest, SeqNumWrapAroundCollective)
 TEST_F(CeInternalMPITest, LaunchEmptyBatchSucceeds)
 {
     ncclCeBatchOpsParams params{};
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream()), ncclSuccess);
+    ncclCeCollArgs collArgs{};
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()), ncclSuccess);
     EXPECT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
 }
 
@@ -425,7 +427,8 @@ TEST_F(CeInternalMPITest, LaunchFourOpsSucceeds)
     }
     params.numOps = kOps;
 
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream()), ncclSuccess);
+    ncclCeCollArgs collArgs{};
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()), ncclSuccess);
     ASSERT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
 
     for(int i = 0; i < kOps; ++i)
@@ -434,6 +437,68 @@ TEST_F(CeInternalMPITest, LaunchFourOpsSucceeds)
         ASSERT_EQ(hipMemcpy(&result, dstGuards[i].get(), sizeof(float), hipMemcpyDeviceToHost),
                   hipSuccess);
         EXPECT_FLOAT_EQ(result, static_cast<float>(i + 1)) << "op " << i;
+    }
+    // srcGuards, dstGuards, and params freed automatically on scope exit.
+}
+
+// LAUNCH-03: ncclCeLaunchBatchOps on the legacy null/default stream (stream == 0).
+//
+// HIP-behaviour test (not a defect-fix validation): pins down that CE batch
+// dispatch on the legacy null/default stream is functionally correct on AMD.
+// Upstream NCCL 2.29.7 added an isLegacyStream fallback to per-op cudaMemcpyAsync
+// because cudaMemcpyBatchAsync rejects the legacy null stream on CUDA; on AMD/HIP
+// hipMemcpyBatchAsync accepts the null stream, so this passes with or without the
+// fallback. Kept as a regression guard for the null-stream contract on HIP.
+TEST_F(CeInternalMPITest, LaunchFourOpsNullStreamSucceeds)
+{
+    using namespace RCCLTestGuards;
+    constexpr int    kOps   = 4;
+    constexpr size_t kBytes = kOps * sizeof(float); // allocation size per src/dst buffer
+
+    // The legacy null/default stream is the exact trigger for the upstream defect.
+    hipStream_t nullStream = static_cast<hipStream_t>(0);
+
+    // DeviceBufferAutoGuard ensures hipFree is called on all paths, including early ASSERT exits.
+    std::vector<DeviceBufferAutoGuard> srcGuards(kOps), dstGuards(kOps);
+    for(int i = 0; i < kOps; ++i)
+    {
+        void* p = nullptr;
+        ASSERT_EQ(hipMalloc(&p, kBytes), hipSuccess);
+        srcGuards[i].set(p);
+        p = nullptr;
+        ASSERT_EQ(hipMalloc(&p, kBytes), hipSuccess);
+        dstGuards[i].set(p);
+
+        float pattern = static_cast<float>(i + 1);
+        ASSERT_EQ(hipMemset(srcGuards[i].get(), 0, kBytes), hipSuccess);
+        ASSERT_EQ(hipMemcpy(srcGuards[i].get(), &pattern, sizeof(float), hipMemcpyHostToDevice),
+                  hipSuccess);
+    }
+
+    ncclCeBatchOpsParams params{};
+    ASSERT_EQ(ncclCeInitBatchOpsParams(&params, kOps), ncclSuccess);
+    SCOPE_EXIT(ncclCeFreeBatchOpsParams(&params));
+
+    for(int i = 0; i < kOps; ++i)
+    {
+        params.srcs[i]  = static_cast<float*>(srcGuards[i].get());
+        params.dsts[i]  = static_cast<float*>(dstGuards[i].get());
+        params.sizes[i] = sizeof(float);
+    }
+    params.numOps = kOps;
+
+    ncclCeCollArgs collArgs{};
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, nullStream), ncclSuccess)
+        << "ncclCeLaunchBatchOps must succeed on the legacy null stream";
+    ASSERT_EQ(hipStreamSynchronize(nullStream), hipSuccess);
+
+    for(int i = 0; i < kOps; ++i)
+    {
+        float result = 0.0f;
+        ASSERT_EQ(hipMemcpy(&result, dstGuards[i].get(), sizeof(float), hipMemcpyDeviceToHost),
+                  hipSuccess);
+        EXPECT_FLOAT_EQ(result, static_cast<float>(i + 1))
+            << "op " << i << " produced wrong data on the null stream";
     }
     // srcGuards, dstGuards, and params freed automatically on scope exit.
 }
@@ -535,13 +600,14 @@ TEST_F(CeFaultInjTest, LaunchBatchOpsErrorPropagates)
     }
     params.numOps = kOps;
 
+    ncclCeCollArgs collArgs{};
     ASSERT_EQ(ncclCeFaultSet(ceComm, CE_FAULT_LAUNCH_OP), ncclSuccess);
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream()),
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()),
               ncclSystemError)
         << "Expected ncclSystemError when CE_FAULT_LAUNCH_OP is armed";
 
     ASSERT_EQ(ncclCeFaultClear(ceComm), ncclSuccess);
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream()),
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()),
               ncclSuccess)
         << "Expected ncclSuccess after fault cleared";
     EXPECT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
@@ -586,7 +652,8 @@ TEST_F(CeFaultInjTest, MultipleFaultsArmedAndCleared)
 
     ncclCeBatchOpsParams emptyParams{};
     emptyParams.numOps = 1; // non-zero to bypass the early-out
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &emptyParams, getActiveStream()),
+    ncclCeCollArgs collArgs{};
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &emptyParams, getActiveStream()),
               ncclSystemError);
 
     ASSERT_EQ(ncclCeFaultClear(ceComm), ncclSuccess);

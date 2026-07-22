@@ -39,6 +39,23 @@ To run AMD SMI, the following components need to be installed on your system:
   - For current amdgpu driver installation instructions, see the [AMD GPU
     Driver (amdgpu)
     documentation](https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/install/detailed-install/prerequisites.html).
+
+    :::{note}
+    ROCm releases claim support for a {ref}`range of amdgpu driver versions
+    <rocm:release-supported-fw>`. Because AMD SMI gets GPU telemetry and
+    management data directly from the amdgpu kernel driver, version mismatches
+    in either direction can affect which metrics and controls are available:
+
+    - If the amdgpu driver is older than your AMD SMI release expects, some
+      features might be unavailable, causing some fields to read N/A.
+    - If the amdgpu driver is newer than AMD SMI expects, AMD SMI might not
+      recognize new data formats (for example, newer `gpu_metrics` versions)
+      and can report N/A for affected fields.
+
+    To maximize compatibility, we recommend using the latest amdgpu driver version
+    that matches your AMD SMI or ROCm release. See {ref}`About N/A values
+    <cli-output-na>` for more information.
+    :::
 - The `amd_hsmp` or `hsmp_acpi` driver
   - See [amd_hsmp](https://github.com/amd/amd_hsmp) for more information.
 

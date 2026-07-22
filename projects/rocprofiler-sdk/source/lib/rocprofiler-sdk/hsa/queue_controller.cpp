@@ -26,9 +26,12 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
-#include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
+
+#include <hsa/amd_hsa_queue.h>
 
 #include <rocprofiler-sdk/fwd.h>
+#include <algorithm>
 #include <memory>
 
 namespace rocprofiler
@@ -53,16 +56,42 @@ create_queue(hsa_agent_t        agent,
     {
         if(agent_info.get_hsa_agent().handle == agent.handle)
         {
-            auto new_queue = std::make_unique<Queue>(agent_info,
-                                                     size,
-                                                     type,
-                                                     callback,
-                                                     data,
-                                                     private_segment_size,
-                                                     group_segment_size,
-                                                     controller->get_core_table(),
-                                                     controller->get_ext_table(),
-                                                     queue);
+            std::unique_ptr<Queue> new_queue;
+            if(queue_interposition::supports_queue_interposition())
+            {
+                ROCP_INFO << "[queue-intercept] creating queue via INLINE path for agent "
+                          << agent.handle;
+                auto status = controller->get_core_table().hsa_queue_create_fn(agent,
+                                                                               size,
+                                                                               type,
+                                                                               callback,
+                                                                               data,
+                                                                               private_segment_size,
+                                                                               group_segment_size,
+                                                                               queue);
+                if(status != HSA_STATUS_SUCCESS) return status;
+
+                new_queue = std::make_unique<Queue>(agent_info,
+                                                    controller->get_core_table(),
+                                                    controller->get_ext_table(),
+                                                    *queue,
+                                                    [](write_interceptor_t, void*) {});
+            }
+            else
+            {
+                ROCP_INFO << "[queue-intercept] creating queue via LEGACY path for agent "
+                          << agent.handle;
+                new_queue = std::make_unique<Queue>(agent_info,
+                                                    size,
+                                                    type,
+                                                    callback,
+                                                    data,
+                                                    private_segment_size,
+                                                    group_segment_size,
+                                                    controller->get_core_table(),
+                                                    controller->get_ext_table(),
+                                                    queue);
+            }
 
             controller->serializer(new_queue.get()).wlock([&](auto& serializer) {
                 serializer.add_queue(queue, *new_queue);
@@ -82,6 +111,110 @@ destroy_queue(hsa_queue_t* hsa_queue)
     if(get_queue_controller()) get_queue_controller()->destroy_queue(hsa_queue);
     return HSA_STATUS_SUCCESS;
 }
+
+#if defined(HSA_AMD_EXT_API_TABLE_STEP_VERSION) && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+hsa_status_t
+create_amd_queue(hsa_agent_t agent, hsa_amd_queue_create_desc_t* descs, uint32_t num_descs)
+{
+    auto* controller = CHECK_NOTNULL(get_queue_controller());
+    auto  status     = controller->get_ext_table().hsa_amd_queue_create_fn(agent, descs, num_descs);
+    if(status != HSA_STATUS_SUCCESS) return status;
+
+    const bool inline_intercept = queue_interposition::supports_queue_interposition();
+
+    for(uint32_t desc_idx = 0; desc_idx < num_descs; ++desc_idx)
+    {
+        hsa_queue_t* queue = descs[desc_idx].queue;
+        if(!queue) continue;
+
+        for(const auto& [_, agent_info] : controller->get_supported_agents())
+        {
+            if(agent_info.get_hsa_agent().handle != agent.handle) continue;
+
+            std::unique_ptr<Queue> new_queue;
+            if(inline_intercept)
+            {
+                // Inline write-index wrappers intercept this plain queue directly (via the
+                // per-queue state registered in add_queue), so no ROCr-level packet
+                // interceptor needs to be attached here.
+                ROCP_INFO << "[queue-intercept] registering hsa_amd_queue_create queue via "
+                             "INLINE path for agent "
+                          << agent.handle;
+                new_queue = std::make_unique<Queue>(agent_info,
+                                                    controller->get_core_table(),
+                                                    controller->get_ext_table(),
+                                                    queue,
+                                                    [](write_interceptor_t, void*) {});
+            }
+            else if(descs[desc_idx].engine_type == HSA_AMD_QUEUE_ENGINE_COMPUTE)
+            {
+                // A queue created by hsa_amd_queue_create is a plain queue that cannot carry a
+                // ROCr packet interceptor (hsa_amd_queue_intercept_register only accepts an
+                // InterceptQueue). In non-inline mode we therefore discard the plain queue and
+                // build a ROCr InterceptQueue that mirrors the descriptor's compute parameters,
+                // then hand that back to the caller in place of the original queue.
+                //
+                // NOTE: the InterceptQueue is created via the classic hsa_queue_create path, so
+                // the descriptor's device-memory ring-buffer flag is not honored while a
+                // non-inline profiling context (e.g. --sys-trace / HIP graph tracing) is active;
+                // the queue falls back to a system-memory ring.
+                ROCP_INFO << "[queue-intercept] registering hsa_amd_queue_create queue via "
+                             "LEGACY path (InterceptQueue) for agent "
+                          << agent.handle;
+
+                const auto&    compute_params = descs[desc_idx].engine.compute;
+                const uint32_t ring_packets   = static_cast<uint32_t>(
+                    descs[desc_idx].queue_size_bytes / sizeof(hsa_kernel_dispatch_packet_t));
+
+                // Release the plain queue that hsa_amd_queue_create just handed us; the
+                // InterceptQueue built below replaces it. get_core_table() holds the real ROCr
+                // functions (saved before the interception wrappers were installed).
+                controller->get_core_table().hsa_queue_destroy_fn(queue);
+
+                hsa_queue_t* intercept_queue = nullptr;
+                new_queue                    = std::make_unique<Queue>(
+                    agent_info,
+                    ring_packets,
+                    compute_params.type,
+                    descs[desc_idx].callback,
+                    descs[desc_idx].callback_data,
+                    compute_params.private_segment_size,
+                    // Descriptor v1 does not expose group_segment_size; UINT32_MAX requests the
+                    // runtime default, matching the classic hsa_queue_create behavior.
+                    UINT32_MAX,
+                    controller->get_core_table(),
+                    controller->get_ext_table(),
+                    &intercept_queue);
+
+                queue                 = intercept_queue;
+                descs[desc_idx].queue = intercept_queue;
+            }
+            else
+            {
+                // Non-compute engines (e.g. SDMA) do not dispatch kernels; keep the plain queue
+                // and register it without a packet interceptor.
+                ROCP_INFO << "[queue-intercept] registering non-compute hsa_amd_queue_create "
+                             "queue (no packet interception) for agent "
+                          << agent.handle;
+                new_queue = std::make_unique<Queue>(agent_info,
+                                                    controller->get_core_table(),
+                                                    controller->get_ext_table(),
+                                                    queue,
+                                                    [](write_interceptor_t, void*) {});
+            }
+
+            controller->serializer(new_queue.get()).wlock([&](auto& serializer) {
+                serializer.add_queue(&queue, *new_queue);
+            });
+            controller->add_queue(queue, std::move(new_queue));
+            ROCP_INFO << "created queue (hsa_amd_queue_create) for HSA agent handle "
+                      << agent.handle;
+            break;
+        }
+    }
+    return HSA_STATUS_SUCCESS;
+}
+#endif
 
 constexpr rocprofiler_agent_t default_agent =
     rocprofiler_agent_t{.size                       = sizeof(rocprofiler_agent_t),
@@ -190,13 +323,27 @@ queue_controller_iterate_attach_queue(hsa_queue_t* queue, hsa_agent_t agent, voi
 }
 
 void
+queue_controller_attach_queue_event(hsa_queue_t*                     queue,
+                                    hsa_agent_t                      agent,
+                                    rocprofiler_attach_queue_phase_t phase,
+                                    void* /*data*/)
+{
+    if(phase == ROCPROFILER_ATTACH_QUEUE_CREATED)
+    {
+        queue_controller_iterate_attach_queue(queue, agent, nullptr);
+    }
+    else if(auto* qc = get_queue_controller())
+    {
+        qc->destroy_queue(queue);
+    }
+}
+
+void
 queue_controller_load_attach_queues()
 {
     auto* attach_table = CHECK_NOTNULL(*(get_attach_table()));
 
-    attach_table->rocprofiler_attach_iterate_all_queues(queue_controller_iterate_attach_queue,
-                                                        nullptr);
-    attach_table->rocprofiler_attach_notify_new_queue = queue_controller_iterate_attach_queue;
+    attach_table->rocprofiler_attach_add_queue_cb(queue_controller_attach_queue_event, nullptr);
 }
 
 }  // namespace
@@ -205,10 +352,11 @@ void
 QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 {
     CHECK(queue);
+    const auto agent_id = queue->get_agent().get_rocp_agent()->id;
+
     _callback_cache.wlock([&](auto& callbacks) {
         _queues.wlock([&](auto& map) {
-            const auto agent_id = queue->get_agent().get_rocp_agent()->id;
-            map[id]             = std::move(queue);
+            map[id] = std::move(queue);
             for(const auto& [cbid, cb_data] : callbacks)
             {
                 auto& [agent, cb] = cb_data;
@@ -219,6 +367,9 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
             }
         });
     });
+
+    // Register queue state for SDK-level write pointer interception
+    queue_interposition::create_queue_state(id);
 }
 
 void
@@ -231,13 +382,10 @@ QueueController::destroy_queue(hsa_queue_t* id)
     // return if queue does not exist
     if(!queue) return;
 
-    ROCP_INFO << "destroying queue...";
-
+    queue_interposition::destroy_queue_state(id);
     queue->sync();
     if(queue->block_signal.handle != 0) get_core_table().hsa_signal_destroy_fn(queue->block_signal);
     _queues.wlock([&](auto& map) { map.erase(id); });
-
-    ROCP_INFO << "queue destroyed";
 }
 
 ClientID
@@ -325,6 +473,9 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
         {
             core_table.hsa_queue_create_fn  = hsa::create_queue;
             core_table.hsa_queue_destroy_fn = hsa::destroy_queue;
+#if defined(HSA_AMD_EXT_API_TABLE_STEP_VERSION) && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+            ext_table.hsa_amd_queue_create_fn = hsa::create_amd_queue;
+#endif
         }
     }
 }
@@ -516,13 +667,25 @@ enable_queue_intercept()
         bool has_scratch_reporting = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY) ||
                                      itr->is_tracing(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
 
+        // Keep interception active for HIP_GRAPH subscribers (drives kernel_dispatch_count).
+        bool has_hip_graph_tracing = itr->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_GRAPH);
+
         if(itr->dispatch_counter_collection || itr->pc_sampler || has_kernel_tracing ||
            itr->dispatch_spm || has_scratch_reporting || itr->device_counter_collection ||
-           itr->device_thread_trace || itr->dispatch_thread_trace)
+           (itr->device_thread_trace && itr->device_thread_trace->requires_queue_intercept()) ||
+           itr->dispatch_thread_trace || has_hip_graph_tracing)
             return true;
     }
-
     return false;
+}
+
+bool
+context_needs_queue_interposition_tracing(const context::context* ctx)
+{
+    return ctx != nullptr && ctx->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                                                    ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                                    ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,
+                                                    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
 }
 
 void
@@ -536,6 +699,9 @@ queue_controller_init(HsaApiTable* table)
 void
 queue_controller_sync()
 {
+    // sync the queue interceptor
+    queue_interposition::interposition_sync();
+
     if(get_queue_controller())
         get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
 }
@@ -543,11 +709,13 @@ queue_controller_sync()
 void
 queue_controller_fini()
 {
-    if(get_queue_controller())
-        get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
+    // synchronize first
+    queue_controller_sync();
 
     // finalize queue data (e.g. clean up signal pool)
     if(enable_queue_intercept()) queue_fini();
+
+    queue_interposition::interposition_fini();
 }
 
 void

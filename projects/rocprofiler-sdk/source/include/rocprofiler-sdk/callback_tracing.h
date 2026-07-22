@@ -31,6 +31,7 @@
 #include <rocprofiler-sdk/rccl.h>
 #include <rocprofiler-sdk/rocdecode.h>
 #include <rocprofiler-sdk/rocjpeg.h>
+#include <rocprofiler-sdk/rocshmem.h>
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_amd_tool.h>
@@ -134,6 +135,16 @@ typedef struct rocprofiler_callback_tracing_rocjpeg_api_data_t
     rocprofiler_rocjpeg_api_args_t   args;
     rocprofiler_rocjpeg_api_retval_t retval;
 } rocprofiler_callback_tracing_rocjpeg_api_data_t;
+
+/**
+ * @brief ROCProfiler rocSHMEM API Callback Data.
+ */
+typedef struct rocprofiler_callback_tracing_rocshmem_api_data_t
+{
+    uint64_t                          size;  ///< size of this struct
+    rocprofiler_rocshmem_api_args_t   args;
+    rocprofiler_rocshmem_api_retval_t retval;
+} rocprofiler_callback_tracing_rocshmem_api_data_t;
 
 /**
  * @brief ROCProfiler Code Object Load Tracer Callback Record.
@@ -347,6 +358,40 @@ typedef struct rocprofiler_callback_tracing_hip_stream_data_t
 } rocprofiler_callback_tracing_hip_stream_data_t;
 
 /**
+ * @brief ROCProfiler HIP Graph Callback Data.
+ *
+ * Delivered with callbacks fired for hipGraphInstantiate*, hipGraphExecDestroy,
+ * and hipGraphLaunch{,_spt} via the ::ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH
+ * domain.
+ *
+ * Sub-operations (::rocprofiler_hip_graph_operation_t):
+ *   - EXEC_CREATE  fires after a successful hipGraphInstantiate*
+ *   - EXEC_DESTROY fires after a successful hipGraphExecDestroy
+ *   - EXEC_LAUNCH  fires at ENTER and EXIT phases of
+ *                  hipGraphLaunch / hipGraphLaunch_spt
+ *
+ * Tools that want to associate kernel dispatches with their producing graph
+ * node should:
+ *   1. Subscribe to ::ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH and maintain a
+ *      per-thread stack of (graph_exec_id, node_counter) by handling
+ *      EXEC_LAUNCH ENTER (push) and EXIT (pop).
+ *   2. Register an external correlation id request callback that, when invoked
+ *      for KERNEL_DISPATCH / MEMORY_COPY, captures the current top-of-stack
+ *      graph attribution into the external correlation id and increments the
+ *      node_counter.
+ *   3. At record consumption time, extract the captured attribution from
+ *      ::rocprofiler_correlation_id_t::external on the dispatch/copy record.
+ *
+ * This mirrors the ::ROCPROFILER_CALLBACK_TRACING_HIP_STREAM design.
+ */
+typedef struct rocprofiler_callback_tracing_hip_graph_data_t
+{
+    uint64_t                    size;              ///< size of this struct
+    rocprofiler_graph_exec_id_t graph_exec_id;     ///< process-monotonic ID of the hipGraphExec_t
+    rocprofiler_address_t       graph_exec_value;  ///< raw hipGraphExec_t pointer value
+} rocprofiler_callback_tracing_hip_graph_data_t;
+
+/**
  * @brief API Tracing callback function. This function is invoked twice per API function: once
  * before the function is invoked and once after the function is invoked.  The external correlation
  * id value within the record is assigned the value at the top of the external correlation id stack.
@@ -360,7 +405,7 @@ typedef struct rocprofiler_callback_tracing_hip_stream_data_t
  * correlation id in the exit callback.
  *
  * @param [in] record Callback record data
- * @param [in,out] user_data This paramter can be used to retain information in between the enter
+ * @param [in,out] user_data This parameter can be used to retain information in between the enter
  * and exit phases.
  * @param [in] callback_data User data provided when configuring the callback tracing service
  */
@@ -459,7 +504,7 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t         
  *
  * @param [in] kind Callback tracing domain
  * @param [out] name If non-null and the name is a constant string that does not require dynamic
- * allocation, this paramter will be set to the address of the string literal, otherwise it will
+ * allocation, this parameter will be set to the address of the string literal, otherwise it will
  * be set to nullptr
  * @param [out] name_len If non-null, this will be assigned the length of the name (regardless of
  * the name is a constant string or requires dynamic allocation)
@@ -478,7 +523,7 @@ rocprofiler_query_callback_tracing_kind_name(rocprofiler_callback_tracing_kind_t
  * @param [in] kind Callback tracing domain
  * @param [in] operation Enumeration id value which maps to a specific API function or event type
  * @param [out] name If non-null and the name is a constant string that does not require dynamic
- * allocation, this paramter will be set to the address of the string literal, otherwise it will
+ * allocation, this parameter will be set to the address of the string literal, otherwise it will
  * be set to nullptr
  * @param [out] name_len If non-null, this will be assigned the length of the name (regardless of
  * the name is a constant string or requires dynamic allocation)

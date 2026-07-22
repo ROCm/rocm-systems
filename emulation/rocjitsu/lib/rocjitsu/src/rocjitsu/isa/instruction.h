@@ -63,6 +63,7 @@ public:
   /// @brief Backend-defined tag for pipeline routing or dispatch.
   /// @returns Tag value.
   uint8_t tag() const { return tag_; }
+  void set_tag(uint8_t t) { tag_ = t; }
 
 protected:
   uint8_t tag_ = 0;
@@ -80,7 +81,8 @@ public:
   /// @param[in] mnemonic Human-readable mnemonic (must point to static storage
   ///            or storage that outlives the instruction — typically a string
   ///            literal or a member of the encoding base class).
-  Instruction(std::string_view mnemonic, ExecuteFn exec) : execute(exec), mnemonic_(mnemonic) {}
+  Instruction(std::string_view mnemonic, ExecuteFn exec, uint64_t src_loc = 0)
+      : execute(exec), src_loc_(src_loc), mnemonic_(mnemonic) {}
   virtual ~Instruction() = default;
 
   /// @brief Pool allocator hooks, set by the decoder's enable_pool().
@@ -115,7 +117,8 @@ public:
   /// @brief Direct execute dispatch.  Callers invoke as:
   ///   ``inst->execute(*inst, &ctx)``
   /// Each derived instruction class sets this to a trampoline that calls
-  /// its ``execute_impl()`` method.  No virtual dispatch.
+  /// its ``execute_impl()`` method. In a model-only DBT image this is nullptr
+  /// and must not be called. No virtual dispatch.
   const ExecuteFn execute;
 
   /// @brief Access the attached dynamic state, or nullptr if none.
@@ -174,6 +177,14 @@ public:
   /// @brief Size of the instruction's encoding in bytes.
   /// @returns Encoding size in bytes.
   int size() const { return size_; }
+
+  /// @brief Source byte offset of this instruction in the decoded text section.
+  ///
+  /// @details Most decoder users only care about the instruction encoding and
+  /// leave this as zero. CFG builders decode from a text stream and pass the
+  /// stream offset through Decoder::decode() so analyses can carry instruction
+  /// pointers without a parallel offset wrapper.
+  [[nodiscard]] uint64_t src_loc() const { return src_loc_; }
 
   /// @brief Whether this instruction is a direct branch.
   /// @retval true The instruction has BRANCH or COND_BRANCH metadata.
@@ -236,6 +247,8 @@ public:
         first = false;
       }
       for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i]->size_bits() == 0)
+          continue;
         disassembly_ += (first ? " " : ", ");
         disassembly_ += src_operands_[i]->name();
         first = false;
@@ -246,10 +259,12 @@ public:
   }
 
 protected:
+  friend class Decoder;
+
   /// @brief Size of the instruction's encoding in bytes.
   int size_ = 0;
-  /// @brief Instruction's source operands (max 4).
-  std::array<Operand *, 4> src_operands_{};
+  /// @brief Instruction's source operands (max 6).
+  std::array<Operand *, 6> src_operands_{};
   uint8_t num_src_ = 0;
   /// @brief Instruction's destination operands (max 2).
   std::array<Operand *, 2> dst_operands_{};
@@ -269,6 +284,8 @@ protected:
   uint16_t encoding_id_ = 0;
   /// @brief Opcode within the encoding format.
   uint16_t opcode_ = 0;
+  /// @brief Source byte offset assigned at construction or by Decoder::decode().
+  uint64_t src_loc_ = 0;
 
 protected:
   std::string_view mnemonic_;
@@ -281,9 +298,12 @@ protected:
 /// @tparam Isa ISA traits type providing a Context type alias.
 template <typename Isa> class IsaInstruction : public Instruction {
 public:
+  using IsaType = Isa;
+
   /// @brief Construct an ISA instruction with the given mnemonic.
   /// @param[in] mnemonic Human-readable mnemonic string.
-  IsaInstruction(std::string_view mnemonic, ExecuteFn exec_fn) : Instruction(mnemonic, exec_fn) {}
+  IsaInstruction(std::string_view mnemonic, ExecuteFn exec_fn, uint64_t src_loc = 0)
+      : Instruction(mnemonic, exec_fn, src_loc) {}
 
   /// @brief Helper to create an execute dispatch trampoline for a concrete type.
   ///
@@ -298,6 +318,39 @@ public:
     return [](Instruction &self, void *ctx) {
       static_cast<Derived &>(self).execute_impl(*static_cast<typename Isa::Context *>(ctx));
     };
+  }
+
+  /// @brief Return the execution callback installed by an optional execution
+  /// translation unit.
+  ///
+  /// @details Model and execution objects must be co-linked into the same
+  /// image. The slot is image-local C++ state, not a registration ABI between
+  /// independently loaded shared libraries. Execution translation units
+  /// register their callbacks during static initialization, before any
+  /// instruction is decoded. Model-only images omit those translation units
+  /// and intentionally observe a null callback.
+  /// @tparam Derived Concrete generated instruction type.
+  /// @returns The registered execution trampoline, or null in a model-only
+  /// image.
+  template <typename Derived> static ExecuteFn registered_exec_fn() {
+    return exec_fn_slot<Derived>();
+  }
+
+  /// @brief Install a concrete instruction's execution trampoline.
+  /// @tparam Derived Concrete generated instruction type.
+  /// @returns True so the helper can initialize a namespace-scope registrar.
+  template <typename Derived> static bool register_exec_fn() {
+    exec_fn_slot<Derived>() = make_exec_fn<Derived>();
+    return true;
+  }
+
+private:
+  /// @brief Return the image-local dispatch slot for one instruction type.
+  /// @tparam Derived Concrete generated instruction type.
+  /// @returns Mutable slot populated during execution-TU static initialization.
+  template <typename Derived> static ExecuteFn &exec_fn_slot() {
+    static ExecuteFn fn = nullptr;
+    return fn;
   }
 };
 

@@ -81,7 +81,7 @@ get_ext_table()
         val.hsa_amd_ipc_signal_create_fn             = hsa_amd_ipc_signal_create;
         val.hsa_amd_ipc_signal_attach_fn             = hsa_amd_ipc_signal_attach;
         val.hsa_amd_register_system_event_handler_fn = hsa_amd_register_system_event_handler;
-        // Cannot be set, no visable public symbols
+        // Cannot be set, no visible public symbols
         // val.hsa_amd_queue_intercept_create_fn = hsa_amd_queue_intercept_create;
         // val.hsa_amd_queue_intercept_register_fn = hsa_amd_queue_intercept_register;
         val.hsa_amd_queue_set_priority_fn     = hsa_amd_queue_set_priority;

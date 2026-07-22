@@ -454,7 +454,7 @@ HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent)
     return agent_info;
 }
 
-// Return systen agent info
+// Return system agent info
 const AgentInfo*
 HsaRsrcFactory::GetAgentInfo(const hsa_agent_t agent)
 {
@@ -594,7 +594,7 @@ HsaRsrcFactory::AllocateLocalMemory(const AgentInfo* agent_info, size_t size)
 }
 
 // Allocate memory to pass kernel parameters.
-// Memory is alocated accessible for all CPU agents and for GPU given by AgentInfo parameter.
+// Memory is allocated accessible for all CPU agents and for GPU given by AgentInfo parameter.
 // @param agent_info Agent from whose memory region to allocate
 // @param size Size of memory in terms of bytes
 // @return uint8_t* Pointer to buffer, null if allocation fails.

@@ -3,7 +3,10 @@
 # SPDX-License-Identifier: MIT
 
 # You may need to add -DCMAKE_PREFIX_PATH=/path/to/hipfile
-# if hipFile has been installed to a non-standard location
+# if hipFile has been installed to a non-standard location. That same path is
+# recorded in the example binaries (via CMake's default RPATH handling), so they
+# find libhipfile.so at runtime without LD_LIBRARY_PATH even from a non-standard
+# install location.
 
 cmake_minimum_required(VERSION 3.21)
 

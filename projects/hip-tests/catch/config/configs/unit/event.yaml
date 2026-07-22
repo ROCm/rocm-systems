@@ -39,14 +39,14 @@ event:
     tags: [synchronization]
   Unit_hipEventElapsedTime:
     <<: *level_2
-    tags: [synchronization]
+    tags: [synchronization, smoke]
   Unit_hipEventElapsedTime_Verify_Capture:
     <<: *level_2
     tags: [synchronization]
   Unit_hipEventRecord:
     <<: *level_2
-    disabled: [amd_windows]
-    tags: [synchronization]
+    disabled: [amd_windows, amd_wsl]
+    tags: [synchronization, smoke]
   Unit_hipEventRecord_Negative:
     <<: *level_2
     tags: [synchronization]
@@ -55,6 +55,9 @@ event:
     # (amd_wsl) Below tests fail in stress test on 24/07/23
     disabled: [amd_windows, amd_wsl]
     tags: [ipc]
+  Unit_hipEventIpc_DestroyNonBlocking:
+    <<: *level_2
+    tags: [ipc, lifecycle]
   Unit_hipEventDestroy_Unfinished:
     <<: *level_2
     # SWDEV-411303 fails in WSL. Profiling not support in WSL
@@ -73,7 +76,7 @@ event:
     tags: [lifecycle]
   Unit_hipEventCreate_Positive:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, smoke]
   Unit_hipEventCreate_Verify_Capture:
     <<: *level_2
     tags: [lifecycle]
@@ -116,7 +119,7 @@ event:
     tags: [lifecycle]
   Unit_hipEventSynchronize_Default_Positive:
     <<: *level_2
-    tags: [synchronization]
+    tags: [synchronization, smoke]
   Unit_hipEventSynchronize_NoEventRecord_Positive:
     <<: *level_2
     tags: [synchronization]
@@ -135,3 +138,15 @@ event:
   Unit_hipEventIpc_shm_cleanup:
     <<: *level_2
     tags: [ipc]
+  Unit_hipEventCoalescing_CrossStreamWait:
+    <<: *level_2
+    tags: [synchronization]
+  Unit_hipEventCoalescing_AsyncOpsBreakCoalescing:
+    <<: *level_2
+    tags: [synchronization]
+  Unit_hipEventCoalescing_InterleavedEvents:
+    <<: *level_2
+    tags: [synchronization]
+  Unit_hipEventCoalescing_EventQuery:
+    <<: *level_2
+    tags: [synchronization]

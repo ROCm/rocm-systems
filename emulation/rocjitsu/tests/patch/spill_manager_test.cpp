@@ -532,7 +532,7 @@ TEST(SpillManager, IntegrationFromLiveBefore) {
   };
   TestCodeObject co(std::move(words));
   IntegDecoder decoder;
-  auto blocks = BasicBlock::build(co, decoder, std::span<const uint64_t>{});
+  auto blocks = BasicBlock::build(co, decoder, ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_FALSE(blocks.empty());
 
   // Pick the probe-site instruction by mnemonic match.

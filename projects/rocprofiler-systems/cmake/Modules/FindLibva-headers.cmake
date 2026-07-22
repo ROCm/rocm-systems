@@ -18,7 +18,7 @@ set(LIBVA_HEADERS_INCLUDE_DIR_INTERNAL
 find_path(
     LIBVA_HEADERS_INCLUDE_DIR
     NAMES va/va.h
-    PATHS /opt/amdgpu/include
+    PATHS ${ROCM_PATH}/lib/rocm_sysdeps/include /opt/amdgpu/include /usr/include
     NO_DEFAULT_PATH
 )
 

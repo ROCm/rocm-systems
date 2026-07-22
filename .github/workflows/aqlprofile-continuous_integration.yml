@@ -13,6 +13,7 @@ on:
       - '!projects/aqlprofile/CODEOWNERS'
       - '!projects/aqlprofile/source/docs/**'
       - '.github/workflows/aqlprofile-continuous_integration.yml'
+      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
   pull_request:
     paths:
       - 'projects/aqlprofile/**'
@@ -20,6 +21,7 @@ on:
       - '!projects/aqlprofile/CODEOWNERS'
       - '!projects/aqlprofile/source/docs/**'
       - '.github/workflows/aqlprofile-continuous_integration.yml'
+      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -45,7 +47,29 @@ env:
   navi4_EXCLUDE_LABEL_REGEX: ""
 
 jobs:
+  ci_config:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    name: Load CI config
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      gfx94x_runner: ${{ steps.runner.outputs.gfx94x_runner }}
+      gfx94x_sandbox_runner: ${{ steps.runner.outputs.gfx94x_sandbox_runner }}
+    steps:
+      - name: Checkout workflow actions
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
+          set-safe-directory: true
+
+      - name: Resolve runner labels
+        id: runner
+        uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+
   core-deb:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    needs: ci_config
     name: Core • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
     strategy:
@@ -54,9 +78,9 @@ jobs:
         system:
           # - { gpu: 'navi4', runner: 'linux-gfx120X-gpu-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx120X' }
           # - { gpu: 'navi3', runner: 'linux-gfx110X-gpu-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx110X' }
-          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
+          - { gpu: 'mi325', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
 
-    runs-on: ${{ matrix.system.runner }}
+    runs-on: ${{ needs.ci_config.outputs.gfx94x_runner }}
     container:
       image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
       credentials:
@@ -76,17 +100,6 @@ jobs:
       GPU_RUNNER: ${{ matrix.system.gpu }}
 
     steps:
-    - &install_latest_nightly_rocm
-      name: Install Latest Nightly ROCm
-      shell: bash
-      working-directory: /tmp
-      run: |
-        mv "${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz" .
-        rm -rf ${{ env.ROCM_PATH }}*
-        mkdir -p "${{ env.ROCM_PATH }}"
-        tar -xf "rocm-${{ matrix.system.gpu-target }}.tar.gz" -C "${{ env.ROCM_PATH }}"
-        echo "ROCm installed to: ${{ env.ROCM_PATH }}"
-
     - name: Git Symlink
       shell: bash
       run: |
@@ -125,7 +138,7 @@ jobs:
         PATH=~/.local/bin:${{ env.ROCM_PATH }}/bin:${PATH}
         LD_LIBRARY_PATH=$(pwd)/build:${{ env.ROCM_PATH }}/lib:$LD_LIBRARY_PATH
         ctest --output-on-failure --verbose -DCTEST_SOURCE_DIRECTORY="$(pwd)"
-          -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="${{ matrix.system.runner }}"
+          -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="${{ needs.ci_config.outputs.gfx94x_runner }}"
           -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           -DCMAKE_CTEST_ARGUMENTS=""
           -DAQLPROFILE_BUILD_TESTS=ON
@@ -133,17 +146,19 @@ jobs:
           -S $(pwd)/projects/aqlprofile/dashboard.cmake
 
   core-rpm:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    needs: ci_config
     name: Core • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
     strategy:
       fail-fast: false
       matrix:
         system:
-          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-ossci-rocm', os: 'rhel-8.8', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
-          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-ossci-rocm', os: 'rhel-9.5', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
-          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-ossci-rocm', os: 'sles-15.6', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
+          - { gpu: 'mi325', os: 'rhel-8.8', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
+          - { gpu: 'mi325', os: 'rhel-9.5', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
+          - { gpu: 'mi325', os: 'sles-15.6', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
 
-    runs-on: ${{ matrix.system.runner }}
+    runs-on: ${{ needs.ci_config.outputs.gfx94x_runner }}
     container:
       image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
       credentials:
@@ -165,8 +180,6 @@ jobs:
       with:
         sparse-checkout: projects/aqlprofile
         set-safe-directory: true
-
-    - *install_latest_nightly_rocm
 
     - name: Install requirements
       timeout-minutes: 10
@@ -199,7 +212,7 @@ jobs:
         LD_LIBRARY_PATH=$(pwd)/build:${{ env.ROCM_PATH }}/lib:$LD_LIBRARY_PATH
         ctest --output-on-failure --verbose -DCTEST_SOURCE_DIRECTORY="$(pwd)"
           -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16"
-          -DCTEST_SITE=${{ matrix.system.runner }}
+          -DCTEST_SITE=${{ needs.ci_config.outputs.gfx94x_runner }}
           -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           -DCMAKE_CTEST_ARGUMENTS=""
           -DAQLPROFILE_BUILD_TESTS=ON

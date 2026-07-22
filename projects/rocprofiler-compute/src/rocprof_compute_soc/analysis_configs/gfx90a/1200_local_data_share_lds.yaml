@@ -12,16 +12,16 @@ Panel Config:
         unit: Unit
       metric:
         Utilization:
-          value: SUM(100 * SQ_LDS_IDX_ACTIVE) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          value: 100 * SUM(SQ_LDS_IDX_ACTIVE) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
         Access Rate:
-          value: SUM(200 * SQ_ACTIVE_INST_LDS) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          value: 200 * SUM(SQ_ACTIVE_INST_LDS) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
         Theoretical Bandwidth Utilization:
-          value: SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * TO_INT($lds_banks_per_cu)) / SUM((End_Timestamp - Start_Timestamp) * $max_sclk * $cu_per_gpu * 0.00128)
+          value: SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * TO_INT($lds_banks_per_cu)) / (0.00128 * SUM((End_Timestamp - Start_Timestamp) * $max_sclk * $cu_per_gpu))
           unit: Percent
         Bank Conflict Rate:
-          value: SUM(SQ_LDS_BANK_CONFLICT * 3.125) / SUM(SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT)
+          value: 3.125 * SUM(SQ_LDS_BANK_CONFLICT) / SUM(SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT)
           unit: Percent
       comparable: false
       cli_style: simple_bar
@@ -38,15 +38,13 @@ Panel Config:
       metric:
         LDS Instructions:
           avg: SUM(SQ_INSTS_LDS) / SUM($denom)
-          min: MIN((SQ_INSTS_LDS / $denom))
-          max: MAX((SQ_INSTS_LDS / $denom))
+          min: MIN(SQ_INSTS_LDS / $denom)
+          max: MAX(SQ_INSTS_LDS / $denom)
           unit: (Instructions + $normUnit)
         Theoretical Bandwidth:
           avg: SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * TO_INT($lds_banks_per_cu)) / SUM(End_Timestamp - Start_Timestamp)
-          min: MIN(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-            / (End_Timestamp - Start_Timestamp)))
-          max: MAX(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-            / (End_Timestamp - Start_Timestamp)))
+          min: MIN((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * TO_INT($lds_banks_per_cu) / (End_Timestamp - Start_Timestamp))
+          max: MAX((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * TO_INT($lds_banks_per_cu) / (End_Timestamp - Start_Timestamp))
           unit: Gbps
         LDS Latency:
           avg: SUM(SQ_INST_LEVEL_LDS_ACCUM) / SUM(SQ_INSTS_LDS)
@@ -60,33 +58,33 @@ Panel Config:
           unit: Conflicts per Access
         Index Accesses:
           avg: SUM(SQ_LDS_IDX_ACTIVE) / SUM($denom)
-          min: MIN((SQ_LDS_IDX_ACTIVE / $denom))
-          max: MAX((SQ_LDS_IDX_ACTIVE / $denom))
+          min: MIN(SQ_LDS_IDX_ACTIVE / $denom)
+          max: MAX(SQ_LDS_IDX_ACTIVE / $denom)
           unit: (Cycles + $normUnit)
         Atomic Return Cycles:
           avg: SUM(SQ_LDS_ATOMIC_RETURN) / SUM($denom)
-          min: MIN((SQ_LDS_ATOMIC_RETURN / $denom))
-          max: MAX((SQ_LDS_ATOMIC_RETURN / $denom))
+          min: MIN(SQ_LDS_ATOMIC_RETURN / $denom)
+          max: MAX(SQ_LDS_ATOMIC_RETURN / $denom)
           unit: (Cycles + $normUnit)
         Bank Conflict:
           avg: SUM(SQ_LDS_BANK_CONFLICT) / SUM($denom)
-          min: MIN((SQ_LDS_BANK_CONFLICT / $denom))
-          max: MAX((SQ_LDS_BANK_CONFLICT / $denom))
+          min: MIN(SQ_LDS_BANK_CONFLICT / $denom)
+          max: MAX(SQ_LDS_BANK_CONFLICT / $denom)
           unit: (Cycles + $normUnit)
         Addr Conflict:
           avg: SUM(SQ_LDS_ADDR_CONFLICT) / SUM($denom)
-          min: MIN((SQ_LDS_ADDR_CONFLICT / $denom))
-          max: MAX((SQ_LDS_ADDR_CONFLICT / $denom))
+          min: MIN(SQ_LDS_ADDR_CONFLICT / $denom)
+          max: MAX(SQ_LDS_ADDR_CONFLICT / $denom)
           unit: (Cycles + $normUnit)
         Unaligned Stall:
           avg: SUM(SQ_LDS_UNALIGNED_STALL) / SUM($denom)
-          min: MIN((SQ_LDS_UNALIGNED_STALL / $denom))
-          max: MAX((SQ_LDS_UNALIGNED_STALL / $denom))
+          min: MIN(SQ_LDS_UNALIGNED_STALL / $denom)
+          max: MAX(SQ_LDS_UNALIGNED_STALL / $denom)
           unit: (Cycles + $normUnit)
         Mem Violations:
           avg: SUM(SQ_LDS_MEM_VIOLATIONS) / SUM($denom)
-          min: MIN((SQ_LDS_MEM_VIOLATIONS / $denom))
-          max: MAX((SQ_LDS_MEM_VIOLATIONS / $denom))
+          min: MIN(SQ_LDS_MEM_VIOLATIONS / $denom)
+          max: MAX(SQ_LDS_MEM_VIOLATIONS / $denom)
           unit: (Accesses + $normUnit)
   metrics_description:
     Utilization: Indicates what percent of the kernel's duration the LDS was actively

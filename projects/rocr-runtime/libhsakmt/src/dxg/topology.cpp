@@ -741,16 +741,40 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.CComputeIdLo = 0;
   props.FComputeIdLo = 0;
   props.Capability.ui32.ASICRevision = device->AsicRevision();
-  props.Capability.ui32.WatchPointsTotalBits = std::log2(device->WatchPointsNum());
-  props.MaxWavesPerSIMD = device->WavePerCu() / device->SimdPerCu();
+  uint32_t watch_points_num = device->WatchPointsNum();
+  if (watch_points_num == 0) {
+    pr_warn(
+        "WatchPointsNum is 0 for node %u, forcing WatchPointsTotalBits to 0\n",
+        node_id);
+    props.Capability.ui32.WatchPointsTotalBits = 0;
+  } else {
+    props.Capability.ui32.WatchPointsTotalBits = std::log2(watch_points_num);
+  }
+  uint32_t simd_per_cu = device->SimdPerCu();
+  if (simd_per_cu == 0){
+    pr_err("SimdPerCU is 0 for node %u\n", node_id);
+    return HSAKMT_STATUS_ERROR;
+  }
   props.LDSSizeInKB = device->LdsSize() / 1024;
   props.GDSSizeInKB = 0;
   props.WaveFrontSize = device->WavefrontSize();
   props.NumShaderBanks = device->NumShaderEngine();
   props.NumArrays = device->ShaderArrayPerShaderEngine();
-  props.NumCUPerArray = device->ComputeUnitCount() / props.NumArrays;
-  props.NumSIMDPerCU = device->SimdPerCu();
+  if (props.NumArrays == 0) {
+    pr_warn("NumArrays is 0 for node %u, forcing NumCUPerArray to 0\n",
+            node_id);
+    props.NumCUPerArray = 0;
+  } else {
+    props.NumCUPerArray = device->ComputeUnitCount() / props.NumArrays;
+  }
+  props.NumSIMDPerCU = simd_per_cu;
   props.MaxSlotsScratchCU = device->MaxScratchSlotsPerCu();
+
+  // MaxWavesPerSIMD = (waves per CU) / (SIMDs per CU)
+  // WKMI provides wave_per_cu which is the total waves per CU.
+  // We need to divide by NumSIMDPerCU to get waves per SIMD.
+  props.MaxWavesPerSIMD = device->WavePerCu() / simd_per_cu;
+
   props.VendorId = 0x1002;
   props.DeviceId = device->DeviceId();
   props.LocationId = device->PciBusAddr();

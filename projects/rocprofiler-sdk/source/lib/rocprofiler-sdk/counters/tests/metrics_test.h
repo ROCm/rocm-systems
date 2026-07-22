@@ -277,7 +277,7 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
        "159",
        "<None>",
        "Count number of context-restored waves sent to SQs. This value represents the number "
-       "of waves whos current register state has been restored from a register bank during "
+       "of waves whose current register state has been restored from a register bank during "
        "the collection timeframe (for dispatch profiling this is the timeframe of kernel "
        "execution, for agent profiling it is the timeframe between start_context and read "
        "counter data). Context saving/restoring is a slow operation and should be limited. "
@@ -390,7 +390,7 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
        "89",
        "<None>",
        "Number of inflight instruction fetch requests from the cache. This is a value "
-       "returned per-sharder engine. Best used with accumlate() functions as part of a "
+       "returned per-shader engine. Best used with accumulate() functions as part of a "
        "derived counter."},
       {"TCC_RW_REQ",
        "TCC",
@@ -812,7 +812,7 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
        "160",
        "<None>",
        "Count number of context-saved waves sent to SQs. This value represents the number "
-       "of waves whos current register state has been saved to a register bank during the "
+       "of waves whose current register state has been saved to a register bank during the "
        "collection timeframe (for dispatch profiling this is the timeframe of kernel "
        "execution, for agent profiling it is the timeframe between start_context and read "
        "counter data) . Context saving/restoring is a slow operation and should be limited. "

@@ -74,7 +74,8 @@ struct testColl broadcastTest = {
   BroadcastInitData,
   BroadcastGetBw,
   BroadcastRunColl,
-  BroadcastGetAlgoProtoChannels
+  BroadcastGetAlgoProtoChannels,
+  NULL
 };
 
 void BroadcastGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {

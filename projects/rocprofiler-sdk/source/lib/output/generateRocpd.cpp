@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -239,12 +239,13 @@ void
 read_file(rocpd_sql_engine_t                        engine,
           rocpd_sql_schema_kind_t                   kind,
           rocpd_sql_options_t                       options,
+          rocpd_version_triplet_t                   schema_version,
           const rocpd_sql_schema_jinja_variables_t* variables,
           const char*                               schema_path,
           const char*                               schema_content,
           void*                                     user_data)
 {
-    common::consume_args(engine, kind, options, variables, schema_path);
+    common::consume_args(engine, kind, options, schema_version, variables, schema_path);
 
     auto* _db     = static_cast<rocpd_db*>(user_data);
     auto& _schema = _db->schemas[kind];
@@ -256,12 +257,20 @@ read_schema_file(rocpd_db& db, rocpd_sql_schema_kind_t schema_kind)
 {
     auto _variables = common::init_public_api_struct(rocpd_sql_schema_jinja_variables_t{});
     auto _options   = ROCPD_SQL_OPTIONS_NONE;
+    auto _version   = rocpd_version_triplet_t{3, 0, 2};  // default schema version
 
     _variables.uuid = db.uuid.c_str();
     _variables.guid = db.guid.c_str();
 
-    ROCPD_CHECK(rocpd_sql_load_schema(
-        ROCPD_SQL_ENGINE_SQLITE3, schema_kind, _options, &_variables, read_file, nullptr, 0, &db));
+    ROCPD_CHECK(rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3,
+                                      schema_kind,
+                                      _options,
+                                      _version,
+                                      &_variables,
+                                      read_file,
+                                      nullptr,
+                                      0,
+                                      &db));
 
     return db.schemas.at(schema_kind);
 }
@@ -281,8 +290,10 @@ iterate_args_callback(rocprofiler_buffer_tracing_kind_t /*kind*/,
 
     auto* _data = static_cast<function_args_t*>(data);
     if(arg_type && arg_name && arg_value_str)
+    {
         _data->emplace_back(
             argument_info{arg_number, common::cxx_demangle(arg_type), arg_name, arg_value_str});
+    }
     return 0;
 }
 
@@ -1022,7 +1033,11 @@ write_rocpd(
     const generator<tool_buffer_tracing_kfd_record_t>&                      kfd_gen,
     const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
-    const generator<tool_counter_record_t>&                                 counter_collection_gen)
+    const generator<tool_counter_record_t>&                                 counter_collection_gen,
+    const generator<tool_spm_counter_record_t>& /** spm_collection_gen*/,
+    const generator<rocprofiler_buffer_tracing_ompt_record_t>&             ompt_gen,
+    const generator<rocprofiler_buffer_tracing_hip_graph_record_t>&        graph_launch_gen,
+    const generator<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t>& rocshmem_api_gen)
 {
     static auto get_simple_timer = [](std::string_view label) {
         return common::simple_timer{fmt::format("SQLite3 generation :: {:24}", label)};
@@ -1069,7 +1084,7 @@ write_rocpd(
 
         for(auto itr : {ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
                         ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
-                        ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS,
+                        ROCPD_SQL_SCHEMA_ROCPD_METADATA,
                         ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS})
         {
             auto views_schema = read_schema_file(db, itr);
@@ -1109,9 +1124,16 @@ write_rocpd(
                          itr.demangled_kernel_name,
                          itr.truncated_kernel_name);
 
+    // Create a local copy of the rename map to use for this output run instead of using
+    // get_kernel_name(), which may access a modified version of the map
+    auto _rename_strings = std::unordered_map<uint64_t, std::string_view>{};
     for(const auto& itr : tool_metadata.kernel_rename_map.get())
     {
-        add_string_entry(_metadata, itr.first);
+        if(!itr.first.empty())
+        {
+            add_string_entry(_metadata, itr.first);
+            _rename_strings.emplace(itr.second, itr.first);
+        }
     }
 
     for(const auto& itr : tool_metadata.get_code_objects())
@@ -1439,6 +1461,8 @@ write_rocpd(
                                     uint64_t    end_timestamp,
                                     const auto& grid,
                                     const auto& workgroup,
+                                    uint64_t    graph_exec_id,
+                                    uint64_t    graph_node_id,
                                     bool        enable_duplicate_check) {
             // Skip if we've already processed this dispatch_id
             if(dispatch_evt_ids.size() > dispatch_id && dispatch_evt_ids[dispatch_id] != 0) return;
@@ -1476,10 +1500,9 @@ write_rocpd(
             // Unconditionally collect kernel rename data if it is available. rocpd needs to be able
             // to use kernel rename option after data has already been collected, so the kernel
             // rename data needs to be stored in generated db.
+            auto _rename_it = _rename_strings.find(corr_id.external.value);
             auto region_name =
-                (corr_id.external.value > 0 && (enable_duplicate_check || kernel_id > 0))
-                    ? tool_metadata.get_kernel_name(kernel_id, true, corr_id.external.value)
-                    : std::string_view{};
+                (_rename_it != _rename_strings.end()) ? _rename_it->second : std::string_view{};
 
             auto agent_node_id = tool_metadata.get_agent(info.agent_id)->node_id;
 
@@ -1507,6 +1530,8 @@ write_rocpd(
                     insert_value("grid_size_x", grid.x),
                     insert_value("grid_size_y", grid.y),
                     insert_value("grid_size_z", grid.z),
+                    insert_value("graph_exec_id", graph_exec_id),
+                    insert_value("graph_node_id", graph_node_id),
                     insert_value("region_name_id", string_entries.at(region_name)),
                     insert_value("event_id", evt_id),
                 });
@@ -1528,7 +1553,7 @@ write_rocpd(
                     auto kind =
                         tool_metadata.buffer_names.at(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
 
-                    // Process this dispatch
+                    // Process this dispatch (counter-collection path: no graph attribution).
                     process_dispatch(info.dispatch_id,                 // dispatch_id
                                      info.kernel_id,                   // kernel_id
                                      dispatch_data.correlation_id,     // corr_id
@@ -1541,6 +1566,8 @@ write_rocpd(
                                      dispatch_data.end_timestamp,      // end_timestamp
                                      info.grid_size,                   // grid
                                      info.workgroup_size,              // workgroup
+                                     0,                                // graph_exec_id
+                                     0,                                // graph_node_id
                                      false                             // enable_duplicate_check
                     );
                 }
@@ -1568,6 +1595,8 @@ write_rocpd(
                                      itr.end_timestamp,                         // end_timestamp
                                      itr.dispatch_info.grid_size,               // grid
                                      itr.dispatch_info.workgroup_size,          // workgroup
+                                     itr.graph_exec_id.handle,                  // graph_exec_id
+                                     itr.graph_node_id.handle,                  // graph_node_id
                                      true  // enable_duplicate_check
                     );
                 }
@@ -1648,11 +1677,64 @@ write_rocpd(
                             insert_value("src_address", itr.src_address.value),
                             insert_value("size", itr.bytes),
                             insert_value("stream_id", get_stream_id(itr.stream_id)),
+                            insert_value("graph_exec_id", itr.graph_exec_id.handle),
+                            insert_value("graph_node_id", itr.graph_node_id.handle),
                             insert_value("event_id", evt_id),
                         });
                 }
             }
         };
+
+    auto insert_graph_launch_data = [&db,
+                                     &tool_metadata,
+                                     &string_entries,
+                                     node_id,
+                                     this_pid,
+                                     &get_thread_id,
+                                     &get_queue_id](const auto& _gen) {
+        auto _sqlgenperf_rocpd = get_simple_timer("rocpd_graph_launch");
+        auto _deferred         = sql::deferred_transaction{db.conn};
+
+        for(auto pitr : _gen)
+        {
+            for(auto itr : _gen.get(pitr))
+            {
+                get_thread_id(itr.thread_id);
+
+                auto kind = tool_metadata.buffer_names.at(itr.kind);
+
+                auto evt_id = create_event(
+                    db,
+                    {
+                        insert_value("category_id", string_entries.at(kind)),
+                        insert_value("stack_id", itr.correlation_id.internal),
+                        insert_value("parent_stack_id", itr.correlation_id.internal),
+                        insert_value("correlation_id", itr.correlation_id.external.value),
+                    });
+
+                auto agent_node_id =
+                    (itr.agent_id.handle != 0)
+                        ? std::optional<uint64_t>{tool_metadata.get_agent(itr.agent_id)->node_id}
+                        : std::nullopt;
+
+                get_insert_statement(
+                    db,
+                    "rocpd_graph_launch{{uuid}}",
+                    {
+                        insert_value("nid", node_id),
+                        insert_value("pid", this_pid),
+                        insert_value("tid", itr.thread_id),
+                        insert_value("agent_id", agent_node_id),
+                        insert_value("queue_id", get_queue_id(itr.queue_id)),
+                        insert_value("start", itr.start_timestamp),
+                        insert_value("end", itr.end_timestamp),
+                        insert_value("graph_exec_id", itr.graph_exec_id.handle),
+                        insert_value("kernel_dispatch_count", itr.kernel_dispatch_count),
+                        insert_value("event_id", evt_id),
+                    });
+            }
+        }
+    };
 
     auto insert_memory_alloc_data = [&db,
                                      &tool_metadata,
@@ -1836,15 +1918,16 @@ write_rocpd(
                 {
                     auto demangled_type = common::cxx_demangle(arg_info.arg_type);
 
-                    get_insert_statement(db,
-                                         "rocpd_arg{{uuid}}",
-                                         {
-                                             insert_value("event_id", evt_id),
-                                             insert_value("position", arg_info.arg_number),
-                                             insert_value("type", demangled_type),
-                                             insert_value("name", arg_info.arg_name),
-                                             insert_value("value", arg_info.arg_value),
-                                         });
+                    get_insert_statement(
+                        db,
+                        "rocpd_arg{{uuid}}",
+                        {
+                            insert_value("event_id", evt_id),
+                            insert_value("position", arg_info.arg_number),
+                            insert_value("type", demangled_type),
+                            insert_value("name", arg_info.arg_name),
+                            insert_value("value", arg_info.arg_value, allow_empty_string{}),
+                        });
                 }
 
                 if(itr.start_timestamp != itr.end_timestamp)
@@ -1864,8 +1947,12 @@ write_rocpd(
                 }
                 else
                 {
+                    // OMPT instant samples are named by operation (not the "OMPT"
+                    // category) so each event keeps its identity on its own track.
+                    const auto& track_name =
+                        (itr.kind == ROCPROFILER_BUFFER_TRACING_OMPT) ? name : category;
                     auto track_id = get_track_id(
-                        db, node_id, this_pid, itr.thread_id, string_entries.at(category), "{}");
+                        db, node_id, this_pid, itr.thread_id, string_entries.at(track_name), "{}");
 
                     get_insert_statement(db,
                                          "rocpd_sample{{uuid}}",
@@ -2015,12 +2102,15 @@ write_rocpd(
         insert_api_data(hsa_api_gen);
         insert_api_data(marker_api_gen);
         insert_api_data(rccl_api_gen);
+        insert_api_data(ompt_gen);
         insert_api_data(rocdecode_api_gen);
+        insert_api_data(rocshmem_api_gen);
     }
 
     insert_kernel_dispatch_data(dispatch_to_evt_id);
     insert_pmc_event_data(dispatch_to_evt_id);
     insert_memory_copy_data(memory_copy_gen);
+    insert_graph_launch_data(graph_launch_gen);
 
     {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_memory_allocate");

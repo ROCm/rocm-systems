@@ -46,6 +46,7 @@
 #include <amdgpu_drm.h>
 #include <link.h>
 #include <sys/ioctl.h>
+#include <fcntl.h>
 #endif
 
 #include "hsakmt/hsakmt.h"
@@ -53,6 +54,7 @@
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/runtime.h"
+#include "core/util/os.h"
 
 #if defined(_WIN32)
 #include "loader/executable.hpp"
@@ -85,9 +87,9 @@ __forceinline HSA_QUEUE_PRIORITY HsaInternalToKfdPriority(
 
 namespace AMD {
 static_assert(
-    (sizeof(decltype(core::ShareableHandle::handle)) >= sizeof(HsaMemoryObjectHandle)) &&
-        (alignof(decltype(core::ShareableHandle::handle)) >= alignof(HsaMemoryObjectHandle)),
-    "ShareableHandle cannot store a HsaMemoryObjectHandle");
+    (sizeof(decltype(core::DriverMemoryHandle::handle)) >= sizeof(HsaMemoryObjectHandle)) &&
+        (alignof(decltype(core::DriverMemoryHandle::handle)) >= alignof(HsaMemoryObjectHandle)),
+    "DriverMemoryHandle cannot store a HsaMemoryObjectHandle");
 namespace {
 
 __forceinline HsaMemoryMapFlags mem_perm(hsa_access_permission_t perm) {
@@ -222,12 +224,22 @@ hsa_status_t KfdDriver::GetCacheProperties(uint32_t node_id, uint32_t processor_
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t
-KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
-                          core::MemoryRegion::AllocateFlags alloc_flags,
-                          void **mem, size_t size, uint32_t agent_node_id) {
+hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
+                                       core::MemoryRegion::AllocateFlags alloc_flags, size_t size,
+                                       uint32_t agent_node_id, core::DriverMemoryHandle* handle) {
   const MemoryRegion &m_region(static_cast<const MemoryRegion &>(mem_region));
   HsaMemFlags kmt_alloc_flags(m_region.mem_flags());
+  void* mem = nullptr;
+
+  // Fills the caller's handle from whatever mem holds: a VA for fragment and
+  // mapped allocations, or the opaque memory-only handle for NoAddress
+  // allocations. For KFD both are the allocation word reinterpreted as uint64_t.
+  // Export-only fields stay at their defaults and are filled lazily on export.
+  auto populate_handle = [&]() {
+    handle->handle = reinterpret_cast<uint64_t>(mem);
+    handle->vaddr = mem;
+    handle->size = size;
+  };
 
   kmt_alloc_flags.ui32.ExecuteAccess =
       (alloc_flags & core::MemoryRegion::AllocateExecutable ? 1 : 0);
@@ -235,11 +247,6 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
   if (m_region.IsSystem() &&
       (alloc_flags & core::MemoryRegion::AllocateNonPaged)) {
     kmt_alloc_flags.ui32.NonPaged = 1;
-  }
-
-  if (!m_region.IsLocalMemory() &&
-      (alloc_flags & core::MemoryRegion::AllocateMemoryOnly)) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
   // Allocating a memory handle for virtual memory
@@ -280,7 +287,7 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
     !!(alloc_flags & core::MemoryRegion::AllocateExecutableBlitKernelObject);
 
   if (m_region.IsLocalMemory()) {
-    // Allocate physically contiguous memory. AllocateKfdMemory function call
+    // Allocate physically contiguous memory. hsaKmtAllocMemory function call
     // will fail if this flag is not supported in KFD.
     kmt_alloc_flags.ui32.Contiguous =
         (alloc_flags & core::MemoryRegion::AllocateContiguous
@@ -298,15 +305,15 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
         ((alloc_flags & (~core::MemoryRegion::AllocateRestrict)) == 0);
 
     if (useSubAlloc) {
-      *mem = m_region.fragment_alloc(size);
+      mem = m_region.fragment_alloc(size);
 
       if ((alloc_flags & core::MemoryRegion::AllocateAsan) &&
-          HSAKMT_CALL(hsaKmtReplaceAsanHeaderPage(*mem)) != HSAKMT_STATUS_SUCCESS) {
-        m_region.fragment_free(*mem);
-        *mem = nullptr;
+          HSAKMT_CALL(hsaKmtReplaceAsanHeaderPage(mem)) != HSAKMT_STATUS_SUCCESS) {
+        m_region.fragment_free(mem);
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
       }
 
+      populate_handle();
       return HSA_STATUS_SUCCESS;
     }
   }
@@ -322,15 +329,18 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
 
   //// Allocate memory.
   //// If it fails attempt to release memory from the block allocator and retry.
-  *mem = AllocateKfdMemory(kmt_alloc_flags, node_id, size);
-  if (*mem == nullptr) {
-    m_region.owner()->Trim();
-    *mem = AllocateKfdMemory(kmt_alloc_flags, node_id, size);
-  }
 
-  if (*mem != nullptr) {
-    if (kmt_alloc_flags.ui32.NoAddress)
+  auto status = HSAKMT_CALL(hsaKmtAllocMemory(node_id, size, kmt_alloc_flags, &mem));
+  if (status == HSAKMT_STATUS_NO_MEMORY) {
+    m_region.owner()->Trim();
+    status = HSAKMT_CALL(hsaKmtAllocMemory(node_id, size, kmt_alloc_flags, &mem));
+  }
+  if (status == HSAKMT_STATUS_SUCCESS) {
+    if (kmt_alloc_flags.ui32.NoAddress) {
+      // returns mem (opaque memory-only handle, no virtual address)
+      populate_handle();
       return HSA_STATUS_SUCCESS;
+    }
 
     // Commit the memory.
     // For system memory, on non-restricted allocation, map it to all GPUs. On
@@ -350,45 +360,63 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
 
         if (map_node_count == 0) {
           // No need to pin since no GPU in the platform.
+          populate_handle();
           return HSA_STATUS_SUCCESS;
         }
 
         map_node_id = &core::Runtime::runtime_singleton_->gpu_ids()[0];
       } else {
         // No need to pin it for CPU exclusive access.
+        populate_handle();
         return HSA_STATUS_SUCCESS;
       }
     }
 
-    uint64_t alternate_va = 0;
-    const bool is_resident = MakeKfdMemoryResident(
-        map_node_count, map_node_id, *mem, size, &alternate_va, map_flag);
+    MAKE_NAMED_SCOPE_GUARD(memoryGuard, [&]() {
+      if (mem != nullptr) {
+        HSAKMT_CALL(hsaKmtFreeMemory(mem, size));
+        mem = nullptr;
+      }
+    });
 
+    uint64_t alternate_va = 0;
+
+    const bool is_resident = (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(
+                                  mem, size, &alternate_va, map_flag, map_node_count,
+                                  const_cast<uint32_t*>(map_node_id))) == HSAKMT_STATUS_SUCCESS);
+
+    // On Windows/DXG, allow allocations to succeed even if MakeResident
+    // is best-effort; WDDM will demand-page on GPU access.
+    const bool is_windxg =
+        core::Runtime::runtime_singleton_->thunkLoader()->IsWinDxg();
     const bool require_pinning =
+        !is_windxg &&
         (!m_region.full_profile() || m_region.IsLocalMemory() ||
          m_region.IsScratch());
 
     if (require_pinning && !is_resident) {
-      FreeKfdMemory(*mem, size);
-      *mem = nullptr;
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
 
     if ((alloc_flags & core::MemoryRegion::AllocateAsan) &&
-        HSAKMT_CALL(hsaKmtReplaceAsanHeaderPage(*mem)) != HSAKMT_STATUS_SUCCESS) {
-      FreeKfdMemory(*mem, size);
-      *mem = nullptr;
+        HSAKMT_CALL(hsaKmtReplaceAsanHeaderPage(mem)) != HSAKMT_STATUS_SUCCESS) {
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
+
+    memoryGuard.Dismiss();
+    populate_handle();
     return HSA_STATUS_SUCCESS;
   }
 
   return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 }
 
-hsa_status_t KfdDriver::FreeMemory(void *mem, size_t size) {
-  MakeKfdMemoryUnresident(mem);
-  return FreeKfdMemory(mem, size) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+hsa_status_t KfdDriver::FreeMemory(const core::DriverMemoryHandle& handle) {
+  void* mem = reinterpret_cast<void*>(handle.handle);
+  HSAKMT_CALL(hsaKmtUnmapMemoryToGPU(mem));
+  return (HSAKMT_CALL(hsaKmtFreeMemory(mem, handle.size)) == HSAKMT_STATUS_SUCCESS)
+      ? HSA_STATUS_SUCCESS
+      : HSA_STATUS_ERROR;
 }
 
 hsa_status_t KfdDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
@@ -443,109 +471,244 @@ hsa_status_t KfdDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdDriver::ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
-                                     size_t *offset) {
-  int dmabuf_fd_res = -1;
-  size_t offset_res = 0;
-  HSAKMT_STATUS status =
-      HSAKMT_CALL(hsaKmtExportDMABufHandle(mem, size, &dmabuf_fd_res, &offset_res));
-  if (status != HSAKMT_STATUS_SUCCESS) {
-    if (status == HSAKMT_STATUS_INVALID_PARAMETER) {
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+hsa_status_t KfdDriver::ExportMemoryHandle(const core::Agent& agent,
+                                           const core::DriverMemoryHandle& handle,
+                                           core::ShareType type, void* export_handle) {
+  return ExportMemoryHandleImpl(agent, handle, type, EXPORT_MEMORY_FLAGS_NONE, export_handle,
+                                nullptr);
+}
+
+hsa_status_t KfdDriver::ExportMemoryHandleImpl(const core::Agent& agent,
+                                               const core::DriverMemoryHandle& handle,
+                                               core::ShareType type, uint32_t flags,
+                                               void* export_handle, uint64_t* export_offset) {
+  if (export_handle == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  switch (type) {
+  case core::ShareType::DMABUF_FD: {
+    auto* dmabuf_fd = static_cast<int*>(export_handle);
+    if (flags & EXPORT_MEMORY_FLAGS_KFD_DMABUF) {
+      if (export_offset == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      void* mem = reinterpret_cast<void*>(handle.handle);
+      if (HSAKMT_CALL(hsaKmtExportDMABufHandle(mem, handle.size, dmabuf_fd, export_offset)) !=
+          HSAKMT_STATUS_SUCCESS) {
+        return HSA_STATUS_ERROR;
+      }
+      return HSA_STATUS_SUCCESS;
     }
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+#if defined(__linux__)
+    if (handle.dmabuf_fd != -1) {
+      *dmabuf_fd = handle.dmabuf_fd;
+      return HSA_STATUS_SUCCESS;
+    }
+#endif
+    const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
+
+    HsaHandleExportDesc desc = {};
+    desc.device_handle = gpu_agent.libThunkDev();
+    desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
+    desc.buf_handle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
+    desc.size = handle.size;
+
+    HsaHandleExportFlags export_flags = {};
+    HsaMemoryExportResult res = {};
+
+    if (HSAKMT_CALL(hsaKmtHandleExport(&desc, &res, &export_flags)) != HSAKMT_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR;
+    }
+    *dmabuf_fd = res.dmabuf_fd;
+    return HSA_STATUS_SUCCESS;
   }
-
-  *dmabuf_fd = dmabuf_fd_res;
-  *offset = offset_res;
-
-  return HSA_STATUS_SUCCESS;
-}
-
-hsa_status_t KfdDriver::ImportDMABuf(int dmabuf_fd, const core::Agent& agent,
-                                     core::ShareableHandle* handle, void* mem) {
-  const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
-  HsaExternalHandleDesc desc;
-  desc.device_handle = gpu_agent.libThunkDev();
-  desc.fd = static_cast<HSAint64>(dmabuf_fd);
-  desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
-  desc.mem = mem;
-  desc.metadata = 0;
-  HsaHandleImportFlags hflags = {0};
-  HsaHandleImportResult res;
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
-  if (status != HSAKMT_STATUS_SUCCESS) {
+  case core::ShareType::FABRIC_HANDLE: {
+#if !defined(__linux__)
+    assert(!"Unimplemented!");
     return HSA_STATUS_ERROR;
+#else
+    auto* fabric_handle = static_cast<hsa_fabric_handle_t*>(export_handle);
+    const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
+
+    HsaHandleExportDesc desc = {};
+    desc.device_handle = gpu_agent.libThunkDev();
+    desc.type = HSA_EXTERNAL_HANDLE_FABRIC;
+    desc.buf_handle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
+    desc.size = handle.size;
+
+    HsaHandleExportFlags export_flags = {};
+    HsaMemoryExportResult res = {};
+
+    if (HSAKMT_CALL(hsaKmtHandleExport(&desc, &res, &export_flags)) != HSAKMT_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR;
+    }
+
+    memcpy(fabric_handle, reinterpret_cast<void*>(&res.fabric), sizeof(hsa_fabric_handle_t));
+    return HSA_STATUS_SUCCESS;
+#endif
   }
-  *handle = core::ShareableHandle{reinterpret_cast<uint64_t>(res.buf_handle)};
-  return HSA_STATUS_SUCCESS;
+  default:
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 }
 
-hsa_status_t KfdDriver::DestroyImportedShareableHandle(core::ShareableHandle* handle) {
-  // Calls DestroyShareableHandle, as an amdgpu_bo_handle object is created during ImportDMABuf.
-  return DestroyShareableHandle(handle);
+hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::DriverMemoryHandle* handle,
+                                           core::ShareType type, void* import_handle,
+                                           void* mem) {
+  if (handle == nullptr || import_handle == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  switch (type) {
+  case core::ShareType::DMABUF_FD: {
+    const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
+    const int dmabuf_fd = static_cast<const core::DriverMemoryHandle*>(import_handle)->dmabuf_fd;
+
+    HsaHandleImportDesc desc = {};
+    desc.device_handle = gpu_agent.libThunkDev();
+    desc.dmabuf_fd = static_cast<HSAint32>(dmabuf_fd);
+    desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
+    desc.mem = mem;
+    desc.metadata = 0;
+    HsaHandleImportFlags hflags = {0};
+    HsaHandleImportResult res = {};
+    HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
+    if (status != HSAKMT_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR;
+    }
+    handle->handle = reinterpret_cast<uint64_t>(res.buf_handle);
+    handle->size = res.alloc_size;
+    return HSA_STATUS_SUCCESS;
+  }
+  case core::ShareType::FABRIC_HANDLE: {
+#if !defined(__linux__)
+    assert(!"Unimplemented!");
+    return HSA_STATUS_ERROR;
+#endif
+    const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
+    const auto fabric_handle = static_cast<const core::DriverMemoryHandle*>(import_handle)->fabric_handle;
+
+    HsaHandleImportDesc desc = {};
+    desc.device_handle = gpu_agent.libThunkDev();
+    desc.type = HSA_EXTERNAL_HANDLE_FABRIC;
+    memcpy(&desc.fabric, &fabric_handle, sizeof(fabric_handle));
+
+    HsaHandleImportFlags hflags = {};
+    HsaHandleImportResult res = {};
+
+    HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
+    if (status != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+
+    handle->handle = reinterpret_cast<uint64_t>(res.buf_handle);
+    if (rocr::os::DmaBufClose(&res.dmabuf_fd) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+    handle->size = res.alloc_size;
+    return HSA_STATUS_SUCCESS;
+  }
+  default:
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 }
 
-hsa_status_t KfdDriver::Map(core::ShareableHandle handle, void* mem, size_t offset, size_t size,
-                            hsa_access_permission_t perms) {
+hsa_status_t KfdDriver::Map(const core::DriverMemoryHandle& handle, void* mem, size_t offset, size_t size,
+                            hsa_access_permission_t perms, uint32_t node_id) {
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaMap(memhandle, static_cast<HSAuint64>(offset),
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaMap(memhandle,
+                                     static_cast<HSAuint64>(offset),
                                      static_cast<HSAuint64>(size), reinterpret_cast<HSAuint64>(mem),
-                                     mem_perm(perms)));
-  if (status != HSAKMT_STATUS_SUCCESS) {
-    return HSA_STATUS_ERROR;
-  }
+                                     mem_perm(perms), node_id));
+  if (status != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdDriver::Unmap(core::ShareableHandle handle, void *mem,
-                              size_t offset, size_t size) {
+hsa_status_t KfdDriver::Unmap(const core::DriverMemoryHandle& handle, void *mem,
+                              size_t offset, size_t size, uint32_t node_id) {
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(memhandle, static_cast<HSAuint64>(offset),
-                                     static_cast<HSAuint64>(size), reinterpret_cast<HSAuint64>(mem)));
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(memhandle,
+                                     static_cast<HSAuint64>(offset),
+                                     static_cast<HSAuint64>(size), reinterpret_cast<HSAuint64>(mem), node_id));
   if (status != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
-                                              const core::Agent& agent,
-                                              core::ShareableHandle* handle, uint64_t* offset,
-                                              int* drm_fd, uint64_t* drm_fd_offset) {
+hsa_status_t KfdDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
+                                              const core::Agent& agent, uint64_t* offset) {
   // Create handle by exporting and importing the memory from the owning agent.
 
-  // Export memory.
-  int dmabuf_fd = 0;
-  hsa_status_t err = ExportDMABuf(mem, size, &dmabuf_fd, offset);
-  if (err != HSA_STATUS_SUCCESS) return err;
+  // On input, handle is the allocation handle. For KFD the native allocation id is the
+  // allocation's virtual address.
+  void* mem = reinterpret_cast<void*>(handle->handle);
+  const size_t size = handle->size;
 
-  // Import memory.
-  err = ImportDMABuf(dmabuf_fd, agent, handle, mem);
-  core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
-  if (err != HSA_STATUS_SUCCESS) return err;
+  int source_fd = -1;
 
-  // Get address that memory is mapped to.
-  auto devhandle = static_cast<const GpuAgent&>(agent).libThunkDev();
-  auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle->handle);
-  HSAKMT_STATUS hsakmt_err =
-      HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle, reinterpret_cast<HSAint32*>(drm_fd),
-                                         reinterpret_cast<HSAuint64*>(drm_fd_offset)));
-  if (hsakmt_err != HSAKMT_STATUS_SUCCESS) {
+  /*
+   * On Linux, export via KFD first (EXPORT_MEMORY_FLAGS_KFD_DMABUF) so the KFD section of the
+   * AMDGPU driver has a BO entry, then import into DRM. The shareable dmabuf_fd itself is created
+   * lazily when access is set (see Runtime::VMemorySetAccessPerHandle), so it is not re-exported
+   * here. On Windows, KFD export and DRM export are equivalent.
+   */
+
+  core::DriverMemoryHandle kfd_alloc = {};
+  kfd_alloc.handle = handle->handle;
+  kfd_alloc.size = size;
+  if (ExportMemoryHandleImpl(agent, kfd_alloc, core::ShareType::DMABUF_FD,
+                             EXPORT_MEMORY_FLAGS_KFD_DMABUF, &source_fd,
+                             offset) != HSA_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }
 
+  core::DriverMemoryHandle source_handle = {};
+  source_handle.dmabuf_fd = source_fd;
+
+  core::DriverMemoryHandle targetHandle = {};
+  hsa_status_t ret = ImportMemoryHandle(agent, &targetHandle, core::ShareType::DMABUF_FD,
+                                        &source_handle, mem);
+#if defined(__linux__)
+  rocr::os::DmaBufClose(&source_fd);
+#endif
+  if (ret != HSA_STATUS_SUCCESS)
+    return ret;
+  assert(targetHandle.size == size);
+
+#if defined(__linux__)
+  /*
+   * We converted mem into a driver handle. The driver handle will keep the reference count
+   * inside the KMD so we can free the original KFD allocation.
+   */
+  if (HSAKMT_CALL(hsaKmtFreeMemory(mem, size)) != HSAKMT_STATUS_SUCCESS) {
+    DestroyMemoryHandle(&targetHandle);
+    return HSA_STATUS_ERROR;
+  }
+#endif
+
+  const auto devhandle = static_cast<const GpuAgent&>(agent).libThunkDev();
+  const auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(targetHandle.handle);
+  if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle, &handle->mmap_offset)) != HSAKMT_STATUS_SUCCESS) {
+    DestroyMemoryHandle(&targetHandle);
+    return HSA_STATUS_ERROR;
+  }
+
+  // handle->handle is replaced by the imported BO; handle->size carries over from allocation.
+  handle->handle = targetHandle.handle;
+  /*
+   * Do not hold a shareable dmabuf_fd open for the lifetime of the handle. It is created lazily
+   * (and closed again) when access is set in Runtime::VMemorySetAccessPerHandle.
+   */
+  handle->dmabuf_fd = -1;
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdDriver::DestroyShareableHandle(core::ShareableHandle* handle) {
+hsa_status_t KfdDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
+  hsa_status_t ret = rocr::os::DmaBufClose(&handle->dmabuf_fd);
+
   auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle->handle);
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemHandleFree(memhandle));
-  if (status != HSAKMT_STATUS_SUCCESS) {
-    return HSA_STATUS_ERROR;
+  if (memhandle != nullptr) {
+    HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemHandleFree(memhandle));
+    if (status != HSAKMT_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR;
+    }
   }
   *handle = {};
-  return HSA_STATUS_SUCCESS;
+  return ret;
 }
 
 hsa_status_t KfdDriver::SPMAcquire(uint32_t preferred_node_id) const {
@@ -586,8 +749,15 @@ hsa_status_t KfdDriver::ImportExternalSemaphore(uint32_t node_id, void* nt_handl
       static_cast<HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE>(type);
 
   HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {};
+  // Require both thunks up front: importing without destroy would leak the
+  // handle. Missing either -> NOT_SUPPORTED, not a null call.
+  auto* thunk_loader = core::Runtime::runtime_singleton_->thunkLoader();
+  const bool loaded =
+      thunk_loader->HSAKMT_PFN(hsaKmtImportExternalSemaphore) != nullptr &&
+      thunk_loader->HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) != nullptr;
   HSAKMT_STATUS s =
-      HSAKMT_CALL(hsaKmtImportExternalSemaphore(node_id, nt_handle, kmt_type, &kmt_handle));
+      loaded ? HSAKMT_CALL(hsaKmtImportExternalSemaphore(node_id, nt_handle, kmt_type, &kmt_handle))
+             : HSAKMT_STATUS_NOT_SUPPORTED;
 
   // libhsakmt distinguishes invalid input (null handle, unknown type)
   // from "no node for this agent" and from generic KMD failures.
@@ -597,8 +767,9 @@ hsa_status_t KfdDriver::ImportExternalSemaphore(uint32_t node_id, void* nt_handl
     case HSAKMT_STATUS_SUCCESS:
       break;
     case HSAKMT_STATUS_INVALID_PARAMETER:  // e.g. null nt_handle
-    case HSAKMT_STATUS_NOT_SUPPORTED:      // unsupported handle type (incl. Linux stub)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSAKMT_STATUS_NOT_SUPPORTED:      // missing thunk / unsupported type / Linux stub
+      return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
     case HSAKMT_STATUS_INVALID_NODE_UNIT:  // no WDDM device for node
       return HSA_STATUS_ERROR_INVALID_AGENT;
     default:
@@ -611,49 +782,54 @@ hsa_status_t KfdDriver::ImportExternalSemaphore(uint32_t node_id, void* nt_handl
 
 hsa_status_t KfdDriver::DestroyExternalSemaphore(hsa_amd_external_semaphore_t sem) const {
   HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {sem.handle};
+  // No export -> not this driver's handle. INVALID_AGENT (base-class
+  // contract) lets handle_close keep polling other drivers.
+  if (core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) == nullptr)
+    return HSA_STATUS_ERROR_INVALID_AGENT;
   if (HSAKMT_CALL(hsaKmtDestroyExternalSemaphore(kmt_handle)) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }
 
-void *KfdDriver::AllocateKfdMemory(const HsaMemFlags &flags, uint32_t node_id,
-                                   size_t size) {
-  void *mem = nullptr;
-  const HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtAllocMemory(node_id, size, flags, &mem));
-  return (status == HSAKMT_STATUS_SUCCESS) ? mem : nullptr;
-}
-
-bool KfdDriver::FreeKfdMemory(void *mem, size_t size) {
-  if (mem == nullptr || size == 0) {
-    debug_print("Invalid free ptr:%p size:%zu\n", mem, size);
-    return false;
+namespace {
+// Preserve the libhsakmt distinctions a caller can act on (bad handle vs.
+// wrong node vs. generic failure) instead of folding everything into ERROR.
+hsa_status_t MapQueueExtSemStatus(HSAKMT_STATUS s) {
+  switch (s) {
+    case HSAKMT_STATUS_SUCCESS:
+      return HSA_STATUS_SUCCESS;
+    case HSAKMT_STATUS_INVALID_HANDLE:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSAKMT_STATUS_INVALID_NODE_UNIT:
+      return HSA_STATUS_ERROR_INVALID_AGENT;
+    case HSAKMT_STATUS_NOT_SUPPORTED:  // missing thunk / platform stub
+      return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+    default:
+      return HSA_STATUS_ERROR;
   }
+}
+}  // namespace
 
-  if (HSAKMT_CALL(hsaKmtFreeMemory(mem, size)) != HSAKMT_STATUS_SUCCESS) {
-    debug_print("Failed to free ptr:%p size:%zu\n", mem, size);
-    return false;
-  }
-  return true;
+hsa_status_t KfdDriver::SignalExternalSemaphore(uint64_t queue_id,
+                                                hsa_amd_external_semaphore_t sem,
+                                                uint64_t value) const {
+  HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {sem.handle};
+  // Optional thunk: missing export maps to NOT_SUPPORTED, not a null call.
+  if (core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore) == nullptr)
+    return MapQueueExtSemStatus(HSAKMT_STATUS_NOT_SUPPORTED);
+  return MapQueueExtSemStatus(
+      HSAKMT_CALL(hsaKmtQueueSignalExternalSemaphore(queue_id, kmt_handle, value)));
 }
 
-bool KfdDriver::MakeKfdMemoryResident(size_t num_node, const uint32_t *nodes,
-                                      const void *mem, size_t size,
-                                      uint64_t *alternate_va,
-                                      HsaMemMapFlags map_flag) {
-  assert(num_node > 0);
-  assert(nodes);
-
-  *alternate_va = 0;
-
-  HSAKMT_STATUS kmt_status(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(
-      const_cast<void *>(mem), size, alternate_va, map_flag, num_node,
-      const_cast<uint32_t *>(nodes))));
-
-  return (kmt_status == HSAKMT_STATUS_SUCCESS);
-}
-
-void KfdDriver::MakeKfdMemoryUnresident(const void *mem) {
-  HSAKMT_CALL(hsaKmtUnmapMemoryToGPU(const_cast<void *>(mem)));
+hsa_status_t KfdDriver::WaitExternalSemaphore(uint64_t queue_id,
+                                              hsa_amd_external_semaphore_t sem,
+                                              uint64_t value) const {
+  HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {sem.handle};
+  // Optional thunk: missing export maps to NOT_SUPPORTED, not a null call.
+  if (core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore) == nullptr)
+    return MapQueueExtSemStatus(HSAKMT_STATUS_NOT_SUPPORTED);
+  return MapQueueExtSemStatus(
+      HSAKMT_CALL(hsaKmtQueueWaitExternalSemaphore(queue_id, kmt_handle, value)));
 }
 
 bool KfdDriver::BindXnackMode() {
@@ -694,6 +870,13 @@ hsa_status_t KfdDriver::SetTrapHandler(uint32_t node_id, const void* base, uint6
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t KfdDriver::SetSigbusDelay(uint32_t node_id, uint32_t delay_ms) const {
+  if (HSAKMT_CALL(hsaKmtSetSigbusDelay(node_id, delay_ms)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t KfdDriver::AllocateScratchMemory(uint32_t node_id, uint64_t size, void** mem) const {
   assert(mem);
   assert(size > 0);
@@ -702,10 +885,9 @@ hsa_status_t KfdDriver::AllocateScratchMemory(uint32_t node_id, uint64_t size, v
   flags.ui32.Scratch = 1;
   flags.ui32.HostAccess = 1;
 
-  void* ptr = AllocateKfdMemory(flags, node_id, size);
-  if (ptr == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-
-  *mem = ptr;
+  *mem = nullptr;
+  auto status = HSAKMT_CALL(hsaKmtAllocMemory(node_id, size, flags, mem));
+  if (status != HSAKMT_STATUS_SUCCESS || *mem == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -713,6 +895,18 @@ hsa_status_t KfdDriver::GetDeviceHandle(uint32_t node_id, void** device_handle) 
   assert(device_handle);
 
   if (HSAKMT_CALL(hsaKmtGetAMDGPUDeviceHandle(node_id, reinterpret_cast<HsaAMDGPUDeviceHandle*>(device_handle))) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::GetDeviceFd(uint32_t node_id, int *fd) const {
+  HsaAMDGPUDeviceHandle device_handle;
+
+  if (HSAKMT_CALL(hsaKmtGetAMDGPUDeviceHandle(node_id, &device_handle)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+
+  if (HSAKMT_CALL(hsaKmtGetAmdGPUDeviceFd(device_handle, fd)) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
 
   return HSA_STATUS_SUCCESS;
@@ -767,7 +961,8 @@ hsa_status_t KfdDriver::MakeMemoryResident(const void* mem, size_t size, uint64_
       return HSA_STATUS_ERROR;
     }
   } else if (mem_flags != nullptr && nodes != nullptr) {
-    if (!MakeKfdMemoryResident(num_nodes, nodes, mem, size, alternate_va, *mem_flags)) {
+    if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(const_cast<void*>(mem), size, alternate_va,
+                                              *mem_flags, num_nodes, const_cast<uint32_t *>(nodes))) != HSAKMT_STATUS_SUCCESS) {
       return HSA_STATUS_ERROR;
     }
   } else {
@@ -815,6 +1010,31 @@ hsa_status_t KfdDriver::GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** addres
 
   *address = queue_info.SaveAreaHeader;
   *size = queue_info.SaveAreaSizeInBytes;
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const {
+  const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
+  const auto& properties = gpu_agent.properties();
+
+  std::string status_path =
+  "/sys/class/drm/renderD" + std::to_string(properties.DrmRenderMinor) + "/device/ualink/accel_state";
+  FILE* file = fopen(status_path.c_str(), "r");
+  if (!file) {
+    return HSA_STATUS_ERROR;
+  }
+  char status[10];
+  if (fscanf(file, "%9s", status) != 1) {
+    fclose(file);
+    return HSA_STATUS_ERROR;
+  }
+  fclose(file);
+  if (!strcmp(status, "ready") || !strcmp(status, "active")) {
+    *ready = true;
+  } else {
+    *ready = false;
+  }
 
   return HSA_STATUS_SUCCESS;
 }

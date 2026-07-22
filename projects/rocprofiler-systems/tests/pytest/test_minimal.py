@@ -10,7 +10,7 @@ import pytest
 from pathlib import Path
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.minimal, pytest.mark.ci_enable]
+pytestmark = [pytest.mark.minimal]
 
 # =============================================================================
 # Fixtures
@@ -26,6 +26,12 @@ def rocpd_env() -> dict[str, str]:
 def recursion_rules(validation_rules_dir: Path) -> list[Path]:
     rules_dir = validation_rules_dir / "minimal"
     return [rules_dir / "recursion-rules.json"]
+
+
+@pytest.fixture
+def pthreads_rules(validation_rules_dir: Path) -> list[Path]:
+    rules_dir = validation_rules_dir / "minimal"
+    return [rules_dir / "pthreads-rules.json"]
 
 
 # =============================================================================
@@ -52,8 +58,8 @@ class TestMinimal(RocprofsysTest):
             mode,
             "minimal-recursion",
             env=env,
-            rewrite_args=["--min-instructions", "0"],
-            runtime_args=["--min-instructions", "0"],
+            binary_rewrite_args=["--min-instructions", "0"],
+            runtime_instrument_args=["--min-instructions", "0"],
             run_args=[str(self.RECURSION_DEPTH)],
         )
         self.assert_regex(result)
@@ -71,4 +77,56 @@ class TestMinimal(RocprofsysTest):
             result,
             subtest_name="ROCpd Recursion Validation",
             rules_files=recursion_rules,
+        )
+
+        # Every 'recurse' frame carries a source_object trace-arg
+        # with the value 'minimal-recursion'
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto Debug Validation",
+            key_names=["source_object"],
+            key_counts=[deepest_depth],
+            pass_regex=[
+                r"key\s*::\s*debug\.source_object",
+                r"string_value\s*::\s*minimal-recursion",
+            ],
+        )
+
+    @pytest.mark.rocpd("rocpd_env")
+    @pytest.mark.parametrize("mode", ["binary_rewrite", "runtime_instrument", "sys_run"])
+    def test_pthreads(self, mode, rocpd_env, pthreads_rules):
+        """
+        Ensure that pthread_create gotcha arguments (the incoming arg0
+        annotation and the return value) are stored in the trace cache and
+        surfaced in both perfetto and rocpd.
+        """
+        env = rocpd_env.copy()
+        env["ROCPROFSYS_COUT_OUTPUT"] = "ON"
+
+        result = self.run_test(
+            mode,
+            "minimal-pthreads",
+            env=env,
+            binary_rewrite_args=["--min-instructions", "0"],
+            runtime_instrument_args=["--min-instructions", "0"],
+        )
+        self.assert_regex(result)
+
+        # Both the pthread_create and pthread_join gotcha regions carry a
+        # "return" trace-arg of 0 (two annotations total)
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto pthread Return Validation",
+            key_names=["return"],
+            key_counts=[2],
+            pass_regex=[
+                r"key\s*::\s*debug\.return",
+                r"string_value\s*::\s*0",
+            ],
+        )
+
+        self.assert_rocpd(
+            result,
+            subtest_name="ROCpd pthread_create Args Validation",
+            rules_files=pthreads_rules,
         )

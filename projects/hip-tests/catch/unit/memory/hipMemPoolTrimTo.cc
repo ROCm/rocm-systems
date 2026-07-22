@@ -228,7 +228,7 @@ HIP_TEST_CASE(Unit_hipMemPoolTrimTo_MGpuVaryingMinBytesToHold) {
 static void checkhipMemPoolTrimToMultiThreaded(hipStream_t stream, int N, int dev = 0) {
   HIP_CHECK_THREAD(hipSetDevice(dev));
 
-  streamMemAllocTest testObj(N);
+  streamMemAllocTest testObj(N, true);
   size_t byte_size = N * sizeof(int);
   testObj.createHostBufferWithData();
 
@@ -255,7 +255,7 @@ static void checkhipMemPoolTrimToMultiThreaded(hipStream_t stream, int N, int de
 
     // Verify and validate
     HIP_CHECK_THREAD(hipStreamSynchronize(stream));
-    REQUIRE_THREAD(true == testObj.validateResult());
+    REQUIRE_THREAD(true == testObj.validateResultThreadSafe());
   }
 
   HIP_CHECK_THREAD(hipMemPoolDestroy(mem_pool));

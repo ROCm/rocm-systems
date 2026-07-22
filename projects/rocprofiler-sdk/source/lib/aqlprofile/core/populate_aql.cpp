@@ -37,7 +37,7 @@ PopulateAql(const uint32_t* ib_packet, packet_t* aql_packet)
 {
     // Populate relevant fields of Aql pkt
     // Size of IB pkt is four DWords
-    // Header and completion sinal are not set
+    // Header and completion signal are not set
     amd_aql_pm4_ib_packet_t* aql_pm4_ib = reinterpret_cast<amd_aql_pm4_ib_packet_t*>(aql_packet);
     aql_pm4_ib->pm4_ib_format           = AMD_AQL_PM4_IB_FORMAT;
     aql_pm4_ib->pm4_ib_command[0]       = ib_packet[0];

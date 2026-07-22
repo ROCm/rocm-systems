@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -49,8 +49,10 @@ def test_perfetto_data(
         "memory_allocation": ("memory_allocation", "memory_allocation"),
         "rocdecode_api": ("rocdecode_api", "rocdecode_api"),
         "rocjpeg_api": ("rocjpeg_api", "rocjpeg_api"),
+        "rocshmem_api": ("rocshmem_api", "rocshmem_api"),
         "counter_collection": ("counter_collection", "counter_collection"),
         "scratch_memory": ("scratch_memory", "scratch_memory"),
+        "ompt": ("openmp", "ompt"),
     }
 
     # make sure they specified valid categories
@@ -119,6 +121,8 @@ def test_otf2_data(
         "memory_allocation": ("memory_allocation", "memory_allocation"),
         "rocdecode_api": ("rocdecode_api", "rocdecode_api"),
         "rocjpeg_api": ("rocjpeg_api", "rocjpeg_api"),
+        "ompt": ("openmp", "ompt"),
+        "rocshmem_api": ("rocshmem_api", "rocshmem_api"),
     }
 
     # make sure they specified valid categories
@@ -145,6 +149,15 @@ def test_otf2_data(
                 )
 
             _json_data = [itr for itr in _json_data if roctx_mark_filter(itr) is not None]
+
+        # OMPT records can be instantaneous; OTF2 only encodes ranged regions.
+        # Drop instantaneous JSON records before comparing.
+        if json_category == "ompt":
+            _json_data = [
+                itr
+                for itr in _json_data
+                if itr["start_timestamp"] != itr["end_timestamp"]
+            ]
 
         assert len(_otf2_data) == len(
             _json_data
@@ -236,6 +249,7 @@ def test_rocpd_data(
         "memory_allocation": ("memory_allocation", ("MEMORY_ALLOCATION")),
         "rocdecode_api": ("rocdecode_api", ("ROCDECODE_API")),
         "rocjpeg_api": ("rocjpeg_api", ("ROCJPEG_API")),
+        "ompt": ("ompt", ("OMPT",)),
     }
 
     view_mapping = {
@@ -248,6 +262,7 @@ def test_rocpd_data(
         "kernel_dispatch": "kernels",
         "memory_copy": "memory_copies",
         "memory_allocation": "memory_allocations",
+        "ompt": "regions_and_samples",
     }
 
     # make sure they specified valid categories

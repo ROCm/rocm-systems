@@ -41,7 +41,11 @@ code_object_load(MQDependencyTest&             obj,
                  MQDependencyTest::CodeObject& code_object)
 {
     hsa_status_t status;
-    obj.device_discovery();
+    if(!obj.device_discovery() || obj.gpu.empty())
+    {
+        fprintf(stderr, "No GPU agent found; cannot run test.\n");
+        exit(EXIT_FAILURE);
+    }
     char agent_name[64];
     status = hsa_agent_get_info(obj.gpu[0].agent, HSA_AGENT_INFO_NAME, agent_name);
     RET_IF_HSA_ERR(status)

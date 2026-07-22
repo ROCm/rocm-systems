@@ -5,8 +5,10 @@
 
 from __future__ import annotations
 
-import cgen
+import os
 import re
+
+import cgen
 
 from collections.abc import Sequence
 from datetime import datetime
@@ -110,7 +112,9 @@ class CppFile:
 
     def gen_code(self) -> None:
         """Generate the file (header or source)."""
-        with open(f'{self.out_path}/{self.arch_name}/{self.file_name}', 'w') as f:
+        arch_out_path = os.path.join(self.out_path, self.arch_name)
+        os.makedirs(arch_out_path, exist_ok=True)
+        with open(os.path.join(arch_out_path, self.file_name), 'w') as f:
             self.gen_prologue(f)
             if self.is_header:
                 self.gen_header(f)

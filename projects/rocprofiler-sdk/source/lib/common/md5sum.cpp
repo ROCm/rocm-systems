@@ -292,7 +292,7 @@ md5sum::update(const unsigned char input[], size_type length)
     return *this;
 }
 
-// for convenience provide a verson with signed char
+// for convenience provide a version with signed char
 md5sum&
 md5sum::update(const char input[], size_type length)
 {

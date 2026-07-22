@@ -2,15 +2,23 @@
 
 ## rocprofsys Package
 
-This package contains the code infrastructure required to run pytests. It contains 5 main components:
+This package contains the code infrastructure required to run pytests. It contains 7 main components:
+
+### cache.py
+
+A persistent, cross-process cache for expensive test-setup probes. CTest spawns many short-lived pytest processes; without caching, each would re-run the same `rocminfo` / `amd-smi` / `mpicc` / `ldd` / `python --version` subprocesses. `cache.py` stores probe results in a single per-build-tree JSON file so each probe runs once per CTest session. See [Caching Expensive Probes](#caching-expensive-probes) for how (and when) to use it.
 
 ### capabilities.py
 
-Contains functions that allow pytests to discover what the current system supports. Everything here is lazy-initialized for performance. This contains information on the system that is not required for every test. Should only be accessed through an instance of a `RocprofsysConfig` (see `config.py`).
+Contains functions that allow pytests to discover what the current system supports. Everything here is lazy-initialized and, where the value is session-constant, cached across processes (see [Caching Expensive Probes](#caching-expensive-probes)). This contains information on the system that is not required for every test. Should only be accessed through an instance of a `RocprofsysConfig` (see `config.py`).
 
 ### config.py
 
-Contains configuration information used by every test. This includes the location of core binaries, an instance of the `SystemCapabilities` class, base environments, and some core helper functions.
+Contains configuration information used by every test. This includes the location of core binaries, an instance of the `SystemCapabilities` class, the computed `LD_LIBRARY_PATH` and some core helper functions.
+
+### environment.py
+
+Contains `TestEnvironment`, which models the per-run environment as three layers ordered from lowest to highest precedence: `base` (framework defaults for the test type), `test` (settings supplied by the test, plus framework-injected values like `ROCPROFSYS_OUTPUT_PATH`), and `user` (the inherited shell environment). A runner builds these layers and merges them (highest layer wins) into the environment handed to the subprocess.
 
 ### gpu.py
 
@@ -23,6 +31,33 @@ Contains classes corresponding to each type of test. For example, a runtime inst
 ### validators.py
 
 Contains wrappers for the validation scripts and other helper functions that can be used during a test. They return a `ValidationResult` which can be used to determine if a test has failed or passed. In practice, the `assert_` fixtures in `conftest.py` wrap these validators and should be used instead.
+
+## Caching Expensive Probes
+
+`cache.py` exists for one reason: **CTest runs each test in its own short-lived pytest process**, so any value computed by shelling out to a subprocess would otherwise be recomputed hundreds of times. The `rocprofiler-systems-pytest-config` setup fixture regenerates the cache once at the start of a `ctest` run (writing every value to a shared JSON file under `/tmp/$USER/`), the cleanup fixture deletes it at the end, and every test process in between reads the values back instead of re-probing.
+
+> **Rule of thumb:** if your code launches a **subprocess** (or does an expensive filesystem scan) to compute a value that is constant for the whole build tree, cache it here. In-process memoization alone (`functools.lru_cache` / `cached_property`) does not help across CTest's many single-test processes — the persistent cache is what makes the probe run once per *session* instead of once per *process*.
+
+### The API
+
+Two decorators, both in `cache.py`:
+
+| Decorator | Use for | Keyed on |
+| --- | --- | --- |
+| `persistent_cache("ns.name")` | a function/method you **call** | namespace + call args |
+| `persistent_cached_property` | a computed **attribute** (`obj.x`) | class + attribute name |
+
+- **System capabilities (most common):** add the probe as a `persistent_cached_property` on `SystemCapabilities` (`capabilities.py`). Config setup introspects the class and warms it automatically, so a new capability needs no extra wiring.
+- **Standalone functions:** decorate with `@persistent_cache("ns.name")`; arguments become part of the key. For an instance method that also takes arguments, add `method=True` so `self` is dropped from the key (e.g. `target_support_mpi(target_path)`).
+- **Return types:** `None`/`bool`/`int`/`float`/`str`/`Path`/`tuple`/`set`/`list`/`dict`, and any dataclass whose fields are (recursively) those, serialize automatically. Supply `to_cache`/`from_cache` only for something exotic — a non-dataclass that isn't JSON-native.
+
+### When NOT to persist
+
+A `persistent_cached_property` key ignores per-process inputs, so never use it for a value that varies with a CLI flag or other per-process state (e.g. `--python-versions`) — one process's result would leak into another. Pass such inputs as function arguments (so they enter the key) or don't cache. See `supported_python_versions` in `capabilities.py`.
+
+### Safety
+
+Reads and I/O are **fail-open**: a corrupt/stale entry or an I/O error just recomputes, so the cache can't break a test for environmental reasons. But an unserializable value raises `SerializationError`, surfacing the bug at config-setup instead of silently re-probing in every process. Set `ROCPROFSYS_DISABLE_TEST_CACHE=1` to disable caching entirely.
 
 ## conftest.py
 
@@ -50,7 +85,10 @@ These fixtures run as **subtests**, meaning multiple validations within a single
 | `assert_rocpd` | Validates that a ROCpd database was created. Requires `@pytest.mark.rocpd("env_name")`. |
 | `assert_timemory` | Validates timemory JSON output files. |
 | `assert_file_exists` | Validates that a specific file exists in the output directory. |
+| `assert_unified_memory_output` | Validates unified-memory text and JSON outputs (`unified_memory*.txt` / `unified_memory*.json`) under the test output directory. |
 | `assert_causal_json` | Validates causal profiling JSON output. |
+
+> For precise, one-off checks, plain `assert` statements can also be used. They are reported as a single test failure (not a subtest), but the same runner output is included in the failure report.
 
 See the docstrings in `conftest.py` for full argument details.
 
@@ -58,9 +96,11 @@ See the docstrings in `conftest.py` for full argument details.
 
 ### General Rules
 
+At the minimum, the following rules should always be followed. If you have a reason not to, a comment should be left explaining the reasoning behind your choice.
+
 - Test methods should always be inside a test class.
 - Every test class should inherit from `RocprofsysTest`.
-- At minimum, a test should use both `run_test` and `assert_regex`.
+- At minimum, a test should use both `run_test` and `assert_regex`. They have complementary responsibilities: `run_test` performs process-level validation (subprocess launch, exit code, signals, timeout), while `assert_regex` performs content-level validation (matching against pass/fail patterns in the captured output). A test that only calls `run_test` will detect a crash but not a silent regression where the binary runs to completion without emitting the expected instrumentation output.
 
 ### Runner Modes
 
@@ -74,12 +114,15 @@ class TestExample(RocprofsysTest):
         self.assert_regex(result)
 ```
 
+If a test is hard-coded to a single mode (no `@pytest.mark.parametrize("mode", ...)` decorator), tag it with `@pytest.mark.<mode>` (e.g. `@pytest.mark.sampling`) so `_generate_ctest_definitions` records the correct CTest mode label. When `parametrize("mode", [...])` is used — even with a single-element list — this is handled automatically.
+
 ### Test Parametrization
 
 Parametrizing a test affects the generated CTest name. The order of `@pytest.mark.parametrize` decorators determines parameter order in the name. The **runner mode should always come last** so that tests group naturally when sorted:
 
 ```python
 # Good: parameters first, mode last
+@pytest.mark.class_name("transpose")
 class TestTranspose(RocprofsysTest):
     @pytest.mark.parametrize("mode", ["sampling", "sys_run"])
     @pytest.mark.parametrize("iterations,tile_dim,block_rows", [(1, 16, 16), (2, 32, 32)])
@@ -90,10 +133,10 @@ class TestTranspose(RocprofsysTest):
 This produces names like:
 
 ```text
-Transpose_parametrized_1_16_16_sampling
-Transpose_parametrized_1_16_16_sys_run
-Transpose_parametrized_2_32_32_sampling
-Transpose_parametrized_2_32_32_sys_run
+transpose-parametrized-1-16-16-sampling
+transpose-parametrized-1-16-16-sys_run
+transpose-parametrized-2-32-32-sampling
+transpose-parametrized-2-32-32-sys_run
 ```
 
 Note: pytest applies decorators bottom-up, so the **bottom** `@pytest.mark.parametrize` varies first (outermost loop). Place `mode` on top so it varies last in the name.
@@ -208,7 +251,7 @@ When adding a functional marker:
 
 **CTest label behavior:** By default, all markers are included as CTest labels (e.g., `ctest -L "rocm"` filters by the `@pytest.mark.rocm` marker). To change how a marker appears in the generated CTest definitions, add it to one of these sets in `_generate_ctest_definitions()`:
 
-- `no_report_markers` — Marker is **not** added as a CTest label (e.g., `timeout`, `serialize`, `ci_disable`).
+- `no_report_markers` — Marker is **not** added as a CTest label (e.g., `timeout`, `serialize`).
 - `no_report_args_markers` — Marker name is added as a label, but its **arguments are hidden** (e.g., `rocpd`).
 - `only_report_args_markers` — Only the marker's **arguments** are added as labels, not the marker name itself (e.g., `mpi_implementation`).
 
@@ -246,7 +289,6 @@ class Test<NAME>(RocprofsysTest):
 
     # Any test level markers here
     def test_<NAME>(self, <test>_env):
-        # Run the test
         result = self.run_test(
             # mode,
             # target,

@@ -61,8 +61,14 @@ inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1030 = 0x36;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1100 = 0x41;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1150 = 0x43;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1200 = 0x48;
+inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1250 = 0x49;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1201 = 0x4e;
 
+/*
+ * \NPI new GPU: add its EF_AMDGPU_MACH_AMDGCN_* constant above (value from the \
+ * LLVM AMDGPU backend), then handle it in elf_mach_for_arch, arch_for_elf_mach, \
+ * and elf_mach_name below.
+ */
 inline constexpr uint32_t elf_mach_for_arch(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
@@ -83,8 +89,75 @@ inline constexpr uint32_t elf_mach_for_arch(rj_code_arch_t arch) {
     return EF_AMDGPU_MACH_AMDGCN_GFX1150;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return EF_AMDGPU_MACH_AMDGCN_GFX1200;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return EF_AMDGPU_MACH_AMDGCN_GFX1250;
   default:
     return EF_AMDGPU_MACH_NONE;
+  }
+}
+
+/// @brief Return the rocjitsu ISA family used by an AMDGPU ELF MACH value.
+///
+/// @details Several concrete GPU steppings share one rocjitsu decoder/translator
+/// family. Keep this mapping next to the ELF constants so code-object parsing,
+/// load-time hooks, and tests do not each grow their own copy.
+inline constexpr rj_code_arch_t arch_for_elf_mach(uint32_t mach) {
+  switch (mach & EF_AMDGPU_MACH) {
+  case EF_AMDGPU_MACH_AMDGCN_GFX908:
+    return ROCJITSU_CODE_ARCH_CDNA1;
+  case EF_AMDGPU_MACH_AMDGCN_GFX90A:
+    return ROCJITSU_CODE_ARCH_CDNA2;
+  case EF_AMDGPU_MACH_AMDGCN_GFX940:
+  case EF_AMDGPU_MACH_AMDGCN_GFX941:
+  case EF_AMDGPU_MACH_AMDGCN_GFX942:
+    return ROCJITSU_CODE_ARCH_CDNA3;
+  case EF_AMDGPU_MACH_AMDGCN_GFX950:
+    return ROCJITSU_CODE_ARCH_CDNA4;
+  case EF_AMDGPU_MACH_AMDGCN_GFX1010:
+    return ROCJITSU_CODE_ARCH_RDNA1;
+  case EF_AMDGPU_MACH_AMDGCN_GFX1030:
+    return ROCJITSU_CODE_ARCH_RDNA2;
+  case EF_AMDGPU_MACH_AMDGCN_GFX1100:
+    return ROCJITSU_CODE_ARCH_RDNA3;
+  case EF_AMDGPU_MACH_AMDGCN_GFX1150:
+    return ROCJITSU_CODE_ARCH_RDNA3_5;
+  case EF_AMDGPU_MACH_AMDGCN_GFX1200:
+  case EF_AMDGPU_MACH_AMDGCN_GFX1201:
+    return ROCJITSU_CODE_ARCH_RDNA4;
+  default:
+    return ROCJITSU_CODE_ARCH_INVALID;
+  }
+}
+
+/// @brief Return the canonical gfx name for an AMDGPU ELF MACH value.
+inline constexpr const char *elf_mach_name(uint32_t mach) {
+  switch (mach & EF_AMDGPU_MACH) {
+  case EF_AMDGPU_MACH_AMDGCN_GFX908:
+    return "gfx908";
+  case EF_AMDGPU_MACH_AMDGCN_GFX90A:
+    return "gfx90a";
+  case EF_AMDGPU_MACH_AMDGCN_GFX940:
+    return "gfx940";
+  case EF_AMDGPU_MACH_AMDGCN_GFX941:
+    return "gfx941";
+  case EF_AMDGPU_MACH_AMDGCN_GFX942:
+    return "gfx942";
+  case EF_AMDGPU_MACH_AMDGCN_GFX950:
+    return "gfx950";
+  case EF_AMDGPU_MACH_AMDGCN_GFX1010:
+    return "gfx1010";
+  case EF_AMDGPU_MACH_AMDGCN_GFX1030:
+    return "gfx1030";
+  case EF_AMDGPU_MACH_AMDGCN_GFX1100:
+    return "gfx1100";
+  case EF_AMDGPU_MACH_AMDGCN_GFX1150:
+    return "gfx1150";
+  case EF_AMDGPU_MACH_AMDGCN_GFX1200:
+    return "gfx1200";
+  case EF_AMDGPU_MACH_AMDGCN_GFX1201:
+    return "gfx1201";
+  default:
+    return "unknown";
   }
 }
 
@@ -99,13 +172,29 @@ inline constexpr uint32_t SHT_REL = 9;
 inline constexpr uint32_t SHT_DYNSYM = 11;
 
 inline constexpr uint8_t kElfSymbolBindGlobal = 1;
-inline constexpr uint8_t kElfSymbolTypeObject = 1;
+inline constexpr uint8_t kElfSymbolTypeNone = 0;    // STT_NOTYPE
+inline constexpr uint8_t kElfSymbolTypeObject = 1;  // STT_OBJECT
+inline constexpr uint8_t kElfSymbolTypeFunc = 2;    // STT_FUNC
+inline constexpr uint8_t kElfSymbolTypeSection = 3; // STT_SECTION
 
 inline constexpr uint8_t elf_symbol_bind(uint8_t info) { return info >> 4; }
 inline constexpr uint8_t elf_symbol_type(uint8_t info) { return info & 0xf; }
 inline constexpr uint8_t elf_symbol_info(uint8_t bind, uint8_t type) {
   return static_cast<uint8_t>((bind << 4) | (type & 0xf));
 }
+
+// ELF64 relocation info accessors (r_info packs symbol index in the high 32 bits
+// and the relocation type in the low 32 bits).
+inline constexpr uint32_t elf_reloc_sym(uint64_t info) { return static_cast<uint32_t>(info >> 32); }
+inline constexpr uint32_t elf_reloc_type(uint64_t info) {
+  return static_cast<uint32_t>(info & 0xffffffffu);
+}
+
+// AMDGPU relocation types (subset), values per the AMDGPU ELF ABI.
+// R_AMDGPU_RELATIVE64 uses symbol index 0 and forms its value from the load bias
+// plus r_addend, so its addend can name an in-.text virtual address with no
+// owning symbol.
+inline constexpr uint32_t R_AMDGPU_RELATIVE64 = 13;
 
 inline constexpr uint64_t SHF_WRITE = 1u << 0;
 inline constexpr uint64_t SHF_ALLOC = 1u << 1;

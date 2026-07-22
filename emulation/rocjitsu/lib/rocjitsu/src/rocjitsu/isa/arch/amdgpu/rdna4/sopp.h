@@ -63,6 +63,13 @@ public:
   Operand simm16;
 };
 
+class SWaitcntSopp : public Sopp {
+public:
+  SWaitcntSopp(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand simm16;
+};
+
 class SWaitIdleSopp : public Sopp {
 public:
   SWaitIdleSopp(const MachineInst *inst);

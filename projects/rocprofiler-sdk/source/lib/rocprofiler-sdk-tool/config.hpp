@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -114,6 +114,7 @@ struct config : output_config
     bool   demangle                      = get_env("ROCPROF_DEMANGLE_KERNELS", true);
     bool   truncate                      = get_env("ROCPROF_TRUNCATE_KERNELS", false);
     bool   kernel_trace                  = get_env("ROCPROF_KERNEL_TRACE", false);
+    bool   hip_graph_trace               = get_env("ROCPROF_HIP_GRAPH_TRACE", false);
     bool   hsa_core_api_trace            = get_env("ROCPROF_HSA_CORE_API_TRACE", false);
     bool   hsa_amd_ext_api_trace         = get_env("ROCPROF_HSA_AMD_EXT_API_TRACE", false);
     bool   hsa_image_ext_api_trace       = get_env("ROCPROF_HSA_IMAGE_EXT_API_TRACE", false);
@@ -132,9 +133,12 @@ struct config : output_config
     bool   rccl_api_trace                = get_env("ROCPROF_RCCL_API_TRACE", false);
     bool   rocdecode_api_trace           = get_env("ROCPROF_ROCDECODE_API_TRACE", false);
     bool   rocjpeg_api_trace             = get_env("ROCPROF_ROCJPEG_API_TRACE", false);
+    bool   ompt_trace                    = get_env("ROCPROF_OMPT_TRACE", false);
+    bool   rocshmem_api_trace            = get_env("ROCPROF_ROCSHMEM_API_TRACE", false);
     bool   list_metrics                  = get_env("ROCPROF_LIST_METRICS", false);
     bool   list_metrics_output_file      = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
     bool   advanced_thread_trace         = get_env("ROCPROF_ADVANCED_THREAD_TRACE", false);
+    bool   att_no_intercept              = get_env("ROCPROF_ATT_NO_INTERCEPT", false);
     bool   att_serialize_all             = get_env("ROCPROF_ATT_PARAM_SERIALIZE_ALL", false);
     bool   enable_signal_handlers        = get_env("ROCPROF_SIGNAL_HANDLERS", true);
     bool   enable_process_sync           = get_env("ROCPROF_PROCESS_SYNC", false);
@@ -142,6 +146,7 @@ struct config : output_config
     bool   selected_regions_ref_count    = get_env("ROCPROF_SELECTED_REGIONS_REF_COUNT", false);
     bool   output_config_file            = get_env("ROCPROF_OUTPUT_CONFIG_FILE", false);
     bool   attach_output_generation_sync = get_env("ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC", false);
+    bool   spm_counter_collection        = get_env("ROCPROF_SPM_COUNTER_COLLECTION", false);
     bool   pc_sampling_host_trap         = false;
     bool   pc_sampling_stochastic        = false;
     size_t pc_sampling_interval          = get_env("ROCPROF_PC_SAMPLING_INTERVAL", 1);
@@ -154,14 +159,18 @@ struct config : output_config
     std::string mpi_size_env_variable = get_env(mpi_size_env_var_name, "");
     uint64_t    att_param_shader_engine_mask =
         get_env<uint64_t>("ROCPROF_ATT_PARAM_SHADER_ENGINE_MASK", 0x1);
-    // 256MB
-    uint64_t att_param_buffer_size = get_env<uint64_t>("ROCPROF_ATT_PARAM_BUFFER_SIZE", 0x10000000);
+    // 384MB
+    uint64_t att_param_buffer_size = get_env<uint64_t>("ROCPROF_ATT_PARAM_BUFFER_SIZE", 0x18000000);
     uint64_t att_param_simd_select = get_env<uint64_t>("ROCPROF_ATT_PARAM_SIMD_SELECT", 0xF);
     uint64_t att_param_target_cu   = get_env<uint64_t>("ROCPROF_ATT_PARAM_TARGET_CU", 1);
     uint64_t att_param_perf_ctrl   = get_env<uint64_t>("ROCPROF_ATT_PARAM_PERFCOUNTER_CTRL", 0);
     bool     att_param_target_only = get_env<int>("ROCPROF_ATT_PARAM_TARGET_ONLY", 0) != 0;
     uint64_t att_consecutive_kernels = get_env<uint64_t>("ROCPROF_ATT_CONSECUTIVE_KERNELS", 0);
 
+    size_t      spm_sample_interval      = get_env<uint64_t>("ROCPROF_SPM_SAMPLE_INTERVAL", 0);
+    std::string spm_sample_interval_unit = get_env("ROCPROF_SPM_SAMPLE_INTERVAL_UNIT", "none");
+    rocprofiler_spm_parameter_type_t spm_sample_interval_unit_value =
+        ROCPROFILER_SPM_PARAMETER_TYPE_NONE;
     std::string kernel_filter_include   = get_env("ROCPROF_KERNEL_FILTER_INCLUDE_REGEX", ".*");
     std::string kernel_filter_exclude   = get_env("ROCPROF_KERNEL_FILTER_EXCLUDE_REGEX", "");
     std::string pc_sampling_method      = get_env("ROCPROF_PC_SAMPLING_METHOD", "none");
@@ -169,9 +178,11 @@ struct config : output_config
     std::string extra_counters_contents = get_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", "");
     std::string att_library_path        = get_env("ROCPROF_ATT_LIBRARY_PATH", "");
     std::string att_gpu_index           = get_env("ROCPROF_ATT_PARAM_GPU_INDEX", "");
+    std::string ompt_trace_operations   = get_env("ROCPROF_OMPT_TRACE_OPERATIONS", "");
 
     std::unordered_set<size_t>         kernel_filter_range    = {};
     std::vector<std::set<std::string>> counters               = {};
+    std::set<std::string>              spm_counters           = {};
     std::vector<att_perfcounter>       att_param_perfcounters = {};
 
     std::queue<CollectionPeriod> collection_periods = {};
@@ -199,6 +210,7 @@ inline auto
 config::get_attach_invariants() const
 {
     return std::make_tuple(kernel_trace,
+                           hip_graph_trace,
                            hsa_core_api_trace,
                            hsa_amd_ext_api_trace,
                            hsa_image_ext_api_trace,
@@ -213,7 +225,9 @@ config::get_attach_invariants() const
                            rccl_api_trace,
                            rocdecode_api_trace,
                            rocjpeg_api_trace,
+                           ompt_trace,
                            advanced_thread_trace,
+                           att_no_intercept,
                            att_serialize_all,
                            att_param_shader_engine_mask,
                            att_param_buffer_size,
@@ -230,7 +244,9 @@ config::get_attach_invariants() const
                            extra_counters_contents,
                            counter_groups_random_seed,
                            counter_groups_interval,
-                           benchmark_mode);
+                           benchmark_mode,
+                           spm_counter_collection,
+                           rocshmem_api_trace);
 }
 
 inline bool
@@ -263,6 +279,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_NAMED_MEMBER("benchmark_mode", benchmark_mode_env);
 
     CFG_SERIALIZE_MEMBER(kernel_trace);
+    CFG_SERIALIZE_MEMBER(hip_graph_trace);
     CFG_SERIALIZE_MEMBER(hsa_core_api_trace);
     CFG_SERIALIZE_MEMBER(hsa_amd_ext_api_trace);
     CFG_SERIALIZE_MEMBER(hsa_image_ext_api_trace);
@@ -281,6 +298,9 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(rccl_api_trace);
     CFG_SERIALIZE_MEMBER(rocdecode_api_trace);
     CFG_SERIALIZE_MEMBER(rocjpeg_api_trace);
+    CFG_SERIALIZE_MEMBER(ompt_trace);
+    CFG_SERIALIZE_MEMBER(ompt_trace_operations);
+    CFG_SERIALIZE_MEMBER(rocshmem_api_trace);
 
     CFG_SERIALIZE_MEMBER(mpi_rank);
     CFG_SERIALIZE_MEMBER(mpi_size);
@@ -288,6 +308,10 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(mpi_size_env_variable);
     CFG_SERIALIZE_MEMBER(collection_periods);
     CFG_SERIALIZE_MEMBER(counters);
+    CFG_SERIALIZE_MEMBER(spm_counters);
+    CFG_SERIALIZE_MEMBER(spm_sample_interval);
+    CFG_SERIALIZE_MEMBER(spm_sample_interval_unit);
+    CFG_SERIALIZE_MEMBER(spm_sample_interval_unit_value);
     CFG_SERIALIZE_MEMBER(extra_counters_contents);
     CFG_SERIALIZE_MEMBER(kernel_filter_include);
     CFG_SERIALIZE_MEMBER(kernel_filter_exclude);
@@ -313,6 +337,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(pc_sampling_unit_value);
 
     CFG_SERIALIZE_MEMBER(advanced_thread_trace);
+    CFG_SERIALIZE_MEMBER(att_no_intercept);
     CFG_SERIALIZE_MEMBER(att_serialize_all);
     CFG_SERIALIZE_MEMBER(att_param_shader_engine_mask);
     CFG_SERIALIZE_MEMBER(att_param_buffer_size);

@@ -341,6 +341,14 @@ public:
         return sq_cntr_sel;
     }
 
+    // SQG Counter Select Register value
+    static uint32_t sqg_select_value(const counter_des_t& counter_des)
+    {
+        uint32_t sqg_cntr_sel =
+            SET_REG_FIELD_BITS(SQG_PERFCOUNTER0_SELECT, PERF_SEL, counter_des.id);
+        return sqg_cntr_sel;
+    }
+
     static uint32_t sq_spm_select_value(const counter_des_t& counter_des)
     {
         uint32_t sq_cntr_sel =
@@ -386,6 +394,13 @@ public:
         else if(block_id == SqCsCounterBlockId)
         {
             sq_cntr_ctrl = SET_REG_FIELD_BITS(SQ_PERFCOUNTER_CTRL, CS_EN, 0x1);
+        }
+        else if(block_id == SqgCounterBlockId)
+        {
+            sq_cntr_ctrl = SET_REG_FIELD_BITS(SQG_PERFCOUNTER_CTRL, GS_EN, 0x1) |
+                           SET_REG_FIELD_BITS(SQG_PERFCOUNTER_CTRL, PS_EN, 0x1) |
+                           SET_REG_FIELD_BITS(SQG_PERFCOUNTER_CTRL, HS_EN, 0x1) |
+                           SET_REG_FIELD_BITS(SQG_PERFCOUNTER_CTRL, CS_EN, 0x1);
         }
 
         return sq_cntr_ctrl;
@@ -452,6 +467,8 @@ public:
         select_value(SPI_PERFCOUNTER0_SELECT);
     static auto constexpr select_value_TA_PERFCOUNTER0_SELECT =
         select_value(TA_PERFCOUNTER0_SELECT);
+    static auto constexpr select_value_TD_PERFCOUNTER0_SELECT =
+        select_value(TD_PERFCOUNTER0_SELECT);
     static auto constexpr select_value_TCP_PERFCOUNTER0_SELECT =
         select_value(TCP_PERFCOUNTER0_SELECT);
     static auto constexpr select_value_SX_PERFCOUNTER0_SELECT =

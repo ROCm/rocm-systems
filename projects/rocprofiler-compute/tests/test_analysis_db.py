@@ -3,10 +3,12 @@
 
 """Unit tests for analysis_db.py static methods."""
 
+from typing import Optional
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from rocprof_compute_analyze.analysis_db import db_analysis
 from utils import schema
@@ -212,8 +214,8 @@ def test_evaluate_with_none_in_formula_does_not_nullify_valid_result():
 def test_evaluate_divide_by_zero_silenced_and_logged_at_debug():
     """
     Divide-by-zero (x/0 -> inf, 0/0 -> NaN) emits a numpy RuntimeWarning
-    that is captured and logged via console_debug. The misleading
-    "missing counter data" console_warning must not fire.
+    that is captured and logged via console_debug. The "evaluated to N/A"
+    console_warning must not fire when a RuntimeWarning was caught.
     """
     pmc_df = pd.DataFrame({"Counter1": [10, 20, 30]})
     sys_info = {}
@@ -226,19 +228,19 @@ def test_evaluate_divide_by_zero_silenced_and_logged_at_debug():
     ]
 
     for expr in cases:
-        with (
-            patch(
-                "rocprof_compute_analyze.analysis_db.console_warning"
-            ) as mock_warning,
-            patch("rocprof_compute_analyze.analysis_db.console_debug") as mock_debug,
-        ):
-            result = db_analysis.evaluate(
-                "test_metric",
-                expr,
-                pmc_df,
-                sys_info,
-                parse=False,
-            )
+        with patch(
+            "rocprof_compute_analyze.analysis_db.console_warning"
+        ) as mock_warning:
+            with patch(
+                "rocprof_compute_analyze.analysis_db.console_debug"
+            ) as mock_debug:
+                result = db_analysis.evaluate(
+                    "test_metric",
+                    expr,
+                    pmc_df,
+                    sys_info,
+                    parse=False,
+                )
 
         assert result is None, f"Expected None for '{expr}', got {result}"
 
@@ -273,26 +275,27 @@ def test_calc_builtin_vars_processes_per_xcd_first():
         "DERIVED_VAR": "$PER_XCD_VAR + 5",  # Depends on PER_XCD_VAR -> 25
     }
 
-    with (
-        patch(
-            "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
-            return_value="MI300",
-        ),
-        patch(
+    with patch(
+        "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
+        return_value="MI300",
+    ):
+        with patch(
             "rocprof_compute_analyze.analysis_db.get_build_in_vars",
             return_value=mock_builtin_vars,
-        ),
-    ):
-        result = db_analysis.calc_builtin_vars(pmc_df, sys_info)
+        ):
+            with patch(
+                "utils.utils_counter_defs.get_build_in_vars",
+                return_value=mock_builtin_vars,
+            ):
+                db_analysis.calc_builtin_vars(
+                    pmc_df, sys_info, ["$PER_XCD_VAR", "$DERIVED_VAR"]
+                )
 
     # Verify PER_XCD var was computed
     assert sys_info["PER_XCD_VAR"] == 20
 
     # Verify DERIVED_VAR used the computed PER_XCD_VAR value
     assert sys_info["DERIVED_VAR"] == 25
-
-    # Verify pmc_df is returned unchanged
-    pd.testing.assert_frame_equal(result, pmc_df)
 
 
 def test_calc_builtin_vars_with_dataframe_expressions():
@@ -308,17 +311,21 @@ def test_calc_builtin_vars_with_dataframe_expressions():
         "SCALED_TOTAL": "$TOTAL_COUNT * $multiplier",  # 120
     }
 
-    with (
-        patch(
-            "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
-            return_value="MI300",
-        ),
-        patch(
+    with patch(
+        "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
+        return_value="MI300",
+    ):
+        with patch(
             "rocprof_compute_analyze.analysis_db.get_build_in_vars",
             return_value=mock_builtin_vars,
-        ),
-    ):
-        db_analysis.calc_builtin_vars(pmc_df, sys_info)
+        ):
+            with patch(
+                "utils.utils_counter_defs.get_build_in_vars",
+                return_value=mock_builtin_vars,
+            ):
+                db_analysis.calc_builtin_vars(
+                    pmc_df, sys_info, ["$TOTAL_COUNT", "$SCALED_TOTAL"]
+                )
 
     assert sys_info["TOTAL_COUNT"] == 60
     assert sys_info["SCALED_TOTAL"] == 120
@@ -376,21 +383,105 @@ def test_calc_dataframe_expressions_with_builtin_vars():
         ],
     })
 
-    with (
-        patch(
-            "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
-            return_value="MI300",
-        ),
-        patch(
+    with patch(
+        "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
+        return_value="MI300",
+    ):
+        with patch(
             "rocprof_compute_analyze.analysis_db.get_build_in_vars",
             return_value=mock_builtin_vars,
-        ),
-    ):
-        result = db_analysis.calc_dataframe_expressions(pmc_df, sys_info, expression_df)
+        ):
+            with patch(
+                "utils.utils_counter_defs.get_build_in_vars",
+                return_value=mock_builtin_vars,
+            ):
+                result = db_analysis.calc_dataframe_expressions(
+                    pmc_df, sys_info, expression_df
+                )
 
     assert result.iloc[0] == 51
     # None from evaluate becomes NaN in pandas Series
     assert pd.isna(result.iloc[1])
+
+
+def test_calc_dataframe_expressions_empty_returns_assignable_series():
+    """An empty expression_df returns an empty Series, not a DataFrame."""
+    expression_df = pd.DataFrame(columns=["metric_id", "value_name", "value"])
+
+    result = db_analysis.calc_dataframe_expressions(
+        pd.DataFrame({"Counter1": [1, 2, 3]}),
+        {"gpu_arch": "gfx942"},
+        expression_df,
+    )
+
+    assert isinstance(result, pd.Series)
+    assert result.empty
+    # Reproduces the call site: assigning the result as a single column must
+    # not raise "Columns must be same length as key".
+    expression_df["value"] = result
+
+
+# =============================================================================
+# calc_metrics_data tests
+# =============================================================================
+
+
+def test_calc_metrics_data_builds_rows_and_preserves_schema():
+    """Metric tables expand into rows with table-level fields resolved once;
+    non-metric tables are skipped and the output frames keep their columns."""
+    workload_path = "/fake/workload"
+    metric_df = pd.DataFrame(
+        {
+            "Metric": ["Grid Size"],
+            "Avg": [" 10 "],
+            "Min": [" 5 "],
+            "Max": [" 20 "],
+            "Unit": ["Work items"],
+            "Description": ["Grid size desc"],
+        },
+        index=pd.Index(["7.1.0"], name="Metric_ID"),
+    )
+    arch_config = schema.ArchConfig()
+    # Table 1 has no Metric/Channel column and is skipped; table 701 maps to
+    # panel 700 (table_name) and sub-table 701 (sub_table_name).
+    arch_config.dfs = {
+        1: pd.DataFrame({"from_csv": ["pmc_kernel_top.csv"]}),
+        701: metric_df,
+    }
+    arch_config.panel_configs = {
+        700: {
+            "id": 700,
+            "title": "Wavefront",
+            "data source": [
+                {"metric_table": {"id": 701, "title": "Wavefront Launch Stats"}}
+            ],
+        }
+    }
+
+    analyzer = db_analysis(MagicMock(), {})
+    analyzer._pmc_df_per_workload = {workload_path: pd.DataFrame({"Counter1": [1]})}
+    analyzer._runs = {
+        workload_path: MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]))
+    }
+    analyzer._arch_configs = {"gfx942": arch_config}
+
+    metrics_info, expressions = analyzer.calc_metrics_data()
+
+    info = metrics_info[workload_path]
+    assert "pct_of_peak" in info.columns
+    assert list(info["metric_id"]) == ["7.1.0"]
+    assert list(info["name"]) == ["Grid Size"]
+    assert list(info["table_name"]) == ["Wavefront"]
+    assert list(info["sub_table_name"]) == ["Wavefront Launch Stats"]
+    assert not bool(info["pct_of_peak"].iloc[0])
+
+    exprs = expressions[workload_path]
+    assert list(exprs.columns) == ["metric_id", "value_name", "value"]
+    # Metric/Unit/Description are non-expression columns, so only Avg/Min/Max
+    # expand into expression rows, stripped and in dataframe-column order.
+    assert list(exprs["value_name"]) == ["Avg", "Min", "Max"]
+    assert list(exprs["value"]) == ["10", "5", "20"]
+    assert set(exprs["metric_id"]) == {"7.1.0"}
 
 
 # =============================================================================
@@ -428,6 +519,7 @@ def test_calc_expressions_noise_clamp():
     analyzer = db_analysis(MagicMock(), {})
     analyzer._pmc_df_per_workload = {workload_path: pmc_df}
     analyzer._metric_expression_data_per_workload = {workload_path: expression_template}
+    analyzer._metrics_info_data_per_workload = {}
     analyzer._roofline_ceilings_per_workload = {workload_path: {}}
     analyzer._runs = {workload_path: MagicMock(sys_info=sys_info_df)}
     analyzer._arch_configs = MagicMock()
@@ -473,17 +565,17 @@ def test_calc_expressions_noise_clamp():
 
     # calc_expressions per-workload bracket.
     clear_noise_clamp_warnings()
-    with (
-        patch("rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}),
-        patch(
-            "rocprof_compute_analyze.analysis_db.console_warning"
-        ) as console_warning_mock,
-        patch(
-            "rocprof_compute_analyze.analysis_db.print_noise_clamp_summary"
-        ) as print_noise_clamp_summary_mock,
-        patch.object(db_analysis, "validate_dual_issue_metrics"),
+    with patch(
+        "rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}
     ):
-        analyzer.calc_expressions()
+        with patch(
+            "rocprof_compute_analyze.analysis_db.console_warning"
+        ) as console_warning_mock:
+            with patch(
+                "rocprof_compute_analyze.analysis_db.print_noise_clamp_summary"
+            ) as print_noise_clamp_summary_mock:
+                with patch.object(db_analysis, "validate_dual_issue_metrics"):
+                    analyzer.calc_expressions()
 
     variance_warning_calls = [
         warning_call
@@ -494,6 +586,93 @@ def test_calc_expressions_noise_clamp():
     assert "1.1 - clamped" in variance_warning_calls[0].args[0]
     print_noise_clamp_summary_mock.assert_called_once()
     assert get_noise_clamp_warnings()["count"] >= 1
+
+
+# =============================================================================
+# _derive_pct_of_peak_values tests
+# =============================================================================
+
+
+class TestDerivePctOfPeakValues:
+    """Tests for db_analysis._derive_pct_of_peak_values."""
+
+    def _make_values_df(
+        self,
+        metric_ids: list[str],
+        value_names: list[str],
+        values: list[float],
+        kernel_names: Optional[list[str]] = None,
+    ):
+        """Build a long-format values DataFrame as produced by calc_expressions."""
+        data = {
+            "metric_id": metric_ids,
+            "value_name": value_names,
+            "value": values,
+        }
+        if kernel_names is not None:
+            data["kernel_name"] = kernel_names
+        return pd.DataFrame(data)
+
+    def test_pct_of_peak_true_metric_appends_percent_of_peak_row(self):
+        """A pct_of_peak-enabled metric produces one new Percent of Peak row."""
+        values_df = self._make_values_df(
+            metric_ids=["1.1", "1.1"],
+            value_names=["Avg", "Peak"],
+            values=[50.0, 200.0],
+        )
+        new_rows = db_analysis._derive_pct_of_peak_values({"1.1"}, values_df)
+        assert len(new_rows) == 1
+        assert new_rows[0]["value_name"] == "Percent of Peak"
+        assert new_rows[0]["value"] == pytest.approx(25.0)
+
+    def test_multi_kernel_produces_one_row_per_kernel(self):
+        """Calling once per kernel produces one Percent of Peak row per kernel."""
+        kernel_a_df = self._make_values_df(
+            metric_ids=["1.1", "1.1"],
+            value_names=["Avg", "Peak"],
+            values=[100.0, 200.0],
+            kernel_names=["kernel_a", "kernel_a"],
+        )
+        kernel_b_df = self._make_values_df(
+            metric_ids=["1.1", "1.1"],
+            value_names=["Avg", "Peak"],
+            values=[60.0, 300.0],
+            kernel_names=["kernel_b", "kernel_b"],
+        )
+        rows_a = db_analysis._derive_pct_of_peak_values({"1.1"}, kernel_a_df)
+        rows_b = db_analysis._derive_pct_of_peak_values({"1.1"}, kernel_b_df)
+        assert len(rows_a) == 1
+        assert rows_a[0]["value"] == pytest.approx(50.0)  # 100/200*100
+        assert len(rows_b) == 1
+        assert rows_b[0]["value"] == pytest.approx(20.0)  # 60/300*100
+
+    def test_pct_of_peak_false_metric_produces_no_pct_row(self):
+        """A metric not in pct_of_peak_metric_ids produces no Percent of Peak row."""
+        values_df = self._make_values_df(
+            metric_ids=["1.1", "1.1"],
+            value_names=["Avg", "Peak"],
+            values=[50.0, 100.0],
+        )
+        new_rows = db_analysis._derive_pct_of_peak_values(set(), values_df)
+        assert new_rows == []
+
+    def test_incomplete_data_skips_metric(self):
+        """A metric missing Peak or Avg/Value must be skipped gracefully."""
+        incomplete_cases = [
+            # Only "Avg" present -- no "Peak" row
+            self._make_values_df(
+                metric_ids=["1.1"], value_names=["Avg"], values=[50.0]
+            ),
+            # Only "Peak" present -- no "Avg" or "Value" row
+            self._make_values_df(
+                metric_ids=["1.1"], value_names=["Peak"], values=[100.0]
+            ),
+        ]
+        for incomplete_values in incomplete_cases:
+            new_rows = db_analysis._derive_pct_of_peak_values(
+                {"1.1"}, incomplete_values
+            )
+            assert new_rows == []
 
 
 # =============================================================================

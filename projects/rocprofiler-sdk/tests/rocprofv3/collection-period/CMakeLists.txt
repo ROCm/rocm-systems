@@ -61,3 +61,16 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-collection-period
     UNSTABLE)
+
+# Conflict: --selected-regions + --collection-period should fail
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-collection-period-selected-regions-conflict-will-fail
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --selected-regions --collection-period
+        0:1:1 --collection-period-unit sec -- $<TARGET_FILE:reproducible-runtime> 100 1
+    DEPENDS reproducible-runtime
+    TIMEOUT 45
+    LABELS "integration-tests"
+    WILL_FAIL
+    FAIL_REGULAR_EXPRESSION
+        "--selected-regions and --collection-period are mutually exclusive")

@@ -21,6 +21,7 @@
 #include "util/except.h"
 
 #include "rocjitsu/isa/arch/amdgpu/cdna4/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/test_encodings.h"
 
 #include <gtest/gtest.h>
@@ -71,7 +72,7 @@ inline bool should_skip(std::string_view mn) {
       "s_waitcnt",    "s_wait_",       "s_barrier",  "s_trap",      "s_sleep",         "s_sethalt",
       "s_sendmsg",    "s_nop",         "s_getpc",    "s_getreg",    "s_setreg",        "s_rfe",
       "s_icache_inv", "s_sendmsghalt", "v_readlane", "v_writelane", "v_readfirstlane", "v_mfma_",
-      "v_smfma_",     "v_wmma_",       "v_swmmac_",
+      "v_permlane",   "v_smfma_",      "v_wmma_",    "v_swmmac_",
   };
   for (auto p : SKIP)
     if (mn.substr(0, p.size()) == p)
@@ -134,7 +135,7 @@ void run_benchmark(rj_code_arch_t arch, std::string_view arch_name, const TestEn
 
   // Build corpus (decode-only filtering, no execute warmup).
   auto corpus = build_corpus(encodings, num_encodings, *decoder);
-  cu->reset_all_wf();
+  wf->halt();
   wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
   ASSERT_NE(wf, nullptr);
 
@@ -185,6 +186,11 @@ void run_benchmark(rj_code_arch_t arch, std::string_view arch_name, const TestEn
       std::chrono::duration_cast<std::chrono::nanoseconds>(decode_end - decode_start).count();
 
   // --- Measure decode + execute (non-memory only) ---
+  // build_corpus() already excludes program terminators (s_endpgm et al.) via
+  // should_skip(), so no instruction here frees the wave. Guard defensively anyway:
+  // a wave frees its resources at s_endpgm, so if the skip list ever drifts and a
+  // terminator slips in, re-dispatch a fresh wave rather than execute on a freed
+  // slot (which would benchmark dead work).
   auto full_start = Clock::now();
   for (int iter = 0; iter < ITERATIONS; ++iter) {
     for (const auto *entry : executable) {
@@ -195,6 +201,10 @@ void run_benchmark(rj_code_arch_t arch, std::string_view arch_name, const TestEn
         } catch (...) {
         }
         delete inst;
+        if (wf->is_halted()) {
+          wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+          ASSERT_NE(wf, nullptr); // single-slot CU: re-dispatch must succeed
+        }
       }
     }
   }
@@ -241,6 +251,12 @@ TEST(DecodeExecuteBenchmark, Rdna4) {
   run_benchmark(ROCJITSU_CODE_ARCH_RDNA4, "rdna4",
                 reinterpret_cast<const TestEncEntry *>(rdna4::test_data::ENCODINGS),
                 rdna4::test_data::NUM_ENCODINGS);
+}
+
+TEST(DecodeExecuteBenchmark, Gfx1250) {
+  run_benchmark(ROCJITSU_CODE_ARCH_GFX1250, "gfx1250",
+                reinterpret_cast<const TestEncEntry *>(gfx1250::test_data::ENCODINGS),
+                gfx1250::test_data::NUM_ENCODINGS);
 }
 
 } // namespace

@@ -161,6 +161,7 @@ from .amdsmi_interface import amdsmi_stop_gpu_event_notification
 
 # # Process Information
 from .amdsmi_interface import amdsmi_get_gpu_process_list
+from .amdsmi_interface import amdsmi_get_gpu_process_list_by_pid
 
 # # ECC Error Information
 from .amdsmi_interface import amdsmi_get_gpu_total_ecc_count
@@ -281,6 +282,8 @@ from .amdsmi_interface import amdsmi_get_link_topology_nearest
 # # Partition Functions
 from .amdsmi_interface import amdsmi_get_gpu_compute_partition
 from .amdsmi_interface import amdsmi_set_gpu_compute_partition
+from .amdsmi_interface import amdsmi_get_gpu_compute_partition_mem_alloc_mode
+from .amdsmi_interface import amdsmi_set_gpu_compute_partition_mem_alloc_mode
 from .amdsmi_interface import amdsmi_get_gpu_memory_partition
 from .amdsmi_interface import amdsmi_set_gpu_memory_partition
 from .amdsmi_interface import amdsmi_get_gpu_accelerator_partition_profile
@@ -329,6 +332,7 @@ from .amdsmi_interface import AmdSmiTemperatureMetric
 from .amdsmi_interface import AmdSmiVoltageMetric
 from .amdsmi_interface import AmdSmiVoltageType
 from .amdsmi_interface import AmdSmiComputePartitionType
+from .amdsmi_interface import AmdSmiComputePartitionMemAllocModeType
 from .amdsmi_interface import AmdSmiMemoryPartitionType
 from .amdsmi_interface import AmdSmiPowerProfilePresetMasks
 from .amdsmi_interface import AmdSmiGpuBlock
@@ -350,6 +354,10 @@ from .amdsmi_interface import amdsmi_set_gpu_uma_carveout
 from .amdsmi_interface import amdsmi_get_ttm_info
 from .amdsmi_interface import amdsmi_set_ttm_pages_limit
 from .amdsmi_interface import amdsmi_reset_ttm_pages_limit
+
+# # Fabric (IFoE/UALoE) Information
+from .amdsmi_interface import amdsmi_get_fabric_telemetry_data
+from .amdsmi_interface import amdsmi_get_gpu_fabric_info
 
 # Exceptions
 from .amdsmi_exception import AmdSmiLibraryException

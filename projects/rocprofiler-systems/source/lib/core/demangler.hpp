@@ -27,7 +27,12 @@ struct cxa_demangle_wrapper_impl
     }
 };
 
-template <typename DemanglerTp = cxa_demangle_wrapper_impl>
+template <typename T>
+concept demangle_backend = requires(const char* _m, char* _o, size_t* _l, int* _s) {
+    T::demangle(_m, _o, _l, _s);
+};
+
+template <demangle_backend DemanglerTp = cxa_demangle_wrapper_impl>
 struct demangler
 {
     template <typename Tp>

@@ -122,7 +122,10 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     } else if (arg == "-nskip") {
       i++;
       skip = atoi(argv[i]);
-    } else if (arg == "-noverif") {
+    } else if (arg == "-b" || arg == "-batch") {
+      i++;
+      batch = atoi(argv[i]);
+    } else if (arg == "-noverif" || arg == "-nocheck") {
       verif = false;
     } else if (arg == "-localbuftype") {
       i++;
@@ -201,9 +204,13 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       min_msg_size = 4;
       break;
     case TeamFCollectTestType:
+    case FcollectWaveTestType:
     case TeamAllToAllTestType:
     case TeamAllToAllvTestType:
     case TeamBroadcastTestType:
+    case BroadcastWaveTestType:
+    case AllToAllWaveTestType:
+    case ReduceWaveTestType:
       min_msg_size = 8;
       break;
     case TeamCtxInfraTestType:
@@ -211,13 +218,11 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     case TeamCtxInfraBlockTestType:
     case TeamCtxInfraOddEvenTestType:
     case TeamCtxSubsetParentInfraTestType:
+    case HostTeamSyncBarrierTestType:
       max_msg_size = min_msg_size;
       break;
     case FenceOrderPutWaveNbiChunksTestType:
       min_msg_size = 16;  // must be >= STRESS_NUM_CHUNKS for chunk_size >= 1
-      break;
-    case PutNBIMRTestType:
-      min_msg_size = max_msg_size;
       break;
     case PTestType:
     case GTestType:
@@ -257,7 +262,8 @@ void TesterArguments::show_usage(std::string executable_name) {
   std::cout << "\t-nloop Set loop count\n";
   std::cout << "\t-nlarge Set loop_large count\n";
   std::cout << "\t-nskip Set skip/warmup count\n";
-  std::cout << "\t-noverif disable buffer verification\n";
+  std::cout << "\t-b|-batch Set buffer rotation batch size (default: loop count)\n";
+  std::cout << "\t-noverif|-nocheck disable buffer verification\n";
 }
 
 void TesterArguments::get_arguments() {
@@ -281,8 +287,12 @@ void TesterArguments::get_arguments() {
     case TeamWGSyncTestType:
     case TeamAllToAllTestType:
     case TeamAllToAllvTestType:
+    case AllToAllWaveTestType:
     case TeamFCollectTestType:
+    case FcollectWaveTestType:
     case TeamReductionTestType:
+    case TeamReduceScatterTestType:
+    case ReduceWaveTestType:
     case TeamBroadcastTestType:
     case PingAllTestType:
     case TeamBarrierTestType:
@@ -313,6 +323,17 @@ void TesterArguments::get_arguments() {
     case DeviceBitcodeTestType:
     case TeamCtxSharedInfraTestType:
     case FenceOrderFanoutTestType:
+    case TeamSplit2DTestType:
+    case HostTeamSyncBarrierTestType:
+    case HostAmoAllPesTestType:
+    case HostAmoSelfTestType:
+    // Tile collective tests - support any number of PEs
+    case TileBroadcastTestType:
+    case TileBroadcastWaveTestType:
+    case TileBroadcastWGTestType:
+    case TileAllgatherTestType:
+    case TileAllgatherWaveTestType:
+    case TileAllgatherWGTestType:
       requires_two_pes = false;
       break;
     default:
