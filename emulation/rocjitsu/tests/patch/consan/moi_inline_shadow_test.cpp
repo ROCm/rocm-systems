@@ -2824,7 +2824,9 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowAccessesShareOneWordCallRelay) {
 }
 
 TEST(ConSanMoi, Rdna4DenseInlineShadowAccessesShareExplicitKeyRelay) {
-  constexpr uint32_t kAccessCount = 9u;
+  // Sixty-four large Inline bodies force the later dispatcher targets outside
+  // direct SOPP reach and exercise the worst-case long-jump reservation.
+  constexpr uint32_t kAccessCount = 64u;
   std::vector<uint32_t> text_words(
       8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_RDNA4));
   for (uint32_t index = 0; index < kAccessCount; ++index) {

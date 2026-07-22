@@ -153,8 +153,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   const uint64_t original_text_size =
       code_object.text_sections().size() == 1 ? code_object.text_sections().front()->size() : 0;
   constexpr uint64_t kIndirectIslandWords = 8u;
-  const uint64_t access_relay_words =
-      arch == ROCJITSU_CODE_ARCH_GFX1250 ? 20u : kIndirectIslandWords;
+  // A dense dispatcher may need one comparison, one conditional branch, and
+  // a long jump per site, plus a fixed relocated-host route. Twenty words per
+  // site safely amortizes that fixed route even for small owner groups.
+  constexpr uint64_t access_relay_words = 20u;
   const bool has_function_candidate = std::ranges::any_of(
       candidates, [](const ConSanMoiCandidate *candidate) { return !candidate->in_kernel; });
   std::unordered_map<uint64_t, size_t> candidate_count_by_descriptor;
