@@ -107,14 +107,14 @@ struct replay_pass_state_t
 // different mutexes and run concurrently; combined with agent-scoped snapshots this keeps multi-GPU
 // replay isolated.
 std::mutex&
-agent_replay_mutex(hsa_agent_t agent)
+agent_replay_mutex(rocprofiler_agent_id_t agent_id)
 {
     using lock_map_t    = std::unordered_map<uint64_t, std::unique_ptr<std::mutex>>;
     static auto*& locks = common::static_object<common::Synchronized<lock_map_t>>::construct();
 
     std::mutex* mtx = nullptr;
     locks->wlock([&](lock_map_t& _map) {
-        auto& slot = _map[agent.handle];
+        auto& slot = _map[agent_id.handle];
         if(!slot) slot = std::make_unique<std::mutex>();
         mtx = slot.get();
     });
@@ -815,7 +815,8 @@ WriteInterceptor(const void* packets,
             // Different agents hold different locks and run concurrently.
             const auto& core         = queue.core_api();
             hsa_agent_t replay_agent = queue.get_agent().get_hsa_agent();
-            const auto replay_guard = std::lock_guard<std::mutex>{agent_replay_mutex(replay_agent)};
+            const auto  replay_guard = std::lock_guard<std::mutex>{
+                agent_replay_mutex(queue.get_agent().get_rocp_agent()->id)};
 
             // The app's original completion signal (completion_signal is at the same offset for
             // dispatch and ext-dispatch packets, per the static_asserts at the top of this file).
