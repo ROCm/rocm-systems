@@ -764,7 +764,9 @@ candidate_payload_vgpr_count_per_address(const ConSanMoiCandidate &candidate) {
       (candidate_requires_gfx1250_flat_offset_materialization(candidate) ? 2u
        : moi_load_clobbers_address(candidate)                            ? 1u
                                                                          : 0u) +
-      (options.automatic_moi_private_epoch ? 1u : 0u));
+      (options.automatic_moi_private_epoch
+           ? (options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId ? 2u : 1u)
+           : 0u));
 }
 
 [[nodiscard]] bool reject_candidate_scratch_range_overlap(const ConSanMoiCandidate &candidate,
@@ -2822,6 +2824,28 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     // existing MFMA and accumulator operands address and has corrupted native
     // gfx950 workloads. Until persistent tuples are selected per owning kernel,
     // reject a code object whose one global tuple would cross any such boundary.
+    const bool has_dynamic_stack_owner =
+        std::ranges::any_of(result.kernels, [&](const ConSanKernelInfo &kernel) {
+          return kernel.uses_dynamic_stack.value_or(false) &&
+                 std::ranges::any_of(
+                     result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+                       return plan.source != ConSanRegisterAllocationSource::Unsupported &&
+                              std::ranges::find(plan.owner_descriptor_file_offsets,
+                                                kernel.descriptor_file_offset) !=
+                                  plan.owner_descriptor_file_offsets.end();
+                     });
+        });
+    if (options.moi_engine == ConSanMoiEngine::Sampled &&
+        options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId &&
+        !has_supported_sampled_sync && !has_dynamic_stack_owner) {
+      options.moi_init_owner_epoch = true;
+      options.automatic_moi_private_epoch = true;
+      result.moi_private_epoch_automatic = true;
+      result.warnings.emplace_back(
+          "ConSan MOI selected entry-snapshotted private owner/epoch state below a CDNA4 "
+          "ordinary VGPR boundary for access-only Sampled instrumentation");
+      return true;
+    }
     if (options.moi_engine == ConSanMoiEngine::RecordReplay && !options.force_private_epoch) {
       constexpr uint16_t scalar_count = 2u;
       uint32_t first = 0u;

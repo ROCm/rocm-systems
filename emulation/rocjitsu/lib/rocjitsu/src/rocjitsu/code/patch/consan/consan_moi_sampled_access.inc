@@ -170,7 +170,10 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     bool runtime_fast_gate = false;
     bool dense_runtime_fast_gate = false;
     std::optional<uint32_t> private_epoch_offset;
+    std::optional<uint32_t> private_owner_offset;
+    std::optional<uint16_t> private_owner_shift;
     std::optional<uint32_t> private_sample_sequence_offset;
+    uint32_t persistent_private_state_end = 0;
     uint32_t required_private_bytes = 0;
     uint32_t probe_guest_instruction_offset = 0;
     std::optional<uint16_t> transient_exec_save_sgpr;
@@ -467,20 +470,28 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     if (!workgroup_descriptor)
       continue;
     std::optional<MoiPrivateEpochLayout> private_layout;
+    std::optional<uint16_t> private_owner_shift;
     if (options.automatic_moi_private_epoch) {
       if (resources->owner_descriptor_file_offsets.size() == 1u) {
         const uint64_t descriptor = resources->owner_descriptor_file_offsets.front();
         auto [cached, inserted] =
             private_layout_by_descriptor.try_emplace(descriptor, std::nullopt);
         if (inserted) {
-          cached->second =
-              build_moi_private_epoch_layout(result, *resources, arch, result.warnings);
+          cached->second = build_moi_private_epoch_layout(
+              result, *resources, arch, result.warnings,
+              /*include_sample_sequence=*/false,
+              /*include_owner=*/options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId);
         }
         private_layout = cached->second;
       } else {
-        private_layout = build_moi_private_epoch_layout(result, *resources, arch, result.warnings);
+        private_layout = build_moi_private_epoch_layout(
+            result, *resources, arch, result.warnings,
+            /*include_sample_sequence=*/false,
+            /*include_owner=*/options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId);
       }
-      if (!private_layout)
+      if (private_layout && private_layout->owner_offset)
+        private_owner_shift = common_moi_private_owner_shift(bytes, *resources, result.warnings);
+      if (!private_layout || (private_layout->owner_offset && !private_owner_shift))
         continue;
     }
     std::optional<VgprSpillSequence> spill;
@@ -568,13 +579,12 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       }
     }
     if (private_layout) {
-      const uint16_t end = static_cast<uint16_t>(resources->base + resources->count);
-      if (private_layout->sample_sequence_offset) {
-        candidate_options.moi_epoch_vgpr = static_cast<uint16_t>(end - 2u);
-        candidate_options.moi_sample_sequence_vgpr = static_cast<uint16_t>(end - 1u);
-      } else {
-        candidate_options.moi_epoch_vgpr = static_cast<uint16_t>(end - 1u);
-      }
+      uint16_t state_vgpr = static_cast<uint16_t>(resources->base + resources->count);
+      if (private_layout->sample_sequence_offset)
+        candidate_options.moi_sample_sequence_vgpr = --state_vgpr;
+      if (private_layout->owner_offset)
+        candidate_options.moi_owner_vgpr = --state_vgpr;
+      candidate_options.moi_epoch_vgpr = --state_vgpr;
     }
     const bool runtime_fast_gate =
         !candidate_options.automatic_moi_record_replay_sgpr_spill && use_indirect_appended &&
@@ -602,6 +612,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         layout.sampled_causal_windows_offset, layout.sampled_watchpoints_offset,
         layout.sampled_pending_acquires_offset,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
+        private_layout ? private_layout->owner_offset : std::nullopt, private_owner_shift,
         private_layout ? private_layout->sample_sequence_offset : std::nullopt, candidate_errors,
         &probe_guest_instruction_offset);
     if (!words) {
@@ -689,7 +700,12 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     if (private_layout)
       planned.private_epoch_offset = private_layout->epoch_offset;
     if (private_layout)
+      planned.private_owner_offset = private_layout->owner_offset;
+    planned.private_owner_shift = private_owner_shift;
+    if (private_layout)
       planned.private_sample_sequence_offset = private_layout->sample_sequence_offset;
+    if (private_layout)
+      planned.persistent_private_state_end = private_layout->ephemeral_base;
     planned.required_private_bytes = required_private_bytes;
     planned.probe_guest_instruction_offset = probe_guest_instruction_offset;
     planned.transient_exec_save_sgpr = candidate_options.moi_exec_save_sgpr;
@@ -1044,14 +1060,13 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       }
       candidate_options.scratch_vgpr = planned_patch.resources.base;
       if (planned_patch.private_epoch_offset) {
-        const uint16_t end =
+        uint16_t state_vgpr =
             static_cast<uint16_t>(planned_patch.resources.base + planned_patch.resources.count);
-        if (planned_patch.private_sample_sequence_offset) {
-          candidate_options.moi_epoch_vgpr = static_cast<uint16_t>(end - 2u);
-          candidate_options.moi_sample_sequence_vgpr = static_cast<uint16_t>(end - 1u);
-        } else {
-          candidate_options.moi_epoch_vgpr = static_cast<uint16_t>(end - 1u);
-        }
+        if (planned_patch.private_sample_sequence_offset)
+          candidate_options.moi_sample_sequence_vgpr = --state_vgpr;
+        if (planned_patch.private_owner_offset)
+          candidate_options.moi_owner_vgpr = --state_vgpr;
+        candidate_options.moi_epoch_vgpr = --state_vgpr;
       }
       ConSanMoiCandidate lowered_candidate = candidate;
       lowered_candidate.kernel_descriptor_file_offset =
@@ -1061,7 +1076,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           planned_patch.prior_first_record_index, planned_patch.prior_access_range_count,
           window_bank_count, layout.sampled_causal_windows_offset,
           layout.sampled_watchpoints_offset, layout.sampled_pending_acquires_offset,
-          planned_patch.private_epoch_offset, planned_patch.private_sample_sequence_offset,
+          planned_patch.private_epoch_offset, planned_patch.private_owner_offset,
+          planned_patch.private_owner_shift, planned_patch.private_sample_sequence_offset,
           result.errors);
       if (!words)
         return;
@@ -1110,6 +1126,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       info.sampled_access_range_count = planned_patch.access_range_count;
       info.scratch_vgpr = planned_patch.resources.base;
       info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
+      info.persistent_owner_private_offset = planned_patch.private_owner_offset;
+      if (planned_patch.private_epoch_offset)
+        info.persistent_private_state_end = planned_patch.persistent_private_state_end;
       info.required_private_segment_size = planned_patch.required_private_bytes;
       info.owner_descriptor_file_offsets = planned_patch.resources.owner_descriptor_file_offsets;
       if (planned_patch.spill) {
@@ -1324,14 +1343,13 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             }
             candidate_options.scratch_vgpr = planned_patch.resources.base;
             if (planned_patch.private_epoch_offset) {
-              const uint16_t end = static_cast<uint16_t>(planned_patch.resources.base +
-                                                         planned_patch.resources.count);
-              if (planned_patch.private_sample_sequence_offset) {
-                candidate_options.moi_epoch_vgpr = static_cast<uint16_t>(end - 2u);
-                candidate_options.moi_sample_sequence_vgpr = static_cast<uint16_t>(end - 1u);
-              } else {
-                candidate_options.moi_epoch_vgpr = static_cast<uint16_t>(end - 1u);
-              }
+              uint16_t state_vgpr = static_cast<uint16_t>(planned_patch.resources.base +
+                                                          planned_patch.resources.count);
+              if (planned_patch.private_sample_sequence_offset)
+                candidate_options.moi_sample_sequence_vgpr = --state_vgpr;
+              if (planned_patch.private_owner_offset)
+                candidate_options.moi_owner_vgpr = --state_vgpr;
+              candidate_options.moi_epoch_vgpr = --state_vgpr;
             }
             ConSanMoiCandidate lowered_candidate = *planned_patch.candidate;
             lowered_candidate.kernel_descriptor_file_offset =
@@ -1341,7 +1359,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                 planned_patch.prior_first_record_index, planned_patch.prior_access_range_count,
                 window_bank_count, layout.sampled_causal_windows_offset,
                 layout.sampled_watchpoints_offset, layout.sampled_pending_acquires_offset,
-                planned_patch.private_epoch_offset, planned_patch.private_sample_sequence_offset,
+                planned_patch.private_epoch_offset, planned_patch.private_owner_offset,
+                planned_patch.private_owner_shift, planned_patch.private_sample_sequence_offset,
                 result.errors);
             if (words) {
               const size_t planned_words =
@@ -1368,6 +1387,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             info.sampled_access_range_count = planned_patch.access_range_count;
             info.scratch_vgpr = planned_patch.resources.base;
             info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
+            info.persistent_owner_private_offset = planned_patch.private_owner_offset;
+            if (planned_patch.private_epoch_offset)
+              info.persistent_private_state_end = planned_patch.persistent_private_state_end;
             info.required_private_segment_size = planned_patch.required_private_bytes;
             info.owner_descriptor_file_offsets =
                 planned_patch.resources.owner_descriptor_file_offsets;

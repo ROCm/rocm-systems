@@ -1120,6 +1120,61 @@ TEST(ConSanMoi, Gfx1250SampledSpillsExecVccStateWithSeparateDeadDenseRouter) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
+TEST(ConSanMoi, Cdna4Wave64AccvgprBoundarySampledUsesPrivatePersistentState) {
+  const auto guest = build_cdna4_ds_store_b32(
+      /*vaddr=*/10, /*vdata=*/11, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(guest);
+  std::vector<uint32_t> text_words(320u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  std::copy(guest->begin(), guest->end(), text_words.begin());
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, "sampled_accvgpr_boundary", /*vgpr_granulated=*/3u);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    // Preserve the compiler-defined split: v12 is the first accumulator while
+    // ordinary guest code reaches v11.
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 2u);
+  });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_runtime_sample_stride = 2u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.moi_private_epoch_automatic);
+  EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
+  const auto sampled_patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(sampled_patch, result.patches.end());
+  EXPECT_TRUE(sampled_patch->persistent_epoch_private_offset);
+  EXPECT_TRUE(sampled_patch->persistent_owner_private_offset);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue,
+                               &ConSanPatchInfo::kind),
+            1u);
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  ASSERT_TRUE(patched.is_valid());
+  KD original_descriptor{};
+  KD patched_descriptor{};
+  std::memcpy(&original_descriptor,
+              bytes.data() + original.kernels().front().descriptor_file_offset,
+              sizeof(original_descriptor));
+  std::memcpy(&patched_descriptor,
+              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              sizeof(patched_descriptor));
+  EXPECT_EQ(AMDHSA_BITS_GET(patched_descriptor.compute_pgm_rsrc3,
+                            kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
+            AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc3,
+                            kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET));
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, DirectSampledProbeSpillsFiveVgprsInAppendedCave) {
   const std::array<uint32_t, 3> text_words = {
       0xD8340000u,

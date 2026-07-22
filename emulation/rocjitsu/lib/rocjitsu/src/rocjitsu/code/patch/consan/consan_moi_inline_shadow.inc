@@ -1746,8 +1746,9 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
   if (reject_candidate_scratch_range_overlap(candidate, *options.scratch_vgpr, scratch_count,
                                              errors))
     return std::nullopt;
-  if (reject_optional_scratch_range_overlap(options.moi_owner_vgpr, *options.scratch_vgpr,
-                                            scratch_count, "MOI owner", errors) ||
+  if ((!options.automatic_moi_private_epoch &&
+       reject_optional_scratch_range_overlap(options.moi_owner_vgpr, *options.scratch_vgpr,
+                                             scratch_count, "MOI owner", errors)) ||
       (!options.automatic_moi_private_epoch &&
        reject_optional_scratch_range_overlap(options.moi_epoch_vgpr, *options.scratch_vgpr,
                                              scratch_count, "MOI epoch", errors)))
@@ -2334,7 +2335,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     std::optional<uint32_t> prior_first_record_index, uint32_t prior_access_range_count,
     uint32_t window_bank_count, size_t sampled_causal_windows_offset,
     size_t sampled_watchpoints_offset, size_t sampled_pending_acquires_offset,
-    std::optional<uint32_t> private_epoch_offset,
+    std::optional<uint32_t> private_epoch_offset, std::optional<uint32_t> private_owner_offset,
+    std::optional<uint16_t> private_owner_shift,
     std::optional<uint32_t> private_sample_sequence_offset, std::vector<std::string> &errors,
     uint32_t *guest_instruction_offset = nullptr) {
   const auto access_ranges = candidate_access_ranges(bytes, candidate);
@@ -2363,6 +2365,25 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     }
     words.insert(words.end(), load->begin(), load->end());
     words.push_back(*wait);
+  }
+  if (private_owner_offset) {
+    if (!options.automatic_moi_private_epoch || !options.moi_owner_vgpr || !private_owner_shift) {
+      errors.emplace_back("ConSan MOI sampled probe has an invalid private owner plan");
+      return std::nullopt;
+    }
+    const auto load = instrumentation::build_private_load_b32(*options.moi_owner_vgpr,
+                                                              *private_owner_offset, arch);
+    const auto wait = instrumentation::build_s_wait_private_load0(arch);
+    const auto owner = instrumentation::build_v_lshrrev_b32(
+        *options.moi_owner_vgpr, scalar_positive_inline_u32(*private_owner_shift),
+        *options.moi_owner_vgpr, arch);
+    if (!load || !wait || !owner) {
+      errors.emplace_back("ConSan MOI sampled probe could not load private owner state");
+      return std::nullopt;
+    }
+    words.insert(words.end(), load->begin(), load->end());
+    words.push_back(*wait);
+    words.push_back(*owner);
   }
   if (private_sample_sequence_offset) {
     if (!options.moi_sample_sequence_vgpr) {
