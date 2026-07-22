@@ -1918,6 +1918,12 @@ def _launcher_from_json(value: str | None) -> list[str]:
     return launcher
 
 
+def _outer_repetitions(target: str, phase: str, workload: Workload) -> int:
+    if target in {"gfx950", "gfx1250"} or phase != "overhead":
+        return 1
+    return workload.overhead_processes
+
+
 def _run_profile(
     workspace: Path,
     target: str,
@@ -1933,9 +1939,7 @@ def _run_profile(
     row_dir = artifact_root / workload.id / phase / (row_label or profile_id)
     row_dir.mkdir(parents=True, exist_ok=False)
     hook = _hook_path(workspace)
-    repetitions = (
-        1 if target == "gfx1250" or phase != "overhead" else workload.overhead_processes
-    )
+    repetitions = _outer_repetitions(target, phase, workload)
     logs = []
     commands = []
     returncodes = []

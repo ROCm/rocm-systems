@@ -404,6 +404,15 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(command[0], "/workspace/venv/bin/python")
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
 
+    def test_active_architectures_use_one_outer_overhead_process(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["d128-pressure"]
+        self.assertEqual(validation._outer_repetitions("gfx950", "overhead", workload), 1)
+        self.assertEqual(validation._outer_repetitions("gfx1250", "overhead", workload), 1)
+        self.assertEqual(
+            validation._outer_repetitions("gfx1201", "overhead", workload),
+            workload.overhead_processes,
+        )
+
     def test_qwen_gfx950_overhead_uses_one_repetition(self) -> None:
         workload = validation.WORKLOAD_BY_ID["qwen-prefill"]
         command = validation._workload_command(
