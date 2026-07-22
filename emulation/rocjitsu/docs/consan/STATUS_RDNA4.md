@@ -113,7 +113,7 @@ tip; a successful smoke or an old artifact is insufficient.
 | **P4 hip-moi tree atomic-OR** | 🟩 Exact oracle; clean 4/4 accesses; exact order and scope weakenings are precommitted qualified misses; overhead 591.81x | 🟧 Exact oracle and complete 4/4 accesses + 15/15 atomics + 4/4 barriers, but four supported fences fail placement at 12/16 | 🟨 Exact oracle and clean-complete 4/4 accesses + 15/15 atomics + 8/8 barrier members; overhead and reviewed faults pending | 🟧 Complete 4/4 + 15/15 + 4/4, but a diagnostic rejects the correct workload | Sampled checkpoint `e96efba818`: clean `...-144`. Current Record/Replay discriminator `...-114` isolates four `instrumentation_patch_missing` fences. Other retained evidence is at checkpoint `79aea7420c` |
 | **P4 hip-moi Jakub attention variants** | 🟩 Exact oracle; clean 31/31 accesses; exact barrier drop is a precommitted qualified miss; overhead 103.75x | 🟩 Exact oracle; clean 31/31 + 4/4; exact barrier drop is a precommitted qualified miss; overhead 11.69x | 🟨 Exact oracle and clean-complete 31/31 accesses + 8/8 barrier members; overhead and reviewed fault pending | 🟩 Exact oracle; clean 31/31 + 4/4; exact barrier drop emits an attributed diagnostic; overhead 11.03x | Sampled checkpoint `e96efba818`: clean `...-139`. Record/Replay checkpoint `baed32a85e`: `...-113`, `...-115`, `...-116`, and `...-121`. SuperCollider and Inline checkpoint `79aea7420c`: `...-076`, `...-084`, `...-085`, `...-089`, `...-096`, and `...-097` |
 
-## Native gfx1201 corpus discovery
+## Native gfx1201 corpus discovery and qualification
 
 The local `rocjitsu-test-corpus` checkout at revision `0fccdd2c58d8` is already
 organized around target-native discovery.  A collection-only survey for
@@ -129,12 +129,16 @@ suites for workloads that exercise the same broad difficulty classes.
 
 A discovery row uses `— Not admitted` after target-native evidence rules it out
 of the validation denominator.  These are resolved selection decisions, not
-support results and not gray instrumentation cells.
+support results and not gray instrumentation cells.  Once a candidate has an
+exact baseline and current-hook execution evidence, its four cells use the
+ordinary ordered color scale independently.  Colored discovery cells are
+provisional qualification until the command is promoted into
+`consan_validation.py` and frozen with overhead and fault evidence.
 
 | Discovery order and native gfx1201 source | SuperCollider | Record/Replay | Sampled | Inline Shadow | Admission decision and evidence |
 |---|---|---|---|---|---|
-| **D0** `kernels.gfx1201.llama.cpp.llama_mul_mat_vec_q.default` | — Local SDK blocked | — Local SDK blocked | — Local SDK blocked | — Local SDK blocked | The existing exact runner cannot configure because this machine's local ROCm SDK has no `hipblas` CMake package. This is an explicit prerequisite blocker, not an unexamined ConSan cell; retry after the SDK gains hipBLAS and admit only if inventory adds coverage beyond Qwen. |
-| **D0** `kernels.gfx1201.llama.cpp.llama_rms_norm.default` | — Local SDK blocked | — Local SDK blocked | — Local SDK blocked | — Local SDK blocked | The same missing-hipBLAS configure gate blocks the existing exact runner before any device code is built. Retry with a complete SDK and first measure whether the native normalization path contains relevant synchronization. |
+| **D0** `kernels.gfx1201.llama.cpp.llama_mul_mat_vec_q.default` | 🟨 Exact CPU oracle; clean-complete 462/462 LDS accesses; overhead and reviewed fault pending | 🟥 Strict fail-closed exit 92: supported device-function fence sites cannot be placed, so the workload never launches | 🟥 Same required-instrumentation-missing rejection before launch | 🟧 Exact oracle and useful partial execution: 135/462 accesses + 7/44 barriers patch, but one diagnostic rejects the clean run | Current hook `fec3ef03…`; exact baseline artifact `.pytest-artifacts-rdna4-llama-baseline`. SuperCollider output passes the corpus's 0.01 absolute-tolerance CPU comparison. Inline exits 89 with static-incomplete 135/462 + 7/44 and one visible diagnostic. This is distinct shared-function/fence pressure, not duplicate Qwen coverage. |
+| **D0** `kernels.gfx1201.llama.cpp.llama_rms_norm.default` | 🟨 Exact CPU oracle; clean-complete 22/22 LDS accesses; no mismatch; overhead and reviewed fault pending | 🟨 Exact oracle; clean-complete 22/22 accesses + 11/11 barriers; visible replay evidence and no conflict; overhead and reviewed fault pending | 🟨 Exact oracle; clean-complete 22/22 accesses + 22/22 barrier members; sampled evidence and no clean diagnostic; overhead and reviewed fault pending | 🟥 Static-complete 22/22 + 11/11, but the clean workload returns incorrect zero output and exits 90 with malformed exact snapshots and 72 dynamic-incomplete events | Current hook `fec3ef03…`; exact baseline artifact `.pytest-artifacts-rdna4-llama-baseline`. Direct current-hook runs use the corpus's `128x1` case and compare against its independent CPU result at 1e-5 tolerance. The Inline failure is a newly exposed correctness bug, not missing setup. |
 | **D0** `kernels.gfx1201.hip-matmul.hip_matmul_matvec.m256_n1_k1024` | — Not admitted | — Not admitted | — Not admitted | — Not admitted | A standalone build with the unrelated llama.cpp backend disabled passes all nine exact matvec variants. Fresh SuperCollider inventory finds no decoded LDS, barriers, or atomics in the nine workload kernels; only eight ambiguous flat maybe-group sites fail placement, so this does not add a sound or nonredundant ConSan workload. |
 | **D0** `llama.cpp` noncontiguous batched-matmul and hazard metadata | — Not admitted | — Not admitted | — Not admitted | — Not admitted | The gfx1201 config explicitly skips compiling both variants. The hazard overlay restores llama.cpp PR #13155's pre-fix noncontiguous-stride conversion and expects a deterministic output-validation failure; it is a data-layout correctness reproducer, not a concurrency oracle. |
 | **D1** Three collected IREE direct-tile matmuls: F16, FP8, and I8 | — Not admitted | — Not admitted | — Not admitted | — Not admitted | The three gfx1201 compilations pass, but their corpus records explicitly set `compile_only=true`; they dispatch no workload and provide no runtime oracle. Normalize a calls/support-module wrapper before reconsidering them. |
@@ -146,11 +150,15 @@ Any future selected case must be added to `consan_validation.py` with its exact
 target-native command and independent oracle. Its four cells then advance
 independently: evidence from one engine never promotes another.
 
-The 2026-07-21 D0 setup attempt reached the existing local ROCm SDK at
-`TheRock-build/dist/rocm`, but that SDK does not contain the `hipblas` CMake
-package required by the vendored llama.cpp build.  Both llama rows therefore
-carry an explicit setup-blocked state; this is not an observed ConSan or
-workload failure.  Do not build a larger SDK solely for these two candidates.
+The 2026-07-21 D0 retry enabled `THEROCK_ENABLE_BLAS=ON`, initialized TheRock's
+pinned `rocm-libraries` submodule, and built the focused `hipBLAS+stage` target.
+The corpus configuration uses `TheRock-build/dist/rocm` as `ROCM_PATH` and
+adds both `TheRock-build/math-libs/BLAS/hipBLAS/dist` and
+`TheRock-build/math-libs/BLAS/hipBLAS-common/dist` to `CMAKE_PREFIX_PATH`; the
+BLAS `lib` directory is prepended to `LD_LIBRARY_PATH`.  This removes the old
+setup blocker without copying libraries or changing the corpus source.  Both
+exact CPU/GPU baseline comparisons pass.  Current-hook GPU runs additionally
+set `HSA_TOOLS_ROCPROFILER_V1_TOOLS=1`, as required by this modern HSA runtime.
 The same corpus CMake configuration unnecessarily enables llama.cpp while
 building the independent HIP-matmul case.  Configuring that case alone with
 `KERNEL_CORPUS_ENABLE_LLAMA_HIP=OFF` establishes its exact baseline and permits
