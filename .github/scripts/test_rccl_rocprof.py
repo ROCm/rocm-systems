@@ -6,6 +6,7 @@
 # Runs in RCCL CI using TheRock build artifacts (THEROCK_BIN_DIR) or
 # locally against a system ROCm install.
 
+import argparse
 import csv
 import json
 import logging
@@ -13,6 +14,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -270,5 +272,38 @@ class TestRCCLRocprof:
                     log.info(f"  {jf.name}: valid JSONL, {len(lines)} lines")
 
 
+def main() -> None:
+    parser = argparse.ArgumentParser(description="rocprofv3 RCCL smoke tests")
+    parser.add_argument(
+        "--notify-email",
+        type=str,
+        default="",
+        help="Send summary report to this email address",
+    )
+    parser.add_argument(
+        "--notify-webhook",
+        type=str,
+        default="",
+        help="Send summary report to this Teams webhook URL",
+    )
+    args = parser.parse_args()
+
+    exit_code = pytest.main([__file__, "-v", "-s", "--log-cli-level=INFO", "--tb=short"])
+
+    if args.notify_email or args.notify_webhook:
+        from rccl_ci_utils import send_email_report, send_teams_webhook
+
+        status = "PASSED" if exit_code == 0 else "FAILED"
+        report = f"RCCL rocprofv3 smoke test: {status}"
+        if args.notify_email:
+            send_email_report(report, args.notify_email, status,
+                              subject_prefix="RCCL rocprofv3 Smoke Test")
+        if args.notify_webhook:
+            send_teams_webhook(report, args.notify_webhook, status,
+                               subject_prefix="RCCL rocprofv3 Smoke Test")
+
+    sys.exit(exit_code)
+
+
 if __name__ == "__main__":
-    pytest.main([__file__, "-v", "-s", "--log-cli-level=INFO", "-x"])
+    main()
