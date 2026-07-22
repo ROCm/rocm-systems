@@ -33,7 +33,7 @@ public:
     roctx& operator=(roctx&&)      = delete;
 
     [[nodiscard]] std::string_view name() const noexcept override { return "roctx"; }
-    [[nodiscard]] vote             initial_vote() const noexcept override;
+    [[nodiscard]] action           initial_action() const noexcept override;
 
     void on_range_start(std::uint64_t range_id, const char* message);
     void on_range_stop(std::uint64_t range_id);
@@ -58,8 +58,8 @@ private:
     std::atomic<bool>                   m_should_write{ true };
     std::mutex                          m_mutex;
 
-    [[nodiscard]] vote compute_vote() const noexcept;
-    [[nodiscard]] bool compute_should_write() const noexcept;
-    void               refresh_state();
+    [[nodiscard]] action compute_action() const noexcept;
+    [[nodiscard]] bool   compute_should_write() const noexcept;
+    void                 refresh_state();
 };
 }  // namespace rocprofsys::control::triggers

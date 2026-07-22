@@ -33,6 +33,7 @@ roctx::roctx(session& sess, std::string_view trace_regions)
     }
 
     m_should_write.store(compute_should_write(), std::memory_order_relaxed);
+    bind_action_setter(sess.register_trigger(*this));
 }
 
 roctx::~roctx()
@@ -40,10 +41,10 @@ roctx::~roctx()
     m_session.unregister_trigger(*this);
 }
 
-vote
-roctx::initial_vote() const noexcept
+action
+roctx::initial_action() const noexcept
 {
-    return compute_vote();
+    return compute_action();
 }
 
 void
@@ -141,10 +142,10 @@ roctx::on_resume()
     refresh_state();
 }
 
-vote
-roctx::compute_vote() const noexcept
+action
+roctx::compute_action() const noexcept
 {
-    return compute_should_write() ? vote::active : vote::paused;
+    return compute_should_write() ? action::trace : action::pause;
 }
 
 bool
@@ -160,6 +161,6 @@ void
 roctx::refresh_state()
 {
     m_should_write.store(compute_should_write(), std::memory_order_relaxed);
-    m_session.publish_vote(*this, compute_vote());
+    publish_action(compute_action());
 }
 }  // namespace rocprofsys::control::triggers
