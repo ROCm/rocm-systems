@@ -1534,7 +1534,7 @@ void apply_test_container_filter(std::vector<Candidate> &candidates, const ConSa
     return options.moi_inline_access_present ? kConSanMoiInlineExecSaveSgprCount : 22u;
   }
   if (options.automatic_moi_record_replay_sgpr_spill)
-    return 4u;
+    return options.moi_engine == ConSanMoiEngine::Sampled ? 8u : 4u;
   // One EXEC-save pair, one VCC-save pair, and one SCC snapshot. Barrier-dense
   // RDNA-family objects additionally reserve a dispatch key and an aligned
   // call-return pair for the relocated router.
@@ -1940,8 +1940,10 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
         }
       }
     }
-    if (!selected && options.moi_engine == ConSanMoiEngine::RecordReplay &&
-        is_rdna4_family_arch(arch) && !options.moi_dynamic_stack_spill &&
+    if (!selected &&
+        ((options.moi_engine == ConSanMoiEngine::RecordReplay && is_rdna4_family_arch(arch)) ||
+         gfx1250_sampled) &&
+        !options.moi_dynamic_stack_spill &&
         address_free_scratch_private_limit(arch)) {
       const auto reserved = [&](uint16_t base, uint16_t width) {
         return (options.moi_owner_sgpr &&
@@ -1979,15 +1981,15 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       // One dead pair is therefore sufficient for both transient roles.
       if (spill_key)
         spill_call_return = spill_pc;
-      constexpr uint16_t kSpilledExecVccCount = 4u;
-      for (uint32_t base = 0; spill_call_return && base + kSpilledExecVccCount <= limit;
+      const uint16_t spilled_scalar_count = gfx1250_sampled ? 8u : 4u;
+      for (uint32_t base = 0; spill_call_return && base + spilled_scalar_count <= limit;
            base += 2u) {
         const uint16_t candidate = static_cast<uint16_t>(base);
-        if (!reserved(candidate, kSpilledExecVccCount) &&
-            !range_overlaps(candidate, kSpilledExecVccCount, *spill_pc, 2u) &&
-            !range_overlaps(candidate, kSpilledExecVccCount, *spill_scc, 1u) &&
-            !range_overlaps(candidate, kSpilledExecVccCount, *spill_key, 1u) &&
-            !range_overlaps(candidate, kSpilledExecVccCount, *spill_call_return, 2u)) {
+        if (!reserved(candidate, spilled_scalar_count) &&
+            !range_overlaps(candidate, spilled_scalar_count, *spill_pc, 2u) &&
+            !range_overlaps(candidate, spilled_scalar_count, *spill_scc, 1u) &&
+            !range_overlaps(candidate, spilled_scalar_count, *spill_key, 1u) &&
+            !range_overlaps(candidate, spilled_scalar_count, *spill_call_return, 2u)) {
           selected = candidate;
           break;
         }
@@ -2415,7 +2417,9 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   // liveness-dead window or a spill-backed access-probe layout.
   if ((is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
       (options.moi_engine == ConSanMoiEngine::RecordReplay ||
-       options.moi_engine == ConSanMoiEngine::InlineShadow)) {
+       options.moi_engine == ConSanMoiEngine::InlineShadow ||
+       (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+        options.moi_engine == ConSanMoiEngine::Sampled))) {
     options.moi_exec_save_sgpr = 0u;
     options.automatic_moi_exec_save_sgprs = true;
     options.automatic_moi_partial_exec_save_sgprs = true;
