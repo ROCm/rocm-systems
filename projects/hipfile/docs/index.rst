@@ -20,6 +20,9 @@ hipFile is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. Th
       * :doc:`Install hipFile <install/install>`
       * :doc:`Build hipFile from source <install/build-from-source>`
       * :doc:`Install the hipFile Python bindings <install/python-bindings>`
+      * :doc:`Set up a local NVMe drive <install/setup-local-nvme>`
+      * :doc:`Set up an NVMeoF disk <install/setup-nvmeof>`
+      * :doc:`Set up an NFSoRDMA share <install/setup-nfsordma>`
 
 .. grid:: 2
    :gutter: 3

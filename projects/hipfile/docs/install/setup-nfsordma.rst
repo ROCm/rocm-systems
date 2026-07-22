@@ -6,34 +6,32 @@
 Set up an NFSoRDMA share
 **********************************
 
-This page walks through a simple example of exporting an NFS share over RDMA
-and mounting it for use with hipFile. Before you begin, make sure hipFile is
-installed. See :doc:`./install` for package options or :doc:`./build-from-source`
-to build from source.
+To use hipFile with an NFS share mounted over RDMA, configure an RDMA-capable
+NFS server, mount the share on the client over InfiniBand or RoCE, and verify
+I/O on the mounted path. Before you begin, make sure hipFile is installed. See
+:doc:`./install` for package options or :doc:`./build-from-source` to build
+from source.
 
 Prerequisites
 =============
 
-- Version 31.40 or newer of the ``amdgpu-dkms`` driver
+- Version 31.40 or newer of the ``amdgpu-dkms`` driver, with ROCm 7.4 or later
+  and the HIP runtime
 - An InfiniBand or RoCE fabric connecting the NFS server and client
 - ``nfs-kernel-server`` installed on the server, with the ``svcrdma`` kernel
   module available
 - ``nfs-common`` installed on the client, with the ``xprtrdma`` kernel module
   available
 - Root or ``sudo`` access on both the server and client
-- A directory on the server to export over NFS. ``HIPFILE_UNSUPPORTED_FILE_SYSTEMS=true``
-  is always required for NFSoRDMA, regardless of the backing filesystem. Whether
-  the transfer is fully zero-copy end-to-end depends on the NFS server's own
-  RDMA support for its storage backend; consult your NFS server documentation.
 
-Configure the InfiniBand interface
-====================================
+Set up the server and client
+============================
 
 Configure a static IP address on the InfiniBand or RoCE interface on the
-server. This example uses ``netplan``; substitute your distribution's network
-configuration tool as needed. Create ``/etc/netplan/<config>.yaml`` with the
-following content, replacing ``<ib_interface>`` and ``<server_ip>/<prefix>``
-with values that match your fabric:
+server. This example uses ``netplan``. Substitute your distribution's network
+configuration tool as needed. Create ``/etc/netplan/<config>.yaml``, replacing
+``<ib_interface>`` and ``<server_ip>/<prefix>`` with values that match your
+fabric:
 
 .. code-block:: yaml
 
@@ -51,9 +49,6 @@ with values that match your fabric:
 .. code:: shell
 
    sudo netplan apply
-
-Set up the NFS server
-=======================
 
 Load the RDMA-capable NFS server module.
 
@@ -87,10 +82,7 @@ Confirm the RDMA port is active.
    rdma 20049
    tcp 2049
 
-Mount the share on the client
-===============================
-
-Load the RDMA-capable NFS client module.
+On the client, load the RDMA-capable NFS client module.
 
 .. code:: shell
 
@@ -103,11 +95,13 @@ Create a mount point and mount the share using RDMA.
    sudo mkdir /mnt/nfs
    sudo mount -o rdma,port=20049 <server_ip>:<export_path> /mnt/nfs
 
-Verify the setup
-=================
+Set ``HIPFILE_UNSUPPORTED_FILE_SYSTEMS=true`` before hipFile I/O on the mounted
+share. The client sees an NFS file system, not ext4 or XFS. Zero-copy over the
+full path depends on the NFS server's RDMA support for its storage backend.
 
-Create a user-accessible directory and then confirm if hipFile can see and use
-this mounted drive. For example, running one of the hipFile example programs. 
+Build or install ``aiscp`` before running the verification. See
+:doc:`../tutorials/copy-a-file` for build steps. Create a user-accessible
+directory, then verify that hipFile can access the mounted share.
 
 .. code:: shell
 
@@ -120,7 +114,7 @@ this mounted drive. For example, running one of the hipFile example programs.
    md5sum /mnt/nfs/"${USER}"/source /mnt/nfs/"${USER}"/dest
 
 Unmount the share
-===================
+=================
 
 Unmount when finished, if applicable.
 
