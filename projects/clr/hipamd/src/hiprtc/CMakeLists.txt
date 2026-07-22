@@ -179,8 +179,6 @@ ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_fp8.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_ocp_host.hpp
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_fp6.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_fp4.h
-${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_ocp_fp.hpp
-${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_ocp_fp_cxx.hpp
 )
 
 # Generate required HIPRTC files.
