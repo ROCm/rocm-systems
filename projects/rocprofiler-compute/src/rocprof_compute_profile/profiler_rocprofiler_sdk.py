@@ -13,7 +13,6 @@ from utils.logger import (
     console_debug,
     console_error,
     console_log,
-    console_warning,
     demarcate,
 )
 from utils.rocm_stack_preflight import comgr_to_force
@@ -42,12 +41,6 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         app_cmd = shlex.split(args.remaining)
 
         forced_comgr = self._forced_comgr
-        if forced_comgr is not None:
-            console_warning(
-                "comgr",
-                "Two ROCm stacks detected. Forcing a single 'libamd_comgr' via "
-                f"LD_PRELOAD: {forced_comgr}",
-            )
 
         # Build LD_PRELOAD: preserve user's existing, then append our libs
         # Order: [user's existing LD_PRELOAD] : [forced comgr] : [our profiler libs]

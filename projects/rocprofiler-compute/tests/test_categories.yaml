@@ -12,6 +12,7 @@ test_categories:
       - test_profile_iteration_multiplexing_1
       - test_profile_sets_func
       - test_utils
+      - test_rocm_stack_preflight
       - test_pc_sampling_analysis
       - test_tui_components
       - test_analysis_db
@@ -77,6 +78,7 @@ test_categories:
       - test_num_xcds_spec_class
       - test_mi_gpu_spec
       - test_utils
+      - test_rocm_stack_preflight
       - test_L1_cache_counters
       - test_roofline_calc
       - test_roofline_analyze
@@ -142,6 +144,7 @@ test_categories:
       - test_num_xcds_spec_class
       - test_mi_gpu_spec
       - test_utils
+      - test_rocm_stack_preflight
       - test_L1_cache_counters
       - test_roofline_calc
       - test_roofline_analyze
@@ -207,6 +210,7 @@ test_categories:
       - test_num_xcds_spec_class
       - test_mi_gpu_spec
       - test_utils
+      - test_rocm_stack_preflight
       - test_L1_cache_counters
       - test_roofline_calc
       - test_roofline_analyze

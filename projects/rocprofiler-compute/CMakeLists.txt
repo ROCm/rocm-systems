@@ -571,6 +571,14 @@ add_test(
         tests/test_rocprofv3_avail_interface.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_rocm_stack_preflight
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_rocm_stack_preflight.xml ${COV_OPTION}
+        tests/test_rocm_stack_preflight.py ${WORKING_DIR_OPTION}
+)
+
 # Memory chart CLI renderers (gfx9 plotille + gfx11 Rich) — no GPU required
 add_test(
     NAME test_mem_chart

@@ -97,8 +97,9 @@ class TestComgrToForce:
                 _resolution(tool_comgr=tool, workload_comgrs=[bundled])
             )
         assert forced == bundled
-        warn.assert_called_once()
-        assert "_rocm_sdk_core" in warn.call_args.args[1]
+        messages = " ".join(str(call.args[1]) for call in warn.call_args_list)
+        assert "_rocm_sdk_core" in messages
+        assert "Forcing a single 'libamd_comgr' via LD_PRELOAD" in messages
 
     def test_matching_comgr_does_not_force(self, tmp_path: Path) -> None:
         tool = _make_lib(tmp_path / "opt/rocm/lib", "libamd_comgr.so.3")
@@ -262,6 +263,49 @@ class TestWorkloadStackDiscovery:
         assert under_root.resolve() not in resolved
         assert bundled.resolve() in resolved
 
+    def test_excludes_library_identical_to_tool(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """A workload lib byte-identical to the tool's copy is not a conflict.
+
+        Packaging-agnostic: a single distribution that splits identical
+        libraries across sibling directories (e.g. a profiler ROCm wheel and
+        the workload's sibling wheel of the same build) must resolve to an
+        empty workload stack so the preflight no-ops.
+        """
+        from utils import rocm_stack_preflight as preflight
+
+        tool_lib = _make_lib(tmp_path / "devel/lib", "libamd_comgr.so.3")
+        tool_lib.write_bytes(b"identical-comgr-build")
+        # Same build shipped in a sibling directory (distinct path, same bytes).
+        workload_lib = _make_lib(tmp_path / "core/lib", "libamd_comgr.so.3")
+        workload_lib.write_bytes(b"identical-comgr-build")
+        # A genuinely different build must still be reported.
+        other_lib = _make_lib(tmp_path / "bundled/lib", "libamd_comgr.so.3")
+        other_lib.write_bytes(b"a-different-comgr-build")
+
+        monkeypatch.setenv("ROCM_PATH", str(tmp_path / "devel"))
+        monkeypatch.setattr(
+            preflight,
+            "_find_workload_libs_dynamic",
+            lambda env, stems: {s: [workload_lib, other_lib] for s in stems},
+        )
+        monkeypatch.setattr(preflight, "_run_import_probe", lambda a, e, s: [])
+        monkeypatch.setattr(
+            preflight,
+            "_find_workload_libs_static",
+            lambda a, s: {stem: [] for stem in s},
+        )
+        result = preflight._discover_workload_stack(
+            ["python3", "x.py"],
+            {},
+            (COMGR_LIB_STEM,),
+            {COMGR_LIB_STEM: tool_lib},
+        )
+        resolved = {p.resolve() for p in result[COMGR_LIB_STEM]}
+        assert workload_lib.resolve() not in resolved
+        assert other_lib.resolve() in resolved
+
 
 class TestImportProbe:
     """A comgr loaded when a workload module is imported must be reported."""
@@ -269,7 +313,7 @@ class TestImportProbe:
     @staticmethod
     def _find_loadable_so() -> Path:
         """Return a loadable shared object mapped into the current process."""
-        with open("/proc/self/maps") as maps:
+        with open("/proc/self/maps", encoding="utf-8") as maps:
             for line in maps:
                 fields = line.split()
                 if len(fields) < 6:

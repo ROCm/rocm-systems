@@ -162,6 +162,9 @@ class RocProfCompute_Base:
         # ROCm stack pre-flight state populated during pre-processing.
         self._stack_resolution: Optional[StackResolution] = None
         self._launch: Rocprofv3Launch = Rocprofv3Launch()
+        # Original workload command (before any ROCTX-injection rewrite),
+        # captured in sanitize() and used for the ROCm stack pre-flight.
+        self._workload_cmd: list[str] = []
 
     def get_args(self) -> argparse.Namespace:
         return self.__args
@@ -270,6 +273,11 @@ class RocProfCompute_Base:
                 if script_index is None and skip_flag is None:
                     raise NoScriptInCommandError(args.remaining)
 
+            # Capture the workload command before ROCTX injection rewrites it,
+            # so the ROCm stack pre-flight inspects the real workload rather
+            # than the inject_roctx launcher.
+            self._workload_cmd = list(args.remaining)
+
             if selected_frameworks:
                 _prepare_ml_api_trace_injection(
                     args.remaining,
@@ -333,11 +341,11 @@ class RocProfCompute_Base:
         # Resolve the profiler and workload ROCm stacks for backend pre-flight.
         self._stack_resolution = (
             resolve_rocm_stacks(
-                shlex.split(args.remaining),
+                self._workload_cmd,
                 getattr(args, "rocprofiler_sdk_tool_path", None),
                 dict(os.environ),
             )
-            if args.remaining and not args.attach_pid
+            if self._workload_cmd and not args.attach_pid
             else None
         )
 

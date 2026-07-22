@@ -266,11 +266,6 @@ def run_prof(
                 new_env["LD_PRELOAD"] = ":".join(
                     part for part in (launch.forced_comgr, existing) if part
                 )
-                console_warning(
-                    "comgr",
-                    "Two ROCm stacks detected. Forcing a single 'libamd_comgr' via "
-                    f"LD_PRELOAD: {launch.forced_comgr}",
-                )
         # print in readable format using shlex
         console_debug(f"rocprof command: {shlex.join([rocprof_bin] + options)}")
         # profile the app

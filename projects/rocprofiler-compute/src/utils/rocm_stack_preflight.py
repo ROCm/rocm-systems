@@ -17,6 +17,7 @@ the stacks cannot be reconciled.
 """
 
 import ast
+import hashlib
 import json
 import os
 import re
@@ -340,12 +341,12 @@ stems = json.loads(sys.argv[2])
 for name in names:
     try:
         importlib.import_module(name)
-    except BaseException:
+    except Exception:
         pass
 
 found = []
 try:
-    with open("/proc/self/maps") as maps:
+    with open("/proc/self/maps", encoding="utf-8") as maps:
         for line in maps:
             fields = line.split()
             if len(fields) < 6:
@@ -467,6 +468,45 @@ def _under_directory(path: Path, directory: Path) -> bool:
         return False
 
 
+def _file_digest(path: str) -> Optional[str]:
+    """Return the SHA-256 of ``path``'s contents, or None if unreadable."""
+    try:
+        digest = hashlib.sha256()
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
+def _same_library(a: Optional[Path], b: Optional[Path]) -> bool:
+    """Return True if ``a`` and ``b`` are the same shared library.
+
+    A dual-stack conflict only arises when two *different* builds of a library
+    co-load. This is packaging-agnostic: two paths are the same library when
+    they resolve to the same file (realpath or hardlink) or are byte-identical.
+    A workload copy that is identical to the profiler tool's copy therefore is
+    not a genuine second stack, regardless of directory layout (e.g. the
+    profiler's ROCm wheel and the workload's sibling wheel of the same build).
+    """
+    if a is None or b is None:
+        return False
+    ra, rb = _real_path(a), _real_path(b)
+    if ra == rb:
+        return True
+    try:
+        sa, sb = Path(ra).stat(), Path(rb).stat()
+    except OSError:
+        return False
+    if (sa.st_ino, sa.st_dev) == (sb.st_ino, sb.st_dev):
+        return True
+    if sa.st_size != sb.st_size:
+        return False
+    digest_a = _file_digest(ra)
+    return digest_a is not None and digest_a == _file_digest(rb)
+
+
 def _resolve_tool_stack(
     tool_path: Optional[str],
     stems: tuple[str, ...],
@@ -485,14 +525,22 @@ def _discover_workload_stack(
     app_cmd: list[str],
     env: dict[str, str],
     stems: tuple[str, ...],
+    tool_stack: Optional[dict[str, Optional[Path]]] = None,
 ) -> dict[str, list[Path]]:
     """Resolve the workload's copy of each stack library.
 
     Combines the runtime environment, an import probe of the workload's
     modules, and static inspection of site-packages and RPATH/RUNPATH.
-    Libraries under the profiler's ROCm root are excluded.
+
+    A candidate is dropped when it lives under the profiler's own ``ROCM_PATH``
+    or is the same library as the profiler tool's copy (see ``_same_library``).
+    The latter is packaging-agnostic: a single-distribution layout that merely
+    splits identical libraries across sibling directories resolves to an empty
+    workload stack, so the preflight no-ops instead of flagging a false
+    dual-stack conflict.
     """
     rocm_root = Path(os.path.realpath(os.getenv("ROCM_PATH", "/opt/rocm")))
+    tool_stack = tool_stack or {}
     dynamic = _find_workload_libs_dynamic(env, stems)
     probed = _run_import_probe(app_cmd, env, stems)
     static = _find_workload_libs_static(app_cmd, stems)
@@ -500,7 +548,12 @@ def _discover_workload_stack(
     for stem in stems:
         imports = [p for p in probed if stem in p.name]
         candidates = _dedupe_paths(dynamic[stem] + imports + static[stem])
-        result[stem] = [p for p in candidates if not _under_directory(p, rocm_root)]
+        tool_lib = tool_stack.get(stem)
+        result[stem] = [
+            p
+            for p in candidates
+            if not _under_directory(p, rocm_root) and not _same_library(p, tool_lib)
+        ]
     return result
 
 
@@ -560,7 +613,9 @@ def resolve_rocm_stacks(
         return None
     try:
         tool_stack = _resolve_tool_stack(tool_path, _STACK_LIB_STEMS)
-        workload_stack = _discover_workload_stack(app_cmd, env, _STACK_LIB_STEMS)
+        workload_stack = _discover_workload_stack(
+            app_cmd, env, _STACK_LIB_STEMS, tool_stack
+        )
     except Exception as err:  # noqa: BLE001
         console_debug("stack", f"stack resolution skipped: {err}")
         return None
@@ -591,6 +646,11 @@ def comgr_to_force(resolution: StackResolution) -> Optional[Path]:
     tool_comgr = resolution.tool(COMGR_LIB_STEM)
     forceable = _log_comgr_mismatch(tool_comgr, resolution.workload(COMGR_LIB_STEM))
     if forceable:
+        console_warning(
+            "comgr",
+            "Two ROCm stacks detected. Forcing a single 'libamd_comgr' via "
+            f"LD_PRELOAD: {forceable[0]}",
+        )
         return forceable[0]
     return None
 
