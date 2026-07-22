@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from amdisa.codegen._generator import CodeGenerator
 from amdisa.gpuisa import InstEncoding, Instruction, Operand
 from amdisa.isa_profile import Rdna4Profile
+from amdisa.parser import Parser
 from amdisa.semantics import InstructionSemantics
 
 
@@ -92,6 +93,31 @@ def test_implied_literal64_uses_its_three_dword_machine_inst():
     )
 
     assert info == ('Vop2InstLiteral64MachineInst', ('src0',))
+
+
+def test_implied_literal_extension_preserves_literal64_width():
+    parent = _enc('ENC_VOP2')
+    literal64 = _enc('VOP2_INST_LITERAL64')
+    literal64.bit_cnt = 96
+
+    words = Parser.implied_literal_extension_words(literal64, parent)
+    parent.implied_literal_ops['35'] = words
+
+    assert words == 2
+    assert parent.has_implied_literal_ops
+    assert parent.has_variable_implied_literal_size
+
+
+def test_implied_literal_extension_keeps_literal32_as_one_word():
+    parent = _enc('ENC_VOP2')
+    literal32 = _enc('VOP2_INST_LITERAL')
+    literal32.bit_cnt = 64
+
+    words = Parser.implied_literal_extension_words(literal32, parent)
+    parent.implied_literal_ops['44'] = words
+
+    assert words == 1
+    assert not parent.has_variable_implied_literal_size
 
 
 def test_literal_fixups_require_generated_machine_inst_struct():

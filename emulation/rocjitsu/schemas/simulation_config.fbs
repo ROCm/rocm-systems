@@ -123,6 +123,16 @@ enum DbtExecutionBackend: byte {
   simulator,
 }
 
+/// Silicon revision for a DBT translation side. gfx1250 A0 and B0 share an ELF
+/// machine ID but require different translation workarounds, so the revision is
+/// carried out of band. `unspecified` is the default for architectures whose
+/// machine ID already identifies the silicon.
+enum DbtSiliconRevision: byte {
+  unspecified,
+  gfx1250_a0,
+  gfx1250_b0,
+}
+
 /// DBT guest-GPU discovery mode.
 ///
 /// The execution_backend selects whether the host agent is backed by real KFD
@@ -140,6 +150,8 @@ table DbtGuestConfig {
   guest_device: KfdDeviceInfo;    // Synthetic guest KFD/sysfs identity appended to host topology.
   execution_backend: DbtExecutionBackend = hardware;
   simulator_config: string;       // External host config; when set, overrides this file's VM/topology.
+  guest_revision: DbtSiliconRevision = unspecified;  // Guest silicon revision (gfx1250 A0/B0 disambiguation).
+  host_revision: DbtSiliconRevision = unspecified;   // Host silicon revision for DBT output.
 }
 
 /// A dispatch packet describing a kernel launch.

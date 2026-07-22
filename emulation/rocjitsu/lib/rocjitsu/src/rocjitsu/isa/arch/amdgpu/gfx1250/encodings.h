@@ -503,6 +503,7 @@ public:
   bool has_dpp16();
   bool hasImpliedLiteral();
   bool hasImpliedLiteral64();
+  uint32_t impliedLiteralWordCount();
   using OpEncoding = Vop2MachineInst;
   const OpEncoding inst_;
   uint32_t literal_ = 0;

@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
@@ -76,6 +77,8 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
     return supports_wave_size<rdna3_5::Isa>(wf);
   case ROCJITSU_CODE_ARCH_RDNA4:
     return supports_wave_size<rdna4::Isa>(wf);
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return supports_wave_size<gfx1250::Isa>(wf);
   default:
     return false;
   }
@@ -101,6 +104,8 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
     return rdna3_5::Isa::WF_SIZE;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::Isa::WF_SIZE;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::Isa::WF_SIZE;
   default:
     return 64;
   }
@@ -126,6 +131,11 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
     return rdna3_5::Isa::MAX_VGPRS_PER_WF;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::Isa::MAX_VGPRS_PER_WF;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    // gfx1250 extends each encoded VGPR operand with dynamic high-bank bits.
+    // Descriptor validation must allow the complete addressable register
+    // range even though its inherited RDNA base describes one 256-VGPR bank.
+    return gfx1250::Isa::MAX_ADDRESSABLE_VGPRS_PER_WF;
   default:
     return 0;
   }
@@ -151,6 +161,8 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
     return HasAccVgpr<rdna3_5::Isa>;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return HasAccVgpr<rdna4::Isa>;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return HasAccVgpr<gfx1250::Isa>;
   default:
     return false;
   }
@@ -295,6 +307,12 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   if (arch_is_cdna(guest_arch))
     return 64;
 
+  // gfx1250 is Wave32-only. Do not interpret a missing legacy descriptor bit
+  // as Wave64: older producers may omit the bit even though the hardware has
+  // no Wave64 launch mode.
+  if (guest_arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return 32;
+
   // RDNA descriptors opt into Wave32 with ENABLE_WAVEFRONT_SIZE32. If the bit is
   // clear, launch hardware interprets the descriptor as Wave64.
   if (arch_is_rdna(guest_arch)) {
@@ -355,6 +373,14 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
 
 [[nodiscard]] uint32_t kernarg_preload_offset(const KD &desc) {
   return AMDHSA_BITS_GET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_OFFSET);
+}
+
+[[nodiscard]] bool uses_kernarg_preload_firmware_skip(rj_code_arch_t arch) {
+  // CDNA3/CDNA4 implement kernarg preloading through the legacy firmware
+  // compatibility window: old firmware enters at the descriptor entry and
+  // compatible firmware enters 256 bytes later. GFX1250 supports preloading in
+  // hardware but has one entry, exactly as specified by the descriptor.
+  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
 }
 
 [[nodiscard]] std::optional<uint32_t> kernarg_bytes_to_preserve(const KD &desc) {
@@ -426,7 +452,9 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
          arch == ROCJITSU_CODE_ARCH_CDNA4;
 }
 
-[[nodiscard]] bool uses_gfx10_plus_rsrc3(rj_code_arch_t arch) { return arch_is_rdna(arch); }
+[[nodiscard]] bool uses_gfx10_plus_rsrc3(rj_code_arch_t arch) {
+  return arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_GFX1250;
+}
 
 [[nodiscard]] uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch,
                                                                  uint32_t wavefront_size) {
@@ -444,6 +472,11 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
     return 4;
   if (arch_is_cdna(arch))
     return 8;
+  // gfx1250 exposes four 256-VGPR banks selected by WAVE_MODE.VGPR_MSB. Its
+  // AMDHSA descriptor allocates that combined Wave32 namespace in blocks of
+  // 16 VGPRs, unlike the 8-VGPR Wave32 granule used by generic RDNA targets.
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return 16;
   if (arch_is_rdna(arch))
     return wavefront_size == 32 ? 8 : 4;
   return 1;
@@ -615,9 +648,11 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   result.entry_text_offset = entry_text_offset;
   result.target_entry_text_offset = entry_text_offset;
   result.target_body_entry_text_offset = entry_text_offset;
-  result.has_kernarg_preload = kernarg_preload_length(src) != 0;
-  result.kernarg_preload_entry_text_offset =
-      result.has_kernarg_preload ? entry_text_offset + kKernargPreloadSkipBytes : entry_text_offset;
+  result.has_kernarg_preload_firmware_skip =
+      kernarg_preload_length(src) != 0 && uses_kernarg_preload_firmware_skip(guest_arch);
+  result.kernarg_preload_firmware_entry_text_offset =
+      result.has_kernarg_preload_firmware_skip ? entry_text_offset + kKernargPreloadSkipBytes
+                                               : entry_text_offset;
   const auto preserved_kernarg_bytes = kernarg_bytes_to_preserve(src);
   result.kernarg_size = preserved_kernarg_bytes.value_or(src.kernarg_size);
   result.target_kernarg_size = src.kernarg_size;
