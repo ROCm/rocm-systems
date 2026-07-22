@@ -679,7 +679,8 @@ static ncclResult_t rcclDirectReduceScatter(const void* sendbuff, void* recvbuff
   if (recvcount == 0) return ncclSuccess;
   void* tempbuff = comm->tempBuff;
 
-  comm->enableDirectReduceScatter = 1;
+  ncclResult_t ret = ncclSuccess;
+
   struct ncclInfo infoP2P = {ncclFuncReduceScatter,
                              "ReduceScatter",
                              sendbuff,
@@ -694,7 +695,6 @@ static ncclResult_t rcclDirectReduceScatter(const void* sendbuff, void* recvbuff
                              sliceSteps,
                              nullptr};
   infoP2P.useDirect = true;
-  NCCLCHECK(ncclEnqueueCheck(&infoP2P));
 
   struct ncclInfo info = {ncclFuncReduceScatter,
                           "ReduceScatter",
@@ -709,9 +709,14 @@ static ncclResult_t rcclDirectReduceScatter(const void* sendbuff, void* recvbuff
                           chunkSteps,
                           sliceSteps,
                           nullptr};
-  NCCLCHECK(ncclEnqueueCheck(&info));
+
+  comm->enableDirectReduceScatter = 1;
+  NCCLCHECKGOTO(ncclEnqueueCheck(&infoP2P), ret, cleanup);
+  NCCLCHECKGOTO(ncclEnqueueCheck(&info), ret, cleanup);
+
+cleanup:
   comm->enableDirectReduceScatter = 0;
-  return ncclSuccess;
+  return ret;
 }
 
 static ncclResult_t ncclHierarchicalReduceScatter_Impl(const void* sendbuff, void* recvbuff, size_t recvcount,
@@ -789,7 +794,7 @@ static rcclReduceScatterAlgo rcclSelectReduceScatterAlgo(struct ncclComm* comm, 
   if (ncclGroupDepth == 0 && rcclUseHierarchicalReduceScatter(comm, msgSize)) {
     return RCCL_RS_HIERARCHICAL;
   }
-  if (rcclUseReduceScatterDirect(comm, msgSize)) {
+  if (ncclGroupDepth == 0 && rcclUseReduceScatterDirect(comm, msgSize)) {
     return RCCL_RS_DIRECT;
   }
   return RCCL_RS_RING;
