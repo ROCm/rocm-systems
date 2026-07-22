@@ -746,8 +746,14 @@ if("120001" IN_LIST RJ_KFD_GFX_TARGET_VERSIONS)
     set(RJ_HAS_GFX1201_GPU TRUE)
 endif()
 
+set(RJ_SANITIZER_PRELOAD_PREFIX "")
+if(RJ_SANITIZER_SHARED_LIBRARIES)
+    list(JOIN RJ_SANITIZER_SHARED_LIBRARIES ":" RJ_SANITIZER_PRELOAD_PREFIX)
+    string(APPEND RJ_SANITIZER_PRELOAD_PREFIX ":")
+endif()
+
 set(RJ_KMD_PRELOAD_ENV
-    "LD_PRELOAD=$<TARGET_FILE:rocjitsu_shared>"
+    "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:rocjitsu_shared>"
     "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4.json"
 )
 
@@ -941,13 +947,8 @@ if(RJ_INSTALL_TESTS)
     )
 endif()
 
-set(RJ_EARLY_MMAP_ASAN_PRELOAD "")
-if(RJ_ENABLE_ASAN AND RJ_SANITIZER_USE_SHARED)
-    set(RJ_EARLY_MMAP_ASAN_PRELOAD "${RJ_ASAN_SHARED_LIBRARY}:")
-endif()
-
-# Keep rocjitsu before early_mmap_preload in LD_PRELOAD (after the shared ASan
-# runtime, when enabled). The loader maps rocjitsu first, but runs
+# Keep rocjitsu before early_mmap_preload in LD_PRELOAD (after any shared
+# sanitizer runtimes). The loader maps rocjitsu first, but runs
 # early_mmap_preload's constructor before init_interposer(). That constructor
 # calls mmap/munmap early enough to exercise the pre-init fallback; verifying the
 # exact path directly would require adding observable test state to the
@@ -956,10 +957,10 @@ rj_add_test(
     NAME "InterposerTest.EarlyMmapBeforeRocjitsuConstructor"
     COMMAND $<TARGET_FILE:early_mmap_driver>
     ENVIRONMENT
-        "LD_PRELOAD=${RJ_EARLY_MMAP_ASAN_PRELOAD}$<TARGET_FILE:rocjitsu_shared>:$<TARGET_FILE:early_mmap_preload>"
+        "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:rocjitsu_shared>:$<TARGET_FILE:early_mmap_preload>"
     INSTALL_COMMAND "bin/early_mmap_driver"
     INSTALL_ENVIRONMENT
-        "LD_PRELOAD=${RJ_EARLY_MMAP_ASAN_PRELOAD}\${RJ_INSTALLED_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}:bin/${CMAKE_SHARED_LIBRARY_PREFIX}early_mmap_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
+        "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}\${RJ_INSTALLED_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}:bin/${CMAKE_SHARED_LIBRARY_PREFIX}early_mmap_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
 )
 
 # --- interposer dup/backend bookkeeping test (CLI launcher) ---
@@ -1976,13 +1977,6 @@ if(RJ_ENABLE_HIP_TESTS)
             "${CMAKE_INSTALL_LIBDIR}"
             "${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}"
         )
-        set(RJ_DAEMON_SANITIZER_PRELOAD "")
-        if(RJ_ENABLE_ASAN AND RJ_SANITIZER_USE_SHARED)
-            set(RJ_DAEMON_SANITIZER_PRELOAD "${RJ_ASAN_SHARED_LIBRARY}:")
-        elseif(RJ_ENABLE_TSAN AND RJ_SANITIZER_USE_SHARED)
-            set(RJ_DAEMON_SANITIZER_PRELOAD "${RJ_TSAN_SHARED_LIBRARY}:")
-        endif()
-
         add_executable(daemon_test daemon_test.cpp)
         target_compile_definitions(
             daemon_test
@@ -1990,7 +1984,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 RJ_DAEMON_BIN="$<TARGET_FILE:rocjitsu_bin>"
                 RJ_DAEMON_CONFIG="${RJ_HIP_TEST_CONFIG}"
                 RJ_DAEMON_CONFIG_2GPU="${RJ_HIP_TEST_2GPU_CONFIG}"
-                RJ_DAEMON_SANITIZER_PRELOAD="${RJ_DAEMON_SANITIZER_PRELOAD}"
+                RJ_DAEMON_SANITIZER_PRELOAD="${RJ_SANITIZER_PRELOAD_PREFIX}"
                 RJ_PRELOAD_LIB="$<TARGET_FILE:rocjitsu_shared>"
                 RJ_HIP_VECTOR_ADD_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_vector_add_test"
                 RJ_HIP_MEMCPY_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_memcpy_test"
