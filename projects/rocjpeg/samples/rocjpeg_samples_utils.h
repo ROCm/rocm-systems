@@ -87,13 +87,13 @@ public:
      * @param argv The command line arguments.
      */
     static void ParseCommandLine(std::string &input_path, std::string &output_file_path, bool &save_images, int &device_id,
-                                 RocJpegBackend &rocjpeg_backend, RocJpegDecodeParams &decode_params, int *num_threads, int *batch_size, int argc, char *argv[], int *num_iterations = nullptr, bool *profiling = nullptr) {
+                                 RocJpegBackend &rocjpeg_backend, RocJpegDecodeParams &decode_params, int *num_threads, int *batch_size, int argc, char *argv[], int *num_iterations = nullptr) {
         if(argc <= 1) {
-            ShowHelpAndExit("", num_threads != nullptr, batch_size != nullptr, num_iterations != nullptr, profiling != nullptr);
+            ShowHelpAndExit("", num_threads != nullptr, batch_size != nullptr, num_iterations != nullptr);
         }
         for (int i = 1; i < argc; i++) {
             if (!strcmp(argv[i], "-h")) {
-                ShowHelpAndExit("", num_threads != nullptr, batch_size != nullptr, num_iterations != nullptr, profiling != nullptr);
+                ShowHelpAndExit("", num_threads != nullptr, batch_size != nullptr, num_iterations != nullptr);
             }
             if (!strcmp(argv[i], "-i")) {
                 if (++i == argc) {
@@ -176,23 +176,17 @@ public:
             }
             if (!strcmp(argv[i], "-n")) {
                 if (++i == argc) {
-                    ShowHelpAndExit("-n", num_threads != nullptr, batch_size != nullptr, num_iterations != nullptr, profiling != nullptr);
+                    ShowHelpAndExit("-n", num_threads != nullptr, batch_size != nullptr, num_iterations != nullptr);
                 }
                 if (num_iterations != nullptr) {
                     *num_iterations = atoi(argv[i]);
                     if (*num_iterations <= 0) {
-                        ShowHelpAndExit(argv[i], num_threads != nullptr, batch_size != nullptr, num_iterations != nullptr, profiling != nullptr);
+                        ShowHelpAndExit(argv[i], num_threads != nullptr, batch_size != nullptr, num_iterations != nullptr);
                     }
                 }
                 continue;
             }
-            if (!strcmp(argv[i], "-profile")) {
-                if (profiling != nullptr) {
-                    *profiling = true;
-                }
-                continue;
-            }
-            ShowHelpAndExit(argv[i], num_threads != nullptr, batch_size != nullptr, num_iterations != nullptr, profiling != nullptr);
+            ShowHelpAndExit(argv[i], num_threads != nullptr, batch_size != nullptr, num_iterations != nullptr);
         }
     }
 
@@ -659,7 +653,7 @@ private:
      * @param option The option to display in the help message (optional).
      * @param show_threads Flag indicating whether to show the number of threads in the help message.
      */
-    static void ShowHelpAndExit(const char *option = nullptr, bool show_threads = false, bool show_batch_size = false, bool show_iterations = false, bool show_profiling = false) {
+    static void ShowHelpAndExit(const char *option = nullptr, bool show_threads = false, bool show_batch_size = false, bool show_iterations = false) {
         std::cout  << "Options:\n"
         "-i     [input path] - input path to a single JPEG image or a directory containing JPEG images - [required]\n"
         "-be    [backend] - select rocJPEG backend (0 for hardware-accelerated JPEG decoding using VCN,\n"
@@ -676,9 +670,6 @@ private:
         }
         if (show_iterations) {
             std::cout << "-n     [iterations] - number of decode iterations per image - [optional - default: 1]\n";
-        }
-        if (show_profiling) {
-            std::cout << "-profile - run synchronous decode benchmark for comparison - [optional]\n";
         }
         exit(0);
     }

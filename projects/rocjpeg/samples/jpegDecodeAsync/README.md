@@ -25,5 +25,4 @@ make -j
                   -d        <[device id] - specify the GPU device id for the desired device (use 0 for the first device, 1 for the second device, and so on) [optional - default: 0]>
                   -crop     <[crop rectangle] - crop rectangle for output in a comma-separated format: left,top,right,bottom - [optional]>
                   -n        <[iterations] - number of decode iterations per image - [optional - default: 1]>
-                  -profile  <run synchronous decode benchmark before async for performance comparison - [optional]>
 ```
