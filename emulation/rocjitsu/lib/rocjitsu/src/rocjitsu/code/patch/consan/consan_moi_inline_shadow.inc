@@ -2339,7 +2339,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     std::optional<uint16_t> private_owner_shift,
     std::optional<uint32_t> private_sample_sequence_offset, std::vector<std::string> &errors,
     uint32_t *guest_instruction_offset = nullptr) {
-  const auto access_ranges = candidate_access_ranges(bytes, candidate);
+  const auto access_ranges = candidate_access_ranges(bytes, candidate, arch);
   if (!access_ranges || access_ranges->empty()) {
     errors.emplace_back("ConSan MOI sampled probe requires at least one LDS access range");
     return std::nullopt;

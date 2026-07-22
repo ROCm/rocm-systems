@@ -628,7 +628,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     return std::nullopt;
   }
   const std::optional<std::vector<ConSanMoiAccessRange>> access_ranges =
-      candidate_access_ranges(bytes, candidate);
+      candidate_access_ranges(bytes, candidate, arch);
   if (!access_ranges || access_ranges->empty()) {
     errors.emplace_back("ConSan MOI first-light probe requires a supported LDS access range");
     return std::nullopt;
@@ -1279,7 +1279,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   if (candidate.size == 0 || candidate.size % sizeof(uint32_t) != 0)
     return false;
   const std::optional<std::vector<ConSanMoiAccessRange>> ranges =
-      candidate_access_ranges(bytes, candidate);
+      candidate_access_ranges(bytes, candidate, arch);
   if (!ranges || ranges->empty())
     return false;
   for (const ConSanMoiAccessRange &range : *ranges) {

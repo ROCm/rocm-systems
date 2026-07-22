@@ -1768,7 +1768,7 @@
     return std::nullopt;
 
   const std::optional<std::vector<ConSanMoiAccessRange>> access_ranges =
-      candidate_access_ranges(bytes, candidate);
+      candidate_access_ranges(bytes, candidate, arch);
   if (!access_ranges || access_ranges->empty()) {
     errors.emplace_back("ConSan MOI inline-shadow probe requires a supported LDS access range");
     return std::nullopt;

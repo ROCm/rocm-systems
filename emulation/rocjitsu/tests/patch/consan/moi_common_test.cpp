@@ -150,6 +150,68 @@ TEST(ConSanMoi, Gfx1250RelaxedLdsAtomicIsAccessButNotSynchronization) {
   }));
 }
 
+TEST(ConSanMoi, Cdna4HistogramLdsAtomicsAreAccessesButNotSynchronization) {
+  constexpr auto add_u32 =
+      cdna4::build_ds(cdna4::kDsAddU32Ds, {.offset0 = 4, .addr = 3, .data0 = 7});
+  constexpr auto add_u64 =
+      cdna4::build_ds(cdna4::kDsAddU64Ds, {.offset0 = 8, .addr = 5, .data0 = 8});
+  constexpr auto add_f32 =
+      cdna4::build_ds(cdna4::kDsAddF32Ds, {.offset0 = 12, .addr = 7, .data0 = 3});
+  constexpr auto add_f64 =
+      cdna4::build_ds(cdna4::kDsAddF64Ds, {.offset0 = 16, .addr = 9, .data0 = 14});
+  constexpr auto cmpst = cdna4::build_ds(
+      cdna4::kDsCmpstRtnB32Ds, {.offset0 = 20, .addr = 12, .data0 = 11, .data1 = 13, .vdst = 13});
+  const std::array<uint32_t, 11> text_words = {
+      add_u32[0],
+      add_u32[1],
+      add_u64[0],
+      add_u64[1],
+      add_f32[0],
+      add_f32[1],
+      add_f64[0],
+      add_f64[1],
+      cmpst[0],
+      cmpst[1],
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, "cdna4_histogram_lds_atomics");
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(5, 0, 0, 0, 0, 1, 1);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.moi_candidates.size(), 5u);
+  EXPECT_TRUE(std::ranges::all_of(result.moi_candidates, [](const auto &candidate) {
+    return candidate.kind == ConSanLdsAccessKind::Atomic;
+  }));
+  EXPECT_EQ(std::ranges::count_if(result.site_dispositions,
+                                  [](const auto &site) {
+                                    return site.site_kind == ConSanResourceSiteKind::Access &&
+                                           site.disposition == ConSanSiteDisposition::Supported;
+                                  }),
+            5u);
+  EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [](const auto &site) {
+    return site.site_kind == ConSanResourceSiteKind::Access &&
+           site.lowering_outcome == ConSanSiteLoweringOutcome::Patched;
+  }));
+  EXPECT_TRUE(std::ranges::none_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiAtomicRecord;
+  }));
+
+  EXPECT_FALSE(consan_moi_shadow_kind_conflicts(ConSanMoiShadowAccessKind::Atomic,
+                                                ConSanMoiShadowAccessKind::Atomic));
+  EXPECT_TRUE(consan_moi_shadow_kind_conflicts(ConSanMoiShadowAccessKind::Atomic,
+                                               ConSanMoiShadowAccessKind::Read));
+  EXPECT_TRUE(consan_moi_shadow_kind_conflicts(ConSanMoiShadowAccessKind::Atomic,
+                                               ConSanMoiShadowAccessKind::Write));
+}
+
 TEST(ConSanMoi, UnassociatedFenceIsNotApplicableOnEverySupportedTarget) {
   const std::array<uint32_t, 3> text_words = {
       0xF4042000u,

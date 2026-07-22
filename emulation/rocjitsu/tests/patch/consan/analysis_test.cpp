@@ -803,6 +803,60 @@ TEST(ConSan, CountsCdna4LdsAccessesFromNativeInstructionShapes) {
   EXPECT_FALSE(result.modified);
 }
 
+TEST(ConSan, InventoriesCdna4HistogramLdsAtomics) {
+  constexpr auto add_u32 =
+      cdna4::build_ds(cdna4::kDsAddU32Ds, {.offset0 = 4, .addr = 3, .data0 = 7});
+  constexpr auto add_u64 =
+      cdna4::build_ds(cdna4::kDsAddU64Ds, {.offset0 = 8, .addr = 5, .data0 = 8});
+  constexpr auto add_f32 =
+      cdna4::build_ds(cdna4::kDsAddF32Ds, {.offset0 = 12, .addr = 7, .data0 = 3});
+  constexpr auto add_f64 =
+      cdna4::build_ds(cdna4::kDsAddF64Ds, {.offset0 = 16, .addr = 9, .data0 = 14});
+  constexpr auto cmpst = cdna4::build_ds(
+      cdna4::kDsCmpstRtnB32Ds, {.offset0 = 20, .addr = 12, .data0 = 11, .data1 = 13, .vdst = 13});
+  const std::array<uint32_t, 11> text_words = {
+      add_u32[0],
+      add_u32[1],
+      add_u64[0],
+      add_u64[1],
+      add_f32[0],
+      add_f32[1],
+      add_f64[0],
+      add_f64[1],
+      cmpst[0],
+      cmpst[1],
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+
+  const ConSanResult result = try_patch_consan(
+      make_cdna4_lds_code_object(text_words, "cdna4_histogram_lds_atomics"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_EQ(result.kernels.size(), 1u);
+  const ConSanKernelInfo &kernel = result.kernels.front();
+  EXPECT_EQ(kernel.stats.lds_atomic_count, 5u);
+  ASSERT_EQ(kernel.lds_sites.size(), 5u);
+  const std::array<std::string_view, 5> expected_mnemonics = {
+      "ds_add_u32", "ds_add_u64", "ds_add_f32", "ds_add_f64", "ds_cmpst_rtn_b32"};
+  const std::array<uint32_t, 5> expected_widths = {32u, 64u, 32u, 64u, 32u};
+  for (size_t i = 0; i < kernel.lds_sites.size(); ++i) {
+    SCOPED_TRACE(i);
+    EXPECT_EQ(kernel.lds_sites[i].kind, ConSanLdsAccessKind::Atomic);
+    EXPECT_EQ(kernel.lds_sites[i].mnemonic, expected_mnemonics[i]);
+    EXPECT_EQ(kernel.lds_sites[i].width_bits, expected_widths[i]);
+    EXPECT_TRUE(kernel.lds_sites[i].addr_vgpr);
+    EXPECT_TRUE(kernel.lds_sites[i].data_vgpr);
+  }
+  ASSERT_TRUE(kernel.lds_sites.back().dst_vgpr);
+  ASSERT_TRUE(kernel.lds_sites.back().second_data_vgpr);
+  EXPECT_EQ(*kernel.lds_sites.back().dst_vgpr, 13u);
+  EXPECT_EQ(*kernel.lds_sites.back().addr_vgpr, 12u);
+  EXPECT_EQ(*kernel.lds_sites.back().data_vgpr, 11u);
+  EXPECT_EQ(*kernel.lds_sites.back().second_data_vgpr, 13u);
+}
+
 TEST(ConSan, InventoriesCdna4FlatRawFieldsAndExplicitSharedBase) {
   const auto load = build_cdna4_flat_load_b32(
       /*vaddr=*/0, /*vdst=*/2, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);

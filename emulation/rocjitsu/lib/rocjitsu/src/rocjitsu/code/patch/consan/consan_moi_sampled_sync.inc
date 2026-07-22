@@ -658,7 +658,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     const auto access = access_by_offset.find(patch.anchor_offset);
     if (access == access_by_offset.end())
       continue;
-    const auto ranges = candidate_access_ranges(bytes, *access->second);
+    const auto ranges = candidate_access_ranges(bytes, *access->second, arch);
     if (!ranges || ranges->empty())
       continue;
     selected_windows.push_back({&patch, access->second, patch.sampled_first_slot,

@@ -485,6 +485,8 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
                                  std::span<const uint8_t> code_object_bytes) {
   ConSanMoiAutoReportInventory inventory;
   inventory.engine = options.moi_engine;
+  const rj_code_arch_t arch =
+      result.arch_name == "cdna4" ? ROCJITSU_CODE_ARCH_CDNA4 : ROCJITSU_CODE_ARCH_INVALID;
 
   size_t selected_candidate_count = 0;
   bool selected_flat_candidate = false;
@@ -511,7 +513,7 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
         });
     if (!supported)
       continue;
-    const auto ranges = candidate_access_ranges(code_object_bytes, candidate);
+    const auto ranges = candidate_access_ranges(code_object_bytes, candidate, arch);
     if (!ranges || ranges->empty())
       continue;
     ++selected_candidate_count;

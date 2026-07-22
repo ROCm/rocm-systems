@@ -212,12 +212,16 @@ decode_relocatable_entry_instruction(std::span<const uint8_t> text, uint64_t off
 two_address_native_lds_offset_scale(std::string_view mnemonic);
 
 [[nodiscard]] bool is_moi_native_lds_candidate(const ConSanLdsSite &site, rj_code_arch_t arch) {
-  const bool gfx1250_atomic =
-      arch == ROCJITSU_CODE_ARCH_GFX1250 && site.kind == ConSanLdsAccessKind::Atomic &&
-      equals_any(site.mnemonic,
-                 {"ds_add_f32", "ds_add_f64", "ds_add_u32", "ds_add_u64", "ds_cmpstore_rtn_b32"});
+  const bool supported_atomic =
+      site.kind == ConSanLdsAccessKind::Atomic &&
+      ((arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+        equals_any(site.mnemonic, {"ds_add_f32", "ds_add_f64", "ds_add_u32", "ds_add_u64",
+                                   "ds_cmpstore_rtn_b32"})) ||
+       (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+        equals_any(site.mnemonic,
+                   {"ds_add_f32", "ds_add_f64", "ds_add_u32", "ds_add_u64", "ds_cmpst_rtn_b32"})));
   if (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write &&
-      !gfx1250_atomic)
+      !supported_atomic)
     return false;
   if (site.mnemonic == "ds_load_b96")
     return arch == ROCJITSU_CODE_ARCH_GFX1250;
@@ -379,8 +383,8 @@ classify_moi_access_candidate_support(std::span<const uint8_t> bytes,
                                       const ConSanMoiCandidate &candidate, rj_code_arch_t arch) {
   const bool supported_atomic =
       candidate.kind == ConSanLdsAccessKind::Atomic &&
-      equals_any(candidate.mnemonic,
-                 {"ds_add_f32", "ds_add_f64", "ds_add_u32", "ds_add_u64", "ds_cmpstore_rtn_b32"});
+      equals_any(candidate.mnemonic, {"ds_add_f32", "ds_add_f64", "ds_add_u32", "ds_add_u64",
+                                      "ds_cmpstore_rtn_b32", "ds_cmpst_rtn_b32"});
   if (candidate.kind != ConSanLdsAccessKind::Read && candidate.kind != ConSanLdsAccessKind::Write &&
       !supported_atomic)
     return ConSanSiteDispositionReason::NonAccessInstruction;
@@ -459,7 +463,8 @@ void append_moi_access_site_dispositions(std::span<const uint8_t> bytes, const C
 
   for (const ConSanLdsSite &site : container.lds_sites) {
     if (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write &&
-        !(arch == ROCJITSU_CODE_ARCH_GFX1250 && site.kind == ConSanLdsAccessKind::Atomic))
+        !((arch == ROCJITSU_CODE_ARCH_GFX1250 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+          site.kind == ConSanLdsAccessKind::Atomic))
       continue;
     append_moi_access_site_disposition(
         bytes, make_moi_candidate(container.name, in_kernel, descriptor, site), arch, result);
@@ -570,12 +575,12 @@ void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvena
     return true;
 
   return equals_any(mnemonic,
-                    {"ds_load_b32",        "ds_load_b64",       "ds_load_b96",  "ds_load_b128",
-                     "ds_load_tr8_b64",    "ds_load_tr16_b128", "ds_read_b32",  "ds_read_b64",
-                     "ds_read_b64_tr_b16", "ds_read_b128",      "ds_store_b32", "ds_store_b64",
-                     "ds_store_b128",      "ds_write_b32",      "ds_write_b64", "ds_write_b128",
-                     "ds_add_f32",         "ds_add_f64",        "ds_add_u32",   "ds_add_u64",
-                     "ds_cmpstore_rtn_b32"});
+                    {"ds_load_b32",         "ds_load_b64",       "ds_load_b96",  "ds_load_b128",
+                     "ds_load_tr8_b64",     "ds_load_tr16_b128", "ds_read_b32",  "ds_read_b64",
+                     "ds_read_b64_tr_b16",  "ds_read_b128",      "ds_store_b32", "ds_store_b64",
+                     "ds_store_b128",       "ds_write_b32",      "ds_write_b64", "ds_write_b128",
+                     "ds_add_f32",          "ds_add_f64",        "ds_add_u32",   "ds_add_u64",
+                     "ds_cmpstore_rtn_b32", "ds_cmpst_rtn_b32"});
 }
 
 [[nodiscard]] std::optional<uint32_t>
@@ -596,7 +601,8 @@ two_address_native_lds_offset_scale(std::string_view mnemonic) {
 }
 
 [[nodiscard]] std::optional<std::vector<ConSanMoiAccessRange>>
-candidate_access_ranges(std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate) {
+candidate_access_ranges(std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
+                        rj_code_arch_t arch) {
   const std::optional<uint32_t> byte_count = byte_count_for_candidate(candidate);
   if (!byte_count)
     return std::nullopt;
@@ -606,9 +612,13 @@ candidate_access_ranges(std::span<const uint8_t> bytes, const ConSanMoiCandidate
     if (!word0)
       return std::nullopt;
     if (is_single_range_native_lds_mnemonic(candidate.mnemonic)) {
-      // RDNA DS encodes the normal single-address immediate byte offset as
-      // offset0 | (offset1 << 8).
-      return std::vector<ConSanMoiAccessRange>{{*word0 & 0xffffu, *byte_count}};
+      // VDS encodes a 16-bit single-address immediate. CDNA4's DS atomics use
+      // only the eight-bit offset0 field; offset1 is not part of their address.
+      const uint32_t static_byte_offset =
+          arch == ROCJITSU_CODE_ARCH_CDNA4 && candidate.kind == ConSanLdsAccessKind::Atomic
+              ? *word0 & 0xffu
+              : *word0 & 0xffffu;
+      return std::vector<ConSanMoiAccessRange>{{static_byte_offset, *byte_count}};
     }
 
     const std::optional<uint32_t> two_address_scale =
@@ -631,10 +641,11 @@ candidate_access_ranges(std::span<const uint8_t> bytes, const ConSanMoiCandidate
 }
 
 [[nodiscard]] bool is_first_light_native_lds_candidate(const ConSanMoiCandidate &candidate,
-                                                       std::span<const uint8_t> bytes) {
+                                                       std::span<const uint8_t> bytes,
+                                                       rj_code_arch_t arch) {
   if (candidate.source != ConSanMoiCandidateSource::NativeLds)
     return false;
-  return candidate_access_ranges(bytes, candidate).has_value();
+  return candidate_access_ranges(bytes, candidate, arch).has_value();
 }
 
 [[nodiscard]] bool is_first_light_flat_candidate(const ConSanMoiCandidate &candidate,
@@ -676,7 +687,7 @@ candidate_access_ranges(std::span<const uint8_t> bytes, const ConSanMoiCandidate
   if (!byte_count_for_candidate(candidate))
     return false;
   if (candidate.source == ConSanMoiCandidateSource::NativeLds)
-    return is_first_light_native_lds_candidate(candidate, bytes);
+    return is_first_light_native_lds_candidate(candidate, bytes, arch);
   return is_first_light_flat_candidate(candidate, arch);
 }
 
