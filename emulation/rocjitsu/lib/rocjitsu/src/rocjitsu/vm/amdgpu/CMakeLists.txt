@@ -11,6 +11,7 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     shader_engine.cpp
     xcd.cpp
     iod.cpp
+    device_cache_coherence.cpp
     l1_scalar_cache.cpp
     l1_vector_cache.cpp
     l2_cache.cpp

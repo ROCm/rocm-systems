@@ -77,6 +77,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -1268,6 +1269,216 @@ TEST(L1ScalarCacheTest, UcAndCcFlushDoNotClobberAtomicAtDisjointAddress) {
     EXPECT_EQ(mem.read32(kVa + sizeof(uint32_t), kVmid), kScalarValue);
     mem.unregister_process(kVmid);
   }
+}
+
+TEST(DeviceCacheCoherenceTest, ScalarWriteThroughCannotClobberRemoteAtomic) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache scalar_l2("scalar_l2");
+  amdgpu::L2Cache atomic_l2("atomic_l2");
+  amdgpu::L1ScalarCache scalar_l1(&scalar_l2);
+  scalar_l2.set_backing_memory(&mem);
+  atomic_l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kLine = 0xA000;
+  constexpr uint64_t kAtomicAddr = kLine;
+  constexpr uint64_t kScalarAddr = kLine + sizeof(uint32_t);
+  constexpr uint32_t kScalarValue = 0xA5A5A5A5;
+  mem.write32(kAtomicAddr, 0);
+  mem.write32(kScalarAddr, 0);
+
+  // The scalar store read-allocates the atomic dword's old value into the same
+  // K$ line. The store must update only its target bytes, and the atomic must
+  // invalidate the stale clean snapshot.
+  scalar_l1.store(kScalarAddr, /*num_dwords=*/1, &kScalarValue);
+  atomic_l2.atomic_rmw(kAtomicAddr, sizeof(uint32_t), [](uint8_t *line, uint32_t offset) {
+    uint32_t value = 0;
+    std::memcpy(&value, line + offset, sizeof(value));
+    ++value;
+    std::memcpy(line + offset, &value, sizeof(value));
+  });
+  scalar_l1.writeback_all();
+
+  EXPECT_EQ(mem.read32(kAtomicAddr), 1u);
+  EXPECT_EQ(mem.read32(kScalarAddr), kScalarValue);
+}
+
+TEST(DeviceCacheCoherenceTest, DisjointScalarWriteThroughStoresSurviveRemoteAtomic) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache first_scalar_l2("first_scalar_l2");
+  amdgpu::L2Cache second_scalar_l2("second_scalar_l2");
+  amdgpu::L2Cache atomic_l2("atomic_l2");
+  amdgpu::L1ScalarCache first_scalar_l1(&first_scalar_l2);
+  amdgpu::L1ScalarCache second_scalar_l1(&second_scalar_l2);
+  first_scalar_l2.set_backing_memory(&mem);
+  second_scalar_l2.set_backing_memory(&mem);
+  atomic_l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kLine = 0xA080;
+  constexpr uint64_t kAtomicAddr = kLine;
+  constexpr uint64_t kFirstScalarAddr = kLine + sizeof(uint32_t);
+  constexpr uint64_t kSecondScalarAddr = kLine + 2 * sizeof(uint32_t);
+  constexpr uint32_t kFirstScalarValue = 0x11112222;
+  constexpr uint32_t kSecondScalarValue = 0x33334444;
+  mem.write32(kAtomicAddr, 0);
+  mem.write32(kFirstScalarAddr, 0);
+  mem.write32(kSecondScalarAddr, 0);
+
+  // Both K$ instances fill the same old line. Their disjoint write-through
+  // stores must merge without either cached snapshot replacing the other.
+  first_scalar_l1.store(kFirstScalarAddr, /*num_dwords=*/1, &kFirstScalarValue);
+  second_scalar_l1.store(kSecondScalarAddr, /*num_dwords=*/1, &kSecondScalarValue);
+  atomic_l2.atomic_rmw(kAtomicAddr, sizeof(uint32_t), [](uint8_t *line, uint32_t offset) {
+    uint32_t value = 0;
+    std::memcpy(&value, line + offset, sizeof(value));
+    ++value;
+    std::memcpy(line + offset, &value, sizeof(value));
+  });
+  first_scalar_l1.writeback_all();
+  second_scalar_l1.writeback_all();
+
+  EXPECT_EQ(mem.read32(kAtomicAddr), 1u);
+  EXPECT_EQ(mem.read32(kFirstScalarAddr), kFirstScalarValue);
+  EXPECT_EQ(mem.read32(kSecondScalarAddr), kSecondScalarValue);
+}
+
+TEST(DeviceCacheCoherenceTest, RemoteAtomicInvalidatesScalarCachedRead) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache scalar_l2("scalar_l2");
+  amdgpu::L2Cache atomic_l2("atomic_l2");
+  amdgpu::L1ScalarCache scalar_l1(&scalar_l2);
+  scalar_l2.set_backing_memory(&mem);
+  atomic_l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kAddr = 0xA100;
+  mem.write32(kAddr, 10);
+  uint32_t value = 0;
+  scalar_l1.load(kAddr, /*num_dwords=*/1, &value);
+  ASSERT_EQ(value, 10u);
+
+  atomic_l2.atomic_rmw(kAddr, sizeof(uint32_t), [](uint8_t *line, uint32_t offset) {
+    uint32_t current = 0;
+    std::memcpy(&current, line + offset, sizeof(current));
+    ++current;
+    std::memcpy(line + offset, &current, sizeof(current));
+  });
+
+  value = 0;
+  scalar_l1.load(kAddr, /*num_dwords=*/1, &value);
+  EXPECT_EQ(value, 11u);
+}
+
+TEST(DeviceCacheCoherenceTest, RemoteAtomicInvalidatesVectorCachedRead) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache vector_l2("vector_l2");
+  amdgpu::L2Cache atomic_l2("atomic_l2");
+  amdgpu::L1VectorCache vector_l1(&vector_l2);
+  vector_l2.set_backing_memory(&mem);
+  atomic_l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kAddr = 0xA200;
+  mem.write32(kAddr, 10);
+  uint64_t addrs[cdna3::Isa::WF_SIZE] = {};
+  addrs[0] = kAddr;
+  std::array<uint8_t, cdna3::Isa::WF_SIZE * sizeof(uint32_t)> bytes{};
+  auto load_value = [&] {
+    bytes.fill(0);
+    vector_l1.load(addrs, /*lane_mask=*/1, /*elem_size=*/sizeof(uint32_t),
+                   /*num_elems=*/1, bytes.data(), amdgpu::Mtype::RW,
+                   /*non_temporal=*/false, /*request_l1_bypass=*/false, cdna3::Isa::WF_SIZE);
+    uint32_t value = 0;
+    std::memcpy(&value, bytes.data(), sizeof(value));
+    return value;
+  };
+  ASSERT_EQ(load_value(), 10u);
+
+  atomic_l2.atomic_rmw(kAddr, sizeof(uint32_t), [](uint8_t *line, uint32_t offset) {
+    uint32_t current = 0;
+    std::memcpy(&current, line + offset, sizeof(current));
+    ++current;
+    std::memcpy(line + offset, &current, sizeof(current));
+  });
+
+  EXPECT_EQ(load_value(), 11u);
+}
+
+TEST(DeviceCacheCoherenceTest, AtomicConsumesScalarWriteThroughTarget) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache scalar_l2("scalar_l2");
+  amdgpu::L2Cache atomic_l2("atomic_l2");
+  amdgpu::L1ScalarCache scalar_l1(&scalar_l2);
+  scalar_l2.set_backing_memory(&mem);
+  atomic_l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kAddr = 0xA300;
+  constexpr uint32_t kStoredValue = 40;
+  mem.write32(kAddr, 0);
+  scalar_l1.store(kAddr, /*num_dwords=*/1, &kStoredValue);
+
+  atomic_l2.atomic_rmw(kAddr, sizeof(uint32_t), [](uint8_t *line, uint32_t offset) {
+    uint32_t current = 0;
+    std::memcpy(&current, line + offset, sizeof(current));
+    ++current;
+    std::memcpy(line + offset, &current, sizeof(current));
+  });
+
+  EXPECT_EQ(mem.read32(kAddr), 41u);
+  uint32_t reloaded = 0;
+  scalar_l1.load(kAddr, /*num_dwords=*/1, &reloaded);
+  EXPECT_EQ(reloaded, 41u);
+}
+
+TEST(DeviceCacheCoherenceTest, DestroyedCachesAreRemovedFromRegistry) {
+  amdgpu::GpuMemory mem("test_mem");
+  constexpr uint64_t kAddr = 0xA400;
+
+  struct alignas(amdgpu::L2Cache) L2Storage {
+    std::byte data[sizeof(amdgpu::L2Cache)];
+  };
+  struct alignas(amdgpu::L1ScalarCache) ScalarStorage {
+    std::byte data[sizeof(amdgpu::L1ScalarCache)];
+  };
+  struct alignas(amdgpu::L1VectorCache) VectorStorage {
+    std::byte data[sizeof(amdgpu::L1VectorCache)];
+  };
+
+  auto l2_storage = std::make_unique<L2Storage>();
+  auto scalar_storage = std::make_unique<ScalarStorage>();
+  auto vector_storage = std::make_unique<VectorStorage>();
+  auto *transient_l2 =
+      std::construct_at(reinterpret_cast<amdgpu::L2Cache *>(l2_storage->data), "transient_l2");
+  auto *transient_scalar = std::construct_at(
+      reinterpret_cast<amdgpu::L1ScalarCache *>(scalar_storage->data), transient_l2);
+  auto *transient_vector = std::construct_at(
+      reinterpret_cast<amdgpu::L1VectorCache *>(vector_storage->data), transient_l2);
+  transient_l2->set_backing_memory(&mem);
+
+  constexpr uint32_t kDirty = 7;
+  transient_scalar->store(kAddr + sizeof(uint32_t), /*num_dwords=*/1, &kDirty);
+  uint64_t addrs[cdna3::Isa::WF_SIZE] = {};
+  addrs[0] = kAddr;
+  std::array<uint8_t, cdna3::Isa::WF_SIZE * sizeof(uint32_t)> bytes{};
+  transient_vector->load(addrs, /*lane_mask=*/1, /*elem_size=*/sizeof(uint32_t),
+                         /*num_elems=*/1, bytes.data(), amdgpu::Mtype::RW,
+                         /*non_temporal=*/false, /*request_l1_bypass=*/false, cdna3::Isa::WF_SIZE);
+
+  std::destroy_at(transient_vector);
+  std::destroy_at(transient_scalar);
+  std::destroy_at(transient_l2);
+  std::memset(vector_storage->data, 0xA5, sizeof(vector_storage->data));
+  std::memset(scalar_storage->data, 0xA5, sizeof(scalar_storage->data));
+  std::memset(l2_storage->data, 0xA5, sizeof(l2_storage->data));
+
+  amdgpu::L2Cache survivor("survivor");
+  EXPECT_NE(static_cast<const void *>(&survivor), static_cast<const void *>(transient_l2));
+  survivor.set_backing_memory(&mem);
+  mem.write32(kAddr, 0);
+  survivor.atomic_rmw(kAddr, sizeof(uint32_t), [](uint8_t *line, uint32_t offset) {
+    uint32_t value = 0;
+    std::memcpy(&value, line + offset, sizeof(value));
+    ++value;
+    std::memcpy(line + offset, &value, sizeof(value));
+  });
+  EXPECT_EQ(mem.read32(kAddr), 1u);
 }
 
 TEST(L1VectorCacheTest, UcReadInvalidatesResidentLine) {

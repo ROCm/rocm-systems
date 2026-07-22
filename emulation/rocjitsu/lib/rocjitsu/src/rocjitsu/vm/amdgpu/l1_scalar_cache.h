@@ -33,14 +33,20 @@ public:
 
   using CacheStore = simdojo::Cache<LINE_SIZE_BITS, NUM_SETS, ASSOCIATIVITY>;
 
-  explicit L1ScalarCache(L2Cache *l2 = nullptr) : l2_(l2) {}
+  explicit L1ScalarCache(L2Cache *l2 = nullptr);
+  ~L1ScalarCache();
+
+  L1ScalarCache(const L1ScalarCache &) = delete;
+  L1ScalarCache &operator=(const L1ScalarCache &) = delete;
+  L1ScalarCache(L1ScalarCache &&) = delete;
+  L1ScalarCache &operator=(L1ScalarCache &&) = delete;
 
   /// @brief Set (or replace) the backing L2 cache.
   /// @param l2 New L2 cache (not owned).
-  void set_l2(L2Cache *l2) { l2_ = l2; }
+  void set_l2(L2Cache *l2);
 
   /// @brief Set the memory subsystem for PTE MTYPE lookups.
-  void set_memory(GpuMemory *mem) { memory_ = mem; }
+  void set_memory(GpuMemory *mem);
 
   /// @brief Scalar load: read num_dwords contiguous dwords from addr.
   ///
@@ -62,15 +68,18 @@ public:
   void writeback_all(uint32_t vmid = 0);
 
   /// @brief Invalidate all clean K$ lines (s_dcache_inv).
-  void invalidate_all() { cache_.invalidate_all(); }
+  void invalidate_all();
 
 private:
-  void ensure_line(uint64_t addr, uint32_t vmid = 0);
-  void flush_line(uint64_t addr, uint32_t vmid = 0);
+  void ensure_line_locked(uint64_t addr, uint32_t vmid = 0);
+  void flush_line_locked(uint64_t addr, uint32_t vmid = 0);
+  void invalidate_all_locked();
+  void synchronize_epoch_locked();
 
   CacheStore cache_;
   L2Cache *l2_;
   GpuMemory *memory_ = nullptr;
+  uint64_t coherence_epoch_ = 0;
 };
 
 } // namespace amdgpu
