@@ -153,6 +153,8 @@ jobs:
             projects/rocr-runtime
             projects/clr
             projects/hip
+            projects/rocdecode
+            projects/rocjpeg
           submodules: false
           set-safe-directory: true
 
@@ -181,22 +183,6 @@ jobs:
 
       - name: Init/Update submodules
         run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
-
-      - name: Clone ROCDecode
-        uses: actions/checkout@v6
-        with:
-          repository: 'ROCm/rocDecode'
-          ref: 'release/rocm-rel-7.0'
-          set-safe-directory: true
-          path: 'rocDecode'
-
-      - name: Clone ROCJPEG
-        uses: actions/checkout@v6
-        with:
-          repository: 'ROCm/rocJPEG'
-          ref: 'release/rocm-rel-7.0'
-          set-safe-directory: true
-          path: 'rocJPEG'
 
       - name: Install requirements
         timeout-minutes: 10
@@ -378,6 +364,8 @@ jobs:
             projects/rocr-runtime
             projects/clr
             projects/hip
+            projects/rocdecode
+            projects/rocjpeg
           submodules: false
           set-safe-directory: true
 
