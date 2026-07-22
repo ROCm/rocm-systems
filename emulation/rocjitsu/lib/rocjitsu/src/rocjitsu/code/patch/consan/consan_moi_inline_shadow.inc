@@ -224,7 +224,20 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   };
   std::map<uint64_t, DenseEntryHost> dense_entry_hosts;
   std::vector<std::unique_ptr<BasicBlock>> dense_host_blocks;
-  if (is_rdna4_family_arch(arch) && use_indirect_appended && !original_text.empty()) {
+  // Dense explicit-key routing is execution-qualified through the 135-site
+  // RDNA4 histogram object. Larger multi-owner compositions retain the
+  // ordinary per-site placement path until their shared relocation layout is
+  // proven compositional; silently emitting the unqualified layout can alter
+  // an otherwise-correct kernel even when every individual owner is sound.
+  constexpr size_t kMaxQualifiedRdna4DenseCandidateCount = 135u;
+  const bool dense_routing_admitted = arch == ROCJITSU_CODE_ARCH_GFX1250 ||
+                                      candidates.size() <= kMaxQualifiedRdna4DenseCandidateCount;
+  if (arch != ROCJITSU_CODE_ARCH_GFX1250 && !dense_routing_admitted)
+    result.warnings.emplace_back(
+        "ConSan MOI inline-shadow retained conservative per-site RDNA4 placement outside the "
+        "qualified dense-routing composition envelope");
+  if (is_rdna4_family_arch(arch) && dense_routing_admitted && use_indirect_appended &&
+      !original_text.empty()) {
     std::unique_ptr<Decoder> decoder = Decoder::create(arch);
     if (decoder) {
       std::vector<uint64_t> leaders;
@@ -246,7 +259,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       dense_host_blocks = BasicBlock::build(code_object, *decoder, arch, leaders, code_ranges);
     }
   }
-  if (is_rdna4_family_arch(arch) && use_indirect_appended && local_entry_islands) {
+  if (is_rdna4_family_arch(arch) && dense_routing_admitted && use_indirect_appended &&
+      local_entry_islands) {
     struct DenseGroup {
       std::vector<const ConSanMoiCandidate *> candidates;
       size_t first_candidate_index = 0;
