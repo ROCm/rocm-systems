@@ -507,7 +507,7 @@ sequenceDiagram
         process->>computeTool: Loads via LD_PRELOAD
 
         rect rgb(230, 230, 230)
-        note right of sdkTool: In-process data collection<br>(no profile-side merge; per-process artifacts are the output)
+        note right of sdkTool: In-process data collection<br>(no profile-side merge, per-process artifacts are the output)
             sdkTool->>sdkData: Write per-process rocpd (kernels)
             computeTool->>countersWriter: Pass data
             countersWriter->>countersWriterCsv: Delegate
@@ -565,7 +565,7 @@ sequenceDiagram
         process->>computeTool: Loads via LD_PRELOAD
 
         rect rgb(138, 185, 142)
-        note right of sdkTool: In-process data collection<br>(native writes through Hub; per-process artifacts are the output)
+        note right of sdkTool: In-process data collection<br>(native writes through Hub, per-process artifacts are the output)
             sdkTool->>sdkData: Write per-process raw rocpd (kernels)
             computeTool->>countersWriter: Pass counters
             countersWriter->>hubImpl: Delegate
