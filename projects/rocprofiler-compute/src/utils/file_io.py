@@ -233,11 +233,13 @@ def discover_pc_sampling_result_files(
 
 @demarcate
 def load_pc_sampling_results(workload_path: str) -> list[dict[str, Any]]:
-    """Load and validate PC sampling result records for shared use.
+    """Load valid PC sampling tool records for a workload.
 
-    Invalid result files are skipped after logging a parse warning. Result files
-    can be multiple GB, so parse them once here and share the records with every
-    PC sampling consumer instead of re-reading the files.
+    PID-prefixed results are returned in numeric PID order and take precedence
+    over the legacy unprefixed result. Malformed files are skipped with a warning.
+
+    Result files can be multiple GB, so parse each once here and share the records
+    with every PC sampling consumer instead of re-reading the files.
     """
     tool_records = []
     for result_file in discover_pc_sampling_result_files(Path(workload_path)):
@@ -488,6 +490,9 @@ def _validate_pc_sampling_process_ids(
 
 def _parse_pc_sampling_result_file(json_path: Path) -> Optional[dict[str, Any]]:
     """Extract the sole ``rocprofiler-sdk-tool`` record at index 0.
+
+    Each per-process SDK output contains exactly one tool record, so index 0 is
+    the complete record for that process.
 
     Log a warning and return ``None`` when the result file is malformed.
     """
