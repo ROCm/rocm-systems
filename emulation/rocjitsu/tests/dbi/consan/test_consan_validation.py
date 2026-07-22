@@ -1272,6 +1272,24 @@ class ConSanValidationTest(unittest.TestCase):
             fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
         )
 
+    def test_checked_in_gfx1201_native_rms_fault_is_runnable(self) -> None:
+        path = Path(__file__).with_name(
+            "consan_validation_faults_gfx1201_native_rms_norm.json"
+        )
+        workload = validation.WORKLOAD_BY_ID["llama-rdna4-rms-norm"]
+        fault = validation._load_fault(
+            path, "gfx1201", workload, "barrier-drop"
+        )
+        for profile in validation.PROFILE_IDS:
+            policy, trials = validation._fault_trials(fault, profile)
+            self.assertEqual(policy["detector"], "detected")
+            self.assertEqual(policy["oracle"], "any")
+            self.assertEqual(trials, [{}])
+        self.assertIn(
+            "pc=0x0000000000001824",
+            fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

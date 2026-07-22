@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "target": "gfx1201",
+  "evidence_model": "reviewed against the current native gfx1201 llama.cpp RMS-norm inventory",
+  "review_required": false,
+  "workloads": {
+    "llama-rdna4-rms-norm": {
+      "faults": [
+        {
+          "id": "barrier-drop",
+          "family": "barrier-drop",
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:57d125f3f8a0c446|kernel=_ZL12rms_norm_f32ILi256ELb0ELb0EEvPKfPfilllfS1_lll15HIP_vector_typeIjLj3EES4_S4_S4_S1_lllS4_S4_S4_S4_|kind=barrier|pc=0x0000000000001824|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:57d125f3f8a0c446|kernel=_ZL12rms_norm_f32ILi256ELb0ELb0EEvPKfPfilllfS1_lll15HIP_vector_typeIjLj3EES4_S4_S4_S1_lllS4_S4_S4_S4_|event=barrier|pc=0x0000000000001824|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:57d125f3f8a0c446|kernel=_ZL12rms_norm_f32ILi256ELb0ELb0EEvPKfPfilllfS1_lll15HIP_vector_typeIjLj3EES4_S4_S4_S1_lllS4_S4_S4_S4_|event=barrier|pc=0x0000000000001830|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "detected",
+              "oracle": "any"
+            },
+            "record-replay": {
+              "detector": "detected",
+              "oracle": "any"
+            },
+            "sampled": {
+              "detector": "detected",
+              "oracle": "any"
+            },
+            "inline-shadow": {
+              "detector": "detected",
+              "oracle": "any"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
