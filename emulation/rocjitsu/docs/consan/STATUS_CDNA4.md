@@ -58,7 +58,7 @@ scratch before promotion.
 | **P4 hip-moi D128 pressure attention** | 🟩 current accepted bundle: four exact clean oracles, 12/12 coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🩶 historical: clean 12/12 access + 4/4 barrier accepted | 🩶 historical: clean 12/12 access accepted | 🩶 historical: clean 12/12 access + 4/4 barrier accepted |
 | **P4 hip-moi MFMA attention** | 🟩 current accepted bundle: two exact clean oracles, 12/12 group-FLAT coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🩶 historical: clean 12/12 access + 4/4 barrier accepted | 🩶 historical: clean 12/12 access accepted | 🩶 historical: clean 12/12 access + 4/4 barrier accepted |
 | **P4 hip-moi Stream-K arrival** | 🟩 current accepted bundle: exact clean, 4/4 coverage, paired 143.70x, reviewed exact-one CDNA4 atomic-order fault, containment, health, and clean provenance | 🩶 historical: clean 4/4 access + 10/10 atomic + 4/4 barrier + 16/16 fence accepted | 🩶 historical: clean 4/4 access + 10/10 atomic accepted | 🩶 historical: planner safely rejected persistent identity at a full ordinary-VGPR/AccVGPR boundary; scalar persistent state open |
-| **P4 hip-moi tree atomic-OR** | 🟨 current clean and paired: both exact tests, 4/4 accesses, 197.94x; fault inventory exposes missing CDNA4 atomic-site encoding | 🩶 historical: clean 4/4 access + 10/10 atomic + 4/4 barrier + 16/16 fence accepted | 🩶 historical: clean 4/4 access + 10/10 atomic accepted | 🩶 historical: clean 4/4 access + 10/10 atomic + 4/4 barrier accepted |
+| **P4 hip-moi tree atomic-OR** | 🟩 current accepted bundle: both exact clean tests, 4/4 coverage, paired 185.5x, reviewed exact-one producer-release atomic-order fault, containment, health, and clean provenance | 🩶 historical: clean 4/4 access + 10/10 atomic + 4/4 barrier + 16/16 fence accepted | 🩶 historical: clean 4/4 access + 10/10 atomic accepted | 🩶 historical: clean 4/4 access + 10/10 atomic + 4/4 barrier accepted |
 | **P4 hip-moi Jakub attention** | 🩶 Applicability inventory pending | 🩶 Applicability inventory pending | 🩶 Applicability inventory pending | 🩶 Applicability inventory pending |
 
 ### Current-matrix executable audit
@@ -286,6 +286,21 @@ trap, crash, output mismatch, or GPU reset is an execution outcome rather than
 a ConSan detection.
 
 ## Progress log
+
+- 2026-07-22: Tree atomic-OR SuperCollider is green from exact clean tip
+  `b536af8f67`.  Paired artifact
+  `consan-validation-gfx950-tree-atomic-or-supercollider-overhead-tip-20260722-002`
+  accepts both exact tests and complete 4/4 coverage, measuring a 16,695-ms
+  profile median against the 90-ms paired baseline (185.5x).  Fresh inventory
+  `consan-validation-gfx950-tree-atomic-or-inventory-tip-20260722-002` exposes
+  23 order sites and correctly omits scope.  Semantic review proves that the
+  selected `flat_atomic_or` publishes producer MFMA partials.  Exact-one fault
+  artifact
+  `consan-validation-gfx950-tree-atomic-or-supercollider-atomic-order-fault-tip-20260722-001`
+  replaces only its eight-byte release `buffer_wbl2` with two native NOPs,
+  preserves the atomic bytes, matches the prospectively frozen
+  pass-oracle/qualified-miss policy, and passes coverage, containment, cleanup,
+  and physical-device health gates.
 
 - 2026-07-22: Stream-K-arrival SuperCollider is green at clean
   `0942528a56`.  Commit `0942528a56` admits CDNA4 atomic-order faults while

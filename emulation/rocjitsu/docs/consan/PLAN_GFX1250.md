@@ -154,6 +154,7 @@ flowchart TD
     XT3G["XT3G DONE<br/>quick SGEMM Sampled first problem;<br/>12/12 exact, 640/640 accesses, 40/40 barriers"]
     XT3H["XT3H DONE<br/>quick SGEMM Inline assessed;<br/>first problem exact, aggregate dynamic incomplete"]
     XT3I["XT3I DONE<br/>SPMM F8 Sampled clean, paired, reviewed fault,<br/>containment, and frozen evidence green"]
+    XT3P["XT3P ACTIVE<br/>SPMM F8 Record/Replay barrier relay windows fixed;<br/>focused tests pass, clean E2E rerun pending"]
     XT3J["XT3J DONE<br/>SPMM F8 Inline standard clean assessed;<br/>MT64x64 wrong-result rows isolate blocker"]
     XT3K["XT3K DONE<br/>SPMM F8 Inline ninth-barrier bank defect fixed;<br/>exact kernel fully passes"]
     XT3D["XT3D DONE<br/>full SGEMM first problem complete;<br/>quadratic 115,776-event frontier isolated"]
@@ -302,6 +303,7 @@ flowchart TD
   XT1 --> XT3G
   XT1 --> XT3H
   XT3C --> XT3I
+  XT3C --> XT3P
   XT3C --> XT3J
   XT3J --> XT3K
   XT1 --> XT3D
@@ -347,6 +349,7 @@ flowchart TD
   XT3G --> XF
   XT3H --> XF
   XT3I --> XF
+  XT3P --> XF
   XT3J --> XF
   XT3K --> XF
   XT3E --> XF
@@ -384,10 +387,21 @@ flowchart TD
   class XP3C done
   class XP2D done
   class V9A done
-  class V9B active
+  class V9B todo
   class XT3I done
-  class G0,XT2C2,XT2C3,XT3E,XF,XG todo
+  class XT3P active
+  class G0,V9B,XT2C2,XT2C3,XT3E,XF,XG todo
 ```
+
+- 2026-07-22: XT3P is ACTIVE/blue and V9B returns to TODO/gray so the graph
+  reflects the work actually in flight.  Record/Replay SPMM artifact `209`
+  completes all exact rows and all 172,468 accesses, but localizes 190 missing
+  barrier patches across two late MT128x128x256 objects.  The common dense
+  barrier router incorrectly required one relay host to reach an entire large
+  owner.  It now partitions sorted barriers into independently reachable
+  signed-branch windows.  The new two-window regression and all 388
+  `ConSanMoi.*` plus 304 `ConSan.*` tests pass; a clean rebuilt-hook E2E rerun
+  is the remaining acceptance gate.
 
 - 2026-07-22: XT3I is DONE/green.  Fresh inventory artifact
   `consan-green-expansion-20260722-spmm-f8-ml-sampled-inventory-final-204`
