@@ -11,7 +11,6 @@ set(PY_BUILD_DIR "python_package")
 # amdsmi part of this string is the directory containing all python files
 # additionally defined in pyproject.toml
 set(PY_PACKAGE_DIR "${PY_BUILD_DIR}/amdsmi")
-set(PY_WRAPPER_INSTALL_DIR "${SHARE_INSTALL_PREFIX}" CACHE STRING "Wrapper installation directory")
 # AMDSMI_PYTHON_LIB_NAME is overloaded: when BUILD_PYTHON_WHEEL=OFF it
 # resolves to the system libamd_smi.so (the python_package staging tree
 # just copies it for in-tree imports); when ON it resolves to the
