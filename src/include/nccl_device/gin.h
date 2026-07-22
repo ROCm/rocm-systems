@@ -153,6 +153,11 @@ NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinPut(
   bool isCounter, ncclGinCounter_t counterId, ncclCoopAny coop, bool isDescriptor, ncclGinDescriptorSmem* descriptor,
   cuda::thread_scope givenRelease, cuda::thread_scope requiredRelease);
 
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinGet(ncclGin_C* net, ncclTeam team, int peer, ncclWindow_t remoteWnd,
+                                                    size_t remoteOffset, ncclWindow_t localWnd, size_t localOffset,
+                                                    size_t bytes, ncclCoopAny coop, bool isDescriptor,
+                                                    ncclGinDescriptorSmem* descriptor, uint32_t optFlags);
+
 NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinSignal(
   ncclGin_C* net, ncclTeam team, int peer, bool isSignal, ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp,
   uint64_t signalOpArg, ncclCoopAny coop, bool isDescriptor, ncclGinDescriptorSmem* descriptor,
