@@ -564,7 +564,7 @@ hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* locati
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (location->id < 0 || location->id >= g_devices.size()) {
+  if (location->id < 0 || static_cast<std::size_t>(location->id) >= g_devices.size()) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
