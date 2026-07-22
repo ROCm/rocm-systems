@@ -114,9 +114,7 @@ destroy_queue(hsa_queue_t* hsa_queue)
 
 #if defined(HSA_AMD_EXT_API_TABLE_STEP_VERSION) && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
 hsa_status_t
-create_amd_queue(hsa_agent_t                  agent,
-                 hsa_amd_queue_create_desc_t* descs,
-                 uint32_t                     num_descs)
+create_amd_queue(hsa_agent_t agent, hsa_amd_queue_create_desc_t* descs, uint32_t num_descs)
 {
     auto* controller = CHECK_NOTNULL(get_queue_controller());
     auto  status     = controller->get_ext_table().hsa_amd_queue_create_fn(agent, descs, num_descs);
