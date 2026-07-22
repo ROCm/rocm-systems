@@ -2823,6 +2823,45 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowAccessesShareOneWordCallRelay) {
             2u); // One relocatable host plus one appended return-PC dispatcher.
 }
 
+TEST(ConSanMoi, Rdna4DenseInlineShadowAccessesShareExplicitKeyRelay) {
+  constexpr uint32_t kAccessCount = 9u;
+  std::vector<uint32_t> text_words(
+      8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_RDNA4));
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
+    text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+  }
+  text_words.resize(33'000u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_RDNA4));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.scratch_vgpr = 82;
+  options.moi_owner_vgpr = 80;
+  options.moi_epoch_vgpr = 81;
+  options.moi_exec_save_sgpr = 60;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const ConSanResult result = try_patch_consan(
+      make_rdna4_lds_code_object(text_words, "rdna4_dense_inline_shadow"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                               &ConSanPatchInfo::kind),
+            2u); // One local relay plus one appended explicit-key dispatcher.
+  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
+    return warning.find("inside a relocated prefix") != std::string::npos;
+  }));
+}
+
 TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersUseSpillBackedRouter) {
   constexpr uint32_t kAccessCount = 9u;
   constexpr size_t kLargeTextWords = 33000u;
