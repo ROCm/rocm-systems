@@ -101,7 +101,8 @@ flowchart TD
     VW["VW DONE<br/>WMMA attention frozen clean, fault, resource,<br/>and provenance bundle accepted"]
     V6B["V6B DONE<br/>remaining rows' resource and timing gates"]
     V7["V7 DONE<br/>one committed tip reruns all 40<br/>non-omitted gfx1250 cells"]
-    V9["V9 ACTIVE<br/>Qwen Sampled current-tip signal;<br/>bounded runtime localization"]
+    V9A["V9A DONE<br/>Qwen Sampled 151936-workgroup initializer<br/>isolated exact at 3/3 accesses and 4/4 barriers"]
+    V9B["V9B ACTIVE<br/>Qwen Sampled full-object cumulative cost;<br/>dense-dispatch burden localization"]
     G0["G0 TODO<br/>current STATUS_GFX1250 matrix<br/>simultaneously green"]
   end
 
@@ -257,8 +258,9 @@ flowchart TD
   V6B --> V7
   IS1 --> V7
   D0 --> V7
-  V7 --> V9
-  V9 --> G0
+  V7 --> V9A
+  V9A --> V9B
+  V9B --> G0
 
   G0 --> X0
   X0 --> XP0
@@ -381,9 +383,22 @@ flowchart TD
   class XP5S,XP1A done
   class XP3C done
   class XP2D done
-  class V9 active
+  class V9A done
+  class V9B active
   class G0,XT2C2,XT2C3,XT3E,XT3I,XF,XG todo
 ```
+
+- 2026-07-22: V9A is DONE and V9B is the sole ACTIVE/blue node.  The current
+  and historical Qwen runs use the same VMFB, and both reach the
+  151,936-workgroup output initializer.  A current-tip diagnostic restricted
+  to that initializer passes the exact Qwen oracle in roughly 45 seconds with
+  complete 3/3 access and 4/4 barrier-member coverage.  This rules out the
+  final dispatch as a standalone failure and localizes the remaining orange
+  cell to cumulative full-object cost.  In the current dense Sampled path,
+  each access resolves its return-PC key through a linear per-owner dispatcher
+  before reaching the runtime gate; repeatedly dispatched matmul owners have
+  roughly 120 LDS sites.  V9B quantifies that burden without immediately
+  widening another unrestricted run or silently changing Sampled semantics.
 
 - 2026-07-22: XP2D is DONE as a bounded current-tip investigation, not as a
   green-cell claim.  Exact one-repetition artifacts `196` and `197` both

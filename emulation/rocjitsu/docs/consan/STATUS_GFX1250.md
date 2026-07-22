@@ -46,7 +46,7 @@ preserve an earlier green claim.
 
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
-| **P0 Qwen3-0.6B prefill** | 🟩 Current paired 1.94x; exact oracle and 1000/1000 accesses | 🟩 Current paired 5.33x; exact oracle, 1000/1000 accesses, and 46/46 barriers | 🟧 Isolated Rocjitsu run signals at ~255 seconds; the independent software-GPU path has no verdict through 600 seconds, nor after a new runtime barrier gate at 180 seconds or with barrier tracking disabled at 120 seconds; no accepted overhead | 🟧 Current isolated run signals at the final large-output dispatch after 552 seconds; no verdict or accepted overhead |
+| **P0 Qwen3-0.6B prefill** | 🟩 Current paired 1.94x; exact oracle and 1000/1000 accesses | 🟩 Current paired 5.33x; exact oracle, 1000/1000 accesses, and 46/46 barriers | 🟧 Full-object isolated run signals at ~255 seconds and the independent software-GPU path has no verdict through 600 seconds; a diagnostic restricted to the final 151,936-workgroup initializer is exact and complete at 3/3 accesses plus 4/4 barrier members, localizing the blocker to cumulative full-object cost; no accepted overhead | 🟧 Current isolated run signals at the final large-output dispatch after 552 seconds; no verdict or accepted overhead |
 | **P1 Sharktank TP1 prefill** | 🟩 Exact prefill oracle; 352/352 accesses; current paired 1.17x | 🟩 Exact prefill oracle; 352/352 accesses, 37/37 barriers; current paired 1.25x | 🟩 Exact prefill oracle; 352/352 accesses, 64/64 applicable barriers; current paired 1.51x | 🟩 Exact prefill oracle; 352/352 accesses, 37/37 barriers; current paired 2.11x |
 | **P1 Sharktank TP1 decode/combined** | 🟩 Exact decode/combined oracles; 704/704 accesses; current paired 1.09x | 🟩 Exact decode/combined oracles; 704/704 accesses, 74/74 barriers; current paired 1.16x | 🟩 Exact decode/combined oracles; 704/704 accesses, 128/128 applicable barriers; current paired 1.28x | 🟧 Compute-active through 600 seconds; no verdict or accepted overhead |
 | **P2 Sharktank TP2 family** | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained |
@@ -256,6 +256,20 @@ do not promote matrix cells without the end-to-end evidence above.
 | Four focused flavor verticals | 🟨 Four-engine bootstrap | A clean ping-pong cooperative-LDS workload passed its host-reference oracle with 4/4 accesses patched by SuperCollider.  Record/Replay passed with 4/4 accesses and 8/8 barriers patched and visible records.  Sampled passed with 4/4 accesses and two visible records, but 0/8 barriers.  Inline Shadow is statically and dynamically complete with 4/4 accesses, 8/8 barriers, and one visible record.  Fault/diagnostic behavior, replay qualification, and Sampled synchronization remain open. |
 
 ## Progress log
+
+- 2026-07-22: Narrowed the current Qwen Sampled exception without another
+  unrestricted timeout.  The historical accepted and current runs use the
+  same byte-identical VMFB and both execute the 151,936-workgroup output
+  initializer.  A current-tip, one-repetition diagnostic restricted to that
+  kernel passes the exact output oracle in roughly 45 seconds with complete
+  3/3 access and 4/4 barrier-member coverage and 16 visible events.  This is
+  diagnostic evidence rather than matrix acceptance because it uses the test
+  kernel filter.  It disproves the final initializer as a standalone blocker
+  and points to cumulative full-object overhead, particularly linear dense
+  return-PC dispatch before Sampled's runtime gate.  A separate top-k
+  diagnostic raised the expert patch budget from 65,536 to 200,000; the first
+  large object then failed transactionally at executable growth before
+  execution, proving that top-k Sampled is not a quick default-limit promotion.
 
 - 2026-07-21: The post-merge `001_sk_mxf8f4gemm_tdm` Inline Shadow
   exception is green at clean revision `9b9b12fc8c`.  Commits `0db1b1954c`
