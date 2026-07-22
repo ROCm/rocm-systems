@@ -208,6 +208,9 @@ decode_relocatable_entry_instruction(std::span<const uint8_t> text, uint64_t off
 
 [[nodiscard]] bool is_single_range_native_lds_mnemonic(std::string_view mnemonic);
 
+[[nodiscard]] bool is_single_range_native_lds_mnemonic(std::string_view mnemonic,
+                                                       rj_code_arch_t arch);
+
 [[nodiscard]] std::optional<uint32_t>
 two_address_native_lds_offset_scale(std::string_view mnemonic);
 
@@ -225,7 +228,7 @@ two_address_native_lds_offset_scale(std::string_view mnemonic);
     return false;
   if (site.mnemonic == "ds_load_b96")
     return arch == ROCJITSU_CODE_ARCH_GFX1250;
-  return is_single_range_native_lds_mnemonic(site.mnemonic) ||
+  return is_single_range_native_lds_mnemonic(site.mnemonic, arch) ||
          two_address_native_lds_offset_scale(site.mnemonic).has_value();
 }
 
@@ -398,7 +401,7 @@ classify_moi_access_candidate_support(std::span<const uint8_t> bytes,
     return ConSanSiteDispositionReason::MissingAddressOperand;
 
   if (candidate.source == ConSanMoiCandidateSource::NativeLds) {
-    return is_single_range_native_lds_mnemonic(candidate.mnemonic) ||
+    return is_single_range_native_lds_mnemonic(candidate.mnemonic, arch) ||
                    two_address_native_lds_offset_scale(candidate.mnemonic).has_value()
                ? ConSanSiteDispositionReason::None
                : ConSanSiteDispositionReason::UnsupportedMnemonic;
@@ -583,6 +586,13 @@ void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvena
                      "ds_cmpstore_rtn_b32", "ds_cmpst_rtn_b32"});
 }
 
+[[nodiscard]] bool is_single_range_native_lds_mnemonic(std::string_view mnemonic,
+                                                       rj_code_arch_t arch) {
+  return is_single_range_native_lds_mnemonic(mnemonic) ||
+         (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+          equals_any(mnemonic, {"ds_read_i8", "ds_write_b8_d16_hi", "ds_write_b16_d16_hi"}));
+}
+
 [[nodiscard]] std::optional<uint32_t>
 two_address_native_lds_offset_scale(std::string_view mnemonic) {
   if (equals_any(mnemonic,
@@ -611,7 +621,7 @@ candidate_access_ranges(std::span<const uint8_t> bytes, const ConSanMoiCandidate
     const std::optional<uint32_t> word0 = read_u32(bytes, candidate.file_offset);
     if (!word0)
       return std::nullopt;
-    if (is_single_range_native_lds_mnemonic(candidate.mnemonic)) {
+    if (is_single_range_native_lds_mnemonic(candidate.mnemonic, arch)) {
       // VDS encodes a 16-bit single-address immediate. CDNA4's DS atomics use
       // only the eight-bit offset0 field; offset1 is not part of their address.
       const uint32_t static_byte_offset =

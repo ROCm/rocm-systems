@@ -1045,9 +1045,16 @@ TEST(ConSanMoi, Cdna4RecordReplayNormalizesTransposeAndTwoAddressLdsRanges) {
 }
 
 TEST(ConSanMoi, Cdna4RecordReplaySupportsSubwordNativeLdsSites) {
+  static_assert(cdna4::build_ds(cdna4::kDsReadI8Ds) == std::array<uint32_t, 2>{0xD8720000u, 0u});
+  static_assert(cdna4::build_ds(cdna4::kDsWriteB8D16HiDs) ==
+                std::array<uint32_t, 2>{0xD8A80000u, 0u});
+  static_assert(cdna4::build_ds(cdna4::kDsWriteB16D16HiDs) ==
+                std::array<uint32_t, 2>{0xD8AA0000u, 0u});
+
   const auto check = [](uint32_t word0, uint32_t word1, std::string_view expected_mnemonic,
                         ConSanLdsAccessKind expected_kind, uint32_t expected_width_bits,
-                        uint32_t expected_byte_offset) {
+                        uint32_t expected_byte_offset, uint16_t expected_addr_vgpr,
+                        uint16_t expected_value_vgpr) {
     std::vector<uint32_t> text_words(520, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
     text_words[0] = word0;
     text_words[1] = word1;
@@ -1070,6 +1077,15 @@ TEST(ConSanMoi, Cdna4RecordReplaySupportsSubwordNativeLdsSites) {
     EXPECT_EQ(result.moi_candidates.front().mnemonic, expected_mnemonic);
     EXPECT_EQ(result.moi_candidates.front().kind, expected_kind);
     EXPECT_EQ(result.moi_candidates.front().width_bits, expected_width_bits);
+    ASSERT_TRUE(result.moi_candidates.front().addr_vgpr);
+    EXPECT_EQ(*result.moi_candidates.front().addr_vgpr, expected_addr_vgpr);
+    if (expected_kind == ConSanLdsAccessKind::Read) {
+      ASSERT_TRUE(result.moi_candidates.front().dst_vgpr);
+      EXPECT_EQ(*result.moi_candidates.front().dst_vgpr, expected_value_vgpr);
+    } else {
+      ASSERT_TRUE(result.moi_candidates.front().data_vgpr);
+      EXPECT_EQ(*result.moi_candidates.front().data_vgpr, expected_value_vgpr);
+    }
     ASSERT_EQ(result.site_dispositions.size(), 1u);
     EXPECT_EQ(result.site_dispositions.front().disposition, ConSanSiteDisposition::Supported);
     EXPECT_EQ(result.site_dispositions.front().lowering_outcome,
@@ -1087,10 +1103,27 @@ TEST(ConSanMoi, Cdna4RecordReplaySupportsSubwordNativeLdsSites) {
     EXPECT_TRUE(contains_subsequence(rewritten_words, *mov_offset));
   };
 
-  check(0xD8740020u, 0x07000004u, "ds_read_u8", ConSanLdsAccessKind::Read, 8u, 32u);
-  check(0xD8780020u, 0x07000004u, "ds_read_u16", ConSanLdsAccessKind::Read, 16u, 32u);
-  check(0xD83C0010u, 0x00000704u, "ds_write_b8", ConSanLdsAccessKind::Write, 8u, 16u);
-  check(0xD83E0010u, 0x00000704u, "ds_write_b16", ConSanLdsAccessKind::Write, 16u, 16u);
+  check(0xD8740020u, 0x07000004u, "ds_read_u8", ConSanLdsAccessKind::Read, 8u, 32u,
+        /*addr=*/4u, /*vdst=*/7u);
+  check(0xD8780020u, 0x07000004u, "ds_read_u16", ConSanLdsAccessKind::Read, 16u, 32u,
+        /*addr=*/4u, /*vdst=*/7u);
+  check(0xD83C0010u, 0x00000704u, "ds_write_b8", ConSanLdsAccessKind::Write, 8u, 16u,
+        /*addr=*/4u, /*data0=*/7u);
+  check(0xD83E0010u, 0x00000704u, "ds_write_b16", ConSanLdsAccessKind::Write, 16u, 16u,
+        /*addr=*/4u, /*data0=*/7u);
+
+  constexpr auto read_i8 =
+      cdna4::build_ds(cdna4::kDsReadI8Ds, {.offset0 = 0x21, .addr = 8, .vdst = 12});
+  constexpr auto write_b8_d16_hi =
+      cdna4::build_ds(cdna4::kDsWriteB8D16HiDs, {.offset0 = 0x12, .addr = 5, .data0 = 9});
+  constexpr auto write_b16_d16_hi =
+      cdna4::build_ds(cdna4::kDsWriteB16D16HiDs, {.offset0 = 0x34, .addr = 6, .data0 = 10});
+  check(read_i8[0], read_i8[1], "ds_read_i8", ConSanLdsAccessKind::Read, 8u, 0x21u,
+        /*addr=*/8u, /*vdst=*/12u);
+  check(write_b8_d16_hi[0], write_b8_d16_hi[1], "ds_write_b8_d16_hi", ConSanLdsAccessKind::Write,
+        8u, 0x12u, /*addr=*/5u, /*data0=*/9u);
+  check(write_b16_d16_hi[0], write_b16_d16_hi[1], "ds_write_b16_d16_hi", ConSanLdsAccessKind::Write,
+        16u, 0x34u, /*addr=*/6u, /*data0=*/10u);
 }
 
 TEST(ConSanMoi, Cdna4RecordReplayRecordsDispatchIdentity) {
