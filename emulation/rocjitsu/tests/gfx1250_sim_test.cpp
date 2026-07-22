@@ -1090,6 +1090,10 @@ TEST(Gfx1250SdmaTest, PollMem64UnresolvedAddressDoesNotAdvance) {
   EXPECT_EQ(queue.read_idx(), 0u);
 }
 
+TEST(Gfx1250ExecutionTest, OperandExecutionBackendIsRegistered) {
+  EXPECT_NO_THROW(gfx1250::Operand::require_execution_backend());
+}
+
 TEST(Gfx1250ExecutionTest, DivScaleWritesExplicitSdstMask) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
