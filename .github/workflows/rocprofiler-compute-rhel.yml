@@ -90,7 +90,7 @@ jobs:
               dnf -y --enablerepo=crb install perl-File-BaseDir
               yum install -y https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/rhel/9.4/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.el9.noarch.rpm
             fi
-            yum install -y rocm-smi-lib roctracer-dev rocprofiler-dev rocprofiler-sdk libpciaccess
+            yum install -y rocm-smi-lib roctracer-dev rocprofiler-dev rocprofiler-sdk rocm-device-libs hip-devel libpciaccess
 
       - name: Checkout
         uses: actions/checkout@v6
