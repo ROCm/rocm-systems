@@ -272,6 +272,38 @@ const ConSanSyncSequence *find_consan_sync_sequence_for_event(const ConSanResult
   return match;
 }
 
+namespace {
+
+void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
+                                       const ConSanOptions &options, ConSanResult &result) {
+  if (options.fault_drop_barrier)
+    try_apply_barrier_drop_fault_patch(code_object, arch, options, result);
+  if (options.fault_move_barrier && result.errors.empty())
+    try_apply_barrier_move_fault_patch(code_object, arch, options, result);
+  if (options.fault_mutate_barrier_id_scope && result.errors.empty())
+    try_apply_barrier_id_scope_fault_patch(code_object, options, result);
+  if (options.fault_mutate_barrier_participants && result.errors.empty() &&
+      result.outcome != ConSanTransformOutcome::Unsupported)
+    try_apply_barrier_participant_fault_patch(code_object, options, result);
+  if ((options.fault_atomic_wrong_address || options.fault_atomic_weaken_order ||
+       options.fault_atomic_weaken_scope) &&
+      result.errors.empty())
+    try_apply_atomic_fault_patch(code_object, options, result);
+  if ((options.fault_ordinary_wrong_address || options.fault_ordinary_weaken_order ||
+       options.fault_ordinary_weaken_scope) &&
+      result.errors.empty())
+    try_apply_ordinary_fault_patch(code_object, options, result);
+  result.applied_fault_mutations = applied_fault_mutation_count(result);
+  if (options.fault_require_exactly_one && result.outcome != ConSanTransformOutcome::Unsupported &&
+      result.applied_fault_mutations != 1u) {
+    result.errors.emplace_back(
+        "ConSan fault injection required exactly one applied mutation, got " +
+        std::to_string(result.applied_fault_mutations));
+  }
+}
+
+} // namespace
+
 [[nodiscard]] ConSanResult
 try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
                       std::span<const CarriedPerturbationPlan> carried_plans = {}) {
@@ -319,6 +351,9 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
       planning_options.fault_require_exactly_one = false;
     ConSanResult pristine_mutation_plan =
         try_patch_consan_impl(code_object_bytes, planning_options);
+    const size_t retained_planned_fault_mutations = pristine_mutation_plan.planned_fault_mutations;
+    const std::vector<ConSanFaultMutationPlan> retained_fault_plans =
+        pristine_mutation_plan.fault_plans;
     if (has_perturbation &&
         (!pristine_mutation_plan.errors.empty() || pristine_mutation_plan.fault_plans.empty() ||
          pristine_mutation_plan.perturbation_plans.empty())) {
@@ -347,7 +382,22 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     fault_options.abort_unmatched_barrier_wait = false;
     fault_options.sc_perturb_kind = ConSanPerturbationKind::None;
     fault_options.faults_preapplied = true;
-    ConSanResult fault_result = try_patch_consan(code_object_bytes, fault_options);
+    ConSanResult fault_result;
+    if (has_perturbation) {
+      fault_result = try_patch_consan(code_object_bytes, fault_options);
+    } else {
+      // Planning already built the complete pristine semantic inventory.
+      // Reuse it to apply the selected mutation instead of decoding and
+      // analyzing a large code object a second time. Final validation below
+      // still re-derives mutation semantics from pristine executable bytes,
+      // and the instrumentation stage independently analyzes the mutated
+      // image.
+      fault_result = std::move(pristine_mutation_plan);
+      AmdGpuCodeObject code_object(code_object_bytes.data(), code_object_bytes.size());
+      const rj_code_arch_t arch = arch_for_target(code_object.target_id());
+      apply_fault_mutation_to_inventory(code_object, arch, fault_options, fault_result);
+      fault_result = finalize_consan_result(std::move(fault_result), code_object_bytes);
+    }
     if (fault_result.outcome != ConSanTransformOutcome::ModifiedValid)
       return fault_result;
     ConSanTransformStage mutation_stage = take_modified_stage(fault_result);
@@ -454,9 +504,9 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
       // Retain the exact applied mutation plan. The instrumentation pass
       // inventories the mutated image, so without this provenance a live
       // staged result loses which dry-run plan authorized the mutation.
-      if (!pristine_mutation_plan.fault_plans.empty()) {
-        instrument_result.planned_fault_mutations = pristine_mutation_plan.planned_fault_mutations;
-        instrument_result.fault_plans = pristine_mutation_plan.fault_plans;
+      if (!retained_fault_plans.empty()) {
+        instrument_result.planned_fault_mutations = retained_planned_fault_mutations;
+        instrument_result.fault_plans = retained_fault_plans;
       }
       if (has_perturbation) {
         instrument_result.requested_perturbations = pristine_mutation_plan.requested_perturbations;
@@ -469,9 +519,9 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     case ConSanTransformOutcome::Unchanged:
       // A no-target instrumentation stage must not discard an otherwise valid
       // mutation. Its inventory describes the staged image being committed.
-      if (!pristine_mutation_plan.fault_plans.empty()) {
-        instrument_result.planned_fault_mutations = pristine_mutation_plan.planned_fault_mutations;
-        instrument_result.fault_plans = pristine_mutation_plan.fault_plans;
+      if (!retained_fault_plans.empty()) {
+        instrument_result.planned_fault_mutations = retained_planned_fault_mutations;
+        instrument_result.fault_plans = retained_fault_plans;
       }
       instrument_result.elf_bytes = std::move(mutation_stage.image);
       instrument_result.patches = std::move(mutation_stage.patches);
@@ -488,10 +538,9 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
         // preflight skip. With no instrumentation request, that is not a
         // reason to discard an independently validated mutation stage.
         instrument_result.outcome = ConSanTransformOutcome::Unchanged;
-        if (!pristine_mutation_plan.fault_plans.empty()) {
-          instrument_result.planned_fault_mutations =
-              pristine_mutation_plan.planned_fault_mutations;
-          instrument_result.fault_plans = pristine_mutation_plan.fault_plans;
+        if (!retained_fault_plans.empty()) {
+          instrument_result.planned_fault_mutations = retained_planned_fault_mutations;
+          instrument_result.fault_plans = retained_fault_plans;
         }
         instrument_result.elf_bytes = std::move(mutation_stage.image);
         instrument_result.patches = std::move(mutation_stage.patches);
@@ -761,30 +810,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     }
   }
 
-  if (options.fault_drop_barrier)
-    try_apply_barrier_drop_fault_patch(code_object, arch, options, result);
-  if (options.fault_move_barrier && result.errors.empty())
-    try_apply_barrier_move_fault_patch(code_object, arch, options, result);
-  if (options.fault_mutate_barrier_id_scope && result.errors.empty())
-    try_apply_barrier_id_scope_fault_patch(code_object, options, result);
-  if (options.fault_mutate_barrier_participants && result.errors.empty() &&
-      result.outcome != ConSanTransformOutcome::Unsupported)
-    try_apply_barrier_participant_fault_patch(code_object, options, result);
-  if ((options.fault_atomic_wrong_address || options.fault_atomic_weaken_order ||
-       options.fault_atomic_weaken_scope) &&
-      result.errors.empty())
-    try_apply_atomic_fault_patch(code_object, options, result);
-  if ((options.fault_ordinary_wrong_address || options.fault_ordinary_weaken_order ||
-       options.fault_ordinary_weaken_scope) &&
-      result.errors.empty())
-    try_apply_ordinary_fault_patch(code_object, options, result);
-  result.applied_fault_mutations = applied_fault_mutation_count(result);
-  if (options.fault_require_exactly_one && result.outcome != ConSanTransformOutcome::Unsupported &&
-      result.applied_fault_mutations != 1u) {
-    result.errors.emplace_back(
-        "ConSan fault injection required exactly one applied mutation, got " +
-        std::to_string(result.applied_fault_mutations));
-  }
+  apply_fault_mutation_to_inventory(code_object, arch, options, result);
 
   return result;
 }

@@ -1548,7 +1548,7 @@ rocjitsu::ConSanResult diagnostic_coverage_transform_result() {
 }
 
 TEST(HsaHooksUnitTest, ConSanCoverageSiteDiagnosticsRetainStableReasonsAndSourceLocations) {
-  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "3");
   const ConSanHookProfile &profile = kConSanHookProfiles[1];
   const rocjitsu::ConSanResult result = diagnostic_coverage_transform_result();
 
