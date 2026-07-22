@@ -138,6 +138,8 @@ extern struct ncclIbDev IbCastDevs[MAX_IB_DEVS];
 extern int IbCastRelaxedOrderingEnabled;
 extern bool IbCastUseInline;
 
+#define WR_ID_RX_COMM_ID_MASK  0xffff
+#define WR_ID_RX_COMM_ID_SHIFT 48
 #define WR_IMM_RX_REQ_IDX_MASK 0xff
 #define WR_IMM_RX_REQ_IDX_SHIFT 24
 #define WR_IMM_SPLIT_DATA_FLAG 0x00800000
@@ -369,7 +371,8 @@ struct alignas(32) ncclIbSendFifoCtsInline {
   uint16_t rxReqIndex;
   uint16_t tag;
   uint32_t idx;
-  char padding[9];
+  // TODO - adjusted padding to align to 32B
+  char padding[7];
 } __attribute__((packed));
 
 struct ncclIbQpInitAttr {
@@ -505,6 +508,13 @@ struct alignas(32) ncclIbNetCommBase {
   bool faultQpError[NCCL_IB_MAX_QPS];
 #endif
   struct ncclIbResiliency* resiliency;
+
+  // QP Sharing fields
+  uint16_t commId;              // 0 = not shared
+  bool     isSharedQpPrimary;
+  int      sharedGroupIdx;      // -1 = not shared
+  int      remIbDevIdx;
+  int      sharedPrimaryNqps;
 };
 
 struct ncclIbNetCommDevBase* IbCastGetNetCommDevBase(ncclIbNetCommBase* base, int devIndex);
@@ -595,6 +605,7 @@ struct ncclIbSendComm {
   int ar; // Use adaptive routing when all merged devices have it enabled
   uint64_t putSignalScratchpad;
   bool useCtsOffload;
+  uint16_t remCommId;           // receiver's commId for imm_data encoding (QP sharing)
 };
 // The SendFifo needs to be 32-byte aligned and each element needs
 // to be a 32-byte multiple, so that an entry does not get split and

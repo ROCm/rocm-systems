@@ -268,6 +268,9 @@ static ncclResult_t IbCastResiliencyRepostRequest(struct ncclIbRequest* request)
   return ncclSuccess;
 }
 
+// TODO - QP sharing
+//        refer to all usage of wc->wr_id and extract needed bits only as it contains the 16bits commId for QP sharing
+//        refer to all usage of wc->imm_data and extract needed bits only as it contains 8 bits rxReqIdx & 16 bits CommId for QP sharing
 static ncclResult_t IbCastResiliencyHandleCompletionErrorReceiver(struct ncclIbResiliency* resCtx, struct ibv_wc* wc,
                                                                   int devIndex) {
   INFO(NCCL_NET, "NET/IB: %s: Handling an error on the receiver side (comm %p)", __func__, resCtx->baseComm);
@@ -275,7 +278,7 @@ static ncclResult_t IbCastResiliencyHandleCompletionErrorReceiver(struct ncclIbR
   bool inFlushRange =
     (wc->wr_id >= NCCL_IB_FLUSH_REQ_WR_ID_OFFSET && wc->wr_id < (NCCL_IB_FLUSH_REQ_WR_ID_OFFSET + NET_IB_MAX_REQUESTS));
   if (!inRecvRange && !inFlushRange && (wc->wr_id != NCCL_IB_RECV_WR_ID_DUMMY)) {
-    WARN("NET/IB: %s: Invalid wr_id (%ld). Unable to retrieve a request on the receiver side (comm=%p)", __func__,
+    WARN("NET/IB: %s: Invalid wr_id (0x%lx). Unable to retrieve a request on the receiver side (comm=%p)", __func__,
          wc->wr_id, resCtx->baseComm);
     return ncclInternalError;
   }
@@ -286,7 +289,7 @@ static ncclResult_t IbCastResiliencyHandleCompletionErrorReceiver(struct ncclIbR
     // now flushed.
     assert(wc->status == IBV_WC_WR_FLUSH_ERR);
     // In this case, there is nothing left to do.
-    INFO(NCCL_NET, "NET/IB: %s: Ignoring flush error on a QP (comm=%p, wc.wr_id=%ld, wc.status=%s(%d)).", __func__,
+    INFO(NCCL_NET, "NET/IB: %s: Ignoring flush error on a QP (comm=%p, wc.wr_id=0x%lx, wc.status=%s(%d)).", __func__,
          resCtx->baseComm, wc->wr_id, ibvWcStatusStr(wc->status), wc->status);
     return ncclSuccess;
   }
@@ -341,6 +344,9 @@ static ncclResult_t IbCastResiliencyHandleCompletionErrorReceiver(struct ncclIbR
   return ncclSuccess;
 }
 
+// TODO - QP sharing
+//        refer to all usage of wc->wr_id and extract needed bits only as it contains the 16bits commId for QP sharing
+//        refer to all usage of wc->imm_data and extract needed bits only as it contains 8 bits rxReqIdx & 16 bits CommId for QP sharing
 static ncclResult_t IbCastResiliencyHandleCompletionErrorSender(struct ncclIbResiliency* resCtx, struct ibv_wc* wc,
                                                                 int devIndex) {
   ncclResult_t res;
@@ -352,7 +358,7 @@ static ncclResult_t IbCastResiliencyHandleCompletionErrorSender(struct ncclIbRes
 
   if (request == NULL) {
     WARN("NET/IB: %s: Encountered a stale CQE with error for slot=%ld. Slot was already handled (comm=%p, "
-         "wc.wr_id=%ld, wc.status=%s(%d), wc.opcode=%s(%d)).",
+         "wc.wr_id=0x%lx, wc.status=%s(%d), wc.opcode=%s(%d)).",
          __func__, slot, resCtx->baseComm, wc->wr_id, ibvWcStatusStr(wc->status), wc->status,
          ibvWcOpcodeStr(wc->opcode), wc->opcode);
     return ncclSuccess;
@@ -361,7 +367,7 @@ static ncclResult_t IbCastResiliencyHandleCompletionErrorSender(struct ncclIbRes
   struct ncclIbResiliencySend* sendResCtx = (struct ncclIbResiliencySend*)resCtx;
   res = IbCastResiliencySendRequestInit(sendResCtx, request, devIndex);
   if (res != ncclSuccess) {
-    WARN("NET/IB: %s: Failed to initialize a resiliency send request (req=%p, comm=%p, id=%ld, type=%s, wc.wr_id=%ld, "
+    WARN("NET/IB: %s: Failed to initialize a resiliency send request (req=%p, comm=%p, id=%ld, type=%s, wc.wr_id=0x%lx, "
          "wc.status=%s(%d), wc.opcode=%s(%d), slot=%ld).",
          __func__, request, request->base, request->id, IbCastReqTypeStr[request->type], wc->wr_id,
          ibvWcStatusStr(wc->status), wc->status, ibvWcOpcodeStr(wc->opcode), wc->opcode, slot);
@@ -540,7 +546,7 @@ static ncclResult_t IbCastResiliencyProbePost(struct ncclIbResiliencySend* sendR
 static ncclResult_t IbCastResiliencyProbeHandleCompletionEvent(struct ncclIbResiliencySend* sendResCtx,
                                                                struct ibv_wc* probeWc, int devIndex) {
   INFO(NCCL_NET,
-       "NET/IB: %s: Got probing completion (devIndex=%d, wc->status=%d, wc->opcode=%d, wc->wr_id=%ld, wc->qp_num=%u)",
+       "NET/IB: %s: Got probing completion (devIndex=%d, wc->status=%d, wc->opcode=%d, wc->wr_id=0x%lx, wc->qp_num=%u)",
        __func__, devIndex, probeWc->status, probeWc->opcode, probeWc->wr_id, probeWc->qp_num);
 
   struct ncclIbResiliencyRequestSend* failedRequest = &sendResCtx->failedRequests[probeWc->wr_id % NET_IB_MAX_REQUESTS];
@@ -810,6 +816,11 @@ ncclResult_t IbCastResiliencySenderCreateQps(struct ncclIbResiliency* resCtx,
   qpCreateAttrs.maxRecvWorkRequest = 0;
   // Every send request can initiate at most one probing request.
   qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS;
+  // TODO - QP sharing:
+  //        QP sharing disabled for resiliency sender QP
+  qpCreateAttrs.isQpSharingEnabled = false;
+  qpCreateAttrs.qpSharingGroupIdx = -1;
+  qpCreateAttrs.cqDepthMultiplier = 1;
   for (int localQpIndex = 0; localQpIndex < resCtx->nProbingQps; localQpIndex++) {
     // Sender creates a single probing QP per local device.
     int localDevIndex = localQpIndex;
@@ -898,6 +909,11 @@ ncclResult_t IbCastResiliencyReceiverQpsCreateToRts(struct ncclIbResiliency* res
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = 0;
   qpCreateAttrs.maxSendWorkRequest = 0;
+  // TODO - QP sharing:
+  //        QP sharing disabled for resiliency QP
+  qpCreateAttrs.isQpSharingEnabled = false;
+  qpCreateAttrs.qpSharingGroupIdx = -1;
+  qpCreateAttrs.cqDepthMultiplier = 1;
   for (int localQpIndex = 0; localQpIndex < resCtx->nProbingQps; localQpIndex++) {
     // When number of QPs on the receiver is larger than the number of devices
     // it has, the probing QPs on the receiver side are created in a "striped"
@@ -1047,7 +1063,7 @@ ncclResult_t IbCastResiliencyRequestIsComplete(struct ncclIbRequest* request, bo
 
 ncclResult_t IbCastResiliencyHandleCompletionError(struct ncclIbResiliency* resCtx, struct ibv_wc* wc, int devIndex) {
   INFO(NCCL_NET,
-       "NET/IB: %s: Got completion with error (devIndex=%d, wc->status=(%s)%d, wc->opcode=(%s)%d, wc->wr_id=%ld, "
+       "NET/IB: %s: Got completion with error (devIndex=%d, wc->status=(%s)%d, wc->opcode=(%s)%d, wc->wr_id=0x%lx, "
        "wc->qp_num=%u, wc->byte_len=%d)",
        __func__, devIndex, ibvWcStatusStr(wc->status), wc->status, ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->wr_id,
        wc->qp_num, wc->byte_len);

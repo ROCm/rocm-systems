@@ -313,6 +313,11 @@ ncclResult_t IbCastPortRecoverySenderQpsCreate(struct ncclIbResiliency* resCtx,
   qpCreateAttrs.type = IBV_QPT_UD;
   qpCreateAttrs.maxRecvWorkRequest = 1;
   qpCreateAttrs.maxSendWorkRequest = NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE_MAX;
+  // TODO - QP sharing:
+  //        disabled for recovery QP
+  qpCreateAttrs.isQpSharingEnabled = false;
+  qpCreateAttrs.qpSharingGroupIdx = -1;
+  qpCreateAttrs.cqDepthMultiplier = 1;
   for (int localQpIndex = 0; localQpIndex < nQps; localQpIndex++) {
     int localDevIndex = localQpIndex % sendComm->base.vProps.ndevs;
     ncclIbSendCommDev* sendCommDev = &sendComm->devs[localDevIndex];
@@ -384,6 +389,11 @@ ncclResult_t IbCastPortRecoveryReceiverQpsCreateToRts(struct ncclIbResiliency* r
   qpCreateAttrs.type = IBV_QPT_UD;
   qpCreateAttrs.maxRecvWorkRequest = NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE_MAX;
   qpCreateAttrs.maxSendWorkRequest = 1;
+  // TODO - QP sharing:
+  //        disabled for recovery QP
+  qpCreateAttrs.isQpSharingEnabled = false;
+  qpCreateAttrs.qpSharingGroupIdx = -1;
+  qpCreateAttrs.cqDepthMultiplier = 1;
   for (int localQpIndex = 0; localQpIndex < nQps; localQpIndex++) {
     int localDevIndex = localQpIndex % recvComm->base.vProps.ndevs;
     ncclIbRecvCommDev* recvCommDev = &recvComm->devs[localDevIndex];
@@ -620,6 +630,8 @@ static inline ncclResult_t IbCastPortRecoveryHandleCompletionReceiver(struct ncc
            recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
     } else {
       assert(completion.opcode == IBV_WC_RECV);
+      // TODO - QP sharing: 
+      //        no change required, as this is specific to port recovery QP (not regular RC QP). confirm?
       uint32_t id = completion.imm_data;
       int seqSize = ncclParamIbCastResiliencyPortRecoveryAliveMsgSequenceSize();
       uint32_t windowEnd = recoveryContext->recv.windowBase + seqSize;
