@@ -559,6 +559,109 @@ TEST(GpuMemoryTest, ReusedMemoryInstanceInvalidatesThreadLocalTranslationCaches)
   second_memory->~GpuMemory();
 }
 
+TEST(GpuMemoryThreadingTest, AtomicRmwKeepsStorageIdentityAcrossConcurrentMap) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kVmid = 17;
+
+  void *raw_mapping = mmap(nullptr, KfdProcess::kPageSize, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(raw_mapping, MAP_FAILED);
+  struct Mapping {
+    uint8_t *data;
+    ~Mapping() { munmap(data, KfdProcess::kPageSize); }
+  } mapping{static_cast<uint8_t *>(raw_mapping)};
+
+  KfdProcess process(kVmid);
+  memory.register_process(kVmid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+  memory.set_process_client_pid(kVmid, getpid());
+
+  // Mirror GpuMemory's private stripe selection to force the mapped and
+  // fallback identities onto different mutexes.
+  auto atomic_stripe = [](uintptr_t key) {
+    constexpr unsigned kGranuleShift = 3;
+    constexpr unsigned kHashFoldShift1 = 17;
+    constexpr unsigned kHashFoldShift2 = 31;
+    constexpr size_t kLockStripes = 4096;
+    key >>= kGranuleShift;
+    key ^= key >> kHashFoldShift1;
+    key ^= key >> kHashFoldShift2;
+    return key & (kLockStripes - 1);
+  };
+  constexpr uintptr_t kClientPidHashSalt = static_cast<uintptr_t>(0x9e3779b97f4a7c15ULL);
+
+  uint32_t *target = nullptr;
+  for (size_t offset = 64; offset + sizeof(uint32_t) <= KfdProcess::kPageSize; offset += 8) {
+    auto *candidate = reinterpret_cast<uint32_t *>(mapping.data + offset);
+    const uintptr_t mapped_key = reinterpret_cast<uintptr_t>(candidate);
+    uintptr_t fallback_key = mapped_key ^ (mapped_key >> 32);
+    fallback_key ^= static_cast<uintptr_t>(getpid()) * kClientPidHashSalt;
+    if (atomic_stripe(mapped_key) != atomic_stripe(fallback_key)) {
+      target = candidate;
+      break;
+    }
+  }
+  ASSERT_NE(target, nullptr);
+  *target = 0;
+
+  std::barrier first_atomic_has_read(2);
+  std::barrier allow_first_atomic_to_write(2);
+  std::thread first_atomic([&] {
+    memory.atomic_rmw(
+        reinterpret_cast<uint64_t>(target), sizeof(*target),
+        [&](uint8_t *storage) {
+          uint32_t value = 0;
+          std::memcpy(&value, storage, sizeof(value));
+          ++value;
+          std::memcpy(storage, &value, sizeof(value));
+          first_atomic_has_read.arrive_and_wait();
+          allow_first_atomic_to_write.arrive_and_wait();
+        },
+        kVmid);
+  });
+
+  first_atomic_has_read.arrive_and_wait();
+
+  // The fixed path keeps the page-table shared lock through the fallback RMW,
+  // so mapping waits for the first atomic. The old path lets the map and a
+  // differently locked mapped atomic overtake its write.
+  const bool mapping_can_proceed = process.page_table_mutex_.try_lock();
+  if (mapping_can_proceed)
+    process.page_table_mutex_.unlock();
+
+  if (mapping_can_proceed) {
+    process.map_pages(reinterpret_cast<uint64_t>(mapping.data), mapping.data,
+                      KfdProcess::kPageSize);
+    memory.atomic_rmw(
+        reinterpret_cast<uint64_t>(target), sizeof(*target),
+        [](uint8_t *storage) {
+          uint32_t value = 0;
+          std::memcpy(&value, storage, sizeof(value));
+          ++value;
+          std::memcpy(storage, &value, sizeof(value));
+        },
+        kVmid);
+    allow_first_atomic_to_write.arrive_and_wait();
+    first_atomic.join();
+  } else {
+    allow_first_atomic_to_write.arrive_and_wait();
+    first_atomic.join();
+    process.map_pages(reinterpret_cast<uint64_t>(mapping.data), mapping.data,
+                      KfdProcess::kPageSize);
+    memory.atomic_rmw(
+        reinterpret_cast<uint64_t>(target), sizeof(*target),
+        [](uint8_t *storage) {
+          uint32_t value = 0;
+          std::memcpy(&value, storage, sizeof(value));
+          ++value;
+          std::memcpy(storage, &value, sizeof(value));
+        },
+        kVmid);
+  }
+
+  EXPECT_EQ(*target, 2u);
+}
+
 TEST(GpuMemoryThreadingTest, ReadersRemainSafeWhilePagesAreRemapped) {
   amdgpu::GpuMemory memory("memory");
   constexpr uint32_t kPid = 7;

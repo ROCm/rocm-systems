@@ -158,11 +158,10 @@ public:
   }
 
   /// @brief Perform an atomic read-modify-write on resolved backing storage.
-  /// @details Mapped aliases rendezvous on a process-wide lock stripe selected
-  /// from the resolved host address. The page-table shared lock remains held
-  /// through the callback, so remapping cannot change or retire the target
-  /// during the operation. Unmapped sparse/client accesses use a stable
-  /// address-space key instead.
+  /// @details Storage classification and the page-table shared lock remain
+  /// stable through the callback. Mapped aliases rendezvous on a process-wide
+  /// host-address stripe; unmapped sparse/client accesses use an address-space
+  /// stripe instead.
   /// @param addr GPU virtual address of the target.
   /// @param size Access size in bytes (4 or 8).
   /// @param fn Callback invoked with a pointer to the target bytes.
@@ -170,27 +169,30 @@ public:
   template <typename F> void atomic_rmw(uint64_t addr, uint32_t size, F &&fn, uint32_t vmid = 0) {
     assert((size == 4 || size == 8) && (addr & PAGE_MASK) + size <= PAGE_SIZE);
 
-    const bool mapped = with_host_ptr(addr, vmid, [&](uint8_t *page) {
-      uint8_t *target = page + (addr & PAGE_MASK);
-      std::lock_guard lock(backing_atomic_mutex(reinterpret_cast<uintptr_t>(target)));
-      fn(target);
-    });
-    if (mapped)
+    if (vmid == 0) {
+      atomic_rmw_unmapped(addr, size, 0, fn);
       return;
-
-    const pid_t client_pid = client_pid_for_vmid(vmid);
-    uintptr_t key = static_cast<uintptr_t>(addr ^ (addr >> 32));
-    if (client_pid > 0) {
-      key ^= static_cast<uintptr_t>(client_pid) * kClientPidHashSalt;
-    } else {
-      key ^= reinterpret_cast<uintptr_t>(this);
     }
 
-    std::lock_guard lock(backing_atomic_mutex(key));
-    std::array<uint8_t, sizeof(uint64_t)> value{};
-    read_block(addr, std::span<uint8_t>(value.data(), size), vmid);
-    fn(value.data());
-    write_block(addr, std::span<const uint8_t>(value.data(), size), vmid);
+    std::shared_lock vmid_lock(vmid_mutex_);
+    auto vmid_entry = vmid_table_.find(vmid);
+    if (vmid_entry == vmid_table_.end()) {
+      atomic_rmw_unmapped(addr, size, 0, fn);
+      return;
+    }
+
+    auto &entry = vmid_entry->second;
+    std::shared_lock page_table_lock(*entry.mutex);
+    auto pte = entry.page_table->find(addr >> PAGE_SHIFT);
+    if (pte != entry.page_table->end()) {
+      if (pte->second.host_ptr != nullptr)
+        atomic_rmw_mapped(addr, pte->second.host_ptr, fn);
+      else
+        atomic_rmw_fallback(addr, size, entry.client_pid, fn);
+      return;
+    }
+
+    atomic_rmw_unmapped(addr, size, entry.client_pid, fn);
   }
 
   uint8_t *translate_debug(uint64_t addr, uint32_t vmid) const { return translate(addr, vmid); }
@@ -357,6 +359,48 @@ private:
     return mutexes[key & (mutexes.size() - 1)];
   }
 
+  template <typename F> static void atomic_rmw_mapped(uint64_t addr, uint8_t *page, F &fn) {
+    uint8_t *target = page + (addr & PAGE_MASK);
+    std::lock_guard lock(backing_atomic_mutex(reinterpret_cast<uintptr_t>(target)));
+    fn(target);
+  }
+
+  template <typename F>
+  void atomic_rmw_unmapped(uint64_t addr, uint32_t size, pid_t client_pid, F &fn) {
+    auto *page = reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
+    if (passthrough_ && addr < kUserSpaceLimit && page != nullptr)
+      atomic_rmw_mapped(addr, page, fn);
+    else
+      atomic_rmw_fallback(addr, size, client_pid, fn);
+  }
+
+  template <typename F>
+  void atomic_rmw_fallback(uint64_t addr, uint32_t size, pid_t client_pid, F &fn) {
+    uintptr_t key = static_cast<uintptr_t>(addr ^ (addr >> 32));
+    if (client_pid > 0)
+      key ^= static_cast<uintptr_t>(client_pid) * kClientPidHashSalt;
+    else
+      key ^= reinterpret_cast<uintptr_t>(this);
+
+    std::lock_guard lock(backing_atomic_mutex(key));
+    std::array<uint8_t, sizeof(uint64_t)> value{};
+    const bool client_storage =
+        client_pid > 0 && read_client_memory_for_pid(addr, value.data(), size, client_pid);
+    if (!client_storage) {
+      for (uint32_t i = 0; i < size; ++i)
+        value[i] = simdojo::SparseMemory::read8(addr + i);
+    }
+
+    fn(value.data());
+
+    if (client_storage) {
+      write_client_memory_for_pid(addr, value.data(), size, client_pid);
+      return;
+    }
+    for (uint32_t i = 0; i < size; ++i)
+      simdojo::SparseMemory::write8(addr + i, value[i]);
+  }
+
   template <typename F> static void for_each_page_chunk(uint64_t addr, size_t len, F &&fn) {
     size_t offset = 0;
     while (offset < len) {
@@ -396,8 +440,8 @@ private:
   /// the whole copy and makes translate() and pte_mtype() share one invalidation
   /// protocol.
   template <typename F>
-  auto cached_walk(uint64_t addr, uint32_t vmid, PteCache &cache, F &&fn) const
-      -> std::invoke_result_t<F, const KfdProcess::PageTableEntry *> {
+  auto cached_walk(uint64_t addr, uint32_t vmid, PteCache &cache,
+                   F &&fn) const -> std::invoke_result_t<F, const KfdProcess::PageTableEntry *> {
     const uint64_t page_key = addr >> PAGE_SHIFT;
     std::shared_lock vmid_lock(vmid_mutex_);
     const uint64_t registry_generation = vmid_registry_generation_;
@@ -492,7 +536,10 @@ private:
   }
 
   bool read_client_memory(uint64_t addr, void *dst, size_t len, uint32_t vmid) const {
-    pid_t pid = client_pid_for_vmid(vmid);
+    return read_client_memory_for_pid(addr, dst, len, client_pid_for_vmid(vmid));
+  }
+
+  static bool read_client_memory_for_pid(uint64_t addr, void *dst, size_t len, pid_t pid) {
     if (pid <= 0)
       return false;
     iovec local{dst, len};
@@ -507,7 +554,10 @@ private:
   }
 
   bool write_client_memory(uint64_t addr, const void *src, size_t len, uint32_t vmid) {
-    pid_t pid = client_pid_for_vmid(vmid);
+    return write_client_memory_for_pid(addr, src, len, client_pid_for_vmid(vmid));
+  }
+
+  static bool write_client_memory_for_pid(uint64_t addr, const void *src, size_t len, pid_t pid) {
     if (pid <= 0)
       return false;
     iovec local{const_cast<void *>(src), len};
