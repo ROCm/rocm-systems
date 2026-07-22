@@ -98,7 +98,7 @@ flowchart TD
   subgraph F[Four instrumentation flavors]
     SC0["SC0 DONE<br/>native CDNA4 LDS checks:<br/>CLIP + TP1/TP2 clean"]
     SC1["SC1 TODO<br/>SuperCollider group-FLAT clean vertical;<br/>racy detection and trap breadth open"]
-    RR0["RR0 TODO<br/>Record/Replay access records and replay"]
+    RR0["RR0 ACTIVE<br/>AccVGPR-safe scalar state runs natively;<br/>dynamic-stack helpers and DS breadth open"]
     RR1["RR1 TODO<br/>Record/Replay barriers, atomics and fences"]
     SA0A["SA0A DONE<br/>CDNA4 sampled barrier lowering:<br/>TP1 + CLIP clean"]
     SA0["SA0 TODO<br/>Sampled TP2 admission/selection<br/>and broader runtime coverage"]
@@ -265,12 +265,20 @@ flowchart TD
   classDef milestone fill:#6f42c1,stroke:#e2d5ff,color:#ffffff,stroke-width:3px
 
   class R0,R1,E0,B0,B1,B2,B3,B4,B5A,S0,S1,S2,S3,S4,S5,S6A,S6B,S7A,S7B,S8A,S8B,S8C,S8D,I4,SC0,SA0A,IS0A done
-  class V5,V6,V7,ST0 active
-  class R2,E1,C0,B5B,I0,I1,I2,I3,A0,A1,A2,A3,A4,A5,SC1,RR0,RR1,SA0,SA1,IS0,IS1,Q0,Q1,Q2,Q3,V0,V1,V2,V3,V4,V8 todo
+  class RR0,V5,V6,V7,ST0 active
+  class R2,E1,C0,B5B,I0,I1,I2,I3,A0,A1,A2,A3,A4,A5,SC1,RR1,SA0,SA1,IS0,IS1,Q0,Q1,Q2,Q3,V0,V1,V2,V3,V4,V8 todo
   class F0,G0 milestone
 ```
 
 ## Reconnaissance conclusions
+
+- 2026-07-22: `RR0` is ACTIVE/blue.  Commit `15e84c6d6c` adds the safe scalar
+  Record/Replay fallback beneath a CDNA4 `ACCUM_OFFSET` boundary without
+  changing accumulator interpretation.  Native TP1 and five focused hip-moi
+  workloads now execute past the former planner rejection.  The next two
+  shared frontiers are dynamic-stack helper instrumentation and unsupported
+  wide/transpose DS forms; Sampled's lane-varying sequence state remains a
+  separate design problem.
 
 The current implementation is not the monolithic ConSan that the first gfx950
 port modified.  Architecture-sensitive policy is now distributed across

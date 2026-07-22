@@ -50,15 +50,15 @@ scratch before promotion.
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
 | **P0 Qwen3-0.6B prefill** | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown |
-| **P1 Sharktank TP1 prefill** | 🟨 current clean and paired: exact oracle, 120/120 accesses, complete analysis, 1.13x; reviewed exact-one fault detected one instability but contradicted its frozen external-oracle policy | 🩶 historical: clean 104/104 access + 31/31 barrier accepted | 🩶 historical: clean 104/104 access + 7/7 qualified barrier accepted | 🩶 historical: clean 104/104 access + 31/31 barrier accepted |
+| **P1 Sharktank TP1 prefill** | 🟨 current clean and paired: exact oracle, 120/120 accesses, complete analysis, 1.13x; reviewed exact-one fault detected one instability but contradicted its frozen external-oracle policy | 🟨 current exact oracle and 104/104 supported accesses plus 31/31 barriers; 16 newly inventoried `ds_*2_b64` sites remain semantically unsupported, so analysis is incomplete | 🩶 historical: clean 104/104 access + 7/7 qualified barrier accepted | 🩶 historical: clean 104/104 access + 31/31 barrier accepted |
 | **P1 Sharktank TP1 decode/combined** | 🟨 current clean and paired: both exact oracles, 240/240 accesses, complete analysis, 1.33x maximum; reviewed exact-one fault was schedule-masked and contradicted its frozen detection policy | 🩶 historical: clean 208/208 access + 62/62 barrier accepted | 🩶 historical: clean 208/208 access + 14/14 qualified barrier accepted | 🩶 historical: clean 208/208 access + 62/62 barrier accepted across six sequential runs |
 | **P2 Sharktank TP2 family** | 🟨 current clean: prefill, decode, and combined oracles pass; aggregate 936/936 accesses; complete analysis | 🩶 historical: clean 840/840 access + 168/168 barrier accepted | 🩶 historical: aggregate rejected: one 140-access + 10-barrier slice executes 0 | 🩶 historical: aggregate rejected: one 140-access + 28-barrier slice lowers 0 |
-| **P3 CLIP BF16** | 🟨 current clean: cosine oracle passes; 45/45 accesses; complete analysis | 🩶 historical: clean 39/39 access + 24/24 barrier accepted | 🩶 historical: clean 39/39 access + 20/20 qualified barrier accepted | 🩶 historical: clean 39/39 access + 24/24 barrier accepted |
-| **P4 hip-moi D128 block attention** | 🟩 current accepted bundle: exact clean, 12/12 coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary | 🟥 current scalar fallback lacks entry-local scratch for one connected component |
-| **P4 hip-moi D128 pressure attention** | 🟩 current accepted bundle: four exact clean oracles, 12/12 coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🩶 historical: clean 12/12 access + 4/4 barrier accepted | 🩶 historical: clean 12/12 access accepted | 🩶 historical: clean 12/12 access + 4/4 barrier accepted |
-| **P4 hip-moi MFMA attention** | 🟩 current accepted bundle: two exact clean oracles, 12/12 group-FLAT coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🩶 historical: clean 12/12 access + 4/4 barrier accepted | 🩶 historical: clean 12/12 access accepted | 🩶 historical: clean 12/12 access + 4/4 barrier accepted |
-| **P4 hip-moi Stream-K arrival** | 🟩 current accepted bundle: exact clean, 4/4 coverage, paired 143.70x, reviewed exact-one CDNA4 atomic-order fault, containment, health, and clean provenance | 🩶 historical: clean 4/4 access + 10/10 atomic + 4/4 barrier + 16/16 fence accepted | 🩶 historical: clean 4/4 access + 10/10 atomic accepted | 🩶 historical: planner safely rejected persistent identity at a full ordinary-VGPR/AccVGPR boundary; scalar persistent state open |
-| **P4 hip-moi tree atomic-OR** | 🟩 current accepted bundle: both exact clean tests, 4/4 coverage, paired 185.5x, reviewed exact-one producer-release atomic-order fault, containment, health, and clean provenance | 🩶 historical: clean 4/4 access + 10/10 atomic + 4/4 barrier + 16/16 fence accepted | 🩶 historical: clean 4/4 access + 10/10 atomic accepted | 🩶 historical: clean 4/4 access + 10/10 atomic + 4/4 barrier accepted |
+| **P3 CLIP BF16** | 🟨 current clean: cosine oracle passes; 45/45 accesses; complete analysis | 🟧 current cosine oracle and 39/39 supported accesses plus 24/24 barriers; six transpose/stride-64 sites remain unsupported and clean replay emits one false conflict | 🩶 historical: clean 39/39 access + 20/20 qualified barrier accepted | 🩶 historical: clean 39/39 access + 24/24 barrier accepted |
+| **P4 hip-moi D128 block attention** | 🟩 current accepted bundle: exact clean, 12/12 coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🟧 current oracle passes with 6/12 accesses and 4/4 barriers; six shared-helper accesses hit the typed dynamic-stack resource limit | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary | 🟥 current scalar fallback lacks entry-local scratch for one connected component |
+| **P4 hip-moi D128 pressure attention** | 🟩 current accepted bundle: four exact clean oracles, 12/12 coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🟧 current four-oracle run passes with 6/12 accesses and 4/4 barriers; six shared-helper accesses hit the typed dynamic-stack resource limit | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary | 🩶 historical: clean 12/12 access + 4/4 barrier accepted |
+| **P4 hip-moi MFMA attention** | 🟩 current accepted bundle: two exact clean oracles, 12/12 group-FLAT coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🟧 current two-oracle run passes with 6/12 accesses and 4/4 barriers; six shared-helper accesses hit the typed dynamic-stack resource limit | 🩶 historical: clean 12/12 access accepted | 🩶 historical: clean 12/12 access + 4/4 barrier accepted |
+| **P4 hip-moi Stream-K arrival** | 🟩 current accepted bundle: exact clean, 4/4 coverage, paired 143.70x, reviewed exact-one CDNA4 atomic-order fault, containment, health, and clean provenance | 🟧 current oracle passes with 4/4 accesses, 4/4 barriers, and 16/16 fences; all 10 shared-helper atomics hit the typed dynamic-stack limit | 🩶 historical: clean 4/4 access + 10/10 atomic accepted | 🩶 historical: planner safely rejected persistent identity at a full ordinary-VGPR/AccVGPR boundary; scalar persistent state open |
+| **P4 hip-moi tree atomic-OR** | 🟩 current accepted bundle: both exact clean tests, 4/4 coverage, paired 185.5x, reviewed exact-one producer-release atomic-order fault, containment, health, and clean provenance | 🟧 current oracles pass with 4/4 accesses, 4/4 barriers, and 16/16 fences; all 10 shared-helper atomics hit the typed dynamic-stack limit | 🩶 historical: clean 4/4 access + 10/10 atomic accepted | 🩶 historical: clean 4/4 access + 10/10 atomic + 4/4 barrier accepted |
 | **P4 hip-moi Jakub attention** | 🩶 Applicability inventory pending | 🩶 Applicability inventory pending | 🩶 Applicability inventory pending | 🩶 Applicability inventory pending |
 
 ### Current-matrix executable audit
@@ -286,6 +286,22 @@ trap, crash, output mismatch, or GPU reset is an execution outcome rather than
 a ConSan detection.
 
 ## Progress log
+
+- 2026-07-22: Record/Replay now preserves the compiler's CDNA4
+  ordinary/accumulator VGPR boundary by selecting fresh wave-uniform scalar
+  owner/epoch state when a persistent VGPR pair cannot fit.  Commit
+  `15e84c6d6c` retains `ACCUM_OFFSET`, passes its focused gfx950 and gfx1250
+  regressions, all 727 ConSan host tests, and 112 validator tests.  A current
+  gfx1250 D128-block regression remains accepted at 18/18 accesses and 4/4
+  barriers.  On physical gfx950, TP1 prefill now executes with 104/104
+  supported accesses and 31/31 barriers instead of failing during planning.
+  D128 block, D128 pressure, and MFMA attention execute their exact oracles
+  with 6/12 accesses and 4/4 barriers.  Stream-K arrival and tree atomic-OR
+  execute with 4/4 accesses, 4/4 barriers, and 16/16 fences.  Their remaining
+  gaps are independently typed: unsupported DS forms in TP1/CLIP, and the
+  existing Record/Replay dynamic-stack resource limit in shared hip-moi
+  access/atomic helpers.  CLIP additionally exposes one clean replay false
+  conflict, so none of these partial rows is promoted to green.
 
 - 2026-07-22: Tree atomic-OR SuperCollider is green from exact clean tip
   `b536af8f67`.  Paired artifact
