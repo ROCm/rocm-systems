@@ -104,7 +104,7 @@ flowchart TD
     SA0["SA0 TODO<br/>Sampled TP2 admission/selection<br/>and broader runtime coverage"]
     SA1["SA1 TODO<br/>Sampled immediate and host-scan agreement"]
     IS0A["IS0A DONE<br/>per-owner CDNA4 persistent tuples<br/>below AccVGPR and VCC boundaries"]
-    IS0["IS0 DONE<br/>VCC-safe scalar spill and generation-qualified LDS;<br/>TP1 + TP2, D128 block, MFMA green"]
+    IS0["IS0 DONE<br/>VCC-safe scalar/private state and generation-qualified LDS;<br/>TP1 + TP2 + CLIP, D128 block, MFMA green"]
     IS1["IS1 TODO<br/>Stream-K scalar state installed;<br/>AcqRel metadata race remains"]
     F0["F0 MILESTONE<br/>all four standard-v1 profiles<br/>feature-complete on focused tests"]
   end
@@ -271,6 +271,18 @@ flowchart TD
 ```
 
 ## Reconnaissance conclusions
+
+- 2026-07-22: CLIP Inline Shadow is green inside DONE/green `IS0` after commit
+  `c24431f77e` closes a private-state lifetime gap.  Generation-tagged CDNA4
+  local shadows now retain the workgroup key at entry alongside private
+  owner/epoch state instead of rereading compiler-reusable entry SGPRs at the
+  access.  The physical clean result changes from 177,152 explicitly
+  unsupported encounters to complete 45/45 access plus 24/24 barrier coverage
+  and a passing cosine oracle.  Committed-tip paired artifact
+  `consan-validation-gfx950-clip-inline-private-key-committed-20260722-235`
+  accepts at 1.51x; reviewed exact-one qualified-miss artifact
+  `...-fault-20260722-236` accepts cleanup, health, and clean provenance.  The
+  `IS0` label and green Mermaid assignment now include CLIP explicitly.
 
 - 2026-07-22: CLIP Record/Replay is green within ACTIVE/blue `RR0` after
   commit `8075a15390` partitions CDNA4 replay records by hardware dispatch
