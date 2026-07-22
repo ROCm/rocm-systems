@@ -105,14 +105,113 @@ def _shared_execute_body(execute_shared: str, name: str, next_name: str) -> str:
 
 def _generated_method_body(cpp: str, class_name: str, next_class_name: str) -> str:
     start = cpp.index(f'void {class_name}::execute_impl')
-    end = cpp.index(f'{next_class_name}::{next_class_name}', start)
+    end_markers = (
+        f'{next_class_name}::{next_class_name}',
+        f'const bool {next_class_name}::execute_registered_',
+    )
+    end = min(
+        cpp.index(marker, start) for marker in end_markers if marker in cpp[start:]
+    )
     return cpp[start:end]
 
 
 def _generated_constructor_body(cpp: str, class_name: str) -> str:
     start = cpp.index(f'{class_name}::{class_name}(')
-    end = cpp.index(f'\nvoid {class_name}::execute_impl', start)
+    end = cpp.index('\n\n', start)
     return cpp[start:end]
+
+
+def _execution_source_path(path: Path) -> Path:
+    """Return the source containing execution bodies for a generated file."""
+    if path.parent.name != 'gfx1250':
+        return path
+
+    stem = path.stem
+    if stem.rsplit('_', 1)[-1].isdigit():
+        stem = stem.rsplit('_', 1)[0]
+    if stem.startswith('vop3_'):
+        stem = stem.replace('vop3_', 'vop3_exec_', 1)
+    elif stem.startswith('vopc_'):
+        stem = stem.replace('vopc_', 'vopc_exec_', 1)
+    else:
+        stem += '_exec'
+    return path.with_name(f'{stem}.cpp')
+
+
+def test_gfx1250_model_sources_do_not_include_execution_headers(
+    gfx1250_generated_root: Path,
+):
+    forbidden_includes = (
+        '#include "rocjitsu/vm/',
+        '#include "rocjitsu/isa/arch/amdgpu/gfx1250/addr_calc.h"',
+        '#include "rocjitsu/isa/arch/amdgpu/gfx1250/mma_exec.h"',
+        '#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"',
+        '#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"',
+        '#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"',
+        '#include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"',
+    )
+    model_sources = [
+        path
+        for path in gfx1250_generated_root.glob('*.cpp')
+        if '_exec' not in path.stem and path.name != 'addr_calc.cpp'
+    ]
+
+    assert model_sources
+    for path in model_sources:
+        source = path.read_text()
+        for forbidden in forbidden_includes:
+            assert forbidden not in source, f'{path.name} includes {forbidden}'
+
+    for header_name in ('isa.h', 'operand.h', 'encodings.h'):
+        header = (gfx1250_generated_root / header_name).read_text()
+        assert '#include "rocjitsu/vm/' not in header
+        assert 'shared/dpp_sdwa_ops.h' not in header
+
+
+def test_gfx1250_model_include_graph_does_not_reach_vm(
+    rocjitsu_source_root: Path,
+    gfx1250_generated_root: Path,
+):
+    include_roots = (
+        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'src',
+        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'include',
+        rocjitsu_source_root / 'lib' / 'util' / 'include',
+        rocjitsu_source_root / 'lib' / 'simdojo' / 'include',
+    )
+    model_sources = [
+        path
+        for path in gfx1250_generated_root.glob('*.cpp')
+        if '_exec' not in path.stem and path.name != 'addr_calc.cpp'
+    ]
+    pending = [(path, [path]) for path in model_sources]
+    visited = set()
+
+    while pending:
+        path, chain = pending.pop()
+        if path in visited:
+            continue
+        visited.add(path)
+
+        for line in path.read_text().splitlines():
+            stripped = line.strip()
+            if not stripped.startswith('#include "'):
+                continue
+            include = stripped.removeprefix('#include "').split('"', 1)[0]
+            assert not include.startswith(('rocjitsu/vm/', 'simdojo/')), (
+                'model include graph reaches execution header: '
+                + ' -> '.join(item.name for item in chain)
+                + f' -> {include}'
+            )
+            resolved = next(
+                (
+                    root / include
+                    for root in include_roots
+                    if (root / include).is_file()
+                ),
+                None,
+            )
+            if resolved is not None:
+                pending.append((resolved, [*chain, resolved]))
 
 
 def _parse_cdna_specs(*names: str):
@@ -1324,12 +1423,13 @@ def test_gfx1250_generated_operand_merges_packed_16bit_destinations(
     gfx1250_generated_root: Path,
 ):
     operand_cpp = (gfx1250_generated_root / 'operand.cpp').read_text()
+    operand_exec_cpp = (gfx1250_generated_root / 'operand_exec.cpp').read_text()
     operand_h = (gfx1250_generated_root / 'operand.h').read_text()
 
     assert 'if (ev >= 0 && ev <= 127)' in operand_cpp
     assert 'packed_16bit_vgpr_dst(packed_16bit_dst_' in operand_cpp
-    assert 'packed->shift ? 0x0000ffffu : 0xffff0000u' in operand_cpp
-    assert 'amdgpu::apply_gpr_idx(wf, off, false)' in operand_cpp
+    assert 'packed->shift ? 0x0000ffffu : 0xffff0000u' in operand_exec_cpp
+    assert 'amdgpu::apply_gpr_idx(wf, off, false)' in operand_exec_cpp
     assert 'void Operand::write_lane_chunk' in operand_cpp
     assert 'void write_lane_chunk(amdgpu::Wavefront &wf' in operand_h
     assert 'bool packed_16bit_dst = false' in operand_h
@@ -1352,9 +1452,9 @@ def test_gfx1250_generated_vop1_selects_packed_destination_overload(
 ):
     vop1_cpp = (gfx1250_generated_root / 'vop1.cpp').read_text()
 
-    start = vop1_cpp.index('VCvtF16F32Vop1::VCvtF16F32Vop1')
-    end = vop1_cpp.index('void VCvtF16F32Vop1::execute_impl', start)
-    compact_ctor = ''.join(vop1_cpp[start:end].split())
+    compact_ctor = ''.join(
+        _generated_constructor_body(vop1_cpp, 'VCvtF16F32Vop1').split()
+    )
 
     assert (
         'vdst(16,OperandType::OPR_VGPR,static_cast<unsignedshort>('
@@ -1367,9 +1467,7 @@ def test_gfx1250_generated_vop2_fmac_f16_reads_packed_vdst(
 ):
     vop2_cpp = (gfx1250_generated_root / 'vop2.cpp').read_text()
 
-    start = vop2_cpp.index('VFmacF16Vop2::VFmacF16Vop2')
-    end = vop2_cpp.index('void VFmacF16Vop2::execute_impl', start)
-    ctor = vop2_cpp[start:end]
+    ctor = _generated_constructor_body(vop2_cpp, 'VFmacF16Vop2')
 
     assert 'vdst(16, OperandType::OPR_VGPR,' in ctor
     compact_ctor = ''.join(ctor.split())
@@ -1383,18 +1481,21 @@ def test_gfx1250_generated_high_vgpr_paths_use_logical_operands(
     gfx1250_generated_root: Path, execute_shared_path: Path
 ):
     vop1 = (gfx1250_generated_root / 'vop1.cpp').read_text()
+    vop1_exec = (gfx1250_generated_root / 'vop1_exec.cpp').read_text()
     vop2 = (gfx1250_generated_root / 'vop2.cpp').read_text()
+    vop2_exec = (gfx1250_generated_root / 'vop2_exec.cpp').read_text()
     vds = (gfx1250_generated_root / 'vds.cpp').read_text()
+    vds_exec = (gfx1250_generated_root / 'vds_exec.cpp').read_text()
     vglobal = (gfx1250_generated_root / 'vglobal.cpp').read_text()
     vopd = (gfx1250_generated_root / 'vopd.cpp').read_text()
     shared = execute_shared_path.read_text()
 
-    mov_b16 = _generated_method_body(vop1, 'VMovB16Vop1', 'VMovB64Vop1')
+    mov_b16 = _generated_method_body(vop1_exec, 'VMovB16Vop1', 'VMovB64Vop1')
     assert 'read_lane(src0, lane)' in mov_b16
     assert 'write_lane(\n        vdst, lane,' in mov_b16
     assert 'wf.vgpr_alloc().base + ((inst_.src0 - 256) & 0x7fu)' not in mov_b16
 
-    fmac_f16 = _generated_method_body(vop2, 'VFmacF16Vop2', 'VFmamkF16Vop2')
+    fmac_f16 = _generated_method_body(vop2_exec, 'VFmacF16Vop2', 'VFmamkF16Vop2')
     assert 'read_lane(vdst, lane)' in fmac_f16
     assert 'write_lane(\n        vdst, lane,' in fmac_f16
     assert 'base + (inst_.vdst & 0x7fu), lane)' not in fmac_f16
@@ -1413,7 +1514,7 @@ def test_gfx1250_generated_high_vgpr_paths_use_logical_operands(
     assert (
         'd->dst_reg_base =\n      wf.vgpr_alloc().base +\n'
         '      *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, '
-        'vdst.vgpr_msb_role());' in vds
+        'vdst.vgpr_msb_role());' in vds_exec
     )
     assert 'data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);' in vds
     assert 'vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);' in vglobal
@@ -1430,7 +1531,7 @@ def test_gfx1250_generated_high_vgpr_paths_use_logical_operands(
 def test_gfx1250_generated_vop3_mad_u16_uses_true16_helpers(
     gfx1250_generated_root: Path,
 ):
-    vop3_ternary = (gfx1250_generated_root / 'vop3_ternary.cpp').read_text()
+    vop3_ternary = (gfx1250_generated_root / 'vop3_exec_ternary.cpp').read_text()
     body = _generated_method_body(vop3_ternary, 'VMadU16Vop3', 'VXadU32Vop3')
 
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT' not in body
@@ -1519,8 +1620,10 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     gfx1250_generated_root: Path,
 ):
     execute_shared = execute_shared_path.read_text()
-    gfx1250_vop3_alu = (gfx1250_generated_root / 'vop3_alu.cpp').read_text()
-    gfx1250_vop3_ternary = (gfx1250_generated_root / 'vop3_ternary.cpp').read_text()
+    gfx1250_vop3_alu = (gfx1250_generated_root / 'vop3_exec_alu.cpp').read_text()
+    gfx1250_vop3_ternary = (
+        gfx1250_generated_root / 'vop3_exec_ternary.cpp'
+    ).read_text()
 
     unary = _shared_execute_body(execute_shared, 'v_ceil_f16_vop3', 'v_ceil_f32_vop1')
     assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16' in unary
@@ -1640,8 +1743,8 @@ def test_generated_rdna4_local_vop3_pack_paths_use_selected_halves(
 def test_gfx1250_generated_vop3_lshrrev_b16_uses_true16_helpers(
     gfx1250_generated_root: Path,
 ):
-    vop3_alu_2 = (gfx1250_generated_root / 'vop3_alu_2.cpp').read_text()
-    body = _generated_method_body(vop3_alu_2, 'VLshrrevB16Vop3', 'VAshrrevI16Vop3')
+    vop3_alu = (gfx1250_generated_root / 'vop3_exec_alu.cpp').read_text()
+    body = _generated_method_body(vop3_alu, 'VLshrrevB16Vop3', 'VAshrrevI16Vop3')
 
     assert 'uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);' in body
     assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
@@ -1653,7 +1756,7 @@ def test_gfx1250_generated_vop3_lshrrev_b16_uses_true16_helpers(
 def test_gfx1250_generated_vop3_auxiliary_masks_are_wave32(
     gfx1250_generated_root: Path,
 ):
-    source = (gfx1250_generated_root / 'vop3_alu_2.cpp').read_text()
+    source = (gfx1250_generated_root / 'vop3_alu.cpp').read_text()
 
     for class_name in (
         'VDivScaleF32Vop3SdstEnc',
@@ -1661,8 +1764,7 @@ def test_gfx1250_generated_vop3_auxiliary_masks_are_wave32(
         'VMadCoU64U32Vop3SdstEnc',
         'VMadCoI64I32Vop3SdstEnc',
     ):
-        ctor = source.split(f'{class_name}::{class_name}', 1)[1]
-        ctor = ctor.split(f'void {class_name}::execute_impl', 1)[0]
+        ctor = _generated_constructor_body(source, class_name)
         assert 'sdst(32, OperandType::OPR_SREG' in ctor
 
 
@@ -1674,6 +1776,7 @@ def test_gfx1250_generated_vop3_add_f16_applies_dpp(
         path.read_text()
         for path in sorted(gfx1250_generated_root.glob('vop3_alu*.cpp'))
     )
+    vop3_exec_alu = (gfx1250_generated_root / 'vop3_exec_alu.cpp').read_text()
 
     vop3_base = encodings_h[
         encodings_h.index('class Vop3') : encodings_h.index('class Vop3p')
@@ -1681,17 +1784,13 @@ def test_gfx1250_generated_vop3_add_f16_applies_dpp(
     assert 'uint32_t dpp_ctrl_ = 0;' in vop3_base
     assert 'uint32_t dpp_fi_ = 1;' in vop3_base
 
-    start = vop3_alu.index('VAddF16Vop3::VAddF16Vop3')
-    end = vop3_alu.index('void VAddF16Vop3::execute_impl', start)
-    ctor = vop3_alu[start:end]
+    ctor = _generated_constructor_body(vop3_alu, 'VAddF16Vop3')
     assert 'Vop3VopDpp16MachineInst' in ctor
     assert 'dpp_ctrl_ = dp->dpp_ctrl;' in ctor
     assert 'dpp_fi_ = dp->fi;' in ctor
     assert 'src_dpp8_fi' in ctor
 
-    start = vop3_alu.index('void VAddF16Vop3::execute_impl')
-    end = vop3_alu.index('VAddNcU16Vop3::VAddNcU16Vop3', start)
-    body = vop3_alu[start:end]
+    body = _generated_method_body(vop3_exec_alu, 'VAddF16Vop3', 'VAddNcU16Vop3')
     assert 'dpp_bound_ctrl_, dpp_fi_' in body
     assert 'apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_' in body
     assert 'if (dpp_src0_)' in body
@@ -1703,17 +1802,14 @@ def test_gfx1250_generated_vop1_dpp8_uses_src0_marker_for_fi(
     gfx1250_generated_root: Path,
 ):
     vop1 = (gfx1250_generated_root / 'vop1.cpp').read_text()
+    vop1_exec = (gfx1250_generated_root / 'vop1_exec.cpp').read_text()
 
-    start = vop1.index('VMovB32Vop1::VMovB32Vop1')
-    end = vop1.index('void VMovB32Vop1::execute_impl', start)
-    ctor = vop1[start:end]
+    ctor = _generated_constructor_body(vop1, 'VMovB32Vop1')
     assert 'src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0)' in ctor
     assert 'dp8->fi' not in ctor
     assert 'dpp_fi_ = dp->fi;' in ctor
 
-    start = vop1.index('void VMovB32Vop1::execute_impl')
-    end = vop1.index('VReadfirstlaneB32Vop1::VReadfirstlaneB32Vop1', start)
-    body = vop1[start:end]
+    body = _generated_method_body(vop1_exec, 'VMovB32Vop1', 'VReadfirstlaneB32Vop1')
     assert 'dpp_bound_ctrl_, dpp_fi_' in body
     assert 'apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_' in body
 
@@ -1721,10 +1817,10 @@ def test_gfx1250_generated_vop1_dpp8_uses_src0_marker_for_fi(
 def test_gfx1250_generated_dpp_cleanup_resolves_high_destination_bank(
     gfx1250_generated_root: Path,
 ):
-    vop1 = (gfx1250_generated_root / 'vop1.cpp').read_text()
-    vop2 = (gfx1250_generated_root / 'vop2.cpp').read_text()
-    vop3 = (gfx1250_generated_root / 'vop3_alu.cpp').read_text()
-    vop3p = (gfx1250_generated_root / 'vop3p.cpp').read_text()
+    vop1 = (gfx1250_generated_root / 'vop1_exec.cpp').read_text()
+    vop2 = (gfx1250_generated_root / 'vop2_exec.cpp').read_text()
+    vop3 = (gfx1250_generated_root / 'vop3_exec_alu.cpp').read_text()
+    vop3p = (gfx1250_generated_root / 'vop3p_exec.cpp').read_text()
 
     bodies = (
         _generated_method_body(vop1, 'VMovB32Vop1', 'VReadfirstlaneB32Vop1'),
@@ -1801,22 +1897,18 @@ def test_generated_dpp_cleanup_uses_full_write_mask_for_dpp16(
 
     for arch in vop1_arches:
         arch_root = amdgpu_generated_root / arch
-        vop1 = (arch_root / 'vop1.cpp').read_text()
+        vop1 = _execution_source_path(arch_root / 'vop1.cpp').read_text()
 
-        start = vop1.index('void VMovB32Vop1::execute_impl')
-        end = vop1.index('VReadfirstlaneB32Vop1::VReadfirstlaneB32Vop1', start)
-        body = vop1[start:end]
+        body = _generated_method_body(vop1, 'VMovB32Vop1', 'VReadfirstlaneB32Vop1')
         assert 'amdgpu::dpp::dpp_write_mask(' in body
         assert 'dpp_bound_ctrl_' in body
         assert 'dpp_bound_ctrl_, dpp_fi_' in body
 
     for arch, vopc_name in vopc_names.items():
         arch_root = amdgpu_generated_root / arch
-        vopc = (arch_root / vopc_name).read_text()
+        vopc = _execution_source_path(arch_root / vopc_name).read_text()
 
-        start = vopc.index('void VCmpEqU32Vopc::execute_impl')
-        end = vopc.index('VCmpLeU32Vopc::VCmpLeU32Vopc', start)
-        body = vopc[start:end]
+        body = _generated_method_body(vopc, 'VCmpEqU32Vopc', 'VCmpLeU32Vopc')
         assert 'amdgpu::dpp::dpp_write_mask(' in body
         assert 'dpp_bound_ctrl_' in body
         assert 'dpp_bound_ctrl_, dpp_fi_' in body
@@ -1860,11 +1952,9 @@ def test_generated_cmpx_dpp_cleanup_preserves_exec(amdgpu_generated_root: Path):
     }
 
     for arch, path in vopc_paths.items():
-        vopc = path.read_text()
+        vopc = _execution_source_path(path).read_text()
 
-        start = vopc.index('void VCmpxEqU32Vopc::execute_impl')
-        end = vopc.index('VCmpxLeU32Vopc::VCmpxLeU32Vopc', start)
-        body = vopc[start:end]
+        body = _generated_method_body(vopc, 'VCmpxEqU32Vopc', 'VCmpxLeU32Vopc')
         assert 'uint64_t dpp_old_exec_ = wf.exec();' in body, arch
         assert 'uint64_t new_exec = wf.exec();' in body, arch
         assert 'dpp_old_exec_ & ~dpp_write_mask_' in body, arch
@@ -2121,11 +2211,9 @@ def test_gfx1250_generated_fp8_vop3_byte_select_uses_local_inst_member(
 
     assert 'inline void execute_v_cvt_f32_fp8_vop3' not in execute_shared
 
-    gfx1250_vop3_cvt = (gfx1250_generated_root / 'vop3_cvt.cpp').read_text()
+    gfx1250_vop3_cvt = (gfx1250_generated_root / 'vop3_exec_cvt.cpp').read_text()
 
-    start = gfx1250_vop3_cvt.index('void VCvtF32Fp8Vop3::execute_impl')
-    end = gfx1250_vop3_cvt.index('VCvtF32Bf8Vop3::VCvtF32Bf8Vop3', start)
-    body = gfx1250_vop3_cvt[start:end]
+    body = _generated_method_body(gfx1250_vop3_cvt, 'VCvtF32Fp8Vop3', 'VCvtF32Bf8Vop3')
 
     assert 'amdgpu::vop3_opsel(inst_)' in body
     assert 'amdgpu::vop3_fp8_decode_e5m3(*this)' in body
@@ -2134,9 +2222,7 @@ def test_gfx1250_generated_fp8_vop3_byte_select_uses_local_inst_member(
     assert 'amdgpu::vop3_opsel(inst.inst_)' not in body
     assert 'amdgpu::vop3_fp8_decode_e5m3(inst_)' not in body
 
-    start = gfx1250_vop3_cvt.index('void VCvtF16Fp8Vop3::execute_impl')
-    end = gfx1250_vop3_cvt.index('VCvtF16Bf8Vop3::VCvtF16Bf8Vop3', start)
-    body = gfx1250_vop3_cvt[start:end]
+    body = _generated_method_body(gfx1250_vop3_cvt, 'VCvtF16Fp8Vop3', 'VCvtF16Bf8Vop3')
     body_words = ' '.join(body.split())
 
     assert '[[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);' in body
@@ -2186,6 +2272,10 @@ def test_gfx1250_helper_blocks_emit_hwreg_and_scaled_wmma_hooks():
     assert 'wf.set_wave_sched_mode_raw' in hwreg
     assert '[[maybe_unused]] bool read_hwreg' in hwreg
     assert '[[maybe_unused]] bool write_hwreg' in hwreg
+    assert 'HW_REG_IB_STS2_CLUSTER_ID_SHIFT = 6' in hwreg
+    assert 'wf.cluster_size() > 1 ? 1u : 0u' in hwreg
+    assert 'HW_REG_IB_STS2_WG_IN_CLUSTER_SHIFT = 21' in hwreg
+    assert 'wf.cluster_rank() & HW_REG_IB_STS2_WG_IN_CLUSTER_MASK' in hwreg
 
     assert codegen._supports_gfx1250_scaled_wmma_vop3px2()
     assert 'VWmmaScaleF32Vop3px2' in (codegen._emit_gfx1250_scaled_wmma_vop3px2_class())
@@ -2205,6 +2295,7 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
 
     codegen.gen_vopd()
     cpp = (tmp_path / 'gfx1250' / 'vopd.cpp').read_text()
+    exec_cpp = (tmp_path / 'gfx1250' / 'vopd_exec.cpp').read_text()
 
     assert '(word0 >> 24) == 0xCF' in cpp
     assert '[[maybe_unused]] bool vopd3' not in cpp
@@ -2214,25 +2305,30 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     assert 'is_float64_op(opx_), literal_, srcx0' in cpp
     assert 'is_float64_op(opy_), literal_, srcy0' in cpp
     assert 'case 3:\n              case 7:' not in cpp
-    assert 'if (lhs == 0.0f || rhs == 0.0f)' in cpp
-    src_neg_start = cpp.index('bool Vopd::uses_src_neg_modifier')
-    src_neg_body = cpp[
-        src_neg_start : cpp.index('uint32_t Vopd::apply_neg', src_neg_start)
+    assert 'if (lhs == 0.0f || rhs == 0.0f)' in exec_cpp
+    src_neg_start = exec_cpp.index('bool Vopd::uses_src_neg_modifier')
+    src_neg_body = exec_cpp[
+        src_neg_start : exec_cpp.index('uint32_t Vopd::apply_neg', src_neg_start)
     ]
     assert 'case kVopdCndmaskB32:' in src_neg_body
-    assert 'if (uses_src_neg_modifier(slot.op))' in cpp
-    execute_start = cpp.index('uint32_t Vopd::execute_slot')
-    fma_start = cpp.index('case kVopdFmaF32', execute_start)
-    fma_case = cpp[fma_start : cpp.index('case kVopdSubNcU32:', fma_start)]
+    assert 'if (uses_src_neg_modifier(slot.op))' in exec_cpp
+    assert 'Vopd::execute_slot' not in cpp
+    assert 'Vopd::execute_impl' not in cpp
+    assert 'ROCJITSU_ISA_MODEL_ONLY' not in cpp
+    execute_start = exec_cpp.index('uint32_t Vopd::execute_slot')
+    fma_start = exec_cpp.index('case kVopdFmaF32', execute_start)
+    fma_case = exec_cpp[fma_start : exec_cpp.index('case kVopdSubNcU32:', fma_start)]
     assert 'std::fma(std::bit_cast<float>(src0),' in fma_case
     assert 'std::bit_cast<float>(src1),' in fma_case
     assert 'std::bit_cast<float>(src2))' in fma_case
-    assert 'constexpr uint16_t kVopdFmaF64 = 32;' in cpp
-    assert 'constexpr uint16_t kVopdAddF64 = 33;' in cpp
-    assert 'constexpr uint16_t kVopdMulF64 = 34;' in cpp
-    assert 'constexpr uint16_t kVopdMaxNumF64 = 35;' in cpp
-    assert 'constexpr uint16_t kVopdMinNumF64 = 36;' in cpp
-    assert 'kVopdFmacF64' not in cpp
+    assert 'constexpr uint16_t kVopdFmaF64 = 32;' in exec_cpp
+    assert 'constexpr uint16_t kVopdAddF64 = 33;' in exec_cpp
+    assert 'bool Vopd::is_float64_op' in cpp
+    assert 'const bool Vopd::execute_registered_' in exec_cpp
+    assert 'constexpr uint16_t kVopdMulF64 = 34;' in exec_cpp
+    assert 'constexpr uint16_t kVopdMaxNumF64 = 35;' in exec_cpp
+    assert 'constexpr uint16_t kVopdMinNumF64 = 36;' in exec_cpp
+    assert 'kVopdFmacF64' not in exec_cpp
 
 
 def test_rdna4_profile_enables_generated_vopd():

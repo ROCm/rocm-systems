@@ -431,6 +431,23 @@ struct rocjpeg_api_callback_record_t
     }
 };
 
+struct rocshmem_api_callback_record_t
+{
+    uint64_t                                         timestamp = 0;
+    rocprofiler_callback_tracing_record_t            record    = {};
+    rocprofiler_callback_tracing_rocshmem_api_data_t payload   = {};
+    callback_arg_array_t                             args      = {};
+
+    template <typename ArchiveT>
+    void save(ArchiveT& ar) const
+    {
+        ar(cereal::make_nvp("timestamp", timestamp));
+        cereal::save(ar, record);
+        ar(cereal::make_nvp("payload", payload));
+        serialize_args(ar, args);
+    }
+};
+
 struct ompt_callback_record_t
 {
     uint64_t                                 timestamp = 0;
@@ -661,6 +678,7 @@ auto memory_allocation_cb_records  = std::deque<memory_allocation_callback_recor
 auto rccl_api_cb_records           = std::deque<rccl_api_callback_record_t>{};
 auto rocdecode_api_cb_records      = std::deque<rocdecode_api_callback_record_t>{};
 auto rocjpeg_api_cb_records        = std::deque<rocjpeg_api_callback_record_t>{};
+auto rocshmem_api_cb_records       = std::deque<rocshmem_api_callback_record_t>{};
 auto ompt_cb_records               = std::deque<ompt_callback_record_t>{};
 auto spm_cb_records                = std::deque<spm_counting_record_t>{};
 auto spm_bf_records                = std::deque<spm_profile_counting_record>{};
@@ -1093,6 +1111,19 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         rocjpeg_api_cb_records.emplace_back(
             rocjpeg_api_callback_record_t{ts, record, *data, std::move(args)});
     }
+    else if(record.kind == ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API)
+    {
+        auto* data = static_cast<rocprofiler_callback_tracing_rocshmem_api_data_t*>(record.payload);
+        auto  args = callback_arg_array_t{};
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+            rocprofiler_iterate_callback_tracing_kind_operation_args(
+                record, save_args, record.phase, &args);
+
+        static auto _mutex = std::mutex{};
+        auto        _lk    = std::unique_lock<std::mutex>{_mutex};
+        rocshmem_api_cb_records.emplace_back(
+            rocshmem_api_callback_record_t{ts, record, *data, std::move(args)});
+    }
     else
     {
         throw std::runtime_error{"unsupported callback kind"};
@@ -1115,8 +1146,11 @@ auto rccl_api_bf_records      = std::deque<rocprofiler_buffer_tracing_rccl_api_r
 auto rocdecode_api_bf_records = std::deque<rocprofiler_buffer_tracing_rocdecode_api_record_t>{};
 auto rocdecode_api_ext_bf_records =
     std::deque<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>{};
-auto rocjpeg_api_bf_records = std::deque<rocprofiler_buffer_tracing_rocjpeg_api_record_t>{};
-auto ompt_bf_records        = std::deque<rocprofiler_buffer_tracing_ompt_record_t>{};
+auto rocjpeg_api_bf_records  = std::deque<rocprofiler_buffer_tracing_rocjpeg_api_record_t>{};
+auto rocshmem_api_bf_records = std::deque<rocprofiler_buffer_tracing_rocshmem_api_record_t>{};
+auto rocshmem_api_ext_bf_records =
+    std::deque<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t>{};
+auto ompt_bf_records = std::deque<rocprofiler_buffer_tracing_ompt_record_t>{};
 auto kfd_page_migrate_event_records =
     std::deque<rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t>{};
 auto kfd_page_fault_event_records =
@@ -1270,6 +1304,20 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     static_cast<rocprofiler_buffer_tracing_rocjpeg_api_record_t*>(header->payload);
 
                 rocjpeg_api_bf_records.emplace_back(*record);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_rocshmem_api_record_t*>(header->payload);
+
+                rocshmem_api_bf_records.emplace_back(*record);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API_EXT)
+            {
+                auto* record = static_cast<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t*>(
+                    header->payload);
+
+                rocshmem_api_ext_bf_records.emplace_back(*record);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE)
             {
@@ -1490,6 +1538,9 @@ rocprofiler_context_id_t rocdecode_api_buffered_ctx         = {0};
 rocprofiler_context_id_t rocdecode_api_ext_buffered_ctx     = {0};
 rocprofiler_context_id_t rocjpeg_api_callback_ctx           = {0};
 rocprofiler_context_id_t rocjpeg_api_buffered_ctx           = {0};
+rocprofiler_context_id_t rocshmem_api_callback_ctx          = {0};
+rocprofiler_context_id_t rocshmem_api_buffered_ctx          = {0};
+rocprofiler_context_id_t rocshmem_api_ext_buffered_ctx      = {0};
 rocprofiler_context_id_t page_migrate_event_ctx             = {0};
 rocprofiler_context_id_t kfd_page_fault_event_ctx           = {0};
 rocprofiler_context_id_t kfd_queue_event_ctx                = {0};
@@ -1515,6 +1566,8 @@ rocprofiler_buffer_id_t rccl_api_buffered_buffer        = {};
 rocprofiler_buffer_id_t rocdecode_api_buffer            = {};
 rocprofiler_buffer_id_t rocdecode_api_ext_buffer        = {};
 rocprofiler_buffer_id_t rocjpeg_api_buffer              = {};
+rocprofiler_buffer_id_t rocshmem_api_buffer             = {};
+rocprofiler_buffer_id_t rocshmem_api_ext_buffer         = {};
 rocprofiler_buffer_id_t ompt_buffered_buffer            = {};
 rocprofiler_buffer_id_t page_migrate_event_buffer       = {};
 rocprofiler_buffer_id_t kfd_page_fault_event_buffer     = {};
@@ -1553,6 +1606,9 @@ auto contexts = std::unordered_map<std::string_view, rocprofiler_context_id_t*>{
     {"ROCDECODE_API_EXT_BUFFERED", &rocdecode_api_ext_buffered_ctx},
     {"ROCJPEG_API_CALLBACK", &rocjpeg_api_callback_ctx},
     {"ROCJPEG_API_BUFFERED", &rocjpeg_api_buffered_ctx},
+    {"ROCSHMEM_API_CALLBACK", &rocshmem_api_callback_ctx},
+    {"ROCSHMEM_API_BUFFERED", &rocshmem_api_buffered_ctx},
+    {"ROCSHMEM_API_EXT_BUFFERED", &rocshmem_api_ext_buffered_ctx},
     {"OMPT_BUFFERED", &ompt_buffered_ctx},
     {"KFD_EVENT_PAGE_MIGRATE", &page_migrate_event_ctx},
     {"KFD_EVENT_PAGE_FAULT", &kfd_page_fault_event_ctx},
@@ -1565,7 +1621,7 @@ auto contexts = std::unordered_map<std::string_view, rocprofiler_context_id_t*>{
     {"SPM_DISPATCH_COLLECTION", &spm_dispatch_collection_ctx},
     {"SPM_BUFFER_DISPATCH_COLLECTION", &spm_buffer_dispatch_collection_ctx}};
 
-auto buffers = std::array<rocprofiler_buffer_id_t*, 23>{&runtime_init_buffered_buffer,
+auto buffers = std::array<rocprofiler_buffer_id_t*, 25>{&runtime_init_buffered_buffer,
                                                         &hsa_api_buffered_buffer,
                                                         &hip_api_buffered_buffer,
                                                         &marker_api_buffered_buffer,
@@ -1580,6 +1636,8 @@ auto buffers = std::array<rocprofiler_buffer_id_t*, 23>{&runtime_init_buffered_b
                                                         &rocdecode_api_buffer,
                                                         &rocdecode_api_ext_buffer,
                                                         &rocjpeg_api_buffer,
+                                                        &rocshmem_api_buffer,
+                                                        &rocshmem_api_ext_buffer,
                                                         &kfd_page_fault_event_buffer,
                                                         &kfd_queue_event_buffer,
                                                         &kfd_unmap_from_gpu_event_buffer,
@@ -1790,6 +1848,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         "rocjpeg api callback tracing service configure");
 
     ROCPROFILER_CALL(
+        rocprofiler_configure_callback_tracing_service(rocshmem_api_callback_ctx,
+                                                       ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API,
+                                                       nullptr,
+                                                       0,
+                                                       tool_tracing_callback,
+                                                       nullptr),
+        "rocshmem api callback tracing service configure");
+
+    ROCPROFILER_CALL(
         rocprofiler_configure_callback_tracing_service(ompt_callback_ctx,
                                                        ROCPROFILER_CALLBACK_TRACING_OMPT,
                                                        nullptr,
@@ -1936,6 +2003,23 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                tool_tracing_buffered,
                                                tool_data,
                                                &rocjpeg_api_buffer),
+                     "buffer creation");
+
+    ROCPROFILER_CALL(rocprofiler_create_buffer(rocshmem_api_buffered_ctx,
+                                               buffer_size,
+                                               watermark,
+                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                               tool_tracing_buffered,
+                                               tool_data,
+                                               &rocshmem_api_buffer),
+                     "buffer creation");
+    ROCPROFILER_CALL(rocprofiler_create_buffer(rocshmem_api_ext_buffered_ctx,
+                                               buffer_size,
+                                               watermark,
+                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                               tool_tracing_buffered,
+                                               tool_data,
+                                               &rocshmem_api_ext_buffer),
                      "buffer creation");
 
     ROCPROFILER_CALL(rocprofiler_create_buffer(ompt_buffered_ctx,
@@ -2294,6 +2378,22 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         "buffer tracing service for rocjpeg api configure");
 
     ROCPROFILER_CALL(
+        rocprofiler_configure_buffer_tracing_service(rocshmem_api_buffered_ctx,
+                                                     ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API,
+                                                     nullptr,
+                                                     0,
+                                                     rocshmem_api_buffer),
+        "buffer tracing service for rocshmem api configure");
+
+    ROCPROFILER_CALL(
+        rocprofiler_configure_buffer_tracing_service(rocshmem_api_ext_buffered_ctx,
+                                                     ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API_EXT,
+                                                     nullptr,
+                                                     0,
+                                                     rocshmem_api_ext_buffer),
+        "buffer tracing service for rocshmem ext api configure");
+
+    ROCPROFILER_CALL(
         rocprofiler_configure_buffer_tracing_service(
             ompt_buffered_ctx, ROCPROFILER_BUFFER_TRACING_OMPT, nullptr, 0, ompt_buffered_buffer),
         "buffer tracing service for ompt configure");
@@ -2501,6 +2601,9 @@ tool_fini(void* tool_data)
               << ", rocjpeg_api_bf_records=" << rocjpeg_api_bf_records.size()
               << ", spm_cb_records=" << spm_cb_records.size()
               << ", spm_bf_records=" << spm_bf_records.size() << "...\n"
+              << ", rocshmem_api_callback_records=" << rocshmem_api_cb_records.size()
+              << ", rocshmem_api_bf_records=" << rocshmem_api_bf_records.size()
+              << ", rocshmem_api_ext_bf_records=" << rocshmem_api_ext_bf_records.size() << "...\n"
               << std::flush;
 
     auto* _call_stack = static_cast<call_stack_t*>(tool_data);
@@ -2599,6 +2702,7 @@ write_json(call_stack_t* _call_stack)
             json_ar(cereal::make_nvp("rocdecode_api_traces", rocdecode_api_cb_records));
             json_ar(cereal::make_nvp("rocjpeg_api_traces", rocjpeg_api_cb_records));
             json_ar(cereal::make_nvp("spm_records", spm_cb_records));
+            json_ar(cereal::make_nvp("rocshmem_api_traces", rocshmem_api_cb_records));
         } catch(std::exception& e)
         {
             std::cerr << "[" << getpid() << "][" << __FUNCTION__
@@ -2637,6 +2741,8 @@ write_json(call_stack_t* _call_stack)
             json_ar(cereal::make_nvp("rocdecode_api_ext_traces", rocdecode_api_ext_bf_records));
             json_ar(cereal::make_nvp("rocjpeg_api_traces", rocjpeg_api_bf_records));
             json_ar(cereal::make_nvp("spm_counter_collection", spm_bf_records));
+            json_ar(cereal::make_nvp("rocshmem_api_traces", rocshmem_api_bf_records));
+            json_ar(cereal::make_nvp("rocshmem_api_ext_traces", rocshmem_api_ext_bf_records));
         } catch(std::exception& e)
         {
             std::cerr << "[" << getpid() << "][" << __FUNCTION__
@@ -2675,7 +2781,9 @@ write_perfetto()
     }();
 
     // environment settings
-    auto shmem_size_hint = size_t{64};
+    // 64 KB filled up during HSA API emission under the DISCARD fill policy, silently
+    // dropping rocSHMEM events; 8 MB leaves enough headroom for the full trace.
+    auto shmem_size_hint = size_t{8192};
     auto buffer_size_kb  = size_t{1024000};
 
     auto* buffer_config = cfg.add_buffers();
@@ -2725,6 +2833,8 @@ write_perfetto()
         for(const auto& itr : rocdecode_api_bf_records)
             tids.emplace(itr.thread_id);
         for(const auto& itr : rocjpeg_api_bf_records)
+            tids.emplace(itr.thread_id);
+        for(const auto& itr : rocshmem_api_ext_bf_records)
             tids.emplace(itr.thread_id);
 
         for(const auto& itr : memory_copy_bf_records)
@@ -3084,6 +3194,49 @@ write_perfetto()
                                       sdk::add_perfetto_annotation(ctx, aitr.first, aitr.second);
                               });
             TRACE_EVENT_END(sdk::perfetto_category<sdk::category::rocjpeg_api>::name,
+                            track,
+                            itr.end_timestamp,
+                            "end_ns",
+                            itr.end_timestamp);
+        }
+
+        for(const auto& itr : rocshmem_api_ext_bf_records)
+        {
+            auto  name  = buffer_names.at(itr.kind, itr.operation);
+            auto& track = thread_tracks.at(itr.thread_id);
+
+            auto _args = callback_arg_array_t{};
+            if(enable_debug_annotations)
+            {
+                // The ext buffer record embeds the call arguments, so read them directly from
+                // the record instead of correlating against the callback records.
+                auto _record = itr;
+                for(const auto& _arg : sdk::serialization::get_buffer_tracing_args(_record))
+                    _args.emplace_back(_arg.name, _arg.value);
+            }
+
+            TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::rocshmem_api>::name,
+                              ::perfetto::StaticString(name.data()),
+                              track,
+                              itr.start_timestamp,
+                              ::perfetto::Flow::ProcessScoped(itr.correlation_id.internal),
+                              "begin_ns",
+                              itr.start_timestamp,
+                              "tid",
+                              itr.thread_id,
+                              "kind",
+                              itr.kind,
+                              "operation",
+                              itr.operation,
+                              "corr_id",
+                              itr.correlation_id.internal,
+                              "ancestor_id",
+                              itr.correlation_id.ancestor,
+                              [&](::perfetto::EventContext ctx) {
+                                  for(const auto& aitr : _args)
+                                      sdk::add_perfetto_annotation(ctx, aitr.first, aitr.second);
+                              });
+            TRACE_EVENT_END(sdk::perfetto_category<sdk::category::rocshmem_api>::name,
                             track,
                             itr.end_timestamp,
                             "end_ns",

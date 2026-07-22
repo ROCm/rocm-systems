@@ -143,12 +143,19 @@ def pytest_configure(config: pytest.Config) -> None:
     config.option.no_header = True
     config.option.reportchars += "s"  # -rs
 
+    # CTest generation only collects tests to emit CTestTestfile.cmake
+    if config.getoption("--ctest-mode", default="off") == "generate":
+        from rocprofsys.cache import disable_for_process
+
+        disable_for_process()
+
     if config.getoption("--ctest-mode", default="off") == "cleanup":
         _run_cleanup()
         pytest.exit("Cleanup complete", returncode=0)
 
     if config.getoption("--show-config-only", default=False):
         pytest._config_ref = config
+        _seed_capability_cache()
         header = _generate_rocprofsys_config_header()
         for line in header:
             print(line)
@@ -1281,6 +1288,101 @@ def _ctest_generate_tests(
 
 
 # ----------------------------------------------------------------------------
+# Cache warmup
+# ----------------------------------------------------------------------------
+
+
+def _seed_object_cached_properties(obj: object) -> None:
+    """Access every ``persistent_cached_property`` on ``obj`` to compute+store it."""
+    from rocprofsys.cache import SerializationError, persistent_cached_property
+
+    seen: set[str] = set()
+    for klass in type(obj).__mro__:
+        for name, attr in vars(klass).items():
+            if name in seen or not isinstance(attr, persistent_cached_property):
+                continue
+            seen.add(name)
+            try:
+                getattr(obj, name)
+            except SerializationError:
+                raise
+            except Exception:
+                pass
+
+
+def _reset_cache_for_regeneration(store) -> None:
+    """Discard the previous run's cache so every probe recomputes and rewrites.
+
+    Clears the on-disk store and the in-process memoization on
+    ``get_rocprof_config`` so nothing stale carries over.
+    """
+    cache_existed = store.path.exists()
+    print(
+        f"Overwriting old cache file: {store.path}"
+        if cache_existed
+        else f"Generating cache file: {store.path}"
+    )
+    store.clear()
+    try:
+        get_rocprof_config.cache_clear()
+    except Exception:
+        pass
+
+
+def _warm_gpu_probes(rocprof_config: RocprofsysConfig) -> None:
+    """Compute + store the GPU / ROCm tooling probes for the active ROCm path."""
+    from rocprofsys.cache import SerializationError
+
+    for probe in (detect_gpu, get_offload_extractor, get_xnack_support):
+        try:
+            probe(rocprof_config.rocm_path)
+        except SerializationError:
+            raise
+        except Exception as e:
+            print(f"Warning: seeding {probe.__name__} failed: {e}")
+
+
+def _warm_cached_properties(rocprof_config: RocprofsysConfig) -> None:
+    """Seed every non-target-dependent persistent_cached_property (config + capabilities)."""
+    from rocprofsys.cache import SerializationError
+
+    _seed_object_cached_properties(rocprof_config)
+    try:
+        cap = rocprof_config.capabilities
+    except SerializationError:
+        raise
+    except Exception:
+        cap = None
+    if cap is not None:
+        _seed_object_cached_properties(cap)
+
+
+def _seed_capability_cache() -> None:
+    """(Re)generate the persistent capability cache during the config setup step.
+
+    This is handled by ``rocprofiler-systems-pytest-config`` test (``--show-config-only``).
+    This is always run once via ``FIXTURES_SETUP`` and ``FIXTURE_REQUIRED``.
+    """
+    from rocprofsys.cache import SerializationError, get_shared_cache
+
+    store = get_shared_cache()
+    if store is None:
+        return  # caching disabled/unavailable
+
+    _reset_cache_for_regeneration(store)
+
+    try:
+        rocprof_config = get_rocprof_config()
+    except SerializationError:
+        raise
+    except Exception:
+        return
+
+    _warm_gpu_probes(rocprof_config)
+    _warm_cached_properties(rocprof_config)
+
+
+# ----------------------------------------------------------------------------
 # Other helpers
 # ----------------------------------------------------------------------------
 
@@ -1617,7 +1719,10 @@ def get_gpu_info() -> GPUInfo:
         rocprof_config = get_rocprof_config()
     except Exception as e:
         pytest.exit(f"{e}")
-    return detect_gpu(rocprof_config.rocm_path)
+    try:
+        return detect_gpu(rocprof_config.rocm_path)
+    except Exception as e:
+        pytest.exit(f"Failed to detect GPU: {e}")
 
 
 def _run_cleanup() -> None:
@@ -1650,10 +1755,14 @@ def _run_cleanup() -> None:
 
 def _cleanup_temp_patterns() -> list[str]:
     """Return list of rocprofiler-systems temp file patterns to clean up."""
+    from rocprofsys.cache import resolve_username
+
     tmpdir = os.environ.get("ROCPROFSYS_TMPDIR", os.environ.get("TMPDIR", "/tmp"))
     dirs = ["/tmp"]
     if tmpdir and not tmpdir.startswith("%") and tmpdir != "/tmp":
         dirs.append(tmpdir)
+
+    user = resolve_username()
 
     patterns = []
     for d in dirs:
@@ -1674,6 +1783,10 @@ def _cleanup_temp_patterns() -> list[str]:
                 f"{d}/core.*",
             ]
         )
+        # The persistent capability cache lives in a per-user subdir
+        # (``<tmp>/$USER/rocprofsys-syscache-*.tmp``; see cache.py).
+        if user:
+            patterns.append(f"{d}/{user}/rocprofsys-*.tmp")
     return patterns
 
 
@@ -2321,6 +2434,8 @@ def assert_perfetto(subtests, tests_dir, request, test_output_dir):
                 perfetto = Path(test_output_dir) / perfetto_file
             else:
                 perfetto = result.perfetto_file
+            if perfetto is None:
+                pytest.fail("No Perfetto trace file was produced by the run")
             if not perfetto.exists():
                 pytest.fail(f"Perfetto trace file {perfetto} not found")
 
