@@ -16,6 +16,7 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <exception>
 #include <fcntl.h>
 #include <hip/hip_runtime_api.h>
@@ -23,6 +24,7 @@
 #include <memory>
 #include <stdexcept>
 #include <system_error>
+#include <unistd.h>
 
 using namespace hipFile;
 using namespace std;
@@ -202,18 +204,21 @@ Fastpath::_io_impl(IoType type, shared_ptr<IFile> file, shared_ptr<IBuffer> buff
     try {
         switch (type) {
             case IoType::Read:
-                fprintf(stderr, "fastpath read size: %zu\n", size);
+                std::fprintf(stderr, "fastpath read pid: %d size: %zu\n", static_cast<int>(getpid()), size);
                 nbytes = Context<Hip>::get()->hipAmdFileRead(handle, devptr, size, file_offset);
-                ioTracker.complete(nbytes);
                 break;
             case IoType::Write:
-                fprintf(stderr, "fastpath write size: %zu\n", size);
+                std::fprintf(stderr, "fastpath write pid: %d size: %zu\n", static_cast<int>(getpid()), size);
                 nbytes = Context<Hip>::get()->hipAmdFileWrite(handle, devptr, size, file_offset);
-                ioTracker.complete(nbytes);
                 break;
             default:
                 throw std::runtime_error("Invalid IoType");
         }
+        if (static_cast<ssize_t>(nbytes) < 0) {
+            const int io_errno{errno};
+            std::fprintf(stderr, "fastpath pid: %d errno: %d\n", static_cast<int>(getpid()), io_errno);
+        }
+        ioTracker.complete(nbytes);
     }
     catch (...) {
         Context<StatsCollection>::get()->error(type, StatsBackend::Fastpath, size);
