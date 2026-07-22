@@ -2534,6 +2534,8 @@ bool SimulatedKfd::on_wave_single_step_complete(amdgpu::Wavefront &wave) {
   // is the public stop-reason bit rocm-dbgapi consumes before the next resume.
   constexpr uint32_t kTrapAfterInstMask = 1u << 25;
   wave.set_trapsts(wave.trapsts() | kTrapAfterInstMask);
+  if (queue_has_running_waves(wave.process_id(), wave.queue_id(), gpu_id, &wave))
+    return true;
   report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size);
   return true;
 }
@@ -2757,7 +2759,9 @@ void SimulatedKfd::resume_debug_queues(KfdProcess *proc) {
     std::unordered_set<amdgpu::ComputeUnitCore *> wake;
     for (const auto &state : states) {
       auto wave = std::find_if(stopped.begin(), stopped.end(), [&](const auto *candidate) {
-        return candidate->debug_wave_id() == state.wave_id;
+        return candidate->aql_packet_id() == state.queue_packet_id &&
+               candidate->wg_id() == state.group_ids[0] &&
+               candidate->wave_in_group() == state.wave_in_group;
       });
       if (wave == stopped.end())
         continue;
