@@ -3040,6 +3040,61 @@ TEST(ConSanMoi, Rdna4DenseInlineShadowBarriersUseRelocatedRouter) {
             kAccessCount);
 }
 
+TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersPartitionRelayWindowsAcrossLargeKernel) {
+  constexpr uint32_t kBarriersPerWindow = 9u;
+  constexpr size_t kSecondWindowWord = 65'580u;
+  const uint32_t filler = build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_GFX1250);
+  std::vector<uint32_t> text_words(kSecondWindowWord + 64u, filler);
+  const auto append_window = [&](size_t cursor, bool include_accesses) {
+    for (uint32_t index = 0; index < kBarriersPerWindow; ++index) {
+      if (include_accesses) {
+        text_words[cursor++] = 0xD8340000u | index * sizeof(uint32_t);
+        text_words[cursor++] = 0x00000000u; // ds_store_b32 v0, v0 offset:index*4
+      }
+      text_words[cursor++] = *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_GFX1250);
+      text_words[cursor++] = *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_GFX1250);
+    }
+  };
+  append_window(32u, /*include_accesses=*/true);
+  append_window(kSecondWindowWord, /*include_accesses=*/false);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  const std::vector<uint8_t> bytes =
+      make_gfx1250_code_object(text_words, "gfx1250_partitioned_dense_inline_shadow_barriers");
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.scratch_vgpr = 82;
+  options.moi_owner_vgpr = 80;
+  options.moi_epoch_vgpr = 81;
+  options.moi_exec_save_sgpr = 60;
+  options.automatic_moi_exec_save_sgprs = true;
+  options.automatic_moi_inline_sgpr_spill = true;
+  options.moi_inline_visible_evidence_sgpr = 28;
+  options.moi_inline_indirect_pc_sgpr = 30;
+  options.moi_inline_call_return_sgpr = 26;
+  options.moi_inline_dispatch_key_sgpr = 25;
+  options.moi_inline_indirect_scc_sgpr = 29;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 4u * kBarriersPerWindow;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
+                               &ConSanPatchInfo::kind),
+            kBarriersPerWindow);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
+                               &ConSanPatchInfo::kind),
+            2u * kBarriersPerWindow);
+  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
+    return warning.find("no relocatable dense relay host") != std::string::npos;
+  }));
+}
+
 TEST(ConSanMoi, Gfx1250InlineBarrierEstablishesLowBankBeforeAdjacentGuestTransition) {
   constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
   constexpr uint32_t kBarrierWait = 0xBF94FFFFu;
