@@ -97,8 +97,8 @@ flowchart TD
 
   subgraph F[Four instrumentation flavors]
     SC0["SC0 DONE<br/>native CDNA4 LDS checks:<br/>CLIP + TP1/TP2 clean"]
-    SC1["SC1 DONE<br/>all runnable model and hip-moi<br/>SuperCollider bundles green"]
-    RR0["RR0 ACTIVE<br/>all runnable model bundles green;<br/>dynamic-stack shared helpers open"]
+    SC1["SC1 ACTIVE<br/>former runnable matrix green;<br/>new Qwen fault gate open"]
+    RR0["RR0 ACTIVE<br/>former model bundles green;<br/>Qwen paired/fault + dynamic-stack open"]
     RR1["RR1 TODO<br/>Record/Replay barriers, atomics and fences"]
     SA0A["SA0A DONE<br/>CDNA4 sampled barrier lowering:<br/>TP1 + CLIP clean"]
     SA0["SA0 TODO<br/>Sampled TP2 admission/selection<br/>and broader runtime coverage"]
@@ -119,7 +119,7 @@ flowchart TD
   subgraph V[Target-native end-to-end validation]
     V0["V0 TODO<br/>target-aware workload registry and manifest"]
     V1["V1 ACTIVE<br/>TP1/TP2/CLIP/Qwen runnable;<br/>Jakub-CDNA4 asset open"]
-    V2["V2 ACTIVE<br/>Qwen baseline + SC direct pass;<br/>formal bundles and three profiles open"]
+    V2["V2 ACTIVE<br/>Qwen SC/RR clean; Sampled rejects;<br/>Inline planning timeout"]
     V3["V3 TODO<br/>P0 Qwen fault inventory and exact policies"]
     V4["V4 TODO<br/>P0 Qwen contained fault campaign"]
     V5["V5 ACTIVE<br/>TP2 SC/RR/Inline clean + paired;<br/>Sampled admission and remaining faults open"]
@@ -264,8 +264,8 @@ flowchart TD
   classDef blocked fill:#9e2a2b,stroke:#ffd0d0,color:#ffffff,stroke-width:3px
   classDef milestone fill:#6f42c1,stroke:#e2d5ff,color:#ffffff,stroke-width:3px
 
-  class R0,R1,E0,B0,B1,B2,B3,B4,B5A,S0,S1,S2,S3,S4,S5,S6A,S6B,S7A,S7B,S8A,S8B,S8C,S8D,I4,SC0,SC1,SA0A,IS0A,IS0,V6 done
-  class RR0,V1,V2,V5,V7,ST0 active
+  class R0,R1,E0,B0,B1,B2,B3,B4,B5A,S0,S1,S2,S3,S4,S5,S6A,S6B,S7A,S7B,S8A,S8B,S8C,S8D,I4,SC0,SA0A,IS0A,IS0,V6 done
+  class SC1,RR0,V1,V2,V5,V7,ST0 active
   class R2,E1,C0,B5B,I0,I1,I2,I3,A0,A1,A2,A3,A4,A5,RR1,SA0,SA1,IS1,Q0,Q1,Q2,Q3,V0,V3,V4,V8 todo
   class F0,G0 milestone
 ```
