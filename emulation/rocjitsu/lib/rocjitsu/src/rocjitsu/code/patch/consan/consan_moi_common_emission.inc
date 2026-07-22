@@ -270,28 +270,42 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
           "ConSan MOI spill cannot share one frame recipe across dynamic and fixed owners");
       return std::nullopt;
     }
-    if (options.moi_engine != ConSanMoiEngine::InlineShadow || !options.moi_exec_save_sgpr) {
-      warnings.emplace_back(
-          "ConSan MOI dynamic-stack spill currently requires InlineShadow scalar state");
+    const bool supported_engine =
+        options.moi_engine == ConSanMoiEngine::InlineShadow ||
+        (arch == ROCJITSU_CODE_ARCH_CDNA4 && options.moi_engine == ConSanMoiEngine::RecordReplay);
+    if (!supported_engine || !options.moi_dynamic_stack_spill || !options.moi_exec_save_sgpr) {
+      warnings.emplace_back("ConSan MOI dynamic-stack spill has no supported scalar-state layout");
       return std::nullopt;
     }
     constexpr uint16_t kDynamicStackTopSgpr = 32u;
     constexpr uint16_t kDynamicFrameBaseSgpr = 33u;
-    const uint16_t saved_scc_sgpr = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 10u);
-    const uint16_t saved_frame_base_sgpr = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 24u);
+    const auto special_state = moi_special_state_sgprs(options);
+    if (!special_state) {
+      warnings.emplace_back("ConSan MOI dynamic-stack spill has no SCC-save register");
+      return std::nullopt;
+    }
+    const uint16_t saved_scc_sgpr = special_state->scc_save_sgpr;
+    const uint16_t saved_frame_base_sgpr =
+        static_cast<uint16_t>(*options.moi_exec_save_sgpr +
+                              (options.moi_engine == ConSanMoiEngine::InlineShadow ? 24u : 5u));
     auto spill = build_dynamic_stack_vgpr_spill_sequence(
         resources.base, resources.count, kDynamicStackTopSgpr, kDynamicFrameBaseSgpr,
         saved_frame_base_sgpr, saved_scc_sgpr, arch);
-    const uint64_t required_private_bytes =
+    const uint64_t requested_private_bytes =
         static_cast<uint64_t>(resources.original_private_segment_size) +
         static_cast<uint64_t>(resources.count) * SpillManager::kSlotBytes;
-    if (!spill || required_private_bytes > *private_limit) {
+    const auto required_private_bytes =
+        requested_private_bytes <= std::numeric_limits<uint32_t>::max()
+            ? normalize_address_free_scratch_private_size(
+                  arch, static_cast<uint32_t>(requested_private_bytes))
+            : std::nullopt;
+    if (!spill || !required_private_bytes) {
       warnings.emplace_back("ConSan MOI could not encode the dynamic-stack VGPR spill frame");
       return std::nullopt;
     }
     // The offsets are frame-relative, but the loader still needs enough
     // backing scratch for the extra maximum stack depth.
-    spill->total_private_bytes = static_cast<uint32_t>(required_private_bytes);
+    spill->total_private_bytes = *required_private_bytes;
     return spill;
   }
 

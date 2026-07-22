@@ -1378,15 +1378,25 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
   plan.reason = register_plan.reason;
   plan.scratch_vgpr = register_plan.base;
   plan.required_vgpr_count = register_plan.required_descriptor_count;
-  if (plan.source == ConSanRegisterAllocationSource::SpillRequired &&
-      options.moi_engine != ConSanMoiEngine::InlineShadow &&
-      std::ranges::any_of(owners, [](const MoiKernelResourceContext *owner) {
-        return owner->kernel->uses_dynamic_stack.value_or(false);
-      })) {
-    plan.source = ConSanRegisterAllocationSource::Unsupported;
-    plan.reason = ConSanRegisterPlanReason::DynamicStack;
-    plan.scratch_vgpr.reset();
-    plan.required_vgpr_count = plan.current_vgpr_count;
+  if (plan.source == ConSanRegisterAllocationSource::SpillRequired) {
+    const bool has_dynamic_owner =
+        std::ranges::any_of(owners, [](const MoiKernelResourceContext *owner) {
+          return owner->kernel->uses_dynamic_stack.value_or(false);
+        });
+    const bool every_owner_dynamic =
+        std::ranges::all_of(owners, [](const MoiKernelResourceContext *owner) {
+          return owner->kernel->uses_dynamic_stack.value_or(false);
+        });
+    const bool supported_cdna4_record_replay =
+        state.arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+        options.moi_engine == ConSanMoiEngine::RecordReplay && every_owner_dynamic;
+    if (has_dynamic_owner && options.moi_engine != ConSanMoiEngine::InlineShadow &&
+        !supported_cdna4_record_replay) {
+      plan.source = ConSanRegisterAllocationSource::Unsupported;
+      plan.reason = ConSanRegisterPlanReason::DynamicStack;
+      plan.scratch_vgpr.reset();
+      plan.required_vgpr_count = plan.current_vgpr_count;
+    }
   }
   return plan;
 }
@@ -1537,6 +1547,11 @@ void apply_test_container_filter(std::vector<Candidate> &candidates, const ConSa
   }
   if (options.automatic_moi_record_replay_sgpr_spill)
     return options.moi_engine == ConSanMoiEngine::Sampled ? 8u : 4u;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4 && options.moi_engine == ConSanMoiEngine::RecordReplay &&
+      options.moi_dynamic_stack_spill)
+    // Preserve the compiler frame base in addition to EXEC, VCC, and SCC.
+    // The dynamic spill setup reuses the ordinary SCC-save slot.
+    return 6u;
   // One EXEC-save pair, one VCC-save pair, and one SCC snapshot. Barrier-dense
   // RDNA-family objects additionally reserve a dispatch key and an aligned
   // call-return pair for the relocated router.

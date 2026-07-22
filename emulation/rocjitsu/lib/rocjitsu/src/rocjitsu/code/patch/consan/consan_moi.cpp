@@ -249,8 +249,12 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   MoiResourcePlanningState resource_planning_state(code_object_bytes, arch, effective_options,
                                                    result);
   rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
+  const bool supports_dynamic_stack_spill =
+      effective_options.moi_engine == ConSanMoiEngine::InlineShadow ||
+      (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+       effective_options.moi_engine == ConSanMoiEngine::RecordReplay);
   effective_options.moi_dynamic_stack_spill =
-      effective_options.moi_engine == ConSanMoiEngine::InlineShadow &&
+      supports_dynamic_stack_spill &&
       std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
         if (plan.source != ConSanRegisterAllocationSource::SpillRequired)
           return false;

@@ -1787,7 +1787,7 @@ TEST(ConSanMoi, Cdna4InlineShadowSpillsThroughSiteLocalDynamicStackFrame) {
   ASSERT_NE(patch, result.patches.end());
   ASSERT_TRUE(patch->scratch_vgpr);
   EXPECT_EQ(patch->spilled_vgpr_count, 18u);
-  EXPECT_EQ(patch->required_private_segment_size, 72u);
+  EXPECT_EQ(patch->required_private_segment_size, 80u);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -1796,7 +1796,7 @@ TEST(ConSanMoi, Cdna4InlineShadowSpillsThroughSiteLocalDynamicStackFrame) {
   std::memcpy(&descriptor,
               result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(descriptor));
-  EXPECT_EQ(descriptor.private_segment_fixed_size, 72u);
+  EXPECT_EQ(descriptor.private_segment_fixed_size, 80u);
   EXPECT_EQ(first_note_segment_bytes(result.elf_bytes), original_note);
   const std::vector<uint32_t> cave_words =
       text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
