@@ -180,7 +180,7 @@ private:
     static std::optional<typename Wrapper::buffer_name_info_t>   s_buffer_names;
 };
 
-using core_sdk = sdk_core<backend>;
+using core_sdk = sdk_core<wrapper>;
 
 }  // namespace rocprofsys::rocprofiler_sdk
 

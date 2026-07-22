@@ -64,7 +64,7 @@ namespace rocprofsys::rocprofiler_sdk
 /// This is the `Wrapper` template argument consumed by
 /// rocprofsys::backends::rocprofiler_sdk::backend<Wrapper> (backend.hpp); it must
 /// expose the same nested types/constants/static methods that struct relies on.
-struct backend
+struct wrapper
 {
     // ─── Compile-time SDK version ────────────────────────────────────────────────
     static constexpr std::uint32_t compile_time_version = ROCPROFILER_VERSION;
