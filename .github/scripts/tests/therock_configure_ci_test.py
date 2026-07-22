@@ -10,6 +10,15 @@ import therock_configure_ci
 
 
 class ConfigureCITest(unittest.TestCase):
+    def setUp(self):
+        # Runner selection imports utilities from a sibling TheRock checkout,
+        # which is not required to run these rocm-systems unit tests.
+        select_build_runner_patcher = patch(
+            "therock_configure_ci.select_build_runner", return_value=""
+        )
+        self.addCleanup(select_build_runner_patcher.stop)
+        select_build_runner_patcher.start()
+
     @patch("subprocess.run")
     def test_pull_request(self, mock_run):
         args = {"is_pull_request": True, "base_ref": "HEAD^"}
@@ -18,7 +27,7 @@ class ConfigureCITest(unittest.TestCase):
         mock_process.stdout = "projects/rocminfo/src/main.cpp"
         mock_run.return_value = mock_process
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertGreaterEqual(len(project_to_run), 1)
 
     @patch("subprocess.run")
@@ -29,7 +38,7 @@ class ConfigureCITest(unittest.TestCase):
         mock_process.stdout = ""
         mock_run.return_value = mock_process
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         # Empty modified_paths should return empty list (no changes = no CI)
         self.assertEqual(len(project_to_run), 0)
 
@@ -45,7 +54,7 @@ class ConfigureCITest(unittest.TestCase):
         mock_process.stdout = "projects/rocminfo/src/main.cpp"
         mock_run.return_value = mock_process
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertGreaterEqual(len(project_to_run), 1)
 
     @patch("subprocess.run")
@@ -60,7 +69,7 @@ class ConfigureCITest(unittest.TestCase):
         mock_process.stdout = "projects/rocminfo/src/main.cpp"
         mock_run.return_value = mock_process
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
 
     @patch("subprocess.run")
@@ -75,7 +84,7 @@ class ConfigureCITest(unittest.TestCase):
         mock_process.stdout = "projects/rocminfo/src/main.cpp"
         mock_run.return_value = mock_process
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertGreaterEqual(len(project_to_run), 1)
 
     @patch("subprocess.run")
@@ -86,14 +95,15 @@ class ConfigureCITest(unittest.TestCase):
         mock_process.stdout = "projects/rocminfo/src/main.cpp"
         mock_run.return_value = mock_process
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
 
     def test_scheduled_run(self):
         args = {"is_nightly": True, "input_projects": "", "base_ref": "HEAD^"}
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, test_type = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 1)
+        self.assertEqual(test_type, "comprehensive")
 
     @patch("subprocess.run")
     def test_is_push(self, mock_run):
@@ -103,7 +113,7 @@ class ConfigureCITest(unittest.TestCase):
         mock_process.stdout = "projects/rocminfo/src/main.cpp"
         mock_run.return_value = mock_process
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertGreaterEqual(len(project_to_run), 1)
 
     def test_is_path_skippable(self):
@@ -181,7 +191,7 @@ class ConfigureCITest(unittest.TestCase):
             "projects/rocprim/docs/api.md",
         ]
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
 
     @patch("therock_configure_ci.get_modified_paths")
@@ -201,7 +211,7 @@ class ConfigureCITest(unittest.TestCase):
             "projects/hipother/hello/test.cpp",
         ]
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
 
     @patch("therock_configure_ci.get_modified_paths")
@@ -223,7 +233,7 @@ class ConfigureCITest(unittest.TestCase):
             ".github/workflows/therock-ci.yml",  # contains windows CI trigger
         ]
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 1)
 
     @patch("therock_configure_ci.get_modified_paths")
@@ -249,7 +259,7 @@ class ConfigureCITest(unittest.TestCase):
             ".github/scripts/therock_matrix.py",
         ]
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
 
         self.assertEqual(len(project_to_run), 1)
         cmake_options = project_to_run[0]["cmake_options"]
@@ -280,7 +290,7 @@ class ConfigureCITest(unittest.TestCase):
             "projects/rocprofiler-compute/src/compute.cpp",
         ]
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
 
         # Windows CI must not be skipped for an explicit workflow_dispatch selection
         self.assertEqual(len(project_to_run), 1)
@@ -303,7 +313,7 @@ class ConfigureCITest(unittest.TestCase):
             ".github/scripts/therock_configure_ci.py",
         ]
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertGreaterEqual(len(project_to_run), 1)
 
     @patch("therock_configure_ci.get_modified_paths")
@@ -320,7 +330,7 @@ class ConfigureCITest(unittest.TestCase):
 
         mock_get_modified.return_value = []
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
 
     @patch("therock_configure_ci.get_modified_paths")
@@ -446,7 +456,6 @@ class ConfigureCITest(unittest.TestCase):
         self.assertGreaterEqual(len(projects), 1)
         self.assertEqual(outputs["run_linux_rccl_ci"], "false")
 
-
     @patch("therock_configure_ci.get_modified_paths")
     def test_hipfile_pr_triggers_storage_libs_linux_ci(self, mock_get_modified):
         """PR with hipfile changes should trigger storage_libs build with THEROCK_ENABLE_STORAGE_LIBS=ON."""
@@ -461,7 +470,7 @@ class ConfigureCITest(unittest.TestCase):
             "projects/hipfile/include/hipfile.h",
         ]
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 1)
         cmake_options = project_to_run[0]["cmake_options"]
         self.assertIn("DTHEROCK_ENABLE_STORAGE_LIBS=ON", cmake_options)
@@ -481,7 +490,7 @@ class ConfigureCITest(unittest.TestCase):
             "projects/hipfile/include/hipfile.h",
         ]
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
 
 
