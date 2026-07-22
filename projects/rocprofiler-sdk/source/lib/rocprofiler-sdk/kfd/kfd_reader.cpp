@@ -29,7 +29,6 @@
 #include "lib/rocprofiler-sdk/kfd/dlog_drain.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
-#include "lib/rocprofiler-sdk/kfd/timestamp_convert.hpp"
 
 // Active (v5) dispatch-log profiler ABI. Must be the ONLY kfd ioctl header in
 // this translation unit (it conflicts with lib/rocprofiler-sdk/details/kfd_ioctl.h).
@@ -324,9 +323,11 @@ evict_stale_starts(dlog_session* s, uint64_t now_ns, uint64_t max_age_ns)
 
 // Drain new firmware records via the shared, unit-tested drain_pipes() core. This
 // wrapper supplies the reader-specific bits: the mmap'd ring pointers, the host
-// clock for start aging, and the two singleton sinks — doorbell binding on every
-// record, and a paired (start,end) deposit into ResultsMap keyed by the doorbell's
-// current generation. See dlog_drain.hpp for the per-pipe ring geometry.
+// clock for start aging, and a paired (start,end) deposit into ResultsMap. The key
+// uses the PAGE-RELATIVE doorbell slot (doorbell_off_to_page_slot) so it matches
+// the value the capture side computes from the queue's doorbell pointer; the
+// doorbell->queue binding is established directly at capture, so no per-record bind
+// happens here. See dlog_drain.hpp for the per-pipe ring geometry.
 uint64_t
 drain_records(dlog_session* s)
 {
@@ -345,13 +346,15 @@ drain_records(dlog_session* s)
         rptr_arr,
         s->drain,
         common::timestamp_ns(),
-        [](uint32_t doorbell_off, uint32_t dispatch_id) {
-            doorbell_map().bind_from_record(doorbell_off, dispatch_id);
+        [](uint32_t, uint32_t) {
+            // Binding is done at capture (page-relative doorbell slot), so there is
+            // nothing to do per raw record here.
         },
         [](uint32_t doorbell_off, uint32_t dispatch_id, uint64_t start_ticks, uint64_t end_ticks) {
-            uint32_t gen = doorbell_map().get_generation(doorbell_off);
+            uint32_t slot = doorbell_off_to_page_slot(doorbell_off);
+            uint32_t gen  = doorbell_map().get_generation(slot);
             results_map().deposit(
-                correlation_key{doorbell_off, dispatch_id, gen},
+                correlation_key{slot, dispatch_id, gen},
                 kfd_timing_result{start_ticks, end_ticks, common::timestamp_ns()});
         });
 }
@@ -371,7 +374,13 @@ stop_reader()
     }
     if(st.thread.joinable()) st.thread.join();
 
-    // Reader thread has exited: safe to tear down the session and fds here.
+    // Teardown runs without taking setup_mu on purpose: it is only safe because the
+    // caller (registration::finalize) tears down queue interception
+    // (queue_controller_fini) BEFORE kfd::finalize(), so no interceptor thread can
+    // still be inside ensure_reader_session()/setup_session() by the time we get
+    // here, and finalize itself is std::call_once (single-threaded). If that ordering
+    // ever changes, this teardown must take st.setup_mu to serialize against a
+    // concurrent setup_session(). The reader thread is already stopped+joined above.
     teardown_session(st.kfd_fd, &st.session);
     st.session_ready.store(false, std::memory_order_release);
     if(st.kfd_fd >= 0)
@@ -401,13 +410,10 @@ reader_loop()
     auto     wake          = pollfd{.fd = st.wake_fd, .events = POLLIN, .revents = 0};
     uint64_t total_seen    = 0;
     uint64_t last_evict_ns = common::timestamp_ns();
-    uint64_t last_recal_ns = 0;  // 0 => calibrate on the first ready iteration
 
     // Age out unpaired starts at most this often (not every 1 ms poll).
     constexpr uint64_t kEvictIntervalNs = 1'000'000'000ull;  // 1 s
     constexpr uint64_t kStartMaxAgeNs   = 5'000'000'000ull;  // 5 s
-    // Re-anchor the GPU-tick -> boottime mapping this often to bound clock drift.
-    constexpr uint64_t kRecalIntervalNs = 100'000'000ull;  // 100 ms
 
     while(!st.stop.load(std::memory_order_acquire))
     {
@@ -427,14 +433,6 @@ reader_loop()
         if(st.session_ready.load(std::memory_order_acquire))
         {
             uint64_t now_ns = common::timestamp_ns();
-
-            // Re-anchor the tick->ns clock mapping before draining so freshly
-            // deposited records convert against a recent anchor.
-            if(now_ns - last_recal_ns >= kRecalIntervalNs)
-            {
-                calibrate_clock();
-                last_recal_ns = now_ns;
-            }
 
             total_seen += drain_records(&st.session);
 

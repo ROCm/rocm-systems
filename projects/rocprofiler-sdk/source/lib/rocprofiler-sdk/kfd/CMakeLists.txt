@@ -1,15 +1,8 @@
 #
 #
 set(ROCPROFILER_LIB_KFD_EVENT_SOURCES
-    abi.cpp
-    kfd.cpp
-    kfd_profiler.cpp
-    doorbell_map.cpp
-    correlation_table.cpp
-    results_map.cpp
-    kfd_correlation.cpp
-    kfd_reader.cpp
-    timestamp_convert.cpp)
+    abi.cpp kfd.cpp kfd_profiler.cpp doorbell_map.cpp correlation_table.cpp
+    results_map.cpp kfd_correlation.cpp kfd_reader.cpp)
 set(ROCPROFILER_LIB_KFD_EVENT_HEADERS
     defines.hpp
     kfd.hpp
@@ -22,8 +15,7 @@ set(ROCPROFILER_LIB_KFD_EVENT_HEADERS
     results_map.hpp
     kfd_correlation.hpp
     kfd_reader.hpp
-    dlog_drain.hpp
-    timestamp_convert.hpp)
+    dlog_drain.hpp)
 
 target_sources(
     rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_KFD_EVENT_SOURCES}

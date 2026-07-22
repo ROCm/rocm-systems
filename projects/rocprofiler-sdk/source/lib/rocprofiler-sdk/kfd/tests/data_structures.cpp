@@ -147,49 +147,23 @@ TEST(DoorbellMap, two_queues_same_doorbell_forward_resolves)
     EXPECT_EQ(m.get_generation(7), 0u);  // no destroy -> generation unchanged
 }
 
-// Empirical bind: capture notes a pending dispatch for an unbound queue; reader
-// binds the doorbell from the matching record; subsequent lookups resolve.
-TEST(DoorbellMap, empirical_bind_from_record)
+// Page-relative doorbell slot helpers: capture (from pointer) and reader (from
+// record) must reduce to the same per-queue slot so their correlation keys match.
+TEST(DoorbellMap, page_relative_slot_capture_matches_reader)
 {
-    auto m = DoorbellMap{};
+    // Reader side: an absolute record doorbell_off masks to its page-relative slot.
+    EXPECT_EQ(doorbell_off_to_page_slot(4100u), 4u);
+    EXPECT_EQ(doorbell_off_to_page_slot(4104u), 8u);
 
-    // Queue 42 is unbound: note_pending returns false and records the hint.
-    EXPECT_FALSE(m.note_pending_dispatch(qid(42), /*dispatch_idx_low32=*/7));
-    EXPECT_FALSE(m.is_bound(/*doorbell_off=*/4100));
-    EXPECT_FALSE(m.get_by_queue(qid(42)).has_value());
+    // Capture side: a doorbell pointer's in-page byte offset, in dwords, gives the
+    // same slot (8-byte doorbells -> 2 dwords apart), independent of the page base.
+    constexpr uint64_t kPage = 4096;
+    EXPECT_EQ(doorbell_ptr_to_page_slot(0x7f0000004010ull, kPage), 4u);
+    EXPECT_EQ(doorbell_ptr_to_page_slot(0x7f0000004020ull, kPage), 8u);
 
-    // Reader sees record (doorbell=4100, dispatch_id=7): binds 4100 -> queue 42.
-    EXPECT_TRUE(m.bind_from_record(/*doorbell_off=*/4100, /*dispatch_id=*/7));
-    EXPECT_TRUE(m.is_bound(4100));
-
-    // Now the queue resolves to that doorbell.
-    auto e = m.get_by_queue(qid(42));
-    ASSERT_TRUE(e.has_value());
-    EXPECT_EQ(e->doorbell_off, 4100u);
-
-    // Once bound, note_pending returns true (caller builds key directly).
-    EXPECT_TRUE(m.note_pending_dispatch(qid(42), 8));
-}
-
-// bind_from_record with no matching hint yet returns false (doorbell stays unknown).
-TEST(DoorbellMap, bind_from_record_no_hint)
-{
-    auto m = DoorbellMap{};
-    EXPECT_FALSE(m.bind_from_record(/*doorbell_off=*/4100, /*dispatch_id=*/99));
-    EXPECT_FALSE(m.is_bound(4100));
-}
-
-// bind_from_record is idempotent: a second record for an already-bound doorbell
-// returns true without disturbing the binding.
-TEST(DoorbellMap, bind_from_record_idempotent)
-{
-    auto m = DoorbellMap{};
-    m.note_pending_dispatch(qid(42), 7);
-    EXPECT_TRUE(m.bind_from_record(4100, 7));
-    EXPECT_TRUE(m.bind_from_record(4100, 8));  // already bound -> true, no-op
-    auto e = m.get_by_queue(qid(42));
-    ASSERT_TRUE(e.has_value());
-    EXPECT_EQ(e->doorbell_off, 4100u);
+    // Same base index (4096) dropped by both sides -> keys agree.
+    EXPECT_EQ(doorbell_off_to_page_slot(4100u),
+              doorbell_ptr_to_page_slot(0x7f0000004010ull, kPage));
 }
 
 // ---------------------------------------------------------------------------

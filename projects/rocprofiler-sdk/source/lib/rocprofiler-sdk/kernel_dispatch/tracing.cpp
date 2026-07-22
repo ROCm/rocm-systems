@@ -31,7 +31,6 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
-#include "lib/rocprofiler-sdk/kfd/timestamp_convert.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -48,11 +47,18 @@ namespace kernel_dispatch
 profiling_time
 get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_data)
 {
+    const auto& callback_record = packet_data.callback_record;
+    const auto* _rocp_agent     = agent::get_agent(callback_record.dispatch_info.agent_id);
+    auto        _hsa_agent      = agent::get_hsa_agent(_rocp_agent);
+
     // --- KFD dispatch-log path (preferred timestamp source) ---
-    // Only attempted when the correlation key was captured at enqueue. If no KFD
-    // record is available (ring overflow, timing race, unbound doorbell), fall
-    // through to the HSA path below. The KFD block never removes the HSA fallback.
-    if(packet_data.kfd_correlation_key_valid)
+    // Only attempted when the correlation key was captured at enqueue. Firmware
+    // records carry raw GPU-clock ticks; hsa_amd_profiling_convert_tick_to_system_
+    // domain() rebases them onto the same CLOCK_BOOTTIME domain HSA uses (it handles
+    // both the GPU<->system rate ratio and epoch, via the runtime's own clock-sync
+    // machinery). If anything is missing (no record, no agent, convert error) we
+    // fall through to the unconditional HSA path below.
+    if(packet_data.kfd_correlation_key_valid && _hsa_agent)
     {
         auto corr_key = kfd::correlation_key{packet_data.kfd_doorbell_off,
                                              packet_data.kfd_dispatch_idx_low32,
@@ -60,60 +66,56 @@ get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_dat
 
         // Take the firmware result and unconditionally clear the correlation-table
         // entry inserted at enqueue (so nothing leaks past completion), even when
-        // we ultimately use the HSA timestamps.
+        // we ultimately fall back to HSA.
         auto kfd_result = kfd::results_map().take(corr_key);
         kfd::correlation_table().erase(corr_key);
 
         if(kfd_result)
         {
-            uint64_t kfd_start_ns = kfd::convert_gpu_ticks_to_ns(kfd_result->start_gpu_ticks);
-            uint64_t kfd_end_ns   = kfd::convert_gpu_ticks_to_ns(kfd_result->end_gpu_ticks);
+            const auto* _ext          = hsa::get_amd_ext_table();
+            uint64_t    kfd_start_sys = 0;
+            uint64_t    kfd_end_sys   = 0;
+            auto        _s1           = _ext->hsa_amd_profiling_convert_tick_to_system_domain_fn(
+                *_hsa_agent, kfd_result->start_gpu_ticks, &kfd_start_sys);
+            auto _s2 = _ext->hsa_amd_profiling_convert_tick_to_system_domain_fn(
+                *_hsa_agent, kfd_result->end_gpu_ticks, &kfd_end_sys);
 
-            if(kfd::conversion_validated())
+            // Sanity guard against a mis-correlated / stale firmware record: the
+            // converted times must form a positive interval that fits inside this
+            // dispatch's own CPU window [enqueue, now]. A record pulled for the wrong
+            // dispatch would land outside these bounds; rather than let
+            // adjust_profiling_time() clamp it (or FATAL under CI-strict) into a
+            // plausible-but-wrong value, we reject and fall back to HSA. This checks
+            // correlation, not the conversion (which is HSA's own).
+            const uint64_t _now      = common::timestamp_ns();
+            const bool     _kfd_sane = _s1 == HSA_STATUS_SUCCESS && _s2 == HSA_STATUS_SUCCESS &&
+                                   kfd_start_sys < kfd_end_sys &&
+                                   kfd_start_sys >= session.enqueue_ts && kfd_end_sys <= _now;
+
+            if(_kfd_sane)
             {
-                // Conversion trusted for this session: emit firmware timestamps.
+                // Emit firmware timestamps. The firmware interval (end-start) is
+                // deliberately kept: it is measured at the true HW dispatch
+                // boundaries and is tighter/earlier than HSA's signal-machinery
+                // timing, so we do NOT force it to match the HSA duration.
                 auto kfd_time =
-                    tracing::profiling_time{HSA_STATUS_SUCCESS, kfd_start_ns, kfd_end_ns};
+                    tracing::profiling_time{HSA_STATUS_SUCCESS, kfd_start_sys, kfd_end_sys};
                 return tracing::adjust_profiling_time(
                     "dispatch",
                     "kfd_dispatch_log",
                     kfd_time,
-                    tracing::profiling_time{
-                        HSA_STATUS_SUCCESS, session.enqueue_ts, common::timestamp_ns()});
+                    tracing::profiling_time{HSA_STATUS_SUCCESS, session.enqueue_ts, _now});
             }
-
-            // Not yet validated: fall through to HSA (Option B), but stash the
-            // converted candidate so the fallback block can validate it against
-            // the authoritative HSA result on this same call.
-            packet_data.kfd_pending_start_ns = kfd_start_ns;
-            packet_data.kfd_pending_end_ns   = kfd_end_ns;
-            packet_data.kfd_pending_valid    = true;
+            // convert failed or record failed the sanity guard: fall through to HSA.
         }
     }
 
     // --- HSA fallback (unchanged; unconditional) ---
-    const auto& callback_record = packet_data.callback_record;
-    const auto* _rocp_agent     = agent::get_agent(callback_record.dispatch_info.agent_id);
-    auto        _hsa_agent      = agent::get_hsa_agent(_rocp_agent);
-    auto        _signal         = packet_data.kernel_packet.kernel_dispatch.completion_signal;
-    auto        _kern_id        = callback_record.dispatch_info.kernel_id;
+    auto _signal  = packet_data.kernel_packet.kernel_dispatch.completion_signal;
+    auto _kern_id = callback_record.dispatch_info.kernel_id;
 
-    auto hsa_result = (_hsa_agent)
-                          ? get_dispatch_time(*_hsa_agent, _signal, _kern_id, session.enqueue_ts)
-                          : profiling_time{.status = HSA_STATUS_ERROR_INVALID_AGENT};
-
-    // Parallel validation: compare the (unvalidated) KFD candidate against the HSA
-    // result. Once enough samples land within tolerance, conversion flips to
-    // validated and subsequent dispatches emit KFD timestamps above.
-    if(packet_data.kfd_pending_valid && hsa_result.status == HSA_STATUS_SUCCESS)
-    {
-        kfd::validate_conversion(packet_data.kfd_pending_start_ns,
-                                 hsa_result.start,
-                                 packet_data.kfd_pending_end_ns,
-                                 hsa_result.end);
-    }
-
-    return hsa_result;
+    return (_hsa_agent) ? get_dispatch_time(*_hsa_agent, _signal, _kern_id, session.enqueue_ts)
+                        : profiling_time{.status = HSA_STATUS_ERROR_INVALID_AGENT};
 }
 
 void

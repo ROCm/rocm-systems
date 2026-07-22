@@ -51,8 +51,11 @@
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
+
+#include <unistd.h>
 
 #include <atomic>
 #include <memory>
@@ -679,28 +682,40 @@ WriteInterceptor(const void* packets,
                 {
                     kfd::ensure_reader_session(static_cast<uint32_t>(_gpu_id));
 
-                    auto& _dmap = kfd::doorbell_map();
-                    auto  _db   = _dmap.get_by_queue(queue.get_id());
-                    if(_db && _dmap.is_generation_certain(_db->doorbell_off))
+                    // Compute the page-relative doorbell slot directly from the
+                    // queue's hardware doorbell pointer (matches what the reader
+                    // derives from each firmware record) and bind it. No empirical
+                    // first-record binding is needed.
+                    uint64_t    _hwptr = 0;
+                    const auto* _iq    = queue.intercept_queue();
+                    if(_iq && _iq->doorbell_signal.handle)
                     {
-                        _packet_data.kfd_doorbell_off          = _db->doorbell_off;
-                        _packet_data.kfd_generation            = _db->generation;
-                        _packet_data.kfd_correlation_key_valid = true;
-
-                        kfd::correlation_table().insert(
-                            kfd::correlation_key{_packet_data.kfd_doorbell_off,
-                                                 _packet_data.kfd_dispatch_idx_low32,
-                                                 _packet_data.kfd_generation},
-                            kfd::correlation_entry{
-                                dispatch_id, kernel_id, queue.get_id(), _info_session.enqueue_ts});
+                        const auto* _sig =
+                            reinterpret_cast<const amd_signal_t*>(_iq->doorbell_signal.handle);
+                        _hwptr = reinterpret_cast<uint64_t>(_sig->hardware_doorbell_ptr);
                     }
-                    else
+                    if(_hwptr != 0)
                     {
-                        // Doorbell not yet bound: record a hint so the reader can
-                        // bind it from the first firmware record. This dispatch
-                        // falls back to HSA. See design notes (empirical bind).
-                        _dmap.note_pending_dispatch(queue.get_id(),
-                                                    _packet_data.kfd_dispatch_idx_low32);
+                        const uint32_t _slot = kfd::doorbell_ptr_to_page_slot(
+                            _hwptr, static_cast<uint64_t>(sysconf(_SC_PAGESIZE)));
+
+                        auto& _dmap = kfd::doorbell_map();
+                        _dmap.bind(queue.get_id(), _slot);
+                        if(_dmap.is_generation_certain(_slot))
+                        {
+                            _packet_data.kfd_doorbell_off          = _slot;
+                            _packet_data.kfd_generation            = _dmap.get_generation(_slot);
+                            _packet_data.kfd_correlation_key_valid = true;
+
+                            kfd::correlation_table().insert(
+                                kfd::correlation_key{_packet_data.kfd_doorbell_off,
+                                                     _packet_data.kfd_dispatch_idx_low32,
+                                                     _packet_data.kfd_generation},
+                                kfd::correlation_entry{dispatch_id,
+                                                       kernel_id,
+                                                       queue.get_id(),
+                                                       _info_session.enqueue_ts});
+                        }
                     }
                 }
             }

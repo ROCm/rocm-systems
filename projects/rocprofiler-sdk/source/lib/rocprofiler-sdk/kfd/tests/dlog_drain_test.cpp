@@ -281,3 +281,81 @@ TEST(dlog_drain, evict_stale_starts)
     EXPECT_EQ(st.pending_starts.count(1), 0u);
     EXPECT_EQ(st.pending_starts.count(2), 1u);
 }
+
+// --- Degradation: the drain must stay well-behaved under bad geometry, overrun,
+// and ring wrap, always falling back gracefully rather than crashing/looping. ---
+
+// Invalid geometry (num_regions==0, or a non-power-of-two per-pipe slot count) must
+// be rejected up front: drain reports nothing and never divides by / masks with a
+// bad slot count.
+TEST(dlog_drain, invalid_geometry_rejected)
+{
+    drain_state st;
+    recorder    rec;
+
+    // num_regions == 0 -> slots_per_pipe computes to 0 -> reject.
+    EXPECT_EQ(
+        drain_pipes(nullptr, 0, 2048, nullptr, nullptr, st, 1000, rec.on_record(), rec.on_pair()),
+        0u);
+
+    // region_record_count/num_regions not a power of two (3000/2 = 1500) -> reject.
+    fake_ring ring(2, 3000);
+    EXPECT_EQ(run_drain(ring, st, rec), 0u);
+    EXPECT_TRUE(rec.pairs.empty());
+}
+
+// Overrun: firmware lapped the consumer (wptr - rptr > slots_per_pipe). The drain
+// must resume just behind the producer (w - slots_per_pipe + 1), drain only the
+// still-valid window, and terminate — no infinite loop, no reads outside the ring,
+// rptr left synced to wptr.
+TEST(dlog_drain, overrun_recovery)
+{
+    fake_ring   ring(2, 2048);  // slots_per_pipe = 1024
+    drain_state st;
+    recorder    rec0;
+    run_drain(ring, st, rec0);  // first-drain sync -> rptr[*]=0
+
+    const uint32_t db = 4100;
+    // Producer has run far ahead: 10000 records written to pipe 0 (>> 1024 slots),
+    // so all but the last ~1024 are already overwritten. Place a valid start/eop
+    // pair in the still-live tail window so we can confirm recovery still pairs it.
+    // Recovery point = w - slots_per_pipe + 1 = 10000 - 1024 + 1 = 8977.
+    ring.put(0, 9990, kRecStart, 42, db, 111);
+    ring.put(0, 9991, kRecEop, 42, db, 222);
+    ring.wptr[0] = 10000;
+
+    recorder rec;
+    uint64_t pairs = run_drain(ring, st, rec);
+
+    // Terminated (did not hang), advanced rptr to wptr, and paired the tail record.
+    EXPECT_EQ(ring.rptr[0], 10000u);
+    EXPECT_EQ(pairs, 1u);
+    ASSERT_EQ(rec.pairs.count(std::make_pair(db, 42u)), 1u);
+    EXPECT_EQ(rec.pairs[std::make_pair(db, 42u)].first, 111u);
+}
+
+// Ring wrap: a pair whose indices straddle the power-of-two wrap boundary (start at
+// the last slot, eop at slot 0 of the next lap) must still map to the right physical
+// slots and pair correctly.
+TEST(dlog_drain, ring_wrap_pairs_across_boundary)
+{
+    fake_ring   ring(2, 2048);  // slots_per_pipe = 1024
+    drain_state st;
+    recorder    rec_sync;
+    run_drain(ring, st, rec_sync);  // first-drain sync at 0
+    // Prime rptr to just before the wrap so we drain [1023, 1025).
+    st.rptr[0] = 1023;
+
+    const uint32_t db = 4100;
+    ring.put(0, 1023, kRecStart, 7, db, 500);  // physical slot 1023
+    ring.put(0, 1024, kRecEop, 7, db, 600);    // 1024 & 1023 = physical slot 0
+    ring.wptr[0] = 1025;
+
+    recorder rec;
+    uint64_t pairs = run_drain(ring, st, rec);
+
+    EXPECT_EQ(pairs, 1u);
+    ASSERT_EQ(rec.pairs.count(std::make_pair(db, 7u)), 1u);
+    EXPECT_EQ(rec.pairs[std::make_pair(db, 7u)].first, 500u);
+    EXPECT_EQ(rec.pairs[std::make_pair(db, 7u)].second, 600u);
+}

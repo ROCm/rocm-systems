@@ -46,6 +46,35 @@ namespace rocprofiler
 {
 namespace kfd
 {
+// Both the capture side (from a queue's doorbell pointer) and the reader side
+// (from a firmware record's doorbell_off) reduce the doorbell identity to a
+// PAGE-RELATIVE dword index, so they agree on the correlation key without needing
+// the process's absolute doorbell base (first_db_index), which neither the pointer
+// nor the record encodes. The firmware record's doorbell_off is an absolute
+// BAR dword index whose base is page-aligned, so masking to the page yields the
+// same per-queue value both sides compute.
+//
+// 4 KiB page / 4-byte dword = 1024 dword slots per page. Collisions would only
+// occur if a process's doorbells spanned more than one page (>512 queues at the
+// 8-byte doorbell stride), far beyond any real workload; a collision would cause a
+// key mismatch -> clean HSA fallback, never misattribution.
+constexpr uint32_t kDoorbellSlotsPerPage = 1024;
+
+// Reader side: absolute record doorbell_off -> page-relative slot index.
+inline uint32_t
+doorbell_off_to_page_slot(uint32_t record_doorbell_off)
+{
+    return record_doorbell_off & (kDoorbellSlotsPerPage - 1);
+}
+
+// Capture side: a queue's hardware doorbell pointer -> page-relative slot index.
+// The pointer's offset within its page, in dwords (>>2): GFX12 dispatch-log
+// records store a dword index, and adjacent 8-byte doorbells are 2 dwords apart.
+inline uint32_t
+doorbell_ptr_to_page_slot(uint64_t hardware_doorbell_ptr, uint64_t page_size)
+{
+    return static_cast<uint32_t>((hardware_doorbell_ptr & (page_size - 1)) >> 2);
+}
 // Snapshot of a queue's doorbell identity, valid at the moment get_by_queue()
 // was called. Captured into packet_data_t at enqueue time (later phase) so the
 // completion path uses a stable key.
@@ -88,27 +117,6 @@ public:
     // doorbells rather than risk misattribution.
     bool is_generation_certain(uint32_t doorbell_off) const;
 
-    // --- Empirical doorbell binding (no clean queue->doorbell_off accessor) ---
-    // There is no supported API to get a queue's record doorbell_off up front, so
-    // we learn it from the firmware records themselves. The capture side calls
-    // note_pending_dispatch() for a dispatch on a queue whose doorbell is not yet
-    // known, recording (dispatch_idx_low32 -> queue_id). The reader side, on the
-    // first record it sees for an unbound doorbell, calls bind_from_record() which
-    // matches the record's dispatch_id against that hint and binds the doorbell to
-    // the queue. Once bound, get_by_queue() succeeds and the hint is unused.
-
-    // Returns true if the queue already has a known doorbell (caller can build the
-    // key directly); false if unbound, in which case a hint was recorded.
-    bool note_pending_dispatch(rocprofiler_queue_id_t queue_id, uint32_t dispatch_idx_low32);
-
-    // Reader side: if doorbell_off is not yet bound, try to bind it using the
-    // pending hint for dispatch_id. Returns true if a bind happened (now or
-    // previously), false if the doorbell is still unknown (no matching hint yet).
-    bool bind_from_record(uint32_t doorbell_off, uint32_t dispatch_id);
-
-    // True once doorbell_off has been bound to a queue.
-    bool is_bound(uint32_t doorbell_off) const;
-
 private:
     struct map_data
     {
@@ -116,10 +124,6 @@ private:
         std::unordered_map<uint32_t /*doorbell_off*/, uint64_t /*queue handle*/> by_doorbell;
         std::unordered_map<uint32_t /*doorbell_off*/, uint32_t /*generation*/>   generations;
         std::unordered_set<uint32_t /*doorbell_off*/>                            uncertain;
-        // Empirical-bind hint: dispatch_idx_low32 -> queue handle, recorded by
-        // capture for dispatches on not-yet-bound queues; consumed by the reader.
-        std::unordered_map<uint32_t /*dispatch_idx_low32*/, uint64_t /*queue handle*/>
-            pending_index;
     };
 
     common::Synchronized<map_data> m_data = {};

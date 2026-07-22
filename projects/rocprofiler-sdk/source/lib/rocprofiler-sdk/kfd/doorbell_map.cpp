@@ -87,52 +87,5 @@ DoorbellMap::is_generation_certain(uint32_t doorbell_off) const
     });
 }
 
-bool
-DoorbellMap::note_pending_dispatch(rocprofiler_queue_id_t queue_id, uint32_t dispatch_idx_low32)
-{
-    return m_data.wlock([&](auto& data) {
-        // Already bound? Caller can build the key directly; no hint needed.
-        if(data.by_queue.find(queue_id.handle) != data.by_queue.end()) return true;
-
-        // Unbound: record the hint so the reader can bind this queue's doorbell
-        // when it sees the matching record.
-        data.pending_index[dispatch_idx_low32] = queue_id.handle;
-        return false;
-    });
-}
-
-bool
-DoorbellMap::bind_from_record(uint32_t doorbell_off, uint32_t dispatch_id)
-{
-    return m_data.wlock([&](auto& data) {
-        // Already bound: nothing to do.
-        if(data.by_doorbell.find(doorbell_off) != data.by_doorbell.end()) return true;
-
-        // Find the queue that enqueued this dispatch_id (recorded by capture).
-        auto it = data.pending_index.find(dispatch_id);
-        if(it == data.pending_index.end()) return false;  // no hint yet
-
-        const uint64_t queue_handle = it->second;
-
-        // Bind, preserving any existing generation for this doorbell.
-        auto gen_it = data.generations.find(doorbell_off);
-        auto gen    = (gen_it != data.generations.end()) ? gen_it->second : 0u;
-
-        data.by_queue[queue_handle]    = queue_doorbell_entry{doorbell_off, gen};
-        data.by_doorbell[doorbell_off] = queue_handle;
-        data.generations[doorbell_off] = gen;
-        data.uncertain.erase(doorbell_off);
-        data.pending_index.erase(it);
-        return true;
-    });
-}
-
-bool
-DoorbellMap::is_bound(uint32_t doorbell_off) const
-{
-    return m_data.rlock([&](const auto& data) {
-        return data.by_doorbell.find(doorbell_off) != data.by_doorbell.end();
-    });
-}
 }  // namespace kfd
 }  // namespace rocprofiler
