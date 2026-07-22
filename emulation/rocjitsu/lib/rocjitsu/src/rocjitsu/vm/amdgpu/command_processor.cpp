@@ -201,8 +201,10 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     if (AMDHSA_BITS_GET(kcp, KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)) {
       if (pkt.queue_ptr != 0) {
         uint64_t srd_va = pkt.queue_ptr + offsetof(amd_queue_t, scratch_resource_descriptor);
-        cu->write_sgpr(sbase + idx + 0, read_gpu_u32(srd_va + 0, pkt.process_id));
-        cu->write_sgpr(sbase + idx + 1, read_gpu_u32(srd_va + 4, pkt.process_id));
+        const uint32_t srd0 = read_gpu_u32(srd_va + 0, pkt.process_id);
+        const uint32_t srd1 = read_gpu_u32(srd_va + 4, pkt.process_id);
+        cu->write_sgpr(sbase + idx + 0, srd0);
+        cu->write_sgpr(sbase + idx + 1, srd1);
         cu->write_sgpr(sbase + idx + 2, read_gpu_u32(srd_va + 8, pkt.process_id));
         cu->write_sgpr(sbase + idx + 3, read_gpu_u32(srd_va + 12, pkt.process_id));
       }
@@ -395,6 +397,15 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     // The scoreboard id is this wave's slot in the queue's scratch allocation;
     // rocm-dbgapi multiplies it by the per-wave size to find the wave's scratch.
     wf->set_scratch_scoreboard_id(static_cast<uint32_t>(global_wave_idx));
+    // CDNA compiler-generated functions use s32 as the private stack pointer
+    // and s33 as its current frame value for explicit scratch SADDR operands.
+    // The pointer is an offset within the per-wave scratch slice, not the SRD
+    // base address supplied in the user SGPR block.
+    if (cu->config().arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+        cu->config().arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      cu->write_sgpr(sbase + 32, 32);
+      cu->write_sgpr(sbase + 33, 0);
+    }
     util::Logger::cp([&](auto &os) {
       os << std::format(
           "SCRATCH wf{} pool={:#x} wave_scratch={:#x} per_wave={} priv_size={} "
@@ -963,6 +974,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       wf->set_lds(placement.lds);
       wf->set_dispatch_id(entry.dispatch_id);
       wf->set_aql_packet_id(entry.aql_packet_id);
+      wf->set_code_load_bias(entry.code_load_bias);
       wf->set_wave_in_group(w);
       wf->set_process_id(entry.process_id);
       wf->set_queue_id(entry.queue_id);
@@ -1232,6 +1244,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   uint32_t sgprs = sgpr_count_is_descriptor_encoded(arch, sgpr_gran) ? (sgpr_gran + 1) * 8 : 0;
   uint32_t user_sgprs = AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
   uint64_t entry_pc = pkt.kernel_object + static_cast<uint64_t>(kd.kernel_code_entry_byte_offset);
+  uint64_t code_load_bias = 0;
 
   uint32_t wg_size =
       static_cast<uint32_t>(pkt.workgroup_size_x) * pkt.workgroup_size_y * pkt.workgroup_size_z;
@@ -1260,7 +1273,10 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.wfs_per_workgroup = wfs_per_wg;
   uint32_t sgpr_limit = cus_.empty() ? 112 : cus_[0]->config().sgprs_per_wf;
   uint32_t vgpr_limit = cus_.empty() ? 256 : cus_[0]->vgpr_allocation_block_size();
-  dp.sgprs_per_wf = std::min(sgprs > 0 ? sgprs : sgpr_limit, sgpr_limit);
+  uint32_t required_sgprs = sgprs > 0 ? sgprs : sgpr_limit;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
+    required_sgprs = std::max(required_sgprs, 34u); // s32 stack pointer, s33 frame pointer
+  dp.sgprs_per_wf = std::min(required_sgprs, sgpr_limit);
   dp.vgprs_per_wf = std::min(vgprs > 0 ? vgprs : vgpr_limit, vgpr_limit);
   dp.kernarg_addr = reinterpret_cast<uint64_t>(pkt.kernarg_address);
   dp.kernarg_size = kd.kernarg_size;
@@ -1391,12 +1407,16 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
       auto *host_range_begin = reinterpret_cast<const uint8_t *>(host_range_base);
       auto *elf_base = find_elf_base(kernel_object_host_ptr, host_range_begin);
       if (elf_base) {
+        const uint64_t kernel_offset = static_cast<uint64_t>(kernel_object_host_ptr - elf_base);
+        if (pkt.kernel_object >= kernel_offset)
+          code_load_bias = pkt.kernel_object - kernel_offset;
         uint64_t elf_accessible =
             host_range_size - static_cast<uint64_t>(elf_base - host_range_begin);
         kernel_symbol = find_kernel_symbol(kernel_object_host_ptr, elf_base, elf_accessible);
       }
     }
   }
+  dp.code_load_bias = code_load_bias;
   std::string kernel_name = kernel_display_name(kernel_symbol);
   ++total_dispatched_;
 

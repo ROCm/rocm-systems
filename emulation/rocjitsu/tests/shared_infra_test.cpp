@@ -2897,6 +2897,44 @@ TEST(ScratchAddrCalcTest, FlatScratchUsesWavefrontBase) {
   EXPECT_EQ(d.scratch_addr_stride, 64u * sizeof(uint32_t));
 }
 
+TEST(ScratchAddrCalcTest, FlatScratchSignExtendsScalarStackOffset) {
+  amdgpu::GpuMemory mem("signed_scratch_mem");
+  amdgpu::L2Cache l2("signed_scratch_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("signed_scratch_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, 104, 16);
+  ASSERT_NE(wf, nullptr);
+  constexpr uint64_t kScratchBase = 0x1'0000'0000ULL;
+  wf->set_scratch_base(kScratchBase);
+  wf->set_exec(1);
+
+  const uint32_t vbase = wf->vgpr_alloc().base;
+  const uint32_t sbase = wf->sgpr_alloc().base;
+  cu->write_vgpr(vbase, 0, 0x40);
+  cu->write_sgpr(sbase + 32, static_cast<uint32_t>(-0x20));
+
+  cdna4::FlatScratchMachineInst inst{};
+  inst.seg = 1;
+  inst.sve = 1;
+  inst.saddr = 32;
+  inst.addr = 0;
+  inst.offset = 0;
+
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  amdgpu::addr_calc::flat_calculate_addresses(inst, *wf, d);
+
+  // Private offset is 0x40 + (-0x20) = 0x20. In the wave64 dword-swizzled
+  // layout lane 0 therefore starts 8 rows (8 * 64 * 4 bytes) above the base.
+  EXPECT_EQ(d.per_lane_addr[0], kScratchBase + 0x800);
+}
+
 TEST(ScratchAddrCalcTest, FlatGlobalDoesNotUseScratchBase) {
   // Verify that FLAT with seg==2 (GLOBAL) does NOT add scratch_base.
   amdgpu::GpuMemory mem("test_mem");

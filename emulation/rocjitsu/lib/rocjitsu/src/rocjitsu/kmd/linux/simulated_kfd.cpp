@@ -2686,20 +2686,16 @@ void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWa
   wave.set_mode_raw(state.mode);
   wave.set_trapsts(state.trapsts);
   wave.set_debug_wave_id(state.wave_id);
+  const uint64_t scratch_base = wave.scratch_base();
+  const uint32_t stack_pointer = wave.debug_read_sgpr(32);
+  const uint32_t stack_frame = wave.debug_read_sgpr(33);
   // rocm-dbgapi may submit a lightweight control-state update with no register
   // payload after displaced stepping. Preserve the SGPR/VGPR values produced
   // by the displaced instruction in that case rather than restoring zeros.
   if (!state.sgprs.empty())
     for (uint32_t s = 0; s < state.num_sgprs && s < state.sgprs.size(); ++s)
-      wave.debug_write_sgpr(s, state.sgprs[s]);
-  // Debugger address writes use x86-style sign extension for 48-bit GPU VAs.
-  // Scalar address pairs are interpreted as unsigned by the ISA emulator, so
-  // strip that extension before resumed code performs address arithmetic.
-  for (uint32_t s = 1; s < state.num_sgprs; s += 2) {
-    const uint32_t hi = wave.debug_read_sgpr(s);
-    if ((hi & 0xFFFF0000u) == 0xFFFF0000u)
-      wave.debug_write_sgpr(s, hi & 0xFFFFu);
-  }
+      if (s != 32 && s != 33 && s < 102)
+        wave.debug_write_sgpr(s, state.sgprs[s]);
   if (!state.vgprs.empty())
     for (uint32_t r = 0; r < state.num_vgprs; ++r)
       for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
@@ -2707,6 +2703,9 @@ void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWa
         if (index < state.vgprs.size())
           wave.debug_write_vgpr(r, lane, state.vgprs[index]);
       }
+  wave.set_scratch_base(scratch_base);
+  wave.debug_write_sgpr(32, stack_pointer);
+  wave.debug_write_sgpr(33, stack_frame);
   const bool single_step = (state.mode & kModeDebugEnMask) != 0;
   wave.set_debug_single_step(single_step);
   wave.set_debug_halted(state.wave_stopped && !single_step);

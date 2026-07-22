@@ -109,6 +109,80 @@ TEST(WaveDebugTest, STrapExecutesConfiguredTrapHandlerInstructions) {
   EXPECT_EQ(completion_count, 1u);
 }
 
+// The ROCr handler temporarily reuses EXEC_LO for MSG_GET_DOORBELL. The wave
+// must be reported with the interrupted lane mask, not the handler's doorbell
+// response, or resuming a breakpoint changes which lanes execute user code.
+TEST(WaveDebugTest, TrapHandlerRestoresInterruptedExecBeforeReporting) {
+  WaveDebugFixture fx;
+  fx.gpu_mem.write32(kKernelAddr, kSTrapBreakpoint);
+  fx.gpu_mem.write32(kKernelAddr + 4, kSEndpgm);
+
+  const uint32_t handler[] = {
+      0x806C846Cu,              // s_add_u32 ttmp0, ttmp0, 4
+      0x826D806Du,              // s_addc_u32 ttmp1, ttmp1, 0
+      0xBEFE00FFu, 0x80000000u, // s_mov_b32 exec_lo, 0x80000000
+      0xBF90000Au,              // s_sendmsg sendmsg(MSG_GET_DOORBELL)
+      0xBEF800FFu, 0x00002000u, // s_mov_b32 ttmp12, STATUS.HALT
+      0xBF900001u,              // s_sendmsg sendmsg(MSG_INTERRUPT)
+      0xB978F802u,              // s_setreg_b32 hwreg(HW_REG_STATUS), ttmp12
+      0xBE801F6Cu,              // s_rfe_b64 ttmp[0:1]
+  };
+  for (uint32_t i = 0; i < std::size(handler); ++i)
+    fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
+
+  fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+    return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0, true};
+  });
+  fx.cu->set_sendmsg_handler([](amdgpu::Wavefront &wave, uint32_t message) {
+    if (message == 10)
+      wave.set_exec((wave.exec() & 0xFFFFFFFF00000000ULL) | 7u);
+    return message == 1 || message == 10;
+  });
+
+  constexpr uint64_t kInterruptedExec = 0x00FF00FF00FF00FFULL;
+  auto *wf = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(kInterruptedExec);
+
+  for (int i = 0; i < 9 && !wf->debug_halted(); ++i)
+    fx.cu->step();
+
+  ASSERT_TRUE(wf->debug_halted());
+  EXPECT_EQ(wf->exec(), kInterruptedExec);
+}
+
+// Linked gfx950 code forms helper addresses as GETPC plus a signed rel32
+// relocation. The 64-bit sum can have a 0x1ffff high dword even though it
+// denotes an address relative to the loaded code object. SWAPPC must relocate
+// that value to the dispatch load bias and preserve the architectural return
+// address for SETPC.
+TEST(WaveDebugTest, SwappcResolvesLinkedRel32AndSetpcReturns) {
+  WaveDebugFixture fx;
+  constexpr uint64_t kLoadBias = 0x7FFF00000000ULL;
+  constexpr uint64_t kCallerPc = kLoadBias + 0xA3A8;
+  constexpr uint64_t kCalleePc = kLoadBias + 0x8D60;
+
+  fx.gpu_mem.write32(kCallerPc, 0xBE9E1E00u); // s_swappc_b64 s[30:31], s[0:1]
+  fx.gpu_mem.write32(kCallerPc + 4, kSEndpgm);
+  fx.gpu_mem.write32(kCalleePc, 0xBE801D1Eu); // s_setpc_b64 s[30:31]
+
+  auto *wf = fx.dispatch(kCallerPc);
+  ASSERT_NE(wf, nullptr);
+  wf->set_code_load_bias(kLoadBias);
+  const int32_t rel32 = static_cast<int32_t>(kCalleePc - kCallerPc);
+  const uint64_t encoded_target = 0x0001FFFF00000000ULL | static_cast<uint32_t>(rel32);
+  fx.cu->write_sgpr(wf->sgpr_alloc().base + 0, static_cast<uint32_t>(encoded_target));
+  fx.cu->write_sgpr(wf->sgpr_alloc().base + 1, static_cast<uint32_t>(encoded_target >> 32));
+
+  fx.cu->step();
+  EXPECT_EQ(wf->pc, kCalleePc);
+  EXPECT_EQ(wf->debug_read_sgpr(30), static_cast<uint32_t>(kCallerPc + 4));
+  EXPECT_EQ(wf->debug_read_sgpr(31), static_cast<uint32_t>((kCallerPc + 4) >> 32));
+
+  fx.cu->step();
+  EXPECT_EQ(wf->pc, kCallerPc + 4);
+}
+
 // A single-stepped wave (rocm-dbgapi MODE.debug_en=1) executes exactly one
 // instruction and is then handed to the single-step completion handler, which
 // re-stops it. The engine must not run past that one instruction.

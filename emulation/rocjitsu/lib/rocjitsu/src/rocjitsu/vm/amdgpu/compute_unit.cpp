@@ -436,6 +436,7 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
         active->set_ttmp(14, static_cast<uint32_t>(config->tma));
         active->set_ttmp(15, static_cast<uint32_t>(config->tma >> 32));
         active->set_trap_id(trap_id);
+        active->set_trap_saved_exec(active->exec());
         active->set_trap_interrupt_sent(false);
         active->set_in_trap_handler(true);
         active->pc = config->tba;
@@ -525,6 +526,8 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
         dbg_addrs.push_back(d.per_lane_addr[lane]);
   }
 
+  const bool trap_return = std::string_view(inst->mnemonic()) == "s_rfe_b64";
+
   if (inst->is_memory_op()) {
     if (inst->data() && inst->data()->tag() == GLOBAL_MEM) {
       auto *d = inst->data_as<VectorMemState>();
@@ -539,9 +542,10 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   // s_rfe follows the same target-minus-size convention as other control-flow
   // instructions. Publish the handler-driven stop only after the common PC
   // increment has produced the architectural return PC for CWSR serialization.
-  if (std::string_view(inst->mnemonic()) == "s_rfe_b64" && active->debug_halted() &&
-      active->trap_interrupt_sent())
+  if (trap_return && active->debug_halted() && active->trap_interrupt_sent()) {
+    active->set_exec(active->trap_saved_exec());
     notify_trap_complete(*active);
+  }
 
   // Debugger per-access checks, after the access completed and the PC advanced
   // (so the serialized wave resumes at the next instruction). A memory fault is
@@ -550,10 +554,11 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   if (debug_probe && !active->debug_halted()) {
     if (memory_violation_handler_) {
       const uint32_t vmid = active->process_id();
-      for (uint64_t addr : dbg_addrs)
-        if (memory_->resolve_host_ptr(addr, vmid) == nullptr &&
+      for (uint64_t addr : dbg_addrs) {
+        if (!memory_->is_mapped(addr, vmid) &&
             memory_violation_handler_(*active, addr, dbg_is_write))
           return; // wave stopped on a memory fault
+      }
     }
     if (watchpoint_handler_)
       for (uint64_t addr : dbg_addrs)

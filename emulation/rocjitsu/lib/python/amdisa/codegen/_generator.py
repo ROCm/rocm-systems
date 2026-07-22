@@ -3808,17 +3808,39 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'scalar_setpc':
+            L.append('  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;')
+            L.append('  constexpr uint64_t kPcSignBit = 1ULL << 47;')
             L.append(
-                f'  wf.pc = amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]}) - size_;'
+                f'  const uint64_t encoded = amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]});'
             )
+            L.append('  uint64_t target = encoded & kPcAddressMask;')
+            L.append(
+                '  if ((encoded >> 32 == 0x1FFFFu || encoded >> 32 == 0xFFFFFFFFu) && wf.code_load_bias() != 0)'
+            )
+            L.append(
+                '    target = wf.code_load_bias() + static_cast<int32_t>(encoded);'
+            )
+            L.append('  else if (target & kPcSignBit)')
+            L.append('    target |= ~kPcAddressMask;')
+            L.append('  wf.pc = target - size_;')
             return '\n'.join(L)
 
         if cls == 'scalar_swappc':
             # S_SWAPPC_B64: dst = PC of next inst, then jump to src.
+            L.append('  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;')
+            L.append('  constexpr uint64_t kPcSignBit = 1ULL << 47;')
             L.append(f'  uint64_t next_pc = wf.pc + size_;')
             L.append(
-                f'  wf.pc = amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]}) - size_;'
+                f'  const uint64_t encoded = amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]});'
             )
+            L.append('  uint64_t target = encoded & kPcAddressMask;')
+            L.append(
+                '  if ((encoded >> 32 == 0x1FFFFu || encoded >> 32 == 0xFFFFFFFFu) && wf.code_load_bias() != 0)'
+            )
+            L.append('    target = wf.pc + static_cast<int32_t>(encoded);')
+            L.append('  else if (target & kPcSignBit)')
+            L.append('    target |= ~kPcAddressMask;')
+            L.append('  wf.pc = target - size_;')
             L.append(
                 f'  amdgpu::RegisterAccess(wf).write_scalar64({dst_ops[0]}, next_pc);'
             )

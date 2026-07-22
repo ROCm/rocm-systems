@@ -87,6 +87,19 @@ public:
     return translate(addr, vmid);
   }
 
+  /// @brief Return whether a GPU VA has a VMID page-table mapping.
+  bool is_mapped(uint64_t addr, uint32_t vmid = 0) const {
+    if (vmid == 0)
+      return passthrough_;
+    std::shared_lock lk(vmid_mutex_);
+    auto it = vmid_table_.find(vmid);
+    if (it == vmid_table_.end())
+      return false;
+    auto &entry = it->second;
+    std::shared_lock pt_lk(*entry.mutex);
+    return entry.page_table->contains(addr >> PAGE_SHIFT);
+  }
+
   /// @brief Look up PTE MTYPE for a GPU VA in the given VMID's page table.
   Mtype pte_mtype(uint64_t addr, uint32_t vmid = 0) const {
     if (vmid == 0)

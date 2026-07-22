@@ -167,6 +167,10 @@ public:
   /// @brief Set the AQL ring packet id (called at dispatch).
   void set_aql_packet_id(uint32_t id) { aql_packet_id_ = id; }
 
+  /// @brief GPU load bias for code-object-relative function addresses.
+  uint64_t code_load_bias() const { return code_load_bias_; }
+  void set_code_load_bias(uint64_t bias) { code_load_bias_ = bias; }
+
   /// @brief Return this wave's position within its workgroup (0-based).
   uint32_t wave_in_group() const { return wave_in_group_; }
 
@@ -488,6 +492,8 @@ public:
 
   bool trap_interrupt_sent() const { return trap_interrupt_sent_; }
   void set_trap_interrupt_sent(bool value) { trap_interrupt_sent_ = value; }
+  uint64_t trap_saved_exec() const { return trap_saved_exec_; }
+  void set_trap_saved_exec(uint64_t value) { trap_saved_exec_ = value; }
 
   /// @brief Record the trap id supplied by hardware trap entry.
   void set_trap_id(uint32_t value) { trap_id_ = value; }
@@ -571,6 +577,7 @@ public:
     wg_id_ = 0;
     dispatch_id_ = 0;
     aql_packet_id_ = 0;
+    code_load_bias_ = 0;
     wave_in_group_ = 0;
     process_id_ = 0;
     lds_base_ = 0;
@@ -602,6 +609,7 @@ public:
     trapsts_ = 0;
     in_trap_handler_ = false;
     trap_interrupt_sent_ = false;
+    trap_saved_exec_ = 0;
     debug_halted_ = false;
     single_step_ = false;
     trap_id_ = 0;
@@ -623,17 +631,18 @@ protected:
 
   ComputeUnitCore &cu_; ///< Parent CU (permanent, set at construction).
   InstructionComputeUnitView cu_view_;
-  uint32_t wf_id_ = 0;         ///< Slot index within the CU (permanent).
-  uint32_t wg_id_ = 0;         ///< Workgroup ID (set per dispatch).
-  uint32_t dispatch_id_ = 0;   ///< Dispatch ID (set per dispatch, unique per dispatch).
-  uint32_t aql_packet_id_ = 0; ///< AQL ring packet id of the dispatch (debugger correlation).
-  uint32_t wave_in_group_ = 0; ///< Position of this wave within its workgroup (debugger).
-  uint32_t process_id_ = 0;    ///< Owning process ID (PASID analog, set per dispatch).
-  uint32_t queue_id_ = 0;      ///< KFD queue ID that launched this wave (debugger correlation).
-  uint32_t lds_base_ = 0;      ///< Per-WG LDS base offset (set per dispatch).
-  Lds *lds_ = nullptr;         ///< Placement-selected LDS backing; nullptr means CU-local LDS.
-  uint32_t cluster_rank_ = 0;  ///< Workgroup rank inside the dispatch cluster.
-  uint32_t cluster_size_ = 1;  ///< Number of workgroups in the dispatch cluster.
+  uint32_t wf_id_ = 0;          ///< Slot index within the CU (permanent).
+  uint32_t wg_id_ = 0;          ///< Workgroup ID (set per dispatch).
+  uint32_t dispatch_id_ = 0;    ///< Dispatch ID (set per dispatch, unique per dispatch).
+  uint32_t aql_packet_id_ = 0;  ///< AQL ring packet id of the dispatch (debugger correlation).
+  uint64_t code_load_bias_ = 0; ///< GPU load bias for code-object-relative call targets.
+  uint32_t wave_in_group_ = 0;  ///< Position of this wave within its workgroup (debugger).
+  uint32_t process_id_ = 0;     ///< Owning process ID (PASID analog, set per dispatch).
+  uint32_t queue_id_ = 0;       ///< KFD queue ID that launched this wave (debugger correlation).
+  uint32_t lds_base_ = 0;       ///< Per-WG LDS base offset (set per dispatch).
+  Lds *lds_ = nullptr;          ///< Placement-selected LDS backing; nullptr means CU-local LDS.
+  uint32_t cluster_rank_ = 0;   ///< Workgroup rank inside the dispatch cluster.
+  uint32_t cluster_size_ = 1;   ///< Number of workgroups in the dispatch cluster.
 
   uint32_t wf_size_ = 0;   ///< Lanes per wavefront (ISA-fixed).
   uint32_t num_sgprs_ = 0; ///< Allocated scalar registers (set at dispatch).
@@ -670,6 +679,7 @@ private:
   uint32_t trapsts_ = 0;             ///< Trap status register (EXCP flags).
   bool in_trap_handler_ = false;     ///< Executing the configured trap-handler shader.
   bool trap_interrupt_sent_ = false; ///< Handler issued MSG_INTERRUPT for this entry.
+  uint64_t trap_saved_exec_ = 0;     ///< Interrupted EXEC restored after handler completion.
   bool debug_halted_ = false;        ///< Stopped by the debugger (skipped by scheduler).
   bool single_step_ = false;         ///< Execute one instruction on resume, then re-stop.
   uint32_t trap_id_ = 0;             ///< Trap id from the last s_trap (breakpoint = 1).
