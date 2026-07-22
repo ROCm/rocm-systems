@@ -221,7 +221,14 @@ HIP_TEST_CASE(Contract_VmmHandle_GetHandleForAddressRange_DmaBufFd_IsQueryableWh
 }
 
 // @asserts: hipMemExportToShareableHandle - an exported POSIX-fd shareable handle imports back into a usable allocation handle within the same process
+// PLATFORM-DIFF: This contract exercises the POSIX file-descriptor shareable-handle path,
+// which is Linux-specific. The Windows runtime rejects the POSIX-fd path with
+// hipErrorInvalidValue, so the contract is skipped there rather than treating the
+// platform mismatch as a runtime failure.
 HIP_TEST_CASE(Contract_VmmHandle_ExportImportShareableHandle_RoundTrips) {
+#if defined(_WIN32)
+  HIP_SKIP_TEST("POSIX-fd VMM shareable handles are not supported on Windows.");
+#else
   SkipIfShareableHandleUnavailable();
   hip::contract::ContractCleanup cleanup;
 
@@ -262,4 +269,5 @@ HIP_TEST_CASE(Contract_VmmHandle_ExportImportShareableHandle_RoundTrips) {
       &imported, reinterpret_cast<void*>(static_cast<long>(fd)),
       hipMemHandleTypePosixFileDescriptor));
   HIP_CHECK(hipMemRelease(imported));
+#endif  // _WIN32
 }

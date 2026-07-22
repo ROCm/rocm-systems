@@ -120,7 +120,7 @@ HIP_TEST_CASE(Contract_DriverPitchedMemory_MemsetD2D32_RoundTripsWords) {
   }
   cleanup.Add([device_ptr] { (void)hipFree(reinterpret_cast<void*>(device_ptr)); });
 
-  HIP_CHECK(hipMemsetD2D32(device_ptr, pitch, static_cast<int>(pattern), kWidth, kHeight));
+  HIP_CHECK(hipMemsetD2D32(device_ptr, pitch, static_cast<int>(pattern), width_bytes, kHeight));
   HIP_CHECK(hipMemcpy2D(dst.data(), width_bytes, reinterpret_cast<void*>(device_ptr), pitch,
                         width_bytes, kHeight, hipMemcpyDeviceToHost));
 

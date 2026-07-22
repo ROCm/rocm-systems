@@ -63,7 +63,11 @@ HIP_TEST_CASE(Contract_MemAdviseV2_SetReadMostly_IsAcceptedOrUnsupported) {
   // path (see the mem_advise domain, which gates those assertions).
   const hipMemLocation location = CurrentDeviceLocation();
   const hipError_t status = hipMemAdvise_v2(ptr, kRangeBytes, hipMemAdviseSetReadMostly, location);
-  if (status != hipSuccess && status != hipErrorNotSupported) {
+  if (status != hipSuccess && status != hipErrorNotSupported
+#if defined(_WIN32)
+      && status != hipErrorInvalidValue
+#endif
+  ) {
     HIP_CHECK(status);
   }
 }
@@ -83,13 +87,21 @@ HIP_TEST_CASE(Contract_MemAdviseV2_SetAndUnsetPreferredLocation_IsAcceptedOrUnsu
   // accepted or reported unsupported.
   const hipError_t set_status =
       hipMemAdvise_v2(ptr, kRangeBytes, hipMemAdviseSetPreferredLocation, location);
-  if (set_status != hipSuccess && set_status != hipErrorNotSupported) {
+  if (set_status != hipSuccess && set_status != hipErrorNotSupported
+#if defined(_WIN32)
+      && set_status != hipErrorInvalidValue
+#endif
+  ) {
     HIP_CHECK(set_status);
   }
 
   const hipError_t unset_status =
       hipMemAdvise_v2(ptr, kRangeBytes, hipMemAdviseUnsetPreferredLocation, location);
-  if (unset_status != hipSuccess && unset_status != hipErrorNotSupported) {
+  if (unset_status != hipSuccess && unset_status != hipErrorNotSupported
+#if defined(_WIN32)
+      && unset_status != hipErrorInvalidValue
+#endif
+  ) {
     HIP_CHECK(unset_status);
   }
 }

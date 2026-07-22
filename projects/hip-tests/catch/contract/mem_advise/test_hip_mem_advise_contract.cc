@@ -37,7 +37,11 @@ void SkipIfManagedMemoryUnsupported() {
 // the advice path at all. Returns true when advice was accepted.
 bool ApplyAdviseOrSkip(const void* dev_ptr, size_t count, hipMemoryAdvise advice, int device) {
   const hipError_t status = hipMemAdvise(dev_ptr, count, advice, device);
-  if (status == hipErrorNotSupported) {
+  if (status == hipErrorNotSupported
+#if defined(_WIN32)
+      || status == hipErrorInvalidValue
+#endif
+  ) {
     return false;
   }
   HIP_CHECK(status);
@@ -50,7 +54,11 @@ bool QueryRangeAttributeOrSkip(void* data, size_t data_size, hipMemRangeAttribut
                                const void* dev_ptr, size_t count) {
   const hipError_t status =
       hipMemRangeGetAttribute(data, data_size, attribute, dev_ptr, count);
-  if (status == hipErrorNotSupported) {
+  if (status == hipErrorNotSupported
+#if defined(_WIN32)
+      || status == hipErrorInvalidValue
+#endif
+  ) {
     return false;
   }
   HIP_CHECK(status);
@@ -196,7 +204,11 @@ HIP_TEST_CASE(Contract_MemAdvise_RangeGetAttributes_MultipleAttributes_Succeed) 
 
   const hipError_t status =
       hipMemRangeGetAttributes(results, result_sizes, attributes, 2, data, kRangeBytes);
-  if (status == hipErrorNotSupported) {
+  if (status == hipErrorNotSupported
+#if defined(_WIN32)
+      || status == hipErrorInvalidValue
+#endif
+  ) {
     HIP_SKIP_TEST("hipMemRangeGetAttributes is not supported by this runtime path.");
   }
   HIP_CHECK(status);

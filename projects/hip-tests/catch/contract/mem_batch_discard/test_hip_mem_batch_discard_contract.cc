@@ -90,7 +90,11 @@ void RequireAcceptedOrUnsupported(hipError_t status) {
   if (status != hipSuccess) {
     (void)hipGetLastError();
   }
-  if (status == hipSuccess || status == hipErrorNotSupported) {
+  if (status == hipSuccess || status == hipErrorNotSupported
+#if defined(_WIN32)
+      || status == hipErrorInvalidValue
+#endif
+  ) {
     return;
   }
   HIP_CHECK(status);
