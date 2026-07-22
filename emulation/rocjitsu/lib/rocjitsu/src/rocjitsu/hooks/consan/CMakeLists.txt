@@ -34,10 +34,23 @@ target_link_libraries(
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(_rj_consan_linker_options "--gc-sections,--exclude-libs,ALL")
+    if(
+        NOT
+        (
+            RJ_ENABLE_ASAN
+            OR RJ_ENABLE_UBSAN
+            OR RJ_ENABLE_TSAN
+            OR RJ_ENABLE_MSAN
+        )
+    )
+        string(APPEND _rj_consan_linker_options ",--no-undefined")
+    endif()
     target_link_options(
         rocjitsu_dbi_hooks
-        PRIVATE "LINKER:--gc-sections,--exclude-libs,ALL,--no-undefined"
+        PRIVATE "LINKER:${_rj_consan_linker_options}"
     )
+    unset(_rj_consan_linker_options)
 endif()
 
 if(MSVC)

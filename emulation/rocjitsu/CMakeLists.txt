@@ -362,9 +362,18 @@ target_link_libraries(
 )
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(_rj_waitcheck_linker_options "--gc-sections,--exclude-libs,ALL")
-    # Instrumented DSOs resolve ASAN hooks from the instrumented host process.
+    # Instrumented DSOs resolve sanitizer hooks from the instrumented host
+    # process.
     # Production builds remain fully checked for unresolved symbols.
-    if(NOT RJ_ENABLE_ASAN)
+    if(
+        NOT
+        (
+            RJ_ENABLE_ASAN
+            OR RJ_ENABLE_UBSAN
+            OR RJ_ENABLE_TSAN
+            OR RJ_ENABLE_MSAN
+        )
+    )
         string(APPEND _rj_waitcheck_linker_options ",--no-undefined")
     endif()
     target_link_options(
