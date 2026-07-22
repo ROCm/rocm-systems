@@ -153,7 +153,7 @@ flowchart TD
     XT3B["XT3B DONE<br/>quick-GEMM SuperCollider assessed;<br/>SGEMM first problem 12/12 exact and fully covered"]
     XT3G["XT3G DONE<br/>quick SGEMM Sampled first problem;<br/>12/12 exact, 640/640 accesses, 40/40 barriers"]
     XT3H["XT3H DONE<br/>quick SGEMM Inline assessed;<br/>first problem exact, aggregate dynamic incomplete"]
-    XT3I["XT3I ACTIVE<br/>SPMM F8 Sampled clean already exact/complete;<br/>paired and reviewed-fault acceptance"]
+    XT3I["XT3I ACTIVE<br/>SPMM F8 Sampled third-object relay window localized;<br/>partition fix, then paired and reviewed-fault acceptance"]
     XT3J["XT3J DONE<br/>SPMM F8 Inline standard clean assessed;<br/>MT64x64 wrong-result rows isolate blocker"]
     XT3K["XT3K DONE<br/>SPMM F8 Inline ninth-barrier bank defect fixed;<br/>exact kernel fully passes"]
     XT3D["XT3D DONE<br/>full SGEMM first problem complete;<br/>quadratic 115,776-event frontier isolated"]
@@ -395,6 +395,17 @@ flowchart TD
   coverage.  The latter therefore offers the narrower path to a green cell:
   reuse the established one-repetition contract to close paired overhead and
   reviewed-fault evidence without changing Sampled's general design.
+
+- 2026-07-22: XT3I's clean-provenance paired artifact
+  `consan-green-expansion-20260722-spmm-f8-ml-sampled-overhead-199` completes
+  stable one-repetition controls at 226,952.48 and 241,620.19 ms.  Sampled
+  reaches 15 exact passes before its 300-second bound and fully covers its
+  first two objects, but a newly reached third object patches only 9,279 of
+  11,154 accesses and 378 of 380 barrier members.  Its 1,870 relocated-prefix
+  gaps localize a narrow placement defect: unlike Record/Replay, Sampled does
+  not partition an over-wide dense owner into independently reachable relay
+  windows.  The next checkpoint is the analogous Sampled partition regression
+  and fix; no source edit is in flight.
 
 - 2026-07-22: V9A is DONE and V9B is the sole ACTIVE/blue node.  The current
   and historical Qwen runs use the same VMFB, and both reach the
