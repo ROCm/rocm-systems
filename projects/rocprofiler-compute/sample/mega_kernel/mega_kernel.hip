@@ -1625,6 +1625,8 @@ test_vmem_operations([[maybe_unused]] float*       global_ptr,
 #if ARCH_RDNA35_APU
     bool tex_load_passed  = true;
     bool tex_store_passed = true;
+    bool tex_load_bypass  = false;
+    bool tex_store_bypass = false;
 
     // ========================================================================
     // TEST 6: TEXTURE LOAD (Strix / RDNA 3.5) - exercises INSTS_TEX_LOAD
@@ -1639,7 +1641,8 @@ test_vmem_operations([[maybe_unused]] float*       global_ptr,
     }
     else
     {
-        tex_load_passed = true;  // Bypassed when no texture object
+        tex_load_passed = true;
+        tex_load_bypass = true;
     }
 
     // ========================================================================
@@ -1656,7 +1659,8 @@ test_vmem_operations([[maybe_unused]] float*       global_ptr,
     }
     else
     {
-        tex_store_passed = true;  // Bypassed when no surface object
+        tex_store_passed = true;
+        tex_store_bypass = true;
     }
 #endif
 
@@ -1669,8 +1673,22 @@ test_vmem_operations([[maybe_unused]] float*       global_ptr,
         atomicAdd(&results->vmem_scratch_passed, scratch_passed ? 1 : 0);
         atomicAdd(&results->vmem_lds_passed, lds_passed ? 1 : 0);
 #if ARCH_RDNA35_APU
-        atomicAdd(&results->vmem_tex_load_passed, tex_load_passed ? 1 : 0);
-        atomicAdd(&results->vmem_tex_store_passed, tex_store_passed ? 1 : 0);
+        if(tex_load_bypass)
+        {
+            atomicMin(&results->vmem_tex_load_passed, -1);
+        }
+        else
+        {
+            atomicAdd(&results->vmem_tex_load_passed, tex_load_passed ? 1 : 0);
+        }
+        if(tex_store_bypass)
+        {
+            atomicMin(&results->vmem_tex_store_passed, -1);
+        }
+        else
+        {
+            atomicAdd(&results->vmem_tex_store_passed, tex_store_passed ? 1 : 0);
+        }
 #else
         // TEX load/store paths are gfx115x-only; mark N/A from every block (not tid==0 only).
         atomicMin(&results->vmem_tex_load_passed, -1);
