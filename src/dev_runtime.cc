@@ -1184,7 +1184,7 @@ void ncclDevCommDump(struct ncclDevComm* devComm) {
   printf(" LSA Barriers count %d handle %d\n", devComm->lsaBarrier.nBarriers, devComm->lsaBarrier.bufHandle);
   printf(" Hybrid Barriers count %d LSA handle %d GIN Rail Barrier signal0 %d GIN World Barrier signal0 %d\n",
          devComm->hybridLsaBarrier.nBarriers, devComm->hybridLsaBarrier.bufHandle,
-         devComm->hybridRailGinBarrier.signal0, devComm->hybridWorldGinBarrier.signal0);
+         devComm->hybridRailGinBarrier.signal0, devComm->hybridDenseGinBarrier.signal0);
   printf(" GIN Rail Barrier signal0 %d\n", devComm->railGinBarrier.signal0);
   printf(" GIN World Barrier signal0 %d\n", devComm->worldGinBarrier.signal0);
 }
@@ -1207,7 +1207,9 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
   cudaStream_t stream = nullptr;
   struct ncclDevResourceRequirements railGinBarrierReq;
   struct ncclDevResourceRequirements hybridRailGinBarrierReq;
-  struct ncclDevResourceRequirements hybridWorldGinBarrierReq;
+  struct ncclDevResourceRequirements hybridDenseGinBarrierReq;
+  int ginStride, denseBarrierCount;
+  ncclTeam_t denseGinTeam;
   struct ncclDevResourceRequirements worldGinBarrierReq;
   struct ncclDevResourceRequirements cftBarReq;
   struct ncclDevResourceRequirements cftMcBarReq;
@@ -1259,6 +1261,12 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
   if (reqs->worldGinBarrierCount > 0 && requestedConnectionType == NCCL_GIN_CONNECTION_RAIL) {
     WARN("Cannot create worldGinBarrier with NCCL_GIN_CONNECTION_RAIL.");
     return ncclInvalidArgument;
+  }
+
+  if (requestedConnectionType == NCCL_GIN_CONNECTION_CUSTOM_STRIDE && reqs->ginCustomStride == 0) {
+    WARN("Cannot create DevComm with a GIN rank stride of 0. To disable GIN, set reqs->ginConnectionType to "
+         "NCCL_GIN_CONNECTION_NONE.");
+    return ncclInvalidUsage;
   }
 
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&captureMode));
@@ -1341,11 +1349,15 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
   ncclGinBarrierCreateRequirement(comm, ncclTeamRail(comm), reqs->barrierCount, &outDevComm->hybridRailGinBarrier,
                                   &hybridRailGinBarrierReq);
   hybridRailGinBarrierReq.next = &hybridLsaBarrierReq;
-  ncclGinBarrierCreateRequirement(comm, ncclTeamWorld(comm),
-                                  requestedConnectionType == NCCL_GIN_CONNECTION_RAIL ? 0 : reqs->barrierCount,
-                                  &outDevComm->hybridWorldGinBarrier, &hybridWorldGinBarrierReq);
-  hybridWorldGinBarrierReq.next = &hybridRailGinBarrierReq;
-  resReqsHead = &hybridWorldGinBarrierReq;
+
+  ginStride = requestedConnectionType == NCCL_GIN_CONNECTION_CUSTOM_STRIDE ? reqs->ginCustomStride : 1;
+  denseGinTeam = {comm->nRanks / ginStride, comm->rank / ginStride, ginStride};
+  // For RAIL, hybridRailGinBarrier is equivalent to hybridDenseGinBarrier and we don't need to allocate a dense barrier.
+  denseBarrierCount = requestedConnectionType == NCCL_GIN_CONNECTION_RAIL ? 0 : reqs->barrierCount;
+  ncclGinBarrierCreateRequirement(comm, denseGinTeam, denseBarrierCount, &outDevComm->hybridDenseGinBarrier,
+                                  &hybridDenseGinBarrierReq);
+  hybridDenseGinBarrierReq.next = &hybridRailGinBarrierReq;
+  resReqsHead = &hybridDenseGinBarrierReq;
 
   ncclLsaBarrierCreateRequirement(lsa, reqs->lsaBarrierCount, &outDevComm->lsaBarrier, &lsaBarReq);
   lsaBarReq.next = resReqsHead;

@@ -37,7 +37,8 @@ struct ncclBarrierSession : ncclBarrierSession_internal<Coop> {
   NCCL_DEVICE_INLINE ncclResult_t sync(Coop, cuda::memory_order, ncclGinFenceLevel, uint64_t timeoutCycles);
 
 private:
-  NCCL_DEVICE_INLINE bool useWorldForFence(ncclGinFenceLevel fence) const;
+  NCCL_DEVICE_INLINE void selectBarrierAlgo(ncclGinFenceLevel fence, bool* needsLsaBarrier, bool* needsRailGinBarrier,
+                                            bool* needsDenseGinBarrier) const;
 };
 
 // Free-function hybrid barrier. Wraps session construct + sync + destruct.

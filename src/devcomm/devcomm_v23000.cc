@@ -127,7 +127,7 @@ static ncclResult_t ncclDevCommCopyNewToOld_v23000(ncclComm_t comm, void* oldDev
   old->windowTable = newDevComm->windowTable;
   old->resourceWindow = newDevComm->resourceWindow;
   ncclDevCommCopyResourceWindowNewToOld_v23000(&old->resourceWindow_inlined, newDevComm->resourceWindow_inlined);
-  old->hybridWorldGinBarrier = newDevComm->hybridWorldGinBarrier;
+  old->hybridWorldGinBarrier = newDevComm->hybridDenseGinBarrier;
   old->lsaMultimem = newDevComm->lsaMultimem;
   old->lsaBarrier = newDevComm->lsaBarrier;
   old->railGinBarrier = newDevComm->railGinBarrier;
@@ -166,7 +166,7 @@ static ncclResult_t ncclDevCommCopyOldToNew_v23000(ncclComm_t comm, struct ncclD
   newDevComm->windowTable = old->windowTable;
   newDevComm->resourceWindow = old->resourceWindow;
   ncclDevCommCopyResourceWindowOldToNew_v23000(&newDevComm->resourceWindow_inlined, old->resourceWindow_inlined);
-  newDevComm->hybridWorldGinBarrier = old->hybridWorldGinBarrier;
+  newDevComm->hybridDenseGinBarrier = old->hybridWorldGinBarrier;
   newDevComm->lsaMultimem = old->lsaMultimem;
   newDevComm->lsaBarrier = old->lsaBarrier;
   newDevComm->railGinBarrier = old->railGinBarrier;

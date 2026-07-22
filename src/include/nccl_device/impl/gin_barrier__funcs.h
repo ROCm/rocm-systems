@@ -79,21 +79,8 @@ NCCL_DEVICE_INLINE ncclResult_t ncclGinBarrierSession_internal<Coop>::syncIntern
   // pair per thread so the flush is parallelised on both axes.
   auto fenceFlush = [&](cuda::memory_order order) {
     if (this->fenceAllContexts) {
-      ncclTeam fenceTeam;
-      int stride = this->net.comm.ginContextStride;
-      if (stride == 1) {
-        fenceTeam = ncclTeamWorld(this->net.comm);
-      } else if (stride == this->net.comm.lsaSize) {
-        fenceTeam = ncclTeamRail(this->net.comm);
-      } else { // Custom stride is used
-        fenceTeam = {
-          .nRanks = this->net.comm.nRanks / stride,
-          .rank = this->net.comm.rank / stride,
-          .stride = stride,
-        };
-      }
       int nCtx = (int)this->net.comm.ginContextCount;
-      int nPeers = fenceTeam.nRanks;
+      int nPeers = this->team.nRanks;
       int total = nCtx * nPeers;
       NVCC_PRAGMA_UNROLL_DISABLED
       for (int i = this->coop.thread_rank(); i < total; i += this->coop.size()) {
@@ -101,7 +88,7 @@ NCCL_DEVICE_INLINE ncclResult_t ncclGinBarrierSession_internal<Coop>::syncIntern
         int peer = i - ctx * nPeers;
         ncclGin scratch(this->net.comm, ctx, this->net.resourceSharingMode);
         ncclGinRequest_t req;
-        scratch.flushAsync(fenceTeam, (uint32_t)peer, &req);
+        scratch.flushAsync(this->team, (uint32_t)peer, &req);
         scratch.wait(req, ncclCoopThread{}, ncclGin_None{}, order);
       }
     } else {

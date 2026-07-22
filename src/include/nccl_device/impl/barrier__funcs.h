@@ -35,7 +35,10 @@ NCCL_DEVICE_INLINE ncclBarrierSession<Coop>::ncclBarrierSession(Coop coop, ncclT
       nccl::utility::present(coop, gin.comm, ncclTeamLsa(gin.comm), gin.comm.hybridLsaBarrier, index, multimem,
                              gin.comm.lsaMultimem),
       nccl::utility::present(coop, gin, ncclTeamRail(gin.comm), gin.comm.hybridRailGinBarrier, index),
-      nccl::utility::present(coop, gin, ncclTeamWorld(gin.comm), gin.comm.hybridWorldGinBarrier, index)) {}
+      nccl::utility::present(coop, gin,
+                             ncclTeam{gin.comm.nRanks / gin.comm.ginContextStride,
+                                      gin.comm.rank / gin.comm.ginContextStride, gin.comm.ginContextStride},
+                             gin.comm.hybridDenseGinBarrier, index)) {}
 #endif
 
 #ifdef __CUDACC__
@@ -73,28 +76,68 @@ NCCL_DEVICE_INLINE ncclGinBarrierSession<Coop>& ncclBarrierSession<Coop>::ginBar
 
 #ifdef __CUDACC__
 template <typename Coop>
-NCCL_DEVICE_INLINE bool ncclBarrierSession<Coop>::useWorldForFence(ncclGinFenceLevel fence) const {
+NCCL_DEVICE_INLINE void ncclBarrierSession<Coop>::selectBarrierAlgo(
+  ncclGinFenceLevel fence, bool* needsLsaBarrier, bool* needsRailGinBarrier, bool* needsDenseGinBarrier) const {
+  // Barrier on TeamLsa
+  if (!this->gin.present) {
+    *needsLsaBarrier = this->innerLsaBar.present;
+    *needsRailGinBarrier = false;
+    *needsDenseGinBarrier = false;
+    return;
+  }
+
+  // Barrier on TeamRail
+  if (!this->innerLsaBar.present) {
+    *needsLsaBarrier = false;
+    *needsRailGinBarrier = true;
+    *needsDenseGinBarrier = false;
+    return;
+  }
+
   bool wantPut = fence & ncclGinFenceLevel::Put;
-  // GIN is never less dense than ncclTeamRail (checked in DevCommCreate)
-  bool ginIsRailTeam = this->gin.thing.comm.ginContextStride == this->gin.thing.comm.lsaSize;
-  return wantPut && this->gin.present && !ginIsRailTeam && this->outerWorldGinBar.present;
+  const ncclDevComm& comm = this->gin.thing.comm;
+
+  // Use the hierarchical barrier if:
+  // (1) Remote data visibility is not needed or
+  // (2) The only GIN connections that exist are the rail team
+  if (!wantPut || comm.ginContextStride == ncclTeamRail(comm).stride) {
+    *needsLsaBarrier = this->innerLsaBar.present;
+    *needsRailGinBarrier = this->outerRailGinBar.present;
+    *needsDenseGinBarrier = false;
+    return;
+  }
+
+  // If all ranks are connected via GIN, use a dense GIN barrier (=full GIN barrier) to sync all ranks.
+  if (comm.ginContextStride == 1) {
+    *needsLsaBarrier = false;
+    *needsRailGinBarrier = false;
+    *needsDenseGinBarrier = this->outerDenseGinBar.present;
+    return;
+  }
+
+  // Else, GIN is denser than the rail team but not fully connected.
+  // LSA barrier first, then a GIN barrier among all connected ranks.
+  // Note: GIN is never less dense than ncclTeamRail (checked in DevCommCreate).
+  *needsLsaBarrier = this->innerLsaBar.present;
+  *needsRailGinBarrier = false;
+  *needsDenseGinBarrier = this->outerDenseGinBar.present;
 }
 #endif
 
 #ifdef __CUDACC__
 template <typename Coop>
 NCCL_DEVICE_INLINE void ncclBarrierSession<Coop>::sync(Coop, cuda::memory_order ord, ncclGinFenceLevel fence) {
-  if (this->useWorldForFence(fence)) {
-    this->outerWorldGinBar.thing.sync(this->coop, ord, fence);
-    return;
+  bool needsLsaBarrier, needsRailGinBarrier, needsDenseGinBarrier;
+  selectBarrierAlgo(fence, &needsLsaBarrier, &needsRailGinBarrier, &needsDenseGinBarrier);
+  if (needsLsaBarrier) {
+    this->innerLsaBar.thing.sync(
+      this->coop, (needsRailGinBarrier || needsDenseGinBarrier) ? nccl::utility::releaseOrderOf(ord) : ord);
   }
-
-  if (this->innerLsaBar.present) {
-    this->innerLsaBar.thing.sync(this->coop, this->outerRailGinBar.present ? nccl::utility::releaseOrderOf(ord) : ord);
+  if (needsRailGinBarrier) {
+    this->outerRailGinBar.thing.sync(this->coop, needsLsaBarrier ? nccl::utility::acquireOrderOf(ord) : ord, fence);
   }
-  if (this->outerRailGinBar.present) {
-    this->outerRailGinBar.thing.sync(this->coop, this->innerLsaBar.present ? nccl::utility::acquireOrderOf(ord) : ord,
-                                     fence);
+  if (needsDenseGinBarrier) {
+    this->outerDenseGinBar.thing.sync(this->coop, needsLsaBarrier ? nccl::utility::acquireOrderOf(ord) : ord, fence);
   }
 }
 #endif
@@ -103,16 +146,16 @@ NCCL_DEVICE_INLINE void ncclBarrierSession<Coop>::sync(Coop, cuda::memory_order 
 template <typename Coop>
 NCCL_DEVICE_INLINE ncclResult_t ncclBarrierSession<Coop>::sync(Coop, cuda::memory_order ord, ncclGinFenceLevel fence,
                                                                uint64_t timeoutCycles) {
-  if (this->useWorldForFence(fence)) {
-    return this->outerWorldGinBar.thing.sync(this->coop, ord, fence, timeoutCycles);
-  }
+  bool needsLsaBarrier, needsRailGinBarrier, needsDenseGinBarrier;
+  selectBarrierAlgo(fence, &needsLsaBarrier, &needsRailGinBarrier, &needsDenseGinBarrier);
 
-  ncclResult_t lsaResult = ncclSuccess, railResult = ncclSuccess;
+  ncclResult_t lsaResult = ncclSuccess, railResult = ncclSuccess, denseResult = ncclSuccess;
 
-  if (this->innerLsaBar.present) {
+  if (needsLsaBarrier) {
     uint64_t startCycle = clock64();
     lsaResult = this->innerLsaBar.thing.sync(
-      this->coop, this->outerRailGinBar.present ? nccl::utility::releaseOrderOf(ord) : ord, timeoutCycles);
+      this->coop, (needsRailGinBarrier || needsDenseGinBarrier) ? nccl::utility::releaseOrderOf(ord) : ord,
+      timeoutCycles);
     uint64_t elapsed = clock64() - startCycle;
     timeoutCycles -= min(elapsed, timeoutCycles);
     // Because threads within a coop don't synchronize about the timeout condition,
@@ -120,13 +163,19 @@ NCCL_DEVICE_INLINE ncclResult_t ncclBarrierSession<Coop>::sync(Coop, cuda::memor
     // to ensure that all the threads arrive at the coop sync.
   }
 
-  if (this->outerRailGinBar.present) {
+  if (needsRailGinBarrier) {
     railResult = this->outerRailGinBar.thing.sync(
-      this->coop, this->innerLsaBar.present ? nccl::utility::acquireOrderOf(ord) : ord, fence, timeoutCycles);
+      this->coop, needsLsaBarrier ? nccl::utility::acquireOrderOf(ord) : ord, fence, timeoutCycles);
+  }
+
+  if (needsDenseGinBarrier) {
+    denseResult = this->outerDenseGinBar.thing.sync(
+      this->coop, needsLsaBarrier ? nccl::utility::acquireOrderOf(ord) : ord, fence, timeoutCycles);
   }
 
   if (lsaResult != ncclSuccess) return lsaResult;
-  return railResult;
+  if (railResult != ncclSuccess) return railResult;
+  return denseResult;
 }
 #endif
 

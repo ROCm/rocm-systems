@@ -40,7 +40,7 @@ struct ncclDevComm {
   ncclWindow_t resourceWindow;
   ncclResourceWindow_vidmem_t resourceWindow_inlined;
 
-  ncclGinBarrierHandle_t hybridWorldGinBarrier;
+  ncclGinBarrierHandle_t hybridDenseGinBarrier;
 
   ncclMultimemHandle_t lsaMultimem;
   ncclLsaBarrierHandle_t lsaBarrier;
