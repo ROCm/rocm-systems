@@ -646,6 +646,11 @@ class ConSanValidationTest(unittest.TestCase):
             "/artifacts/benchmark-0-llama-work",
         )
 
+    def test_native_matvec_uses_fault_sensitive_realistic_shape(self) -> None:
+        self.assertEqual(llama_validation.WORKLOADS["mul-mat-vec-q"]["n_embd"], 1024)
+        self.assertEqual(llama_validation.WORKLOADS["mul-mat-vec-q"]["n_tokens"], 1)
+        self.assertEqual(llama_validation.WORKLOADS["mul-mat-vec-q"]["tolerance"], 2.0e-2)
+
     def test_llama_cpu_oracle_environment_scrubs_instrumentation(self) -> None:
         with mock.patch.dict(
             os.environ,
@@ -1289,6 +1294,18 @@ class ConSanValidationTest(unittest.TestCase):
             "pc=0x000000000000b8cc",
             fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
         )
+
+    def test_checked_in_gfx1201_native_matvec_effective_fault_is_runnable(self) -> None:
+        path = Path(__file__).with_name(
+            "consan_validation_faults_gfx1201_native_matvec_rr_effective.json"
+        )
+        workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
+        fault = validation._load_fault(path, "gfx1201", workload, "barrier-drop")
+        for profile in ("record-replay", "sampled"):
+            policy, trials = validation._fault_trials(fault, profile)
+            self.assertEqual(policy["detector"], "not_detected")
+            self.assertEqual(policy["oracle"], "fail")
+            self.assertEqual(trials, [{}])
 
     def test_checked_in_gfx1201_native_rms_fault_is_runnable(self) -> None:
         path = Path(__file__).with_name(

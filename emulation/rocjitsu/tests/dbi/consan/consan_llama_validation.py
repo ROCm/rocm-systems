@@ -15,8 +15,12 @@ import time
 
 
 WORKLOADS = {
-    "rms-norm": {"tolerance": 1.0e-5},
-    "mul-mat-vec-q": {"tolerance": 1.0e-2},
+    "rms-norm": {"tolerance": 1.0e-5, "n_embd": 128, "n_tokens": 1},
+    # The corpus's 128-element setup smoke is too small for a dropped
+    # synchronization pair to have a reproducible semantic effect. A
+    # 1024-element embedding remains compact while exercising enough native
+    # matvec workgroups for the independent CPU oracle to expose the fault.
+    "mul-mat-vec-q": {"tolerance": 2.0e-2, "n_embd": 1024, "n_tokens": 1},
 }
 
 
@@ -93,12 +97,13 @@ def main(argv: list[str] | None = None) -> int:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     gpu_output = args.output_dir / "gpu-output.bin"
     cpu_output = args.output_dir / "cpu-output.bin"
+    workload = WORKLOADS[args.workload]
     common = [
         str(args.executable),
         "--n-embd",
-        "128",
+        str(workload["n_embd"]),
         "--n-tokens",
-        "1",
+        str(workload["n_tokens"]),
     ]
     gpu_returncode, gpu_elapsed_ms = _run([*common, "--output", str(gpu_output)])
     cpu_returncode, _ = _run(
@@ -121,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
                 detail = "non-finite output"
             else:
                 max_abs_error = max(abs(left - right) for left, right in zip(gpu, cpu))
-                oracle_passed = max_abs_error <= WORKLOADS[args.workload]["tolerance"]
+                oracle_passed = max_abs_error <= workload["tolerance"]
                 detail = "pass" if oracle_passed else "tolerance exceeded"
         except (OSError, ValueError) as error:
             detail = str(error)
@@ -132,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
             "oracle": "independent-cpu-binary-output",
             "oracle_passed": oracle_passed,
             "max_abs_error": max_abs_error,
-            "tolerance": WORKLOADS[args.workload]["tolerance"],
+            "tolerance": workload["tolerance"],
             "gpu_returncode": gpu_returncode,
             "cpu_returncode": cpu_returncode,
             "detail": detail,

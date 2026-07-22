@@ -145,10 +145,14 @@ not validate a GPU execution. The checked-in
 therefore launches two processes for every repetition: an instrumented GPU
 process without `--validate`, and an uninstrumented CPU process with
 `--validate` after scrubbing all ConSan/HSA-tool settings. Both write binary
-F32 results. The wrapper requires equal element counts, finite values, and a
-maximum absolute error of `1e-5` for RMSNorm or `1e-2` for quantized matvec,
-then emits the GPU timing and oracle result as JSON for the normal paired
-overhead machinery.
+F32 results. RMSNorm uses the corpus's compact 128-element shape and requires
+a maximum absolute error of `1e-5`. Quantized matvec uses a still-compact but
+fault-sensitive 1,024-element embedding: the corpus's 128-element setup smoke
+schedule-masks its synchronization fault. The 1,024-element clean GPU/CPU
+baseline requires a maximum absolute error of `2e-2`; its independently
+reviewed exact barrier deletion exceeds that bound by roughly 40 orders of
+magnitude. The wrapper emits the GPU timing and oracle result as JSON for the
+normal paired-overhead machinery.
 
 ## Inspecting the executable contract
 

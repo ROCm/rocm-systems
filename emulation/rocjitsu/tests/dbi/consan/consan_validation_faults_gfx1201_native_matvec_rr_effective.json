@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "target": "gfx1201",
+  "evidence_model": "reviewed after retaining the rejected 128-element hypotheses; independently confirm the exact native matvec barrier drop at the canonical 1024-element embedding",
+  "review_required": false,
+  "workloads": {
+    "llama-rdna4-mul-mat-vec-q": {
+      "faults": [
+        {
+          "id": "barrier-drop",
+          "family": "barrier-drop",
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:fd5ac4e13780e469|kernel=_ZL13mul_mat_vec_qIL9ggml_type2ELi1ELb0ELb0EEvPKvS2_PKi31ggml_cuda_mm_fusion_args_devicePfj15HIP_vector_typeIjLj3EEjjjS8_jjjS8_jjjj|kind=barrier|pc=0x000000000000b8cc|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:fd5ac4e13780e469|kernel=_ZL13mul_mat_vec_qIL9ggml_type2ELi1ELb0ELb0EEvPKvS2_PKi31ggml_cuda_mm_fusion_args_devicePfj15HIP_vector_typeIjLj3EEjjjS8_jjjS8_jjjj|event=barrier|pc=0x000000000000b8cc|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:fd5ac4e13780e469|kernel=_ZL13mul_mat_vec_qIL9ggml_type2ELi1ELb0ELb0EEvPKvS2_PKi31ggml_cuda_mm_fusion_args_devicePfj15HIP_vector_typeIjLj3EEjjjS8_jjjS8_jjjj|event=barrier|pc=0x000000000000b8d0|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "record-replay": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            },
+            "sampled": {
+              "detector": "not_detected",
+              "oracle": "fail"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
