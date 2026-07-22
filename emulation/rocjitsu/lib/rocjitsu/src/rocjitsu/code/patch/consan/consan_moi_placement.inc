@@ -2905,6 +2905,148 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
             "AccVGPR boundary for Record/Replay");
         return true;
       }
+
+      // A linked kernel can reference a high SGPR transiently while leaving a
+      // lower pair completely untouched throughout every owning kernel and
+      // shared helper. Persistent state may use such a hole only after proving
+      // that the pair is absent from the complete owner scopes; site-local
+      // liveness is insufficient because the values cross arbitrary guest
+      // code between the entry prologue and every probe.
+      MoiResourcePlanningState scalar_state(bytes, arch, options, result);
+      std::vector<uint64_t> scalar_owners;
+      for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+        if (plan.source == ConSanRegisterAllocationSource::Unsupported)
+          continue;
+        for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
+          if (std::ranges::find(scalar_owners, descriptor_offset) == scalar_owners.end())
+            scalar_owners.push_back(descriptor_offset);
+        }
+      }
+      ConSanOptions scalar_options = options;
+      const bool scalar_state_valid =
+          scalar_state.valid && !scalar_owners.empty() &&
+          apply_moi_transient_sgpr_assignment(scalar_options, scalar_owners);
+      RegisterSet component_references;
+      bool component_uses_indirect_sgprs = false;
+      bool every_owner_resolved = scalar_state_valid;
+      std::vector<const MoiKernelResourceContext *> scalar_contexts;
+      for (uint64_t descriptor_offset : scalar_owners) {
+        const auto context = std::ranges::find_if(
+            scalar_state.contexts, [&](const MoiKernelResourceContext &candidate) {
+              return candidate.kernel != nullptr &&
+                     candidate.kernel->descriptor_file_offset == descriptor_offset;
+            });
+        if (context == scalar_state.contexts.end() || !context->descriptor_valid) {
+          every_owner_resolved = false;
+          break;
+        }
+        scalar_contexts.push_back(&*context);
+        if (context->kernel->uses_dynamic_stack.value_or(false)) {
+          component_references.expand({RegClass::SGPR, 32u, 2u});
+        }
+        if (descriptor_offset > bytes.size() || sizeof(KD) > bytes.size() - descriptor_offset) {
+          every_owner_resolved = false;
+          break;
+        }
+        KD descriptor{};
+        std::memcpy(&descriptor, bytes.data() + descriptor_offset, sizeof(descriptor));
+        const uint32_t initialized_count = moi_descriptor_user_sgpr_count(descriptor) +
+                                           moi_descriptor_system_sgpr_count(descriptor);
+        for (uint32_t sgpr = 0u;
+             sgpr < std::min<uint32_t>(initialized_count,
+                                       moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA4));
+             ++sgpr) {
+          component_references.expand({RegClass::SGPR, static_cast<uint16_t>(sgpr), 1u});
+        }
+      }
+      // Scan every decoded block in the linked object, rather than only the
+      // recovered owner scopes. This is stricter (unrelated kernels can make a
+      // hole unavailable), but it remains sound in the presence of indirect
+      // calls whose targets cannot be proven from the CFG.
+      for (const std::unique_ptr<BasicBlock> &block : scalar_state.blocks) {
+        if (!block)
+          continue;
+        for (const Instruction &instruction : block->instructions()) {
+          if (instruction.mnemonic().starts_with("s_movrel"))
+            component_uses_indirect_sgprs = true;
+          const InstDefUse def_use(instruction);
+          component_references |= def_use.defs | def_use.uses;
+        }
+      }
+      const auto hole_unavailable = [&](uint16_t base) {
+        if (component_references.contains({RegClass::SGPR, base, 1u}) ||
+            component_references.contains({RegClass::SGPR, static_cast<uint16_t>(base + 1u), 1u}) ||
+            (scalar_options.moi_exec_save_sgpr &&
+             range_overlaps(base, scalar_count, *scalar_options.moi_exec_save_sgpr,
+                            moi_exec_save_sgpr_count(scalar_options, ROCJITSU_CODE_ARCH_CDNA4))) ||
+            (scalar_options.moi_dispatch_id_sgpr &&
+             range_overlaps(base, scalar_count, *scalar_options.moi_dispatch_id_sgpr,
+                            moi_dispatch_state_sgpr_count(scalar_options))) ||
+            (scalar_options.moi_owner_sgpr &&
+             range_overlaps(base, scalar_count, *scalar_options.moi_owner_sgpr, 1u)) ||
+            (scalar_options.moi_record_replay_dispatch_key_sgpr &&
+             range_overlaps(base, scalar_count, *scalar_options.moi_record_replay_dispatch_key_sgpr,
+                            1u)) ||
+            (scalar_options.moi_record_replay_call_return_sgpr &&
+             range_overlaps(base, scalar_count, *scalar_options.moi_record_replay_call_return_sgpr,
+                            2u))) {
+          return true;
+        }
+        return std::ranges::any_of(scalar_contexts, [&](const MoiKernelResourceContext *context) {
+          return static_cast<uint32_t>(base) + scalar_count > context->current_sgpr_count ||
+                 cdna4_sgpr_window_conflicts_with_physical_vcc(base, scalar_count,
+                                                               context->current_sgpr_count);
+        });
+      };
+      std::optional<uint16_t> persistent_hole;
+      if (every_owner_resolved && !component_uses_indirect_sgprs) {
+        for (uint32_t base = 0u; base + scalar_count <= first; ++base) {
+          if (!hole_unavailable(static_cast<uint16_t>(base))) {
+            persistent_hole = static_cast<uint16_t>(base);
+            break;
+          }
+        }
+      }
+      if (persistent_hole) {
+        std::vector<ConSanMoiPrologueScratchVgprAssignment> prologue_scratch;
+        // Resource plans are rebuilt after persistent-state selection. Keep
+        // the same placeholder used by the ordinary scalar fallback for every
+        // kernel that the rebuild can newly admit. Record/Replay initializes
+        // both persistent values directly in SGPRs, so the shared prologue API
+        // does not actually clobber this VGPR pair.
+        for (const ConSanKernelInfo &kernel : result.kernels) {
+          if (kernel.has_text_range)
+            prologue_scratch.push_back({kernel.descriptor_file_offset, 0u});
+        }
+        options.moi_persistent_owner_sgpr = *persistent_hole;
+        options.moi_persistent_epoch_sgpr = static_cast<uint16_t>(*persistent_hole + 1u);
+        options.moi_init_owner_epoch = true;
+        options.automatic_moi_persistent_sgprs = true;
+        options.moi_prologue_scratch_vgpr_assignments = std::move(prologue_scratch);
+        result.resolved_moi_persistent_owner_sgpr = options.moi_persistent_owner_sgpr;
+        result.resolved_moi_persistent_epoch_sgpr = options.moi_persistent_epoch_sgpr;
+        result.moi_persistent_sgprs_automatic = true;
+        result.resolved_moi_prologue_scratch_vgpr_assignments =
+            options.moi_prologue_scratch_vgpr_assignments;
+        result.warnings.emplace_back(
+            "ConSan MOI assigned persistent scalar owner/epoch state to a proven-unused "
+            "CDNA4 SGPR pair below the maximum guest reference");
+        return true;
+      }
+      if (!scalar_state_valid) {
+        result.warnings.emplace_back(
+            "ConSan MOI could not build owner scopes for a proven-unused persistent SGPR pair");
+      } else if (!every_owner_resolved) {
+        result.warnings.emplace_back(
+            "ConSan MOI could not resolve every owner descriptor for a proven-unused persistent "
+            "SGPR pair");
+      } else if (component_uses_indirect_sgprs) {
+        result.warnings.emplace_back(
+            "ConSan MOI cannot prove a persistent SGPR hole across scalar-relative guest access");
+      } else {
+        result.warnings.emplace_back(
+            "ConSan MOI found no persistent SGPR pair unused by every admitted owner");
+      }
       result.outcome = ConSanTransformOutcome::Unsupported;
       result.warnings.emplace_back(
           "ConSan MOI cannot place persistent scalar owner/epoch state below a CDNA4 "
