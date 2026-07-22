@@ -94,6 +94,10 @@ public:
   /// cover the appended spill zone. Reads the descriptor at @p
   /// descriptor_file_offset, sets the scratch-size field to @p bytes, and writes
   /// it back. Returns false if the descriptor does not fit in the image.
+  ///
+  /// Deliberately narrower than DBT's apply_kernel_descriptor_translation: a
+  /// same-arch instrument-only pass must re-encode no other descriptor field
+  /// (VGPR/SGPR granules, mode bits, USER_SGPR_COUNT, kernarg size).
   [[nodiscard]] bool set_private_segment_fixed_size(uint64_t descriptor_file_offset,
                                                     uint32_t bytes);
 

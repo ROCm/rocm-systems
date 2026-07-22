@@ -7,6 +7,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/error_report.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
@@ -678,7 +679,8 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // must spill grows that one kernel's per-lane scratch. The SpillManager is
   // created lazily on the first spilling site and shared by the rest; its final
   // size is written back to the descriptor after all sites succeed.
-  const std::vector<KernelDescriptorInfo> kernels = obj_.kernel_descriptors();
+  const std::vector<ScannedKernelDescriptor> kernels =
+      scan_kernel_descriptors(patcher.image_bytes(), patcher.text_offset(), patcher.text_size());
   std::optional<SpillManager> spills;
   uint64_t spill_descriptor_file_offset = 0;
 
@@ -765,20 +767,20 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       if (!spill.none()) {
         // Single-kernel assumption: spilling needs exactly one kernel descriptor
         // with non-zero fixed scratch to grow.
-        if (kernels.size() != 1 || kernels.front().private_segment_fixed_size == 0) {
+        if (kernels.size() != 1 || kernels.front().descriptor.private_segment_fixed_size == 0) {
           result.errors.push_back(
               "probe call at anchor_offset " + std::to_string(site.anchor_offset) +
               " must spill live registers, but the code object does not have a single kernel with "
               "fixed scratch to spill into");
           continue;
         }
-        const KernelDescriptorInfo &kernel = kernels.front();
+        const ScannedKernelDescriptor &kernel = kernels.front();
         if (!spills) {
           // Cap total per-lane scratch at the widest slot the scratch offset field
           // can encode, so the SpillManager limit and the per-instruction offset
           // guards in the planners agree.
           const uint32_t scratch_limit = max_scratch_offset_bytes(arch_) + SpillManager::kSlotBytes;
-          spills.emplace(kernel.private_segment_fixed_size, scratch_limit);
+          spills.emplace(kernel.descriptor.private_segment_fixed_size, scratch_limit);
           spill_descriptor_file_offset = kernel.descriptor_file_offset;
         }
         // Split by class: VGPRs go straight to scratch; SGPRs need a bridge VGPR.
@@ -792,8 +794,11 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
           result.errors.push_back(std::move(err));
           continue;
         }
+        const uint32_t granulated_vgpr_count =
+            AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc1,
+                            rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
         const uint32_t kernel_vgpr_count =
-            (kernel.granulated_workitem_vgpr_count + 1) * vgpr_encoding_granule(arch_);
+            (granulated_vgpr_count + 1) * vgpr_encoding_granule(arch_);
         if (!sgpr_spill.none() &&
             !plan_sgpr_spills(sgpr_spill, live, plan.vgpr_spills, kernel_vgpr_count, *spills, arch_,
                               plan.sgpr_spills, plan.spill_bridge_vgpr, &err)) {
@@ -837,9 +842,8 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     return result;
 
   // Grow the spilled kernel's per-lane scratch to cover its DBI spill zone. Done
-  // before replace_text so the edit lands at the descriptor's original file
-  // offset; replace_text then relocates the descriptor bytes with the rest of the
-  // ELF.
+  // before replace_text so the edit lands at the descriptor's original file offset;
+  // replace_text then relocates the descriptor with the rest of the ELF.
   if (spills) {
     if (!patcher.set_private_segment_fixed_size(spill_descriptor_file_offset,
                                                 spills->total_private_bytes())) {

@@ -18,6 +18,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -105,9 +106,9 @@ inline uint64_t align_up_for_test(uint64_t value, uint64_t alignment) {
 // gfx950 ET_DYN ELF with one kernel: a .kd descriptor (scratch = private_bytes,
 // SGPR granulation big enough for the s[30:31] link pair) plus a .text holding
 // `text_words`, entry at .text offset 0. The `.kd` symbol is a global
-// STT_OBJECT of descriptor size so AmdGpuCodeObject::kernel_descriptors() (and
-// replace_text) can find and keep it coherent. Modeled on the in-file
-// make_gfx950_kernel_elf in instrumentor_test.cpp.
+// STT_OBJECT of descriptor size so scan_kernel_descriptors() (and replace_text)
+// can find and keep it coherent. Modeled on the in-file make_gfx950_kernel_elf
+// in instrumentor_test.cpp.
 inline std::vector<uint8_t> make_gfx950_kernel_elf(const std::vector<uint32_t> &text_words,
                                                    uint32_t private_bytes,
                                                    uint32_t granulated_sgpr_count = 3) {
@@ -500,8 +501,13 @@ inline std::vector<uint32_t> section_words(const AmdGpuCodeObject &obj, std::str
 
 // Read back the (single) kernel's scratch size from a patched ELF.
 inline uint32_t patched_private_segment_size(const AmdGpuCodeObject &obj) {
-  const auto kernels = obj.kernel_descriptors();
-  return kernels.size() == 1 ? kernels.front().private_segment_fixed_size : 0xFFFFFFFFu;
+  if (obj.text_sections().empty())
+    return 0xFFFFFFFFu;
+  const Section *text = obj.text_sections().front();
+  const auto kernels = scan_kernel_descriptors(
+      {reinterpret_cast<const uint8_t *>(obj.image_data()), obj.image_size()},
+      text->sectionOffset(), text->size());
+  return kernels.size() == 1 ? kernels.front().descriptor.private_segment_fixed_size : 0xFFFFFFFFu;
 }
 
 } // namespace rocjitsu::test
