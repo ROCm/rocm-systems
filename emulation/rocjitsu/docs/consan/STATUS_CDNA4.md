@@ -51,7 +51,7 @@ scratch before promotion.
 |---|---|---|---|---|
 | **P0 Qwen3-0.6B prefill** | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown |
 | **P1 Sharktank TP1 prefill** | 🟨 current clean and paired: exact oracle, 120/120 accesses, complete analysis, 1.13x; reviewed exact-one fault detected one instability but contradicted its frozen external-oracle policy | 🩶 historical: clean 104/104 access + 31/31 barrier accepted | 🩶 historical: clean 104/104 access + 7/7 qualified barrier accepted | 🩶 historical: clean 104/104 access + 31/31 barrier accepted |
-| **P1 Sharktank TP1 decode/combined** | 🟨 current clean: decode and combined oracles pass; aggregate 240/240 accesses; complete analysis | 🩶 historical: clean 208/208 access + 62/62 barrier accepted | 🩶 historical: clean 208/208 access + 14/14 qualified barrier accepted | 🩶 historical: clean 208/208 access + 62/62 barrier accepted across six sequential runs |
+| **P1 Sharktank TP1 decode/combined** | 🟨 current clean and paired: both exact oracles, 240/240 accesses, complete analysis, 1.33x maximum; reviewed fault active | 🩶 historical: clean 208/208 access + 62/62 barrier accepted | 🩶 historical: clean 208/208 access + 14/14 qualified barrier accepted | 🩶 historical: clean 208/208 access + 62/62 barrier accepted across six sequential runs |
 | **P2 Sharktank TP2 family** | 🟨 current clean: prefill, decode, and combined oracles pass; aggregate 936/936 accesses; complete analysis | 🩶 historical: clean 840/840 access + 168/168 barrier accepted | 🩶 historical: aggregate rejected: one 140-access + 10-barrier slice executes 0 | 🩶 historical: aggregate rejected: one 140-access + 28-barrier slice lowers 0 |
 | **P3 CLIP BF16** | 🟨 current clean: cosine oracle passes; 45/45 accesses; complete analysis | 🩶 historical: clean 39/39 access + 24/24 barrier accepted | 🩶 historical: clean 39/39 access + 20/20 qualified barrier accepted | 🩶 historical: clean 39/39 access + 24/24 barrier accepted |
 | **P4 hip-moi D128 block attention** | 🟩 current accepted bundle: exact clean, 12/12 coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary | 🟥 current scalar fallback lacks entry-local scratch for one connected component |
@@ -286,6 +286,16 @@ trap, crash, output mismatch, or GPU reset is an execution outcome rather than
 a ConSan detection.
 
 ## Progress log
+
+- 2026-07-22: TP1 decode/combined SuperCollider paired artifact
+  `consan-validation-gfx950-tp1-decode-combined-supercollider-overhead-tip-20260722-001`
+  accepts at clean `1a16f718ac`, with exactly one repetition per leg.  Both
+  exact workload oracles pass, coverage is complete at 240/240 accesses, and
+  paired slowdowns are 1.18x for decode and 1.33x for combined.  Fresh
+  inventory artifact
+  `consan-validation-gfx950-tp1-decode-combined-inventory-tip-20260722-001`
+  accepts 31 selectable singleton barriers; semantic review and one contained
+  fault remain before green.
 
 - 2026-07-22: TP1-prefill SuperCollider paired artifact
   `consan-validation-gfx950-tp1-prefill-supercollider-overhead-tip-20260722-002`
