@@ -39,6 +39,8 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.sql import Select
+from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy.sql.selectable import CTE
 
 from utils.logger import console_debug, console_error, console_warning
 
@@ -391,6 +393,13 @@ class Database:
     _db_name: Optional[str] = None
     _view_sql_cache: Optional[dict[str, str]] = None
     _type_cache: Optional[dict[tuple[type[Base], str], Base]] = None
+    _PC_SAMPLING_IDENTITY_COLUMN_NAMES = (
+        "workload_id",
+        "kernel_uuid",
+        "offset",
+        "instruction",
+        "source",
+    )
 
     @classmethod
     def init(cls, db_name: str) -> str:
@@ -513,16 +522,17 @@ class Database:
         return value
 
     @staticmethod
-    def _build_pc_sampling_view_select() -> Select[Any]:
-        """Build the aggregated PC sampling analysis view."""
-        identity_column_names = (
-            "workload_id",
-            "kernel_uuid",
-            "offset",
-            "instruction",
-            "source",
+    def _pc_sampling_identity_columns(
+        pc_sampling_cte: CTE,
+    ) -> tuple[ColumnElement[Any], ...]:
+        return tuple(
+            pc_sampling_cte.c[column_name]
+            for column_name in Database._PC_SAMPLING_IDENTITY_COLUMN_NAMES
         )
-        pc_sample_base = (
+
+    @staticmethod
+    def _build_pc_sampling_base_cte() -> CTE:
+        return (
             select(
                 CodeObjectStore.workload_id.label("workload_id"),
                 InstructionLine.kernel_uuid.label("kernel_uuid"),
@@ -545,10 +555,10 @@ class Database:
             )
         ).cte("pc_sample_base")
 
-        pc_sample_identity = tuple(
-            pc_sample_base.c[column_name] for column_name in identity_column_names
-        )
-        pc_sample_totals = (
+    @staticmethod
+    def _build_pc_sampling_totals_cte(pc_sample_base: CTE) -> CTE:
+        pc_sample_identity = Database._pc_sampling_identity_columns(pc_sample_base)
+        return (
             select(
                 *pc_sample_identity,
                 func.sum(pc_sample_base.c.total_count).label("count"),
@@ -559,6 +569,9 @@ class Database:
             .cte("pc_sample_totals")
         )
 
+    @staticmethod
+    def _build_pc_sampling_stall_reason_json_cte(pc_sample_base: CTE) -> CTE:
+        pc_sample_identity = Database._pc_sampling_identity_columns(pc_sample_base)
         pc_sample_stall_reason_totals = (
             select(
                 *pc_sample_identity,
@@ -580,11 +593,10 @@ class Database:
             .cte("pc_sample_stall_reason_totals")
         )
 
-        pc_sample_stall_reason_identity = tuple(
-            pc_sample_stall_reason_totals.c[column_name]
-            for column_name in identity_column_names
+        pc_sample_stall_reason_identity = Database._pc_sampling_identity_columns(
+            pc_sample_stall_reason_totals
         )
-        pc_sample_stall_reason_json = (
+        return (
             select(
                 *pc_sample_stall_reason_identity,
                 func.json_group_object(
@@ -596,13 +608,31 @@ class Database:
             .cte("pc_sample_stall_reason_json")
         )
 
-        pc_sample_identity_match = and_(
+    @staticmethod
+    def _build_pc_sampling_identity_match(
+        pc_sample_totals: CTE,
+        pc_sample_stall_reason_json: CTE,
+    ) -> ColumnElement[bool]:
+        return and_(
             *(
                 pc_sample_totals.c[column_name].is_not_distinct_from(
                     pc_sample_stall_reason_json.c[column_name]
                 )
-                for column_name in identity_column_names
+                for column_name in Database._PC_SAMPLING_IDENTITY_COLUMN_NAMES
             )
+        )
+
+    @staticmethod
+    def _build_pc_sampling_view_select() -> Select[Any]:
+        """Build the aggregated PC sampling analysis view."""
+        pc_sample_base = Database._build_pc_sampling_base_cte()
+        pc_sample_totals = Database._build_pc_sampling_totals_cte(pc_sample_base)
+        pc_sample_stall_reason_json = Database._build_pc_sampling_stall_reason_json_cte(
+            pc_sample_base
+        )
+        pc_sample_identity_match = Database._build_pc_sampling_identity_match(
+            pc_sample_totals,
+            pc_sample_stall_reason_json,
         )
         return (
             select(
