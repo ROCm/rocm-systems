@@ -38,10 +38,18 @@ enum class event_type_t
     pmc_event
 };
 
+/// Visible time window for track/flow reads. Interval and flow reads keep any event that
+/// OVERLAPS [start, end] (boundary-inclusive); an event is dropped only when it lies
+/// entirely outside. Point reads (scalar tracks) keep events whose timestamp falls within
+/// [start, end]. An unset bound is open-ended; an empty {} window applies no filter.
 struct time_window_t
 {
-    std::optional<timestamp_ns_t> start{ std::nullopt };  ///< Filter: start >= this
-    std::optional<timestamp_ns_t> end{ std::nullopt };    ///< Filter: end <= this
+    std::optional<timestamp_ns_t> start{
+        std::nullopt
+    };  ///< Window lower bound (ns); unset = open
+    std::optional<timestamp_ns_t> end{
+        std::nullopt
+    };  ///< Window upper bound (ns); unset = open
 };
 
 struct pagination_t

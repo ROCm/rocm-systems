@@ -2433,8 +2433,19 @@ reader_t::impl::get_interval_track(size_t                              track_id,
     auto       tit      = m_track_info_utility.find(track_id);
     if(tit != m_track_info_utility.end()) tit->second->max_lane = max_lane;
 
-    // Optional time-window filter (containment: start >= window.start, end <=
-    // window.end).
+    // DESIGN DECISION (2026-07-22, task 039): Optional time-window filter uses OVERLAP,
+    // not containment. An interval bar is kept iff its extent [ev.start, ev.end]
+    // intersects the window [lo, hi]; it is dropped only when it lies entirely outside
+    // (ends before lo, or starts after hi). Boundary-inclusive (< / >, so a bar merely
+    // touching an edge is kept). This matches the two existing overlap conventions in
+    // this reader — the get_events_* SQL predicate (read_statements.hpp:808-809
+    // "a.start <= ? AND a.end >= ?") and get_flows_in_window — because a timeline render
+    // must show every bar that crosses the visible viewport, including bars straddling
+    // its edges. Containment (the previous rule) silently dropped straddling bars.
+    // The window is deliberately NOT pushed into SQL: full-track lane/parent layout is
+    // computed above (compute_interval_layout) over the entire track BEFORE this filter,
+    // so lanes stay stable across pans/zooms. Pushing the window into the query would
+    // relayout each windowed read and make lanes jump. C++ post-filter only.
     if(filter.time_window.start.has_value() || filter.time_window.end.has_value())
     {
         const auto&                         lo = filter.time_window.start;
@@ -2443,8 +2454,9 @@ reader_t::impl::get_interval_track(size_t                              track_id,
         filtered.reserve(events.size());
         for(auto& ev : events)
         {
-            if(lo.has_value() && ev.start < lo.value()) continue;
-            if(hi.has_value() && ev.end > hi.value()) continue;
+            if(lo.has_value() && ev.end < lo.value()) continue;  // entirely before window
+            if(hi.has_value() && ev.start > hi.value())
+                continue;  // entirely after window
             filtered.push_back(std::move(ev));
         }
         events = std::move(filtered);
