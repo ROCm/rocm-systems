@@ -6,6 +6,7 @@
 
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/guest_kfd.h"
+#include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
@@ -34,6 +35,7 @@ RJ_DIAGNOSTIC_POP
 #include <thread>
 #include <vector>
 
+#include <sys/mman.h>
 #include <unistd.h>
 
 namespace {
@@ -60,7 +62,8 @@ TestVM create_test_vm() {
   t.engine = std::make_unique<simdojo::SimulationEngine>(t.loaded.engine_config);
 
   auto root = t.loaded.take_root();
-  root.release();
+  auto *released_root = root.release();
+  (void)released_root;
   auto vm = std::make_unique<rocjitsu::VirtualMachine>(std::unique_ptr<rocjitsu::SoC>(soc));
   vm->driver()->setup_topology(t.loaded.device, soc->num_xcds());
 
@@ -110,11 +113,137 @@ TEST_F(SimulatedKfdTest, LocalOpenRegistersClientPidForMemoryFallback) {
   uint32_t host_value = 0x12345678u;
   uint64_t host_va = reinterpret_cast<uint64_t>(&host_value);
   EXPECT_EQ(memory->read32(host_va, process_id), host_value);
+  EXPECT_NE(memory->resolve_host_ptr(host_va, process_id), nullptr);
 
   memory->write32(host_va, 0xA5A55A5Au, process_id);
   EXPECT_EQ(host_value, 0xA5A55A5Au);
 
   EXPECT_EQ(t.driver()->close(), 0);
+}
+
+TEST_F(SimulatedKfdTest, ProcessVmidProtNoneReservationUsesSparseFallback) {
+  auto t = create_test_vm();
+  ASSERT_NE(t.driver(), nullptr);
+  auto *vm = dynamic_cast<rocjitsu::VirtualMachine *>(t.engine->topology().root());
+  ASSERT_NE(vm, nullptr);
+  auto *memory = vm->memory();
+  ASSERT_NE(memory, nullptr);
+
+  int fd = t.driver()->open();
+  ASSERT_GE(fd, 0);
+  uint32_t process_id = t.driver()->local_process_id();
+  ASSERT_NE(process_id, 0u);
+  auto process = t.driver()->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+
+  constexpr size_t kPageSize = 0x1000;
+  void *reservation =
+      ::mmap(nullptr, kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(reservation, MAP_FAILED);
+
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = reinterpret_cast<uint64_t>(reservation);
+  alloc.size = kPageSize;
+  alloc.gpu_id = t.driver()->gpu_id();
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(t.driver()->ioctl(process_id, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+
+  uint32_t map_gpu = alloc.gpu_id;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = alloc.handle;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&map_gpu);
+  map.n_devices = 1;
+  ASSERT_EQ(t.driver()->ioctl(process_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  EXPECT_EQ(map.n_success, 1u);
+  EXPECT_TRUE(process->contains_sparse_reservation(alloc.va_addr, alloc.size));
+
+  for (uint32_t i = 0; i < 2048; ++i) {
+    uint64_t addr = alloc.va_addr + static_cast<uint64_t>((i % 64) * sizeof(uint32_t));
+    uint32_t expected = 0xA5A50000u + i;
+    memory->write32(addr, expected, process_id);
+    EXPECT_EQ(memory->read32(addr, process_id), expected);
+  }
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = alloc.handle;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&map_gpu);
+  unmap.n_devices = 1;
+  EXPECT_EQ(t.driver()->ioctl(process_id, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+
+  kfd_ioctl_free_memory_of_gpu_args free_args{};
+  free_args.handle = alloc.handle;
+  EXPECT_EQ(t.driver()->ioctl(process_id, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+  EXPECT_EQ(::munmap(reservation, kPageSize), 0);
+  EXPECT_EQ(t.driver()->close(), 0);
+}
+
+TEST_F(SimulatedKfdTest, UserptrAllocationIsNotClassifiedAsSparseReservation) {
+  auto t = create_test_vm();
+  ASSERT_NE(t.driver(), nullptr);
+
+  int fd = t.driver()->open();
+  ASSERT_GE(fd, 0);
+  uint32_t process_id = t.driver()->local_process_id();
+  ASSERT_NE(process_id, 0u);
+  auto process = t.driver()->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+
+  constexpr size_t kPageSize = 0x1000;
+  void *host = ::mmap(nullptr, kPageSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,
+                      -1, 0);
+  ASSERT_NE(host, MAP_FAILED);
+
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = reinterpret_cast<uint64_t>(host);
+  alloc.size = kPageSize;
+  alloc.gpu_id = t.driver()->gpu_id();
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(t.driver()->ioctl(process_id, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+  EXPECT_FALSE(process->contains_sparse_reservation(alloc.va_addr, alloc.size));
+
+  kfd_ioctl_free_memory_of_gpu_args free_args{};
+  free_args.handle = alloc.handle;
+  EXPECT_EQ(t.driver()->ioctl(process_id, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+  EXPECT_EQ(::munmap(host, kPageSize), 0);
+  EXPECT_EQ(t.driver()->close(), 0);
+}
+
+TEST_F(SimulatedKfdTest, SparseReservationOverlapPrefersHostBackedPages) {
+  rocjitsu::KfdProcess proc(/*process_id=*/7);
+  constexpr uint64_t kBaseVa = 0x40000000ULL;
+  constexpr uint64_t kPage = rocjitsu::KfdProcess::kPageSize;
+
+  {
+    std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
+
+    rocjitsu::KfdProcess::GpuAllocation sparse{};
+    sparse.handle = 1;
+    sparse.gpu_va = kBaseVa;
+    sparse.size = 2 * kPage;
+    sparse.host_ptr = nullptr;
+    proc.allocations_[sparse.handle] = sparse;
+
+    rocjitsu::KfdProcess::GpuAllocation host{};
+    host.handle = 2;
+    host.gpu_va = kBaseVa + kPage;
+    host.size = kPage;
+    host.host_ptr = reinterpret_cast<void *>(0x100000ULL);
+    proc.allocations_[host.handle] = host;
+
+    proc.mark_allocations_dirty();
+  }
+
+  EXPECT_TRUE(proc.contains_sparse_reservation(kBaseVa, kPage));
+  EXPECT_FALSE(proc.contains_sparse_reservation(kBaseVa + kPage, kPage));
+  EXPECT_FALSE(proc.contains_sparse_reservation(kBaseVa, 2 * kPage));
+
+  {
+    std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
+    proc.allocations_.erase(2);
+    proc.mark_allocations_dirty();
+  }
+
+  EXPECT_TRUE(proc.contains_sparse_reservation(kBaseVa, 2 * kPage));
 }
 
 TEST_F(SimulatedKfdTest, GuestDiscoveryOpenIsReleasedOnLastClose) {

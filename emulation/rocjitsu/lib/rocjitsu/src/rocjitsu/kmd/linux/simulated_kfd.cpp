@@ -368,10 +368,16 @@ int SimulatedKfd::open() {
   // DBG_TRAP self-resolution therefore requires a post-fork re-open.
   proc->set_client_pid(static_cast<pid_t>(getpid()));
   proc->event_state_.reset();
+  std::weak_ptr<KfdProcess> weak_proc = proc;
   for (auto &g : gpus_) {
     if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
       mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_);
       mem->set_process_client_pid(pid, proc->client_pid());
+      mem->set_process_sparse_reservation_classifier(
+          pid, [weak_proc](uint64_t gpu_va, size_t size) {
+            auto process = weak_proc.lock();
+            return process && process->contains_sparse_reservation(gpu_va, size);
+          });
       if (!daemon_mode_)
         mem->set_passthrough(true);
     }
@@ -430,11 +436,17 @@ uint32_t SimulatedKfd::open_process(pid_t client_pid) {
     if (client_pid > 0)
       proc->set_client_pid(client_pid);
     proc->event_state_.reset();
+    std::weak_ptr<KfdProcess> weak_proc = proc;
     for (auto &g : gpus_) {
       if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
         mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_);
         if (client_pid > 0)
           mem->set_process_client_pid(pid, client_pid);
+        mem->set_process_sparse_reservation_classifier(
+            pid, [weak_proc](uint64_t gpu_va, size_t size) {
+              auto process = weak_proc.lock();
+              return process && process->contains_sparse_reservation(gpu_va, size);
+            });
       }
     }
     processes_[pid] = proc;
@@ -606,6 +618,7 @@ int SimulatedKfd::close(uint32_t process_id) {
       }
     }
     proc.allocations_.clear();
+    proc.mark_allocations_dirty();
   }
 
   for (uint32_t qid : queue_ids) {
@@ -1060,6 +1073,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
 
   alloc.host_ptr = host_ptr;
   alloc.host_ptr_owned = host_ptr_owned;
+  proc.mark_allocations_dirty();
 
   util::Logger::vm([&](auto &os) {
     os << std::format("mmap: gpu_va={:#x} host_ptr={:#x} size={} flags={:#x}"
@@ -1147,6 +1161,7 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
       libc_passthrough().munmap(addr, length);
       alloc.host_ptr = nullptr;
       alloc.host_ptr_owned = false;
+      proc.mark_allocations_dirty();
       return 0;
     }
   }
@@ -1321,6 +1336,7 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   }
 
   proc.allocations_[alloc.handle] = alloc;
+  proc.mark_allocations_dirty();
 
   args->handle = alloc.handle;
   args->va_addr = va;
@@ -1411,6 +1427,7 @@ bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va
     alloc.handle = proc->next_handle_++;
     alloc.memfd = -1;
     proc->allocations_[alloc.handle] = alloc;
+    proc->mark_allocations_dirty();
   }
 
   util::Logger::vm([&](auto &os) {
@@ -1449,6 +1466,7 @@ int SimulatedKfd::free_memory_ioctl(KfdProcess &proc, void *arg) {
     uint32_t freed_process_id = proc.process_id();
     uint64_t freed_handle = args->handle;
     proc.allocations_.erase(it);
+    proc.mark_allocations_dirty();
 
     {
       std::lock_guard<std::mutex> ilk(ipc_mutex_);
@@ -1696,6 +1714,7 @@ int SimulatedKfd::import_dmabuf_ioctl(KfdProcess &proc, void *arg) {
     alloc.dmabuf_fd = dupfd;
     alloc.host_ptr = reinterpret_cast<void *>(args->va_addr);
     proc.allocations_[handle] = alloc;
+    proc.mark_allocations_dirty();
 
     KfdProcess::ImportedDmabuf info{};
     info.handle = handle;
@@ -1923,6 +1942,7 @@ int SimulatedKfd::ipc_import_handle_ioctl(KfdProcess &proc, void *arg) {
     alloc.gpu_id = source_gpu_id;
     alloc.imported = true;
     proc.allocations_[handle] = alloc;
+    proc.mark_allocations_dirty();
   }
 
   // IPC-imported memory uses CC (cache coherent) mtype to emulate the

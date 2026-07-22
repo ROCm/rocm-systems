@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <functional>
 #include <format>
 #include <memory>
 #include <mutex>
@@ -36,6 +37,8 @@ namespace amdgpu {
 /// issuing wave through the memory hierarchy.
 class GpuMemory : public simdojo::SparseMemory {
 public:
+  using SparseReservationClassifier = std::function<bool(uint64_t, size_t)>;
+
   explicit GpuMemory(std::string name) : simdojo::SparseMemory(std::move(name)) {
     cpl_ = add_port(std::make_unique<simdojo::Port>("cpl", 0, this, simdojo::PortDirection::IN,
                                                     simdojo::PortProtocol::MEMORY));
@@ -58,7 +61,10 @@ public:
     util::Logger::cp("VMID_REG pid=", pid, " mem=0x", std::hex, reinterpret_cast<uintptr_t>(this),
                      std::dec, " pt_size=", pt->size());
     std::unique_lock lk(vmid_mutex_);
-    vmid_table_[pid] = {pt, mu};
+    VmidEntry entry{};
+    entry.page_table = pt;
+    entry.mutex = mu;
+    vmid_table_[pid] = std::move(entry);
   }
 
   /// @brief Unregister a process from the VMID table.
@@ -76,6 +82,13 @@ public:
       it->second.client_pid = client_pid;
   }
 
+  void set_process_sparse_reservation_classifier(uint32_t pid, SparseReservationClassifier classifier) {
+    std::unique_lock lk(vmid_mutex_);
+    auto it = vmid_table_.find(pid);
+    if (it != vmid_table_.end())
+      it->second.sparse_reservation_classifier = std::move(classifier);
+  }
+
   /// @brief Enable passthrough for VMID-0 unmapped addresses (local/user-mode only).
   /// @details Process-scoped VMIDs must not directly dereference page-table misses:
   /// local-mode KFD clients can hold large PROT_NONE GPUVA reservations. Those
@@ -84,7 +97,9 @@ public:
 
   /// @brief Resolve a GPU VA to a host pointer via the given VMID's page table.
   uint8_t *resolve_host_ptr(uint64_t addr, uint32_t vmid = 0) const {
-    return translate(addr, vmid);
+    if (auto *p = translate(addr, vmid))
+      return p;
+    return resolve_client_identity_page(addr, vmid);
   }
 
   /// @brief Look up PTE MTYPE for a GPU VA in the given VMID's page table.
@@ -117,7 +132,8 @@ public:
         std::memcpy(out.data(), p + (ea & PAGE_MASK), chunk);
         return;
       }
-      if (vmid > 0 && read_client_memory(ea, out.data(), chunk, vmid))
+      if (should_probe_client_memory(ea, chunk, vmid) &&
+          read_client_memory(ea, out.data(), chunk, vmid))
         return;
       for (size_t i = 0; i < chunk; ++i)
         out[i] = simdojo::SparseMemory::read8(ea + i);
@@ -134,7 +150,8 @@ public:
         std::memcpy(p + (ea & PAGE_MASK), in.data(), chunk);
         return;
       }
-      if (vmid > 0 && write_client_memory(ea, in.data(), chunk, vmid))
+      if (should_probe_client_memory(ea, chunk, vmid) &&
+          write_client_memory(ea, in.data(), chunk, vmid))
         return;
       for (size_t i = 0; i < chunk; ++i)
         simdojo::SparseMemory::write8(ea + i, in[i]);
@@ -219,7 +236,7 @@ public:
     if (auto *p = translate(addr, vmid))
       return p[addr & PAGE_MASK];
     uint8_t val = 0;
-    if (vmid > 0 && read_client_memory(addr, &val, 1, vmid))
+    if (read_client_value(addr, vmid, val))
       return val;
     return SparseMemory::read8(addr);
   }
@@ -231,7 +248,7 @@ public:
       return val;
     }
     uint16_t val = 0;
-    if (vmid > 0 && read_client_memory(addr, &val, 2, vmid))
+    if (read_client_value(addr, vmid, val))
       return val;
     return SparseMemory::read16(addr);
   }
@@ -243,7 +260,7 @@ public:
       return val;
     }
     uint32_t val = 0;
-    if (vmid > 0 && read_client_memory(addr, &val, 4, vmid))
+    if (read_client_value(addr, vmid, val))
       return val;
     return SparseMemory::read32(addr);
   }
@@ -255,7 +272,7 @@ public:
       return val;
     }
     uint64_t val = 0;
-    if (vmid > 0 && read_client_memory(addr, &val, 8, vmid))
+    if (read_client_value(addr, vmid, val))
       return val;
     return SparseMemory::read64(addr);
   }
@@ -265,7 +282,7 @@ public:
       p[addr & PAGE_MASK] = val;
       return;
     }
-    if (vmid > 0 && write_client_memory(addr, &val, 1, vmid))
+    if (write_client_value(addr, vmid, val))
       return;
     SparseMemory::write8(addr, val);
   }
@@ -275,7 +292,7 @@ public:
       std::memcpy(p + (addr & PAGE_MASK), &val, 2);
       return;
     }
-    if (vmid > 0 && write_client_memory(addr, &val, 2, vmid))
+    if (write_client_value(addr, vmid, val))
       return;
     SparseMemory::write16(addr, val);
   }
@@ -285,7 +302,7 @@ public:
       std::memcpy(p + (addr & PAGE_MASK), &val, 4);
       return;
     }
-    if (vmid > 0 && write_client_memory(addr, &val, 4, vmid))
+    if (write_client_value(addr, vmid, val))
       return;
     SparseMemory::write32(addr, val);
   }
@@ -295,7 +312,7 @@ public:
       std::memcpy(p + (addr & PAGE_MASK), &val, 8);
       return;
     }
-    if (vmid > 0 && write_client_memory(addr, &val, 8, vmid))
+    if (write_client_value(addr, vmid, val))
       return;
     SparseMemory::write64(addr, val);
   }
@@ -315,6 +332,7 @@ private:
     KfdProcess::PageTable *page_table = nullptr;
     std::shared_mutex *mutex = nullptr;
     pid_t client_pid = 0;
+    SparseReservationClassifier sparse_reservation_classifier;
   };
 
   uint8_t *translate(uint64_t addr, uint32_t vmid) const {
@@ -338,6 +356,53 @@ private:
     std::shared_lock lk(vmid_mutex_);
     auto it = vmid_table_.find(vmid);
     return (it != vmid_table_.end()) ? it->second.client_pid : 0;
+  }
+
+  bool is_sparse_reservation(uint64_t addr, size_t len, uint32_t vmid) const {
+    if (vmid == 0 || len == 0)
+      return false;
+    SparseReservationClassifier classifier;
+    {
+      std::shared_lock lk(vmid_mutex_);
+      auto it = vmid_table_.find(vmid);
+      if (it == vmid_table_.end())
+        return false;
+      classifier = it->second.sparse_reservation_classifier;
+    }
+    return classifier ? classifier(addr, len) : false;
+  }
+
+  bool should_probe_client_memory(uint64_t addr, size_t len, uint32_t vmid) const {
+    return vmid > 0 && !is_sparse_reservation(addr, len, vmid);
+  }
+
+  template <typename T>
+  bool read_client_value(uint64_t addr, uint32_t vmid, T &val) const {
+    if (!should_probe_client_memory(addr, sizeof(T), vmid))
+      return false;
+    return read_client_memory(addr, &val, sizeof(T), vmid);
+  }
+
+  template <typename T>
+  bool write_client_value(uint64_t addr, uint32_t vmid, const T &val) {
+    if (!should_probe_client_memory(addr, sizeof(T), vmid))
+      return false;
+    return write_client_memory(addr, &val, sizeof(T), vmid);
+  }
+
+  uint8_t *resolve_client_identity_page(uint64_t addr, uint32_t vmid) const {
+    if (vmid == 0 || is_sparse_reservation(addr, 1, vmid))
+      return nullptr;
+    pid_t pid = client_pid_for_vmid(vmid);
+    if (pid <= 0)
+      return nullptr;
+    uint8_t byte = 0;
+    iovec local{&byte, 1};
+    iovec remote{reinterpret_cast<void *>(addr), 1};
+    ssize_t rc = process_vm_readv(pid, &local, 1, &remote, 1, 0);
+    if (rc != 1)
+      return nullptr;
+    return reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
   }
 
   bool read_client_memory(uint64_t addr, void *dst, size_t len, uint32_t vmid) const {

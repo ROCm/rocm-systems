@@ -244,6 +244,44 @@ public:
       page_table_.erase((gpu_va + off) >> kPageShift);
   }
 
+  /// @brief Whether a GPU VA range belongs to a tracked sparse-style reservation.
+  /// @details Returns true only when every covered page is tracked as sparse-only.
+  /// If a page is covered by both sparse and host-backed allocations, host-backed
+  /// wins and this returns false for that page.
+  [[nodiscard]] bool contains_sparse_reservation(uint64_t gpu_va, size_t size) const {
+    if (size == 0)
+      return false;
+    static_assert(sizeof(size_t) <= sizeof(uint64_t));
+    const uint64_t span = static_cast<uint64_t>(size);
+    if (gpu_va > UINT64_MAX - (span - 1))
+      return false;
+    std::lock_guard<std::mutex> lock(alloc_mutex_);
+    if (!sparse_reservation_index_valid_ ||
+        sparse_reservation_index_epoch_ != allocation_state_epoch_) {
+      rebuild_sparse_reservation_index_locked();
+    }
+    uint64_t page = gpu_va >> kPageShift;
+    const uint64_t last_page = (gpu_va + span - 1) >> kPageShift;
+    while (true) {
+      auto it = sparse_reservation_pages_.find(page);
+      if (it == sparse_reservation_pages_.end())
+        return false;
+      const auto &state = it->second;
+      if (state.host_refcount != 0 || state.sparse_refcount == 0)
+        return false;
+      if (page == last_page)
+        break;
+      ++page;
+    }
+    return true;
+  }
+
+  /// @brief Mark sparse-reservation classification as stale after allocation changes.
+  void mark_allocations_dirty() {
+    ++allocation_state_epoch_;
+    sparse_reservation_index_valid_ = false;
+  }
+
   mutable std::shared_mutex page_table_mutex_;
   PageTable page_table_;
 
@@ -291,7 +329,39 @@ public:
   mutable std::mutex debug_mutex_;
   DebugSession debug_session_;
 
-private:
+  struct ReservationPageState {
+    uint32_t sparse_refcount = 0;
+    uint32_t host_refcount = 0;
+  };
+
+  void rebuild_sparse_reservation_index_locked() const {
+    sparse_reservation_pages_.clear();
+    for (const auto &[handle, alloc] : allocations_) {
+      (void)handle;
+      if (alloc.size == 0 || alloc.gpu_va > UINT64_MAX - (alloc.size - 1))
+        continue;
+      const uint64_t first_page = alloc.gpu_va >> kPageShift;
+      const uint64_t last_page = (alloc.gpu_va + alloc.size - 1) >> kPageShift;
+      uint64_t page = first_page;
+      while (true) {
+        auto &state = sparse_reservation_pages_[page];
+        if (alloc.host_ptr)
+          ++state.host_refcount;
+        else
+          ++state.sparse_refcount;
+        if (page == last_page)
+          break;
+        ++page;
+      }
+    }
+    sparse_reservation_index_epoch_ = allocation_state_epoch_;
+    sparse_reservation_index_valid_ = true;
+  }
+
+  mutable uint64_t allocation_state_epoch_ = 0;
+  mutable uint64_t sparse_reservation_index_epoch_ = 0;
+  mutable bool sparse_reservation_index_valid_ = false;
+  mutable std::unordered_map<uint64_t, ReservationPageState> sparse_reservation_pages_;
 };
 
 } // namespace rocjitsu
