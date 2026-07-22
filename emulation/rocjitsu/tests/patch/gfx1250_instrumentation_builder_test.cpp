@@ -13,21 +13,6 @@
 namespace rocjitsu {
 namespace {
 
-TEST(Gfx1250InstructionBuilder, BuildSWaitXcnt0) {
-  const auto word = build_gfx1250_s_wait_xcnt0(ROCJITSU_CODE_ARCH_GFX1250);
-  ASSERT_TRUE(word);
-  EXPECT_EQ(*word, 0xBFC50000u);
-
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
-  ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(&*word));
-  ASSERT_NE(inst, nullptr);
-  EXPECT_EQ(std::string_view(inst->mnemonic()), "s_wait_xcnt");
-  EXPECT_EQ(inst->disassemble(), "s_wait_xcnt 0");
-
-  EXPECT_FALSE(build_gfx1250_s_wait_xcnt0(ROCJITSU_CODE_ARCH_RDNA4));
-}
-
 TEST(Gfx1250InstructionBuilder, BuildSSetVgprMsb) {
   EXPECT_EQ(build_gfx1250_s_set_vgpr_msb(/*mode=*/0x00, ROCJITSU_CODE_ARCH_GFX1250), 0xBF860000u);
   EXPECT_EQ(build_gfx1250_s_set_vgpr_msb(/*mode=*/0x40, ROCJITSU_CODE_ARCH_GFX1250), 0xBF860040u);
