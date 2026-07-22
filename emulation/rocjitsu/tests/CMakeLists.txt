@@ -494,6 +494,32 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_model_only_test> -P
             ${CMAKE_CURRENT_SOURCE_DIR}/check_model_only_symbols.cmake
     )
+
+    add_executable(
+        gfx1250_b0_to_a0_library_test
+        dbt/gfx1250_b0_to_a0_library_test.cpp
+    )
+    target_link_libraries(
+        gfx1250_b0_to_a0_library_test
+        PRIVATE rocjitsu_gfx1250_b0_to_a0 GTest::gtest_main
+    )
+    if(HAS_GFX1250_DBT_FIXTURE)
+        target_compile_definitions(
+            gfx1250_b0_to_a0_library_test
+            PRIVATE
+                GFX1250_B0_TO_A0_FIXTURE="${KERNEL_OUTPUT_DIR}/relocation_function_table_dispatch_gfx1250.hsaco"
+        )
+        add_dependencies(
+            gfx1250_b0_to_a0_library_test
+            probe_relocation_function_table_dispatch_gfx1250
+        )
+    endif()
+    rj_configure_target(
+        gfx1250_b0_to_a0_library_test
+        PRIVATE_INCLUDES
+        WARNINGS
+    )
+    rj_add_gtest_tests(gfx1250_b0_to_a0_library_test)
 endif()
 
 # --- DBI probe fixture test ---
