@@ -236,13 +236,12 @@ RCCL Profiling Output
 
 When RCCL profiling is enabled, rocprofiler-systems generates:
 
-* **ROCm Profiling Data (rocpd)**: When ``rocpd`` is output is enabled
-  (by setting ``--output-format rocpd``), RCCL profiling
-  data is output in a SQLite3 database format with per-GPU device attribution for
-  multi-GPU systems. See :ref:`rocprof_sys_rocpd_output` for details on this output
-  format. You can visualize RCCL operations in a timeline view showing communication
-  patterns, operation durations, and concurrency using
-  `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
+* **ROCm Profiling Data (rocpd)**: When ``rocpd`` is included in ``--output-format``
+  (for example, ``--output-format rocpd``), RCCL profiling data is output in a SQLite3
+  database format with per-GPU device attribution for multi-GPU systems. See
+  :ref:`rocprof_sys_rocpd_output` for details on this output format. You can visualize
+  RCCL operations in a timeline view showing communication patterns, operation durations,
+  and concurrency using `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
 * **Perfetto traces**: Visualize RCCL operations on a timeline, showing communication patterns, operation durations, and concurrency
 * **Communication data**: Track send/receive volumes separately for each GPU in multi-GPU configurations
 
@@ -359,8 +358,8 @@ UCX Profiling Output
 
 When UCX profiling is enabled, rocprofiler-systems generates:
 
-* **ROCm Profiling Data (rocpd)**: When ``rocpd`` is output is enabled
-  (by setting ``--output-format rocpd``), profiling data is output in a SQLite3
+* **ROCm Profiling Data (rocpd)**: When ``rocpd`` is included in ``--output-format``
+ (for example, ``--output-format rocpd``), profiling data is output in a SQLite3
   database format for advanced analysis. See :ref:`rocprof_sys_rocpd_output`
   for details on this output format. You can visualize MPI operations in a
   timeline view showing communication patterns, operation durations, and
@@ -431,8 +430,8 @@ SHMEM profiling output
 
 When SHMEM profiling is enabled, rocprofiler-systems generates:
 
-* **ROCm Profiling Data (rocpd)**: When ``rocpd`` is output is enabled
-  (by setting ``--output-format rocpd``),, SHMEM data is written to the SQLite3
+* **ROCm Profiling Data (rocpd)**: When ``rocpd`` is included in ``--output-format``
+(for example, ``--output-format rocpd``), SHMEM data is written to the SQLite3
   rocpd database. You can visualize SHMEM operations in
   `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
 * **Perfetto traces**: Visualize SHMEM API on a timeline (e.g., ``shmem_putmem``, ``shmem_barrier_all``).
