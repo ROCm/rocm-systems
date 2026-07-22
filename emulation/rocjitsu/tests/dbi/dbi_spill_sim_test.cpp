@@ -67,6 +67,7 @@ namespace rocjitsu {
 namespace {
 
 using test::kMovV2Zero;
+using test::kMovV3S8;
 using test::kMovV3V2;
 using test::kProbeSetpcS30S31;
 
@@ -253,7 +254,6 @@ TEST_F(DbiSpillSimFixture, MissingRestoreLeavesVgprClobbered) {
 // SGPR spill (bridged through a VGPR)
 //==============================================================================
 
-constexpr uint32_t kMovV3S8 = 0x7E060208u; // v_mov_b32 v3, s8 -> reads s8 into v3.
 constexpr uint16_t kSpilledSgpr = 8;
 
 // Patch a gfx950 kernel with a probe that clobbers the live SGPR s8, forcing an
