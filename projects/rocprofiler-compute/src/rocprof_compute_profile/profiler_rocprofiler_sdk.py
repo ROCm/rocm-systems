@@ -42,12 +42,12 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
 
         forced_comgr = self._forced_comgr
 
-        # Build LD_PRELOAD: the user's existing value, then the forced comgr,
-        # then the profiler tool libraries.
+        # Build LD_PRELOAD: the forced comgr first so it interposes, then the
+        # user's existing value, then the profiler tool libraries.
         ld_preload_parts = [
-            os.environ.get("LD_PRELOAD"),  # User's existing LD_PRELOAD (if any)
             str(forced_comgr) if forced_comgr is not None else None,  # Forced comgr
-            args.rocprofiler_sdk_tool_path,  # Our rocprofiler-sdk tool
+            os.environ.get("LD_PRELOAD"),  # User's existing LD_PRELOAD (if any)
+            args.rocprofiler_sdk_tool_path,  # The rocprofiler-sdk tool
             native_tool_path,  # Native tool (if provided)
         ]
         # Filter out None and empty string values and join with ':'
