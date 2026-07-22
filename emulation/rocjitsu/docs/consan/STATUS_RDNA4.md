@@ -131,26 +131,30 @@ A discovery row uses `— Not admitted` after target-native evidence rules it ou
 of the validation denominator.  These are resolved selection decisions, not
 support results and not gray instrumentation cells.
 
-| Discovery order and native gfx1201 source | SuperCollider | Record/Replay | Sampled | Inline Shadow | Admission decision still needed |
+| Discovery order and native gfx1201 source | SuperCollider | Record/Replay | Sampled | Inline Shadow | Admission decision and evidence |
 |---|---|---|---|---|---|
-| **D0** `kernels.gfx1201.llama.cpp.llama_mul_mat_vec_q.default` | 🩶 Inventory pending | 🩶 Inventory pending | 🩶 Inventory pending | 🩶 Inventory pending | Real LLM quantized matvec with an existing validation result.  Inventory executed LDS, barriers, atomics, pressure, and dispatch count; admit only if it adds meaningful coverage beyond Qwen. |
-| **D0** `kernels.gfx1201.llama.cpp.llama_rms_norm.default` | 🩶 Inventory pending | 🩶 Inventory pending | 🩶 Inventory pending | 🩶 Inventory pending | Real LLM normalization with an existing numeric path.  Measure synchronization relevance and choose a useful native shape without turning it into synthetic stress. |
+| **D0** `kernels.gfx1201.llama.cpp.llama_mul_mat_vec_q.default` | — Local SDK blocked | — Local SDK blocked | — Local SDK blocked | — Local SDK blocked | The existing exact runner cannot configure because this machine's local ROCm SDK has no `hipblas` CMake package. This is an explicit prerequisite blocker, not an unexamined ConSan cell; retry after the SDK gains hipBLAS and admit only if inventory adds coverage beyond Qwen. |
+| **D0** `kernels.gfx1201.llama.cpp.llama_rms_norm.default` | — Local SDK blocked | — Local SDK blocked | — Local SDK blocked | — Local SDK blocked | The same missing-hipBLAS configure gate blocks the existing exact runner before any device code is built. Retry with a complete SDK and first measure whether the native normalization path contains relevant synchronization. |
+| **D0** `kernels.gfx1201.hip-matmul.hip_matmul_matvec.m256_n1_k1024` | — Not admitted | — Not admitted | — Not admitted | — Not admitted | A standalone build with the unrelated llama.cpp backend disabled passes all nine exact matvec variants. Fresh SuperCollider inventory finds no decoded LDS, barriers, or atomics in the nine workload kernels; only eight ambiguous flat maybe-group sites fail placement, so this does not add a sound or nonredundant ConSan workload. |
 | **D0** `llama.cpp` noncontiguous batched-matmul and hazard metadata | — Not admitted | — Not admitted | — Not admitted | — Not admitted | The gfx1201 config explicitly skips compiling both variants. The hazard overlay restores llama.cpp PR #13155's pre-fix noncontiguous-stride conversion and expects a deterministic output-validation failure; it is a data-layout correctness reproducer, not a concurrency oracle. |
 | **D1** Three collected IREE direct-tile matmuls: F16, FP8, and I8 | — Not admitted | — Not admitted | — Not admitted | — Not admitted | The three gfx1201 compilations pass, but their corpus records explicitly set `compile_only=true`; they dispatch no workload and provide no runtime oracle. Normalize a calls/support-module wrapper before reconsidering them. |
 | **D1** IREE `argmax`, strided extract, and map-load/map-store cases | — Not admitted | — Not admitted | — Not admitted | — Not admitted | All four exact baselines pass. Record/Replay inventory in `.pytest-artifacts-rdna4-iree-inventory` reports zero supported accesses, barriers, atomics, and fences for every executed code object, so these global-only shapes add no ConSan coverage. |
 | **D2** RDNA4 WMMA/SWMMAC, wave32/wave64, atomic, and lane/DS CTS families | — Not admitted | — Not admitted | — Not admitted | — Not admitted | Seven exact baseline cases pass, but the arithmetic and lane-operation cases add no admitted ConSan synchronization traffic. The bundled atomic case is useful as an unsupported-transform stress object, not as a compact or nonredundant acceptance workload. Retain this family as an engine-specific reproducer pool. |
-| **D3** Remaining 105-case corpus inventory | 🩶 Survey pending | 🩶 Survey pending | 🩶 Survey pending | 🩶 Survey pending | Cluster by executed event families, code-object shape, and engine applicability before selecting a small nonredundant set. |
+| **D3** Remaining corpus families | — Not admitted | — Not admitted | — Not admitted | — Not admitted | Collection and representative execution now account for all 105 gfx1201 cases. Remaining FPSan host-only/arithmetic cases either dispatch no GPU work or reproduce the already-retained 2,560-atomic support object; remaining integer-ISA arithmetic variants add no distinct ordering family, and the reduction representative currently crashes this SDK's compiler. Keep these as compiler/engine reproducer pools rather than inflating the acceptance denominator. |
 
-Each selected case must be added to `consan_validation.py` with its exact
-target-native command and independent oracle.  Its four gray cells advance
+Any future selected case must be added to `consan_validation.py` with its exact
+target-native command and independent oracle. Its four cells then advance
 independently: evidence from one engine never promotes another.
 
 The 2026-07-21 D0 setup attempt reached the existing local ROCm SDK at
 `TheRock-build/dist/rocm`, but that SDK does not contain the `hipblas` CMake
 package required by the vendored llama.cpp build.  Both llama rows therefore
-remain unassessed; this is a local build-prerequisite gap, not an observed
-ConSan or workload failure.  Continue with another gray row instead of building
-a larger SDK solely for these two candidates.
+carry an explicit setup-blocked state; this is not an observed ConSan or
+workload failure.  Do not build a larger SDK solely for these two candidates.
+The same corpus CMake configuration unnecessarily enables llama.cpp while
+building the independent HIP-matmul case.  Configuring that case alone with
+`KERNEL_CORPUS_ENABLE_LLAMA_HIP=OFF` establishes its exact baseline and permits
+inventory without weakening the workload.
 
 The noncontiguous llama cases are absent from collection because
 `corpus/kernels/configs/gfx1201.json` names both cases in
@@ -174,6 +178,15 @@ valuable focused-debugging evidence, but admitting it would duplicate stronger
 atomic workload rows while weakening the exact-oracle acceptance standard.
 The retained external artifacts are `.pytest-artifacts-rdna4-cts-sync` and
 `.pytest-artifacts-rdna4-cts-inventory` in the `rocjitsu-test-corpus` checkout.
+The completion survey additionally retains
+`.pytest-artifacts-rdna4-hip-matvec-standalone`,
+`.pytest-artifacts-rdna4-cts-d3-baseline`, and
+`.pytest-artifacts-rdna4-cts-d3-device-baseline`.  `fpsan_core_test` passes but
+is host-only; `fpsan_hip_device_test` reaches the same 2,560-atomic bundled
+support-object rejection already represented by D2; and the integer reduction
+representative crashes Clang 23 during instruction selection before ConSan can
+run.  Those outcomes close corpus *selection* without creating spurious
+four-engine acceptance rows.
 
 ## Native gfx1201 PyTorch discovery
 
@@ -222,7 +235,7 @@ after seeing what the RDNA4 stack actually dispatches.
 | **D0** `test/test_sort_and_select.py` and `test/test_reductions.py` | 🟥 Promoted; typed strict rejection exits 92 | 🟥 Promoted; 60-second fat-object analysis gate | 🟥 Promoted; shared fat-object construction gate | 🟥 Promoted; shared fat-object construction gate | A decode-style `topk` over one 151,936-element Qwen vocabulary row with `k=50` is now in the main matrix. Its exact baseline passes. The native rocPRIM path loads 3,153 kernels and exposes shared whole-code-object scalability and unsupported-site handling that the compact Inductor client does not. |
 | **D0** Attention and model paths, including `test/inductor/test_fused_attention.py` and `test/nn/test_multihead_attention.py` | 🟨 Promoted: independent oracle; clean 158/158 | 🟨 Promoted: clean 158/158 + 22/22 + 2/2 + 2/2 | 🟥 Promoted: full-pressure persistent/transient SGPR placement | 🟥 Promoted: same full-pressure SGPR placement | Ordinary causal `torch.nn.functional.scaled_dot_product_attention` is now in the main matrix.  It selects a real native attention kernel and exposed the RDNA4 scalar-spilling and relay-placement work needed to make default Record/Replay clean-complete. |
 | **D1** `test/test_scatter_gather_ops.py` | 🟨 Promoted: exact oracle, clean 27/27 | 🟨 Promoted: exact oracle, clean 27/27 | 🟧 Promoted: exact oracle, 14/27 | 🟧 Promoted: exact oracle, 14/27 | Collision-heavy BF16/FP32 `scatter_reduce` is now in the main matrix. Artifact `rdna4-pytorch-scatter-inventory` records 656 global-atomic sites for both mutation families; clean artifact `rdna4-pytorch-scatter-clean-001` classifies all four engines. The relaxed singleton reductions are atomicity operations, not qualified MOI ordering edges. |
-| **D1** `test/test_reductions.py` histogram | 🟥 Promoted: typed strict atomic-object rejection exits 92 | 🟧 Promoted: exact oracle, 135/135 accesses, 42/84 barriers | 🟥 Promoted: typed invalid-transform rejection exits 92 | 🟧 Promoted: exact oracle, 100/135 accesses, 43/84 barriers | Ordinary `torch.histc` is now in the main matrix. Its native object adds a real precompiled-library placement and relaxed-atomic difficulty class; the relaxed LDS atomics are accesses, not qualified memory-ordering events. |
+| **D1** `test/test_reductions.py` histogram | 🟥 Promoted: typed strict atomic-object rejection exits 92 | 🟧 Promoted: exact oracle, 135/135 accesses, 42/84 barriers | 🟧 Promoted: exact oracle, 122/135 accesses, 86/168 barrier members | 🟧 Promoted: exact oracle, 100/135 accesses, 43/84 barriers | Ordinary `torch.histc` is now in the main matrix. Its native object adds a real precompiled-library placement and relaxed-atomic difficulty class; the relaxed LDS atomics are accesses, not qualified memory-ordering events. Sampled now preserves explicit partial coverage instead of rejecting the entire object when one far barrier has no relay island. |
 | **D1** `torch.compile` softmax selected from the reduction/softmax survey | 🟩 Promoted: clean 4/4; exact drop qualified miss; 0.960x | 🟩 Promoted: clean 4/4 + 3/3; exact drop detected; 1.052x | 🟧 Promoted but clean false conflict | 🟧 Promoted: static 4/4 + 3/3; dynamic workgroup-bank limit | The `128x256` exact client is in the main matrix.  Record/Replay detects the third exact barrier-pair drop even though the numeric oracle remains schedule-masked. Inline now instruments every site and exposes a distinct 32-bank external-shadow scalability limit; a different native shape remains desirable for Sampled. |
 | **D2** `test/inductor/test_cooperative_reductions.py` and `test/inductor/test_online_softmax.py` | 🟨 Promoted: exact oracle, clean 8/8 across two stages | 🟨 Promoted: clean 8/8 + 6/6 across two stages | 🟧 Promoted: static-complete, but 16 clean false conflicts | 🟧 Promoted: static-complete, but 18,576 dynamic-incomplete events | Upstream split online softmax is now in the main matrix. Its deterministic client avoids the unrelated 856-kernel RNG object while retaining the exact target-native `1x(2^20+13)` split-reduction shape. |
 | **D3** Broader PyTorch model/test survey | 🩶 Survey pending | 🩶 Survey pending | 🩶 Survey pending | 🩶 Survey pending | Inventory first, then cluster by executed event, resource shape, and engine applicability to prevent a large redundant matrix. |
