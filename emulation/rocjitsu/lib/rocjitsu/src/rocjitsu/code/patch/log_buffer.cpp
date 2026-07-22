@@ -7,10 +7,8 @@
 
 #include "util/bit.h"
 
-#include <cassert>
-#include <cinttypes>
-#include <cstdio>
 #include <cstring>
+#include <format>
 #include <new>
 
 namespace rocjitsu {
@@ -18,6 +16,22 @@ namespace rocjitsu {
 namespace {
 
 constexpr std::size_t kBufferAlignment = alignof(RjLogBufferHeader); // 64
+
+// Stamp the self-describing control fields of a logging header. Factored out of
+// the allocator so a future device-shared factory can reuse it over an
+// externally-provided [header][slots] image. Assumes the reserved padding is
+// already zeroed; this sets every meaningful field explicitly.
+void init_header(RjLogBufferHeader *hdr, uint32_t slot_count) {
+  hdr->magic = kRjLogMagic;
+  hdr->abi_version = kRjLogAbiVersion;
+  hdr->header_size = static_cast<uint16_t>(sizeof(RjLogBufferHeader));
+  hdr->record_size = kRjLogRecordSize;
+  hdr->slot_count = slot_count;
+  hdr->flags = 0;
+  hdr->write_ptr = 0;
+  hdr->read_ptr = 0;
+  hdr->overflow_count = 0;
+}
 
 } // namespace
 
@@ -56,15 +70,7 @@ std::unique_ptr<LogBuffer> LogBuffer::create_for_host_tests(uint32_t slot_count,
 
   // std::unique_ptr private-ctor dance: construct, then initialize the header.
   auto buffer = std::unique_ptr<LogBuffer>(new LogBuffer(storage, slot_count, total_bytes));
-
-  RjLogBufferHeader *hdr = buffer->header();
-  hdr->magic = kRjLogMagic;
-  hdr->abi_version = kRjLogAbiVersion;
-  hdr->header_size = static_cast<uint16_t>(sizeof(RjLogBufferHeader));
-  hdr->record_size = kRjLogRecordSize;
-  hdr->slot_count = slot_count;
-  // flags and all counters are already zeroed by the memset above.
-
+  init_header(buffer->header(), slot_count);
   return buffer;
 }
 
@@ -88,6 +94,31 @@ uint64_t LogBuffer::overflow_count() const { return header()->overflow_count; }
 
 size_t LogBuffer::total_bytes() const { return total_bytes_; }
 
+bool LogBuffer::validate(std::string *error_out) const {
+  const RjLogBufferHeader *hdr = header();
+  if (hdr->magic != kRjLogMagic) {
+    report(error_out, "log buffer magic mismatch");
+    return false;
+  }
+  if (hdr->abi_version != kRjLogAbiVersion) {
+    report(error_out, "log buffer abi_version mismatch");
+    return false;
+  }
+  if (hdr->header_size != sizeof(RjLogBufferHeader)) {
+    report(error_out, "log buffer header_size mismatch");
+    return false;
+  }
+  if (hdr->record_size != kRjLogRecordSize) {
+    report(error_out, "log buffer record_size mismatch");
+    return false;
+  }
+  if (hdr->slot_count != slot_count_) {
+    report(error_out, "log buffer slot_count mismatch");
+    return false;
+  }
+  return true;
+}
+
 DrainStats LogBuffer::drain(const LogRecordCallback &callback) {
   DrainStats stats;
   RjLogBufferHeader *hdr = header();
@@ -98,13 +129,18 @@ DrainStats LogBuffer::drain(const LogRecordCallback &callback) {
   // final settled counter values (no concurrent producer to race).
   const uint64_t write_ptr = hdr->write_ptr;
   const uint64_t read_ptr = hdr->read_ptr;
-  const uint64_t pending = write_ptr - read_ptr;
+  uint64_t pending = write_ptr - read_ptr;
 
   // Producer contract: a full ring bumps overflow_count without advancing
-  // write_ptr, so pending never exceeds slot_count and the `pending` indices
-  // map to distinct live slots. Check in debug build.
-  assert(pending <= slot_count_ &&
-         "log ring producer overran the buffer: write_ptr - read_ptr > slot_count");
+  // write_ptr, so pending should never exceed slot_count. These counters are
+  // written by an untrusted producer (a device), though, so we clamp in all
+  // builds rather than trusting the contract: an overrun would make
+  // (read_ptr + n) & mask alias earlier slots and deliver the same record more
+  // than once. Report the dropped excess instead of aborting the host.
+  if (pending > slot_count_) {
+    stats.dropped_overrun = pending - slot_count_;
+    pending = slot_count_;
+  }
   // Walk `pending` monotonic indices, mapping each to its slot. The
   // `read_ptr + n` and `& mask` arithmetic is unsigned and wrap-safe so the
   // walk stays correct even if the counters roll over.
@@ -139,13 +175,9 @@ void LogBuffer::reinitialize() {
 }
 
 std::string format_log_line(const RjLogRecord &record) {
-  char buf[128];
-  std::snprintf(buf, sizeof(buf),
-                "rj-log record_type=%" PRIu32 " site=0x%" PRIx32 " wave=0x%" PRIx32 " lane=%" PRIu32
-                " payload=0x%" PRIx64,
-                record.record_type, record.site, record.wave_id, record.writer_lane,
-                record.payload);
-  return std::string(buf);
+  return std::format("rj-log record_type={} site=0x{:x} wave=0x{:x} lane={} payload=0x{:x}",
+                     record.record_type, record.site, record.wave_id, record.writer_lane,
+                     record.payload);
 }
 
 } // namespace rocjitsu

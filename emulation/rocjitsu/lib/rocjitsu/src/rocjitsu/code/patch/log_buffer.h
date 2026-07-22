@@ -30,6 +30,8 @@ struct DrainStats {
                                 ///< valid flag was 0 (a post-completion
                                 ///< protocol error, not an expected race).
   uint64_t overflow_count = 0;  ///< Snapshot of header.overflow_count.
+  uint64_t dropped_overrun = 0; ///< Advertised records dropped because the
+                                ///< producer overran the ring (see drain()).
 };
 
 /// @brief Owns and drains a single logging ring buffer in host memory.
@@ -71,6 +73,14 @@ public:
   /// @brief Total byte size of the owned allocation (header + all slots).
   [[nodiscard]] size_t total_bytes() const;
 
+  /// @brief Validate the header's self-describing fields before trusting it.
+  ///
+  /// Checks magic, abi_version, header_size, record_size, and slot_count against
+  /// the compiled-in ABI. Intended for buffers whose header was written by
+  /// another agent (a device or a shared allocation) before the first drain().
+  /// Returns false and sets @p error_out on the first mismatch.
+  [[nodiscard]] bool validate(std::string *error_out = nullptr) const;
+
   /// @brief Drain all records in [read_ptr, write_ptr) after completion.
   ///
   /// For each advertised index the live slot is `index & (slot_count-1)`. A
@@ -79,8 +89,18 @@ public:
   /// counted in invalid_slots and skipped. On return, read_ptr is advanced to
   /// write_ptr.
   ///
+  /// The number of advertised records (write_ptr - read_ptr) is clamped to
+  /// slot_count in all builds: the counters are written by an untrusted producer
+  /// (a device), and an overrun would otherwise alias physical slots and deliver
+  /// the same record more than once. Any excess is reported in
+  /// DrainStats::dropped_overrun.
+  ///
   /// @note For now this is single-threaded and intended to run only after the
-  ///       producing dispatch has completed.
+  ///       producing dispatch has completed. The invalid_slots hole-skip
+  ///       (advancing read_ptr past a valid==0 slot) is correct ONLY for this
+  ///       post-completion model; it would permanently drop a not-yet-published
+  ///       slot once producers publish `valid` concurrently, so this must be
+  ///       revisited before the host drains while a kernel is still running.
   DrainStats drain(const LogRecordCallback &callback);
 
   /// @brief Reset the buffer for reuse: zero the counters and all record

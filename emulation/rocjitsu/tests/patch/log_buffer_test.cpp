@@ -336,5 +336,50 @@ TEST(LogBufferTest, FormatLogLineMaxValues) {
                                   "lane=4294967295 payload=0xffffffffffffffff");
 }
 
+TEST(LogBufferTest, ValidateAcceptsFreshBuffer) {
+  auto buf = LogBuffer::create_for_host_tests(8);
+  ASSERT_NE(buf, nullptr);
+  std::string err;
+  EXPECT_TRUE(buf->validate(&err)) << err;
+}
+
+TEST(LogBufferTest, ValidateRejectsWrongMagic) {
+  auto buf = LogBuffer::create_for_host_tests(8);
+  ASSERT_NE(buf, nullptr);
+  buf->header()->magic = 0xdeadbeef; // as if written by an incompatible producer
+  std::string err;
+  EXPECT_FALSE(buf->validate(&err));
+  EXPECT_NE(err.find("magic"), std::string::npos) << err;
+}
+
+TEST(LogBufferTest, ValidateRejectsWrongAbiVersion) {
+  auto buf = LogBuffer::create_for_host_tests(8);
+  ASSERT_NE(buf, nullptr);
+  buf->header()->abi_version = kRjLogAbiVersion + 1;
+  std::string err;
+  EXPECT_FALSE(buf->validate(&err));
+  EXPECT_NE(err.find("abi_version"), std::string::npos) << err;
+}
+
+TEST(LogBufferTest, DrainClampsProducerOverrun) {
+  auto buf = LogBuffer::create_for_host_tests(4);
+  ASSERT_NE(buf, nullptr);
+  for (uint32_t i = 0; i < 4; ++i)
+    publish_record(*buf, 1, 0x10 + i, i);
+  // Simulate a buggy/untrusted producer that advanced write_ptr past
+  // read_ptr + slot_count. Without clamping, indices 4 and 5 would alias slots
+  // 0 and 1 and deliver those records a second time.
+  buf->header()->write_ptr = 6; // pending = 6 > slot_count (4)
+
+  DrainStats stats;
+  auto drained = drain_all(*buf, &stats);
+  EXPECT_EQ(stats.dropped_overrun, 2u);
+  EXPECT_EQ(stats.records_drained, 4u);
+  EXPECT_EQ(stats.invalid_slots, 0u);
+  ASSERT_EQ(drained.size(), 4u); // no record delivered more than once
+  for (uint32_t i = 0; i < 4; ++i)
+    EXPECT_EQ(drained[i].site, 0x10u + i);
+}
+
 } // namespace
 } // namespace rocjitsu

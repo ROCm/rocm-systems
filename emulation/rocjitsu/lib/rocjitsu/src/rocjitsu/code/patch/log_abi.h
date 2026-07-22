@@ -45,7 +45,7 @@ struct alignas(64) RjLogBufferHeader {
   uint16_t header_size; ///< sizeof(RjLogBufferHeader).
   uint32_t record_size; ///< kRjLogRecordSize.
   uint32_t slot_count;  ///< Number of records; power of two.
-  uint64_t flags;       ///< Reserved
+  uint64_t flags;       ///< Reserved; must be zero for now. Readers ignore unknown bits.
   uint8_t reserved_control[40];
 
   // Cache line 1: producer-owned hot counter.
@@ -63,30 +63,62 @@ struct alignas(64) RjLogBufferHeader {
 
 static_assert(sizeof(RjLogBufferHeader) == 256);
 static_assert(alignof(RjLogBufferHeader) == 64);
+// Version discriminant offsets are FROZEN for all ABI versions: a host must be
+// able to read magic/abi_version/header_size at these fixed positions before it
+// can decide whether it understands the rest of the layout. Never move them.
+static_assert(offsetof(RjLogBufferHeader, magic) == 0);
+static_assert(offsetof(RjLogBufferHeader, abi_version) == 4);
+static_assert(offsetof(RjLogBufferHeader, header_size) == 6);
+static_assert(offsetof(RjLogBufferHeader, record_size) == 8);
+static_assert(offsetof(RjLogBufferHeader, slot_count) == 12);
+static_assert(offsetof(RjLogBufferHeader, flags) == 16);
 static_assert(offsetof(RjLogBufferHeader, write_ptr) == 64);
 static_assert(offsetof(RjLogBufferHeader, read_ptr) == 128);
 static_assert(offsetof(RjLogBufferHeader, overflow_count) == 192);
 
 /// @brief One logging record.
+///
+/// `payload` is kept last because it is the field most likely to grow in a
+/// future ABI version; trailing it lets the payload region expand without
+/// shifting the fixed metadata offsets ahead of it.
 struct alignas(64) RjLogRecord {
   uint32_t valid;       ///< 0 = free, 1 = record written.
   uint16_t abi_version; ///< kRjLogAbiVersion.
-  uint16_t record_size; ///< kRjLogRecordSize.
+  uint16_t reserved0;   ///< Reserved; must be zero for now.
+  uint32_t record_size; ///< kRjLogRecordSize.
   uint32_t record_type; ///< Tool-defined record kind.
-  uint32_t site;        ///< Original .text byte offset of the anchor.
-  uint64_t payload;     ///< Tool-defined payload.
   uint64_t exec_mask;   ///< Original EXEC mask at the probe site.
-  uint32_t wave_id;     ///< 0 if unavailable in the first probe.
+  uint32_t site;        ///< Original .text byte offset of the anchor.
+  uint32_t wave_id;     ///< 0 if unavailable.
   uint32_t workgroup_x; ///< 0 if unavailable.
   uint32_t workgroup_y; ///< 0 if unavailable.
   uint32_t workgroup_z; ///< 0 if unavailable.
   uint32_t active_lane_count;
   uint32_t writer_lane; ///< First active lane, or 0xffffffff if unknown.
-  uint64_t reserved0;
+  uint32_t reserved1;   ///< Reserved; must be zero for now.
+  uint64_t payload;     ///< Tool-defined payload. Kept last (see above).
 };
 
 static_assert(sizeof(RjLogRecord) == 64);
 static_assert(alignof(RjLogRecord) == 64);
 static_assert(sizeof(RjLogRecord) == kRjLogRecordSize);
+// Pin every field offset: a device writes this record, so a middle-field
+// reorder or width change that preserved the 64-byte total would otherwise
+// compile clean and silently desync the host reader from the device writer.
+static_assert(offsetof(RjLogRecord, valid) == 0);
+static_assert(offsetof(RjLogRecord, abi_version) == 4);
+static_assert(offsetof(RjLogRecord, reserved0) == 6);
+static_assert(offsetof(RjLogRecord, record_size) == 8);
+static_assert(offsetof(RjLogRecord, record_type) == 12);
+static_assert(offsetof(RjLogRecord, exec_mask) == 16);
+static_assert(offsetof(RjLogRecord, site) == 24);
+static_assert(offsetof(RjLogRecord, wave_id) == 28);
+static_assert(offsetof(RjLogRecord, workgroup_x) == 32);
+static_assert(offsetof(RjLogRecord, workgroup_y) == 36);
+static_assert(offsetof(RjLogRecord, workgroup_z) == 40);
+static_assert(offsetof(RjLogRecord, active_lane_count) == 44);
+static_assert(offsetof(RjLogRecord, writer_lane) == 48);
+static_assert(offsetof(RjLogRecord, reserved1) == 52);
+static_assert(offsetof(RjLogRecord, payload) == 56);
 
 } // namespace rocjitsu
