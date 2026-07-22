@@ -93,7 +93,7 @@ solution kernels while a numeric run selects only a subset.
 | P1 | `016_spmm_tdm_all` | 🟩 1610/1610 accesses; current paired 1.15x | 🟩 1610/1610 accesses; 512/512 barriers; current paired 1.24x | 🟩 1610/1610 accesses; 494/494 barriers; current paired 1.19x | 🟩 1610/1610 accesses; 256/256 barriers; strict-capacity current paired 1.61x | Multi-type transpose matrix; all profiles accepted, including strict-capacity Inline Shadow. |
 | P1 | `001_sk_mxf8f4gemm_tdm` | 🟩 768/768 accesses; current paired 1.12x | 🟩 Current exact clean run: 768/768 accesses, 102/102 barriers, 24/24 fences | 🟩 768/768 accesses; 180/180 barriers; current paired 1.22x | 🟩 768/768 accesses; 102/102 barriers; current paired 13.38x; reviewed exact-one fault and health accepted | Exact numeric oracle; all profiles accepted, including reviewed Inline Shadow fault evidence. |
 | P1 | `004_sk_mxf8gemm_tdm` | 🟩 992/992 accesses; current paired 1.20x | 🟩 Current exact clean run: 992/992 accesses, 102/102 barriers, 24/24 fences | 🟩 992/992 accesses; 180/180 barriers; current paired 1.23x | 🟧 Compute-active through 600, 1200, and 1800 seconds; no verdict | Only Inline Shadow remains: execution has no verdict at the stated bound. |
-| P1 | `007_sk_mxf4gemm_tdm` | 🟩 2448/2448 accesses; current paired 1.35x | 🟧 Current instrumentation is statically complete (2448 accesses, 272 barriers, 64 fences) and the first five exact rows pass, then execution aborts; the matching uninstrumented client passes all rows | 🟩 2448/2448 accesses; 480/480 barriers; current paired 1.38x | 🟧 Compute-active through 1800 seconds; no verdict | Record/Replay has a current execution regression after private-segment growth; Inline Shadow remains bounded. |
+| P1 | `007_sk_mxf4gemm_tdm` | 🟩 2448/2448 accesses; current paired 1.35x | 🟧 Current instrumentation is statically complete (2448 accesses, 272 barriers, 64 fences); PGR1 and PGR2 access/fence-only pass, but PGR2 access candidate 145 first corrupts results when barriers are enabled | 🟩 2448/2448 accesses; 480/480 barriers; current paired 1.38x | 🟧 Compute-active through 1800 seconds; no verdict | Record/Replay is localized to barrier/access composition around `ds_load_b128` at `0x257d8`, after barriers at `0x25790` and `0x2579c`; Inline Shadow remains bounded. |
 | P2 | Reduced `sk_sgemm_runtime_smoke` | 🟩 Exact numeric oracle; 640/640 accesses; current paired 1.07x | 🟩 Exact numeric oracle; 640/640 accesses; 22/22 barriers; 8/8 fences; current paired 1.32x | 🟩 Exact numeric oracle; 640/640 accesses; 40/40 barriers; current paired 1.34x | 🟩 Exact numeric oracle; 640/640 accesses; 22/22 barriers; paired 1.33x; causal fault diagnosed | Exact numeric oracle; all profiles accepted, including a causal Inline Shadow fault. |
 | P2 | `000_sk_sgemm_quick` | 🟨 First problem: 12/12 exact numeric rows; 640/640 accesses; static/dynamic complete | 🟨 First problem exact and fully covered; aggregate host analysis fixed; full client is intrinsically execution-bound | 🟨 First problem: 12/12 exact numeric rows; 640/640 accesses; 40/40 barrier members | 🟧 First problem: 12/12 exact rows and complete static coverage; interrupted second problem leaves dynamic analysis incomplete | The first problem is validated; the full multi-problem client remains execution-bound. |
 | P2 | `005_sk_f8gemm_quick` | 🟩 Exact oracle; 1772/1772 accesses; current paired 1.43x; reviewed fault and health accepted | 🟩 Exact oracle; 1772/1772 accesses; 44/44 barriers; 16/16 fences; current paired 8.00x | 🟧 Current clean execution remains compute-active through 900 seconds; no verdict or measured overhead | 🟧 Current tip executes 49 exact rows with zero failures before the fixed 180-second bound | SuperCollider and Record/Replay are accepted; Sampled and Inline Shadow lack a full-client verdict. |
@@ -168,10 +168,23 @@ barriers, and its paired one-repetition bundle measures 211.06x.  The full
 shared ConSan suite, including the RDNA4 cases, remains green.
 
 `007_sk_mxf4gemm_tdm` is the one prior green claim that does not survive this
-audit.  It is statically complete and passes its first five exact rows, then
-the instrumented software-GPU execution aborts after an 84-byte private-segment
-growth; the matching uninstrumented client completes all rows.  The cell is
-orange rather than carrying forward stale green evidence.
+audit.  It is statically complete and passes its first five exact rows; the
+matching uninstrumented client completes all rows.  The failure is isolated to
+the PGR2 MT128x128 kernel: access-only and fence-plus-access instrumentation
+pass, while enabling barriers makes access candidate 145, the `ds_load_b128`
+at `0x257d8`, the first numerical corruption.  The immediately preceding
+barriers are at `0x25790` and `0x2579c`.  The cell is orange while this bounded
+barrier/access composition defect is repaired.  The access-only and combined
+objects use the same anchor and relay, and their normalized access bodies are
+instruction-equivalent.  A temporary diagnostic retaining the barriers,
+normal VGPR spill/restore, relocated guest `ds_load_b128`, and return while
+removing all Record/Replay publication and EXEC logic still corrupts the same
+row.  That edit was reverted; the remaining frontier is therefore the
+barrier-plus-relocation/spill execution interaction, not epoch arithmetic or
+record publication.  The independent emulator cannot currently adjudicate
+this case: its uninstrumented corpus run stops on a later 202,752-byte LDS
+solution above the modeled 163,840-byte limit, while the instrumented run
+fails earlier in emulator dispatch-private handling.
 
 ### Shared-branch merge revalidation closeout
 
