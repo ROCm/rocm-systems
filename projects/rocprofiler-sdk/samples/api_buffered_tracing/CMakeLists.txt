@@ -45,8 +45,7 @@ target_link_libraries(
             rocprofiler-sdk::samples-build-flags rocprofiler-sdk::samples-common-library)
 
 rocprofiler_samples_get_preload_env(PRELOAD_ENV buffered-api-tracing-client)
-rocprofiler_samples_get_ld_library_path_env(
-    LIBRARY_PATH_ENV rocprofiler-sdk::rocprofiler-sdk-shared-library)
+rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV)
 
 set(buffered-api-tracing-env ${PRELOAD_ENV} ${LIBRARY_PATH_ENV})
 
