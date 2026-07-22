@@ -720,7 +720,11 @@ struct Analyzer {
     // resume only the call that created that context. Without this expansion,
     // later calls can return into earlier, mutually exclusive continuations and
     // manufacture impossible pending-event paths.
-    using CallFrame = std::pair<size_t, uint16_t>;
+    // Keep the callee entry as well as the return continuation. Generated
+    // device helpers can recurse; re-entering an already active callee is
+    // summarized at that call's continuation instead of enumerating an
+    // exponential family of finite stacks up to the hard depth limit.
+    using CallFrame = std::tuple<size_t, uint16_t, size_t>;
     using AnalysisNodeKey = std::pair<size_t, std::vector<CallFrame>>;
     constexpr size_t kMaxCallDepth = 32;
     // Real code objects can have tens of thousands of distinct depth-two
@@ -751,6 +755,31 @@ struct Analyzer {
       return index;
     };
 
+    auto set_call_context_limit_error = [&] {
+      size_t deepest_stack = 0;
+      size_t setpc_nodes = 0;
+      size_t matching_return_nodes = 0;
+      for (const auto &[_, call_stack] : analysis_node_keys)
+        deepest_stack = std::max(deepest_stack, call_stack.size());
+      for (size_t i = 0; i < analysis_node_keys.size(); ++i) {
+        const Instruction *term = analysis_blocks[i]->terminator();
+        if (term == nullptr ||
+            (term->mnemonic() != "s_setpc_b64" && term->mnemonic() != "s_set_pc_i64"))
+          continue;
+        ++setpc_nodes;
+        if (!analysis_node_keys[i].second.empty() && term->raw_encoding() != nullptr &&
+            static_cast<uint16_t>(term->raw_encoding()[0] & 0xffu) ==
+                std::get<1>(analysis_node_keys[i].second.back()))
+          ++matching_return_nodes;
+      }
+      report_.analysis_error = "waitcheck call-context graph exceeded node limit: nodes=" +
+                               std::to_string(analysis_node_keys.size()) +
+                               " blocks=" + std::to_string(blocks.size()) +
+                               " deepest_call_stack=" + std::to_string(deepest_stack) +
+                               " setpc_nodes=" + std::to_string(setpc_nodes) +
+                               " matching_return_nodes=" + std::to_string(matching_return_nodes);
+    };
+
     std::vector<size_t> root_blocks;
     if (entry_offsets.empty()) {
       // Symbol-less section analysis has no distinguished entry point.
@@ -774,7 +803,7 @@ struct Analyzer {
     for (size_t i : root_blocks) {
       if (!get_or_add_node({i, {}})) {
         report_.supported = false;
-        report_.analysis_error = "waitcheck call-context graph exceeded node limit";
+        set_call_context_limit_error();
         return;
       }
     }
@@ -800,13 +829,14 @@ struct Analyzer {
           term->size() == static_cast<int>(sizeof(uint32_t)) &&
           (term->mnemonic() == "s_setpc_b64" || term->mnemonic() == "s_set_pc_i64") &&
           term->raw_encoding() != nullptr &&
-          static_cast<uint16_t>(term->raw_encoding()[0] & 0xffu) == node_key.second.back().second) {
+          static_cast<uint16_t>(term->raw_encoding()[0] & 0xffu) ==
+              std::get<1>(node_key.second.back())) {
         std::vector<CallFrame> caller_stack = node_key.second;
-        const size_t continuation_index = caller_stack.back().first;
+        const size_t continuation_index = std::get<0>(caller_stack.back());
         caller_stack.pop_back();
         if (!add_context_edge(continuation_index, std::move(caller_stack))) {
           report_.supported = false;
-          report_.analysis_error = "waitcheck call-context graph exceeded node limit";
+          set_call_context_limit_error();
           return;
         }
         continue;
@@ -822,7 +852,7 @@ struct Analyzer {
             });
         if (!is_call_fallthrough && !add_context_edge(successor_it->second, node_key.second)) {
           report_.supported = false;
-          report_.analysis_error = "waitcheck call-context graph exceeded node limit";
+          set_call_context_limit_error();
           return;
         }
       }
@@ -837,11 +867,23 @@ struct Analyzer {
           report_.analysis_error = "waitcheck call depth exceeds supported limit";
           return;
         }
+        const bool recursive_reentry =
+            std::ranges::any_of(node_key.second, [&](const CallFrame &frame) {
+              return std::get<2>(frame) == callee_it->second;
+            });
+        if (recursive_reentry) {
+          if (!add_context_edge(continuation_it->second, node_key.second)) {
+            report_.supported = false;
+            set_call_context_limit_error();
+            return;
+          }
+          continue;
+        }
         std::vector<CallFrame> callee_stack = node_key.second;
-        callee_stack.emplace_back(continuation_it->second, call.return_sreg);
+        callee_stack.emplace_back(continuation_it->second, call.return_sreg, callee_it->second);
         if (!add_context_edge(callee_it->second, std::move(callee_stack))) {
           report_.supported = false;
-          report_.analysis_error = "waitcheck call-context graph exceeded node limit";
+          set_call_context_limit_error();
           return;
         }
       }
@@ -956,9 +998,10 @@ struct Analyzer {
     for (size_t i = 0; i < analysis_blocks.size(); ++i) {
       current_cfg_view_index_ = i;
       current_in_callee_context_ = !analysis_node_keys[i].second.empty();
-      current_call_return_sreg_ = current_in_callee_context_
-                                      ? std::optional{analysis_node_keys[i].second.back().second}
-                                      : std::nullopt;
+      current_call_return_sreg_ =
+          current_in_callee_context_
+              ? std::optional{std::get<1>(analysis_node_keys[i].second.back())}
+              : std::nullopt;
       (void)analyze_block(*analysis_blocks[i], in[i], section_name, file_offset_base, arch, true);
       if (should_stop_after_diagnostic())
         break;
@@ -4475,9 +4518,11 @@ private:
     const std::vector<size_t> producer_block_indices =
         cfg_block_indices_containing(event.section_offset);
     if (before_target && current_cfg_view_index_ && *current_cfg_view_index_ < cfg_views_.size() &&
-        std::ranges::any_of(producer_block_indices, [&](size_t producer_block_index) {
-          return cfg_block_dominates(producer_block_index, *current_cfg_view_index_);
-        })) {
+        std::ranges::any_of(
+            producer_block_indices,
+            [&](size_t producer_block_index) {
+              return cfg_block_dominates(producer_block_index, *current_cfg_view_index_);
+            })) {
       feasible_path_cache_[cache_key] = true;
       return true;
     }
