@@ -16,10 +16,6 @@
 #include "amd_smi/impl/amd_smi_wsl_device.h"
 #include "amd_smi/impl/amd_smi_wsl_syms.h"
 
-#if __has_include(<hsakmt/rocdxg_smi.h>)
-#define AMDSMI_HAS_ROCDXG_SMI 1
-#endif
-
 #include <cstdio>
 #include <algorithm>
 #include <cstring>
@@ -95,6 +91,18 @@ void copy_rocdxg_string(char* dst, const char* src) {
   std::memset(dst, 0, AMDSMI_MAX_STRING_LENGTH);
   if (src != nullptr) std::snprintf(dst, AMDSMI_MAX_STRING_LENGTH, "%s", src);
 }
+
+// Returns cached device info, fetching on first call.
+const rocdxg_smi_device_info_t* load_device_info(uint32_t node_id,
+                                                  rocdxg_smi_device_info_t& info,
+                                                  bool& loaded) {
+  if (loaded) return &info;
+  if (!g_wsl_syms.rocdxg_smi_get_device_info) return nullptr;
+  if (g_wsl_syms.rocdxg_smi_get_device_info(node_id, &info) != HSAKMT_STATUS_SUCCESS)
+    return nullptr;
+  loaded = true;
+  return &info;
+}
 #endif
 
 }  // namespace
@@ -125,27 +133,23 @@ amdsmi_status_t AMDSmiWslGPUDevice::get_kfd_info(amdsmi_kfd_info_t* info) const 
 amdsmi_status_t AMDSmiWslGPUDevice::get_asic_info(amdsmi_asic_info_t* info) const {
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
 #ifdef AMDSMI_HAS_ROCDXG_SMI
-  rocdxg_smi_asic_info_t rocdxg_info = {};
-  HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_asic_info(node_id_, &rocdxg_info);
-  if (hstatus == HSAKMT_STATUS_SUCCESS) {
+  if (const auto* di = load_device_info(node_id_, device_info_, device_info_loaded_)) {
+    const auto& a = di->asic;
     std::memset(info, 0, sizeof(*info));
-    copy_rocdxg_string(info->market_name, rocdxg_info.market_name);
-    info->vendor_id = rocdxg_info.vendor_id;
-    if (info->vendor_id == 0x1002) {
+    copy_rocdxg_string(info->market_name, a.market_name);
+    info->vendor_id = a.vendor_id;
+    if (info->vendor_id == 0x1002)
       copy_string(info->vendor_name, "Advanced Micro Devices, Inc. [AMD/ATI]");
-    }
-    info->subvendor_id = rocdxg_info.subvendor_id;
-    info->device_id = rocdxg_info.device_id;
-    info->rev_id = rocdxg_info.rev_id;
-    std::snprintf(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, "%016lx",
-                  rocdxg_info.asic_serial);
+    info->subvendor_id = a.subvendor_id;
+    info->device_id = a.device_id;
+    info->rev_id = a.rev_id;
+    std::snprintf(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, "%016lx", a.asic_serial);
     info->oam_id = std::numeric_limits<uint32_t>::max();
-    info->num_of_compute_units = rocdxg_info.num_of_compute_units;
-    info->target_graphics_version = rocdxg_info.target_graphics_version;
-    info->subsystem_id = rocdxg_info.subsystem_id;
+    info->num_of_compute_units = a.num_of_compute_units;
+    info->target_graphics_version = a.target_graphics_version;
+    info->subsystem_id = a.subsystem_id;
     return AMDSMI_STATUS_SUCCESS;
   }
-  if (hstatus != HSAKMT_STATUS_NOT_SUPPORTED) return rocdxg_to_amdsmi_status(hstatus);
 #endif
   std::memset(info, 0, sizeof(*info));
   copy_string(info->market_name, marketing_name_);
@@ -169,15 +173,12 @@ amdsmi_status_t AMDSmiWslGPUDevice::get_asic_info(amdsmi_asic_info_t* info) cons
 amdsmi_status_t AMDSmiWslGPUDevice::get_board_info(amdsmi_board_info_t* info) const {
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
 #ifdef AMDSMI_HAS_ROCDXG_SMI
-  rocdxg_smi_board_info_t rocdxg_info = {};
-  HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_board_info(node_id_, &rocdxg_info);
-  if (hstatus == HSAKMT_STATUS_SUCCESS) {
+  if (const auto* di = load_device_info(node_id_, device_info_, device_info_loaded_)) {
     std::memset(info, 0, sizeof(*info));
-    copy_rocdxg_string(info->product_name, rocdxg_info.product_name);
-    copy_rocdxg_string(info->manufacturer_name, rocdxg_info.manufacturer_name);
+    copy_rocdxg_string(info->product_name, di->board.product_name);
+    copy_rocdxg_string(info->manufacturer_name, di->board.manufacturer_name);
     return AMDSMI_STATUS_SUCCESS;
   }
-  if (hstatus != HSAKMT_STATUS_NOT_SUPPORTED) return rocdxg_to_amdsmi_status(hstatus);
 #endif
   std::memset(info, 0, sizeof(*info));
   copy_string(info->product_name, marketing_name_);
@@ -188,18 +189,16 @@ amdsmi_status_t AMDSmiWslGPUDevice::get_board_info(amdsmi_board_info_t* info) co
 amdsmi_status_t AMDSmiWslGPUDevice::get_vram_info(amdsmi_vram_info_t* info) const {
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
 #ifdef AMDSMI_HAS_ROCDXG_SMI
-  rocdxg_smi_vram_info_t rocdxg_info = {};
-  HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_vram_info(node_id_, &rocdxg_info);
-  if (hstatus == HSAKMT_STATUS_SUCCESS) {
+  if (const auto* di = load_device_info(node_id_, device_info_, device_info_loaded_)) {
+    const auto& v = di->vram;
     std::memset(info, 0, sizeof(*info));
     info->vram_type = AMDSMI_VRAM_TYPE_UNKNOWN;
     copy_string(info->vram_vendor, "UNKNOWN");
-    info->vram_size = rocdxg_info.vram_size_mb;
-    info->vram_bit_width = rocdxg_info.vram_bit_width;
+    info->vram_size = v.vram_size_mb;
+    info->vram_bit_width = v.vram_bit_width;
     info->vram_max_bandwidth = std::numeric_limits<decltype(info->vram_max_bandwidth)>::max();
     return AMDSMI_STATUS_SUCCESS;
   }
-  if (hstatus != HSAKMT_STATUS_NOT_SUPPORTED) return rocdxg_to_amdsmi_status(hstatus);
 #endif
   std::memset(info, 0, sizeof(*info));
   info->vram_type = AMDSMI_VRAM_TYPE_UNKNOWN;
@@ -218,13 +217,10 @@ amdsmi_status_t AMDSmiWslGPUDevice::get_memory_total(amdsmi_memory_type_t mem_ty
   }
 
 #ifdef AMDSMI_HAS_ROCDXG_SMI
-  rocdxg_smi_vram_info_t rocdxg_info = {};
-  HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_vram_info(node_id_, &rocdxg_info);
-  if (hstatus == HSAKMT_STATUS_SUCCESS) {
-    *total = rocdxg_info.vram_size_mb * 1024 * 1024;
+  if (const auto* di = load_device_info(node_id_, device_info_, device_info_loaded_)) {
+    *total = di->vram.vram_size_mb * 1024 * 1024;
     return AMDSMI_STATUS_SUCCESS;
   }
-  if (hstatus != HSAKMT_STATUS_NOT_SUPPORTED) return rocdxg_to_amdsmi_status(hstatus);
 #endif
   *total = local_mem_size_;
   return AMDSMI_STATUS_SUCCESS;
@@ -396,13 +392,12 @@ amdsmi_status_t AMDSmiWslGPUDevice::get_pcie_info(amdsmi_pcie_info_t* info) cons
 amdsmi_status_t AMDSmiWslGPUDevice::get_driver_info(amdsmi_driver_info_t* info) const {
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
 #ifdef AMDSMI_HAS_ROCDXG_SMI
-  rocdxg_smi_driver_info_t rocdxg_info = {};
-  HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_driver_info(node_id_, &rocdxg_info);
-  if (hstatus != HSAKMT_STATUS_SUCCESS) return rocdxg_to_amdsmi_status(hstatus);
+  const auto* di = load_device_info(node_id_, device_info_, device_info_loaded_);
+  if (!di) return AMDSMI_STATUS_NOT_SUPPORTED;
   std::memset(info, 0, sizeof(*info));
-  copy_rocdxg_string(info->driver_version, rocdxg_info.driver_version);
-  copy_rocdxg_string(info->driver_date, rocdxg_info.driver_date);
-  copy_rocdxg_string(info->driver_name, rocdxg_info.driver_name);
+  copy_rocdxg_string(info->driver_version, di->driver.driver_version);
+  copy_rocdxg_string(info->driver_date, di->driver.driver_date);
+  copy_rocdxg_string(info->driver_name, di->driver.driver_name);
   return AMDSMI_STATUS_SUCCESS;
 #else
   return AMDSMI_STATUS_NOT_SUPPORTED;
@@ -412,15 +407,14 @@ amdsmi_status_t AMDSmiWslGPUDevice::get_driver_info(amdsmi_driver_info_t* info) 
 amdsmi_status_t AMDSmiWslGPUDevice::get_vbios_info(amdsmi_vbios_info_t* info) const {
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
 #ifdef AMDSMI_HAS_ROCDXG_SMI
-  rocdxg_smi_vbios_info_t rocdxg_info = {};
-  HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_vbios_info(node_id_, &rocdxg_info);
-  if (hstatus != HSAKMT_STATUS_SUCCESS) return rocdxg_to_amdsmi_status(hstatus);
+  const auto* di = load_device_info(node_id_, device_info_, device_info_loaded_);
+  if (!di) return AMDSMI_STATUS_NOT_SUPPORTED;
   std::memset(info, 0, sizeof(*info));
-  copy_rocdxg_string(info->name, rocdxg_info.name);
-  copy_rocdxg_string(info->build_date, rocdxg_info.build_date);
-  copy_rocdxg_string(info->part_number, rocdxg_info.part_number);
-  copy_rocdxg_string(info->version, rocdxg_info.version);
-  copy_rocdxg_string(info->boot_firmware, rocdxg_info.boot_firmware);
+  copy_rocdxg_string(info->name, di->vbios.name);
+  copy_rocdxg_string(info->build_date, di->vbios.build_date);
+  copy_rocdxg_string(info->part_number, di->vbios.part_number);
+  copy_rocdxg_string(info->version, di->vbios.version);
+  copy_rocdxg_string(info->boot_firmware, di->vbios.boot_firmware);
   return AMDSMI_STATUS_SUCCESS;
 #else
   return AMDSMI_STATUS_NOT_SUPPORTED;
@@ -460,6 +454,44 @@ amdsmi_status_t AMDSmiWslGPUDevice::get_process_list(
     ssize_t len = readlink(exe_path, out.name, AMDSMI_MAX_STRING_LENGTH - 1);
     if (len > 0) out.name[len] = '\0';
     processes->push_back(out);
+  }
+  return AMDSMI_STATUS_SUCCESS;
+#else
+  return AMDSMI_STATUS_NOT_SUPPORTED;
+#endif
+}
+
+amdsmi_status_t AMDSmiWslGPUDevice::get_gpu_cache_info(amdsmi_gpu_cache_info_t* info) const {
+  if (info == nullptr) return AMDSMI_STATUS_INVAL;
+#ifdef AMDSMI_HAS_ROCDXG_SMI
+  const auto* di = load_device_info(node_id_, device_info_, device_info_loaded_);
+  if (!di) return AMDSMI_STATUS_NOT_SUPPORTED;
+  std::memset(info, 0, sizeof(*info));
+  info->num_cache_types = di->cache.num_cache_types;
+  for (uint32_t i = 0; i < di->cache.num_cache_types; ++i) {
+    info->cache[i].cache_size        = di->cache.cache[i].cache_size_kb;
+    info->cache[i].cache_level       = di->cache.cache[i].cache_level;
+    info->cache[i].cache_properties  = di->cache.cache[i].cache_properties;
+    info->cache[i].max_num_cu_shared = di->cache.cache[i].max_num_cu_shared;
+    info->cache[i].num_cache_instance = di->cache.cache[i].num_cache_instance;
+  }
+  return AMDSMI_STATUS_SUCCESS;
+#else
+  return AMDSMI_STATUS_NOT_SUPPORTED;
+#endif
+}
+
+amdsmi_status_t AMDSmiWslGPUDevice::get_fw_info(amdsmi_fw_info_t* info) const {
+  if (info == nullptr) return AMDSMI_STATUS_INVAL;
+#ifdef AMDSMI_HAS_ROCDXG_SMI
+  const auto* di = load_device_info(node_id_, device_info_, device_info_loaded_);
+  if (!di) return AMDSMI_STATUS_NOT_SUPPORTED;
+  std::memset(info, 0, sizeof(*info));
+  for (uint32_t i = 0; i < di->fw.num_fw_info && i < AMDSMI_FW_ID__MAX; ++i) {
+    info->fw_info_list[i].fw_id =
+        static_cast<amdsmi_fw_block_t>(di->fw.entries[i].fw_id);
+    info->fw_info_list[i].fw_version = di->fw.entries[i].fw_version;
+    info->num_fw_info++;
   }
   return AMDSMI_STATUS_SUCCESS;
 #else

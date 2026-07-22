@@ -218,7 +218,6 @@ struct VideoBiosInfo {
   char date[24];        // "yyyy/mm/dd hh:mm"
 };
 
-
 // ============================================================================
 // GPU Telemetry Functions
 // ============================================================================
@@ -245,7 +244,6 @@ NTSTATUS QueryChipsetId(D3DKMT_HANDLE adapter, D3DKMT_HANDLE device,
 /// @brief Read VBIOS version, part number, and build date.
 NTSTATUS QueryVideoBiosInfo(D3DKMT_HANDLE adapter, D3DKMT_HANDLE device,
                             VideoBiosInfo* out);
-
 
 // ============================================================================
 // Device Query Functions
@@ -440,6 +438,7 @@ void FillinRegisterRuntimeStatePrivData(void* priv_data, uint32_t runtime_state,
 
 /// @brief Configure the SetTrapHandler private data
 void FillinTrapHandlerPrivData(void* priv_data, uint64_t tba, uint64_t tma);
+
 
 
 

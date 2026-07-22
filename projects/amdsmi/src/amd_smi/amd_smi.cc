@@ -1553,9 +1553,14 @@ amdsmi_status_t amdsmi_get_gpu_cache_info(amdsmi_processor_handle processor_hand
     return AMDSMI_STATUS_INVAL;
   }
 
+
   amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
   amdsmi_status_t status = get_gpu_device_from_handle(processor_handle, &gpu_device);
   if (status != AMDSMI_STATUS_SUCCESS) return status;
+#ifdef ENABLE_WSL_BACKEND
+  if (auto* wsl_device = amd::smi::as_wsl_gpu_device(gpu_device))
+    return wsl_device->get_gpu_cache_info(info);
+#endif
 
   rsmi_gpu_cache_info_t rsmi_info;
   status = rsmi_wrapper(rsmi_dev_cache_info_get, processor_handle, 0, &rsmi_info);
@@ -2288,6 +2293,10 @@ amdsmi_status_t amdsmi_get_fw_info(amdsmi_processor_handle processor_handle,
     return status;
   }
   (void)gpu_device;  // Only used for handle validation
+#ifdef ENABLE_WSL_BACKEND
+  if (auto* wsl_device = amd::smi::as_wsl_gpu_device(gpu_device))
+    return wsl_device->get_fw_info(info);
+#endif
 
   if (info == nullptr) {
     return AMDSMI_STATUS_INVAL;

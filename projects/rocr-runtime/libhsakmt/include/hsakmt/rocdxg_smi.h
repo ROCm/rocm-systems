@@ -131,15 +131,34 @@ typedef struct rocdxg_smi_process_info {
   uint64_t evicted_time;
 } rocdxg_smi_process_info_t;
 
+#define ROCDXG_SMI_MAX_CACHE_TYPES 10
+
+typedef struct rocdxg_smi_cache_entry {
+  uint32_t cache_size_kb;
+  uint32_t cache_level;
+  uint32_t cache_properties;
+  uint32_t max_num_cu_shared;
+  uint32_t num_cache_instance;
+} rocdxg_smi_cache_entry_t;
+
+typedef struct rocdxg_smi_cache_info {
+  uint32_t num_cache_types;
+  rocdxg_smi_cache_entry_t cache[ROCDXG_SMI_MAX_CACHE_TYPES];
+} rocdxg_smi_cache_info_t;
+
+#define ROCDXG_SMI_MAX_FW_ENTRIES 32
+
+typedef struct rocdxg_smi_fw_entry {
+  uint32_t fw_id;
+  uint64_t fw_version;
+} rocdxg_smi_fw_entry_t;
+
+typedef struct rocdxg_smi_fw_info {
+  rocdxg_smi_fw_entry_t entries[ROCDXG_SMI_MAX_FW_ENTRIES];
+  uint32_t num_fw_info;
+} rocdxg_smi_fw_info_t;
+
 HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_device_count(uint32_t* count);
-HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_bdf_info(uint32_t node_id,
-                                                rocdxg_smi_bdf_info_t* info);
-HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_asic_info(uint32_t node_id,
-                                                 rocdxg_smi_asic_info_t* info);
-HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_board_info(uint32_t node_id,
-                                                 rocdxg_smi_board_info_t* info);
-HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_vram_info(uint32_t node_id,
-                                                rocdxg_smi_vram_info_t* info);
 HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_vram_usage(uint32_t node_id,
                                                  rocdxg_smi_vram_usage_t* usage);
 HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_power_info(uint32_t node_id,
@@ -153,10 +172,6 @@ HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_clock_info(uint32_t node_id,
                                                  rocdxg_smi_clock_info_t* info);
 HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_pcie_info(uint32_t node_id,
                                                 rocdxg_smi_pcie_info_t* info);
-HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_driver_info(uint32_t node_id,
-                                                  rocdxg_smi_driver_info_t* info);
-HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_vbios_info(uint32_t node_id,
-                                                 rocdxg_smi_vbios_info_t* info);
 HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_gpu_metrics_info(
     uint32_t node_id, rocdxg_smi_gpu_metrics_info_t* info);
 HSAKMT_STATUS HSAKMTAPI rocdxg_smi_enum_processes(uint32_t node_id,
@@ -167,4 +182,18 @@ HSAKMT_STATUS HSAKMTAPI rocdxg_smi_enum_processes(uint32_t node_id,
 }  // extern "C"
 #endif
 
+
+typedef struct rocdxg_smi_device_info {
+  rocdxg_smi_bdf_info_t   bdf;
+  rocdxg_smi_asic_info_t  asic;
+  rocdxg_smi_board_info_t board;
+  rocdxg_smi_vram_info_t  vram;
+  rocdxg_smi_driver_info_t driver;
+  rocdxg_smi_vbios_info_t  vbios;
+  rocdxg_smi_cache_info_t  cache;
+  rocdxg_smi_fw_info_t     fw;
+} rocdxg_smi_device_info_t;
+
+HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_device_info(uint32_t node_id,
+                                                   rocdxg_smi_device_info_t* info);
 #endif  // ROCDXG_SMI_H_

@@ -29,6 +29,34 @@
 
 namespace {
 
+// Read a REG_SZ value from the adapter driver registry key.
+static bool query_adapter_reg_str(D3DKMT_HANDLE adapter, const char* key_name,
+                                  char* buf_out, size_t buf_len) {
+  static constexpr uint32_t kMaxOutputSize = 512;
+  struct RegQuery {
+    D3DDDI_QUERYREGISTRY_INFO info;
+    wchar_t                   output[kMaxOutputSize];
+  } q = {};
+  q.info.QueryType                = D3DDDI_QUERYREGISTRY_ADAPTERKEY;
+  q.info.QueryFlags.TranslatePath = FALSE;
+  q.info.ValueType                = CIREG_SZ;
+  if (mbstowcs(q.info.ValueName, key_name, MAX_PATH) == static_cast<size_t>(-1))
+    return false;
+  D3DKMT_QUERYADAPTERINFO args = {};
+  args.hAdapter              = adapter;
+  args.Type                  = KMTQAITYPE_QUERYREGISTRY;
+  args.pPrivateDriverData    = &q;
+  args.PrivateDriverDataSize = sizeof(q);
+  if (DXCORE_CALL(D3DKMTQueryAdapterInfo(&args)) != STATUS_SUCCESS) return false;
+  if (q.info.Status != D3DDDI_QUERYREGISTRY_STATUS_SUCCESS) return false;
+  if (buf_out && buf_len > 0) {
+    wcstombs(buf_out, q.info.OutputString, buf_len - 1);
+    buf_out[buf_len - 1] = '\0';
+  }
+  return true;
+}
+
+
 wsl::thunk::WDDMDevice* checked_device(uint32_t node_id) {
   if (dxg_runtime == nullptr || dxg_runtime->dxg_open_count == 0 || dxg_runtime->is_forked) {
     return nullptr;
@@ -120,75 +148,6 @@ HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_device_count(uint32_t* count) {
   if (count == nullptr) return HSAKMT_STATUS_INVALID_PARAMETER;
   CHECK_DXG_OPEN();
   *count = get_num_wddmdev();
-  return HSAKMT_STATUS_SUCCESS;
-}
-
-HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_bdf_info(uint32_t node_id,
-                                                rocdxg_smi_bdf_info_t* info) {
-  HSAKMT_STATUS status = clear_out(info);
-  if (status != HSAKMT_STATUS_SUCCESS) return status;
-
-  auto* device = checked_device(node_id);
-  if (device == nullptr) return HSAKMT_STATUS_INVALID_NODE_UNIT;
-
-  const uint32_t location = device->PciBusAddr();
-  info->domain_number = device->Domain();
-  info->bus_number = (location >> 8) & 0xff;
-  info->device_number = (location >> 3) & 0x1f;
-  info->function_number = location & 0x7;
-  return HSAKMT_STATUS_SUCCESS;
-}
-
-HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_asic_info(uint32_t node_id,
-                                                 rocdxg_smi_asic_info_t* info) {
-  HSAKMT_STATUS status = clear_out(info);
-  if (status != HSAKMT_STATUS_SUCCESS) return status;
-
-  auto* device = checked_device(node_id);
-  if (device == nullptr) return HSAKMT_STATUS_INVALID_NODE_UNIT;
-
-  info->device_id = device->DeviceId();
-  info->vendor_id = 0x1002;
-  info->subvendor_id = std::numeric_limits<uint32_t>::max();
-  info->subsystem_id = std::numeric_limits<uint32_t>::max();
-  info->rev_id = device->AsicRevision();
-  info->asic_serial = device->Uuid();
-  copy_string(info->market_name, device->ProductName());
-  info->num_of_compute_units = device->ComputeUnitCount();
-  info->target_graphics_version = target_graphics_version(*device);
-  return HSAKMT_STATUS_SUCCESS;
-}
-
-HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_board_info(uint32_t node_id,
-                                                  rocdxg_smi_board_info_t* info) {
-  HSAKMT_STATUS status = clear_out(info);
-  if (status != HSAKMT_STATUS_SUCCESS) return status;
-
-  auto* wdev = checked_device(node_id);
-  if (wdev == nullptr) return HSAKMT_STATUS_INVALID_NODE_UNIT;
-
-  Wkmi::DriverRegInfo reg = {};
-  if (Wkmi::QueryDriverRegInfo(wdev->GetAdapter(), &reg) == STATUS_SUCCESS &&
-      reg.adapter_string[0] != '\0') {
-    copy_string(info->product_name, reg.adapter_string);
-  } else {
-    copy_string(info->product_name, wdev->ProductName());
-  }
-  copy_string(info->manufacturer_name, "Advanced Micro Devices, Inc. [AMD/ATI]");
-  return HSAKMT_STATUS_SUCCESS;
-}
-
-HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_vram_info(uint32_t node_id,
-                                                 rocdxg_smi_vram_info_t* info) {
-  HSAKMT_STATUS status = clear_out(info);
-  if (status != HSAKMT_STATUS_SUCCESS) return status;
-
-  auto* device = checked_device(node_id);
-  if (device == nullptr) return HSAKMT_STATUS_INVALID_NODE_UNIT;
-
-  info->vram_type = 0;
-  info->vram_bit_width = device->MemoryBusWidth();
-  info->vram_size_mb = device->LocalHeapSize() / (1024 * 1024);
   return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -371,59 +330,6 @@ HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_pcie_info(uint32_t node_id,
   return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_driver_info(uint32_t node_id,
-                                                   rocdxg_smi_driver_info_t* info) {
-  HSAKMT_STATUS status = clear_out(info);
-  if (status != HSAKMT_STATUS_SUCCESS) return status;
-
-  auto* wdev = checked_device(node_id);
-  if (wdev == nullptr) return HSAKMT_STATUS_INVALID_NODE_UNIT;
-
-  Wkmi::DriverRegInfo reg = {};
-  NTSTATUS ret = Wkmi::QueryDriverRegInfo(wdev->GetAdapter(), &reg);
-  if (ret != STATUS_SUCCESS) return nt_to_hsa(ret);
-
-  // Match upstream libthunk_proxy.a field assignments (verified by disassembly):
-  //   driver_version = ReleaseVersion  (full string, e.g. "26.10.21.04-260623a-...")
-  //   driver_date    = 6 chars after first '-' in ReleaseVersion (e.g. "260623")
-  //   driver_name    = DriverDesc      (e.g. "AMD Radeon(TM) 8060S Graphics")
-  copy_string(info->driver_version, reg.release_version);
-  copy_string(info->driver_name,    reg.driver_desc);
-
-  // Extract date: up to 6 chars starting right after the first '-'
-  const char* dash = std::strchr(reg.release_version, '-');
-  if (dash && *(dash + 1) != '\0') {
-    char date_buf[ROCDXG_SMI_MAX_STRING_LENGTH] = {};
-    std::strncpy(date_buf, dash + 1, 6);
-    copy_string(info->driver_date, date_buf);
-  } else {
-    copy_string(info->driver_date, "N/A");
-  }
-  return HSAKMT_STATUS_SUCCESS;
-}
-
-HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_vbios_info(uint32_t node_id,
-                                                  rocdxg_smi_vbios_info_t* info) {
-  HSAKMT_STATUS status = clear_out(info);
-  if (status != HSAKMT_STATUS_SUCCESS) return status;
-
-  auto* wdev = checked_device(node_id);
-  if (wdev == nullptr) return HSAKMT_STATUS_INVALID_NODE_UNIT;
-
-  Wkmi::VideoBiosInfo vbios = {};
-  NTSTATUS ret = Wkmi::QueryVideoBiosInfo(wdev->GetAdapter(), wdev->DeviceHandle(), &vbios);
-  if (ret != STATUS_SUCCESS) return nt_to_hsa(ret);
-
-  copy_string(info->version,    vbios.version);
-  copy_string(info->part_number, vbios.part_number);
-  copy_string(info->build_date, vbios.date);
-  // name: use adapter string from registry as product name
-  Wkmi::DriverRegInfo reg = {};
-  if (Wkmi::QueryDriverRegInfo(wdev->GetAdapter(), &reg) == STATUS_SUCCESS)
-    copy_string(info->name, reg.adapter_string);
-  return HSAKMT_STATUS_SUCCESS;
-}
-
 HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_gpu_metrics_info(
     uint32_t node_id, rocdxg_smi_gpu_metrics_info_t* info) {
   HSAKMT_STATUS status = clear_out(info);
@@ -504,4 +410,119 @@ HSAKMT_STATUS HSAKMTAPI rocdxg_smi_enum_processes(uint32_t node_id,
   return output_capacity >= found ? HSAKMT_STATUS_SUCCESS : HSAKMT_STATUS_BUFFER_TOO_SMALL;
 }
 
-}  // extern "C"
+HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_device_info(uint32_t node_id,
+                                                   rocdxg_smi_device_info_t* info) {
+  if (info == nullptr) return HSAKMT_STATUS_INVALID_PARAMETER;
+  auto* wdev = checked_device(node_id);
+  if (wdev == nullptr) return HSAKMT_STATUS_INVALID_NODE_UNIT;
+
+  std::memset(info, 0, sizeof(*info));
+
+  // BDF
+  {
+    const uint32_t loc = wdev->PciBusAddr();
+    info->bdf.domain_number   = wdev->Domain();
+    info->bdf.bus_number      = (loc >> 8) & 0xff;
+    info->bdf.device_number   = (loc >> 3) & 0x1f;
+    info->bdf.function_number = loc & 0x7;
+  }
+
+  // ASIC
+  {
+    info->asic.device_id               = wdev->DeviceId();
+    info->asic.vendor_id               = 0x1002;
+    info->asic.subvendor_id            = std::numeric_limits<uint32_t>::max();
+    info->asic.subsystem_id            = std::numeric_limits<uint32_t>::max();
+    info->asic.rev_id                  = wdev->AsicRevision();
+    info->asic.asic_serial             = wdev->Uuid();
+    info->asic.num_of_compute_units    = wdev->ComputeUnitCount();
+    info->asic.target_graphics_version = target_graphics_version(*wdev);
+    copy_string(info->asic.market_name, wdev->ProductName());
+  }
+
+  // Board + VBIOS name: query AdapterString once
+  {
+    char adapter_string[MAX_PATH] = {};
+    D3DKMT_ADAPTERREGISTRYINFO ri = {};
+    D3DKMT_QUERYADAPTERINFO    qi = {};
+    qi.hAdapter              = wdev->GetAdapter();
+    qi.Type                  = KMTQAITYPE_ADAPTERREGISTRYINFO;
+    qi.pPrivateDriverData    = &ri;
+    qi.PrivateDriverDataSize = sizeof(ri);
+    if (DXCORE_CALL(D3DKMTQueryAdapterInfo(&qi)) == STATUS_SUCCESS && ri.AdapterString[0])
+      wcstombs(adapter_string, ri.AdapterString, sizeof(adapter_string) - 1);
+
+    copy_string(info->board.product_name,
+                adapter_string[0] ? adapter_string : wdev->ProductName());
+    copy_string(info->board.manufacturer_name,
+                "Advanced Micro Devices, Inc. [AMD/ATI]");
+    copy_string(info->vbios.name,
+                adapter_string[0] ? adapter_string : wdev->ProductName());
+  }
+
+  // VRAM
+  {
+    info->vram.vram_type      = 0;
+    info->vram.vram_bit_width = wdev->MemoryBusWidth();
+    info->vram.vram_size_mb   = wdev->LocalHeapSize() / (1024 * 1024);
+  }
+
+  // Driver (registry)
+  {
+    char release_version[256] = {};
+    char driver_desc[256]     = {};
+    query_adapter_reg_str(wdev->GetAdapter(), "ReleaseVersion",
+                          release_version, sizeof(release_version));
+    query_adapter_reg_str(wdev->GetAdapter(), "DriverDesc",
+                          driver_desc, sizeof(driver_desc));
+    copy_string(info->driver.driver_version, release_version);
+    copy_string(info->driver.driver_name,    driver_desc);
+    const char* dash = std::strchr(release_version, '-');
+    if (dash && *(dash + 1) != '\0') {
+      char date_buf[ROCDXG_SMI_MAX_STRING_LENGTH] = {};
+      std::strncpy(date_buf, dash + 1, 6);
+      copy_string(info->driver.driver_date, date_buf);
+    } else {
+      copy_string(info->driver.driver_date, "N/A");
+    }
+  }
+
+  // VBIOS (escape)
+  {
+    Wkmi::VideoBiosInfo vbios = {};
+    if (Wkmi::QueryVideoBiosInfo(wdev->GetAdapter(), wdev->DeviceHandle(), &vbios) ==
+        STATUS_SUCCESS) {
+      copy_string(info->vbios.version,     vbios.version);
+      copy_string(info->vbios.part_number, vbios.part_number);
+      copy_string(info->vbios.build_date,  vbios.date);
+    }
+  }
+
+  // Cache
+  {
+    uint32_t idx = 0;
+    if (wdev->GetL1CacheSize() > 0)
+      info->cache.cache[idx++] = {wdev->GetL1CacheSize() / 1024, 1, 0x2, 2, 0};
+    if (wdev->GetL2CacheSize() > 0)
+      info->cache.cache[idx++] = {wdev->GetL2CacheSize() / 1024, 2, 0x3,
+                                   wdev->ComputeUnitCount(), 1};
+    if (wdev->GetL3CacheSize() > 0)
+      info->cache.cache[idx++] = {wdev->GetL3CacheSize() / 1024, 3, 0x3,
+                                   wdev->ComputeUnitCount(), 1};
+    info->cache.num_cache_types = idx;
+  }
+
+  // FW
+  {
+    uint32_t idx = 0;
+    if (wdev->GetMecFwVersion())
+      info->fw.entries[idx++] = {7, wdev->GetMecFwVersion()};
+    if (wdev->GetSdmaFwVersion())
+      info->fw.entries[idx++] = {10, wdev->GetSdmaFwVersion()};
+    info->fw.num_fw_info = idx;
+  }
+
+  return HSAKMT_STATUS_SUCCESS;
+}
+
+}  // extern C

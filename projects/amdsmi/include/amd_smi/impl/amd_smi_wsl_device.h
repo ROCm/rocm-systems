@@ -21,6 +21,12 @@
 
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 
+#if __has_include(<hsakmt/rocdxg_smi.h>)
+#include <hsakmt/rocdxg_smi.h>
+#define AMDSMI_HAS_ROCDXG_SMI 1
+#endif
+
+
 typedef struct _HsaNodeProperties HsaNodeProperties;
 
 namespace amd::smi {
@@ -56,6 +62,8 @@ class AMDSmiWslGPUDevice : public AMDSmiGPUDevice {
   amdsmi_status_t get_driver_info(amdsmi_driver_info_t* info) const;
   amdsmi_status_t get_vbios_info(amdsmi_vbios_info_t* info) const;
   amdsmi_status_t get_process_list(std::vector<amdsmi_proc_info_t>* processes) const;
+  amdsmi_status_t get_gpu_cache_info(amdsmi_gpu_cache_info_t* info) const;
+  amdsmi_status_t get_fw_info(amdsmi_fw_info_t* info) const;
   amdsmi_status_t get_uuid(unsigned int* uuid_length, char* uuid) const;
 
  private:
@@ -69,6 +77,10 @@ class AMDSmiWslGPUDevice : public AMDSmiGPUDevice {
   uint64_t local_mem_size_;
   amdsmi_bdf_t bdf_;
   std::string marketing_name_;
+#ifdef AMDSMI_HAS_ROCDXG_SMI
+  mutable rocdxg_smi_device_info_t device_info_ = {};
+  mutable bool device_info_loaded_ = false;
+#endif
 };
 
 bool is_wsl_gpu_device(const AMDSmiGPUDevice* device);

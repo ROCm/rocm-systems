@@ -38,17 +38,15 @@ struct WslSyms {
   HSAKMT_STATUS (*hsaKmtGetNodeProperties)(HSAuint32, HsaNodeProperties*) = nullptr;
 
   // rocdxg_smi
-  HSAKMT_STATUS (*rocdxg_smi_get_asic_info)(uint32_t, rocdxg_smi_asic_info_t*) = nullptr;
-  HSAKMT_STATUS (*rocdxg_smi_get_board_info)(uint32_t, rocdxg_smi_board_info_t*) = nullptr;
-  HSAKMT_STATUS (*rocdxg_smi_get_vram_info)(uint32_t, rocdxg_smi_vram_info_t*) = nullptr;
+  // Static device info (populated once per device via rocdxg_smi_get_device_info)
+  HSAKMT_STATUS (*rocdxg_smi_get_device_info)(uint32_t, rocdxg_smi_device_info_t*) = nullptr;
+  // Dynamic / per-call queries
   HSAKMT_STATUS (*rocdxg_smi_get_vram_usage)(uint32_t, rocdxg_smi_vram_usage_t*) = nullptr;
   HSAKMT_STATUS (*rocdxg_smi_get_power_info)(uint32_t, rocdxg_smi_power_info_t*) = nullptr;
   HSAKMT_STATUS (*rocdxg_smi_get_temperature)(uint32_t, uint32_t, uint32_t, int64_t*) = nullptr;
   HSAKMT_STATUS (*rocdxg_smi_get_clock_info)(uint32_t, uint32_t,
                                              rocdxg_smi_clock_info_t*) = nullptr;
   HSAKMT_STATUS (*rocdxg_smi_get_pcie_info)(uint32_t, rocdxg_smi_pcie_info_t*) = nullptr;
-  HSAKMT_STATUS (*rocdxg_smi_get_driver_info)(uint32_t, rocdxg_smi_driver_info_t*) = nullptr;
-  HSAKMT_STATUS (*rocdxg_smi_get_vbios_info)(uint32_t, rocdxg_smi_vbios_info_t*) = nullptr;
   HSAKMT_STATUS (*rocdxg_smi_get_gpu_metrics_info)(uint32_t,
                                                    rocdxg_smi_gpu_metrics_info_t*) = nullptr;
   HSAKMT_STATUS (*rocdxg_smi_enum_processes)(uint32_t, uint32_t*,

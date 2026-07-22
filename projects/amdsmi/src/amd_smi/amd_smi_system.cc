@@ -101,10 +101,8 @@ static bool load_rocdxg() {
   ok &= bind_sym(g_rocdxg_handle, "hsaKmtReleaseSystemProperties",
                  g_wsl_syms.hsaKmtReleaseSystemProperties);
   ok &= bind_sym(g_rocdxg_handle, "hsaKmtGetNodeProperties", g_wsl_syms.hsaKmtGetNodeProperties);
-  ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_get_asic_info", g_wsl_syms.rocdxg_smi_get_asic_info);
-  ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_get_board_info",
-                 g_wsl_syms.rocdxg_smi_get_board_info);
-  ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_get_vram_info", g_wsl_syms.rocdxg_smi_get_vram_info);
+  ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_get_device_info",
+                 g_wsl_syms.rocdxg_smi_get_device_info);
   ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_get_vram_usage",
                  g_wsl_syms.rocdxg_smi_get_vram_usage);
   ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_get_power_info",
@@ -114,10 +112,6 @@ static bool load_rocdxg() {
   ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_get_clock_info",
                  g_wsl_syms.rocdxg_smi_get_clock_info);
   ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_get_pcie_info", g_wsl_syms.rocdxg_smi_get_pcie_info);
-  ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_get_driver_info",
-                 g_wsl_syms.rocdxg_smi_get_driver_info);
-  ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_get_vbios_info",
-                 g_wsl_syms.rocdxg_smi_get_vbios_info);
   ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_get_gpu_metrics_info",
                  g_wsl_syms.rocdxg_smi_get_gpu_metrics_info);
   ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_enum_processes",
