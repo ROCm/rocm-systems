@@ -2674,7 +2674,7 @@ TEST(ConSanMoi, Cdna4RecordReplayPersistentEpochAdvancesAtBarrier) {
             1);
 }
 
-TEST(ConSanMoi, RecordReplayLargeBarrierInventoryRetainsPrivateEpochCoalescing) {
+TEST(ConSanMoi, Gfx1201RecordReplayAvoidsPrivateEpochOnHotAccesses) {
   constexpr uint32_t kBarrierWait = 0xBF940000u;
   std::vector<uint32_t> text_words = {
       0xD8340000u,
@@ -2699,10 +2699,15 @@ TEST(ConSanMoi, RecordReplayLargeBarrierInventoryRetainsPrivateEpochCoalescing) 
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_private_epoch_automatic);
+  EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
+  EXPECT_FALSE(result.moi_private_epoch_automatic);
   EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
   EXPECT_FALSE(result.resolved_moi_owner_vgpr);
   EXPECT_FALSE(result.resolved_moi_epoch_vgpr);
+  ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr);
+  ASSERT_TRUE(result.resolved_moi_persistent_epoch_sgpr);
+  EXPECT_EQ(*result.resolved_moi_persistent_epoch_sgpr,
+            *result.resolved_moi_persistent_owner_sgpr + 1u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
                                &ConSanPatchInfo::kind),
             1);
@@ -2714,13 +2719,13 @@ TEST(ConSanMoi, RecordReplayLargeBarrierInventoryRetainsPrivateEpochCoalescing) 
   const auto barrier = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier, &ConSanPatchInfo::kind);
   const auto prologue = std::ranges::find(
-      result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue, &ConSanPatchInfo::kind);
+      result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(access, result.patches.end());
   ASSERT_NE(barrier, result.patches.end());
   ASSERT_NE(prologue, result.patches.end());
-  ASSERT_TRUE(access->persistent_epoch_private_offset);
-  EXPECT_EQ(barrier->persistent_epoch_private_offset, access->persistent_epoch_private_offset);
-  EXPECT_EQ(prologue->persistent_epoch_private_offset, access->persistent_epoch_private_offset);
+  EXPECT_FALSE(access->persistent_epoch_private_offset);
+  EXPECT_FALSE(barrier->persistent_epoch_private_offset);
+  EXPECT_FALSE(prologue->persistent_epoch_private_offset);
 }
 
 TEST(ConSanMoi, Gfx1250FullVgprRecordReplayUsesScalarEpochCoalescing) {

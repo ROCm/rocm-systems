@@ -2763,10 +2763,10 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       !sampled_requires_persistent_owner &&
       (has_dynamic_lds_owner ||
        (would_grow_descriptor && options.moi_engine != ConSanMoiEngine::InlineShadow));
-  const bool gfx1250_record_replay_needs_scalar_epoch =
-      arch == ROCJITSU_CODE_ARCH_GFX1250 && options.moi_engine == ConSanMoiEngine::RecordReplay &&
+  const bool rdna4_record_replay_needs_scalar_epoch =
+      is_rdna4_family_arch(arch) && options.moi_engine == ConSanMoiEngine::RecordReplay &&
       !options.force_private_epoch && (persistent_end > kMaxVgprs || prefer_private_epoch);
-  if (gfx1250_record_replay_needs_scalar_epoch) {
+  if (rdna4_record_replay_needs_scalar_epoch) {
     constexpr uint16_t scalar_count = 2u;
     uint32_t first = 0u;
     std::vector<uint64_t> owner_descriptors;
@@ -2812,12 +2812,12 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       result.resolved_moi_prologue_scratch_vgpr_assignments =
           options.moi_prologue_scratch_vgpr_assignments;
       result.warnings.emplace_back(
-          "ConSan MOI assigned persistent scalar owner/epoch state for gfx1250 "
-          "Record/Replay with a full VGPR bank");
+          "ConSan MOI assigned persistent scalar owner/epoch state for RDNA4 "
+          "Record/Replay without growing the VGPR allocation");
       return true;
     }
     result.warnings.emplace_back(
-        "ConSan MOI could not place persistent scalar owner/epoch state for gfx1250 "
+        "ConSan MOI could not place persistent scalar owner/epoch state for RDNA4 "
         "Record/Replay");
   }
   if (options.force_private_epoch || persistent_end > kMaxVgprs || prefer_private_epoch) {

@@ -1631,7 +1631,7 @@ TEST(ConSanMoi, AutomaticPersistentProloguesOnlyTargetEmittedProbeOwners) {
   }
 }
 
-TEST(ConSanMoi, AutomaticPersistentStatePreservesGuestVgprAllocation) {
+TEST(ConSanMoi, AutomaticScalarPersistentStatePreservesGuestVgprAllocation) {
   const std::array<uint32_t, 4> text_words = {
       0xD8340000u,
       0x00000000u, // ds_store_b32 v0, v0
@@ -1652,13 +1652,16 @@ TEST(ConSanMoi, AutomaticPersistentStatePreservesGuestVgprAllocation) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_private_epoch_automatic);
+  EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
+  EXPECT_FALSE(result.moi_private_epoch_automatic);
   EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
   EXPECT_FALSE(result.resolved_moi_owner_vgpr);
   EXPECT_FALSE(result.resolved_moi_epoch_vgpr);
+  ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr);
+  ASSERT_TRUE(result.resolved_moi_persistent_epoch_sgpr);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
                                &ConSanPatchInfo::kind),
-            0);
+            1);
   EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
            patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
