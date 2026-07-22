@@ -2386,7 +2386,20 @@ inline void execute_s_quadmask_b64_sop1([[maybe_unused]] Inst &inst,
 }
 
 template <typename Inst>
-inline void execute_s_rfe_b64_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
+inline void execute_s_rfe_b64_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  uint64_t saved_pc = amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0);
+  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;
+  wf.pc = (saved_pc & kPcAddressMask) - inst.size();
+  wf.set_in_trap_handler(false);
+
+  // The handler sets STATUS.HALT when it wants the wave to stay
+  // stopped for the debugger; honour that on the way out.
+  constexpr uint32_t kStatusHalt = 1u << 13;
+  if ((wf.status_raw() & kStatusHalt) != 0) {
+    wf.set_debug_single_step(false);
+    wf.set_debug_halted(true);
+  }
+}
 
 template <typename Inst>
 inline void execute_s_rndne_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
@@ -2408,7 +2421,12 @@ inline void execute_s_round_mode_sopp([[maybe_unused]] Inst &inst, [[maybe_unuse
 }
 
 template <typename Inst>
-inline void execute_s_sendmsg_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
+inline void execute_s_sendmsg_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  const uint32_t message = static_cast<uint32_t>(inst.simm16.encoding_value_);
+  if (wf.in_trap_handler() && (message & 0xFu) == 1u)
+    wf.set_trap_interrupt_sent(true);
+  wf.cu().handle_sendmsg(wf, message);
+}
 
 template <typename Inst>
 inline void execute_s_sendmsg_rtn_b32_sop1([[maybe_unused]] Inst &inst,
@@ -2472,7 +2490,13 @@ inline void execute_s_sendmsg_rtn_b64_sop1([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_s_sendmsghalt_sopp([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {}
+                                       [[maybe_unused]] Wavefront &wf) {
+  const uint32_t message = static_cast<uint32_t>(inst.simm16.encoding_value_);
+  if (wf.in_trap_handler() && (message & 0xFu) == 1u)
+    wf.set_trap_interrupt_sent(true);
+  wf.cu().handle_sendmsg(wf, message);
+  wf.set_debug_halted(true);
+}
 
 template <typename Inst>
 inline void execute_s_set_gpr_idx_idx_sop1([[maybe_unused]] Inst &inst,

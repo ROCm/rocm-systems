@@ -27,6 +27,7 @@ using namespace rocjitsu;
 constexpr uint32_t SGPRS_PER_WF = 106;
 constexpr uint32_t VGPRS_PER_WF = 64;
 constexpr uint32_t kKernelAddr = 0x1000;
+constexpr uint32_t kTrapHandlerAddr = 0x2000;
 constexpr uint32_t kSTrapBreakpoint = 0xBF920001u; // s_trap 1 (rocm-dbgapi breakpoint)
 constexpr uint32_t kSTrapSeven = 0xBF92AB07u;      // s_trap 0xab07 (trap id is low 8 bits)
 constexpr uint32_t kGfx1250STrap = 0xBF900003u;    // s_trap 3 on gfx12.5
@@ -55,56 +56,57 @@ struct WaveDebugFixture {
   }
 };
 
-// A wave that executes an s_trap breakpoint stops for the debugger: the trap
-// handler is invoked with the trap id, the wave becomes debug-halted (not
-// retired), and the PC points just past the s_trap. The CU then reports no
-// runnable work (so the engine can quiesce) while the slot stays occupied.
-TEST(WaveDebugTest, STrapBreakpointStopsWaveAndQuiescesCu) {
+TEST(WaveDebugTest, STrapExecutesConfiguredTrapHandlerInstructions) {
   WaveDebugFixture fx;
   fx.gpu_mem.write32(kKernelAddr, kSTrapBreakpoint);
   fx.gpu_mem.write32(kKernelAddr + 4, kSEndpgm);
 
-  uint32_t trap_seen = 0xFFFFFFFF;
-  const amdgpu::Wavefront *trap_wf = nullptr;
-  fx.cu->set_trap_handler([&](amdgpu::Wavefront &w, uint32_t id) {
-    trap_seen = id;
-    trap_wf = &w;
-    return true; // debugger attached: stop the wave
+  // Assembled for gfx950. The handler writes a proof value to TTMP4,
+  // advances the saved PC, restores STATUS.HALT, emits MSG_INTERRUPT, and
+  // returns through s_rfe_b64.
+  const uint32_t handler[] = {
+      0xBEF000FFu, 0x12345678u, // s_mov_b32 ttmp4, 0x12345678
+      0x806C846Cu,              // s_add_u32 ttmp0, ttmp0, 4
+      0x826D806Du,              // s_addc_u32 ttmp1, ttmp1, 0
+      0xBEF800FFu, 0x00002000u, // s_mov_b32 ttmp12, STATUS.HALT
+      0xBF900001u,              // s_sendmsg sendmsg(MSG_INTERRUPT)
+      0xB978F802u,              // s_setreg_b32 hwreg(HW_REG_STATUS), ttmp12
+      0xBE801F6Cu,              // s_rfe_b64 ttmp[0:1]
+  };
+  for (uint32_t i = 0; i < std::size(handler); ++i)
+    fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
+
+  fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+    return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0x3000, true};
   });
+  uint32_t interrupt_count = 0;
+  fx.cu->set_sendmsg_handler([&](amdgpu::Wavefront &, uint32_t message) {
+    if (message == 1)
+      ++interrupt_count;
+    return message == 1;
+  });
+  uint32_t completion_count = 0;
+  fx.cu->set_trap_completion_handler([&](amdgpu::Wavefront &) { ++completion_count; });
 
   auto *wf = fx.dispatch(kKernelAddr);
   ASSERT_NE(wf, nullptr);
-  EXPECT_FALSE(wf->debug_halted());
-  EXPECT_TRUE(fx.cu->has_runnable_wfs());
 
   fx.cu->step();
+  ASSERT_TRUE(wf->in_trap_handler());
+  EXPECT_EQ(wf->pc, kTrapHandlerAddr);
+  EXPECT_EQ(wf->ttmp(0), kKernelAddr);
+  EXPECT_EQ(wf->ttmp(1), 1u << 16);
+  EXPECT_EQ(wf->ttmp(14), 0x3000u);
 
-  EXPECT_EQ(trap_seen, 1u);
-  EXPECT_EQ(trap_wf, wf);
+  for (int i = 0; i < 7; ++i)
+    fx.cu->step();
+
+  EXPECT_FALSE(wf->in_trap_handler());
   EXPECT_TRUE(wf->debug_halted());
-  EXPECT_EQ(wf->trap_id(), 1u);
-  EXPECT_EQ(wf->pc, kKernelAddr + 4); // saved PC is past the s_trap
-  // The slot is still occupied (not retired) but nothing is runnable, so the
-  // engine can go idle while the wave is stopped at the breakpoint.
-  EXPECT_TRUE(fx.cu->has_active_wfs());
-  EXPECT_FALSE(fx.cu->has_runnable_wfs());
-  EXPECT_TRUE(fx.cu->is_idle());
-  amdgpu::ShaderProcessorInput spi({fx.cu.get()});
-  EXPECT_FALSE(spi.step());
-  EXPECT_FALSE(spi.has_pending());
-  spi.run_to_idle();
-
-  // Stepping again makes no progress while the wave is debug-halted.
-  uint64_t pc_before = wf->pc;
-  fx.cu->step();
-  EXPECT_EQ(wf->pc, pc_before);
-  EXPECT_TRUE(wf->debug_halted());
-
-  // Resuming clears the debug halt; the wave then runs to s_endpgm and retires.
-  wf->set_debug_halted(false);
-  EXPECT_TRUE(fx.cu->has_runnable_wfs());
-  fx.cu->step();
-  EXPECT_TRUE(wf->is_halted());
+  EXPECT_EQ(wf->pc, kKernelAddr + 4);
+  EXPECT_EQ(wf->ttmp(4), 0x12345678u);
+  EXPECT_EQ(interrupt_count, 1u);
+  EXPECT_EQ(completion_count, 1u);
 }
 
 // A single-stepped wave (rocm-dbgapi MODE.debug_en=1) executes exactly one
@@ -192,15 +194,9 @@ TEST(WaveDebugTest, IllegalInstructionWithoutDebuggerHalts) {
   EXPECT_TRUE(wave->is_halted());
 }
 
-TEST(WaveDebugTest, DeclinedTrapAdvancesPcWithoutChangingWaveState) {
+TEST(WaveDebugTest, STrapWithoutConfiguredHandlerAdvancesPcWithoutChangingWaveState) {
   WaveDebugFixture fx;
   fx.gpu_mem.write32(kKernelAddr, kSTrapSeven);
-
-  uint32_t trap_seen = 0;
-  fx.cu->set_trap_handler([&](amdgpu::Wavefront &, uint32_t id) {
-    trap_seen = id;
-    return false;
-  });
 
   auto *wf = fx.dispatch(kKernelAddr);
   ASSERT_NE(wf, nullptr);
@@ -209,7 +205,6 @@ TEST(WaveDebugTest, DeclinedTrapAdvancesPcWithoutChangingWaveState) {
 
   fx.cu->step();
 
-  EXPECT_EQ(trap_seen, 7u);
   EXPECT_EQ(wf->pc, kKernelAddr + 4);
   EXPECT_EQ(wf->status_raw(), 0x12345678u);
   EXPECT_EQ(wf->trapsts(), 0x87654321u);
@@ -217,23 +212,16 @@ TEST(WaveDebugTest, DeclinedTrapAdvancesPcWithoutChangingWaveState) {
   EXPECT_FALSE(wf->debug_halted());
 }
 
-TEST(WaveDebugTest, Gfx1250TrapUsesDecodedInstructionAndImmediate) {
+TEST(WaveDebugTest, Gfx1250TrapWithoutConfiguredHandlerAdvancesPc) {
   WaveDebugFixture fx(ROCJITSU_CODE_ARCH_GFX1250);
   fx.gpu_mem.write32(kKernelAddr, kGfx1250STrap);
-
-  uint32_t trap_seen = 0;
-  fx.cu->set_trap_handler([&](amdgpu::Wavefront &, uint32_t id) {
-    trap_seen = id;
-    return true;
-  });
 
   auto *wf = fx.dispatch(kKernelAddr);
   ASSERT_NE(wf, nullptr);
   fx.cu->step();
 
-  EXPECT_EQ(trap_seen, 3u);
   EXPECT_EQ(wf->pc, kKernelAddr + 4);
-  EXPECT_TRUE(wf->debug_halted());
+  EXPECT_FALSE(wf->debug_halted());
 }
 
 // The trap temporary registers and trap status register round-trip, and reset()

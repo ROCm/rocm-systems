@@ -32,6 +32,7 @@ class L1VectorCache;
 class L2Cache;
 class Lds;
 class RegisterAccess;
+class Wavefront;
 
 /// @brief Narrow CU API exposed to AMDGPU instruction emulation code.
 ///
@@ -56,6 +57,8 @@ public:
   simdojo::ComponentID id() const;
   simdojo::SimulationEngine *engine() const;
   void request_functional_yield();
+  bool handle_sendmsg(Wavefront &wf, uint32_t message);
+  void notify_trap_complete(Wavefront &wf);
 
 private:
   uint32_t read_sgpr(uint32_t reg_idx) const;

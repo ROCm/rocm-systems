@@ -3968,6 +3968,45 @@ class CodeGenerator:
         if cls == 'true_nop' and sem.name in ('S_SLEEP', 'S_SLEEP_VAR'):
             return '  wf.cu().request_functional_yield();'
 
+        # The MR ISA carries no pseudocode for the trap-handler control ops, so
+        # they derive as true_nop. They are not nops: the configured GPU trap
+        # handler returns through S_RFE and reports through S_SENDMSG, and
+        # leaving these empty silently disables ROCgdb's whole stop/resume path
+        # (see docs/rocgdb-debugging.md). Emit real bodies here, alongside
+        # S_SLEEP above, rather than hand-editing the generated header.
+        if cls == 'true_nop' and sem.name in ('S_RFE', 'S_RFE_B64'):
+            # Return from exception: restore the PC the trap handler saved in
+            # ssrc0. The 48-bit mask drops the status bits the hardware packs
+            # into the high half, and the instruction size is subtracted
+            # because the interpreter advances the PC after execute() returns.
+            return (
+                '  uint64_t saved_pc = amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0);\n'
+                '  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;\n'
+                '  wf.pc = (saved_pc & kPcAddressMask) - inst.size();\n'
+                '  wf.set_in_trap_handler(false);\n'
+                '\n'
+                '  // The handler sets STATUS.HALT when it wants the wave to stay\n'
+                '  // stopped for the debugger; honour that on the way out.\n'
+                '  constexpr uint32_t kStatusHalt = 1u << 13;\n'
+                '  if ((wf.status_raw() & kStatusHalt) != 0) {\n'
+                '    wf.set_debug_single_step(false);\n'
+                '    wf.set_debug_halted(true);\n'
+                '  }'
+            )
+
+        if cls == 'true_nop' and sem.name in ('S_SENDMSG', 'S_SENDMSGHALT'):
+            # MSG_INTERRUPT (id 1) from inside the trap handler is how the wave
+            # tells KFD it has stopped; the CU turns it into a debug event.
+            body = (
+                '  const uint32_t message = static_cast<uint32_t>(inst.simm16.encoding_value_);\n'
+                '  if (wf.in_trap_handler() && (message & 0xFu) == 1u)\n'
+                '    wf.set_trap_interrupt_sent(true);\n'
+                '  wf.cu().handle_sendmsg(wf, message);'
+            )
+            if sem.name == 'S_SENDMSGHALT':
+                body += '\n  wf.set_debug_halted(true);'
+            return body
+
         if cls == 'true_nop':
             return '  (void)wf;'
 
@@ -10465,8 +10504,14 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    return static_cast<uint32_t>(wf.vcc());\n'
             '  if (ev == 107)\n'
             '    return static_cast<uint32_t>(wf.vcc() >> 32);\n'
+            # TTMP0-15 are the trap handler's private scratch registers. They are
+            # NOT part of the wave's SGPR allocation: hardware banks them
+            # separately, the CP seeds them with the dispatch/queue identity that
+            # rocm-dbgapi reads back out of the CWSR area, and a shader that never
+            # enters a trap must not be able to clobber them through an SGPR write.
+            # Route them to Wavefront::ttmp()/set_ttmp() rather than the SGPR file.
             '  if (ev >= 108 && ev <= 123)\n'
-            '    return amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
+            '    return wf.ttmp(static_cast<uint32_t>(ev - 108));\n'
             + (
                 '  if (ev == 124)\n'
                 '    return 0u; // NULL\n'
@@ -10582,8 +10627,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '  if (ev == 106)\n'
             '    return wf.vcc();\n'
             '  if (ev >= 108 && ev <= 122) {\n'
-            '    uint32_t lo = amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
-            '    uint32_t hi = amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));\n'
+            '    uint32_t lo = wf.ttmp(static_cast<uint32_t>(ev - 108));\n'
+            '    uint32_t hi = wf.ttmp(static_cast<uint32_t>(ev - 107));\n'
             '    return static_cast<uint64_t>(hi) << 32 | lo;\n'
             '  }\n'
             + (
@@ -10655,7 +10700,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    return;\n'
             '  }\n'
             '  if (ev >= 108 && ev <= 123) {\n'
-            '    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);\n'
+            '    wf.set_ttmp(static_cast<uint32_t>(ev - 108), val);\n'
             '    return;\n'
             '  }\n'
             + (
@@ -10697,8 +10742,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    return;\n'
             '  }\n'
             '  if (ev >= 108 && ev <= 122) {\n'
-            '    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), static_cast<uint32_t>(val));\n'
-            '    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1), static_cast<uint32_t>(val >> 32));\n'
+            '    wf.set_ttmp(static_cast<uint32_t>(ev - 108), static_cast<uint32_t>(val));\n'
+            '    wf.set_ttmp(static_cast<uint32_t>(ev - 107), static_cast<uint32_t>(val >> 32));\n'
             '    return;\n'
             '  }\n'
             '  if (ev == 124)\n'

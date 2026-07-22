@@ -5527,9 +5527,16 @@ TEST(HwregHelperTest, Rdna3TablesNameXmlHwregIds) {
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
     ASSERT_NE(wf, nullptr);
 
+    // TRAPSTS is backed by Wavefront::trapsts_ on every arch: the GPU trap
+    // handler reads the excp cause on entry and clears it before s_rfe, so a
+    // write has to reach wave state rather than report Unsupported.
     EXPECT_STREQ(amdgpu::hwreg_name(*wf, encode_hwreg(3)), "TRAPSTS");
     EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(3), 1u),
-              amdgpu::HwregAccessResult::Unsupported);
+              amdgpu::HwregAccessResult::Success);
+    uint32_t trapsts = 0;
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(3), trapsts),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(trapsts, 1u);
     EXPECT_STREQ(amdgpu::hwreg_name(*wf, encode_hwreg(14)), "FLUSH_IB");
     EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(14), 1u),
               amdgpu::HwregAccessResult::Unsupported);
