@@ -98,7 +98,7 @@ flowchart TD
   subgraph F[Four instrumentation flavors]
     SC0["SC0 DONE<br/>native CDNA4 LDS checks:<br/>CLIP + TP1/TP2 clean"]
     SC1["SC1 TODO<br/>SuperCollider group-FLAT clean vertical;<br/>racy detection and trap breadth open"]
-    RR0["RR0 ACTIVE<br/>AccVGPR-safe scalar state runs natively;<br/>dynamic-stack helpers and DS breadth open"]
+    RR0["RR0 ACTIVE<br/>AccVGPR-safe scalar state and CDNA4 DS breadth run;<br/>dynamic-stack helpers and replay stability open"]
     RR1["RR1 TODO<br/>Record/Replay barriers, atomics and fences"]
     SA0A["SA0A DONE<br/>CDNA4 sampled barrier lowering:<br/>TP1 + CLIP clean"]
     SA0["SA0 TODO<br/>Sampled TP2 admission/selection<br/>and broader runtime coverage"]
@@ -271,6 +271,14 @@ flowchart TD
 ```
 
 ## Reconnaissance conclusions
+
+- 2026-07-22: `RR0` remains ACTIVE/blue after `92678db569`, but its CDNA4 DS
+  breadth slice is complete for the current TP1 and CLIP inventories.  TP1
+  prefill Record/Replay is green at 120/120 accesses and 31/31 barriers.
+  CLIP reaches 45/45 plus 24/24 clean coverage but retains a nondeterministic
+  replay conflict, while TP1 decode exposes a separate warmup-oracle failure.
+  The active box therefore now denotes replay stability and dynamic-stack
+  helpers, not the closed opcode-normalization work.
 
 - 2026-07-22: `RR0` is ACTIVE/blue.  Commit `15e84c6d6c` adds the safe scalar
   Record/Replay fallback beneath a CDNA4 `ACCUM_OFFSET` boundary without
