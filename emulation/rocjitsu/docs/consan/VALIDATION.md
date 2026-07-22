@@ -43,6 +43,8 @@ iree-test-suites/
 iree-test-suites-build/
 hip-moi/
 hip-moi-build/
+rocjitsu-test-corpus/
+rocjitsu-test-corpus-build/
 rocjitsu-build/
 ```
 
@@ -92,11 +94,11 @@ official prebuilt wheel compatible with the machine's runtime and target when
 reproducing elsewhere.  The doctor requires this interpreter only when the
 selected target manifest contains a PyTorch workload.
 
-Official PyTorch ROCm wheels bundle a modern HSA runtime.  After successful
-rocprofiler registration that runtime does not consult legacy
+Official PyTorch ROCm wheels and the native llama.cpp clients use a modern HSA
+runtime. After successful rocprofiler registration that runtime does not consult legacy
 `HSA_TOOLS_LIB` tooling unless `HSA_TOOLS_ROCPROFILER_V1_TOOLS=1` is present.
 The runner therefore sets and audits that variable automatically for
-instrumented PyTorch rows and removes it from baseline rows.  It is classified
+instrumented PyTorch and llama.cpp rows and removes it from baseline rows. It is classified
 as `runtime-plumbing`, never as workload tuning; users should not have to
 discover or manually preserve it.  The doctor tests this behavior with a real
 dispatch.  Its linkage-only canary uses a deliberately nonmatching internal
@@ -115,6 +117,38 @@ The doctor reports every missing checkout, artifact, workload executable,
 hook, and tool.  When a PyTorch workload is selected, it also performs one
 small numeric GPU dispatch and verifies that the process loaded the exact
 ConSan hook.  Other workload kinds remain filesystem/tooling-only preflight.
+
+### Native llama.cpp corpus clients
+
+The gfx1201 manifest includes `llama-rdna4-mul-mat-vec-q` and
+`llama-rdna4-rms-norm` from `rocjitsu-test-corpus`. Build its kernels project
+out of source at
+`$CONSAN_VALIDATION_WORKSPACE_DIR/rocjitsu-test-corpus-build/kernels/gfx1201`
+with `CMAKE_HIP_ARCHITECTURES=gfx1201`, `KERNEL_CORPUS_ENABLE_ALL=OFF`, and
+`KERNEL_CORPUS_ENABLE_LLAMA_HIP=ON`. The resulting executables are expected at
+`cases/llama.cpp/llama_cpp_mul_mat_vec_q` and
+`cases/llama.cpp/llama_cpp_rms_norm` beneath that directory. The runner also
+recognizes the target's pytest build artifact while migrating an existing
+workspace, but the stable out-of-source path is the reproducible contract.
+
+These clients require HIP, rocBLAS, and hipBLAS. For a source-built TheRock
+workspace, configure TheRock with `THEROCK_ENABLE_BLAS=ON`, build its focused
+`hipBLAS+stage` target, use `TheRock-build/dist/rocm` as `ROCM_PATH`, and add
+the hipBLAS and hipBLAS-common `dist` prefixes to the corpus
+`CMAKE_PREFIX_PATH`. This is build/runtime enablement, not an instrumentation
+knob. The exact local paths and retained gfx1201 setup evidence are recorded in
+[STATUS_RDNA4.md](STATUS_RDNA4.md).
+
+The corpus executable's `--validate` option selects its CPU backend; it does
+not validate a GPU execution. The checked-in
+[`consan_llama_validation.py`](../../tests/dbi/consan/consan_llama_validation.py)
+therefore launches two processes for every repetition: an instrumented GPU
+process without `--validate`, and an uninstrumented CPU process with
+`--validate` after scrubbing all ConSan/HSA-tool settings. Both write binary
+F32 results. The wrapper requires equal element counts, finite values, and a
+maximum absolute error of `1e-5` for RMSNorm or `1e-2` for quantized matvec,
+then emits the GPU timing and oracle result as JSON for the normal paired
+overhead machinery.
 
 ## Inspecting the executable contract
 
@@ -211,7 +245,7 @@ continues to reject the cumulative reference file.
 The current gfx1201 manifest covers Qwen3-0.6B prefill; native
 PyTorch/Inductor compact and split online-softmax clients, collision-heavy
 scatter-reduce, Qwen-vocabulary top-k, causal SDPA, and histogram;
-Sharktank TP1 prefill and
+native llama.cpp quantized matvec and RMSNorm; Sharktank TP1 prefill and
 decode/combined, TP2, and CLIP BF16; and the hip-moi D128, WMMA, Stream-K,
 tree-atomic-OR, and Jakub workloads. The profile IDs are `supercollider`,
 `record-replay`, `sampled`, and `inline-shadow`.

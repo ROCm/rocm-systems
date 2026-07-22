@@ -10,8 +10,8 @@ commit `640e575da2`, with hook SHA-256
 `c45aa0fece5a9aa7ef8b3ad24bcbb2077e477586df6b4eecf12990f7fafa693d`.  It is
 retained below as historical evidence, but it does not qualify the current
 branch.  After rebasing onto the 2026-07-21 sanitizer tip, the current
-certificate has advanced through executable validation checkpoint
-`551c284c40`, using rebuilt hook SHA-256
+certificate has advanced through rebuilt-hook checkpoint `551c284c40` and
+executable-manifest checkpoint `2b6b84ee07`, using hook SHA-256
 `f28c56eb20b39840cb93f9048e561fcf869ac36ea4924456f071f4eb1d36d5ce`.
 Current-tip qualification is in progress; cells below name retained artifacts
 when post-rebase execution evidence has replaced the initial gray state.
@@ -57,9 +57,10 @@ denominator.
 
 ## Catch-up snapshot
 
-- **Immediate requalification:** the portable manifest now has 17 workloads ×
-  4 profiles = 68 current-tip cells, including six independently selected
-  native gfx1201 PyTorch workloads.  Rebuild the exact hook, run
+- **Immediate requalification:** the portable manifest now has 19 workloads ×
+  4 profiles = 76 current-tip cells, including six independently selected
+  native gfx1201 PyTorch workloads and two native llama.cpp workloads. Rebuild
+  the exact hook, run
   clean and paired rows, regenerate target identities, review fault specs,
   execute contained faults, and freeze one provenance bundle.
 - **Historical comparator:** commit `640e575da2` accepted 55 clean
@@ -80,7 +81,7 @@ denominator.
   model, but do not port its configurations, shapes, selectors, denominators,
   or expected outcomes to RDNA4.
 
-Thus the immediate regression campaign contains 68 cells.  The expanded
+Thus the immediate regression campaign contains 76 cells.  The expanded
 gfx1201 denominator is intentionally unknown until discovery produces concrete
 native workloads with independent oracles.  Survey rows and baselines are not
 counted as instrumentation cells.
@@ -89,7 +90,8 @@ The current `gfx1201 manifest --json` exposes the original 11 workloads plus
 `pytorch-rdna4-compiled-softmax`, `pytorch-rdna4-split-softmax`,
 `pytorch-rdna4-llm-topk`, `pytorch-rdna4-sdpa`, and the independently
 inventoried target-native `pytorch-scatter-reduce` and
-`pytorch-torch-histc`.  All other
+`pytorch-torch-histc`, plus `llama-rdna4-mul-mat-vec-q` and
+`llama-rdna4-rms-norm`. All other
 expanded PyTorch and Tensile
 workloads remain declared with `targets=("gfx1250",)`.  Their configuration
 paths, generated kernels, and in one case intrinsic are target-specific; they
@@ -161,14 +163,16 @@ A discovery row uses `🟦 Excluded` after target-native evidence rules it out o
 the validation denominator.  Blue is a resolved selection decision, not a
 support result and not a gray instrumentation cell.  Once a candidate has an
 exact baseline and current-hook execution evidence, its four cells use the
-ordinary ordered color scale independently.  Colored discovery cells are
-provisional qualification until the command is promoted into
-`consan_validation.py` and frozen with overhead and fault evidence.
+ordinary ordered color scale independently. Both admitted llama.cpp commands
+are now first-class `consan_validation.py` workloads. Their wrapper runs the
+instrumented GPU client and an uninstrumented CPU backend in separate
+processes, compares their binary F32 outputs, and emits a machine-readable
+oracle and timing record.
 
 | Discovery order and native gfx1201 source | SuperCollider | Record/Replay | Sampled | Inline Shadow | Admission decision and evidence |
 |---|---|---|---|---|---|
-| **D0** `kernels.gfx1201.llama.cpp.llama_mul_mat_vec_q.default` | 🟨 Exact CPU oracle; clean-complete 462/462 LDS accesses; overhead and reviewed fault pending | 🟧 Exact 0.01 CPU oracle and useful partial execution: 462/462 accesses, 8/44 barriers, 63/63 supported atomics, and 63/63 associated fences patch without a clean diagnostic | 🟧 Exact 0.01 CPU oracle and useful partial execution: 241/462 accesses + 10/88 barrier members patch, but two sampled conflicts reject the clean run | 🟧 Exact oracle and useful partial execution: 132/462 accesses + 6/44 barriers patch, but one diagnostic rejects the clean run | Current Record/Replay artifact `rdna4-matvec-rr-b64-relay10`, hook `f32d0529…`, extends exact-address reconstruction to 64-bit global/flat atomics and reserves enough RDNA4 dense-dispatch relay space; it exits zero and differs from the CPU result by at most 0.00403. Current Sampled artifact `rdna4-matvec-sampled-no-access-atomics`, hook `95f96eae…`, no longer rejects 63 standalone printf-helper atomics that have no LDS causal-window consumer; it reaches the real matvec object and passes the oracle with the same maximum error, but its two clean conflicts and placement gaps prevent yellow. Earlier artifacts `rdna4-matvec-rr-current` and `rdna4-matvec-sampled-current`, hook `8c64e5ee…`, retain the pre-fix strict rejections. Exact baseline artifact `.pytest-artifacts-rdna4-llama-baseline`; SuperCollider passes the same tolerance. Inline artifact `rdna4-matvec-inline-dense-budget` passes the same oracle while retaining one clean diagnostic. The automatic 135-candidate RDNA4 dense-routing qualification envelope prevents the newly recovered shared-relay path from composing an unqualified 462-site relocation layout; owner-filtered sweeps show that individual 42-site owners are sound, while the combined layout corrupts output. This is a conservative internal admission rule, not a user knob. |
-| **D0** `kernels.gfx1201.llama.cpp.llama_rms_norm.default` | 🟨 Exact CPU oracle; clean-complete 22/22 LDS accesses; no mismatch; 1.306x process overhead; reviewed effective fault pending | 🟨 Exact oracle; clean-complete 22/22 accesses + 11/11 barriers; visible replay evidence and no conflict; 1.308x overhead; reviewed effective fault pending | 🟨 Exact oracle; clean-complete 22/22 accesses + 22/22 barrier members; sampled evidence and no clean diagnostic; 1.307x overhead; reviewed effective fault pending | 🟨 Exact 128-element CPU oracle; static- and dynamic-complete 22/22 accesses + 11/11 barriers; 80 visible events and no malformed or incomplete snapshots; overhead and reviewed effective fault pending | Inline checkpoint `6ddab1a730`, hook `ae96b66a…`, artifact `rdna4-rms-inline-retry-sgpr-fix-full`; exact baseline artifact `.pytest-artifacts-rdna4-llama-baseline`. The versioned exact-shadow retry counter had aliased the saved low half of guest VCC, restoring the decremented `0x7ff` counter as the application's lane mask. Moving the counter from EXEC-base `+8` to the diagnostic-temporary `+20` slot fixes the exact clean workload without a user knob. The earlier `45f8b118f3` dispatch-ID-zero fix remains required. Other profiles retain five-process medians of 0.163896 s baseline, 0.213989 s SuperCollider, 0.214359 s Record/Replay, and 0.214191 s Sampled. |
+| **D0** `llama-rdna4-mul-mat-vec-q` | 🟨 Exact 0.01 CPU oracle; clean-complete 462/462 LDS accesses; 17.881x process overhead; reviewed fault pending | 🟧 Exact oracle and clean GPU exit; 462/462 accesses, 44/44 barriers, 63/63 supported atomics, and 63/63 associated fences patch, but nine unsupported fences in a separate support object keep the aggregate analysis incomplete | 🟨 Exact oracle; clean-complete 462/462 accesses + 88/88 barrier members; 17.077x process overhead; reviewed fault pending | 🟧 Exact oracle passes; useful partial execution reaches 132/462 accesses + 18/44 barriers, but one clean diagnostic rejects the strict run | Current scripted clean artifact `rdna4-llama-matvec-all-scripted-20260722`, hook `f28c56eb…`, runs all four engines through the independent two-process oracle; every result differs from CPU by at most 0.004023. Current paired artifacts `rdna4-llama-matvec-{sc,sampled}-overhead-scripted-20260722` use five instrumented processes bracketed by five-process baselines. Sampled's current complete, diagnostic-free result supersedes the older partial `rdna4-matvec-sampled-no-access-atomics` evidence. Record/Replay executes correctly and patches every supported site, but its strict result intentionally retains the typed unsupported-fence gap rather than hiding the bundled support object. Inline retains one owner-33 store versus owner-1 load diagnostic and the automatic 135-candidate dense-routing envelope; no user knob narrows any row. |
+| **D0** `llama-rdna4-rms-norm` | 🟨 Exact CPU oracle; clean-complete 22/22 LDS accesses; 1.194x process overhead; reviewed effective fault pending | 🟨 Exact oracle; clean-complete 22/22 accesses + 11/11 barriers; 1.350x overhead; reviewed effective fault pending | 🟨 Exact oracle; clean-complete 22/22 accesses + 22/22 barrier members; 1.404x overhead; reviewed effective fault pending | 🟨 Exact oracle; clean-complete 22/22 accesses + 11/11 barriers; 1.375x overhead; reviewed effective fault pending | Current scripted clean and paired evidence is `rdna4-llama-rms-{all,overhead}-scripted-20260722`, hook `f28c56eb…`. All four engines pass the independent 128-element GPU-versus-CPU binary-output oracle without a diagnostic or user knob; every one of five overhead repetitions remains complete. The earlier Inline retry-counter and dispatch-ID-zero fixes remain load-bearing. A reviewed fault with an observable semantic effect is still required for green. |
 | **D0** `kernels.gfx1201.hip-matmul.hip_matmul_matvec.m256_n1_k1024` | 🟦 Excluded | 🟦 Excluded | 🟦 Excluded | 🟦 Excluded | A standalone build with the unrelated llama.cpp backend disabled passes all nine exact matvec variants. Fresh SuperCollider inventory finds no decoded LDS, barriers, or atomics in the nine workload kernels; only eight ambiguous flat maybe-group sites fail placement, so this does not add a sound or nonredundant ConSan workload. |
 | **D0** `llama.cpp` noncontiguous batched-matmul and hazard metadata | 🟦 Excluded | 🟦 Excluded | 🟦 Excluded | 🟦 Excluded | The gfx1201 config explicitly skips compiling both variants. The hazard overlay restores llama.cpp PR #13155's pre-fix noncontiguous-stride conversion and expects a deterministic output-validation failure; it is a data-layout correctness reproducer, not a concurrency oracle. |
 | **D1** Three collected IREE direct-tile matmuls: F16, FP8, and I8 | 🟦 Excluded | 🟦 Excluded | 🟦 Excluded | 🟦 Excluded | The three gfx1201 compilations pass, but their corpus records explicitly set `compile_only=true`; they dispatch no workload and provide no runtime oracle. Normalize a calls/support-module wrapper before reconsidering them. |
