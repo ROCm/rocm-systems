@@ -16,6 +16,23 @@ namespace rocjitsu {
 class AmdGpuCodeObject;
 struct KdTranslation;
 
+/// @brief One exact source-to-target offset mapping inside `.text`.
+///
+/// @details DBT supplies instruction starts and block ends after final kernel
+/// placement. The ELF patcher uses these mappings to keep local labels and
+/// function symbols attached to relocated code without interpreting the ISA.
+struct TextOffsetRelocation {
+  uint64_t source_offset = 0;
+  uint64_t target_offset = 0;
+};
+
+/// @brief One relocated literal64 PC builder whose target is outside `.text`.
+struct PcRelativeDataRelocation {
+  uint64_t target_getpc_offset = 0;
+  uint64_t target_literal_offset = 0;
+  uint64_t source_target_vaddr = 0;
+};
+
 /// @brief Location of a sidecar kernel descriptor appended into a loaded ELF segment.
 struct AppendedSidecarDescriptor {
   uint64_t file_offset = 0;
@@ -39,7 +56,9 @@ public:
   /// the executable LOAD segment that contains .text, preserves LOAD alignment,
   /// updates moved symbols and relocation places, and keeps descriptor-relative
   /// entries coherent with explicit descriptor patches applied by DBT.
-  [[nodiscard]] bool replace_text(std::span<const uint8_t> new_text);
+  [[nodiscard]] bool replace_text(std::span<const uint8_t> new_text,
+                                  std::span<const TextOffsetRelocation> text_relocations = {},
+                                  std::span<const PcRelativeDataRelocation> data_relocations = {});
 
   /// @brief True if any relocation's place (r_offset) falls inside .text.
   ///
@@ -52,21 +71,17 @@ public:
   /// genuinely unsupported inputs.
   [[nodiscard]] bool has_relocations_within_text() const;
 
-  /// @brief True if any relocation resolves against a location inside .text.
+  /// @brief True if any relocation references .text in a form DBT cannot remap.
   ///
-  /// @details DBT moves (and can duplicate) .text blocks, but the symbol values
-  /// (st_value) of anything defined in .text are not remapped. A relocation
-  /// elsewhere (e.g. a function-pointer table in .data) that resolves against
-  /// such a location would therefore point at its stale pre-move PC. This covers
-  /// every symbol whose st_shndx is the text section regardless of type —
-  /// STT_FUNC helpers, STT_NOTYPE labels, and an STT_SECTION symbol for .text
-  /// (whose addend selects an in-.text offset) all alias moved code. Kernel entry
-  /// points are dispatched through the descriptor's kernel_code_entry_byte_offset
-  /// (which DBT does update) and are not the target of in-object relocations, so
-  /// this rejects only genuinely address-taken text locations that cannot be
-  /// relocated safely yet. BinaryTranslator uses it to fail closed instead of
-  /// resolving to a wrong address.
-  [[nodiscard]] bool has_relocation_to_text_symbol() const;
+  /// @details DBT can remap zero-addend RELA references to ordinary symbols
+  /// defined in .text by updating the symbol value, and symbol-less
+  /// R_AMDGPU_RELATIVE64 references by updating their explicit addend. Section
+  /// symbols, REL records with implicit addends, and named-symbol references
+  /// with nonzero addends require relocation-specific address reconstruction
+  /// that is not implemented. BinaryTranslator uses this predicate to reject
+  /// only those unsupported forms while allowing relocation-backed function
+  /// tables that the text offset map can update safely.
+  [[nodiscard]] bool has_unsupported_relocation_to_text() const;
 
   void update_elf_flags(uint32_t new_flags);
 
