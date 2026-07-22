@@ -232,27 +232,50 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           access_island_begin + group.first_candidate_index * access_relay_words * sizeof(uint32_t);
       auto island =
           local_entry_islands->claim_reachable_from_all(anchors, group_entry_island_words);
-      if (!island && key.first) {
-        const auto kernel = std::ranges::find(result.kernels, key.second, &ConSanKernelInfo::name);
-        if (kernel != result.kernels.end()) {
+      if (!island) {
+        const auto kernel =
+            key.first ? std::ranges::find(result.kernels, key.second, &ConSanKernelInfo::name)
+                      : result.kernels.end();
+        const auto function =
+            !key.first ? std::ranges::find(result.functions, key.second, &ConSanFunctionInfo::name)
+                       : result.functions.end();
+        const bool has_owner_range =
+            (kernel != result.kernels.end() && kernel->has_text_range && kernel->code_size != 0u) ||
+            (function != result.functions.end() && function->code_size != 0u);
+        if (has_owner_range) {
           const uint64_t host_words_count = group_entry_island_words + 1u;
           const uint64_t host_bytes = host_words_count * sizeof(uint32_t);
-          const uint64_t kernel_end = kernel->entry_text_offset + kernel->code_size;
+          const uint64_t owner_begin =
+              key.first ? kernel->entry_text_offset : function->entry_text_offset;
+          const uint64_t owner_end =
+              owner_begin + (key.first ? kernel->code_size : function->code_size);
           std::vector<std::pair<uint64_t, uint64_t>> occupied_ranges;
-          occupied_ranges.reserve(group.candidates.size() + kernel->barrier_sites.size() +
-                                  kernel->fence_sites.size() + kernel->atomic_sites.size());
+          const size_t owner_barrier_count =
+              key.first ? kernel->barrier_sites.size() : function->barrier_sites.size();
+          const size_t owner_fence_count =
+              key.first ? kernel->fence_sites.size() : function->fence_sites.size();
+          const size_t owner_atomic_count =
+              key.first ? kernel->atomic_sites.size() : function->atomic_sites.size();
+          occupied_ranges.reserve(group.candidates.size() + owner_barrier_count +
+                                  owner_fence_count + owner_atomic_count);
           const auto append_occupied_range = [&](uint64_t begin, uint64_t size) {
             if (size != 0u)
               occupied_ranges.emplace_back(begin, begin + size);
           };
           for (const ConSanMoiCandidate *candidate : group.candidates)
             append_occupied_range(candidate->text_offset, candidate->size);
-          for (const ConSanBarrierSite &site : kernel->barrier_sites)
-            append_occupied_range(site.text_offset, site.size);
-          for (const ConSanFenceSite &site : kernel->fence_sites)
-            append_occupied_range(site.text_offset, site.size);
-          for (const ConSanAtomicSite &site : kernel->atomic_sites)
-            append_occupied_range(site.text_offset, site.size);
+          const auto append_owner_sites = [&](const auto &owner) {
+            for (const ConSanBarrierSite &site : owner.barrier_sites)
+              append_occupied_range(site.text_offset, site.size);
+            for (const ConSanFenceSite &site : owner.fence_sites)
+              append_occupied_range(site.text_offset, site.size);
+            for (const ConSanAtomicSite &site : owner.atomic_sites)
+              append_occupied_range(site.text_offset, site.size);
+          };
+          if (key.first)
+            append_owner_sites(*kernel);
+          else
+            append_owner_sites(*function);
           std::ranges::sort(occupied_ranges);
           size_t merged_range_count = 0u;
           for (const auto &range : occupied_ranges) {
@@ -320,15 +343,15 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             }
             return true;
           };
-          auto block = std::lower_bound(
-              dense_host_blocks.begin(), dense_host_blocks.end(), kernel->entry_text_offset,
-              [](const std::unique_ptr<BasicBlock> &candidate, uint64_t entry) {
-                return candidate->end_offset() <= entry;
-              });
-          for (; block != dense_host_blocks.end() && (*block)->start_offset() < kernel_end;
+          auto block =
+              std::lower_bound(dense_host_blocks.begin(), dense_host_blocks.end(), owner_begin,
+                               [](const std::unique_ptr<BasicBlock> &candidate, uint64_t entry) {
+                                 return candidate->end_offset() <= entry;
+                               });
+          for (; block != dense_host_blocks.end() && (*block)->start_offset() < owner_end;
                ++block) {
-            if ((*block)->start_offset() < kernel->entry_text_offset ||
-                (*block)->end_offset() > kernel_end || (*block)->size() < host_bytes)
+            if ((*block)->start_offset() < owner_begin || (*block)->end_offset() > owner_end ||
+                (*block)->size() < host_bytes)
               continue;
             for (const Instruction &instruction : (*block)->instructions()) {
               const uint64_t host_offset = instruction.src_loc();

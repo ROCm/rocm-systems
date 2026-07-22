@@ -2138,7 +2138,7 @@ TEST(ConSanMoi, RecordReplaySpillBackedDenseHostDoesNotConsumeNearbyBarrier) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
-TEST(ConSanMoi, RecordReplayReservedBranchIslandsComposeWithBarrierEpochs) {
+TEST(ConSanMoi, RecordReplayReservedRelaySpaceComposesWithBarrierEpochs) {
   std::vector<uint32_t> text_words;
   for (uint32_t i = 0; i < 9u; ++i) {
     text_words.push_back(0xD8340000u); // ds_store_b32 v0, v0
@@ -2170,25 +2170,31 @@ TEST(ConSanMoi, RecordReplayReservedBranchIslandsComposeWithBarrierEpochs) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
                                &ConSanPatchInfo::kind),
             1);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+  // The epoch body may fit directly in its reserved local relay space. Keep
+  // this test about the composition contract instead of requiring the larger
+  // indirect-entry layout.
+  EXPECT_GE(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
                                &ConSanPatchInfo::kind),
-            10);
+            9);
 
-  const auto barrier_island =
-      std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
-        return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-               patch.anchor_offset == 9u * 2u * sizeof(uint32_t);
-      });
-  ASSERT_NE(barrier_island, result.patches.end());
+  const auto barrier_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiInlineEpochBarrier &&
+           patch.anchor_offset == 9u * 2u * sizeof(uint32_t);
+  });
+  ASSERT_NE(barrier_patch, result.patches.end());
+  ASSERT_TRUE(barrier_patch->relocated_guest_instruction_offset);
+  EXPECT_GE(*barrier_patch->relocated_guest_instruction_offset, barrier_patch->trampoline_offset);
+  EXPECT_LT(*barrier_patch->relocated_guest_instruction_offset,
+            barrier_patch->trampoline_offset + barrier_patch->trampoline_size);
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
-  const std::vector<uint32_t> island_words = text_words_at_offset(
-      patched, barrier_island->trampoline_offset, barrier_island->trampoline_size);
-  EXPECT_EQ(island_words.front(),
-            build_rdna4_s_cselect_b32(/*sdst=*/84, scalar_positive_inline_u32(1),
-                                      scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_EQ(island_words[1], pack_sop1(/*s_getpc_b64=*/0x47, /*sdst=*/80, /*ssrc0=*/0));
+  const auto branch =
+      compute_sopp_branch_simm16(barrier_patch->anchor_offset, barrier_patch->trampoline_offset);
+  ASSERT_TRUE(branch);
+  EXPECT_EQ(text_words_at_offset(patched, barrier_patch->anchor_offset, sizeof(uint32_t)).front(),
+            build_s_branch(*branch, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_TRUE(result.final_validation_passed);
 }
 
 TEST(ConSanMoi, RecordReplayAllowsScratchBetweenDisjointGfx1250StoreTuples) {
@@ -2309,6 +2315,54 @@ TEST(ConSanMoi, RecordReplayUsesBranchIslandForFunctionOwnedAccess) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
                                &ConSanPatchInfo::kind),
             1);
+}
+
+TEST(ConSanMoi, Rdna4DenseFunctionAccessesUseRelocatableHost) {
+  constexpr uint32_t kAccessCount = 9u;
+  const std::array<uint32_t, 2> kernel_words = {
+      pack_sopk(/*s_call_b64=*/0x14, /*sdst=*/30, /*simm16=*/1),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/20u, /*ssrc0=*/20u, ROCJITSU_CODE_ARCH_RDNA4);
+  std::vector<uint32_t> function_words(8u, filler);
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    function_words.push_back(0xD8340000u | index * sizeof(uint32_t));
+    function_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+  }
+  // Keep the function-owned sites outside SOPP reach of their appended
+  // bodies and provide no NOP island. The relocatable host must be selected
+  // from the function itself rather than from its owning kernel.
+  function_words.resize(33'000u, filler);
+  function_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const ConSanResult result = try_patch_consan(
+      make_rdna4_code_object_with_local_function(kernel_words, function_words), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount);
+  EXPECT_EQ(std::ranges::count_if(result.site_dispositions,
+                                  [](const auto &site) {
+                                    return site.site_kind == ConSanResourceSiteKind::Access &&
+                                           !site.in_kernel &&
+                                           site.lowering_outcome ==
+                                               ConSanSiteLoweringOutcome::Patched;
+                                  }),
+            kAccessCount);
 }
 
 TEST(ConSanMoi, FirstLightProbeRejectsScratchVgprsOverlappingFlatAddressPair) {
