@@ -1810,7 +1810,7 @@ TEST(ConSanMoi, RecordReplayFindsDeadSgprsBelowAHighTransientReference) {
   EXPECT_EQ(result.resolved_moi_exec_save_sgpr, 0u);
   EXPECT_TRUE(result.moi_exec_save_sgprs_automatic);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("liveness-dead EXEC-save SGPRs s0:s7") != std::string::npos;
+    return warning.find("liveness-dead EXEC-save SGPRs s0:s4") != std::string::npos;
   }));
 }
 
@@ -1839,7 +1839,7 @@ TEST(ConSanMoi, RecordReplayDeadSgprWindowRejectsAnyLiveLane) {
   EXPECT_EQ(result.resolved_moi_exec_save_sgpr, 4u);
   EXPECT_TRUE(result.moi_exec_save_sgprs_automatic);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("liveness-dead EXEC-save SGPRs s4:s11") != std::string::npos;
+    return warning.find("liveness-dead EXEC-save SGPRs s4:s8") != std::string::npos;
   }));
 }
 
@@ -1856,7 +1856,7 @@ TEST(ConSanMoi, RecordReplayAutomaticExecSaveUsesDistinctOwnerLocalWindows) {
     return words;
   };
   // The first owner leaves only s0:s7 dead at its access. The second leaves
-  // only s98:s105 dead. Their union has no code-object-wide eight-SGPR
+  // only s98:s105 dead. Their union has no code-object-wide five-SGPR
   // window, but each independent owner has a safe transient window.
   const std::vector<uint32_t> first_words =
       make_owner(/*first_live=*/8u, /*last_live=*/105u, /*dead_destination=*/0u);
@@ -3197,7 +3197,9 @@ TEST(ConSanMoi, Rdna4FamilyDenseAccessesShareOneWordCallRelay) {
 }
 
 TEST(ConSanMoi, Rdna4DenseRecordReplayBarriersUseRelocatedRouter) {
-  constexpr uint32_t kAccessCount = 9u;
+  // Seventeen split barriers contribute 34 supported member instructions,
+  // exceeding the compact operating point and reserving the dense router.
+  constexpr uint32_t kAccessCount = 17u;
   constexpr size_t kLargeTextWords = 33'000u;
   const uint32_t filler = build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_RDNA4);
   std::vector<uint32_t> text_words(kLargeTextWords, filler);

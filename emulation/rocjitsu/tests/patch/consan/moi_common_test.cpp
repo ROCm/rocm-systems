@@ -1408,17 +1408,17 @@ TEST(ConSanMoi, OwnerEpochPrologueUsesIndirectReturnBeyondSoppRange) {
   EXPECT_EQ(actual_words[0], *owner_init);
   EXPECT_EQ(actual_words[1],
             build_v_mov_b32_e32(12, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_EQ(actual_words[2], pack_sop1(/*s_getpc_b64=*/0x47, 30, 0));
+  EXPECT_EQ(actual_words[2], pack_sop1(/*s_getpc_b64=*/0x47, kRdna4VccLo, 0));
 
   std::vector<uint32_t> expected_builder;
   const uint64_t pc_after_getpc = patch.trampoline_offset + 3u * sizeof(uint32_t);
-  ASSERT_TRUE(append_pc_delta_builder(expected_builder, ROCJITSU_CODE_ARCH_RDNA4, 30,
+  ASSERT_TRUE(append_pc_delta_builder(expected_builder, ROCJITSU_CODE_ARCH_RDNA4, kRdna4VccLo,
                                       -static_cast<int64_t>(pc_after_getpc)));
   ASSERT_EQ(expected_builder.size(), 3u);
   EXPECT_TRUE(
       std::equal(expected_builder.begin(), expected_builder.end(), actual_words.begin() + 3));
   EXPECT_EQ(actual_words[6], *build_s_wait_alu_sa_sdst0(ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_EQ(actual_words[7], pack_sop1(/*s_setpc_b64=*/0x48, 0, 30));
+  EXPECT_EQ(actual_words[7], pack_sop1(/*s_setpc_b64=*/0x48, 0, kRdna4VccLo));
 }
 
 TEST(ConSanMoi, OwnerEpochPrologueUsesWave32DescriptorForOwnerShift) {

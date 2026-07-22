@@ -79,15 +79,19 @@ append_dispatch_id_capture_and_restore(std::vector<uint32_t> &words,
   }
 
   // Large all-site transformations can place the entry prologue beyond a
-  // SOPP branch's signed 16-bit dword range. The descriptor-backed ConSan
-  // scalar state is unobservable by the original kernel at entry, so its first
-  // pair is safe temporary state for an absolute indirect return.
-  if (!pc_sgpr || *pc_sgpr > 126u || *pc_sgpr % 2u != 0u) {
+  // SOPP branch's signed 16-bit dword range. A probe-local EXEC-save window is
+  // dead at the selected probe sites, but that does not make it safe at kernel
+  // entry: it may still hold guest ABI input. RDNA-family VCC and SCC are not
+  // kernel-entry inputs, so use VCC for the absolute return and let the guest
+  // establish both special registers from its normal entry state afterward.
+  const std::optional<uint16_t> long_return_pc_sgpr =
+      is_rdna4_family_arch(arch) ? std::optional<uint16_t>(kRdna4VccLo) : pc_sgpr;
+  if (!long_return_pc_sgpr || *long_return_pc_sgpr > 126u || *long_return_pc_sgpr % 2u != 0u) {
     errors.emplace_back("ConSan MOI " + std::string(prologue_name) +
                         " branch target is out of range and has no valid long-return SGPR pair");
     return false;
   }
-  words.push_back(build_s_getpc_b64(*pc_sgpr, arch));
+  words.push_back(build_s_getpc_b64(*long_return_pc_sgpr, arch));
   const uint64_t pc_after_getpc = branch_pc + sizeof(uint32_t);
   if (original_entry_text_offset > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
       pc_after_getpc > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
@@ -97,7 +101,7 @@ append_dispatch_id_capture_and_restore(std::vector<uint32_t> &words,
   }
   const int64_t delta =
       static_cast<int64_t>(original_entry_text_offset) - static_cast<int64_t>(pc_after_getpc);
-  if (!append_pc_delta_builder(words, arch, *pc_sgpr, delta)) {
+  if (!append_pc_delta_builder(words, arch, *long_return_pc_sgpr, delta)) {
     errors.emplace_back("ConSan MOI " + std::string(prologue_name) +
                         " could not encode its long return");
     return false;
@@ -109,7 +113,7 @@ append_dispatch_id_capture_and_restore(std::vector<uint32_t> &words,
     return false;
   }
   words.push_back(*wait_pc);
-  words.push_back(build_s_setpc_b64(*pc_sgpr, arch));
+  words.push_back(build_s_setpc_b64(*long_return_pc_sgpr, arch));
   return true;
 }
 

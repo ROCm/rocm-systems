@@ -334,6 +334,11 @@ struct ConSanOptions {
   /// Internal Record/Replay fallback: EXEC/VCC destinations are preserved in
   /// private memory while dense routing uses separately proven-dead scalars.
   bool automatic_moi_record_replay_sgpr_spill = false;
+  /// Internal operating-point marker for RDNA-family Record/Replay objects
+  /// whose barrier inventory can require the relocated dense router. Such
+  /// objects reserve a dispatch key and call-return pair in addition to the
+  /// ordinary five-register EXEC/VCC/SCC window.
+  bool moi_record_replay_dense_barrier_router = false;
   /// Internal proof marker set only when the automatic EXEC-save window lies
   /// above every guest-referenced SGPR and can retain cross-site wave state.
   bool moi_exec_save_sgprs_persistent = false;

@@ -149,6 +149,21 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
         return site.disposition == ConSanSiteDisposition::Supported &&
                site.site_kind == ConSanResourceSiteKind::Barrier;
       });
+  const size_t supported_barrier_members = std::ranges::count_if(
+      sync_admission.site_dispositions, [](const ConSanSiteDispositionRecord &site) {
+        return site.disposition == ConSanSiteDisposition::Supported &&
+               site.site_kind == ConSanResourceSiteKind::Barrier;
+      });
+  // Record/Replay's compact persistent-epoch operating point handles bounded
+  // barrier inventories without the relocated dense router. Larger RDNA
+  // inventories can strand appended barrier bodies beyond SOPP branch reach,
+  // so reserve the router's key and call-return state up front. Do not impose
+  // that wider liveness window on ordinary kernels: on full-pressure compiler
+  // output, otherwise-unused adjacent SGPRs may still carry entry ABI state.
+  constexpr size_t kCompactRecordReplayBarrierMemberLimit = 32u;
+  effective_options.moi_record_replay_dense_barrier_router =
+      is_rdna4_family_arch(arch) && effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
+      supported_barrier_members > kCompactRecordReplayBarrierMemberLimit;
   const auto has_operational_atomic = [&](const auto &container, bool in_kernel) {
     return std::ranges::any_of(container.atomic_sites, [&](const ConSanAtomicSite &site) {
       return atomic_event_kind_for_site(result, container.name, in_kernel, site).has_value();

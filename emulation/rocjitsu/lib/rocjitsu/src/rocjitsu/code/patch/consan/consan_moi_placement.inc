@@ -1326,10 +1326,13 @@ void apply_test_container_filter(std::vector<Candidate> &candidates, const ConSa
   }
   if (options.automatic_moi_record_replay_sgpr_spill)
     return 4u;
-  // One EXEC-save pair, one VCC-save pair, and one SCC snapshot. RDNA4-family
-  // record/replay also reserves a dispatch key and an aligned call-return pair
-  // for dense access and barrier anchors.
-  return options.moi_report_buffer_address ? (is_rdna4_family_arch(arch) ? 8u : 5u) : 0u;
+  // One EXEC-save pair, one VCC-save pair, and one SCC snapshot. Barrier-dense
+  // RDNA-family objects additionally reserve a dispatch key and an aligned
+  // call-return pair for the relocated router.
+  return options.moi_report_buffer_address
+             ? (is_rdna4_family_arch(arch) && options.moi_record_replay_dense_barrier_router ? 8u
+                                                                                             : 5u)
+             : 0u;
 }
 
 [[nodiscard]] std::optional<uint16_t>
