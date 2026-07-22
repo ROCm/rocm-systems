@@ -755,6 +755,8 @@ ncclResult_t IbCastGetPhysProperties(int dev, ncclNetProperties_t* props);
 ncclResult_t IbCastListen(void* ctx, int dev, void* opaqueHandle, void** listenComm);
 ncclResult_t IbCastConnect(void* ctx, int dev, void* opaqueHandle, void** sendComm,
                            ncclNetDeviceHandle_t** /*sendDevComm*/);
+ncclResult_t IbCastConnectImpl(void* ctx, int dev, void* opaqueHandle, void** sendComm,
+                               ncclNetDeviceHandle_t** /*sendDevComm*/, int envTrafficClass);
 ncclResult_t IbCastAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle_t** /*recvDevComm*/);
 ncclResult_t IbCastRegMr(void* comm, void* data, size_t size, int type, void** mhandle);
 ncclResult_t IbCastRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle);

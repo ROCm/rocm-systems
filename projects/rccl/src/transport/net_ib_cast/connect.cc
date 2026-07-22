@@ -779,8 +779,8 @@ void IbCastSetTrafficClass(void* ctx, int trafficClass) {
   if (config) config->trafficClass = trafficClass;
 }
 
-ncclResult_t IbCastConnect(void* ctx, int dev, void* opaqueHandle, void** sendComm,
-                           ncclNetDeviceHandle_t** sendDevComm) {
+ncclResult_t IbCastConnectImpl(void* ctx, int dev, void* opaqueHandle, void** sendComm,
+                               ncclNetDeviceHandle_t** sendDevComm, int envTrafficClass) {
   ncclResult_t ret = ncclSuccess;
   struct ncclIbHandle* handle = (struct ncclIbHandle*)opaqueHandle;
   struct ncclIbCommStage* stage = &handle->stage;
@@ -994,7 +994,7 @@ ib_recv_dev_list:
   meta.sl = (ncclParamIbCastSl() != -1)                    ? ncclParamIbCastSl() :
             (trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? trafficClass :
                                                              NCCL_IB_SL_DEFAULT;
-  meta.tc = (ncclParamIbCastTc() != -1)                    ? ncclParamIbCastTc() :
+  meta.tc = (envTrafficClass != -1)                        ? envTrafficClass :
             (trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? trafficClass :
                                                              NCCL_IB_TC_DEFAULT;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
@@ -1087,6 +1087,11 @@ exit:
 fail:
   free(comm);
   goto exit;
+}
+
+ncclResult_t IbCastConnect(void* ctx, int dev, void* opaqueHandle, void** sendComm,
+                           ncclNetDeviceHandle_t** sendDevComm) {
+  return IbCastConnectImpl(ctx, dev, opaqueHandle, sendComm, sendDevComm, ncclParamIbCastTc());
 }
 
 NCCL_PARAM(IbCastWarnRailLocal, "IB_WARN_RAIL_LOCAL", 0);
