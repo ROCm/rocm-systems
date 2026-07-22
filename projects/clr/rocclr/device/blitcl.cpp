@@ -189,8 +189,23 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
         __global const uchar *tail_size,   // trailing bytes after body
         ulong n_batches,
         ulong total_ops,                   // == body_prefix[n_batches]
-        ulong copy_stride) {
+        ulong copy_stride,
+        __local ulong *bp_lds,             // scratch for staged body_prefix (dynamic size)
+        uint use_lds) {                    // 1 => body_prefix staged in bp_lds, else read global
       ulong gid = get_global_id(0);
+
+      // Stage the read-only body_prefix array into LDS once per workgroup so the
+      // per-element binary search probes hit LDS instead of global memory. The
+      // host sets use_lds only when the whole array fits the LDS budget, so the
+      // branch is workgroup-uniform and the barrier is reached by all workitems
+      // (no early return precedes it). When use_lds is 0 the reads below fall
+      // back to global memory, exactly as before.
+      if (use_lds) {
+        for (ulong i = get_local_id(0); i <= n_batches; i += get_local_size(0)) {
+          bp_lds[i] = body_prefix[i];
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+      }
 
       // Body loop: strided walk over the global body-op index space. Each global
       // op index g maps to (copy c, local element) via a binary search over the
@@ -216,15 +231,26 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
           ulong hi = n_batches;  // upper_bound over body_prefix[0..n_batches]
           while (lo < hi) {
             ulong mid = lo + ((hi - lo) >> 1);
-            if (body_prefix[mid] <= g) {
+            ulong bp_mid;
+            if (use_lds) {
+              bp_mid = bp_lds[mid];
+            } else {
+              bp_mid = body_prefix[mid];
+            }
+            if (bp_mid <= g) {
               lo = mid + 1;
             } else {
               hi = mid;
             }
           }
           c = lo - 1;  // upper_bound - 1
-          lo_bound = body_prefix[c];
-          hi_bound = body_prefix[c + 1];
+          if (use_lds) {
+            lo_bound = bp_lds[c];
+            hi_bound = bp_lds[c + 1];
+          } else {
+            lo_bound = body_prefix[c];
+            hi_bound = body_prefix[c + 1];
+          }
           src_c = srcs[c];
           dst_c = dsts[c];
           s = op_size[c];
@@ -290,7 +316,16 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
           }
 
           // Tail bytes: [tail_start, tail_start + tail), after head + body.
-          ulong body_count = body_prefix[ci + 1] - body_prefix[ci];
+          ulong bp_ci;
+          ulong bp_ci1;
+          if (use_lds) {
+            bp_ci = bp_lds[ci];
+            bp_ci1 = bp_lds[ci + 1];
+          } else {
+            bp_ci = body_prefix[ci];
+            bp_ci1 = body_prefix[ci + 1];
+          }
+          ulong body_count = bp_ci1 - bp_ci;
           ulong tail_start = (ulong)head + body_count * (ulong)op_size[ci];
           for (ulong i = 0; i < tail; ++i) {
             uchar tmp = src_base[tail_start + i];

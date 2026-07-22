@@ -3150,6 +3150,11 @@ bool KernelBlitManager::ShaderSwapBufferBatch(
 
   constexpr uint32_t kMaxOpSize = 2 * sizeof(uint64_t);  // ulong2 == 16 bytes
   constexpr uint32_t kLocalWorkSize = 512;
+  // LDS budget for staging body_prefix. Kept well below the per-workgroup LDS
+  // capacity so several workgroups stay resident; when the array fits, each
+  // workgroup copies body_prefix into LDS and the binary-search probes read LDS
+  // instead of global memory. 16 KiB covers n_batches up to 2047.
+  constexpr uint32_t kSwapPrefixLdsBudgetBytes = 16u * 1024u;
   const size_t n_batches = copy_operations.size();
 
   // floor_pow2(v): largest power of two <= v (v > 0).
@@ -3266,6 +3271,15 @@ bool KernelBlitManager::ShaderSwapBufferBatch(
   size_t global_work_size = std::max<size_t>(copy_stride, kLocalWorkSize);
   size_t local_work_size = kLocalWorkSize;
 
+  // Stage body_prefix ((n_batches + 1) uint64s) in LDS when it fits the budget.
+  // Otherwise pass use_lds = 0 / zero LDS and the kernel reads body_prefix from
+  // global, preserving correctness for arbitrarily large n_batches.
+  const uint64_t prefix_bytes = (n_batches + 1) * sizeof(uint64_t);
+  const uint64_t lds_budget =
+      std::min<uint64_t>(kSwapPrefixLdsBudgetBytes, dev().info().localMemSize_);
+  const uint32_t use_lds = (prefix_bytes <= lds_budget) ? 1u : 0u;
+  const size_t lds_bytes = use_lds ? static_cast<size_t>(prefix_bytes) : 0;
+
   amd::Kernel* const kernel = kernels_[BlitSwapBufferBatch];
   constexpr bool kDirectVa = true;
   const uint64_t n_batches_arg = n_batches;
@@ -3279,6 +3293,8 @@ bool KernelBlitManager::ShaderSwapBufferBatch(
   setArgument(kernel, 6, sizeof(n_batches_arg), &n_batches_arg);
   setArgument(kernel, 7, sizeof(total_ops), &total_ops);
   setArgument(kernel, 8, sizeof(copy_stride_arg), &copy_stride_arg);
+  setArgument(kernel, 9, lds_bytes, nullptr);  // __local bp_lds: dynamic LDS size in bytes
+  setArgument(kernel, 10, sizeof(use_lds), &use_lds);
 
   amd::NDRangeContainer nd_range(1, nullptr, &global_work_size, &local_work_size);
 
