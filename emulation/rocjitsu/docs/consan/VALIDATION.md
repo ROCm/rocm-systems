@@ -423,7 +423,9 @@ creates a process group, holds the global destructive-GPU lock, enforces the
 deadline, captures original/patched code objects, runs a device-discovery
 command plus a target-dispatch smoke before and after, and quarantines the
 artifact root if health fails.  The defaults are `rocminfo` and the portable
-workload smoke.  Environments where either default cannot terminate may pass
+workload smoke, with a 30-second probe deadline.  Slow software devices may
+set a larger retained `--health-timeout`.  Environments where either default
+cannot terminate may pass
 the paired `--health-command-json` and `--smoke-command-json` overrides.  Both
 exact commands are retained in every row manifest and replayed verbatim; the
 smoke must still execute target code and check an independent result.  A

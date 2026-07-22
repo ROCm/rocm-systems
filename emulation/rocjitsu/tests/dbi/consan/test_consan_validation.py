@@ -1111,6 +1111,8 @@ class ConSanValidationTest(unittest.TestCase):
                 "barrier-drop",
                 "--artifact-root",
                 "/tmp/artifacts",
+                "--health-timeout",
+                "75",
                 "--health-command-json",
                 '["/bin/true"]',
                 "--smoke-command-json",
@@ -1119,6 +1121,7 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(args.health_command_json, ["/bin/true"])
         self.assertEqual(args.smoke_command_json, ["/tmp/smoke", "--short"])
+        self.assertEqual(args.health_timeout, 75.0)
 
     def test_fault_parser_rejects_unpaired_health_command_override(self) -> None:
         with self.assertRaises(SystemExit):

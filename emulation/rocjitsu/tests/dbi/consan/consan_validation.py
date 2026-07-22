@@ -3007,6 +3007,8 @@ def _fault(args: argparse.Namespace) -> int:
                 fault["family"],
                 "--timeout",
                 str(args.timeout),
+                "--health-timeout",
+                str(args.health_timeout),
                 "--destructive",
                 "--allow-destructive",
                 "--serialize-gpu",
@@ -3224,6 +3226,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     fault.add_argument("--fault", required=True, help="fault id in the JSON spec")
     fault.add_argument("--artifact-root", type=Path, required=True)
     fault.add_argument("--timeout", type=int, default=TIMEOUT_SECONDS)
+    fault.add_argument(
+        "--health-timeout",
+        type=float,
+        default=30.0,
+        help="deadline in seconds for each retained discovery and smoke probe",
+    )
     fault.add_argument("--allow-destructive", action="store_true")
     fault.add_argument(
         "--health-command-json",
@@ -3238,6 +3246,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if getattr(args, "timeout", 1) <= 0:
         parser.error("--timeout must be positive")
+    if getattr(args, "health_timeout", 1) <= 0:
+        parser.error("--health-timeout must be positive")
     if (getattr(args, "health_command_json", None) is None) != (
         getattr(args, "smoke_command_json", None) is None
     ):
