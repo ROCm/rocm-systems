@@ -19,6 +19,7 @@ on:
         type: string
         default: ''
       test_scope:
+        description: 'Test scope: smoke (22 curated tests) or all'
         type: string
         default: 'smoke'
       notify_email:
@@ -31,6 +32,8 @@ permissions:
 jobs:
   therock-build-linux:
     name: Build Linux Packages
+    # Skipped when artifact_run_id is provided (reuse mode). Downstream jobs
+    # use `!cancelled()` in their `if:` so they still run when this is skipped.
     if: ${{ inputs.artifact_run_id == '' }}
     runs-on: azure-linux-scale-rocm
     permissions:
@@ -54,7 +57,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: d8e27dff1d165462ffa5bd50057a075b943c97c5 # 2026-07-13
+          ref: 22004a6bc8a28393f8b772b7f6e2a3040f11cd8d # 2026-07-20
 
       - name: Install python deps
         run: |
@@ -176,4 +179,16 @@ jobs:
       test_runs_on: linux-gfx942-8gpu-ossci-rocm
       artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
       test_scope: ${{ inputs.test_scope }}
+      notify_email: ${{ inputs.notify_email }}
+
+  therock-test-jax-collective:
+    name: "Test JAX collective (scheduled)"
+    if: ${{ !cancelled() && inputs.amdgpu_families != 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
+    needs: [therock-build-linux]
+    uses: ./.github/workflows/therock-rccl-test-jax-collective.yml
+    with:
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      artifact_group: ${{ inputs.artifact_group }}
+      test_runs_on: linux-gfx942-8gpu-ossci-rocm
+      artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
       notify_email: ${{ inputs.notify_email }}

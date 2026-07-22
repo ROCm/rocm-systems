@@ -1278,11 +1278,11 @@ SIMD_VOP3P_DOT_INT: dict[str, str] = {
 # v_dot2_f32_{f16,bf16} — two half-precision products + an f32 accumulator into
 # one f32 lane. op_sel half-select (gated default), neg/neg_hi sign flips,
 # optional clamp to [0,1]. Functorless / fixed-op. The set spans BOTH 16-bit
-# float formats: v_dot2_f32_bf16's generated scalar body is byte-identical to the
-# f16 form (it widens each half via util::f16_to_f32 with the same
-# op_sel/neg/clamp handling, verified by diff), so both route through the same
-# glue. Named _F16_OR_BF16 to make that span explicit (the emitted macro keeps
-# the shorter ROCJITSU_TRY_SIMD_VOP3P_DOT_F16 name — the widening path is shared).
+# float formats, which share the entire dot2 structure but differ in how each
+# half is widened to f32 (f16 has a 5-bit exponent with denormal renormalization;
+# bf16 has an 8-bit exponent and is a pure left-shift). Both route through the
+# same ROCJITSU_TRY_SIMD_VOP3P_DOT_F16 glue, which takes the format as an
+# argument so it selects util::{f16,bf16}_to_f32_simd accordingly.
 SIMD_VOP3P_DOT_F16_OR_BF16: set[str] = {
     'v_dot2_f32_f16_vop3p',
     'v_dot2_f32_bf16_vop3p',
@@ -2731,7 +2731,8 @@ def simd_probe_line(template_name: str, *, true16_vop3: bool = False) -> str | N
     if specdot is not None:
         return f'  ROCJITSU_TRY_SIMD_VOP3P_DOT_INT({specdot});'
     if template_name in SIMD_VOP3P_DOT_F16_OR_BF16:
-        return '  ROCJITSU_TRY_SIMD_VOP3P_DOT_F16();'
+        fmt = 'BF16' if template_name == 'v_dot2_f32_bf16_vop3p' else 'F16'
+        return f'  ROCJITSU_TRY_SIMD_VOP3P_DOT_F16({fmt});'
     # VOP3P mixed-sign integer dots (dot4 iu8, dot8 iu4).
     specdotm = SIMD_VOP3P_DOT_INT_MIXED.get(template_name)
     if specdotm is not None:

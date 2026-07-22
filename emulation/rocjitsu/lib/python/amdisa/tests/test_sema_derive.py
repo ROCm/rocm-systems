@@ -1442,11 +1442,7 @@ class TestDeriveVectorCmp:
             in cpp
         )
         assert 'vcc &= ~(1ULL << lane)' not in cpp
-        assert (
-            'amdgpu::RegisterAccess(wf).write_scalar(vdst, static_cast<uint32_t>(vcc));'
-            in cpp
-        )
-        assert 'amdgpu::RegisterAccess(wf).write_scalar64(vdst, vcc);' in cpp
+        assert 'amdgpu::write_wave_mask_scalar(vdst, wf, vcc);' in cpp
 
 
 class TestDeriveVectorCmpx:

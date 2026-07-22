@@ -73,6 +73,7 @@ Settings::Settings() {
   barrier_value_packet_ = false;
   ext_dispatch_packet_ = false;
   kernel_arg_impl_ = KernelArgImpl::HostKernelArgs;
+  aql_device_ring_buf_ = false;
   gwsInitSupported_ = true;
   limit_blit_wg_ = 16;
 
@@ -87,7 +88,7 @@ Settings::Settings() {
 
 // ================================================================================================
 bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, bool coop_groups,
-                      bool isXgmi, bool hasValidHDPFlush) {
+                      bool isXgmi) {
   uint32_t gfxipMajor = isa.versionMajor();
   uint32_t gfxipMinor = isa.versionMinor();
   uint32_t gfxStepping = isa.versionStepping();
@@ -150,7 +151,7 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     sdma_swap_supported_ = true;
   }
 
-  setKernelArgImpl(isa, isXgmi, hasValidHDPFlush);
+  setKernelArgImpl(isa, isXgmi);
 
   if (gfxipMajor >= 10) {
      enableWave32Mode_ = true;
@@ -249,7 +250,7 @@ void Settings::override() {
 }
 
 // ================================================================================================
-void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi, bool hasValidHDPFlush) {
+void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi) {
   const uint32_t gfxipMajor = isa.versionMajor();
   const uint32_t gfxipMinor = isa.versionMinor();
   const uint32_t gfxStepping = isa.versionStepping();
@@ -257,40 +258,33 @@ void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi, bool hasValidH
   const bool isGfx94x = gfxipMajor == 9 && gfxipMinor >= 4 &&
                         (gfxStepping == 0 || gfxStepping == 1 || gfxStepping == 2);
   const bool isGfx90a = (gfxipMajor == 9 && gfxipMinor == 0 && gfxStepping == 10);
-  const bool isPreGfx908 =
-      (gfxipMajor < 9) || ((gfxipMajor == 9) && (gfxipMinor == 0) && (gfxStepping < 8));
-  const bool isGfx101x = (gfxipMajor == 10) && ((gfxipMinor == 0) || (gfxipMinor == 1));
-  const bool isGfx125x =
-      (gfxipMajor == 12) && ((gfxipMinor >= 5));
+  const bool isGfx125x = (gfxipMajor == 12) && ((gfxipMinor >= 5));
 
   auto kernelArgImpl = KernelArgImpl::HostKernelArgs;
-
-  hasValidHDPFlush &= DEBUG_CLR_KERNARG_HDP_FLUSH_WA;
 
   if (isXgmi) {
     // The XGMI-connected path does not require the manual memory ordering
     // workarounds that the PCIe connected path requires
     kernelArgImpl = KernelArgImpl::DeviceKernelArgs;
-  } else if (hasValidHDPFlush) {
-    // If the HDP flush register is valid implement the HDP flush to MMIO
-    // workaround.
-    if (!(isPreGfx908 || isGfx101x)) {
-      kernelArgImpl = KernelArgImpl::DeviceKernelArgsHDP;
-    }
   } else if (isGfx94x || isGfx90a || isGfx125x) {
     // Implement the kernel argument readback workaround
     // (write all args -> sfence -> write last byte -> mfence -> read last byte)
     kernelArgImpl = KernelArgImpl::DeviceKernelArgsReadback;
   }
 
-  // Enable device kernel args for gfx94x for now
+  // Enable device kernel args and device-memory AQL queue ring buffers by
+  // default on gfx94x/gfx125x.
   if (isGfx94x || isGfx125x) {
     kernel_arg_impl_ = kernelArgImpl;
     kernel_arg_opt_ = true;
+    aql_device_ring_buf_ = true;
   }
 
   if (!flagIsDefault(HIP_FORCE_DEV_KERNARG)) {
     kernel_arg_impl_ = kernelArgImpl & (HIP_FORCE_DEV_KERNARG ? 0xF : 0x0);
+  }
+  if (!flagIsDefault(DEBUG_CLR_AQL_DEV_QUEUE)) {
+    aql_device_ring_buf_ = (DEBUG_CLR_AQL_DEV_QUEUE > 0);
   }
 }
 }  // namespace amd::roc
