@@ -28,8 +28,9 @@ import shutil
 import time
 from collections import defaultdict
 
-from .importer import RocpdImportData, get_schema_version
+from .importer import RocpdImportData
 from . import output_config
+from . import libpyrocpd
 
 
 def get_perfetto_category_name(category):
@@ -107,7 +108,7 @@ def write_otf2(importData, config):
         ) from e
 
     timer_resolution = 1_000_000_000
-    _schema_version = get_schema_version(importData)
+    _schema_version = importData.schema_version
     trace_dir = getattr(config, "output_path", "./otf_traces")
     trace_file = f"{getattr(config, 'output_file', 'traces')}_results"
     if not os.path.exists(trace_dir):
@@ -185,7 +186,7 @@ def write_otf2(importData, config):
                     agent_index_value = getattr(config, "agent_index_value")
 
                     hip_graph_fields = []
-                    if _schema_version >= (3, 0, 2):
+                    if _schema_version >= libpyrocpd.schema_version(3, 0, 2):
                         hip_graph_fields = ["graph_exec_id", "graph_node_id"]
 
                     cursor = conn.cursor()
@@ -298,7 +299,7 @@ def write_otf2(importData, config):
                                         (start, end, name, *_hip_graph_values)
                                     )
 
-                            if _schema_version >= (3, 0, 2):
+                            if _schema_version >= libpyrocpd.schema_version(3, 0, 2):
                                 cursor = conn.cursor()
                                 cursor.execute(
                                     """SELECT tid, start, end, graph_exec_id,
@@ -441,7 +442,7 @@ def write_otf2(importData, config):
                                         memory_copy_writer.leave(timestamp, region)
 
                             # Write HIP Graph Launch Events
-                            if _schema_version >= (3, 0, 2):
+                            if _schema_version >= libpyrocpd.schema_version(3, 0, 2):
                                 for tid, data in graph_launches.items():
                                     graph_launch_location = archive.definitions.location(
                                         name=f"Thread {tid}, HIP Graph Launch",

@@ -26,7 +26,7 @@
 import os
 import re
 
-from .importer import RocpdImportData, get_schema_version
+from .importer import RocpdImportData
 from .query import export_sqlite_query
 from . import output_config
 from . import libpyrocpd
@@ -223,7 +223,7 @@ def get_kernel_csv_query(importData, config) -> str:
 
     # check schema version and add new fields:
     hip_graph_fields = ()
-    if get_schema_version(importData) >= (3, 0, 2):
+    if importData.schema_version >= libpyrocpd.schema_version(3, 0, 2):
         hip_graph_fields = ("graph_exec_id", "graph_node_id")
 
     select_columns = [
@@ -281,7 +281,7 @@ def write_memory_copy_csv(importData, config) -> None:
 
     # check schema version and add new fields:
     hip_graph_fields = []
-    if get_schema_version(importData) >= (3, 0, 2):
+    if importData.schema_version >= libpyrocpd.schema_version(3, 0, 2):
         hip_graph_fields = [
             "graph_exec_id",
             "graph_node_id",
@@ -307,13 +307,6 @@ def write_memory_copy_csv(importData, config) -> None:
 
 
 def write_graph_launch_csv(importData, config) -> None:
-
-    if get_schema_version(importData) < (
-        3,
-        0,
-        2,
-    ):  # graph_launch view was introduced in schema 3.0.2
-        return
 
     agent_id = build_agent_id_string(config.agent_index_value)
 
@@ -506,14 +499,18 @@ def write_csv(importData, config):
 
     write_agent_info_csv(importData, config)
     write_counters_csv(importData, config)
-    write_graph_launch_csv(importData, config)
-    write_spm_counters_csv(importData, config)
     write_kernel_csv(importData, config)
     write_memory_allocation_csv(importData, config)
     write_memory_copy_csv(importData, config)
     write_region_csv(importData, config)
     write_scratch_memory_csv(importData, config)
 
+    # graph launch was not introduced until schema version 3.0.2
+    if importData.schema_version >= libpyrocpd.schema_version(3, 0, 2):
+        write_graph_launch_csv(importData, config)
+
+    if importData.schema_version >= libpyrocpd.schema_version(3, 0, 3):
+        write_spm_counters_csv(importData, config)
 
 def execute(input, config=None, **kwargs):
 

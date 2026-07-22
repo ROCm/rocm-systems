@@ -34,7 +34,7 @@ import sqlite3
 from .schema import RocpdSchema
 from . import libpyrocpd
 
-__all__ = ["RocpdImportData", "execute_statement", "get_schema_version"]
+__all__ = ["RocpdImportData", "execute_statement"]
 
 
 def internal_init(_input, _output, skip_auto_merge, automerge_limit):
@@ -49,10 +49,10 @@ def internal_init(_input, _output, skip_auto_merge, automerge_limit):
     ), "RocpdImportData error, invalid SQLite3 database provided"
     _connection = libpyrocpd.connect(_output)
     _connection.execute("PRAGMA foreign_keys = ON")
-    _table_info, _schema_versions = _create_temp_views(_connection, _input)
-    _schema_version = _schema_versions[0] if _schema_versions else "0.0.0"
+    _table_info = _create_temp_views(_connection, _input)
+    _schema_version = _fetch_version_info(_connection)
     _create_meta_views(_connection, _schema_version)
-    return (_connection, _input, _table_info, _schema_versions)
+    return (_connection, _input, _table_info, _schema_version)
 
 
 class RocpdImportData(libpyrocpd.RocpdImportData):
@@ -82,17 +82,12 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
                     input, dbname, skip_auto_merge, automerge_limit
                 )
                 self.table_info = _table_info
-                unique_versions = list(set(_schema_versions))
-                if len(unique_versions) > 1:
-                    raise RuntimeError(
-                        f"Multiple schema versions found across input databases: {unique_versions}"
-                    )
             else:
                 raise ValueError(
                     f"input is unsupported type. Expected sqlite3.Connection, string, or (non-empty) list of strings. type={type(input).__name__}"
                 )
             super(RocpdImportData, self).__init__(_connection, _filenames)
-            self.schema_version = unique_versions[0] if unique_versions else "0.0.0"
+            self.schema_version = _schema_versions
 
     def __getattr__(self, name):
         # any attribute or method not found in RocpdImportData will be looked up on self.connection
@@ -145,10 +140,9 @@ def _create_temp_views(connection, input):
     assert isinstance(connection, sqlite3.Connection)
     assert isinstance(input, list)
 
-    # Attach each database and extract the uuid and schema_version from each database
+    # Attach each database and extract the uuid from each database
     dbinfo = []
     uuids = []
-    schema_versions = []
     for i, inp in enumerate(input):
         execute_statement(connection, f"ATTACH DATABASE '{inp}' AS db{i}")
         _uuids = [
@@ -158,16 +152,8 @@ def _create_temp_views(connection, input):
                 f"SELECT value FROM db{i}.rocpd_metadata WHERE tag='uuid'",
             ).fetchall()
         ]
-        _schema_versions = [
-            itr[0]
-            for itr in execute_statement(
-                connection,
-                f"SELECT value FROM db{i}.rocpd_metadata WHERE tag='schema_version'",
-            ).fetchall()
-        ]
         dbinfo += [f"db{i}"]
         uuids += [itr for itr in _uuids if itr not in uuids]
-        schema_versions += [v for v in _schema_versions if v not in schema_versions]
 
     # unique set of universal process identifiers
     uuids = list(set(uuids))
@@ -213,26 +199,26 @@ def _create_temp_views(connection, input):
         stmt = "CREATE TEMPORARY VIEW {} AS {}".format(key, " UNION ALL ".join(itr))
         execute_statement(connection, stmt)
 
-    return all_tables, schema_versions
+    return all_tables
 
 
-def _create_meta_views(connection, schema_version="0.0.0"):
-    schema = RocpdSchema(version=schema_version)
+def _create_meta_views(connection, schema_version):
+    schema = RocpdSchema(version=str(schema_version))
     sql_script = schema.views.replace("CREATE VIEW", "CREATE TEMPORARY VIEW")
     execute_statement(connection, sql_script, is_script=True)
 
 
-def get_schema_version(importData) -> tuple:
-    """Return the schema version of importData as a comparable integer tuple.
+def _fetch_version_info(connection):
+    _versions = [
+        itr[0]
+        for itr in execute_statement(
+            connection,
+            "SELECT value FROM rocpd_metadata WHERE tag='schema_version'",
+        ).fetchall()
+    ]
 
-    Example usage:
-        if get_schema_version(importData) >= (3, 0, 1):
-            # include fields added in schema 3.0.1
+    _versions = list(set(_versions))
+    if len(_versions) != 1:
+        raise ValueError(f"Expected exactly one schema version, found: {_versions}")
 
-    Falls back to (0, 0, 0) if the version string is absent or malformed.
-    """
-    ver_str = getattr(importData, "schema_version", "0.0.0")
-    try:
-        return tuple(int(x) for x in ver_str.split("."))
-    except (ValueError, AttributeError):
-        return (0, 0, 0)
+    return libpyrocpd.schema_version(_versions[0])

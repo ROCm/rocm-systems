@@ -152,9 +152,9 @@ struct RocpdImportData
     {
         if(py::isinstance<RocpdImportData>(_obj))
         {
-            connection         = _obj.cast<RocpdImportData>().connection;
-            databases          = _obj.cast<RocpdImportData>().databases;
-            schema_version_str = _obj.cast<RocpdImportData>().schema_version_str;
+            connection     = _obj.cast<RocpdImportData>().connection;
+            databases      = _obj.cast<RocpdImportData>().databases;
+            schema_version = _obj.cast<RocpdImportData>().schema_version;
         }
         else
         {
@@ -173,9 +173,9 @@ struct RocpdImportData
     size_t size() const { return (connection) ? databases.size() : 0; }
     bool   empty() const { return databases.empty() || !connection; }
 
-    py::object               connection         = {};
-    std::vector<std::string> databases          = {};
-    std::string              schema_version_str = {};
+    py::object               connection     = {};
+    std::vector<std::string> databases      = {};
+    rocpd_version_triplet_t  schema_version = {0, 0, 0};
 };
 
 struct jinja_variables
@@ -359,9 +359,19 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
              [](const rocpd_version_triplet_t& v) {
                  return fmt::format("{}.{}.{}", v.major, v.minor, v.patch);
              })
-        .def("__repr__", [](const rocpd_version_triplet_t& v) {
-            return fmt::format("schema_version({}, {}, {})", v.major, v.minor, v.patch);
-        });
+        .def("__repr__",
+             [](const rocpd_version_triplet_t& v) {
+                 return fmt::format("schema_version({}, {}, {})", v.major, v.minor, v.patch);
+             })
+        // NOLINTBEGIN(misc-redundant-expression)
+        .def(py::self == py::self)
+        .def(py::self != py::self)
+        .def(py::self < py::self)
+        .def(py::self > py::self)
+        .def(py::self <= py::self)
+        .def(py::self >= py::self)
+        // NOLINTEND(misc-redundant-expression)
+        ;
 
     py::class_<rocpd::RocpdImportData>(pyrocpd, "RocpdImportData", "RocPD database(s) instances")
         .def(py::init<>())
@@ -369,7 +379,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         .def(py::init<py::object, std::vector<std::string>>())
         .def_readonly("connection", &rocpd::RocpdImportData::connection)
         .def_readonly("databases", &rocpd::RocpdImportData::databases)
-        .def_readwrite("schema_version", &rocpd::RocpdImportData::schema_version_str);
+        .def_readwrite("schema_version", &rocpd::RocpdImportData::schema_version);
 
     pyrocpd.def("load_schema",
                 [](rocpd_sql_engine_t            engine,
@@ -499,54 +509,8 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             auto* conn             = rocpd::interop::get_connection(std::move(data.connection));
             auto  perfetto_session = rocpd::output::PerfettoSession{output_cfg, conn};
 
-            // We can parse the schema_version string populated from python side when
-            // RocpdImportData was initialized
-            auto get_db_schema_version = [&data](sqlite3* c) -> rocpd_version_triplet_t {
-                auto        version = rocpd_version_triplet_t{0, 0, 0};
-                auto* const q       = const_cast<char*>(
-                    "SELECT value FROM rocpd_metadata WHERE tag='schema_version'");
-                auto ver_str = data.schema_version_str;
-                auto parts   = std::vector<std::string>{};
-                parts.reserve(3);
-
-                // if the schema_version_str is not set, query the database for the schema_version
-                if(ver_str == "0.0.0")
-                {
-                    auto* stmt = static_cast<sqlite3_stmt*>(nullptr);
-                    if(sqlite3_prepare_v2(c, q, -1, &stmt, nullptr) == SQLITE_OK)
-                    {
-                        if(sqlite3_step(stmt) == SQLITE_ROW)
-                        {
-                            if(auto* text = sqlite3_column_text(stmt, 0))
-                            {
-                                ver_str = std::string(reinterpret_cast<const char*>(text));
-                            }
-                        }
-                        sqlite3_finalize(stmt);
-                    }
-                }
-                for(const auto& part : rocprofiler::sdk::parse::tokenize(ver_str, "."))
-                {
-                    parts.emplace_back(part);
-                }
-                try
-                {
-                    if(!parts.empty())
-                        version.major = static_cast<uint32_t>(std::stoul(parts.at(0)));
-                    if(parts.size() > 1)
-                        version.minor = static_cast<uint32_t>(std::stoul(parts.at(1)));
-                    if(parts.size() > 2)
-                        version.patch = static_cast<uint32_t>(std::stoul(parts.at(2)));
-                } catch(...)
-                {
-                    ROCP_WARNING << fmt::format("Error parsing schema version string: {}", ver_str);
-                    return rocpd_version_triplet_t{0, 0, 0};
-                }
-                return version;
-            };
-
             constexpr auto graph_launch_min_version = rocpd_version_triplet_t{3, 0, 2};
-            auto           db_schema_version        = get_db_schema_version(conn);
+            auto           db_schema_version        = data.schema_version;
 
             auto sqlgen_perf = common::simple_timer{
                 fmt::format("Perfetto generation from {} SQL database(s)", data.size())};
