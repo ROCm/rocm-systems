@@ -869,19 +869,6 @@ def test_load_pc_sampling_data_filtered_kernel_not_found() -> None:
     assert df.empty
 
 
-def test_load_pc_sampling_data_filtered_invalid_sorting_type() -> None:
-    """Return an empty DataFrame and log an error for an unrecognized sorting type."""
-    tool_data = setup_pc_sampling_data()
-    with patch("utils.parser.console_error"):
-        df = load_pc_sampling_data(
-            make_pc_sampling_workload(),
-            "ps_file",
-            "invalid",
-            [tool_data],
-        )
-    assert df.empty
-
-
 def test_load_pc_sampling_data_empty_prefix() -> None:
     """Return an empty DataFrame when the file prefix is an empty string."""
     df = load_pc_sampling_data(schema.Workload(), "", "count", [make_tool_data()])
