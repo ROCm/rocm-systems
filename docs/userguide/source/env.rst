@@ -557,11 +557,20 @@ Values accepted
 
 Plugin library name (e.g., ``/path/to/library/libfoo.so``), suffix (e.g., ``foo``), or "none".
 
+.. _NCCL_IGNORE_CPU_AFFINITY:
+
 NCCL_IGNORE_CPU_AFFINITY
 ------------------------
 (since 2.4.6)
 
-The ``NCCL_IGNORE_CPU_AFFINITY`` variable can be used to cause NCCL to ignore the job's supplied CPU affinity and instead use the GPU affinity only.
+The ``NCCL_IGNORE_CPU_AFFINITY`` variable controls whether NCCL honors the CPU affinity inherited from the launcher or parent process.
+By default, NCCL uses the intersection of the inherited CPU affinity and the CPU affinity associated with the GPU.
+If the intersection is empty, NCCL leaves the inherited CPU affinity unchanged.
+Setting this variable to 1 makes NCCL ignore the inherited affinity and use the GPU affinity only.
+NCCL still cannot use CPUs excluded by cpuset, cgroup, or container restrictions.
+
+This setting does not change process placement or memory binding.
+See :ref:`cpu_memory_affinity` for placement guidance.
 
 Values accepted
 ^^^^^^^^^^^^^^^
