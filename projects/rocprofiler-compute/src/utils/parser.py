@@ -512,13 +512,8 @@ def _format_pc_sampling_display_frame(
     # format offset as hex for display.
     if sorting_type == "offset":
         df_sorted = df.sort_values(by=["Kernel_Name", "offset"])
-    elif sorting_type == "count":
-        df_sorted = df.sort_values(by=["count"], ascending=False)
     else:
-        console_error(
-            'Error: pc sampling sorting_type must be either "offset" or "count".'
-        )
-        return pd.DataFrame()
+        df_sorted = df.sort_values(by=["count"], ascending=False)
 
     # num_rows of 0 or None (or a negative passed programmatically) shows all.
     if num_rows and num_rows > 0:
@@ -548,11 +543,6 @@ def _load_pc_sampling_data_from_records(
         frame = _build_pc_sampling_partial_frame(method, tool_data, kernel_name)
         if frame.empty:
             continue
-        if sorting_type not in {"offset", "count"}:
-            console_error(
-                'Error: pc sampling sorting_type must be either "offset" or "count".'
-            )
-            return pd.DataFrame()
         process_frames.append(frame)
 
     if not process_frames:
