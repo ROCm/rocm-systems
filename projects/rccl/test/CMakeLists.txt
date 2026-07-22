@@ -342,6 +342,7 @@ if(BUILD_TESTS)
       BootstrapBidirTests.cpp
       DdaAlltoAllThresholdTests.cpp
       DdaIpcEligibilityTests.cpp
+      DdaNranksRelax_test.cpp
       DdaFabricEligibilityTests.cpp
       EnqueueTests.cpp
       IpcsocketTests.cpp
