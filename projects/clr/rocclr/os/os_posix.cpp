@@ -877,6 +877,10 @@ bool Os::GetFileHandle(const char* fname, FileDesc* fd_ptr, size_t* sz_ptr) {
 
 bool amd::Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr,
                                       size_t* foffset_ptr, size_t* region_bound_ptr) {
+  // Fail closed: callers must never read a stale bound on any early-return path.
+  if (region_bound_ptr != nullptr) {
+    *region_bound_ptr = 0;
+  }
   // Get the list of mapped file list
   bool ret_value = false;
   std::ifstream proc_maps;
