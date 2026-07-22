@@ -565,7 +565,8 @@ void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvena
                  {"ds_load_i8", "ds_load_u8", "ds_load_i16", "ds_load_u16", "ds_load_u8_d16",
                   "ds_load_u8_d16_hi", "ds_load_i8_d16", "ds_load_i8_d16_hi", "ds_load_u16_d16",
                   "ds_load_u16_d16_hi", "ds_store_b8", "ds_store_b16", "ds_store_b8_d16_hi",
-                  "ds_store_b16_d16_hi"}))
+                  "ds_store_b16_d16_hi", "ds_read_u8", "ds_read_u16", "ds_write_b8",
+                  "ds_write_b16"}))
     return true;
 
   return equals_any(mnemonic,
