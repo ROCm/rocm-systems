@@ -872,6 +872,13 @@ hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
 hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t count,
                                hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
                                size_t* failIdx, hipStream_t stream);
+hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
+                                  size_t* sizesA, size_t* sizesB,
+                                  hipExtMemcpyWait* waits,
+                                  hipExtMemcpySignal* signals,
+                                  hipExtMemcpyOp* ops, size_t count,
+                                  hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
+                                  size_t* failIdx, hipStream_t stream);
 hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opList, size_t* failIdx,
                                  unsigned long long flags, hipStream_t stream);
 hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p);
@@ -1489,6 +1496,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipStreamGetAttribute_fn = hip::hipStreamGetAttribute;
   ptrDispatchTable->hipStreamSetAttribute_fn = hip::hipStreamSetAttribute;
   ptrDispatchTable->hipMemcpyBatchAsync_fn = hip::hipMemcpyBatchAsync;
+  ptrDispatchTable->hipExtMemcpyBatchAsync_fn = hip::hipExtMemcpyBatchAsync;
   ptrDispatchTable->hipMemcpy3DBatchAsync_fn = hip::hipMemcpy3DBatchAsync;
   ptrDispatchTable->hipMemcpy3DPeer_fn = hip::hipMemcpy3DPeer;
   ptrDispatchTable->hipMemcpy3DPeerAsync_fn = hip::hipMemcpy3DPeerAsync;
@@ -2269,6 +2277,7 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipDeviceGetLuid_fn, 542);
 HIP_ENFORCE_ABI(HipDispatchTable, hipInitDevice_fn, 543);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 34
 HIP_ENFORCE_ABI(HipDispatchTable, hipModuleEnumerateFunctions_fn, 544);
+HIP_ENFORCE_ABI(HipDispatchTable, hipExtMemcpyBatchAsync_fn, 545);
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //

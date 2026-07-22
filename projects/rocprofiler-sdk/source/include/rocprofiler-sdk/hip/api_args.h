@@ -3647,6 +3647,21 @@ typedef union rocprofiler_hip_api_args_t
         unsigned int   numFunctions;
         hipModule_t    mod;
     } hipModuleEnumerateFunctions;
+    struct {
+        void**               dsts;
+        void**               srcs;
+        size_t*              sizesA;
+        size_t*              sizesB;
+        hipExtMemcpyWait*    waits;
+        hipExtMemcpySignal*  signals;
+        hipExtMemcpyOp*      ops;
+        size_t               count;
+        hipMemcpyAttributes* attrs;
+        size_t*              attrsIdxs;
+        size_t               numAttrs;
+        size_t*              failIdx;
+        hipStream_t          stream;
+    } hipExtMemcpyBatchAsync;
 #endif
 } rocprofiler_hip_api_args_t;
 
