@@ -318,6 +318,13 @@ bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
     const uint32_t ttmp6 = read32(ttmps_addr + 6 * 4);
     w.wave_stopped = (ttmp6 & (1u << 30)) != 0;
     w.saved_status_halt = (ttmp6 & (1u << 29)) != 0;
+    w.spi_ttmps_setup = (ttmp6 & (1u << 31)) == 0;
+    w.group_ids[0] = read32(ttmps_addr + 8 * 4);
+    w.group_ids[1] = read32(ttmps_addr + 9 * 4);
+    w.group_ids[2] = read32(ttmps_addr + 10 * 4);
+    const uint32_t ttmp11 = read32(ttmps_addr + 11 * 4);
+    w.wave_in_group = ttmp11 & 0x3Fu;
+    w.queue_packet_id = (ttmp11 >> 6) & 0x1FFFFFFu;
 
     w.sgprs.resize(w.num_sgprs);
     for (uint32_t s = 0; s < w.num_sgprs; ++s)

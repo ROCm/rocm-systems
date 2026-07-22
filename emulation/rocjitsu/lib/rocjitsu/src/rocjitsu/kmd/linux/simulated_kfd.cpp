@@ -2686,6 +2686,7 @@ void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWa
   wave.set_mode_raw(state.mode);
   wave.set_trapsts(state.trapsts);
   wave.set_debug_wave_id(state.wave_id);
+  wave.set_aql_packet_id(state.queue_packet_id);
   const uint64_t scratch_base = wave.scratch_base();
   const uint32_t stack_pointer = wave.debug_read_sgpr(32);
   const uint32_t stack_frame = wave.debug_read_sgpr(33);
@@ -2754,9 +2755,15 @@ void SimulatedKfd::resume_debug_queues(KfdProcess *proc) {
         }))
       continue;
     std::unordered_set<amdgpu::ComputeUnitCore *> wake;
-    for (size_t index = 0; index < stopped.size(); ++index) {
-      apply_cwsr_to_wave(*stopped[index], states[index]);
-      if (!stopped[index]->debug_halted())
+    for (const auto &state : states) {
+      auto wave = std::find_if(stopped.begin(), stopped.end(), [&](const auto *candidate) {
+        return candidate->debug_wave_id() == state.wave_id;
+      });
+      if (wave == stopped.end())
+        continue;
+      const size_t index = static_cast<size_t>(std::distance(stopped.begin(), wave));
+      apply_cwsr_to_wave(**wave, state);
+      if (!(*wave)->debug_halted())
         wake.insert(owners[index]);
     }
     for (auto *cu : wake)
