@@ -57,9 +57,10 @@ doctor or row instead verifies the target through its stronger in-process
 numeric dispatch, device-architecture, and exact-hook mapping probe, so a
 prebuilt-wheel setup does not need a separate `rocminfo` installation.
 The Python used to launch the runner must be able to import the IREE Python
-bindings and their `numpy`/`ml_dtypes` dependencies needed by the Sharktank
-tests.  Launch the runner with that configured interpreter; putting a bare
-system `python3` earlier in `PATH` can otherwise fail before any GPU dispatch.
+bindings and the `pytest`, `numpy`, and `ml_dtypes` dependencies needed by the
+Sharktank tests.  Launch the runner with that configured interpreter; putting
+a bare system `python3` earlier in `PATH` can otherwise fail before any GPU
+dispatch.
 
 PyTorch validation deliberately uses a separate, prebuilt-wheel interpreter;
 the workspace `pytorch/` checkout is for workload discovery and source
