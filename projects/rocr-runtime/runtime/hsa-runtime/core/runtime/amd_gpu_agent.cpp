@@ -1550,7 +1550,8 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
     const hsa_agent_t* dst_agent_list,
     const size_t* size_list,
     uint32_t coord_engine,
-    uint32_t max_engines) {
+    uint32_t max_engines,
+    const size_t* dst_size_list) {
 
   SetCopyRequestRefCount(true);
   MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
@@ -1772,7 +1773,8 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
           coord_dsts.push_back(dst_list[d]);
           coord_srcs.push_back(src_list[d]);
           coord_sizes_a.push_back(size_list[d]);
-          coord_sizes_b.push_back(size_list[d]);
+          // B side for asymmetric swap; defaults to the A side when not provided.
+          coord_sizes_b.push_back(dst_size_list ? dst_size_list[d] : size_list[d]);
         }
       }
     }
@@ -1789,7 +1791,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
                core::Signal::Convert(&out_signal).handle);
       stat = engines[idxs[0]].blit->SubmitBodies(
           op, dst_list, src_list, size_list, idxs,
-          ind_src, ind_dst, body_deps, out_signal, nullptr);
+          ind_src, ind_dst, body_deps, out_signal, nullptr, dst_size_list);
       if (stat != HSA_STATUS_SUCCESS) return stat;
     }
 
@@ -1850,7 +1852,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
                body_sig);
       stat = engines[idxs[0]].blit->SubmitBodies(
           op, dst_list, src_list, size_list, idxs,
-          ind_src, ind_dst, body_deps, out_signal, body_sig);
+          ind_src, ind_dst, body_deps, out_signal, body_sig, dst_size_list);
       if (stat != HSA_STATUS_SUCCESS) return stat;
       ++grp_idx;
     }
@@ -2034,19 +2036,22 @@ hsa_status_t GpuAgent::DmaCopySwap(
   core::Signal& out_signal = *out_signal_obj;
 
   if (op.num_entries == 0) {
-    // Asymmetric swap is not yet supported here.
-    if (op.src_size != op.dst_size)
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-
+    // Scalar swap: A side = src_size, B side = dst_size. Asymmetric (A != B) is
+    // not supported here; it is rejected (HSA_STATUS_ERROR_INVALID_ARGUMENT) so
+    // callers fall back to CLR-side decomposition.
     const void* src_arr[1] = { op.src };
     void* dst_arr[1] = { op.dst };
     hsa_agent_t dst_agent_arr[1] = { op.dst_agent };
     size_t size_arr[1] = { op.src_size };
+    size_t dst_size_arr[1] = { op.dst_size };
     return DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP, out_signal,
                            dep_signals, 1,
-                           src_arr, dst_arr, dst_agent_arr, size_arr);
+                           src_arr, dst_arr, dst_agent_arr, size_arr,
+                           /*coord_engine=*/0, /*max_engines=*/0, dst_size_arr);
   }
 
+  // Multi-entry swaps are symmetric only (the public op struct carries a single
+  // size_list); asymmetric batches are emitted by the caller as scalar ops.
   return DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP, out_signal,
                          dep_signals, op.num_entries,
                          const_cast<const void* const*>(op.src_list),

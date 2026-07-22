@@ -888,6 +888,12 @@ memory:
   Unit_hipMemcpyBatchAsync_H2D_Functional:
     <<: *level_2
     tags: [transfer, P1]
+  Unit_hipMemcpyBatchAsync_D2D_Swap:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_HD_Swap:
+    <<: *level_2
+    tags: [transfer]
   Unit_hipMemcpyBatchAsync_H2D_Pageable_DuringApiCall_SourceAccess:
     <<: *level_2
     tags: [transfer]
@@ -919,6 +925,26 @@ memory:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_MixedAttributes_DefaultSwapIndirect:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_swap_cp: *level_2
+  Unit_hipMemcpyBatchAsync_swap_asymmetric: *level_2
+  Unit_hipExtMemcpyBatchAsync_swap_asymmetric_ops: *level_2
+  Unit_hipMemcpyBatchAsync_swap_asymmetric_multi_attr: *level_2
+  Unit_hipMemcpyBatchAsync_swap_asymmetric_fallback: *level_2
+  Unit_hipExtMemcpyBatchAsync_entryFlags_swap: *level_2
+  Unit_hipExtMemcpyBatchAsync_UnknownOpsBits_Negative: *level_2
+  Unit_hipExtMemcpyBatchAsync_OpsDefault_OverridesAttrSwap: *level_2
+  Unit_hipExtMemcpyBatchAsync_FailIdx_SwapRejected: *level_2
+  Unit_hipExtMemcpyBatchAsync_OpsOnly_NullAttrs_Swap: *level_2
+  Unit_hipExtMemcpyBatchAsync_OpsDefault_IgnoresAttrIndirectGate: *level_2
+  Unit_hipExtMemcpyBatchAsync_WaitsSignals_Reserved_Negative: *level_2
+  Unit_hipExtMemcpyBatchAsync_SizesB_Constraint_Negative: *level_2
+  Unit_hipExtMemcpyBatchAsync_HD_Swap_Asymmetric: *level_2
+  Unit_hipExtMemcpyBatchAsync_ops_IndirectSrc: *level_2
+  Unit_hipExtMemcpyBatchAsync_ops_IndirectDst: *level_2
+  Unit_hipExtMemcpyBatchAsync_ops_IndirectSrcDst: *level_2
+  Unit_hipMemcpyBatchAsync_NegativeTsts:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemsetD2D8_BasicFunctional:

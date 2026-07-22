@@ -6191,6 +6191,49 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
                                size_t* failIdx, hipStream_t stream __dparm(0));
 
 /**
+ * @brief Perform Batch of 1D copies with extended operation support.
+ *
+ * Extended version of hipMemcpyBatchAsync with per-entry operation flags
+ * and asymmetric swap sizes. GPU-side wait/signal parameters are reserved
+ * for future use and must be NULL.
+ *
+ * @param [in] dsts        - Array of destination pointers.
+ * @param [in] srcs        - Array of source pointers.
+ * @param [in] sizesA      - Array of A-side copy sizes in bytes.
+ * @param [in] sizesB      - Array of B-side sizes for swap (NULL = symmetric).
+ *                            For each swap entry, sizesB[i] must be non-zero and
+ *                            <= sizesA[i], otherwise hipErrorInvalidValue is
+ *                            returned and failIdx is set to that entry.
+ * @param [in] waits       - Reserved for future use. Must be NULL.
+ * @param [in] signals     - Reserved for future use. Must be NULL.
+ * @param [in] ops         - Per-entry operation type. When non-NULL, ops[] is
+ *                            authoritative per entry and overrides any op flag in
+ *                            attrs[].flags (hipExtMemcpyOpDefault forces a linear
+ *                            copy). When NULL, the op type comes from
+ *                            attrs[].flags. See hipExtMemcpyOp for valid values.
+ * @param [in] count       - Number of copy operations.
+ * @param [in] attrs       - Array of hipMemcpyAttributes (CUDA-compatible fields).
+ * @param [in] attrsIdxs   - Array mapping attributes to copy index ranges.
+ * @param [in] numAttrs    - Number of entries in attrs/attrsIdxs.
+ * @param [out] failIdx    - Set to the index of the first entry that fails
+ *                            per-entry validation; set to SIZE_MAX when the
+ *                            failure is not tied to a specific entry. Only
+ *                            meaningful when the call returns an error.
+ * @param [in] stream      - Stream to execute on.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported,
+ *          #hipErrorInvalidResourceHandle
+ */
+hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
+                                  size_t* sizesA, size_t* sizesB,
+                                  hipExtMemcpyWait* waits,
+                                  hipExtMemcpySignal* signals,
+                                  hipExtMemcpyOp* ops,
+                                  size_t count,
+                                  hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
+                                  size_t* failIdx, hipStream_t stream __dparm(0));
+
+/**
  * @brief Perform Batch of 3D copies
  *
  * @param [in] numOps  - Total number of memcpy operations.
