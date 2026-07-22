@@ -91,9 +91,9 @@ solution kernels while a numeric run selects only a subset.
 | P0 | `003_sk_mxf4gemm_explicit` | 🟩 42/42 accesses; current paired 1.04x | 🟩 42/42 accesses; 32/32 barriers; 4/4 fences; current paired 1.00x | 🟩 42/42 accesses; 28/28 barriers; current paired 1.08x | 🟩 42/42 accesses; 32/32 barriers; current paired 1.24x | Exact numeric oracle; all four profile bundles accepted. |
 | P1 | `037_spmm_tdm_f16_transposes` | 🟩 672/672 accesses; current paired 1.10x | 🟩 672/672 accesses; 176/176 barriers; current paired 1.19x | 🟩 672/672 accesses; 160/160 barriers; current paired 1.19x | 🟩 672/672 accesses; 176/176 barriers; current paired 1.79x | Four numeric clients cover tensor waits and transpose LDS reads; all profiles accepted. |
 | P1 | `016_spmm_tdm_all` | 🟩 1610/1610 accesses; current paired 1.15x | 🟩 1610/1610 accesses; 512/512 barriers; current paired 1.24x | 🟩 1610/1610 accesses; 494/494 barriers; current paired 1.19x | 🟩 1610/1610 accesses; 256/256 barriers; strict-capacity current paired 1.61x | Multi-type transpose matrix; all profiles accepted, including strict-capacity Inline Shadow. |
-| P1 | `001_sk_mxf8f4gemm_tdm` | 🟩 768/768 accesses; current paired 1.12x | 🟩 768/768 accesses; 204/204 barriers; 24/24 fences; current paired 1.27x | 🟩 768/768 accesses; 180/180 barriers; current paired 1.22x | 🟩 768/768 accesses; 102/102 barriers; current paired 13.38x; reviewed exact-one fault and health accepted | Exact numeric oracle; all profiles accepted, including reviewed Inline Shadow fault evidence. |
-| P1 | `004_sk_mxf8gemm_tdm` | 🟩 992/992 accesses; current paired 1.20x | 🟩 992/992 accesses; 204/204 barriers; 24/24 fences; current paired 1.30x | 🟩 992/992 accesses; 180/180 barriers; current paired 1.23x | 🟧 Compute-active through 600, 1200, and 1800 seconds; no verdict | Only Inline Shadow remains: execution has no verdict at the stated bound. |
-| P1 | `007_sk_mxf4gemm_tdm` | 🟩 2448/2448 accesses; current paired 1.35x | 🟩 2448/2448 accesses; 544/544 barriers; 64/64 fences; current paired 1.33x | 🟩 2448/2448 accesses; 480/480 barriers; current paired 1.38x | 🟧 Compute-active through 1800 seconds; no verdict | Only Inline Shadow remains: execution has no verdict at the stated bound. |
+| P1 | `001_sk_mxf8f4gemm_tdm` | 🟩 768/768 accesses; current paired 1.12x | 🟩 Current exact clean run: 768/768 accesses, 102/102 barriers, 24/24 fences | 🟩 768/768 accesses; 180/180 barriers; current paired 1.22x | 🟩 768/768 accesses; 102/102 barriers; current paired 13.38x; reviewed exact-one fault and health accepted | Exact numeric oracle; all profiles accepted, including reviewed Inline Shadow fault evidence. |
+| P1 | `004_sk_mxf8gemm_tdm` | 🟩 992/992 accesses; current paired 1.20x | 🟩 Current exact clean run: 992/992 accesses, 102/102 barriers, 24/24 fences | 🟩 992/992 accesses; 180/180 barriers; current paired 1.23x | 🟧 Compute-active through 600, 1200, and 1800 seconds; no verdict | Only Inline Shadow remains: execution has no verdict at the stated bound. |
+| P1 | `007_sk_mxf4gemm_tdm` | 🟩 2448/2448 accesses; current paired 1.35x | 🟧 Current instrumentation is statically complete (2448 accesses, 272 barriers, 64 fences) and the first five exact rows pass, then execution aborts; the matching uninstrumented client passes all rows | 🟩 2448/2448 accesses; 480/480 barriers; current paired 1.38x | 🟧 Compute-active through 1800 seconds; no verdict | Record/Replay has a current execution regression after private-segment growth; Inline Shadow remains bounded. |
 | P2 | Reduced `sk_sgemm_runtime_smoke` | 🟩 Exact numeric oracle; 640/640 accesses; current paired 1.07x | 🟩 Exact numeric oracle; 640/640 accesses; 22/22 barriers; 8/8 fences; current paired 1.32x | 🟩 Exact numeric oracle; 640/640 accesses; 40/40 barriers; current paired 1.34x | 🟩 Exact numeric oracle; 640/640 accesses; 22/22 barriers; paired 1.33x; causal fault diagnosed | Exact numeric oracle; all profiles accepted, including a causal Inline Shadow fault. |
 | P2 | `000_sk_sgemm_quick` | 🟨 First problem: 12/12 exact numeric rows; 640/640 accesses; static/dynamic complete | 🟨 First problem exact and fully covered; aggregate host analysis fixed; full client is intrinsically execution-bound | 🟨 First problem: 12/12 exact numeric rows; 640/640 accesses; 40/40 barrier members | 🟧 First problem: 12/12 exact rows and complete static coverage; interrupted second problem leaves dynamic analysis incomplete | The first problem is validated; the full multi-problem client remains execution-bound. |
 | P2 | `005_sk_f8gemm_quick` | 🟩 Exact oracle; 1772/1772 accesses; current paired 1.43x; reviewed fault and health accepted | 🟩 Exact oracle; 1772/1772 accesses; 44/44 barriers; 16/16 fences; current paired 8.00x | 🟧 Current clean execution remains compute-active through 900 seconds; no verdict or measured overhead | 🟧 Current tip executes 49 exact rows with zero failures before the fixed 180-second bound | SuperCollider and Record/Replay are accepted; Sampled and Inline Shadow lack a full-client verdict. |
@@ -142,6 +142,31 @@ clustered-dispatch coverage from a workload whose inputs and numeric oracle
 are PyTorch tensors.  It does not yet prove cluster-memory or inter-workgroup
 synchronization: the prototype contains no `cluster_load_*` instruction, so
 that remains a separate discovery target rather than an implied result.
+
+### 2026-07-22 Record/Replay revalidation
+
+After rebasing `users/bjacob/sanitizers`, all 27 cells that were green in the
+Record/Replay column received a fresh one-repetition clean assessment.  At
+revision `448177858e2c` and hook SHA-256
+`f7a5e0861e8b1f3dd55285838cfb5d4c287529d48a4b2abf5d54c9b987e5d254`,
+25 remain green.  The shared architecture gate passes 775/775 ConSan tests,
+the HSA hook gate passes 20/20, and the validation Python suite passes
+136/136.  This retains the RDNA4 cases while qualifying the gfx1250 changes.
+
+The rebase exposed and the current branch fixes two gfx1250 placement defects:
+singleton spill-backed scalar placement and reuse of relocated dense access
+hosts by far fence probes.  The latter restores `001_sk_mxf8f4gemm_tdm` and
+`004_sk_mxf8gemm_tdm` from 8/24 to 24/24 fences without changing the RDNA4
+path.
+
+Two prior green claims do not survive the audit.  The norm/softmax exact oracle
+still passes, but five full-pressure reduction kernels safely reject a
+persistent dispatch-state overlap, leaving 130 accesses and 45 barriers
+unpatched.  `007_sk_mxf4gemm_tdm` is statically complete and passes its first
+five exact rows, then the instrumented software-GPU execution aborts after an
+84-byte private-segment growth; the matching uninstrumented client completes
+all rows.  These cells are yellow and orange respectively rather than carrying
+forward stale green evidence.
 
 ### Shared-branch merge revalidation closeout
 
@@ -201,7 +226,7 @@ that workaround consistently.
 | P1 | `torch.sort` over segmented rows | 🟩 Exact values/indices; 48,224/48,224 accesses; current paired 184.68x | 🟩 Exact values/indices; 48,224/48,224 accesses and 6,032/6,032 barriers; current paired 370.29x | 🟩 Exact values/indices; 48,224/48,224 accesses and 12,064/12,064 barrier members; current paired 171.77x; reviewed noncausal fault accepted | 🟩 Exact values/indices; 48,224/48,224 accesses and 6,032/6,032 barriers; current paired 416.22x | All four profile bundles accepted. |
 | P1 | Collision-heavy `torch.scatter_reduce` (`sum`, BF16 and FP32) | 🟩 Exact collision sums; 23/23 accesses; current paired 24.37x | 🟩 Exact collision sums; 23/23 accesses; current paired 42.30x | 🟩 Exact collision sums; 23/23 accesses; current paired 41.91x | 🟩 Exact collision sums; 23/23 accesses; current paired 40.17x | All profiles accepted; ordered-atomic fault modes are typed N/A for this relaxed singleton reduction. |
 | P1 | `torch.histc` with a shared-memory-sized bin count | 🟩 Exact counts; 133/133 supported accesses; current paired 60.11x | 🟩 Exact counts; 175/175 accesses and 84/84 barriers; current paired 72.00x | 🟩 Exact counts; 175/175 accesses and 168/168 applicable barriers; current paired 67.37x | 🟩 Exact counts; 175/175 accesses and 84/84 barriers; current paired 85.86x | All four profile bundles accepted, including causal barrier-fault evidence. |
-| P2 | `torch.linalg.vector_norm` and large-row `torch.softmax` | 🟩 Exact norm/softmax; 4,756/4,756 accesses; current paired 315.57x | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 2,352/2,352 barriers; current paired 435.17x | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 4,572/4,572 barriers; current paired 534.97x | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 2,352/2,352 barriers; current paired 317.24x | All four profile bundles accepted. |
+| P2 | `torch.linalg.vector_norm` and large-row `torch.softmax` | 🟩 Exact norm/softmax; 4,756/4,756 accesses; current paired 315.57x | 🟨 Current exact oracle passes, but five full-pressure reduction kernels leave 130 accesses and 45 barriers resource-incomplete (4,626/4,756 accesses; 2,307/2,352 barriers) | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 4,572/4,572 barriers; current paired 534.97x | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 2,352/2,352 barriers; current paired 317.24x | Record/Replay now safely rejects dispatch-state overlap in five reduction kernels; the other profiles retain accepted bundles. |
 | P1 | PyTorch cluster synchronization | 🟩 Exact oracle; 25/25 applicable accesses; current paired 1.02x | 🟩 Exact oracle; 25/25 accesses and 2/2 barriers; current paired 1.03x | 🟩 Exact oracle; 25/25 accesses and 4/4 barrier members; current paired 1.07x | 🟩 Exact oracle; 25/25 accesses and 2/2 barriers; current paired 1.24x | All profiles accepted for the causal cluster-scope synchronization workload. |
 | Survey | Cluster-memory and inter-workgroup synchronization from PyTorch | 🟩 Executable cluster-scope synchronization full bundle accepted | 🟩 Executable cluster-scope synchronization full bundle accepted | 🟩 Executable cluster-scope synchronization full bundle accepted | 🟩 Executable cluster-scope synchronization full bundle accepted | Cluster-scope synchronization is covered; no distinct cluster-memory opcode is claimed. |
 
@@ -212,8 +237,8 @@ code.  It is not instrumentation acceptance evidence.
 
 | Item | Current evidence |
 |---|---|
-| Port branch | `users/bjacob/consan` |
-| Rebased foundation | `origin/develop` merge-base `8bba8691911ad19ce58bef2ac252ac497331fc5f` |
+| Port branch | `users/bjacob/sanitizers` |
+| Rebased foundation | `origin/users/bjacob/sanitizers` at `6420276d7bdc` |
 | ROCm distribution | `$WORKSPACE_ROOT/TheRock/build/dist/rocm` |
 | Toolchain | workspace TheRock HIP compiler targeting `gfx1250`; host Clang 21.1.8 |
 | Execution | software GPU environment initialized one gfx1250 node |
