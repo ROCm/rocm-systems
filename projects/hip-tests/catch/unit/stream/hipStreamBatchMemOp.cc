@@ -258,12 +258,13 @@ HIP_TEST_CASE(Unit_hipStreamBatchMemOp_SequentialOrdering_MultiGPU) {
     }
   }
 
-  for (int d = 0; d < deviceCount; d++) {
+for (int d = deviceCount - 1; d >= 0; d--) {
     HIP_CHECK(hipSetDevice(d));
     HIP_CHECK(hipStreamDestroy(streams[d]));
     HIP_CHECK(hipFree(reinterpret_cast<void*>(devPtrs[d])));
-    HIP_CHECK(hipCtxPopCurrent(&ctxs[d]));
-    HIP_CHECK(hipCtxDestroy(ctxs[d]));
+    hipCtx_t popped = nullptr;
+    HIP_CHECK(hipCtxPopCurrent(&popped));
+    HIP_CHECK(hipCtxDestroy(popped]));
   }
 }
 

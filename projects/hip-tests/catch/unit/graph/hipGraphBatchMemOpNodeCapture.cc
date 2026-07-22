@@ -40,7 +40,11 @@ HIP_TEST_CASE(Unit_hipGraphBatchMemOpNode_WriteAndWait) {
   if (attrErr != hipSuccess || waitValueSupport == 0) {
     HIP_SKIP_TEST("hipStreamWaitValue is not supported on this device.");
   }
-
+#if !HT_AMD
+  // hipMallocSignalMemory is AMD/ROCr-only; skip at runtime on non-AMD backends
+  // so that devPtr=0 is never passed to hipMemset/hipMemcpy.
+  HIP_SKIP_TEST("hipMallocSignalMemory is not supported on non-AMD backends.");
+#endif
   hipCtx_t ctx;
   HIP_CHECK(hipCtxCreate(&ctx, 0, device));
 
