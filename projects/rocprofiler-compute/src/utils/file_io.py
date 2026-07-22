@@ -261,7 +261,6 @@ def process_pc_sampling_kernel_traces(
     if not tool_data_records:
         return process_pc_sampling_kernel_trace(None)
 
-    _validate_pc_sampling_process_ids(tool_data_records)
     return pd.concat(
         [
             process_pc_sampling_kernel_trace(tool_data)
