@@ -106,8 +106,8 @@ jobs:
       - name: Install Python prereqs
         working-directory: projects/rocprofiler-compute
         run: |
-          python3 -m pip install -r requirements.txt
-          python3 -m pip install -r requirements-test.txt
+          python3 -m pip install --ignore-installed -r requirements.txt
+          python3 -m pip install --ignore-installed -r requirements-test.txt
           python3 -m pip install cmake
 
       - name: Configure and install
