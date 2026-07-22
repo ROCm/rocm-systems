@@ -135,7 +135,7 @@ support results and not gray instrumentation cells.
 |---|---|---|---|---|---|
 | **D0** `kernels.gfx1201.llama.cpp.llama_mul_mat_vec_q.default` | 🩶 Inventory pending | 🩶 Inventory pending | 🩶 Inventory pending | 🩶 Inventory pending | Real LLM quantized matvec with an existing validation result.  Inventory executed LDS, barriers, atomics, pressure, and dispatch count; admit only if it adds meaningful coverage beyond Qwen. |
 | **D0** `kernels.gfx1201.llama.cpp.llama_rms_norm.default` | 🩶 Inventory pending | 🩶 Inventory pending | 🩶 Inventory pending | 🩶 Inventory pending | Real LLM normalization with an existing numeric path.  Measure synchronization relevance and choose a useful native shape without turning it into synthetic stress. |
-| **D0** `llama.cpp` noncontiguous batched-matmul and hazard metadata | 🩶 Collection pending | 🩶 Collection pending | 🩶 Collection pending | 🩶 Collection pending | Resolve why the correct and hazardous gfx1201 variants are absent from the current collection, then determine whether the hazard is a concurrency oracle or an unrelated layout bug. |
+| **D0** `llama.cpp` noncontiguous batched-matmul and hazard metadata | — Not admitted | — Not admitted | — Not admitted | — Not admitted | The gfx1201 config explicitly skips compiling both variants. The hazard overlay restores llama.cpp PR #13155's pre-fix noncontiguous-stride conversion and expects a deterministic output-validation failure; it is a data-layout correctness reproducer, not a concurrency oracle. |
 | **D1** Three collected IREE direct-tile matmuls: F16, FP8, and I8 | — Not admitted | — Not admitted | — Not admitted | — Not admitted | The three gfx1201 compilations pass, but their corpus records explicitly set `compile_only=true`; they dispatch no workload and provide no runtime oracle. Normalize a calls/support-module wrapper before reconsidering them. |
 | **D1** IREE `argmax`, strided extract, and map-load/map-store cases | — Not admitted | — Not admitted | — Not admitted | — Not admitted | All four exact baselines pass. Record/Replay inventory in `.pytest-artifacts-rdna4-iree-inventory` reports zero supported accesses, barriers, atomics, and fences for every executed code object, so these global-only shapes add no ConSan coverage. |
 | **D2** RDNA4 WMMA/SWMMAC, wave32/wave64, atomic, and lane/DS CTS families | — Not admitted | — Not admitted | — Not admitted | — Not admitted | Seven exact baseline cases pass, but the arithmetic and lane-operation cases add no admitted ConSan synchronization traffic. The bundled atomic case is useful as an unsupported-transform stress object, not as a compact or nonredundant acceptance workload. Retain this family as an engine-specific reproducer pool. |
@@ -151,6 +151,16 @@ package required by the vendored llama.cpp build.  Both llama rows therefore
 remain unassessed; this is a local build-prerequisite gap, not an observed
 ConSan or workload failure.  Continue with another gray row instead of building
 a larger SDK solely for these two candidates.
+
+The noncontiguous llama cases are absent from collection because
+`corpus/kernels/configs/gfx1201.json` names both cases in
+`skip_compile_tests`; the originating corpus commit described these as
+temporarily skipped "unsure kernels."  Static comparison of the hazard overlay
+with the fixed vendored source shows that it converts a noncontiguous view as
+one contiguous span while retaining the old batched-GEMM strides.  Its case
+manifest requires exit code 1 for the trigger because CPU/output validation is
+supposed to fail.  That makes it a useful llama.cpp layout-regression
+reproducer, but not a ConSan concurrency-validation workload.
 
 The D2 CTS survey ran serially with a 30-second per-case bound.  Exact
 baselines pass for the atomic, gfx12 WMMA and SWMMAC wave32/wave64, and DS
