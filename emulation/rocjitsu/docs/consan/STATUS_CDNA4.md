@@ -50,7 +50,7 @@ scratch before promotion.
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
 | **P0 Qwen3-0.6B prefill** | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown |
-| **P1 Sharktank TP1 prefill** | 🟨 current clean and paired: exact oracle, 120/120 accesses, complete analysis, 1.13x; reviewed fault active | 🩶 historical: clean 104/104 access + 31/31 barrier accepted | 🩶 historical: clean 104/104 access + 7/7 qualified barrier accepted | 🩶 historical: clean 104/104 access + 31/31 barrier accepted |
+| **P1 Sharktank TP1 prefill** | 🟨 current clean and paired: exact oracle, 120/120 accesses, complete analysis, 1.13x; reviewed exact-one fault detected one instability but contradicted its frozen external-oracle policy | 🩶 historical: clean 104/104 access + 31/31 barrier accepted | 🩶 historical: clean 104/104 access + 7/7 qualified barrier accepted | 🩶 historical: clean 104/104 access + 31/31 barrier accepted |
 | **P1 Sharktank TP1 decode/combined** | 🟨 current clean: decode and combined oracles pass; aggregate 240/240 accesses; complete analysis | 🩶 historical: clean 208/208 access + 62/62 barrier accepted | 🩶 historical: clean 208/208 access + 14/14 qualified barrier accepted | 🩶 historical: clean 208/208 access + 62/62 barrier accepted across six sequential runs |
 | **P2 Sharktank TP2 family** | 🟨 current clean: prefill, decode, and combined oracles pass; aggregate 936/936 accesses; complete analysis | 🩶 historical: clean 840/840 access + 168/168 barrier accepted | 🩶 historical: aggregate rejected: one 140-access + 10-barrier slice executes 0 | 🩶 historical: aggregate rejected: one 140-access + 28-barrier slice lowers 0 |
 | **P3 CLIP BF16** | 🟨 current clean: cosine oracle passes; 45/45 accesses; complete analysis | 🩶 historical: clean 39/39 access + 24/24 barrier accepted | 🩶 historical: clean 39/39 access + 20/20 qualified barrier accepted | 🩶 historical: clean 39/39 access + 24/24 barrier accepted |
@@ -295,6 +295,18 @@ a ConSan detection.
   `consan-validation-gfx950-tp1-prefill-inventory-tip-20260722-002` accepts 31
   exact-one barrier sites; semantic review and contained fault execution are
   active before the cell can become green.
+
+- 2026-07-22: TP1-prefill reviewed fault artifact
+  `consan-validation-gfx950-tp1-prefill-supercollider-fault-tip-20260722-001`
+  removes exactly one semantically reviewed barrier at PC `0x7ff8`, between
+  waited LDS publication and immediate LDS consumption in the executed
+  prefill-attention kernel.  Coverage remains complete at 120/120 and
+  SuperCollider reports exactly one instability diagnostic; health and the
+  independent dispatch smoke pass before and after.  The external scalar
+  oracle nevertheless passes, contradicting the precommitted
+  fail-oracle/no-diagnostic policy, so the validator correctly rejects the
+  trial and the cell remains yellow.  The policy was not changed after
+  observation.
 
 - 2026-07-22: D128-pressure and MFMA-attention SuperCollider are green at
   current clean tip `499ddfe89d`.  Their paired artifacts report 186.82x and
