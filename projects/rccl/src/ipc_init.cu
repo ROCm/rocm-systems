@@ -12,6 +12,7 @@
 #include "debug.h"
 #include "dda_init_detail.h"
 #include "ipc_mem_handler.h"
+#include "dda_all_reduce.h"
 
 #include <cuda_runtime.h>
 
@@ -45,7 +46,10 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   //   which aborts comm init entirely. Gate init to match dispatch.
   const bool ddaArchSupported =
     comm->archName != nullptr && (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950"));
-  if (comm->nRanks != kDdaNranks || comm->nNodes != 1 || comm->bootstrap == nullptr || comm->directMode ||
+  const bool nranksSupported =
+    comm->nRanks == kDdaNranks ||
+    (ncclDdaNranksRelaxEnabled() && (comm->nRanks == 2 || comm->nRanks == 4 || comm->nRanks == 8));
+  if (!nranksSupported || comm->nNodes != 1 || comm->bootstrap == nullptr || comm->directMode ||
       comm->MNNVL || !ddaArchSupported) {
     return ncclSuccess;
   }
@@ -101,6 +105,9 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
+  // Peer table is sized for kDdaNranks (the max) but only comm->nRanks entries
+  // are populated/copied when RCCL_DDA_NRANKS_RELAX shrinks the participant set.
+  const int nActiveRanks = comm->nRanks;
   void* peerDev = nullptr;
   cudaError_t ce = cudaMalloc(&peerDev, kDdaNranks * sizeof(void*));
   if (ce != cudaSuccess) {
@@ -111,7 +118,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   }
 
   void* h_ptrs[kDdaNranks];
-  for (int i = 0; i < kDdaNranks; ++i) {
+  for (int i = 0; i < nActiveRanks; ++i) {
     void* p = nullptr;
     res = handler->getPeerDeviceMemPtr(i, &p);
     if (res != ncclSuccess) {
@@ -124,7 +131,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     h_ptrs[i] = p;
   }
 
-  ce = cudaMemcpy(peerDev, h_ptrs, kDdaNranks * sizeof(void*), cudaMemcpyHostToDevice);
+  ce = cudaMemcpy(peerDev, h_ptrs, nActiveRanks * sizeof(void*), cudaMemcpyHostToDevice);
   if (ce != cudaSuccess) {
     CUDACHECKIGNORE(cudaFree(peerDev));
     delete handler;
@@ -134,7 +141,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   }
 
   const int nBlocksMax = ddaMaxNBlocksForScratch();
-  auto barrierPair = meta::comms::IpcGpuBarrier::mallocAndInit(kDdaNranks, nBlocksMax, comm->rank, comm->bootstrap);
+  auto barrierPair = meta::comms::IpcGpuBarrier::mallocAndInit(nActiveRanks, nBlocksMax, comm->rank, comm->bootstrap);
   if (!barrierPair.first) {
     CUDACHECKIGNORE(cudaFree(peerDev));
     delete handler;

@@ -186,7 +186,11 @@ static bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx94
   if (IsArchMatch(comm->archName, "gfx1250")) {
     threshold = (size_t)rcclParamDdaThreshold();
   } else if (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950")) {
-    if (comm->nRanks < 8 || comm->symmetricSupport) return false;
+    // Default DDA requires the full 8-rank clique. With RCCL_DDA_NRANKS_RELAX=1,
+    // 2/4-rank comms clear this floor too; per-collective eligibility (only the
+    // IPC AllReduce path is relaxed) still rejects unsupported participant counts.
+    const int ddaMinRanks = ncclDdaNranksRelaxEnabled() ? 2 : 8;
+    if (comm->nRanks < ddaMinRanks || comm->symmetricSupport) return false;
     if (IsArchMatch(comm->archName, "gfx942")) {
       threshold = gfx942Default;
     } else {
