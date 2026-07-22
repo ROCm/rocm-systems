@@ -7,9 +7,10 @@ import shutil
 import subprocess
 import os
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 from typing import Optional
+
+from .cache import persistent_cache
 
 GFX_XXXX_PATTERN = re.compile(r"(gfx[0-9a-fA-F]+)")
 
@@ -106,7 +107,58 @@ def get_rocminfo(rocm_path: Optional[Path] = None) -> Optional[Path]:
     return None
 
 
-@lru_cache(maxsize=1)
+# rocminfo can fail for several reasons, including having no GPU devices.
+# A GPU-less machine is a stable, expected state, so it is treated as "no GPU".
+# Any other failure (kfd perms, kfd/HSA-init races) is treated as an error.
+# This marker matches only the GPU-less case; see rocminfo.cc CheckInitialState().
+_ROCMINFO_NO_GPU_MARKER = "possibly no gpu devices"
+
+
+def _rocminfo_reports_no_gpu(output: str) -> bool:
+    """Return True if rocminfo output indicates the system has no AMD GPU."""
+    return _ROCMINFO_NO_GPU_MARKER in output.lower()
+
+
+def run_rocminfo(rocm_path: Optional[Path] = None) -> Optional[str]:
+    """Run ``rocminfo`` and return its stdout for further processing.
+
+    Args:
+        rocm_path: Path to the ROCm installation directory
+
+    Returns:
+        The captured stdout on success, or ``None`` if ``rocminfo`` cannot be
+        found or the system has no AMD GPU (ROCk kernel module not loaded).
+
+    Raises:
+        RuntimeError: if ``rocminfo`` is found but fails for any reason other
+            than "no GPU present" (non-zero exit, timeout, or OS error)
+    """
+    rocminfo = get_rocminfo(rocm_path)
+    if not rocminfo:
+        return None
+    try:
+        result = subprocess.run(
+            [str(rocminfo)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        raise RuntimeError(f"Failed to run rocminfo ({rocminfo}): {exc}") from exc
+
+    if result.returncode != 0:
+        # A system with no AMD GPU is a valid, stable state, not an error
+        if _rocminfo_reports_no_gpu(result.stdout + result.stderr):
+            return None
+        raise RuntimeError(
+            f"rocminfo ({rocminfo}) failed with return code {result.returncode}:\n"
+            f"--- stdout ---\n{result.stdout.strip()}\n"
+            f"--- stderr ---\n{result.stderr.strip()}"
+        )
+    return result.stdout
+
+
+@persistent_cache("gpu.detect_gpu")
 def detect_gpu(rocm_path: Optional[Path] = None) -> GPUInfo:
     """Detect available AMD GPUs and their capabilities.
 
@@ -116,40 +168,22 @@ def detect_gpu(rocm_path: Optional[Path] = None) -> GPUInfo:
     categories: set[str] = set()
     architectures: list[str] = []
     device_count = 0
-    rocminfo_stdout: Optional[str] = None
 
-    # Detect available GPUs
-    rocminfo = None
-    if rocm_path:
-        rocminfo = rocm_path / "bin" / "rocminfo"
-    if not rocminfo:
-        rocminfo = shutil.which("rocminfo")
-
-    if rocminfo:
-        try:
-            result = subprocess.run(
-                [str(rocminfo)],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            rocminfo_stdout = result.stdout if result.returncode == 0 else None
-            if rocminfo_stdout:
-                # Only match gfx on "Name:"
-                name_gfx_pattern = re.compile(
-                    r"^\s*Name:\s+(gfx[0-9A-Fa-f][0-9A-Fa-f]+)", re.MULTILINE
-                )
-                all_matches = name_gfx_pattern.findall(rocminfo_stdout)
-                # gfx000 is the cpu, remove it
-                filtered = [arch for arch in all_matches if arch != "gfx000"]
-                device_count = len(filtered)
-                # Remove duplicates
-                architectures = list(set(filtered))
-        except (subprocess.TimeoutExpired, OSError):
-            pass
+    rocminfo_stdout = run_rocminfo(rocm_path)
+    if rocminfo_stdout:
+        # Only match gfx on "Name:"
+        name_gfx_pattern = re.compile(
+            r"^\s*Name:\s+(gfx[0-9A-Fa-f][0-9A-Fa-f]+)", re.MULTILINE
+        )
+        all_matches = name_gfx_pattern.findall(rocminfo_stdout)
+        # gfx000 is the cpu, remove it
+        filtered = [arch for arch in all_matches if arch != "gfx000"]
+        device_count = len(filtered)
+        # Remove duplicates
+        architectures = list(set(filtered))
 
     for arch in architectures:
-        categories.update(lookup_gpu_category(arch, rocm_path, rocminfo_stdout))
+        categories.update(lookup_gpu_category(arch, rocminfo_stdout))
 
     return GPUInfo(
         available=device_count > 0,
@@ -161,15 +195,13 @@ def detect_gpu(rocm_path: Optional[Path] = None) -> GPUInfo:
 
 def lookup_gpu_category(
     arch: str,
-    rocm_path: Optional[Path] = None,
     rocminfo_stdout: Optional[str] = None,
 ) -> list[str]:
     """Lookup the GPU category for an architecture.
 
     Args:
         arch: Architecture string (e.g., 'gfx940')
-        rocm_path: Optional path to ROCm installation (used only if rocminfo_stdout not provided)
-        rocminfo_stdout: Optional pre-captured rocminfo stdout (avoids re-running rocminfo for APU check)
+        rocminfo_stdout: Pre-captured rocminfo stdout, used for the APU check
 
     Returns:
         List of GPU categories the architecture belongs to (instinct, radeon, apu)
@@ -213,21 +245,7 @@ def lookup_gpu_category(
 
     if arch in instinct_list:
         categories.append("instinct")
-        # Some instinct GPUs may also be an APU (ex: MI300A)
-        if rocminfo_stdout is None:
-            rocminfo = get_rocminfo(rocm_path)
-            if rocminfo:
-                try:
-                    result = subprocess.run(
-                        [str(rocminfo)],
-                        capture_output=True,
-                        text=True,
-                        timeout=30,
-                    )
-                    if result.returncode == 0:
-                        rocminfo_stdout = result.stdout
-                except (subprocess.TimeoutExpired, OSError):
-                    pass
+        # Some instinct GPUs may also be an APU (ex: MI300A).
         if rocminfo_stdout and "APU" in rocminfo_stdout:
             categories.append("apu")
     if arch in radeon_list:
@@ -242,7 +260,7 @@ def lookup_gpu_category(
     return categories
 
 
-@lru_cache(maxsize=1)
+@persistent_cache("gpu.get_offload_extractor")
 def get_offload_extractor(
     rocm_path: Optional[Path] = None,
 ) -> tuple[Optional[Path], Optional[bool]]:
@@ -322,8 +340,13 @@ def get_offload_extractor(
     return None, is_llvm_too_old
 
 
+@persistent_cache("gpu.get_target_gpu_arch")
 def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
     """Get the list of gpu architectures (gfx) the target was compiled for.
+
+    Cached per ``(rocm_path, target_path)`` for the CTest session (a target
+    binary does not change mid-session; the config-setup fixture regenerates
+    the cache between runs).
 
     Args:
         rocm_path: Path to the ROCm installation directory
@@ -405,7 +428,7 @@ def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
     return list(target_archs)
 
 
-@lru_cache(maxsize=1)
+@persistent_cache("gpu.get_xnack_support")
 def get_xnack_support(rocm_path: Optional[Path] = None) -> bool:
     """Check whether the current GPU is XNACK-capable.
 

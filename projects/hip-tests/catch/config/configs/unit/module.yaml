@@ -41,9 +41,6 @@ module:
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows, amd_wsl]
     tags: [launch]
-  Unit_hipModuleLaunchKernel_ManagedVar_Memcpy:
-    <<: *level_2
-    tags: [launch]
   Unit_hipExtLaunchKernelGGL_Functional:
     <<: *level_2
     # SWDEV-438524: Below tests causing TDR & machine down in stress test on 15/12/23 ===

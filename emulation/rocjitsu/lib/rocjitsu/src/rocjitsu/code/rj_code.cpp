@@ -120,6 +120,8 @@ rj_status_t rj_code_executable_get_code_object(const rj_code_executable_t *exec,
 
   *obj = new rj_code_object_t{};
   (*obj)->co = co;
+  (*obj)->parent_exec = const_cast<rj_code_executable_t *>(exec);
+  (*obj)->parent_exec->retain();
   (*obj)->retain();
   return ROCJITSU_STATUS_SUCCESS;
 }
@@ -246,6 +248,8 @@ rj_status_t rj_code_basic_block_list_get(const rj_code_basic_block_list_t *list,
 
   *block = new rj_code_basic_block_t{};
   (*block)->block = list->blocks[index].get();
+  (*block)->parent_list = const_cast<rj_code_basic_block_list_t *>(list);
+  (*block)->parent_list->retain();
   (*block)->retain();
   return ROCJITSU_STATUS_SUCCESS;
 }
