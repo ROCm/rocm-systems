@@ -2413,7 +2413,7 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
     }
     const uint32_t restore_count =
         patch.dispatch_id_preload_inserted ? guest_input_count - patch.dispatch_id_source_sgpr : 0u;
-    const uint64_t required_words = 4u + 2u * restore_count;
+    const uint64_t required_words = 8u + 2u * restore_count;
     const uint64_t required_bytes = required_words * sizeof(uint32_t);
     if (entry_offset > replacement_text.size() ||
         required_bytes > replacement_text.size() - entry_offset) {
@@ -2446,6 +2446,12 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
     expect_write(build_s_mov_b32(static_cast<uint16_t>(persistent + 1u),
                                  static_cast<uint16_t>(patch.dispatch_id_source_sgpr + 1u), arch),
                  "high-word capture");
+    expect_write(build_s_add_u32(persistent, persistent, scalar_positive_inline_u32(1), arch),
+                 "low-word sentinel encoding");
+    expect_write(build_s_addc_u32(static_cast<uint16_t>(persistent + 1u),
+                                  static_cast<uint16_t>(persistent + 1u),
+                                  scalar_positive_inline_u32(0), arch),
+                 "high-word sentinel encoding");
     for (uint32_t i = 0; i < restore_count; ++i) {
       const uint16_t destination = static_cast<uint16_t>(patch.dispatch_id_source_sgpr + i);
       expect_write(build_s_mov_b32(destination, static_cast<uint16_t>(destination + 2u), arch),

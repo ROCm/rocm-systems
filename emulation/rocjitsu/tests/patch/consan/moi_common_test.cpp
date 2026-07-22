@@ -835,6 +835,11 @@ TEST(ConSanMoi, DispatchPrologueCapturesBeforeAscendingRestoreAtBothKernargEntri
     expect_write(build_s_mov_b32(persistent, 10u, ROCJITSU_CODE_ARCH_RDNA4));
     expect_write(
         build_s_mov_b32(static_cast<uint16_t>(persistent + 1u), 11u, ROCJITSU_CODE_ARCH_RDNA4));
+    expect_write(build_s_add_u32(persistent, persistent, scalar_positive_inline_u32(1),
+                                 ROCJITSU_CODE_ARCH_RDNA4));
+    expect_write(build_s_addc_u32(static_cast<uint16_t>(persistent + 1u),
+                                  static_cast<uint16_t>(persistent + 1u),
+                                  scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
     for (uint16_t destination = 10u; destination < 18u; ++destination) {
       expect_write(build_s_mov_b32(destination, static_cast<uint16_t>(destination + 2u),
                                    ROCJITSU_CODE_ARCH_RDNA4));
@@ -879,15 +884,15 @@ TEST(ConSanMoi, AlreadyEnabledDispatchPreloadIsCapturedWithoutGuestShuffle) {
               sizeof(descriptor));
   EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT),
             4u);
-  uint32_t third_word = 0;
-  std::memcpy(&third_word,
+  uint32_t first_owner_word = 0;
+  std::memcpy(&first_owner_word,
               patched.text_sections().front()->data() + prologue->trampoline_offset +
-                  4u * sizeof(uint32_t),
-              sizeof(third_word));
+                  8u * sizeof(uint32_t),
+              sizeof(first_owner_word));
   const auto owner_init = build_v_lshrrev_b32_e32(
       *result.resolved_moi_owner_vgpr, scalar_positive_inline_u32(6), 0, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(owner_init);
-  EXPECT_EQ(third_word, *owner_init);
+  EXPECT_EQ(first_owner_word, *owner_init);
 }
 
 TEST(ConSanMoi, SharedHelperDispatchCaptureUsesPerKernelLayoutsAndOnePersistentPair) {

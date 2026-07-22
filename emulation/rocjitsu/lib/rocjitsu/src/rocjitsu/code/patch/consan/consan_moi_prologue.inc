@@ -31,6 +31,20 @@ append_dispatch_id_capture_and_restore(std::vector<uint32_t> &words,
           words,
           build_s_mov_b32(static_cast<uint16_t>(*persistent_dispatch_sgpr + 1u),
                           static_cast<uint16_t>(plan.dispatch_id_sgpr + 1u), arch),
+          arch) ||
+      // Hardware dispatch ID zero is valid (and common for the first packet),
+      // while ConSan reserves zero as the empty metadata sentinel. Store the
+      // injective modulo-2^64 successor used by every downstream comparison.
+      !append_moi_entry_salu_write(words,
+                                   build_s_add_u32(*persistent_dispatch_sgpr,
+                                                   *persistent_dispatch_sgpr,
+                                                   scalar_positive_inline_u32(1), arch),
+                                   arch) ||
+      !append_moi_entry_salu_write(
+          words,
+          build_s_addc_u32(static_cast<uint16_t>(*persistent_dispatch_sgpr + 1u),
+                           static_cast<uint16_t>(*persistent_dispatch_sgpr + 1u),
+                           scalar_positive_inline_u32(0), arch),
           arch)) {
     errors.emplace_back("ConSan MOI dispatch-ID prologue cannot encode its SALU dependency delay");
     return false;

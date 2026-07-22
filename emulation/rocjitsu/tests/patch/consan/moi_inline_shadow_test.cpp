@@ -1402,17 +1402,25 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesPersistentOwnerEpochVgprs) {
       build_v_lshrrev_b32_e32(1, scalar_positive_inline_u32(6), 0, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(owner_init);
   ASSERT_TRUE(prologue->dispatch_id_capture_sgpr);
-  ASSERT_GE(prologue_words.size(), 7u);
+  ASSERT_GE(prologue_words.size(), 11u);
   EXPECT_EQ(prologue_words[0],
             build_s_mov_b32(*prologue->dispatch_id_capture_sgpr, prologue->dispatch_id_source_sgpr,
                             ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_EQ(prologue_words[1], build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_EQ(prologue_words[4], *owner_init);
+  EXPECT_EQ(prologue_words[4],
+            build_s_add_u32(*prologue->dispatch_id_capture_sgpr,
+                            *prologue->dispatch_id_capture_sgpr, scalar_positive_inline_u32(1),
+                            ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(prologue_words[6],
+            build_s_addc_u32(static_cast<uint16_t>(*prologue->dispatch_id_capture_sgpr + 1u),
+                             static_cast<uint16_t>(*prologue->dispatch_id_capture_sgpr + 1u),
+                             scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(prologue_words[8], *owner_init);
   const auto owner_bias =
       build_v_add_nc_u32_e32(1, scalar_positive_inline_u32(1), 1, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(owner_bias);
-  EXPECT_EQ(prologue_words[5], *owner_bias);
-  EXPECT_EQ(prologue_words[6],
+  EXPECT_EQ(prologue_words[9], *owner_bias);
+  EXPECT_EQ(prologue_words[10],
             build_v_mov_b32_e32(2, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
 }
 

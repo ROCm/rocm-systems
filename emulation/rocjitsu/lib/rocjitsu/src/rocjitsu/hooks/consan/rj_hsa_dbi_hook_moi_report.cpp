@@ -660,6 +660,15 @@ private:
         ++summary.exact_changed_snapshot_count;
         break;
       case rocjitsu::ConSanMoiInlineExactSnapshotState::Malformed:
+        if (summary.exact_malformed_snapshot_count == 0) {
+          log_message(kLogInfo,
+                      "ConSan MOI first malformed exact snapshot reader=%llu index=%u "
+                      "version_before=%u packed_access=0x%016llx dispatch_id=0x%016llx "
+                      "reserved=%u version_after=%u",
+                      static_cast<unsigned long long>(entry.reader), i, version_before,
+                      static_cast<unsigned long long>(packed_access),
+                      static_cast<unsigned long long>(dispatch_id), reserved, version_after);
+        }
         ++summary.exact_malformed_snapshot_count;
         break;
       }
