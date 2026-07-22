@@ -482,6 +482,30 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
   return !grown_vcc || static_cast<uint32_t>(base) + width > *grown_vcc;
 }
 
+struct MoiSgprRange {
+  uint16_t base = 0;
+  uint16_t width = 0;
+};
+
+[[nodiscard]] bool
+cdna4_sgpr_ranges_conflict_with_physical_vcc(std::span<const MoiSgprRange> ranges,
+                                             uint32_t current_sgpr_count) {
+  const auto original_vcc = cdna4_physical_vcc_base(current_sgpr_count);
+  if (!original_vcc)
+    return true;
+  uint32_t required_count = current_sgpr_count;
+  for (const MoiSgprRange &range : ranges)
+    required_count = std::max<uint32_t>(required_count, range.base + range.width);
+  const auto grown_vcc = cdna4_physical_vcc_base(required_count);
+  if (!grown_vcc)
+    return true;
+  return std::ranges::any_of(ranges, [&](const MoiSgprRange &range) {
+    return range_overlaps(range.base, range.width, *original_vcc, 2u) ||
+           range_overlaps(range.base, range.width, *grown_vcc, 2u) ||
+           static_cast<uint32_t>(range.base) + range.width > *grown_vcc;
+  });
+}
+
 [[nodiscard]] std::optional<uint16_t> moi_descriptor_owner_shift(std::span<const uint8_t> image,
                                                                  uint64_t descriptor_file_offset,
                                                                  std::vector<std::string> &errors) {
@@ -1744,10 +1768,15 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   };
 
   bool assigned_any = false;
+  bool missed_required_assignment = false;
   for (auto &[root, owners] : owners_by_component) {
     const bool needs_override = std::ranges::any_of(owners, [&](uint64_t owner) {
       const MoiKernelResourceContext *context = context_for_owner(owner);
-      return context != nullptr && context->max_referenced_sgpr_count > *options.moi_exec_save_sgpr;
+      return context != nullptr &&
+             (context->max_referenced_sgpr_count > *options.moi_exec_save_sgpr ||
+              (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+               cdna4_sgpr_window_conflicts_with_physical_vcc(*options.moi_exec_save_sgpr, count,
+                                                             context->current_sgpr_count)));
     });
     if (!needs_override)
       continue;
@@ -1783,8 +1812,8 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       }
     }
     if (!selected && options.moi_engine == ConSanMoiEngine::InlineShadow &&
-        is_rdna4_family_arch(arch) && !options.moi_dynamic_stack_spill &&
-        address_free_scratch_private_limit(arch)) {
+        (is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+        !options.moi_dynamic_stack_spill && address_free_scratch_private_limit(arch)) {
       const auto reserved = [&](uint16_t base, uint16_t width) {
         return (options.moi_owner_sgpr &&
                 range_overlaps(base, width, *options.moi_owner_sgpr, 1u)) ||
@@ -1806,55 +1835,86 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
             std::max<uint32_t>(initialized_end, moi_descriptor_user_sgpr_count(descriptor) +
                                                     moi_descriptor_system_sgpr_count(descriptor));
       }
-      const auto unavailable_or_reserved = [&](uint16_t base, uint16_t width, uint16_t spill_base) {
-        return range_overlaps(base, width, spill_base, count) || reserved(base, width) ||
-               intersects(unavailable, base, width);
+      const auto architecturally_reserved = [&](uint16_t base, uint16_t width) {
+        return reserved(base, width) ||
+               (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+                range_overlaps(base, width, /*initialized SGPR base=*/0u, initialized_end));
       };
+      const auto conflicts_with_cdna4_vcc = [&](std::span<const MoiSgprRange> ranges) {
+        return arch == ROCJITSU_CODE_ARCH_CDNA4 && std::ranges::any_of(owners, [&](uint64_t owner) {
+                 const MoiKernelResourceContext *context = context_for_owner(owner);
+                 return context == nullptr || cdna4_sgpr_ranges_conflict_with_physical_vcc(
+                                                  ranges, context->current_sgpr_count);
+               });
+      };
+      const uint32_t fresh_begin = arch == ROCJITSU_CODE_ARCH_CDNA4
+                                       ? std::max(initialized_end, referenced_end)
+                                       : referenced_end;
       for (uint32_t base = util::align_up(initialized_end, 2u); !selected && base + count <= limit;
            base += 2u) {
         const uint16_t spill_base = static_cast<uint16_t>(base);
-        if (reserved(spill_base, count))
+        std::vector<MoiSgprRange> selected_ranges{{spill_base, count}};
+        if (architecturally_reserved(spill_base, count) ||
+            conflicts_with_cdna4_vcc(selected_ranges))
           continue;
-        for (uint32_t reg = referenced_end; reg < limit; ++reg) {
+        const auto unavailable_or_reserved = [&](uint16_t candidate, uint16_t width) {
+          return range_overlaps(candidate, width, spill_base, count) ||
+                 architecturally_reserved(candidate, width) ||
+                 intersects(unavailable, candidate, width);
+        };
+        const auto can_add_range = [&](uint16_t candidate, uint16_t width) {
+          std::vector<MoiSgprRange> proposed = selected_ranges;
+          proposed.push_back({candidate, width});
+          return !conflicts_with_cdna4_vcc(proposed);
+        };
+        for (uint32_t reg = fresh_begin; reg < limit; ++reg) {
           const uint16_t candidate = static_cast<uint16_t>(reg);
-          if (!range_overlaps(candidate, 1u, spill_base, count) && !reserved(candidate, 1u)) {
+          if (!unavailable_or_reserved(candidate, 1u) && can_add_range(candidate, 1u)) {
             spill_visible = candidate;
+            selected_ranges.push_back({candidate, 1u});
             break;
           }
         }
         for (uint32_t pc = 0; pc + 2u <= limit; pc += 2u) {
           const uint16_t candidate = static_cast<uint16_t>(pc);
-          if (!unavailable_or_reserved(candidate, 2u, spill_base) &&
-              (!spill_visible || !range_overlaps(candidate, 2u, *spill_visible, 1u))) {
+          if (!unavailable_or_reserved(candidate, 2u) &&
+              (!spill_visible || !range_overlaps(candidate, 2u, *spill_visible, 1u)) &&
+              can_add_range(candidate, 2u)) {
             spill_pc = candidate;
+            selected_ranges.push_back({candidate, 2u});
             break;
           }
         }
         for (uint32_t reg = 0; spill_pc && reg < limit; ++reg) {
           const uint16_t candidate = static_cast<uint16_t>(reg);
-          if (!unavailable_or_reserved(candidate, 1u, spill_base) && candidate != *spill_visible &&
-              !range_overlaps(candidate, 1u, *spill_pc, 2u)) {
+          if (!unavailable_or_reserved(candidate, 1u) && candidate != *spill_visible &&
+              !range_overlaps(candidate, 1u, *spill_pc, 2u) && can_add_range(candidate, 1u)) {
             spill_scc = candidate;
+            selected_ranges.push_back({candidate, 1u});
             break;
           }
         }
-        for (uint32_t reg = 0; spill_scc && reg < limit; ++reg) {
+        for (uint32_t reg = fresh_begin; spill_scc && reg < limit; ++reg) {
           const uint16_t candidate = static_cast<uint16_t>(reg);
-          if (!unavailable_or_reserved(candidate, 1u, spill_base) &&
+          if (!unavailable_or_reserved(candidate, 1u) &&
               (!spill_visible || candidate != *spill_visible) &&
-              !range_overlaps(candidate, 1u, *spill_pc, 2u) && candidate != *spill_scc) {
+              !range_overlaps(candidate, 1u, *spill_pc, 2u) && candidate != *spill_scc &&
+              can_add_range(candidate, 1u)) {
             spill_key = candidate;
+            selected_ranges.push_back({candidate, 1u});
             break;
           }
         }
-        for (uint32_t call = 0; spill_key && call + 2u <= limit; call += 2u) {
+        for (uint32_t call = util::align_up(fresh_begin, 2u); spill_key && call + 2u <= limit;
+             call += 2u) {
           const uint16_t candidate = static_cast<uint16_t>(call);
-          if (!unavailable_or_reserved(candidate, 2u, spill_base) &&
+          if (!unavailable_or_reserved(candidate, 2u) &&
               (!spill_visible || !range_overlaps(candidate, 2u, *spill_visible, 1u)) &&
               !range_overlaps(candidate, 2u, *spill_pc, 2u) &&
               !range_overlaps(candidate, 2u, *spill_scc, 1u) &&
-              !range_overlaps(candidate, 2u, *spill_key, 1u)) {
+              !range_overlaps(candidate, 2u, *spill_key, 1u) && can_add_range(candidate, 2u)) {
             spill_call_return = candidate;
+            selected_ranges.push_back({candidate, 2u});
             break;
           }
         }
@@ -1871,7 +1931,9 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
         for (uint32_t base = util::align_up(initialized_end, 2u); base + count <= limit;
              base += 2u) {
           const uint16_t candidate = static_cast<uint16_t>(base);
-          if (!reserved(candidate, count) && !intersects(unavailable, candidate, count)) {
+          const std::array ranges{MoiSgprRange{candidate, count}};
+          if (!architecturally_reserved(candidate, count) &&
+              !intersects(unavailable, candidate, count) && !conflicts_with_cdna4_vcc(ranges)) {
             selected = candidate;
             break;
           }
@@ -1931,8 +1993,10 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
         }
       }
     }
-    if (!selected)
+    if (!selected) {
+      missed_required_assignment = true;
       continue;
+    }
     const bool spill_backed =
         spill_pc && spill_scc && spill_key && spill_call_return &&
         (options.moi_engine != ConSanMoiEngine::InlineShadow || spill_visible);
@@ -1961,6 +2025,11 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
                                                         .visible_evidence_sgpr = spill_visible});
     }
     assigned_any = true;
+  }
+  if (missed_required_assignment) {
+    options.moi_transient_sgpr_assignments.clear();
+    result.resolved_moi_transient_sgpr_assignments.clear();
+    return false;
   }
   if (!assigned_any)
     return false;
@@ -2116,7 +2185,8 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   // assignments for the independent owners that do not.  Trying this before
   // the monolithic Inline spill fallback avoids spilling every kernel in a
   // generated library merely because one component has high scalar pressure.
-  if (is_rdna4_family_arch(arch) && options.moi_engine == ConSanMoiEngine::InlineShadow) {
+  if ((is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      options.moi_engine == ConSanMoiEngine::InlineShadow) {
     const int32_t last_base = static_cast<int32_t>((ordinary_sgpr_limit - count) & ~1u);
     for (int32_t base = last_base; base >= 0; base -= 2) {
       const uint16_t candidate = static_cast<uint16_t>(base);
@@ -2129,16 +2199,17 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
            range_overlaps(candidate, count, /*stack top=*/32u, /*stack registers=*/2u))) {
         continue;
       }
-      const bool admits_owner =
-          std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
-            return plan.source != ConSanRegisterAllocationSource::Unsupported &&
-                   !plan.owner_descriptor_file_offsets.empty() &&
-                   plan.max_referenced_sgpr_count <= candidate;
-          });
+      const auto plan_admits_window = [&](const ConSanCandidateResourcePlan &plan) {
+        return plan.source != ConSanRegisterAllocationSource::Unsupported &&
+               !plan.owner_descriptor_file_offsets.empty() &&
+               plan.max_referenced_sgpr_count <= candidate &&
+               (arch != ROCJITSU_CODE_ARCH_CDNA4 || !cdna4_sgpr_window_conflicts_with_physical_vcc(
+                                                        candidate, count, plan.current_sgpr_count));
+      };
+      const bool admits_owner = std::ranges::any_of(result.resource_plans, plan_admits_window);
       const bool excludes_owner =
           std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
-            return !plan.owner_descriptor_file_offsets.empty() &&
-                   plan.max_referenced_sgpr_count > candidate;
+            return !plan.owner_descriptor_file_offsets.empty() && !plan_admits_window(plan);
           });
       if (!admits_owner || !excludes_owner)
         continue;

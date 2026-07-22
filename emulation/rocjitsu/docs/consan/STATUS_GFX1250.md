@@ -260,9 +260,10 @@ do not promote matrix cells without the end-to-end evidence above.
 - 2026-07-22: P0 TopK Sampled gains bounded owner-local scalar recovery.
   Owner/component liveness now selects the eight transient SGPRs independently
   on gfx1250 instead of requiring one global window across every high-pressure
-  owner.  All 731 ConSan host tests pass.  One-repetition diagnostic artifact
-  `consan-validation-gfx1250-pytorch-topk-sampled-ownerlocal-dirty-20260722-216`
-  preserves both exact FP64/BF16 oracles and dynamic completeness, raises
+  owner.  All 731 ConSan host tests pass.  One-repetition clean artifact
+  `consan-validation-gfx1250-pytorch-topk-sampled-ownerlocal-clean-20260722-217`
+  at commit `935acc5e01` preserves both exact FP64/BF16 oracles in 93.66
+  seconds and dynamic completeness, and raises
   coverage from 102,598 to 102,639 accesses and from 15,182 to 15,950 barriers,
   and reduces root `forbidden_overlap` failures from 5,128 to 4,545.  The
   remaining `gatherTopK` components have no common dead eight-SGPR window and

@@ -1003,8 +1003,7 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
     for (ConSanCandidateResourcePlan &plan : result.resource_plans) {
       ConSanOptions owner_options = options;
       if (!options.moi_transient_sgpr_assignments.empty() &&
-          !apply_moi_transient_sgpr_assignment(owner_options,
-                                               plan.owner_descriptor_file_offsets)) {
+          !apply_moi_transient_sgpr_assignment(owner_options, plan.owner_descriptor_file_offsets)) {
         continue;
       }
       if (!owner_options.moi_dispatch_id_sgpr)
@@ -1022,9 +1021,10 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
       }
     }
   }
-  if (is_rdna4_family_arch(state.arch) && options.automatic_moi_partial_exec_save_sgprs &&
-      options.moi_exec_save_sgpr) {
+  if ((is_rdna4_family_arch(state.arch) || state.arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      options.automatic_moi_partial_exec_save_sgprs && options.moi_exec_save_sgpr) {
     const uint16_t exec_base = *options.moi_exec_save_sgpr;
+    const uint16_t exec_count = moi_exec_save_sgpr_count(options, state.arch);
     for (ConSanCandidateResourcePlan &plan : result.resource_plans) {
       const bool has_owner_override =
           std::ranges::any_of(plan.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
@@ -1035,8 +1035,11 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
         if (apply_moi_transient_sgpr_assignment(owner_options, plan.owner_descriptor_file_offsets))
           continue;
       }
+      const bool conflicts_with_cdna4_vcc = state.arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+                                            cdna4_sgpr_window_conflicts_with_physical_vcc(
+                                                exec_base, exec_count, plan.current_sgpr_count);
       if (!plan.owner_descriptor_file_offsets.empty() &&
-          plan.max_referenced_sgpr_count > exec_base) {
+          (plan.max_referenced_sgpr_count > exec_base || conflicts_with_cdna4_vcc)) {
         plan.source = ConSanRegisterAllocationSource::Unsupported;
         plan.reason = ConSanRegisterPlanReason::ForbiddenOverlap;
         plan.scratch_vgpr.reset();

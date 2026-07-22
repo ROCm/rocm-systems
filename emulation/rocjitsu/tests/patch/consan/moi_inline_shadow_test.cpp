@@ -3268,6 +3268,168 @@ TEST(ConSanMoi, Gfx1250InlineUsesComponentLocalScalarSpillForMixedPressureOwners
   EXPECT_TRUE(result.final_validation_passed);
 }
 
+TEST(ConSanMoi, Cdna4InlineUsesComponentLocalScalarSpillOutsidePreloadsAndPhysicalVcc) {
+  const auto guest = build_cdna4_ds_store_b32(
+      /*vaddr=*/0, /*vdata=*/0, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto barrier = build_cdna4_s_barrier(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(guest && barrier);
+  const auto make_owner = [&](std::span<const uint16_t> live_sgprs) {
+    std::vector<uint32_t> words(guest->begin(), guest->end());
+    for (uint16_t sgpr : live_sgprs)
+      words.push_back(build_s_mov_b32(/*sdst=*/52u, sgpr, ROCJITSU_CODE_ARCH_CDNA4));
+    words.push_back(*barrier);
+    for (uint16_t sgpr : live_sgprs)
+      words.push_back(build_s_mov_b32(/*sdst=*/52u, sgpr, ROCJITSU_CODE_ARCH_CDNA4));
+    words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+    return words;
+  };
+
+  const std::array<uint16_t, 2> low_live = {8u, 9u};
+  std::vector<uint16_t> high_live;
+  for (uint16_t sgpr = 8u; sgpr <= 85u; ++sgpr) {
+    // Leave one transient PC pair and SCC slot outside every viable 30-SGPR
+    // spill window. Fresh s86:s89 carry persistent dense-router state.
+    if (sgpr != 52u && sgpr != 53u && sgpr != 54u)
+      high_live.push_back(sgpr);
+  }
+  std::vector<uint8_t> bytes = make_rdna4_code_object_with_local_function(
+      make_owner(low_live), make_owner(high_live), {}, kRdna4Wave64AllVgprsGranulated,
+      /*function_is_kernel=*/true, /*wave32=*/false);
+  mutate_elf_header(bytes,
+                    [](Elf64_Ehdr &header) { header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950; });
+  const auto configure_descriptor = [](KD &descriptor) {
+    // Twelve allocation quanta give 96 decoded SGPRs and physical VCC at
+    // s90:s91. The first eight SGPRs include a kernarg pointer and preload and
+    // must not be borrowed even when decoded instruction liveness is empty.
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 11u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 8u);
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1u);
+    AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 4u);
+    AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_OFFSET, 0u);
+  };
+  mutate_kernel_descriptor(bytes, "lds_probe", configure_descriptor);
+  mutate_kernel_descriptor(bytes, "lds_helper", configure_descriptor);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.scratch_vgpr = 8;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_inline_workgroup_shadow = true;
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 8u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u)
+      << testing::PrintToString(result.warnings);
+  const ConSanMoiTransientSgprAssignment &assignment =
+      result.resolved_moi_transient_sgpr_assignments.front();
+  ASSERT_TRUE(assignment.spill_backed);
+  ASSERT_TRUE(assignment.visible_evidence_sgpr);
+  ASSERT_TRUE(assignment.indirect_pc_sgpr);
+  ASSERT_TRUE(assignment.indirect_scc_sgpr);
+  ASSERT_TRUE(assignment.dispatch_key_sgpr);
+  ASSERT_TRUE(assignment.call_return_sgpr);
+
+  constexpr uint16_t kInitializedEnd = 8u;
+  constexpr uint16_t kOriginalPhysicalVcc = 90u;
+  constexpr uint16_t kGrownPhysicalVcc = 98u;
+  const std::array ranges = {
+      std::pair{assignment.exec_save_sgpr, kConSanMoiInlineExecSaveSgprCount},
+      std::pair{*assignment.visible_evidence_sgpr, uint16_t{1u}},
+      std::pair{*assignment.indirect_pc_sgpr, uint16_t{2u}},
+      std::pair{*assignment.indirect_scc_sgpr, uint16_t{1u}},
+      std::pair{*assignment.dispatch_key_sgpr, uint16_t{1u}},
+      std::pair{*assignment.call_return_sgpr, uint16_t{2u}},
+  };
+  for (const auto &[base, width] : ranges) {
+    EXPECT_GE(base, kInitializedEnd);
+    EXPECT_LE(static_cast<uint32_t>(base) + width, kGrownPhysicalVcc);
+    EXPECT_FALSE(base < kOriginalPhysicalVcc + 2u && kOriginalPhysicalVcc < base + width);
+    EXPECT_FALSE(base < kGrownPhysicalVcc + 2u && kGrownPhysicalVcc < base + width);
+  }
+  EXPECT_TRUE(std::ranges::all_of(result.resource_plans, [](const auto &plan) {
+    return (plan.site_kind != ConSanResourceSiteKind::Access &&
+            plan.site_kind != ConSanResourceSiteKind::Barrier) ||
+           plan.source != ConSanRegisterAllocationSource::Unsupported;
+  }));
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return (patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
+            patch.kind == ConSanPatchKind::TrampolineMoiInlineEpochBarrier) &&
+           patch.required_private_segment_size > 0u;
+  }));
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSanMoi, Cdna4InlineFailsClosedWhenOneIncompatibleOwnerHasNoSpillRouter) {
+  const auto guest = build_cdna4_ds_store_b32(
+      /*vaddr=*/0, /*vdata=*/0, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto barrier = build_cdna4_s_barrier(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(guest && barrier);
+  const auto make_owner = [&](std::span<const uint16_t> live_sgprs) {
+    std::vector<uint32_t> words(guest->begin(), guest->end());
+    for (uint16_t sgpr : live_sgprs)
+      words.push_back(build_s_mov_b32(/*sdst=*/89u, sgpr, ROCJITSU_CODE_ARCH_CDNA4));
+    words.push_back(*barrier);
+    for (uint16_t sgpr : live_sgprs)
+      words.push_back(build_s_mov_b32(/*sdst=*/89u, sgpr, ROCJITSU_CODE_ARCH_CDNA4));
+    words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+    return words;
+  };
+
+  const std::array<uint16_t, 2> low_live = {8u, 9u};
+  std::vector<uint16_t> high_live;
+  for (uint16_t sgpr = 8u; sgpr <= 88u; ++sgpr)
+    high_live.push_back(sgpr);
+  std::vector<uint8_t> bytes = make_rdna4_code_object_with_local_function(
+      make_owner(low_live), make_owner(high_live), {}, kRdna4Wave64AllVgprsGranulated,
+      /*function_is_kernel=*/true, /*wave32=*/false);
+  mutate_elf_header(bytes,
+                    [](Elf64_Ehdr &header) { header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950; });
+  const auto configure_descriptor = [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 11u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 8u);
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1u);
+    AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 4u);
+  };
+  mutate_kernel_descriptor(bytes, "lds_probe", configure_descriptor);
+  mutate_kernel_descriptor(bytes, "lds_helper", configure_descriptor);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.scratch_vgpr = 8;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_inline_workgroup_shadow = true;
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 8u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  EXPECT_TRUE(result.resolved_moi_transient_sgpr_assignments.empty());
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("could not place a fresh automatic EXEC-save SGPR window") !=
+           std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
+                               &ConSanPatchInfo::kind),
+            0u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
+                               &ConSanPatchInfo::kind),
+            0u);
+}
+
 TEST(ConSanMoi, InlineShadowPreservesTwoAddressLoadAddressAliasedBySecondResult) {
   const std::array<uint32_t, 3> text_words = {
       0xD9DC1D1Cu,

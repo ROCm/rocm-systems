@@ -104,7 +104,7 @@ flowchart TD
     SA0["SA0 TODO<br/>Sampled TP2 admission/selection<br/>and broader runtime coverage"]
     SA1["SA1 TODO<br/>Sampled immediate and host-scan agreement"]
     IS0A["IS0A DONE<br/>per-owner CDNA4 persistent tuples<br/>below AccVGPR and VCC boundaries"]
-    IS0["IS0 TODO<br/>Inline TP1 lifecycle clean;<br/>atomic breadth open"]
+    IS0["IS0 ACTIVE<br/>VCC-safe component-local Inline scalar spill;<br/>TP1/TP2 clean recovery"]
     IS1["IS1 TODO<br/>Stream-K scalar state installed;<br/>AcqRel metadata race remains"]
     F0["F0 MILESTONE<br/>all four standard-v1 profiles<br/>feature-complete on focused tests"]
   end
@@ -265,8 +265,8 @@ flowchart TD
   classDef milestone fill:#6f42c1,stroke:#e2d5ff,color:#ffffff,stroke-width:3px
 
   class R0,R1,E0,B0,B1,B2,B3,B4,B5A,S0,S1,S2,S3,S4,S5,S6A,S6B,S7A,S7B,S8A,S8B,S8C,S8D,I4,SC0,SA0A,IS0A done
-  class RR0,V5,V6,V7,ST0 active
-  class R2,E1,C0,B5B,I0,I1,I2,I3,A0,A1,A2,A3,A4,A5,SC1,RR1,SA0,SA1,IS0,IS1,Q0,Q1,Q2,Q3,V0,V1,V2,V3,V4,V8 todo
+  class RR0,IS0,V5,V6,V7,ST0 active
+  class R2,E1,C0,B5B,I0,I1,I2,I3,A0,A1,A2,A3,A4,A5,SC1,RR1,SA0,SA1,IS1,Q0,Q1,Q2,Q3,V0,V1,V2,V3,V4,V8 todo
   class F0,G0 milestone
 ```
 
@@ -485,6 +485,16 @@ mutation without final-byte proof, or a diagnostic without an independent
 oracle is not an accepted row.
 
 ## Progress log
+
+- 2026-07-22: `IS0` becomes ACTIVE/blue after current-tip physical TP1
+  decode/combined and TP2 diagnostics invalidate their older Inline evidence.
+  The corrected CDNA4 VCC model proves the former 30-SGPR transient windows
+  unsafe; both objects now fail closed with zero patches.  The active fix is
+  component-local spill-backed Inline scalar state that protects kernarg
+  preloads and both original and allocation-grown physical VCC.  `SA0` stays
+  TODO/light gray: current TP1, TP2, and MFMA diagnostics consistently isolate
+  its separate persistent-VGPR/AccVGPR boundary instead of consuming the
+  active implementation lane.
 
 - 2026-07-22: Refreshed the Mermaid states to distinguish unfinished work
   from work actually in flight.  Broad, partially explored implementation
