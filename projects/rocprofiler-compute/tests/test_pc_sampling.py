@@ -21,23 +21,22 @@ config["METRIC_COMPARE"] = False
 num_devices = 1
 
 
-PC_SAMPLING_HOST_TRAP_FILES = sorted([
-    "sysinfo.csv",
-])
-
-PC_SAMPLING_STOCHASTIC_FILES = sorted([
-    "sysinfo.csv",
-])
-
-
-def _assert_pc_sampling_files(file_dict, expected):
+def _assert_pc_sampling_files(file_dict):
     """Assert PID-prefixed PC sampling and code-object output files."""
-    keys = list(file_dict.keys())
-    code_obj = [k for k in keys if k.endswith("_code_obj_info.json")]
+    file_names = file_dict.keys()
+    code_obj = [
+        file_name
+        for file_name in file_names
+        if file_name.endswith("_code_obj_info.json")
+    ]
     assert len(code_obj) == 1, (
         f"expected exactly one *_code_obj_info.json, got {code_obj}"
     )
-    pc_sampling_results = [k for k in keys if k.endswith("_ps_file_results.json")]
+    pc_sampling_results = [
+        file_name
+        for file_name in file_names
+        if file_name.endswith("_ps_file_results.json")
+    ]
     assert len(pc_sampling_results) == 1, (
         f"expected exactly one *_ps_file_results.json, got {pc_sampling_results}"
     )
@@ -48,8 +47,8 @@ def _assert_pc_sampling_files(file_dict, expected):
     assert pc_sampling_pid == code_obj_pid
 
     dynamic_files = {*code_obj, *pc_sampling_results}
-    remaining = sorted(k for k in keys if k not in dynamic_files)
-    assert remaining == sorted(expected)
+    remaining = file_names - dynamic_files
+    assert remaining == {"sysinfo.csv"}
 
 
 def is_pc_sampling_not_supported(output):
@@ -99,7 +98,7 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute, monkeypat
 
     assert code == 0
     file_dict = common.check_non_pmc_files(workload_dir, num_devices, 1)
-    _assert_pc_sampling_files(file_dict, PC_SAMPLING_HOST_TRAP_FILES)
+    _assert_pc_sampling_files(file_dict)
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -137,7 +136,7 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute, monkeypa
 
     assert code == 0
     file_dict = common.check_non_pmc_files(workload_dir, num_devices, 1)
-    _assert_pc_sampling_files(file_dict, PC_SAMPLING_STOCHASTIC_FILES)
+    _assert_pc_sampling_files(file_dict)
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -271,7 +270,7 @@ def test_pc_sampling_profile_then_analyze(
 
     assert code == 0
     file_dict = common.check_non_pmc_files(workload_dir, num_devices, 1)
-    _assert_pc_sampling_files(file_dict, PC_SAMPLING_HOST_TRAP_FILES)
+    _assert_pc_sampling_files(file_dict)
 
     code = binary_handler_analyze_rocprof_compute(
         [
@@ -365,7 +364,7 @@ def test_pc_sampling_with_sol_block(
 
     assert code == 0
     file_dict = common.check_csv_files(workload_dir, num_devices, 1)
-    _assert_pc_sampling_files(file_dict, PC_SAMPLING_HOST_TRAP_FILES)
+    _assert_pc_sampling_files(file_dict)
 
     assert common.check_file_pattern("- '21'", f"{workload_dir}/profiling_config.yaml")
     assert common.check_file_pattern("- '2'", f"{workload_dir}/profiling_config.yaml")
