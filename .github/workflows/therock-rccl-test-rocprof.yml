@@ -76,9 +76,10 @@ jobs:
           repository: "ROCm/TheRock"
           ref: d8e27dff1d165462ffa5bd50057a075b943c97c5 # 2026-07-13
 
-      - name: Checkout rocm-systems
+      - name: Checkout rocm-systems scripts
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          sparse-checkout: .github/scripts
           path: "rocm-systems"
 
       - name: Run setup test environment
@@ -99,10 +100,16 @@ jobs:
         env:
           THEROCK_BIN_DIR: ${{ env.THEROCK_BIN_DIR }}
         run: |
+          NOTIFY_ARGS=""
+          if [ -n "${{ inputs.notify_email }}" ]; then
+            NOTIFY_ARGS="$NOTIFY_ARGS --notify-email ${{ inputs.notify_email }}"
+          fi
+          if [ -n "${{ inputs.notify_webhook }}" ]; then
+            NOTIFY_ARGS="$NOTIFY_ARGS --notify-webhook ${{ inputs.notify_webhook }}"
+          fi
           set -o pipefail
-          pytest rocm-systems/.github/scripts/test_rccl_rocprof.py -v -s \
-            --log-cli-level=info \
-            --tb=short \
+          python rocm-systems/.github/scripts/test_rccl_rocprof.py \
+            $NOTIFY_ARGS \
             2>&1 | tee rocprof_test_results.txt
 
       - name: Upload test results
@@ -111,32 +118,3 @@ jobs:
         with:
           name: rocprof-smoke-test-results-${{ inputs.amdgpu_families }}
           path: rocprof_test_results.txt
-
-      - name: Send notifications
-        if: always() && (inputs.notify_email != '' || inputs.notify_webhook != '')
-        env:
-          NOTIFY_EMAIL: ${{ inputs.notify_email }}
-          NOTIFY_WEBHOOK: ${{ inputs.notify_webhook }}
-          STATUS: ${{ job.status }}
-          REPORT_FILE: rocprof_test_results.txt
-        run: |
-          python3 -c "
-          import os, sys
-          sys.path.insert(0, 'rocm-systems/.github/scripts')
-          from rccl_ci_utils import send_email_report, send_teams_webhook
-          from pathlib import Path
-
-          status = os.environ.get('STATUS', 'UNKNOWN')
-          report = ''
-          report_file = Path(os.environ.get('REPORT_FILE', ''))
-          if report_file.exists():
-              lines = report_file.read_text().splitlines()
-              report = '\n'.join(lines[-100:])
-          prefix = 'RCCL rocprofv3 Smoke Test'
-          email = os.environ.get('NOTIFY_EMAIL', '')
-          webhook = os.environ.get('NOTIFY_WEBHOOK', '')
-          if email:
-              send_email_report(report, email, status, subject_prefix=prefix)
-          if webhook:
-              send_teams_webhook(report, webhook, status, subject_prefix=prefix)
-          "
