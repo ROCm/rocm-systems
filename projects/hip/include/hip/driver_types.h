@@ -467,6 +467,36 @@ typedef enum hipMemcpyFlags {
 } hipMemcpyFlags;
 
 /**
+ * Per-entry wait condition for hipExtMemcpyBatchAsync. Reserved for future use.
+ */
+typedef struct hipExtMemcpyWait {
+  void*    addr;       ///< GPU address to poll (NULL = no wait, use stream ordering)
+  uint64_t value;      ///< Reference value for comparison
+  uint64_t mask;       ///< AND mask applied before comparison
+  uint32_t compareOp;  ///< Reserved; comparison function
+} hipExtMemcpyWait;
+
+/**
+ * Per-entry signal-after-copy for hipExtMemcpyBatchAsync. Reserved for future use.
+ */
+typedef struct hipExtMemcpySignal {
+  void*    addr;       ///< GPU address to signal (NULL = no signal)
+  uint64_t data;       ///< Data value for the atomic operation
+  uint32_t signalOp;   ///< Reserved; atomic operation
+} hipExtMemcpySignal;
+
+/**
+ * Per-entry operation type for hipExtMemcpyBatchAsync.
+ * Values can be combined with bitwise OR for indirect operations.
+ */
+typedef enum hipExtMemcpyOp {
+  hipExtMemcpyOpDefault        = 0x0,  ///< Regular linear copy
+  hipExtMemcpyOpSwap           = 0x1,  ///< Swap contents of A and B
+  hipExtMemcpyOpIndirectSrc    = 0x2,  ///< src is void** (late-bound at execution)
+  hipExtMemcpyOpIndirectDst    = 0x4,  ///< dst is void** (late-bound at execution)
+} hipExtMemcpyOp;
+
+/**
  * Flags to specify order in which source pointer is accessed by Batch memcpy
  */
 typedef enum hipMemcpySrcAccessOrder {
