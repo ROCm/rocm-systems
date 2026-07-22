@@ -272,6 +272,17 @@ flowchart TD
 
 ## Reconnaissance conclusions
 
+- 2026-07-22: TP1 decode/combined Record/Replay is green within ACTIVE/blue
+  `RR0`.  The same prospectively reviewed DPP-phase mutation used to close its
+  SuperCollider sibling accepts its independently frozen Record/Replay
+  qualified-miss policy in artifact
+  `consan-validation-gfx950-tp1-decode-rr-fault-dpp-phase-20260722-112`.
+  Exact mutation accounting is 1/1/1, both workload oracles pass, surviving
+  coverage is complete at 240/240 accesses plus 61/61 barriers, execution and
+  cleanup are bounded, provenance is clean at `fbde18c5d7`, and physical
+  health passes before and after.  TP2 and CLIP remain the runnable model
+  Record/Replay frontier.
+
 - 2026-07-22: `SC1` becomes DONE/green after TP1 decode/combined closes the
   final runnable SuperCollider model cell.  Artifact
   `consan-validation-gfx950-tp1-decode-supercollider-fault-dpp-phase-20260722-111`
