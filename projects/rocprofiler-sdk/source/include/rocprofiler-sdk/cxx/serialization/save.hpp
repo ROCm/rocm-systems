@@ -196,6 +196,20 @@ save(ArchiveT& ar, rocprofiler_stream_id_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_graph_exec_id_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(handle);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_graph_node_id_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(handle);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_counter_id_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(handle);
@@ -478,6 +492,22 @@ save(ArchiveT& ar, rocprofiler_callback_tracing_rccl_api_data_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& /*ar*/, rocprofiler_rocshmem_api_retval_t /*data*/)
+{
+    // every traced rocSHMEM API returns void; nothing to record
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_callback_tracing_rocshmem_api_data_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(size);
+    // ROCP_SDK_SAVE_DATA_FIELD(args);
+    ROCP_SDK_SAVE_DATA_FIELD(retval);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_rocdecode_api_retval_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(uint64_t_retval);
@@ -655,6 +685,23 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_rocjpeg_api_record_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_buffer_tracing_rocshmem_api_record_t data)
+{
+    save_buffer_tracing_api_record(ar, data);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_buffer_tracing_rocshmem_api_ext_record_t data)
+{
+    save_buffer_tracing_api_record(ar, data);
+    auto args = sdk::serialization::get_buffer_tracing_args(data);
+    ROCP_SDK_SAVE_VALUE("args", args);
+    ROCP_SDK_SAVE_DATA_FIELD(retval);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_ompt_target_t data)
 {
     ROCP_SDK_SAVE_DATA_VALUE("kind", kind);
@@ -715,6 +762,23 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_kernel_dispatch_record_t data)
     ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(dispatch_info);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_buffer_tracing_hip_graph_record_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(kind);
+    ROCP_SDK_SAVE_DATA_FIELD(operation);
+    ROCP_SDK_SAVE_DATA_FIELD(correlation_id);
+    ROCP_SDK_SAVE_DATA_FIELD(thread_id);
+    ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(agent_id);
+    ROCP_SDK_SAVE_DATA_FIELD(queue_id);
+    ROCP_SDK_SAVE_DATA_FIELD(graph_exec_id);
+    ROCP_SDK_SAVE_DATA_FIELD(kernel_dispatch_count);
 }
 
 template <typename ArchiveT>

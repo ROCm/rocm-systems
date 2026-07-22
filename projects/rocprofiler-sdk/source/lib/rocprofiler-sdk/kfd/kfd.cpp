@@ -45,6 +45,7 @@
 #include <sys/poll.h>
 #include <unistd.h>
 #include <atomic>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
@@ -242,10 +243,10 @@ parse_event<KFD_EVENT_PAGE_MIGRATE_START>(const agent_id_map_t& agents, std::str
     e.preferred_agent     = get_node_agent_id(agents, _preferred_node);
     e.error_code          = 0;
 
-    ROCP_INFO << fmt::format(
+    ROCP_TRACE << fmt::format(
         "Page migrate start [ ts: {} pid: {} addr s: 0x{:X} addr "
         "e: 0x{:X} size: {}B from node: {} to node: {} prefetch node: {} preferred node: {} "
-        "trigger: {} ] \n",
+        "trigger: {} ]",
         e.timestamp,
         e.pid,
         e.start_address.value,
@@ -312,16 +313,16 @@ parse_event<KFD_EVENT_PAGE_MIGRATE_END>(const agent_id_map_t& agents, std::strin
     e.src_agent           = get_node_agent_id(agents, _from_node);
     e.dst_agent           = get_node_agent_id(agents, _to_node);
 
-    ROCP_INFO << fmt::format("Page migrate end [ ts: {} pid: {} addr s: 0x{:X} addr e: "
-                             "0x{:X} from node: {} to node: {} trigger: {} error code: {}] \n",
-                             e.timestamp,
-                             e.pid,
-                             e.start_address.value,
-                             e.end_address.value,
-                             e.src_agent.handle,
-                             e.dst_agent.handle,
-                             _operation,
-                             e.error_code);
+    ROCP_TRACE << fmt::format("Page migrate end [ ts: {} pid: {} addr s: 0x{:X} addr e: "
+                              "0x{:X} from node: {} to node: {} trigger: {} error code: {}]",
+                              e.timestamp,
+                              e.pid,
+                              e.start_address.value,
+                              e.end_address.value,
+                              e.src_agent.handle,
+                              e.dst_agent.handle,
+                              _operation,
+                              e.error_code);
 
     rec.kind      = e.kind;
     rec.operation = e.operation;
@@ -376,12 +377,12 @@ parse_event<KFD_EVENT_PAGE_FAULT_START>(const agent_id_map_t& agents, std::strin
         ROCP_CI_LOG(WARNING) << "Unknown PAGE_FAULT_START fault type. Expected read or write fault";
     }
 
-    ROCP_INFO << fmt::format("Page fault start [ ts: {} pid: {} addr: 0x{:X} node: {} ] \n",
-                             e.timestamp,
-                             e.pid,
-                             e.address.value,
-                             e.agent_id.handle,
-                             _fault);
+    ROCP_TRACE << fmt::format("Page fault start [ ts: {} pid: {} addr: 0x{:X} node: {} ]",
+                              e.timestamp,
+                              e.pid,
+                              e.address.value,
+                              e.agent_id.handle,
+                              _fault);
 
     rec.kind      = e.kind;
     rec.operation = e.operation;
@@ -435,8 +436,8 @@ parse_event<KFD_EVENT_PAGE_FAULT_END>(const agent_id_map_t& agents, std::string_
         ROCP_CI_LOG(WARNING) << "Unknown PAGE_FAULT_END migrated/updated state";
     }
 
-    ROCP_INFO << fmt::format(
-        "Page fault end [ ts: {} pid: {} addr: 0x{:X} node: {} resolution: {} ] \n",
+    ROCP_TRACE << fmt::format(
+        "Page fault end [ ts: {} pid: {} addr: 0x{:X} node: {} resolution: {} ]",
         e.timestamp,
         e.pid,
         e.address.value,
@@ -480,11 +481,11 @@ parse_event<KFD_EVENT_QUEUE_EVICTION>(const agent_id_map_t& agents, std::string_
     e.operation = static_cast<rocprofiler_kfd_event_queue_operation_t>(_operation);
     e.agent_id  = get_node_agent_id(agents, _node_id);
 
-    ROCP_INFO << fmt::format("Queue evict [ ts: {} pid: {} node: {} trigger: {} ] \n",
-                             e.timestamp,
-                             e.pid,
-                             e.agent_id.handle,
-                             _operation);
+    ROCP_TRACE << fmt::format("Queue evict [ ts: {} pid: {} node: {} trigger: {} ]",
+                              e.timestamp,
+                              e.pid,
+                              e.agent_id.handle,
+                              _operation);
 
     rec.kind      = e.kind;
     rec.operation = e.operation;
@@ -542,11 +543,11 @@ parse_event<KFD_EVENT_QUEUE_RESTORE>(const agent_id_map_t& agents, std::string_v
         return {};
     }
 
-    ROCP_INFO << fmt::format("Queue restore [ ts: {} pid: {} node: {} rescheduled: {} ] \n",
-                             e.timestamp,
-                             e.pid,
-                             e.agent_id.handle,
-                             e.operation == ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED);
+    ROCP_TRACE << fmt::format("Queue restore [ ts: {} pid: {} node: {} rescheduled: {} ]",
+                              e.timestamp,
+                              e.pid,
+                              e.agent_id.handle,
+                              e.operation == ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED);
 
     rec.kind      = e.kind;
     rec.operation = e.operation;
@@ -590,14 +591,15 @@ parse_event<KFD_EVENT_UNMAP_FROM_GPU>(const agent_id_map_t& agents, std::string_
     e.end_address.value   = page_to_bytes(_start_address + _size);
     e.agent_id            = get_node_agent_id(agents, _node_id);
 
-    ROCP_INFO << fmt::format("Unmap from GPU [ ts: {} pid: {} start addr: 0x{:X} end addr: 0x{:X}  "
-                             "node: {} trigger {} ] \n",
-                             e.timestamp,
-                             e.pid,
-                             e.start_address.value,
-                             e.end_address.value,
-                             e.agent_id.handle,
-                             _operation);
+    ROCP_TRACE << fmt::format(
+        "Unmap from GPU [ ts: {} pid: {} start addr: 0x{:X} end addr: 0x{:X}  "
+        "node: {} trigger {} ]",
+        e.timestamp,
+        e.pid,
+        e.start_address.value,
+        e.end_address.value,
+        e.agent_id.handle,
+        _operation);
 
     rec.kind      = e.kind;
     rec.operation = e.operation;
@@ -631,8 +633,8 @@ parse_event<KFD_EVENT_DROPPED_EVENT>(const agent_id_map_t&, std::string_view str
         return {};
     }
 
-    ROCP_TRACE << fmt::format(
-        "Dropped events [ ts: {} pid: {} dropped count: {} ] \n", e.timestamp, e.pid, e.count);
+    ROCP_WARNING << fmt::format(
+        "KFD Dropped events [ ts: {} pid: {} dropped count: {} ]", e.timestamp, e.pid, e.count);
 
     rec.kind      = e.kind;
     rec.operation = e.operation;
@@ -670,7 +672,7 @@ to_rocprofiler_kfd_event_id(const std::string_view event_data)
         to_rocprofiler_kfd_event_id_func(kfd_id, std::make_index_sequence<KFD_EVENT_LAST>{});
 
     ROCP_CI_LOG_IF(WARNING, event_id == std::numeric_limits<size_t>::max())
-        << fmt::format("Failed to parse KFD event ID {}. Parsed ID: {}, kfd_event_id ID: {}\n",
+        << fmt::format("Failed to parse KFD event ID {}. Parsed ID: {}, kfd_event_id ID: {}",
                        event_data[0],
                        kfd_id,
                        event_id);
@@ -699,7 +701,18 @@ kfd_readlines(const std::string_view str, void(handler)(std::string_view))
         assert(char_count > 0);
         std::string_view event_str{cursor, char_count};
 
-        ROCP_INFO << fmt::format("KFD event: [{}]", event_str);
+        ROCP_TRACE << fmt::format("KFD event: [{}]", [&]() {
+            auto escaped = std::string{};
+            escaped.reserve(event_str.size());
+            for(unsigned char c : event_str)
+            {
+                if(std::isprint(c) != 0)
+                    escaped += static_cast<char>(c);
+                else
+                    escaped += fmt::format("\\x{:02x}", c);
+            }
+            return escaped;
+        }());
         handler(event_str);
 
         cursor = pos + 1;
@@ -896,7 +909,7 @@ struct poll_kfd_t
 
         const auto kfd_flags = kfd_bitmask(rprof_ev, std::make_index_sequence<KFD_EVENT_LAST>{});
 
-        ROCP_INFO << fmt::format("Setting KFD flags to [0b{:b}] \n", kfd_flags);
+        ROCP_INFO << fmt::format("Setting KFD flags to [0b{:b}]", kfd_flags);
 
         // Create fd for notifying thread when we want to wake it up, and an eventfd for any events
         // to this thread
@@ -909,7 +922,7 @@ struct poll_kfd_t
             const auto retcode = pipe2(&thread_pipes[0], DEFAULT_FLAGS);
             const auto _err    = errno;
             ROCP_FATAL_IF(retcode != 0)
-                << fmt::format("Pipe creation for page-migration thread notify returned {} :: {}\n",
+                << fmt::format("Pipe creation for page-migration thread notify returned {} :: {}",
                                retcode,
                                strerror(_err));
         }();
@@ -931,7 +944,7 @@ struct poll_kfd_t
                 auto gpu_event_fd = get_node_fd(agent->gpu_id);
                 file_handles.emplace_back(pollfd{gpu_event_fd, POLLIN, 0});
                 ROCP_INFO << fmt::format(
-                    "GPU node {} with fd {} added\n", agent->gpu_id, gpu_event_fd);
+                    "GPU node {} with fd {} added", agent->gpu_id, gpu_event_fd);
             }
         }
 
@@ -941,7 +954,7 @@ struct poll_kfd_t
             auto& fd         = file_handles[i];
             auto  write_size = write(fd.fd, &kfd_flags, sizeof(kfd_flags));
             ROCP_INFO << fmt::format(
-                "Writing {} to GPU fd {} ({} bytes)\n", kfd_flags, fd.fd, write_size);
+                "Writing {} to GPU fd {} ({} bytes)", kfd_flags, fd.fd, write_size);
             CHECK(write_size == sizeof(kfd_flags));
         }
 
@@ -961,7 +974,7 @@ struct poll_kfd_t
 
     ~poll_kfd_t()
     {
-        ROCP_INFO << fmt::format("Terminating poll_kfd\n");
+        ROCP_INFO << fmt::format("Terminating poll_kfd");
         if(!active) return;
 
         // wake thread up
@@ -971,7 +984,7 @@ struct poll_kfd_t
             bytes_written = write(thread_notify.fd, "E", 1);
         } while(bytes_written == -1 && (errno == EINTR || errno == EAGAIN));
 
-        ROCP_INFO << fmt::format("Background thread signalled\n");
+        ROCP_INFO << fmt::format("Background thread signalled");
 
         bg_thread.join();
 
@@ -1489,7 +1502,7 @@ poll_events(small_vector<pollfd> file_handles)
     for(auto& fd : file_handles)
     {
         ROCP_INFO << fmt::format(
-            "Handle = {}, events = {}, revents = {}\n", fd.fd, fd.events, fd.revents);
+            "Handle = {}, events = {}, revents = {}", fd.fd, fd.events, fd.revents);
     }
 
     while(true)
@@ -1509,7 +1522,7 @@ poll_events(small_vector<pollfd> file_handles)
             {
                 close(f.fd);
             }
-            ROCP_INFO << "Terminating background thread\n";
+            ROCP_INFO << "Terminating background thread";
             return;
         }
 

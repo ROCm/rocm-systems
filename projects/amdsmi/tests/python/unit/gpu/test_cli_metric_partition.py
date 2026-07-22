@@ -33,6 +33,10 @@ lock the following behaviors in place:
   lock state attached to a missing value).
 * GFX lock state is ``N/A`` when the lock-status word is absent, ``DISABLED``
   when the word is present and the bit is clear (0 is a valid reading).
+
+A second class covers the virtual-OS case: the parser omits ``--partition`` on
+non-baremetal platforms, so ``args`` has no ``partition`` attribute and
+``metric_gpu`` must not read it.
 """
 
 import argparse
@@ -70,6 +74,28 @@ class _FakeLibraryException(Exception):
 
     def get_error_info(self):
         return self._message
+
+
+def _raise_lib_exc(*_args, **_kwargs):
+    raise _FakeLibraryException("mock error")
+
+
+_UNSET = object()
+
+
+def _restore_attr(interface, name, original):
+    if original is _UNSET:
+        delattr(interface, name)
+    else:
+        setattr(interface, name, original)
+
+
+def _patch_interface(testcase, interface, **overrides):
+    """Set interface attributes for one test and restore them on cleanup."""
+    for name, value in overrides.items():
+        original = getattr(interface, name, _UNSET)
+        setattr(interface, name, value)
+        testcase.addCleanup(_restore_attr, interface, name, original)
 
 
 def _install_fake_amdsmi():
@@ -182,10 +208,20 @@ class _FakeHelpers:
         return f"{value}".rstrip()
 
 
+class _FakeHelpersVirtualOS(_FakeHelpers):
+    """Virtual-OS stub: ``is_baremetal()`` is False, so ``--partition`` is unregistered."""
+
+    def is_baremetal(self):
+        return False
+
+    def _get_metric_version_and_partition_info(self, *args, **kwargs):
+        return {"num_partition": "N/A"}
+
+
 def _build_args(**overrides):
     """Namespace with every attribute ``metric_gpu`` touches, clock+partition on."""
     defaults = dict(
-        gpu=object(),  # non-None, non-list sentinel device handle
+        gpu=object(),  # non-None, non-list placeholder device handle
         watch=False,
         watch_time=None,
         iterations=None,
@@ -215,6 +251,30 @@ def _build_args(**overrides):
         guest_data=False,
         fb_usage=False,
         xgmi=False,
+    )
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
+
+
+def _build_virtual_os_args(**overrides):
+    """Namespace mirroring argparse on a Linux virtual OS (no baremetal-only flags)."""
+    defaults = dict(
+        gpu=object(),  # non-None, non-list placeholder device handle
+        watch=False,
+        watch_time=None,
+        iterations=None,
+        loglevel="INFO",
+        clock=True,
+        usage=False,
+        power=False,
+        temperature=False,
+        voltage=False,
+        pcie=False,
+        ecc=False,
+        ecc_blocks=False,
+        base_board=False,
+        gpu_board=False,
+        mem_usage=False,
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -349,6 +409,142 @@ class TestCliMetricPartitionClock(unittest.TestCase):
         self.assertEqual(clocks["xcp_1"]["gfx_clk"], "1450 MHz")
         self.assertEqual(clocks["socclks_mid"]["mid_0"], "600 MHz")
         self.assertEqual(clocks["socclks_mid"]["mid_1"], "650 MHz")
+
+    def _run_baremetal_section(self, args):
+        """Drive ``metric_gpu`` on baremetal and return the stored values dict."""
+        commands = object.__new__(self.metric_module.MetricCommands)
+        commands.logger = _FakeLogger()
+        commands.helpers = _FakeHelpers()
+        commands.group_check_printed = True
+        commands.device_handles = []
+        commands.metric_gpu(args)
+        return commands.logger.captured_values
+
+    def test_usage_partition_branch_uses_partition_metrics(self):
+        # partition=True drives the fetch; gpu_partition_metrics is non-None, so
+        # the simplified usage condition must still route to partition-scoped
+        # xcp data. The socket-level else branch is covered by tests that leave
+        # amdsmi_get_gpu_partition_metrics_info returning None.
+        _patch_interface(
+            self,
+            self.interface,
+            amdsmi_get_gpu_metrics_info=lambda _h: {"vcn_activity": "N/A", "jpeg_activity": "N/A"},
+            amdsmi_get_gpu_activity=lambda _h: {"gfx_activity": 50},
+            amdsmi_get_gpu_partition_metrics_info=lambda _h: {
+                "xcp_stats.gfx_busy_inst": [[10, 20]]
+            },
+        )
+
+        captured = self._run_baremetal_section(_build_args(clock=False, usage=True, partition=True))
+
+        self.assertIn("usage", captured)
+        self.assertIsInstance(captured["usage"], dict)
+        self.assertIn("xcp_0", captured["usage"]["gfx_busy_inst"])
+
+    def test_temperature_partition_branch_uses_partition_metrics(self):
+        # Same invariant for the temperature section: partition metrics present
+        # drive mid/xcd temperatures without reading args.partition.
+        _patch_interface(
+            self,
+            self.interface,
+            amdsmi_get_gpu_metrics_info=lambda _h: {},
+            amdsmi_get_temp_metric=lambda *_: 50,
+            AmdSmiTemperatureType=types.SimpleNamespace(
+                EDGE="EDGE", HOTSPOT="HOTSPOT", VRAM="VRAM"
+            ),
+            AmdSmiTemperatureMetric=types.SimpleNamespace(CURRENT="CURRENT", CRITICAL="CRITICAL"),
+            amdsmi_get_gpu_partition_metrics_info=lambda _h: {
+                "temperature_mid": [40, 41],
+                "xcp_stats.temperature_xcd": [55, 56],
+            },
+        )
+
+        captured = self._run_baremetal_section(
+            _build_args(clock=False, temperature=True, partition=True)
+        )
+
+        self.assertIn("temperature", captured)
+        self.assertIn("xcp_0", captured["temperature"]["xcd"])
+
+
+class TestCliMetricPartitionVirtualOS(unittest.TestCase):
+    """``amd-smi metric`` must not crash on a virtual OS where ``--partition``
+    is never registered, so ``args`` has no ``partition`` attribute."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not os.path.isfile(METRIC_PATH):
+            raise unittest.SkipTest(f"amd-smi CLI metric.py not found at {METRIC_PATH}")
+        cls.interface = _install_fake_amdsmi()
+        cls.metric_module = _load_metric_module()
+        # fclk is unavailable so the non-partition clock exception handler fires.
+        cls.interface.amdsmi_get_clk_freq = _raise_lib_exc
+        # Temperature enum access is not guarded, so the enums must exist; the
+        # sensor fetches degrade to N/A.
+        cls.interface.amdsmi_get_gpu_activity = _raise_lib_exc
+        cls.interface.amdsmi_get_temp_metric = _raise_lib_exc
+        cls.interface.AmdSmiTemperatureType = types.SimpleNamespace(
+            EDGE="EDGE", HOTSPOT="HOTSPOT", VRAM="VRAM"
+        )
+        cls.interface.AmdSmiTemperatureMetric = types.SimpleNamespace(
+            CURRENT="CURRENT", CRITICAL="CRITICAL"
+        )
+
+    def _run_metric(self, args):
+        partition_calls = []
+
+        def _tracking_partition_metrics(handle):
+            partition_calls.append(handle)
+            return None
+
+        self.interface.amdsmi_get_gpu_partition_metrics_info = _tracking_partition_metrics
+
+        commands = object.__new__(self.metric_module.MetricCommands)
+        commands.logger = _FakeLogger()
+        commands.helpers = _FakeHelpersVirtualOS()
+        commands.group_check_printed = True
+        commands.device_handles = []
+
+        commands.metric_gpu(args)
+        return commands.logger.captured_values, partition_calls
+
+    def test_metric_without_partition_attr_does_not_crash(self):
+        # Reproduces the AttributeError: on a virtual OS the parser omits
+        # --partition, so args has no 'partition'. metric_gpu must not read it.
+        args = _build_virtual_os_args()
+        self.assertFalse(hasattr(args, "partition"))
+
+        captured, partition_calls = self._run_metric(args)
+
+        self.assertIsNotNone(captured, "metric_gpu did not store a values payload")
+        self.assertIn("clock", captured)
+        self.assertIsInstance(captured["clock"], dict)
+        # partition is not a valid platform arg here, so the partition-metrics
+        # API must never be probed.
+        self.assertEqual(partition_calls, [])
+
+    def test_usage_and_temperature_sections_do_not_read_partition(self):
+        # The usage and temperature partition branches were simplified to key off
+        # gpu_partition_metrics (None here). Let the usage section run to
+        # completion (real activity + metrics data) so a re-introduced
+        # args.partition read would surface instead of being swallowed by the
+        # section's broad except; both sections must produce a dict payload and
+        # never probe the partition-metrics API on a virtual OS.
+        _patch_interface(
+            self,
+            self.interface,
+            amdsmi_get_gpu_activity=lambda _h: {"gfx_activity": 50},
+            amdsmi_get_gpu_metrics_info=lambda _h: {"vcn_activity": "N/A", "jpeg_activity": "N/A"},
+        )
+        args = _build_virtual_os_args(clock=False, usage=True, temperature=True)
+        self.assertFalse(hasattr(args, "partition"))
+
+        captured, partition_calls = self._run_metric(args)
+
+        self.assertIsNotNone(captured, "metric_gpu did not store a values payload")
+        self.assertIsInstance(captured["usage"], dict)
+        self.assertIn("temperature", captured)
+        self.assertEqual(partition_calls, [])
 
 
 if __name__ == "__main__":

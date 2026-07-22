@@ -141,6 +141,8 @@ std::optional<RewriteDecision> DecideHotswapRewriteForTesting(
 size_t RetainedRewrittenElfBufferCountForTesting(hsa_executable_t executable);
 bool HotswapRewriteWithOptionsAvailableForTesting();
 void ForceRetargetCodeObjectFailureForTesting(bool force);
+size_t RetargetCacheSizeForTesting();
+void ClearRetargetCacheForTesting();
 #endif
 
 }  // namespace hotswap

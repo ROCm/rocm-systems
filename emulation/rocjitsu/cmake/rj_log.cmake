@@ -7,6 +7,7 @@
 #   cmake -DRJ_LOG_GROUPS=VM        → group 0 only
 #   cmake -DRJ_LOG_GROUPS=CP        → group 1 only
 #   cmake -DRJ_LOG_GROUPS=DBT_HOOKS → group 2 only
+#   cmake -DRJ_LOG_GROUPS=DRIVER    → group 3 only
 #   cmake -DRJ_LOG_GROUPS=ALL       → all groups
 #   cmake -DRJ_LOG_GROUPS=0x3       → raw bitmask (groups 0 and 1)
 #   cmake -DRJ_LOG_GROUPS=OFF       → all logging off (default)
@@ -19,27 +20,27 @@
 #   VM        (bit 0)  Kernel dispatch, instruction execution, memory access.
 #   CP        (bit 1)  Command processor: doorbell, dispatch, completion.
 #   DBT_HOOKS (bit 2)  ROCR HSA tools DBT hook tracing.
+#   DRIVER    (bit 3)  KFD driver: ioctl dispatch, process/session state.
 #
 # Usage: include(rj_log) after project().
 
 set(RJ_LOG_GROUPS
     "OFF"
     CACHE STRING
-    "Log groups: OFF, ALL, or comma-separated names (VM, CP, DBT_HOOKS). Raw bitmask also accepted."
+    "Log groups: OFF, ALL, or comma-separated names (VM, CP, DBT_HOOKS, DRIVER). Raw bitmask also accepted."
 )
 
 # --- Group name → bit mapping (keep in sync with Logger::Group in log.h) ---
 set(_RJ_GROUP_VM 1) # bit 0
 set(_RJ_GROUP_CP 2) # bit 1
 set(_RJ_GROUP_DBT_HOOKS 4) # bit 2
-# Future groups:
-# set(_RJ_GROUP_KFD   8)  # bit 3
+set(_RJ_GROUP_DRIVER 8) # bit 3
 
 # All known group bits OR'd together.
 math(
     EXPR
     _RJ_GROUP_ALL
-    "${_RJ_GROUP_VM} | ${_RJ_GROUP_CP} | ${_RJ_GROUP_DBT_HOOKS}"
+    "${_RJ_GROUP_VM} | ${_RJ_GROUP_CP} | ${_RJ_GROUP_DBT_HOOKS} | ${_RJ_GROUP_DRIVER}"
 )
 
 # --- Resolve the user value to a numeric bitmask ---
@@ -67,7 +68,7 @@ else()
         else()
             message(
                 FATAL_ERROR
-                "Unknown log group '${_group}'. Known groups: VM, CP, DBT_HOOKS. Use OFF or ALL for all."
+                "Unknown log group '${_group}'. Known groups: VM, CP, DBT_HOOKS, DRIVER. Use OFF or ALL for all."
             )
         endif()
     endforeach()

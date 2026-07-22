@@ -28,6 +28,7 @@
 #include "lib/rocprofiler-sdk/thread_trace/dl.hpp"
 
 #include <fmt/core.h>
+#include <cstddef>
 #include <cstdlib>
 #include <iostream>
 
@@ -268,6 +269,10 @@ SQTTBufferingPackets::query_buffer_status()
     query.size     = ret.read_size;
     query.gpu_full = ret.is_too_late;
     query.packet   = buffer_swap.at(ret.num_swaps % buffer_swap.size());
+
+    constexpr auto read_offset_size =
+        offsetof(aqlprofile_att_buffer_status_t, read_offset) + sizeof(ret.read_offset);
+    if(ret._size >= read_offset_size) query.read_offset = ret.read_offset;
 
     return query;
 }

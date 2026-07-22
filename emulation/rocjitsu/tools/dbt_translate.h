@@ -75,6 +75,7 @@ struct TranslateOptions {
   bool collect_diagnostics = false;
   std::optional<uint16_t> debug_min_free_vgpr;
   bool debug_continue_after_failure = false;
+  bool skip_failed_kernels = false;
   DisassemblyMode disassembly = DisassemblyMode::None;
 };
 
@@ -87,6 +88,17 @@ struct TranslateOutput {
   std::vector<InstructionTranslationReport> instruction_translations;
   std::vector<TranslationDiagnostic> diagnostics;
   std::string disassembly;
+
+  /// @brief True if translation produced no error diagnostics.
+  [[nodiscard]] bool ok() const { return !has_error_diagnostic(diagnostics); }
+
+  /// @brief True if elf_bytes is safe to emit for execution.
+  ///
+  /// @details False when a kernel was replaced by a non-dispatchable trap stub
+  /// (has_skipped_kernel): its s_trap; s_endpgm completes normally without a trap
+  /// handler and would silently produce wrong results. Executable emitters must
+  /// gate on this, not just ok() -- a KernelSkipped diagnostic is only a warning.
+  [[nodiscard]] bool dispatchable() const { return ok() && !has_skipped_kernel(diagnostics); }
 };
 
 /// @brief Translate one AMDGPU code object using the DBT pipeline.

@@ -118,13 +118,18 @@ table AmdgpuConfig {
   num_gpus: uint32 = 1;          // Number of simulated GPU instances.
 }
 
+enum DbtExecutionBackend: byte {
+  hardware,
+  simulator,
+}
+
 /// DBT guest-GPU discovery mode.
 ///
-/// When enabled, the KFD interposer does not start the simulated VM. Instead it
-/// forwards real host-GPU KFD ioctls to /dev/kfd and appends one synthetic guest
-/// GPU to the topology seen by ROCR. HSA hooks then map execution-facing calls
-/// from the guest agent to the host agent and translate guest code objects to
-/// host code objects before loading them.
+/// The execution_backend selects whether the host agent is backed by real KFD
+/// hardware or by a simulation configuration. In both modes the KFD interposer
+/// appends one synthetic guest GPU to the execution topology.
+/// HSA hooks map execution-facing calls from the guest agent to the host agent
+/// and translate guest code objects to host code objects before loading them.
 table DbtGuestConfig {
   enabled: bool = false;          // Enables GuestKfd discovery mode.
   guest_isa: string;              // Guest ISA advertised by the synthetic agent, e.g. "gfx950".
@@ -133,6 +138,8 @@ table DbtGuestConfig {
   log_level: int32 = 0;           // DBT hook logging: 0 off, 1 info, 2 verbose, 3 debug.
   signal_backtrace: bool = false; // Install a best-effort crash backtrace handler in the HSA hook.
   guest_device: KfdDeviceInfo;    // Synthetic guest KFD/sysfs identity appended to host topology.
+  execution_backend: DbtExecutionBackend = hardware;
+  simulator_config: string;       // External host config; when set, overrides this file's VM/topology.
 }
 
 /// A dispatch packet describing a kernel launch.
