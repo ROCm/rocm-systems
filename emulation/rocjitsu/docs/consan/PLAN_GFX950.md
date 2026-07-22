@@ -45,9 +45,9 @@ flowchart TD
   subgraph R[Reconnaissance and contracts]
     R0["R0 DONE<br/>new upstream history, all ConSan docs,<br/>STATUS_RDNA4 and code tour"]
     R1["R1 DONE<br/>CDNA4 ISA and old-port reconnaissance"]
-    R2["R2 ACTIVE<br/>mechanical old-to-new source crosswalk<br/>and closed architecture inventory"]
+    R2["R2 TODO<br/>mechanical old-to-new source crosswalk<br/>and closed architecture inventory"]
     E0["E0 DONE<br/>gfx950 device, toolchain, runtime,<br/>workspace and health baseline"]
-    E1["E1 ACTIVE<br/>target-aware validation doctor<br/>and reproducible build manifest"]
+    E1["E1 TODO<br/>target-aware validation doctor<br/>and reproducible build manifest"]
     C0["C0 TODO<br/>explicit gfx950 capability matrix<br/>with typed unsupported results"]
   end
 
@@ -58,7 +58,7 @@ flowchart TD
     B3["B3 DONE<br/>DS access and atomic builders"]
     B4["B4 DONE<br/>wait, barrier, cache and fence builders"]
     B5A["B5A DONE<br/>neutral fixed- and variable-length<br/>builder dispatch"]
-    B5B["B5B ACTIVE<br/>gfx950 engine-emission round trips<br/>and instruction-shape audit"]
+    B5B["B5B TODO<br/>gfx950 engine-emission round trips<br/>and instruction-shape audit"]
   end
 
   subgraph S[Spilling and resources -- critical path]
@@ -79,46 +79,46 @@ flowchart TD
   end
 
   subgraph I[Identity and geometry]
-    I0["I0 ACTIVE<br/>gfx950 descriptor/system-SGPR ABI inventory"]
-    I1["I1 ACTIVE<br/>reversible entry-time identity snapshot;<br/>group-FLAT key lifetime native-proven"]
-    I2["I2 ACTIVE<br/>wave64 owner derivation for 1D/2D/3D groups"]
-    I3["I3 ACTIVE<br/>epoch state and guest ABI restoration"]
+    I0["I0 TODO<br/>gfx950 descriptor/system-SGPR ABI inventory"]
+    I1["I1 TODO<br/>reversible entry-time identity snapshot;<br/>group-FLAT key lifetime native-proven"]
+    I2["I2 TODO<br/>wave64 owner derivation for 1D/2D/3D groups"]
+    I3["I3 TODO<br/>epoch state and guest ABI restoration"]
     I4["I4 DONE<br/>launch-bounded multidimensional<br/>workgroup identity"]
   end
 
   subgraph A[Access and synchronization semantics]
-    A0["A0 ACTIVE<br/>representative gfx950 instruction corpus"]
-    A1["A1 ACTIVE<br/>DS access normalization and exclusions"]
-    A2["A2 ACTIVE<br/>FLAT/global/group access normalization"]
-    A3["A3 ACTIVE<br/>barrier inventory and pre-wait semantics"]
-    A4["A4 ACTIVE<br/>atomic/fence inventory and ordering model"]
-    A5["A5 ACTIVE<br/>CDNA4 singleton-barrier exact-one proof;<br/>broader mutation encoders open"]
+    A0["A0 TODO<br/>representative gfx950 instruction corpus"]
+    A1["A1 TODO<br/>DS access normalization and exclusions"]
+    A2["A2 TODO<br/>FLAT/global/group access normalization"]
+    A3["A3 TODO<br/>barrier inventory and pre-wait semantics"]
+    A4["A4 TODO<br/>atomic/fence inventory and ordering model"]
+    A5["A5 TODO<br/>CDNA4 singleton-barrier exact-one proof;<br/>broader mutation encoders open"]
   end
 
   subgraph F[Four instrumentation flavors]
     SC0["SC0 DONE<br/>native CDNA4 LDS checks:<br/>CLIP + TP1/TP2 clean"]
-    SC1["SC1 ACTIVE<br/>SuperCollider group-FLAT clean vertical;<br/>racy detection and trap breadth open"]
-    RR0["RR0 ACTIVE<br/>Record/Replay access records and replay"]
-    RR1["RR1 ACTIVE<br/>Record/Replay barriers, atomics and fences"]
+    SC1["SC1 TODO<br/>SuperCollider group-FLAT clean vertical;<br/>racy detection and trap breadth open"]
+    RR0["RR0 TODO<br/>Record/Replay access records and replay"]
+    RR1["RR1 TODO<br/>Record/Replay barriers, atomics and fences"]
     SA0A["SA0A DONE<br/>CDNA4 sampled barrier lowering:<br/>TP1 + CLIP clean"]
-    SA0["SA0 ACTIVE<br/>Sampled TP2 admission/selection<br/>and broader runtime coverage"]
+    SA0["SA0 TODO<br/>Sampled TP2 admission/selection<br/>and broader runtime coverage"]
     SA1["SA1 TODO<br/>Sampled immediate and host-scan agreement"]
     IS0A["IS0A DONE<br/>per-owner CDNA4 persistent tuples<br/>below AccVGPR and VCC boundaries"]
-    IS0["IS0 ACTIVE<br/>Inline TP1 lifecycle clean;<br/>atomic breadth open"]
-    IS1["IS1 ACTIVE<br/>Stream-K scalar state installed;<br/>AcqRel metadata race remains"]
+    IS0["IS0 TODO<br/>Inline TP1 lifecycle clean;<br/>atomic breadth open"]
+    IS1["IS1 TODO<br/>Stream-K scalar state installed;<br/>AcqRel metadata race remains"]
     F0["F0 MILESTONE<br/>all four standard-v1 profiles<br/>feature-complete on focused tests"]
   end
 
   subgraph Q[Correctness and regression gates]
-    Q0["Q0 ACTIVE<br/>host/synthetic builder, patcher,<br/>resource and malformed-input tests"]
+    Q0["Q0 TODO<br/>host/synthetic builder, patcher,<br/>resource and malformed-input tests"]
     Q1["Q1 TODO<br/>focused native gfx950 clean/racy tests"]
     Q2["Q2 TODO<br/>gfx1201 shared-code regression audit"]
     Q3["Q3 TODO<br/>focused gfx1201 rocJITsu-emulator evidence<br/>with emulator bugs reported, not hidden"]
   end
 
   subgraph V[Target-native end-to-end validation]
-    V0["V0 ACTIVE<br/>target-aware workload registry and manifest"]
-    V1["V1 ACTIVE<br/>TP1/TP2/CLIP assets runnable;<br/>Qwen and Jakub-CDNA4 assets open"]
+    V0["V0 TODO<br/>target-aware workload registry and manifest"]
+    V1["V1 TODO<br/>TP1/TP2/CLIP assets runnable;<br/>Qwen and Jakub-CDNA4 assets open"]
     V2["V2 TODO<br/>P0 Qwen clean baseline and four profiles"]
     V3["V3 TODO<br/>P0 Qwen fault inventory and exact policies"]
     V4["V4 TODO<br/>P0 Qwen contained fault campaign"]
@@ -126,7 +126,7 @@ flowchart TD
     V6["V6 ACTIVE<br/>D128 barrier-drop campaign accepted;<br/>remaining workload faults open"]
     V7["V7 ACTIVE<br/>D128 paired overhead accepted;<br/>peak memory and broader rows open"]
     V8["V8 TODO<br/>freeze one committed tip, rebuild,<br/>and rerun authoritative matrix"]
-    ST0["ST0 ACTIVE<br/>create and maintain STATUS_CDNA4.md"]
+    ST0["ST0 ACTIVE<br/>maintain STATUS_CDNA4.md<br/>from current physical evidence"]
     G0["G0 MILESTONE<br/>gfx950 e2e acceptance"]
   end
 
@@ -265,8 +265,8 @@ flowchart TD
   classDef milestone fill:#6f42c1,stroke:#e2d5ff,color:#ffffff,stroke-width:3px
 
   class R0,R1,E0,B0,B1,B2,B3,B4,B5A,S0,S1,S2,S3,S4,S5,S6A,S6B,S7A,S7B,S8A,S8B,S8C,S8D,I4,SC0,SA0A,IS0A done
-  class R2,E1,B5B,I0,I1,I2,I3,A0,A1,A2,A3,A4,A5,SC1,RR0,RR1,SA0,IS0,IS1,Q0,V0,V1,V5,V6,V7,ST0 active
-  class C0,SA1,Q1,Q2,Q3,V2,V3,V4,V8 todo
+  class V5,V6,V7,ST0 active
+  class R2,E1,C0,B5B,I0,I1,I2,I3,A0,A1,A2,A3,A4,A5,SC1,RR0,RR1,SA0,SA1,IS0,IS1,Q0,Q1,Q2,Q3,V0,V1,V2,V3,V4,V8 todo
   class F0,G0 milestone
 ```
 
@@ -448,6 +448,13 @@ mutation without final-byte proof, or a diagnostic without an independent
 oracle is not an accepted row.
 
 ## Progress log
+
+- 2026-07-22: Refreshed the Mermaid states to distinguish unfinished work
+  from work actually in flight.  Broad, partially explored implementation
+  nodes are TODO/gray rather than indefinitely ACTIVE/blue.  The only blue
+  nodes are now `V5`, `V6`, and `V7`, representing the current physical-GPU
+  clean/fault/overhead bundle, plus `ST0` for the evidence ledger that is being
+  updated alongside it.  Completed prerequisites remain green.
 
 - 2026-07-18: `IS1` remains blue/ACTIVE after artifacts
   `gfx950-take2-streamk-claimed-acqrel-016` and `-017` separated two scratch
