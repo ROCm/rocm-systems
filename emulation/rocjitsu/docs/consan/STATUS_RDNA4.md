@@ -48,12 +48,13 @@ architecture ledgers:
 records a typed reason.  A gray cell says that current-tip evidence is missing;
 it does not assert that the implementation has regressed.
 
-🟦 **resolved discovery exclusion** is deliberately outside the ordered
-maturity scale.  It means target-native evidence established that the candidate
-is not an acceptance workload (for example, it is compile-only, executes no
-supported synchronization, or duplicates a stronger retained workload).  It
-must not be read as an unassessed gray cell or counted in the validation
-denominator.
+`N/A — RESOLVED EXCLUSION` is deliberately outside the ordered maturity scale.
+It means target-native evidence established that the candidate is not an
+acceptance workload (for example, it is compile-only, executes no supported
+synchronization, or duplicates a stronger retained workload).  This textual
+label is intentional: it must not be mistaken for an unassessed gray cell or
+counted in the validation denominator, even in renderers where colored emoji
+are indistinguishable.
 
 ## Catch-up snapshot
 
@@ -159,11 +160,11 @@ Do not copy, retarget, or author lookalike versions of those configurations
 merely to make the ledgers symmetric.  Search the native IREE, kernel, and CTS
 suites for workloads that exercise the same broad difficulty classes.
 
-A discovery row uses `🟦 Excluded` after target-native evidence rules it out of
-the validation denominator.  Blue is a resolved selection decision, not a
-support result and not a gray instrumentation cell.  Once a candidate has an
-exact baseline and current-hook execution evidence, its four cells use the
-ordinary ordered color scale independently. Both admitted llama.cpp commands
+A discovery row uses `N/A — RESOLVED EXCLUSION` after target-native evidence
+rules it out of the validation denominator.  This is a resolved selection
+decision, not a support result and not a gray instrumentation cell.  Once a
+candidate has an exact baseline and current-hook execution evidence, its four
+cells use the ordinary ordered color scale independently. Both admitted llama.cpp commands
 are now first-class `consan_validation.py` workloads. Their wrapper runs the
 instrumented GPU client and an uninstrumented CPU backend in separate
 processes, compares their binary F32 outputs, and emits a machine-readable
@@ -173,12 +174,12 @@ oracle and timing record.
 |---|---|---|---|---|---|
 | **D0** `llama-rdna4-mul-mat-vec-q` | 🟨 Exact 0.01 CPU oracle; clean-complete 462/462 LDS accesses; 17.881x process overhead; reviewed fault pending | 🟧 Exact oracle and clean GPU exit; 462/462 accesses, 44/44 barriers, 63/63 supported atomics, and 63/63 associated fences patch, but nine unsupported fences in a separate support object keep the aggregate analysis incomplete | 🟨 Exact oracle; clean-complete 462/462 accesses + 88/88 barrier members; 17.077x process overhead; reviewed fault pending | 🟧 Exact oracle passes; useful partial execution reaches 132/462 accesses + 18/44 barriers, but one clean diagnostic rejects the strict run | Current scripted clean artifact `rdna4-llama-matvec-all-scripted-20260722`, hook `f28c56eb…`, runs all four engines through the independent two-process oracle; every result differs from CPU by at most 0.004023. Current paired artifacts `rdna4-llama-matvec-{sc,sampled}-overhead-scripted-20260722` use five instrumented processes bracketed by five-process baselines. Sampled's current complete, diagnostic-free result supersedes the older partial `rdna4-matvec-sampled-no-access-atomics` evidence. Record/Replay executes correctly and patches every supported site, but its strict result intentionally retains the typed unsupported-fence gap rather than hiding the bundled support object. Inline retains one owner-33 store versus owner-1 load diagnostic and the automatic 135-candidate dense-routing envelope; no user knob narrows any row. |
 | **D0** `llama-rdna4-rms-norm` | 🟨 Exact CPU oracle; clean-complete 22/22 LDS accesses; 1.194x process overhead; reviewed effective fault pending | 🟨 Exact oracle; clean-complete 22/22 accesses + 11/11 barriers; 1.350x overhead; reviewed effective fault pending | 🟨 Exact oracle; clean-complete 22/22 accesses + 22/22 barrier members; 1.404x overhead; reviewed effective fault pending | 🟨 Exact oracle; clean-complete 22/22 accesses + 11/11 barriers; 1.375x overhead; reviewed effective fault pending | Current scripted clean and paired evidence is `rdna4-llama-rms-{all,overhead}-scripted-20260722`, hook `f28c56eb…`. All four engines pass the independent 128-element GPU-versus-CPU binary-output oracle without a diagnostic or user knob; every one of five overhead repetitions remains complete. The earlier Inline retry-counter and dispatch-ID-zero fixes remain load-bearing. A reviewed fault with an observable semantic effect is still required for green. |
-| **D0** `kernels.gfx1201.hip-matmul.hip_matmul_matvec.m256_n1_k1024` | 🟦 Excluded | 🟦 Excluded | 🟦 Excluded | 🟦 Excluded | A standalone build with the unrelated llama.cpp backend disabled passes all nine exact matvec variants. Fresh SuperCollider inventory finds no decoded LDS, barriers, or atomics in the nine workload kernels; only eight ambiguous flat maybe-group sites fail placement, so this does not add a sound or nonredundant ConSan workload. |
-| **D0** `llama.cpp` noncontiguous batched-matmul and hazard metadata | 🟦 Excluded | 🟦 Excluded | 🟦 Excluded | 🟦 Excluded | The gfx1201 config explicitly skips compiling both variants. The hazard overlay restores llama.cpp PR #13155's pre-fix noncontiguous-stride conversion and expects a deterministic output-validation failure; it is a data-layout correctness reproducer, not a concurrency oracle. |
-| **D1** Three collected IREE direct-tile matmuls: F16, FP8, and I8 | 🟦 Excluded | 🟦 Excluded | 🟦 Excluded | 🟦 Excluded | The three gfx1201 compilations pass, but their corpus records explicitly set `compile_only=true`; they dispatch no workload and provide no runtime oracle. Normalize a calls/support-module wrapper before reconsidering them. |
-| **D1** IREE `argmax`, strided extract, and map-load/map-store cases | 🟦 Excluded | 🟦 Excluded | 🟦 Excluded | 🟦 Excluded | All four exact baselines pass. Record/Replay inventory in `.pytest-artifacts-rdna4-iree-inventory` reports zero supported accesses, barriers, atomics, and fences for every executed code object, so these global-only shapes add no ConSan coverage. |
-| **D2** RDNA4 WMMA/SWMMAC, wave32/wave64, atomic, and lane/DS CTS families | 🟦 Excluded | 🟦 Excluded | 🟦 Excluded | 🟦 Excluded | Seven exact baseline cases pass, but the arithmetic and lane-operation cases add no admitted ConSan synchronization traffic. The bundled atomic case is useful as an unsupported-transform stress object, not as a compact or nonredundant acceptance workload. Retain this family as an engine-specific reproducer pool. |
-| **D3** Remaining corpus families | 🟦 Excluded | 🟦 Excluded | 🟦 Excluded | 🟦 Excluded | Collection and representative execution now account for all 105 gfx1201 cases. Remaining FPSan host-only/arithmetic cases either dispatch no GPU work or reproduce the already-retained 2,560-atomic support object; remaining integer-ISA arithmetic variants add no distinct ordering family, and the reduction representative currently crashes this SDK's compiler. Keep these as compiler/engine reproducer pools rather than inflating the acceptance denominator. |
+| **D0** `kernels.gfx1201.hip-matmul.hip_matmul_matvec.m256_n1_k1024` | N/A — RESOLVED EXCLUSION | N/A — RESOLVED EXCLUSION | N/A — RESOLVED EXCLUSION | N/A — RESOLVED EXCLUSION | A standalone build with the unrelated llama.cpp backend disabled passes all nine exact matvec variants. Fresh SuperCollider inventory finds no decoded LDS, barriers, or atomics in the nine workload kernels; only eight ambiguous flat maybe-group sites fail placement, so this does not add a sound or nonredundant ConSan workload. |
+| **D0** `llama.cpp` noncontiguous batched-matmul and hazard metadata | N/A — RESOLVED EXCLUSION | N/A — RESOLVED EXCLUSION | N/A — RESOLVED EXCLUSION | N/A — RESOLVED EXCLUSION | The gfx1201 config explicitly skips compiling both variants. The hazard overlay restores llama.cpp PR #13155's pre-fix noncontiguous-stride conversion and expects a deterministic output-validation failure; it is a data-layout correctness reproducer, not a concurrency oracle. |
+| **D1** Three collected IREE direct-tile matmuls: F16, FP8, and I8 | N/A — RESOLVED EXCLUSION | N/A — RESOLVED EXCLUSION | N/A — RESOLVED EXCLUSION | N/A — RESOLVED EXCLUSION | The three gfx1201 compilations pass, but their corpus records explicitly set `compile_only=true`; they dispatch no workload and provide no runtime oracle. Normalize a calls/support-module wrapper before reconsidering them. |
+| **D1** IREE `argmax`, strided extract, and map-load/map-store cases | N/A — RESOLVED EXCLUSION | N/A — RESOLVED EXCLUSION | N/A — RESOLVED EXCLUSION | N/A — RESOLVED EXCLUSION | All four exact baselines pass. Record/Replay inventory in `.pytest-artifacts-rdna4-iree-inventory` reports zero supported accesses, barriers, atomics, and fences for every executed code object, so these global-only shapes add no ConSan coverage. |
+| **D2** RDNA4 WMMA/SWMMAC, wave32/wave64, atomic, and lane/DS CTS families | N/A — RESOLVED EXCLUSION | N/A — RESOLVED EXCLUSION | N/A — RESOLVED EXCLUSION | N/A — RESOLVED EXCLUSION | Seven exact baseline cases pass, but the arithmetic and lane-operation cases add no admitted ConSan synchronization traffic. The bundled atomic case is useful as an unsupported-transform stress object, not as a compact or nonredundant acceptance workload. Retain this family as an engine-specific reproducer pool. |
+| **D3** Remaining corpus families | N/A — RESOLVED EXCLUSION | N/A — RESOLVED EXCLUSION | N/A — RESOLVED EXCLUSION | N/A — RESOLVED EXCLUSION | Collection and representative execution now account for all 105 gfx1201 cases. Remaining FPSan host-only/arithmetic cases either dispatch no GPU work or reproduce the already-retained 2,560-atomic support object; remaining integer-ISA arithmetic variants add no distinct ordering family, and the reduction representative currently crashes this SDK's compiler. Keep these as compiler/engine reproducer pools rather than inflating the acceptance denominator. |
 
 Any future selected case must be added to `consan_validation.py` with its exact
 target-native command and independent oracle. Its four cells then advance
