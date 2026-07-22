@@ -17,14 +17,9 @@
 namespace rocjitsu {
 namespace gfx1250 {
 
-const bool TensorLoadToLdsVimage::execute_registered_ = register_exec_fn<TensorLoadToLdsVimage>();
-
 void TensorLoadToLdsVimage::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_tensor_load_to_lds(*this, wf);
 }
-
-const bool TensorStoreFromLdsVimage::execute_registered_ =
-    register_exec_fn<TensorStoreFromLdsVimage>();
 
 void TensorStoreFromLdsVimage::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_tensor_store_from_lds(*this, wf);

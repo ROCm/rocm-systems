@@ -627,8 +627,8 @@ void Operand::simd_notify_read64_mut_exec(amdgpu::Wavefront &wf, uint64_t lane_m
   }
 }
 
-const bool Operand::execution_backend_registered_ = [] {
-  execution_backend() = ExecutionBackend{
+const void *Operand::full_execution_backend() {
+  static const ExecutionBackend backend{
       &Operand::simd_capable_exec,        &Operand::read_lane_chunk_exec,
       &Operand::write_lane_chunk_exec,    &Operand::read_scalar_exec,
       &Operand::read_lane_exec,           &Operand::write_scalar_exec,
@@ -640,8 +640,24 @@ const bool Operand::execution_backend_registered_ = [] {
       &Operand::simd_notify_read_exec,    &Operand::simd_notify_read_mut_exec,
       &Operand::simd_notify_read64_exec,  &Operand::simd_notify_read64_mut_exec,
   };
-  return true;
-}();
+  return &backend;
+}
+
+bool Operand::full_execution_backend_complete() {
+  const auto is_complete = [](const ExecutionBackend &backend) {
+    return backend.simd_capable != nullptr && backend.read_lane_chunk != nullptr &&
+           backend.write_lane_chunk != nullptr && backend.read_scalar != nullptr &&
+           backend.read_lane != nullptr && backend.write_scalar != nullptr &&
+           backend.write_lane != nullptr && backend.read_lane64 != nullptr &&
+           backend.write_lane64 != nullptr && backend.read_scalar64 != nullptr &&
+           backend.write_scalar64 != nullptr && backend.simd_vgpr_base != nullptr &&
+           backend.simd_vgpr_storage != nullptr && backend.simd_vgpr_storage_mut != nullptr &&
+           backend.simd_vgpr_storage64 != nullptr && backend.simd_vgpr_storage64_mut != nullptr &&
+           backend.simd_notify_read != nullptr && backend.simd_notify_read_mut != nullptr &&
+           backend.simd_notify_read64 != nullptr && backend.simd_notify_read64_mut != nullptr;
+  };
+  return is_complete(*static_cast<const ExecutionBackend *>(full_execution_backend()));
+}
 
 } // namespace gfx1250
 } // namespace rocjitsu

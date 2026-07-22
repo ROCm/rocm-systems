@@ -4,67 +4,34 @@
 #include "rocjitsu/code/rj_code_internal.h"
 
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/target_registry.h"
 
 #include <cstring>
+#include <unordered_map>
 
 using namespace rocjitsu;
 
 namespace {
 
-/*
- * \NPI new GPU: add its target -> Decoder mapping in create_decoder_for_target() \
- * and its target -> arch mapping in arch_for_target() below.
- */
 Decoder *create_decoder_for_target(rj_code_target_id_t target) {
-  static thread_local std::unique_ptr<Decoder> cdna2_decoder;
-  static thread_local std::unique_ptr<Decoder> cdna3_decoder;
-  static thread_local std::unique_ptr<Decoder> cdna4_decoder;
-  static thread_local std::unique_ptr<Decoder> rdna4_decoder;
-  static thread_local std::unique_ptr<Decoder> gfx1250_decoder;
-
-  switch (target) {
-  case ROCJITSU_CODE_TARGET_GFX90A:
-    if (!cdna2_decoder)
-      cdna2_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
-    return cdna2_decoder.get();
-  case ROCJITSU_CODE_TARGET_GFX942:
-    if (!cdna3_decoder)
-      cdna3_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
-    return cdna3_decoder.get();
-  case ROCJITSU_CODE_TARGET_GFX950:
-    if (!cdna4_decoder)
-      cdna4_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
-    return cdna4_decoder.get();
-  case ROCJITSU_CODE_TARGET_GFX1200:
-  case ROCJITSU_CODE_TARGET_GFX1201:
-    if (!rdna4_decoder)
-      rdna4_decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
-    return rdna4_decoder.get();
-  case ROCJITSU_CODE_TARGET_GFX1250:
-    if (!gfx1250_decoder)
-      gfx1250_decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
-    return gfx1250_decoder.get();
-  default:
+  const auto &registry = default_isa_target_registry();
+  const IsaTargetDescriptor *descriptor = registry.find(target);
+  if (descriptor == nullptr)
     return nullptr;
-  }
+
+  static thread_local std::unordered_map<const IsaTargetDescriptor *, std::unique_ptr<Decoder>>
+      decoders;
+  std::unique_ptr<Decoder> &decoder = decoders[descriptor];
+  if (!decoder)
+    decoder = descriptor->decoder_factory(descriptor->execution_backend);
+  return decoder.get();
 }
 
 rj_code_arch_t arch_for_target(rj_code_target_id_t target) {
-  switch (target) {
-  case ROCJITSU_CODE_TARGET_GFX90A:
-    return ROCJITSU_CODE_ARCH_CDNA2;
-  case ROCJITSU_CODE_TARGET_GFX942:
-    return ROCJITSU_CODE_ARCH_CDNA3;
-  case ROCJITSU_CODE_TARGET_GFX950:
-    return ROCJITSU_CODE_ARCH_CDNA4;
-  case ROCJITSU_CODE_TARGET_GFX1200:
-  case ROCJITSU_CODE_TARGET_GFX1201:
-    return ROCJITSU_CODE_ARCH_RDNA4;
-  case ROCJITSU_CODE_TARGET_GFX1250:
-    return ROCJITSU_CODE_ARCH_GFX1250;
-  default:
+  const IsaTargetDescriptor *descriptor = default_isa_target_registry().find(target);
+  if (descriptor == nullptr)
     return ROCJITSU_CODE_ARCH_INVALID;
-  }
+  return descriptor->architecture_id;
 }
 
 } // namespace

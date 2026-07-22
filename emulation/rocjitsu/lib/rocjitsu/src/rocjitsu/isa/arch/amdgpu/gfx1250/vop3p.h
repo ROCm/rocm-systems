@@ -23,7 +23,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPkMulLoU16Vop3p : public Vop3p {
@@ -33,7 +32,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkAddI16Vop3p : public Vop3p {
@@ -43,7 +41,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkSubI16Vop3p : public Vop3p {
@@ -53,7 +50,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkLshlrevB16Vop3p : public Vop3p {
@@ -63,7 +59,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkLshrrevB16Vop3p : public Vop3p {
@@ -73,7 +68,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkAshrrevI16Vop3p : public Vop3p {
@@ -83,7 +77,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkMaxI16Vop3p : public Vop3p {
@@ -93,7 +86,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkMinI16Vop3p : public Vop3p {
@@ -103,7 +95,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkMadU16Vop3p : public Vop3p {
@@ -114,7 +105,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPkAddU16Vop3p : public Vop3p {
@@ -124,7 +114,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkSubU16Vop3p : public Vop3p {
@@ -134,7 +123,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkMaxU16Vop3p : public Vop3p {
@@ -144,7 +132,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkMinU16Vop3p : public Vop3p {
@@ -154,7 +141,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkFmaF16Vop3p : public Vop3p {
@@ -165,7 +151,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPkAddF16Vop3p : public Vop3p {
@@ -175,7 +160,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkMulF16Vop3p : public Vop3p {
@@ -185,7 +169,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkFmaBf16Vop3p : public Vop3p {
@@ -196,7 +179,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPkAddMaxI16Vop3p : public Vop3p {
@@ -207,7 +189,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPkAddMaxU16Vop3p : public Vop3p {
@@ -218,7 +199,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VDot4I32Iu8Vop3p : public Vop3p {
@@ -229,7 +209,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VDot4U32U8Vop3p : public Vop3p {
@@ -240,7 +219,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VDot8I32Iu4Vop3p : public Vop3p {
@@ -251,7 +229,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VDot8U32U4Vop3p : public Vop3p {
@@ -262,7 +239,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPkMinNumF16Vop3p : public Vop3p {
@@ -272,7 +248,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkMaxNumF16Vop3p : public Vop3p {
@@ -282,7 +257,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkMinimumF16Vop3p : public Vop3p {
@@ -292,7 +266,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkMaximumF16Vop3p : public Vop3p {
@@ -302,7 +275,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkFmaF32Vop3p : public Vop3p {
@@ -313,7 +285,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VFmaMixF32Vop3p : public Vop3p {
@@ -324,7 +295,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VFmaMixloF16Vop3p : public Vop3p {
@@ -336,7 +306,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VFmaMixhiF16Vop3p : public Vop3p {
@@ -348,7 +317,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPkAddBf16Vop3p : public Vop3p {
@@ -358,7 +326,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkMulF32Vop3p : public Vop3p {
@@ -368,7 +335,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkAddF32Vop3p : public Vop3p {
@@ -378,7 +344,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkMulBf16Vop3p : public Vop3p {
@@ -388,7 +353,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkMinNumBf16Vop3p : public Vop3p {
@@ -398,7 +362,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkMaxNumBf16Vop3p : public Vop3p {
@@ -408,7 +371,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPkAddMinI16Vop3p : public Vop3p {
@@ -419,7 +381,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPkAddMinU16Vop3p : public Vop3p {
@@ -430,7 +391,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPkMax3I16Vop3p : public Vop3p {
@@ -441,7 +401,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPkMax3U16Vop3p : public Vop3p {
@@ -452,7 +411,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPkMin3I16Vop3p : public Vop3p {
@@ -463,7 +421,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPkMin3U16Vop3p : public Vop3p {
@@ -474,7 +431,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaF3216x16x128F8f6f4Vop3p : public Vop3p {
@@ -486,7 +442,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPkMinimum3F16Vop3p : public Vop3p {
@@ -497,7 +452,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPkMaximum3F16Vop3p : public Vop3p {
@@ -508,7 +462,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPkMin3NumF16Vop3p : public Vop3p {
@@ -519,7 +472,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPkMax3NumF16Vop3p : public Vop3p {
@@ -530,7 +482,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VFmaMixF32Bf16Vop3p : public Vop3p {
@@ -541,7 +492,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VFmaMixloBf16Vop3p : public Vop3p {
@@ -553,7 +503,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VFmaMixhiBf16Vop3p : public Vop3p {
@@ -565,7 +514,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaF3216x16x4F32Vop3p : public Vop3p {
@@ -576,7 +524,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaF3216x16x32F16Vop3p : public Vop3p {
@@ -587,7 +534,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaF1616x16x32F16Vop3p : public Vop3p {
@@ -598,7 +544,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaF3216x16x32Bf16Vop3p : public Vop3p {
@@ -609,7 +554,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaBf1616x16x32Bf16Vop3p : public Vop3p {
@@ -620,7 +564,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaBf16f3216x16x32Bf16Vop3p : public Vop3p {
@@ -631,7 +574,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VSwmmacF3216x16x64F16Vop3p : public Vop3p {
@@ -643,7 +585,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VSwmmacF3216x16x64Bf16Vop3p : public Vop3p {
@@ -655,7 +596,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VSwmmacF1616x16x64F16Vop3p : public Vop3p {
@@ -667,7 +607,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VSwmmacBf1616x16x64Bf16Vop3p : public Vop3p {
@@ -679,7 +618,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VSwmmacBf16f3216x16x64Bf16Vop3p : public Vop3p {
@@ -691,7 +629,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaF3216x16x64Fp8Fp8Vop3p : public Vop3p {
@@ -702,7 +639,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaF3216x16x64Fp8Bf8Vop3p : public Vop3p {
@@ -713,7 +649,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaF3216x16x64Bf8Fp8Vop3p : public Vop3p {
@@ -724,7 +659,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaF3216x16x64Bf8Bf8Vop3p : public Vop3p {
@@ -735,7 +669,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaF1616x16x64Fp8Fp8Vop3p : public Vop3p {
@@ -746,7 +679,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaF1616x16x64Fp8Bf8Vop3p : public Vop3p {
@@ -757,7 +689,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaF1616x16x64Bf8Fp8Vop3p : public Vop3p {
@@ -768,7 +699,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaF1616x16x64Bf8Bf8Vop3p : public Vop3p {
@@ -779,7 +709,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaI3216x16x64Iu8Vop3p : public Vop3p {
@@ -790,7 +719,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VSwmmacF3216x16x128Fp8Fp8Vop3p : public Vop3p {
@@ -802,7 +730,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VSwmmacF3216x16x128Fp8Bf8Vop3p : public Vop3p {
@@ -814,7 +741,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VSwmmacF3216x16x128Bf8Fp8Vop3p : public Vop3p {
@@ -826,7 +752,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VSwmmacF3216x16x128Bf8Bf8Vop3p : public Vop3p {
@@ -838,7 +763,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VSwmmacF1616x16x128Fp8Fp8Vop3p : public Vop3p {
@@ -850,7 +774,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VSwmmacF1616x16x128Fp8Bf8Vop3p : public Vop3p {
@@ -862,7 +785,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VSwmmacF1616x16x128Bf8Fp8Vop3p : public Vop3p {
@@ -874,7 +796,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VSwmmacF1616x16x128Bf8Bf8Vop3p : public Vop3p {
@@ -886,7 +807,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VSwmmacI3216x16x128Iu8Vop3p : public Vop3p {
@@ -898,7 +818,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaF3216x16x128Fp8Fp8Vop3p : public Vop3p {
@@ -909,7 +828,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaF3216x16x128Fp8Bf8Vop3p : public Vop3p {
@@ -920,7 +838,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaF3216x16x128Bf8Fp8Vop3p : public Vop3p {
@@ -931,7 +848,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaF3216x16x128Bf8Bf8Vop3p : public Vop3p {
@@ -942,7 +858,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaF1616x16x128Fp8Fp8Vop3p : public Vop3p {
@@ -953,7 +868,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaF1616x16x128Fp8Bf8Vop3p : public Vop3p {
@@ -964,7 +878,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaF1616x16x128Bf8Fp8Vop3p : public Vop3p {
@@ -975,7 +888,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaF1616x16x128Bf8Bf8Vop3p : public Vop3p {
@@ -986,7 +898,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaF3232x16x128F4Vop3p : public Vop3p {
@@ -997,7 +908,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VWmmaScaleF32Vop3px2 : public Vop3p {
@@ -1014,7 +924,6 @@ public:
   Operand scale_src1;
   OpEncoding scale_inst_;
   std::array<uint32_t, 4> raw_words_{};
-  static const bool execute_registered_;
 };
 
 } // namespace gfx1250

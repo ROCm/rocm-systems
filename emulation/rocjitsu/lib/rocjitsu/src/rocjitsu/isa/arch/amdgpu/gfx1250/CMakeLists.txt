@@ -54,22 +54,38 @@ rj_add_object_library(rocjitsu_isa_gfx1250_model
     vopd.cpp
     ${gfx1250_vopc_sources}
     vscratch.cpp
+    model_target_provider.cpp
 )
 
 rj_add_object_library(rocjitsu_isa_gfx1250_exec
     addr_calc.cpp
     ${gfx1250_execution_sources}
+    target_provider.cpp
 )
 
 # Preserve the canonical full-ISA target name while making the two object
 # sets explicit. Consumers of this interface receive one copy of the model
 # objects and one copy of the execution objects. Keep the execution set as
-# TARGET_OBJECTS: its file-scope registrars are link side effects that an
-# ordinary archive link could discard.
+# TARGET_OBJECTS so consumers receive both generated object sets without
+# recompiling either source set.
 add_library(rocjitsu_isa_gfx1250 INTERFACE)
 target_sources(
     rocjitsu_isa_gfx1250
     INTERFACE
         $<TARGET_OBJECTS:rocjitsu_isa_gfx1250_model>
         $<TARGET_OBJECTS:rocjitsu_isa_gfx1250_exec>
+)
+
+rj_add_isa_target_provider(
+    rocjitsu_isa_gfx1250
+    HEADER rocjitsu/isa/arch/amdgpu/gfx1250/target_provider.h
+    BUILTIN
+)
+
+# Decoder/patching consumers can select the model provider independently of
+# the simulator's full provider. It contributes the same target identity but
+# has no execution capability or dependency on execution objects.
+rj_add_isa_target_provider(
+    rocjitsu_isa_gfx1250_model
+    HEADER rocjitsu/isa/arch/amdgpu/gfx1250/model_target_provider.h
 )
