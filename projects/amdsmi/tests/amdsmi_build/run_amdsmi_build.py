@@ -1004,6 +1004,27 @@ def verify_wheel_site_packages(cfg: "RunnerConfig") -> None:
     )
 
 
+def verify_soname_distinct(cfg: "RunnerConfig") -> None:
+    """Assert the system and wheel libraries keep distinct SONAMEs.
+
+    Runs the standalone SONAME conflict check against the build tree. Only
+    meaningful when the wheel library was built (BUILD_PYTHON_WHEEL=ON), so a
+    build tree without libamd_smi_python.so is skipped rather than failed.
+    """
+    wheel_libs = list(cfg.build_dir.glob("**/libamd_smi_python.so.*"))
+    if not wheel_libs:
+        print("Skipping SONAME conflict check: no wheel library in the build tree")
+        return
+
+    test_script = cfg.project_dir / "tests" / "run_amdsmi_pkg_conflict_test.py"
+    run_command(
+        ["python3", str(test_script), "--build-root", str(cfg.build_dir)],
+        name="pkg-conflict-soname",
+        retries=1,
+        log_dir=cfg.log_dir,
+    )
+
+
 @dataclass
 class RunnerConfig:
     project_dir: Path
@@ -1365,6 +1386,20 @@ def main() -> None:
             )
             report_and_raise("VERIFY WHEEL", exc)
         _write_result(cfg.test_results_dir, "verify_wheel_result.txt", "VERIFY WHEEL PASSED")
+
+    # 8. SONAME distinctness (system vs wheel library)
+    if not cfg.skip_install:
+        try:
+            verify_soname_distinct(cfg)
+        except CommandError as exc:
+            _write_result(
+                cfg.test_results_dir,
+                "pkg_conflict_result.txt",
+                f"SONAME CHECK FAILED: {exc.name} exited {exc.code}\n\n"
+                f"Log ({exc.log_path}):\n{read_log(exc.log_path)}",
+            )
+            report_and_raise("SONAME CHECK", exc)
+        _write_result(cfg.test_results_dir, "pkg_conflict_result.txt", "SONAME CHECK PASSED")
 
     print("AMDSMI workflow complete")
 

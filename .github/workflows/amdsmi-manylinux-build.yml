@@ -94,6 +94,12 @@ jobs:
             exit 1
           fi
 
+      - name: Verify system/wheel SONAMEs are distinct
+        run: |
+          ${{matrix.target.python-bin}} \
+            "$GITHUB_WORKSPACE/projects/amdsmi/tests/run_amdsmi_pkg_conflict_test.py" \
+            --build-root /tmp/amdsmi-build
+
       - name: Smoke test (install + import)
         run: |
           ${{matrix.target.python-bin}} -m pip install --upgrade pip
