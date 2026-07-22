@@ -91,8 +91,9 @@ public:
     claim_words = claim_words == 0u ? island_words_ : claim_words;
     auto best = available_offsets_.end();
     uint64_t best_distance = std::numeric_limits<uint64_t>::max();
-    for (auto candidate = available_offsets_.begin(); candidate != available_offsets_.end();
-         ++candidate) {
+    const auto [first_reachable, last_reachable] = reachable_target_bounds(anchor_offset);
+    for (auto candidate = available_offsets_.lower_bound(first_reachable);
+         candidate != available_offsets_.end() && *candidate <= last_reachable; ++candidate) {
       if (!claim_fits(*candidate, claim_words) ||
           !compute_sopp_branch_simm16(anchor_offset, *candidate))
         continue;
@@ -112,10 +113,14 @@ public:
 
   [[nodiscard]] bool has_reachable(uint64_t anchor_offset, uint32_t claim_words = 0u) const {
     claim_words = claim_words == 0u ? island_words_ : claim_words;
-    return std::ranges::any_of(available_offsets_, [&](uint64_t candidate) {
-      return claim_fits(candidate, claim_words) &&
-             compute_sopp_branch_simm16(anchor_offset, candidate).has_value();
-    });
+    const auto [first_reachable, last_reachable] = reachable_target_bounds(anchor_offset);
+    for (auto candidate = available_offsets_.lower_bound(first_reachable);
+         candidate != available_offsets_.end() && *candidate <= last_reachable; ++candidate) {
+      if (claim_fits(*candidate, claim_words) &&
+          compute_sopp_branch_simm16(anchor_offset, *candidate))
+        return true;
+    }
+    return false;
   }
 
   [[nodiscard]] std::optional<uint64_t>
@@ -123,10 +128,19 @@ public:
     if (anchor_offsets.empty())
       return std::nullopt;
     claim_words = claim_words == 0u ? island_words_ : claim_words;
+    uint64_t first_reachable = 0u;
+    uint64_t last_reachable = std::numeric_limits<uint64_t>::max();
+    for (uint64_t anchor_offset : anchor_offsets) {
+      const auto [first, last] = reachable_target_bounds(anchor_offset);
+      first_reachable = std::max(first_reachable, first);
+      last_reachable = std::min(last_reachable, last);
+    }
+    if (first_reachable > last_reachable)
+      return std::nullopt;
     auto best = available_offsets_.end();
     uint64_t best_max_distance = std::numeric_limits<uint64_t>::max();
-    for (auto candidate = available_offsets_.begin(); candidate != available_offsets_.end();
-         ++candidate) {
+    for (auto candidate = available_offsets_.lower_bound(first_reachable);
+         candidate != available_offsets_.end() && *candidate <= last_reachable; ++candidate) {
       if (!claim_fits(*candidate, claim_words))
         continue;
       uint64_t max_distance = 0;
@@ -155,6 +169,24 @@ public:
   void reserve(uint64_t offset, uint32_t words) { retire_overlaps(offset, words); }
 
 private:
+  [[nodiscard]] static constexpr std::pair<uint64_t, uint64_t>
+  reachable_target_bounds(uint64_t anchor_offset) {
+    constexpr uint64_t kBackwardReach =
+        static_cast<uint64_t>(-static_cast<int64_t>(std::numeric_limits<int16_t>::min())) *
+        sizeof(uint32_t);
+    constexpr uint64_t kForwardReach =
+        static_cast<uint64_t>(std::numeric_limits<int16_t>::max()) * sizeof(uint32_t);
+    const uint64_t branch_base =
+        anchor_offset > std::numeric_limits<uint64_t>::max() - sizeof(uint32_t)
+            ? std::numeric_limits<uint64_t>::max()
+            : anchor_offset + sizeof(uint32_t);
+    const uint64_t first = branch_base > kBackwardReach ? branch_base - kBackwardReach : 0u;
+    const uint64_t last = branch_base > std::numeric_limits<uint64_t>::max() - kForwardReach
+                              ? std::numeric_limits<uint64_t>::max()
+                              : branch_base + kForwardReach;
+    return {first, last};
+  }
+
   [[nodiscard]] bool claim_fits(uint64_t offset, uint32_t claim_words) const {
     const uint64_t claim_bytes = static_cast<uint64_t>(claim_words) * sizeof(uint32_t);
     if (offset > text_.size() || claim_bytes > text_.size() - offset)
@@ -171,9 +203,16 @@ private:
   void retire_overlaps(uint64_t offset, uint32_t claim_words) {
     const uint64_t claim_end = offset + static_cast<uint64_t>(claim_words) * sizeof(uint32_t);
     const uint64_t island_bytes = static_cast<uint64_t>(island_words_) * sizeof(uint32_t);
-    std::erase_if(available_offsets_, [&](uint64_t candidate) {
-      return candidate < claim_end && candidate + island_bytes > offset;
-    });
+    const uint64_t first_possible_overlap =
+        offset >= island_bytes ? offset - island_bytes + 1u : 0u;
+    auto candidate = available_offsets_.lower_bound(first_possible_overlap);
+    while (candidate != available_offsets_.end() && *candidate < claim_end) {
+      if (*candidate + island_bytes > offset) {
+        candidate = available_offsets_.erase(candidate);
+      } else {
+        ++candidate;
+      }
+    }
   }
 
   std::span<const uint8_t> text_;

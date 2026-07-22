@@ -1,5 +1,6 @@
 void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                                const ConSanOptions &options, rj_code_arch_t arch,
+                                               const MoiResourcePlanningState &resource_state,
                                                ConSanResult &result) {
   if (!options.moi_report_buffer_address)
     return;
@@ -135,32 +136,11 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     uint64_t body_offset = 0;
   };
   std::map<uint64_t, DenseEntryHost> dense_entry_hosts;
-  std::vector<std::unique_ptr<BasicBlock>> dense_host_blocks;
-  std::unique_ptr<MoiResourcePlanningState> dense_resource_state;
-  if (is_rdna4_family_arch(arch) && use_indirect_appended && !original_text.empty()) {
-    std::unique_ptr<Decoder> decoder = Decoder::create(arch);
-    if (decoder) {
-      std::vector<uint64_t> leaders;
-      std::vector<BasicBlock::CodeRange> code_ranges;
-      leaders.reserve(result.kernels.size() + result.functions.size());
-      code_ranges.reserve(result.kernels.size() + result.functions.size());
-      const auto append_owner = [&](uint64_t entry, uint64_t size) {
-        leaders.push_back(entry);
-        if (size != 0u)
-          code_ranges.push_back({.start_offset = entry, .size = size});
-      };
-      for (const ConSanKernelInfo &kernel : result.kernels)
-        if (kernel.has_text_range)
-          append_owner(kernel.entry_text_offset, kernel.code_size);
-      for (const ConSanFunctionInfo &function : result.functions)
-        append_owner(function.entry_text_offset, function.code_size);
-      std::ranges::sort(leaders);
-      leaders.erase(std::ranges::unique(leaders).begin(), leaders.end());
-      dense_host_blocks = BasicBlock::build(code_object, *decoder, arch, leaders, code_ranges);
-    }
-  }
-  if (!options.moi_transient_sgpr_assignments.empty())
-    dense_resource_state = std::make_unique<MoiResourcePlanningState>(bytes, arch, options, result);
+  // The retained planning state already owns the pristine CFG and liveness
+  // facts needed by dense relay selection. Re-decoding the whole code object
+  // here (and a third time for component-local scalar assignments) is both
+  // redundant and dominant on multi-thousand-kernel generated libraries.
+  const auto &dense_host_blocks = resource_state.blocks;
   if (is_rdna4_family_arch(arch) && use_indirect_appended && local_entry_islands) {
     struct DenseGroup {
       std::vector<const ConSanMoiCandidate *> candidates;
@@ -274,8 +254,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                                               uint64_t host_offset) {
             if (!has_owner_override)
               return true;
-            if (!dense_resource_state || !dense_resource_state->valid ||
-                !group_options.moi_exec_save_sgpr || group_resource == nullptr)
+            if (!resource_state.valid || !group_options.moi_exec_save_sgpr ||
+                group_resource == nullptr)
               return false;
             const auto overlaps_window = [&](const RegisterSet &set) {
               const auto overlaps_range = [&](uint16_t base, uint16_t count) {
@@ -298,9 +278,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                      overlaps_range(*group_options.moi_record_replay_call_return_sgpr, 2u);
             };
             bool found_owner_context = false;
-            BasicBlock *resource_block =
-                block_for_offset(dense_resource_state->block_index, host_offset);
-            for (const MoiKernelResourceContext &context : dense_resource_state->contexts) {
+            BasicBlock *resource_block = block_for_offset(resource_state.block_index, host_offset);
+            for (const MoiKernelResourceContext &context : resource_state.contexts) {
               if (context.kernel == nullptr ||
                   std::ranges::find(group_resource->owner_descriptor_file_offsets,
                                     context.kernel->descriptor_file_offset) ==

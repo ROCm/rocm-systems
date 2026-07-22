@@ -334,7 +334,8 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
         });
   }
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::Sampled)
-    try_apply_direct_sampled_watchpoint_patch(code_object_bytes, effective_options, arch, result);
+    try_apply_direct_sampled_watchpoint_patch(code_object_bytes, effective_options, arch,
+                                              resource_planning_state, result);
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::Sampled)
     try_apply_sampled_atomic_sync_patch(code_object_bytes, effective_options, arch, result);
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::Sampled)
@@ -342,7 +343,8 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::InlineShadow)
     try_apply_inline_shadow_patch(code_object_bytes, effective_options, arch, result);
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::RecordReplay)
-    try_apply_first_light_access_record_patch(code_object_bytes, effective_options, arch, result);
+    try_apply_first_light_access_record_patch(code_object_bytes, effective_options, arch,
+                                              resource_planning_state, result);
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
       !explicit_persistent_state &&
       std::ranges::none_of(result.patches, [](const ConSanPatchInfo &patch) {
