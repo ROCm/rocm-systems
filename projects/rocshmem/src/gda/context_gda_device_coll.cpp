@@ -430,9 +430,22 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wg(rocshmem_team_t te
   for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
     uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
-    qps[dest_pe].put_nbi_single(
-      reinterpret_cast<char*>(dst) + my_pe_in_team * nelems + base_heap_offset,
-      reinterpret_cast<const char*>(src) + j * nelems, nelems, false);
+
+    /*
+     * dst may be a symmetric-heap object or a registered user buffer, so
+     * resolve its remote address and key through the QP. src and pSync are
+     * always heap; for a heap dst this reproduces the base_heap_offset math
+     * and default keys exactly.
+     */
+    char *dst_local = reinterpret_cast<char *>(dst) + my_pe_in_team * nelems;
+    const char *src_local = reinterpret_cast<const char *>(src) + j * nelems;
+    auto [dst_raddr, dst_rkey] = qps[dest_pe].get_raddr_info(dst_local);
+    uint32_t src_lkey =
+        (static_cast<int32_t>(nelems) <=
+         static_cast<int32_t>(qps[dest_pe].inline_threshold))
+            ? 0 : qps[dest_pe].get_lkey(reinterpret_cast<uintptr_t>(src_local));
+    qps[dest_pe].put_nbi_single(reinterpret_cast<void *>(dst_raddr), dst_rkey,
+                                src_local, src_lkey, nelems, false);
     qps[dest_pe].atomic_nofetch_single(
       reinterpret_cast<char *>(&pSync[alltoall_pSync_offset + my_pe_in_team]) +
       base_heap_offset, 1);
@@ -516,9 +529,22 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
   for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
     uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
-    qps[dest_pe].put_nbi_single(
-      reinterpret_cast<char*>(dst) + my_pe_in_team * nelems + base_heap_offset,
-      reinterpret_cast<const char *>(src) + j * nelems, nelems, false);
+
+    /*
+     * dst may be a symmetric-heap object or a registered user buffer, so
+     * resolve its remote address and key through the QP. src and pSync are
+     * always heap; for a heap dst this reproduces the base_heap_offset math
+     * and default keys exactly.
+     */
+    char *dst_local = reinterpret_cast<char *>(dst) + my_pe_in_team * nelems;
+    const char *src_local = reinterpret_cast<const char *>(src) + j * nelems;
+    auto [dst_raddr, dst_rkey] = qps[dest_pe].get_raddr_info(dst_local);
+    uint32_t src_lkey =
+        (static_cast<int32_t>(nelems) <=
+         static_cast<int32_t>(qps[dest_pe].inline_threshold))
+            ? 0 : qps[dest_pe].get_lkey(reinterpret_cast<uintptr_t>(src_local));
+    qps[dest_pe].put_nbi_single(reinterpret_cast<void *>(dst_raddr), dst_rkey,
+                                src_local, src_lkey, nelems, false);
     qps[dest_pe].atomic_nofetch_single(
       reinterpret_cast<char *>(&pSync[alltoall_pSync_offset + my_pe_in_team]) +
       base_heap_offset, 1);
@@ -541,6 +567,79 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
   }
 
   sync_wave(team);
+}
+
+__device__ void GDAContext::fcollectmem_wg(rocshmem_team_t team, void *dst,
+                                     const void *src, int nelems) {
+  fcollectmem_linear_wg(team, dst, src, nelems);
+}
+
+__device__ void GDAContext::fcollectmem_linear_wg(rocshmem_team_t team, void *dst,
+    const void *src, int nelems) {
+  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+
+  int pe_start = team_obj->tinfo_wrt_world->pe_start;
+  int pe_size = team_obj->num_pes;
+  int stride = team_obj->tinfo_wrt_world->stride;
+  long *pSync = team_obj->alltoall_pSync;
+  int my_pe_in_team = team_obj->my_pe;
+
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
+  // Have each PE put their designated data to the other PEs
+  for (int j = 0; j < pe_size; j++) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+    internal_putmem_nbi_wg(reinterpret_cast<char *>(dst) + my_pe_in_team * nelems, src,
+      nelems, dest_pe, dest_pe, wf_info);
+  }
+
+  if (is_thread_zero_in_block()) {
+    // Iterate through 0th qp of each PE
+    for (int j = 0; j < pe_size; j++) {
+      int dest_pe = team_obj->get_pe_in_world(j);
+      qps[dest_pe].quiet(wf_info);
+    }
+  }
+  // wait until everyone has obtained their designated data
+  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
+}
+
+__device__ int GDAContext::fcollectmem_wave(rocshmem_team_t team, void *dst,
+                                     const void *src, int nelems) {
+  if (dst == nullptr || src == nullptr || team == ROCSHMEM_TEAM_INVALID)
+    return ROCSHMEM_ERROR;
+
+  fcollectmem_linear_wave(team, dst, src, nelems);
+
+  return ROCSHMEM_SUCCESS;
+}
+
+__device__ void GDAContext::fcollectmem_linear_wave(rocshmem_team_t team, void *dst,
+    const void *src, int nelems) {
+  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+
+  int pe_start = team_obj->tinfo_wrt_world->pe_start;
+  int pe_size = team_obj->num_pes;
+  int stride = team_obj->tinfo_wrt_world->stride;
+  long *pSync = team_obj->alltoall_pSync;
+  int my_pe_in_team = team_obj->my_pe;
+
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wave);
+  // Have each PE put their designated data to the other PEs
+  for (int j = 0; j < pe_size; j++) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+    internal_putmem_nbi_wave(reinterpret_cast<char *>(dst) + my_pe_in_team * nelems, src,
+      nelems, dest_pe, dest_pe, wf_info);
+  }
+
+  if (is_thread_zero_in_block()) {
+    // Iterate through 0th qp of each PE
+    for (int j = 0; j < pe_size; j++) {
+      int dest_pe = team_obj->get_pe_in_world(j);
+      qps[dest_pe].quiet(wf_info);
+    }
+  }
+  // wait until everyone has obtained their designated data
+  internal_sync_wave(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
 }
 
 }  // namespace rocshmem

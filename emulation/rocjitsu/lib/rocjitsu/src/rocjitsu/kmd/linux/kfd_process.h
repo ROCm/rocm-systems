@@ -123,6 +123,11 @@ public:
     bool user_va = false;
     bool imported = false;
     int dmabuf_fd = -1;
+    // True when the driver created host_ptr (mmap it itself) and must munmap it
+    // on teardown. False for caller-owned pages (e.g. reused MAP_FIXED pages
+    // from the thunk) that the driver must never unmap, since unmapping them
+    // races with the owning process still accessing the memory.
+    bool host_ptr_owned = false;
   };
 
   /// @brief Memory policy descriptor.
@@ -248,6 +253,12 @@ public:
   pid_t client_pid_ = 0;
   std::atomic<uint32_t> open_ref_count_{1};
 
+  /// @brief Serializes this process's ioctls, analogous to the real KFD's
+  /// per-process lock. Taken as the outermost per-process lock in dispatch_ioctl.
+  /// AMDKFD_IOC_WAIT_EVENTS is intentionally NOT taken under this lock: it blocks
+  /// waiting for signals that SET_EVENT/RESET_EVENT (which DO run under this lock)
+  /// must produce, so holding it would deadlock forward progress.
+  std::mutex op_mutex_;
   mutable std::mutex alloc_mutex_;
   std::unordered_map<uint64_t, GpuAllocation> allocations_;
   uint64_t next_handle_ = 1;

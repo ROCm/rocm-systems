@@ -158,6 +158,7 @@ set(SRC_FILES
   include/gin/gin_host_proxy.h
   include/gin/gin_host_rocshmem_gda.h
   include/gin/gin_rocshmem_gda_factory.h
+  include/gin/gin_host_anvil_sdma.h
   include/hip_rocm_version_info.h
   include/ibvcore.h
   include/ibvsymbols.h
@@ -225,6 +226,11 @@ set(SRC_FILES
   include/nccl_device/gin/rocshmem_gda/gin_rocshmem_gda.h
   include/nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h
   include/nccl_device/gin/rocshmem_gda/queue_pair_device.h
+  include/nccl_device/gin/anvil_sdma/gin_anvil_sdma.h
+  include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_copy.h
+  include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h
+  include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table_device.h
+  include/nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h
   include/nccl_device/ll_a2a.h
   include/nccl_device/lsa_barrier.h
   include/nccl_device/ptr.h
@@ -467,6 +473,9 @@ if(ENABLE_ROCSHMEM_GIN)
   list(APPEND SRC_FILES
     src/gin/gin_plugin_rocshmem_gda.cc
     src/gin/gin_rocshmem_gda_factory.cc
+    src/gin/gin_plugin_anvil_sdma.cc
+    src/gin/gin_anvil_ipc_table_host.cc
+    src/gin/gin_anvil_sdma_oss7_device.cc
   )
 endif()
 

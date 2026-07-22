@@ -23,11 +23,14 @@
  *****************************************************************************/
 
 #include <hip/hip_runtime.h>
+#include <hip/hip_version.h>
+#include <unistd.h>
 #include <cstring>
 #include <cctype>
 #include <cstdlib>
 #include <cassert>
 #include <algorithm>
+#include <vector>
 
 #include "backend_gda.hpp"
 #include "debug_gda.hpp"
@@ -141,12 +144,24 @@ void GDABackend::init() {
   setup_heap_memory_rkey();
   setup_gpu_qps();
 
+  /*
+   * Allocate the symmetric-registration table before contexts are created so
+   * they capture its (stable) device pointer.
+   */
+  setup_symm_registration();
+
   setup_ctxs();
   rte_barrier();
 }
 
 GDABackend::~GDABackend() {
   cleanup_ctxs();
+
+  /*
+   * Release symmetric registrations (and the table) while the NIC protection
+   * domains are still valid, since it deregisters per-NIC MRs.
+   */
+  cleanup_symm_registration();
 
   cleanup_teams();
 
@@ -640,6 +655,431 @@ void GDABackend::buffer_unregister_all() {
 
   /* Clear the ptr cache */
   Backend::buffer_unregister_all();
+}
+
+void GDABackend::setup_symm_registration() {
+#if HIP_VERSION >= 70000000
+  /*
+   * The GDA device-side registration state (the flat per-QP entry table and
+   * the shared count) is allocated in setup_gpu_qps() so every QP captures a
+   * stable slice pointer. Nothing to do for the NIC path here.
+   *
+   * When IPC is enabled at runtime (node-local peers detected; controlled by
+   * ROCSHMEM_DISABLE_MIXED_IPC / compile-time USE_IPC), also allocate the
+   * device-visible IPC registration table so node-local peers can reach
+   * registered buffers through the IPC fast path instead of the NIC. When IPC
+   * is disabled, pes_with_ipc_avail is null and this stays unallocated, so all
+   * registered-buffer traffic falls back to the NIC.
+   */
+  if (ipcImpl.pes_with_ipc_avail != nullptr) {
+    alloc_ipc_symm_table();
+  }
+#endif
+}
+
+void GDABackend::cleanup_symm_registration() {
+#if HIP_VERSION >= 70000000
+  /* Unregister anything the user left registered. */
+  symmetric_buffer_unregister_all();
+
+  /* Free the shared IPC registration table (no-op if never allocated). */
+  free_ipc_symm_table();
+#endif
+}
+
+#if HIP_VERSION >= 70000000
+struct ibv_mr *GDABackend::register_symm_buffer_mr(
+    struct ibv_pd *pd, hipMemGenericAllocationHandle_t gen_handle,
+    bool use_dmabuf, void *iova, size_t length, int *out_fd) {
+  *out_fd = -1;
+  int access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
+               IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC;
+  if (envvar::gda::pcie_relaxed_ordering) {
+    access |= IBV_ACCESS_RELAXED_ORDERING;
+  }
+
+  /*
+   * The buffer is HIP VMM (GPUDirect-RDMA-capable) memory. When dmabuf is
+   * available, register through the dmabuf path (matching the symmetric heap
+   * MR). The buffer is not tracked in the allocator's internal map, so export
+   * the caller-retained generic handle directly rather than via
+   * GetDmabufHandle.
+   *
+   * The caller keeps @p gen_handle retained for the whole MR lifetime: the
+   * heap MR keeps its allocation handle alive similarly, and releasing the
+   * retained handle before the MR is torn down leaves the user unable to
+   * later hipMemUnmap the buffer.
+   *
+   * The exported fd likewise must remain open for the MR's lifetime (mirroring
+   * the ibv_reg_mr wrapper); it is returned via out_fd and closed by the
+   * caller only after the MR is deregistered.
+   */
+  if (use_dmabuf) {
+    int fd = -1;
+    hipError_t err = hipMemExportToShareableHandle(
+        &fd, gen_handle, hipMemHandleTypePosixFileDescriptor, 0);
+    if (err != hipSuccess) {
+      return nullptr;
+    }
+    struct ibv_mr *mr = ibv.reg_dmabuf_mr(pd, 0, length,
+                                          reinterpret_cast<uint64_t>(iova),
+                                          fd, access);
+    if (mr == nullptr) {
+      close(fd);
+      return nullptr;
+    }
+    *out_fd = fd;
+    return mr;
+  }
+
+  return ibv.reg_mr(pd, iova, length, access);
+}
+#endif
+
+int GDABackend::buffer_register_symmetric([[maybe_unused]] void *addr,
+                                          [[maybe_unused]] size_t length,
+                                          [[maybe_unused]] void **registered_addr) {
+#if HIP_VERSION >= 70000000
+  if (registered_addr == nullptr || symm_entries_ == nullptr) {
+    return ROCSHMEM_ERROR;
+  }
+
+  /*
+   * Symmetric size check first: registration is collective, so every PE must
+   * call with the same length. Doing this before any host-side setup lets a
+   * mismatch fail out uniformly with nothing to unwind.
+   */
+  if (!symm_lengths_match(length)) {
+    return ROCSHMEM_ERROR;
+  }
+
+  /*
+   * Stage 1: base-class host-side setup. Validates the user buffer (VMM checks)
+   * maps it to a rocSHMEM-owned alias, runs capacity/overlap checks, and
+   * records it keyed by the alias. The alias is the symmetric address the
+   * caller uses for RMA and unregistration.
+   */
+  void *alias = nullptr;
+  int register_ok = (Backend::buffer_register_symmetric(addr, length, &alias) ==
+                     ROCSHMEM_SUCCESS) ? 1 : 0;
+  if (!all_pes_succeeded(register_ok)) {
+    if (register_ok) {
+      Backend::buffer_unregister_symmetric(alias);
+    }
+    return ROCSHMEM_ERROR;
+  }
+
+  uintptr_t key = reinterpret_cast<uintptr_t>(alias);
+
+  /*
+   * Stage 2: register the alias with every NIC's protection domain. Registered
+   * buffers are reached over the NIC (including for node-local peers), so this
+   * mirrors the per-NIC heap MR registration in setup_heap_memory_rkey().
+   */
+  /*
+   * Retain the backing VMM handle once and keep it alive for the whole MR
+   * lifetime (released in buffer_unregister_symmetric). This mirrors how the
+   * symmetric heap keeps its allocation handle alive around its
+   * dmabuf-registered MR. The alias and the original map the same physical
+   * allocation.
+   */
+  bool use_dmabuf = ibv.is_dmabuf_supported();
+  hipMemGenericAllocationHandle_t gen_handle{};
+  bool has_gen_handle = false;
+  if (use_dmabuf) {
+    if (hipMemRetainAllocationHandle(&gen_handle, addr) != hipSuccess) {
+      use_dmabuf = false;
+    } else {
+      has_gen_handle = true;
+    }
+  }
+
+  std::vector<struct ibv_mr *> mrs(num_nics_, nullptr);
+  std::vector<int> mr_fds(num_nics_, -1);
+  int reg_mr_ok = 1;
+  for (int n = 0; n < num_nics_; n++) {
+    mrs[n] = register_symm_buffer_mr(nic_devices_[n].pd_orig, gen_handle,
+                                     use_dmabuf, alias, length, &mr_fds[n]);
+    if (mrs[n] == nullptr) {
+      reg_mr_ok = 0;
+      break;
+    }
+  }
+  if (!all_pes_succeeded(reg_mr_ok)) {
+    for (int n = 0; n < num_nics_; n++) {
+      if (mrs[n]) {
+        (void)ibv.dereg_mr(mrs[n]);
+      }
+      if (mr_fds[n] != -1) {
+        close(mr_fds[n]);
+      }
+    }
+    if (has_gen_handle) {
+      (void)hipMemRelease(gen_handle);
+    }
+    Backend::buffer_unregister_symmetric(alias);
+    return ROCSHMEM_ERROR;
+  }
+
+  /*
+   * Stage 3: exchange the per-PE alias base and per-PE/per-NIC remote keys.
+   */
+  std::vector<uintptr_t> bases(num_pes, 0);
+  bases[my_pe] = key;
+  symm_allgather(bases.data(), sizeof(uintptr_t));
+
+  std::vector<uint32_t> rkeys(static_cast<size_t>(num_pes) * num_nics_, 0);
+  for (int n = 0; n < num_nics_; n++) {
+    rkeys[my_pe * num_nics_ + n] = mrs[n]->rkey;
+  }
+  symm_allgather(rkeys.data(), sizeof(uint32_t) * num_nics_);
+
+  std::vector<uint32_t> lkeys(num_nics_, 0);
+  for (int n = 0; n < num_nics_; n++) {
+    lkeys[n] = mrs[n]->lkey;
+  }
+
+  /*
+   * Publish the registration into the device-visible flat entry table. Each QP
+   * reads only the slice specialized to its (dest_pe, nic_idx), so fill one
+   * pre-resolved entry per (pe, nic) at this registration's slot. The entry
+   * carries the peer base and per-NIC keys directly, so the device lookup does
+   * no pointer chasing.
+   */
+  int slot = symm_count_host_;
+  if (slot >= symm_capacity_) {
+    /* Bound guard; base class already enforces max_symm_regions_. */
+    for (int n = 0; n < num_nics_; n++) {
+      (void)ibv.dereg_mr(mrs[n]);
+      if (mr_fds[n] != -1) {
+        close(mr_fds[n]);
+      }
+    }
+    if (has_gen_handle) {
+      (void)hipMemRelease(gen_handle);
+    }
+    Backend::buffer_unregister_symmetric(alias);
+    return ROCSHMEM_ERROR;
+  }
+
+  for (int pe = 0; pe < num_pes; pe++) {
+    for (int n = 0; n < num_nics_; n++) {
+      QpSymmEntry &e =
+          host_symm_entries_[(static_cast<size_t>(pe) * num_nics_ + n) *
+                                 symm_capacity_ + slot];
+      e.local_base = key;
+      e.remote_base = bases[pe];
+      e.length = length;
+      e.rkey = rkeys[static_cast<size_t>(pe) * num_nics_ + n];
+      e.lkey = lkeys[n];
+    }
+  }
+
+  /*
+   * Registration is a rare collective, so re-upload the whole (small) mirror
+   * for simplicity, then publish by bumping the shared count last so a device
+   * reader never observes count > populated entries.
+   */
+  CHECK_HIP(hipMemcpy(symm_entries_, host_symm_entries_.data(),
+                      host_symm_entries_.size() * sizeof(QpSymmEntry),
+                      hipMemcpyHostToDevice));
+  symm_count_host_ = slot + 1;
+  CHECK_HIP(hipMemcpy(symm_count_, &symm_count_host_, sizeof(int),
+                      hipMemcpyHostToDevice));
+
+  GdaSymmRecord rec;
+  rec.slot = slot;
+  rec.mrs = std::move(mrs);
+  rec.mr_fds = std::move(mr_fds);
+  rec.gen_handle = gen_handle;
+  rec.has_gen_handle = has_gen_handle;
+  gda_symm_records_[key] = std::move(rec);
+
+  /*
+   * Stage 4 (IPC fast path): when IPC is enabled at runtime, also expose the
+   * buffer to node-local peers over IPC so their accesses avoid the NIC. This
+   * reuses the same handle-exchange machinery as the IPC backend. The peer
+   * index is the node-local shm index (matching how the device indexes
+   * ipc_bases / peer_bases via isIpcAvailable), so peer_global maps the local
+   * index to the global PE via pes_with_ipc_avail. All PEs run this in lockstep
+   * (the enabled state is global), keeping the collectives aligned.
+   *
+   * When IPC is disabled (ROCSHMEM_DISABLE_MIXED_IPC or USE_IPC=OFF), the table
+   * is not allocated and this is skipped, so node-local peers fall back to the
+   * NIC path just like remote peers.
+   */
+  if (ipcImpl.symm_table != nullptr && ipcImpl.pes_with_ipc_avail != nullptr) {
+    int shm_size = ipcImpl.shm_size;
+    std::vector<int> peer_global(shm_size, 0);
+    CHECK_HIP(hipMemcpy(peer_global.data(), ipcImpl.pes_with_ipc_avail,
+                        shm_size * sizeof(int), hipMemcpyDeviceToHost));
+
+    if (register_ipc_symm_region(alias, addr, length, peer_global,
+                                 ipcImpl.shm_rank) != ROCSHMEM_SUCCESS) {
+      /* Collective failure: unwind NIC + base state on all PEs. */
+      gda_nic_unregister(key);
+      Backend::buffer_unregister_symmetric(alias);
+      return ROCSHMEM_ERROR;
+    }
+  }
+
+  *registered_addr = alias;
+  return ROCSHMEM_SUCCESS;
+#else
+  return ROCSHMEM_ERROR;
+#endif
+}
+
+int GDABackend::gda_nic_unregister([[maybe_unused]] uintptr_t key) {
+#if HIP_VERSION >= 70000000
+  auto it = gda_symm_records_.find(key);
+  if (it == gda_symm_records_.end()) {
+    return ROCSHMEM_ERROR;
+  }
+
+  int slot = it->second.slot;
+
+  /*
+   * Unpublish the region from the device-visible table BEFORE tearing down any
+   * NIC resources, so no QP can resolve an address to a registration whose MRs
+   * (and rkeys) are about to be invalidated. This is the reverse of the publish
+   * order used at registration.
+   *
+   * Compact the flat entry table by moving the last registration's row into the
+   * freed slot for every (pe, nic) slice (in the host mirror). Upload the
+   * compacted entries first, then shrink the shared count: while count is still
+   * unshrunk the moved region is briefly duplicated (at both its old and new
+   * slot, which resolve identically), so every live region stays reachable
+   * throughout; the removed region disappears as soon as the entries land.
+   */
+  int last = symm_count_host_ - 1;
+  if (slot != last && last >= 0) {
+    for (int pe = 0; pe < num_pes; pe++) {
+      for (int n = 0; n < num_nics_; n++) {
+        size_t base =
+            (static_cast<size_t>(pe) * num_nics_ + n) * symm_capacity_;
+        host_symm_entries_[base + slot] = host_symm_entries_[base + last];
+      }
+    }
+    for (auto &kv : gda_symm_records_) {
+      if (kv.second.slot == last) {
+        kv.second.slot = slot;
+        break;
+      }
+    }
+  }
+  CHECK_HIP(hipMemcpy(symm_entries_, host_symm_entries_.data(),
+                      host_symm_entries_.size() * sizeof(QpSymmEntry),
+                      hipMemcpyHostToDevice));
+  symm_count_host_ = (last >= 0) ? last : 0;
+  CHECK_HIP(hipMemcpy(symm_count_, &symm_count_host_, sizeof(int),
+                      hipMemcpyHostToDevice));
+
+  /*
+   * Now that the region is no longer advertised, release its NIC resources
+   * (per-NIC MRs, dmabuf fds, and the retained VMM handle). Done before the
+   * base-class alias unmap so the retained reference is dropped before the
+   * alias mapping is torn down.
+   */
+  release_symm_record_nic_resources(it->second);
+
+  gda_symm_records_.erase(it);
+  return ROCSHMEM_SUCCESS;
+#else
+  return ROCSHMEM_ERROR;
+#endif
+}
+
+void GDABackend::release_symm_record_nic_resources(
+    [[maybe_unused]] GdaSymmRecord &rec) {
+#if HIP_VERSION >= 70000000
+  /*
+   * Deregister the per-NIC MRs, then close their dmabuf fds. The fd must
+   * outlive the MR (the NIC references the dmabuf), so it is closed only after
+   * dereg_mr, mirroring the ibv_reg_mr wrapper's teardown order.
+   */
+  for (size_t n = 0; n < rec.mrs.size(); n++) {
+    if (rec.mrs[n]) {
+      (void)ibv.dereg_mr(rec.mrs[n]);
+    }
+    if (n < rec.mr_fds.size() && rec.mr_fds[n] != -1) {
+      close(rec.mr_fds[n]);
+    }
+  }
+
+  /* Release the backing VMM handle retained at registration. */
+  if (rec.has_gen_handle) {
+    (void)hipMemRelease(rec.gen_handle);
+  }
+#endif
+}
+
+void GDABackend::symmetric_buffer_unregister_all() {
+#if HIP_VERSION >= 70000000
+  if (gda_symm_records_.empty()) {
+    return;
+  }
+
+  /*
+   * Unpublish the whole device-visible table up front, before tearing down any
+   * NIC resources, so no QP can resolve an address to a registration whose MRs
+   * are about to be invalidated.
+   */
+  symm_count_host_ = 0;
+  if (symm_count_ != nullptr) {
+    CHECK_HIP(hipMemcpy(symm_count_, &symm_count_host_, sizeof(int),
+                        hipMemcpyHostToDevice));
+  }
+
+  /*
+   * Now tear down each registration's transport resources and host bookkeeping,
+   * mirroring buffer_unregister_symmetric (IPC exposure, NIC resources, common
+   * base-class bookkeeping).
+   */
+  for (auto &[key, rec] : gda_symm_records_) {
+    void *addr = reinterpret_cast<void *>(key);
+    if (ipcImpl.symm_table != nullptr &&
+        ipc_symm_records_.find(key) != ipc_symm_records_.end()) {
+      (void)unregister_ipc_symm_region(addr);
+    }
+    release_symm_record_nic_resources(rec);
+    (void)Backend::buffer_unregister_symmetric(addr);
+  }
+
+  gda_symm_records_.clear();
+#endif
+}
+
+int GDABackend::buffer_unregister_symmetric([[maybe_unused]] void *addr) {
+#if HIP_VERSION >= 70000000
+  if (addr == nullptr || symm_entries_ == nullptr) {
+    return ROCSHMEM_ERROR;
+  }
+
+  uintptr_t key = reinterpret_cast<uintptr_t>(addr);
+
+  /*
+   * Unregister in the reverse order of registration, unwinding the most
+   * specialized state first:
+   *   1. IPC exposure (only present if this buffer was also mapped for
+   *      node-local peers via the mixed IPC path),
+   *   2. NIC state (device table entry, per-NIC MRs, dmabuf fds, VMM handle),
+   *   3. common host-side bookkeeping (alias unmap + region maps) in the base
+   *      class.
+   */
+  if (ipcImpl.symm_table != nullptr &&
+      ipc_symm_records_.find(key) != ipc_symm_records_.end()) {
+    (void)unregister_ipc_symm_region(addr);
+  }
+
+  if (gda_nic_unregister(key) != ROCSHMEM_SUCCESS) {
+    return ROCSHMEM_ERROR;
+  }
+
+  return Backend::buffer_unregister_symmetric(addr);
+#else
+  return ROCSHMEM_ERROR;
+#endif
 }
 
 void GDABackend::accumulate_default_host_ctx_stats() {
@@ -1270,8 +1710,46 @@ void GDABackend::setup_gpu_qps() {
   host_qps = (QueuePair*) malloc(qp_objs_mem_size);
   CHECK_NNULL(host_qps, "malloc (host_qps)");
 
+#if HIP_VERSION >= 70000000
+  /*
+   * Allocate the device-side symmetric-registration state shared by every QP:
+   * a flat entry table pre-sliced per (dest_pe, nic_idx) plus a shared count.
+   * Allocated here (before QPs are wired) so each QP captures a stable slice
+   * pointer; register/unregister only mutate the contents, never the pointers.
+   * Each QP reads only its own slice, so the RMA hot path needs no pointer
+   * chasing.
+   */
+  int symm_capacity = static_cast<int>(max_symm_regions_);
+  if (symm_capacity <= 0) {
+    symm_capacity = 1;
+  }
+  symm_capacity_ = symm_capacity;
+  size_t num_entries =
+      static_cast<size_t>(num_pes) * num_nics_ * symm_capacity_;
+  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&symm_entries_),
+                      num_entries * sizeof(QpSymmEntry)));
+  CHECK_HIP(hipMemset(symm_entries_, 0, num_entries * sizeof(QpSymmEntry)));
+  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&symm_count_), sizeof(int)));
+  CHECK_HIP(hipMemset(symm_count_, 0, sizeof(int)));
+  host_symm_entries_.assign(num_entries, QpSymmEntry{});
+  symm_count_host_ = 0;
+#endif
+
+  const auto &heap_bases = heap.get_heap_bases();
   for (size_t i = 0; i < qp_objs_count; i++) {
     new (&host_qps[i]) QueuePair(nic_for_qp(i).pd_orig, gda_provider);
+    int qp_dest_pe = static_cast<int>(i % num_pes);
+    /* Cache the peer heap base so the heap translation is load-free. */
+    host_qps[i].remote_heap_base =
+        reinterpret_cast<uintptr_t>(heap_bases[qp_dest_pe]);
+#if HIP_VERSION >= 70000000
+    /* Point the QP at the registration slice for its (dest_pe, nic_idx). */
+    int qp_nic_idx = nic_idx_for_qp(static_cast<int>(i));
+    host_qps[i].symm_count = symm_count_;
+    host_qps[i].symm_entries =
+        symm_entries_ + (static_cast<size_t>(qp_dest_pe) * num_nics_ +
+                         qp_nic_idx) * symm_capacity_;
+#endif
     CHECK_HIP(hipMemcpy(&gpu_qps[i], &host_qps[i], sizeof(QueuePair), hipMemcpyDefault));
 
     initialize_gpu_qp(&gpu_qps[i], i);
@@ -1291,6 +1769,20 @@ void GDABackend::cleanup_gpu_qps() {
 
   CHECK_HIP(hipFree(gpu_qps));
   gpu_qps = nullptr;
+
+#if HIP_VERSION >= 70000000
+  if (symm_entries_ != nullptr) {
+    CHECK_HIP(hipFree(symm_entries_));
+    symm_entries_ = nullptr;
+  }
+  if (symm_count_ != nullptr) {
+    CHECK_HIP(hipFree(symm_count_));
+    symm_count_ = nullptr;
+  }
+  host_symm_entries_.clear();
+  symm_capacity_ = 0;
+  symm_count_host_ = 0;
+#endif
 }
 
 void GDABackend::open_ib_device() {

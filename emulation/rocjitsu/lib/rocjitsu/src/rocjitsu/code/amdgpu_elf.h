@@ -172,14 +172,29 @@ inline constexpr uint32_t SHT_REL = 9;
 inline constexpr uint32_t SHT_DYNSYM = 11;
 
 inline constexpr uint8_t kElfSymbolBindGlobal = 1;
-inline constexpr uint8_t kElfSymbolTypeObject = 1;
-inline constexpr uint8_t kElfSymbolTypeFunc = 2; // STT_FUNC
+inline constexpr uint8_t kElfSymbolTypeNone = 0;    // STT_NOTYPE
+inline constexpr uint8_t kElfSymbolTypeObject = 1;  // STT_OBJECT
+inline constexpr uint8_t kElfSymbolTypeFunc = 2;    // STT_FUNC
+inline constexpr uint8_t kElfSymbolTypeSection = 3; // STT_SECTION
 
 inline constexpr uint8_t elf_symbol_bind(uint8_t info) { return info >> 4; }
 inline constexpr uint8_t elf_symbol_type(uint8_t info) { return info & 0xf; }
 inline constexpr uint8_t elf_symbol_info(uint8_t bind, uint8_t type) {
   return static_cast<uint8_t>((bind << 4) | (type & 0xf));
 }
+
+// ELF64 relocation info accessors (r_info packs symbol index in the high 32 bits
+// and the relocation type in the low 32 bits).
+inline constexpr uint32_t elf_reloc_sym(uint64_t info) { return static_cast<uint32_t>(info >> 32); }
+inline constexpr uint32_t elf_reloc_type(uint64_t info) {
+  return static_cast<uint32_t>(info & 0xffffffffu);
+}
+
+// AMDGPU relocation types (subset), values per the AMDGPU ELF ABI.
+// R_AMDGPU_RELATIVE64 uses symbol index 0 and forms its value from the load bias
+// plus r_addend, so its addend can name an in-.text virtual address with no
+// owning symbol.
+inline constexpr uint32_t R_AMDGPU_RELATIVE64 = 13;
 
 inline constexpr uint64_t SHF_WRITE = 1u << 0;
 inline constexpr uint64_t SHF_ALLOC = 1u << 1;

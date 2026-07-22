@@ -176,25 +176,32 @@ uint32_t max_numeric_dir(const fs::path &dir) {
   return max_id;
 }
 
-std::optional<uint32_t> first_real_gpu_id_matching_isa(std::string_view host_isa) {
+std::optional<uint32_t> first_gpu_id_matching_isa_in_topology(const fs::path &topology_root,
+                                                              std::string_view host_isa) {
   std::optional<uint32_t> target_version = kmd::gfx_target_version_from_name(host_isa);
   if (!target_version)
     return std::nullopt;
 
-  for (std::string_view topology_path : kRealTopologyPaths) {
-    fs::path nodes_dir = fs::path(std::string(topology_path)) / "nodes";
-    const uint32_t max_node = max_numeric_dir(nodes_dir);
-    for (uint32_t node_id = 1; node_id <= max_node; ++node_id) {
-      fs::path node_dir = nodes_dir / std::to_string(node_id);
-      const uint32_t gfx_target_version =
-          read_u32_property(node_dir / "properties", "gfx_target_version", 0);
-      if (gfx_target_version != *target_version)
-        continue;
+  fs::path nodes_dir = topology_root / "nodes";
+  const uint32_t max_node = max_numeric_dir(nodes_dir);
+  for (uint32_t node_id = 1; node_id <= max_node; ++node_id) {
+    fs::path node_dir = nodes_dir / std::to_string(node_id);
+    const uint32_t gfx_target_version =
+        read_u32_property(node_dir / "properties", "gfx_target_version", 0);
+    if (gfx_target_version != *target_version)
+      continue;
 
-      std::optional<uint32_t> gpu_id = read_u32_file(node_dir / "gpu_id");
-      if (gpu_id && *gpu_id != 0)
-        return gpu_id;
-    }
+    std::optional<uint32_t> gpu_id = read_u32_file(node_dir / "gpu_id");
+    if (gpu_id && *gpu_id != 0)
+      return gpu_id;
+  }
+  return std::nullopt;
+}
+
+std::optional<uint32_t> first_real_gpu_id_matching_isa(std::string_view host_isa) {
+  for (std::string_view topology_path : kRealTopologyPaths) {
+    if (auto gpu_id = first_gpu_id_matching_isa_in_topology(fs::path(topology_path), host_isa))
+      return gpu_id;
   }
   return std::nullopt;
 }
@@ -339,8 +346,9 @@ public:
 
   /// @brief Build the overlay from the current host sysfs topology.
   /// @param guest Synthetic guest GPU properties to append.
+  /// @param host_topology_path Optional path to a generated simulated-host topology root.
   /// @returns true when topology and guest DRM paths are ready.
-  bool generate(const Sysfs::GpuInfo &guest);
+  bool generate(const Sysfs::GpuInfo &guest, const std::string &host_topology_path = {});
 
   /// @brief Remove generated overlay directories.
   void cleanup();
@@ -361,8 +369,8 @@ private:
   /// @brief Copy a host sysfs subtree into the generated overlay.
   bool copy_tree(const std::string &src, const std::string &dst);
 
-  /// @brief Copy the first available real KFD topology root into the overlay.
-  bool copy_host_topology();
+  /// @brief Copy a simulated topology path or the first available real KFD topology.
+  bool copy_host_topology(const std::string &host_topology_path);
 
   /// @brief Generate the appended guest KFD node and guest DRM metadata.
   bool copy_guest_node(const Sysfs::GpuInfo &guest);
@@ -434,7 +442,10 @@ bool GuestKfd::TopologyOverlay::copy_tree(const std::string &src, const std::str
   return ok;
 }
 
-bool GuestKfd::TopologyOverlay::copy_host_topology() {
+bool GuestKfd::TopologyOverlay::copy_host_topology(const std::string &host_topology_path) {
+  if (!host_topology_path.empty())
+    return copy_tree(host_topology_path, topology_dir_);
+
   for (std::string_view topology_path : kRealTopologyPaths) {
     if (copy_tree(std::string(topology_path), topology_dir_))
       return true;
@@ -486,11 +497,12 @@ bool GuestKfd::TopologyOverlay::patch_topology_files() {
   return true;
 }
 
-bool GuestKfd::TopologyOverlay::generate(const Sysfs::GpuInfo &guest) {
+bool GuestKfd::TopologyOverlay::generate(const Sysfs::GpuInfo &guest,
+                                         const std::string &host_topology_path) {
   cleanup();
   if (!make_temp_dir("rocjitsu_guest_topology", &topology_dir_))
     return false;
-  if (!copy_host_topology()) {
+  if (!copy_host_topology(host_topology_path)) {
     cleanup();
     return false;
   }
@@ -519,18 +531,22 @@ void GuestKfd::TopologyOverlay::release_after_fork() {
   guest_sysfs_.release_after_fork();
 }
 
-GuestKfd::GuestKfd(config::DbtGuestConfig config)
-    : config_(std::move(config)), overlay_(std::make_unique<TopologyOverlay>()) {
+GuestKfd::GuestKfd(config::DbtGuestConfig config, LinuxKfd *execution_driver)
+    : config_(std::move(config)), execution_driver_(execution_driver),
+      overlay_(std::make_unique<TopologyOverlay>()),
+      owns_execution_driver_open_(execution_driver && execution_driver->fd() >= 0) {
   libc_passthrough().resolve();
   guest_ = gpu_info_from_config(config_.guest_device,
                                 std::max(1u, config_.guest_device.num_shader_engines));
   guest_.drm_render_minor = choose_render_minor(guest_.drm_render_minor);
-  host_gpu_id_ = config_.host_gpu_id;
+  host_gpu_id_ = config_.host.gpu_id;
 }
 
 GuestKfd::~GuestKfd() {
   int kfd_fd = real_kfd_fd_.load(std::memory_order_acquire);
-  if (kfd_fd >= 0)
+  if (execution_driver_ && owns_execution_driver_open_)
+    execution_driver_->close();
+  else if (kfd_fd >= 0 && !execution_driver_)
     libc_passthrough().close(kfd_fd);
 }
 
@@ -542,8 +558,10 @@ void GuestKfd::reset_after_fork() {
   new (&mutex_) std::mutex();
   ready_.store(false, std::memory_order_release);
   int kfd_fd = real_kfd_fd_.exchange(-1, std::memory_order_acq_rel);
-  if (kfd_fd >= 0)
+  if (kfd_fd >= 0 && !execution_driver_)
     libc_passthrough().close(kfd_fd);
+  owns_execution_driver_open_ = false;
+  execution_driver_ = nullptr;
   open_refs_ = 0;
   overlay_->release_after_fork();
   synthetic_handles_.clear();
@@ -554,6 +572,30 @@ void GuestKfd::reset_after_fork() {
 bool GuestKfd::ensure_real_kfd_locked() {
   if (real_kfd_fd_.load(std::memory_order_acquire) >= 0)
     return true;
+  if (execution_driver_) {
+    int fd = execution_driver_->fd();
+    if (fd < 0) {
+      const bool already_owns_open = owns_execution_driver_open_;
+      fd = execution_driver_->open();
+      if (fd >= 0) {
+        if (already_owns_open) {
+          // Re-minting an overwritten simulator primary retains the existing
+          // process once. GuestKfd already pins that process for the lifetime
+          // of its app-facing opens, so balance the temporary retain and keep
+          // the original owned reference for final teardown.
+          execution_driver_->close();
+        } else {
+          owns_execution_driver_open_ = true;
+        }
+      }
+    }
+    if (fd < 0) {
+      errno = ENODEV;
+      return false;
+    }
+    real_kfd_fd_.store(fd, std::memory_order_release);
+    return true;
+  }
   int fd = libc_passthrough().openat(AT_FDCWD, "/dev/kfd", O_RDWR | O_CLOEXEC, 0);
   if (fd < 0)
     return false;
@@ -566,6 +608,10 @@ bool GuestKfd::ensure_ready() {
     return true;
 
   std::lock_guard lock(mutex_);
+  return ensure_ready_locked();
+}
+
+bool GuestKfd::ensure_ready_locked() {
   if (ready_.load(std::memory_order_acquire))
     return true;
   if (!config_.enabled || !config_.guest_device.present) {
@@ -575,14 +621,20 @@ bool GuestKfd::ensure_ready() {
   if (!ensure_real_kfd_locked())
     return false;
   if (host_gpu_id_ == 0) {
-    std::optional<uint32_t> host_gpu_id = first_real_gpu_id_matching_isa(config_.host_isa);
+    std::optional<uint32_t> host_gpu_id;
+    if (execution_driver_)
+      host_gpu_id = first_gpu_id_matching_isa_in_topology(execution_driver_->topology_path(),
+                                                          config_.host.isa);
+    else
+      host_gpu_id = first_real_gpu_id_matching_isa(config_.host.isa);
     if (!host_gpu_id) {
       errno = ENODEV;
       return false;
     }
     host_gpu_id_ = *host_gpu_id;
   }
-  if (!overlay_->generate(guest_)) {
+  const std::string host_topology = execution_driver_ ? execution_driver_->topology_path() : "";
+  if (!overlay_->generate(guest_, host_topology)) {
     errno = ENODEV;
     return false;
   }
@@ -593,23 +645,44 @@ bool GuestKfd::ensure_ready() {
 bool GuestKfd::prepare_for_discovery() { return ensure_ready(); }
 
 int GuestKfd::open() {
-  for (;;) {
-    if (!ensure_ready())
+  std::lock_guard lock(mutex_);
+  if (!ensure_ready_locked())
+    return -1;
+
+  bool opened_execution_driver = false;
+  if (execution_driver_ && !owns_execution_driver_open_) {
+    const int execution_fd = execution_driver_->open();
+    if (execution_fd < 0)
       return -1;
-    std::lock_guard lock(mutex_);
-    int kfd_fd = real_kfd_fd_.load(std::memory_order_acquire);
-    if (ready_.load(std::memory_order_acquire) && kfd_fd >= 0) {
-      // Keep the real /dev/kfd fd internal to the driver. Applications receive
-      // ordinary dup fds, so close(fd) releases that fd number immediately while
-      // the hidden real fd keeps host-KFD forwarding alive until the last
-      // app-facing open/dup reference is closed.
-      int app_fd = libc_passthrough().fcntl(kfd_fd, F_DUPFD_CLOEXEC, 0);
-      if (app_fd < 0)
-        return -1;
-      ++open_refs_;
-      return app_fd;
-    }
+    real_kfd_fd_.store(execution_fd, std::memory_order_release);
+    owns_execution_driver_open_ = true;
+    opened_execution_driver = true;
   }
+
+  const int kfd_fd = real_kfd_fd_.load(std::memory_order_acquire);
+  if (kfd_fd < 0) {
+    if (opened_execution_driver) {
+      execution_driver_->close();
+      owns_execution_driver_open_ = false;
+    }
+    errno = ENODEV;
+    return -1;
+  }
+
+  // Keep the real /dev/kfd fd internal to the driver. Applications receive
+  // ordinary dup fds, so close(fd) releases that fd number immediately while
+  // the hidden real fd keeps host-KFD forwarding alive until the last
+  // app-facing open/dup reference is closed.
+  const int app_fd = libc_passthrough().fcntl(kfd_fd, F_DUPFD_CLOEXEC, 0);
+  if (app_fd < 0) {
+    if (opened_execution_driver) {
+      execution_driver_->close();
+      owns_execution_driver_open_ = false;
+    }
+    return -1;
+  }
+  ++open_refs_;
+  return app_fd;
 }
 
 bool GuestKfd::retain_local_open() {
@@ -632,6 +705,13 @@ LinuxKfd::PrimaryInvalidation GuestKfd::invalidate_primary_fd(int fd) {
   int expected = fd;
   if (!real_kfd_fd_.compare_exchange_strong(expected, -1, std::memory_order_acq_rel))
     return PrimaryInvalidation::kNotPrimary;
+  if (execution_driver_)
+    // Clear the simulator's stale primary-fd classification, but do not honor
+    // kClearedDropRef here. That counted reference is the execution-backend
+    // open GuestKfd owns and must keep pinned while app-facing dups are live.
+    // ensure_real_kfd_locked() balances the extra retain if a later open has to
+    // re-mint the simulator primary.
+    (void)execution_driver_->invalidate_primary_fd(fd);
   // Also drop out of the ready state (mirroring close()'s teardown, minus the
   // fd close / overlay cleanup / ref decrement). This matters because GuestKfd
   // forwards every ioctl/mmap through real_kfd_fd_: with the number now cleared,
@@ -647,6 +727,7 @@ LinuxKfd::PrimaryInvalidation GuestKfd::invalidate_primary_fd(int fd) {
 
 int GuestKfd::close() {
   int kfd_fd = -1;
+  LinuxKfd *execution_driver_to_close = nullptr;
   std::unique_ptr<TopologyOverlay> overlay_to_cleanup;
   auto fresh_overlay = std::make_unique<TopologyOverlay>();
   {
@@ -662,6 +743,10 @@ int GuestKfd::close() {
     // final open reference closes the primary real fd and tears down discovery
     // state; the close hook separately closes any dup fd that triggered this.
     kfd_fd = real_kfd_fd_.exchange(-1, std::memory_order_acq_rel);
+    if (execution_driver_ && owns_execution_driver_open_) {
+      execution_driver_to_close = execution_driver_;
+      owns_execution_driver_open_ = false;
+    }
     ready_.store(false, std::memory_order_release);
     synthetic_handles_.clear();
     synthetic_mmap_offsets_.clear();
@@ -673,12 +758,17 @@ int GuestKfd::close() {
     overlay_ = std::move(fresh_overlay);
   }
   overlay_to_cleanup.reset();
-  if (kfd_fd >= 0)
+  if (execution_driver_to_close)
+    execution_driver_to_close->close();
+  else if (kfd_fd >= 0 && !execution_driver_)
     libc_passthrough().close(kfd_fd);
   return 0;
 }
 
 int GuestKfd::forward_ioctl(unsigned long request, void *arg) {
+  if (execution_driver_)
+    return execution_driver_->ioctl(request, arg);
+
   int kfd_fd = fd();
   if (kfd_fd < 0) {
     errno = ENODEV;
@@ -958,13 +1048,21 @@ void *GuestKfd::mmap(void *addr, size_t length, int prot, int flags, off_t offse
     errno = ENODEV;
     return MAP_FAILED;
   }
+  if (execution_driver_)
+    return execution_driver_->mmap(addr, length, prot, flags, offset);
   return libc_passthrough().mmap(addr, length, prot, flags, kfd_fd, offset);
 }
 
-int GuestKfd::munmap(void *, size_t) { return -ENOENT; }
+int GuestKfd::munmap(void *addr, size_t length) {
+  return execution_driver_ ? execution_driver_->munmap(addr, length) : -ENOENT;
+}
 
 bool GuestKfd::owns_fd(int fd) const {
-  return fd >= 0 && fd == real_kfd_fd_.load(std::memory_order_acquire);
+  if (fd < 0)
+    return false;
+  if (fd == real_kfd_fd_.load(std::memory_order_acquire))
+    return true;
+  return execution_driver_ && execution_driver_->owns_fd(fd);
 }
 
 int GuestKfd::fd() const { return real_kfd_fd_.load(std::memory_order_acquire); }
@@ -1013,22 +1111,32 @@ std::string GuestKfd::redirect_sysfs_path(const char *path) const {
     }
   }
 
-  return {};
+  return execution_driver_ ? execution_driver_->redirect_sysfs_path(path) : std::string{};
 }
 
-bool GuestKfd::is_doorbell_range(const void *, size_t) const { return false; }
+bool GuestKfd::is_doorbell_range(const void *addr, size_t length) const {
+  return execution_driver_ && execution_driver_->is_doorbell_range(addr, length);
+}
 
 bool GuestKfd::handles_drm_render_minor(uint32_t minor) const {
-  return ready_.load(std::memory_order_acquire) && minor == guest_.drm_render_minor;
+  if (ready_.load(std::memory_order_acquire) && minor == guest_.drm_render_minor)
+    return true;
+  return execution_driver_ && execution_driver_->handles_drm_render_minor(minor);
 }
 
 const Sysfs::GpuInfo *GuestKfd::gpu_info_for_render_minor(uint32_t minor) const {
-  return handles_drm_render_minor(minor) ? &guest_ : nullptr;
+  if (ready_.load(std::memory_order_acquire) && minor == guest_.drm_render_minor)
+    return &guest_;
+  return execution_driver_ ? execution_driver_->gpu_info_for_render_minor(minor) : nullptr;
 }
 
 std::string GuestKfd::topology_path() const {
   std::lock_guard lock(mutex_);
   return ready_.load(std::memory_order_acquire) ? overlay_->topology_path() : std::string{};
+}
+
+std::string GuestKfd::drm_path() const {
+  return execution_driver_ ? execution_driver_->drm_path() : std::string{};
 }
 
 int GuestKfd::reject_guest_execution_ioctl(unsigned long request, void *) const {
