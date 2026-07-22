@@ -23,13 +23,16 @@ extern "C" {
 typedef struct rj_daemon_t rj_daemon_t;
 
 /// @brief Observable daemon lifecycle state.
-typedef enum rj_daemon_status_t : int32_t {
+typedef int32_t rj_daemon_status_t;
+
+/// @brief Named values for @ref rj_daemon_status_t.
+enum {
   RJ_DAEMON_STATUS_STOPPED = 0,
   RJ_DAEMON_STATUS_STARTING = 1,
   RJ_DAEMON_STATUS_RUNNING = 2,
   RJ_DAEMON_STATUS_STOPPING = 3,
   RJ_DAEMON_STATUS_ERROR = 4,
-} rj_daemon_status_t;
+};
 
 /// @brief Start a daemon-mode VM and its Unix-socket RPC server.
 ///
