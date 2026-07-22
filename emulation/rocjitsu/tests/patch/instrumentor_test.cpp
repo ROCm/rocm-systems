@@ -2247,5 +2247,146 @@ TEST(InstrumentorProbeSpill, Cdna4RejectsClobberedFlatScratch) {
       << "error was: " << result.errors.front();
 }
 
+// A site that must spill on a code object with more than one kernel has no
+// unambiguous descriptor to grow, so it fails closed (§9, instrumentor.cpp:768).
+TEST(InstrumentorProbeSpill, Cdna4MultiKernelSpillFailsClosed) {
+  const uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  auto target = make_gfx950_two_kernel_elf({kMovV3V2, endpgm}, /*private_bytes=*/64);
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kMovV2Zero, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+  ASSERT_TRUE(obj.is_valid());
+  ASSERT_TRUE(probe_obj.is_valid());
+  ASSERT_EQ(obj.kernel_descriptors().size(), 2u);
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0; // v_mov_b32 v3, v2 -> v2 live and clobbered -> must spill.
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  instr.add_point(pt);
+
+  auto result = instr.patch();
+  EXPECT_TRUE(result.elf_bytes.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("single kernel"), std::string::npos)
+      << "error was: " << result.errors.front();
+}
+
+// A site whose spill set contains both a live+clobbered VGPR and SGPR spills both
+// in one bracket: the VGPR straight to scratch, the SGPR bridged through v0. The
+// VGPR takes the first slot (offset 64), the SGPR the next (68); descriptor -> 72.
+TEST(InstrumentorProbeSpill, Cdna4SpillsLiveClobberedVgprAndSgpr) {
+  const uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  // Anchor reads v2; the next instruction reads s8, so both are live at the anchor.
+  auto target = make_gfx950_kernel_elf({kMovV3V2, kMovV3S8, endpgm}, /*private_bytes=*/64);
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kMovV2Zero, kMovS8Zero, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+  ASSERT_TRUE(obj.is_valid());
+  ASSERT_TRUE(probe_obj.is_valid());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_TRUE(result.patches[0].is_probe_call);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  constexpr size_t kOriginalTextWords = 3; // {v_mov v3,v2, v_mov v3,s8, s_endpgm}.
+  ASSERT_GT(text.size(), kOriginalTextWords);
+  const std::vector<uint32_t> cave(text.begin() + kOriginalTextWords, text.end());
+
+  // VGPR v2 -> slot 64, straight to scratch.
+  const auto vstore = build_scratch_store_dword(2, 64, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto vload = build_scratch_load_dword(2, 64, ROCJITSU_CODE_ARCH_CDNA4);
+  // SGPR s8 -> slot 68, bridged through v0.
+  const auto writelane =
+      build_v_writelane_b32(/*bridge=*/0, /*sgpr=*/8, /*lane=*/0, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto sstore = build_scratch_store_dword(/*bridge=*/0, 68, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto sload = build_scratch_load_dword(/*bridge=*/0, 68, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto readlane =
+      build_v_readlane_b32(/*sgpr=*/8, /*bridge=*/0, /*lane=*/0, ROCJITSU_CODE_ARCH_CDNA4);
+  const uint32_t wait = build_wait_loads_complete(ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_NE(std::search(cave.begin(), cave.end(), vstore.begin(), vstore.end()), cave.end());
+  EXPECT_NE(std::search(cave.begin(), cave.end(), vload.begin(), vload.end()), cave.end());
+  EXPECT_NE(std::search(cave.begin(), cave.end(), writelane.begin(), writelane.end()), cave.end());
+  EXPECT_NE(std::search(cave.begin(), cave.end(), sstore.begin(), sstore.end()), cave.end());
+  EXPECT_NE(std::search(cave.begin(), cave.end(), sload.begin(), sload.end()), cave.end());
+  EXPECT_NE(std::search(cave.begin(), cave.end(), readlane.begin(), readlane.end()), cave.end());
+  EXPECT_NE(std::find(cave.begin(), cave.end(), wait), cave.end());
+
+  // Two 4-byte slots on top of the 16-aligned base: 64 -> 72.
+  EXPECT_EQ(patched_private_segment_size(patched), 72u);
+}
+
+// Two live+clobbered SGPRs spill through a single shared bridge VGPR (v0), each to
+// its own scratch slot (s8 -> 64, s9 -> 68); descriptor grows to cover both -> 72.
+TEST(InstrumentorProbeSpill, Cdna4SpillsMultipleLiveClobberedSgprs) {
+  const uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  // Anchor reads s8; the next instruction reads s9, so both are live at the anchor.
+  auto target = make_gfx950_kernel_elf({kMovV3S8, kMovV4S9, endpgm}, /*private_bytes=*/64);
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kMovS8Zero, kMovS9Zero, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+  ASSERT_TRUE(obj.is_valid());
+  ASSERT_TRUE(probe_obj.is_valid());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_TRUE(result.patches[0].is_probe_call);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  constexpr size_t kOriginalTextWords = 3; // {v_mov v3,s8, v_mov v4,s9, s_endpgm}.
+  ASSERT_GT(text.size(), kOriginalTextWords);
+  const std::vector<uint32_t> cave(text.begin() + kOriginalTextWords, text.end());
+
+  const uint32_t wait = build_wait_loads_complete(ROCJITSU_CODE_ARCH_CDNA4);
+  // Both SGPRs bridge through v0; s8 -> slot 64, s9 -> slot 68.
+  for (const auto [sgpr, off] :
+       {std::pair{uint16_t{8}, uint32_t{64}}, {uint16_t{9}, uint32_t{68}}}) {
+    const auto writelane =
+        build_v_writelane_b32(/*bridge=*/0, sgpr, /*lane=*/0, ROCJITSU_CODE_ARCH_CDNA4);
+    const auto store = build_scratch_store_dword(/*bridge=*/0, off, ROCJITSU_CODE_ARCH_CDNA4);
+    const auto load = build_scratch_load_dword(/*bridge=*/0, off, ROCJITSU_CODE_ARCH_CDNA4);
+    const auto readlane =
+        build_v_readlane_b32(sgpr, /*bridge=*/0, /*lane=*/0, ROCJITSU_CODE_ARCH_CDNA4);
+    EXPECT_NE(std::search(cave.begin(), cave.end(), writelane.begin(), writelane.end()), cave.end())
+        << "missing writelane for s" << sgpr;
+    EXPECT_NE(std::search(cave.begin(), cave.end(), store.begin(), store.end()), cave.end())
+        << "missing store for s" << sgpr;
+    EXPECT_NE(std::search(cave.begin(), cave.end(), load.begin(), load.end()), cave.end())
+        << "missing load for s" << sgpr;
+    EXPECT_NE(std::search(cave.begin(), cave.end(), readlane.begin(), readlane.end()), cave.end())
+        << "missing readlane for s" << sgpr;
+  }
+  EXPECT_NE(std::find(cave.begin(), cave.end(), wait), cave.end());
+
+  EXPECT_EQ(patched_private_segment_size(patched), 72u);
+}
+
 } // namespace
 } // namespace rocjitsu

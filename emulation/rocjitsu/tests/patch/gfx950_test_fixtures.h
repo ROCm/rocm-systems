@@ -44,6 +44,8 @@ inline constexpr uint32_t kMovV3V2 = 0x7E060302u;   // v_mov_b32 v3, v2 -> reads
 inline constexpr uint32_t kMovV2Zero = 0x7E040280u; // v_mov_b32 v2, 0  -> clobbers v2.
 inline constexpr uint32_t kMovV3S8 = 0x7E060208u;   // v_mov_b32 v3, s8 -> reads s8 (s8 live).
 inline constexpr uint32_t kMovS8Zero = 0xbe880080u; // s_mov_b32 s8, 0  -> clobbers s8.
+inline constexpr uint32_t kMovV4S9 = 0x7E080209u;   // v_mov_b32 v4, s9 -> reads s9 (s9 live).
+inline constexpr uint32_t kMovS9Zero = 0xbe890080u; // s_mov_b32 s9, 0  -> clobbers s9.
 
 // s_mov_b32 <special>, 0: probe bodies that clobber special machine state the
 // trampoline preserves across the call (exec_lo=126, vcc_lo=106, m0=124).
@@ -194,6 +196,155 @@ inline std::vector<uint8_t> make_gfx950_kernel_elf(const std::vector<uint32_t> &
   syms[1].st_shndx = 2; // .rodata
   syms[1].st_value = rodata_vaddr;
   syms[1].st_size = sizeof(KD);
+  std::memcpy(image.data() + symtab_offset, syms.data(), syms.size() * sizeof(Elf64_Sym));
+
+  std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
+
+  std::array<Elf64_Shdr, section_count> shdrs{};
+  shdrs[1].sh_name = text_name;
+  shdrs[1].sh_type = SHT_PROGBITS;
+  shdrs[1].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
+  shdrs[1].sh_addr = text_vaddr;
+  shdrs[1].sh_offset = text_offset;
+  shdrs[1].sh_size = text_size;
+  shdrs[1].sh_addralign = sizeof(uint32_t);
+
+  shdrs[2].sh_name = rodata_name;
+  shdrs[2].sh_type = SHT_PROGBITS;
+  shdrs[2].sh_flags = SHF_ALLOC;
+  shdrs[2].sh_addr = rodata_vaddr;
+  shdrs[2].sh_offset = rodata_offset;
+  shdrs[2].sh_size = rodata_size;
+  shdrs[2].sh_addralign = 64;
+
+  shdrs[3].sh_name = symtab_name;
+  shdrs[3].sh_type = SHT_SYMTAB;
+  shdrs[3].sh_offset = symtab_offset;
+  shdrs[3].sh_size = syms.size() * sizeof(Elf64_Sym);
+  shdrs[3].sh_link = 4;
+  shdrs[3].sh_info = 1;
+  shdrs[3].sh_addralign = 8;
+  shdrs[3].sh_entsize = sizeof(Elf64_Sym);
+
+  shdrs[4].sh_name = strtab_name;
+  shdrs[4].sh_type = SHT_STRTAB;
+  shdrs[4].sh_offset = strtab_offset;
+  shdrs[4].sh_size = strtab.size();
+  shdrs[4].sh_addralign = 1;
+
+  shdrs[5].sh_name = shstrtab_name;
+  shdrs[5].sh_type = SHT_STRTAB;
+  shdrs[5].sh_offset = shstrtab_offset;
+  shdrs[5].sh_size = shstrtab.size();
+  shdrs[5].sh_addralign = 1;
+
+  std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+  return image;
+}
+
+// Like make_gfx950_kernel_elf but exports *two* `.kd` descriptors (both entering
+// .text at offset 0) so kernel_descriptors() returns two kernels, exercising the
+// orchestrator's single-kernel spill guard. Only the count matters here.
+inline std::vector<uint8_t> make_gfx950_two_kernel_elf(const std::vector<uint32_t> &text_words,
+                                                       uint32_t private_bytes,
+                                                       uint32_t granulated_sgpr_count = 3) {
+  namespace kd = rocr::llvm::amdhsa;
+  using KD = kd::kernel_descriptor_t;
+
+  constexpr uint64_t text_offset = 0x100;
+  constexpr uint64_t text_vaddr = 0x1100;
+  const uint64_t text_size = text_words.size() * sizeof(uint32_t);
+  constexpr uint64_t load_align = 0x1000;
+  constexpr size_t kKernelCount = 2;
+  const uint64_t rodata_size = kKernelCount * sizeof(KD);
+
+  std::vector<uint8_t> shstrtab{'\0'};
+  const uint32_t text_name = add_elf_name(shstrtab, ".text");
+  const uint32_t rodata_name = add_elf_name(shstrtab, ".rodata");
+  const uint32_t symtab_name = add_elf_name(shstrtab, ".symtab");
+  const uint32_t strtab_name = add_elf_name(shstrtab, ".strtab");
+  const uint32_t shstrtab_name = add_elf_name(shstrtab, ".shstrtab");
+
+  std::vector<uint8_t> strtab{'\0'};
+  const uint32_t kd0_symbol_name = add_elf_name(strtab, "test_kernel0.kd");
+  const uint32_t kd1_symbol_name = add_elf_name(strtab, "test_kernel1.kd");
+
+  const uint64_t rodata_offset = text_offset + text_size;
+  const uint64_t rodata_vaddr = text_vaddr + text_size + load_align;
+  const uint64_t strtab_offset = rodata_offset + rodata_size;
+  const uint64_t symtab_offset = align_up_for_test(strtab_offset + strtab.size(), 8);
+  constexpr size_t sym_count = 1 + kKernelCount; // null + one per kernel
+  const uint64_t shstrtab_offset = symtab_offset + sym_count * sizeof(Elf64_Sym);
+  const uint64_t shoff = align_up_for_test(shstrtab_offset + shstrtab.size(), 8);
+  constexpr uint16_t section_count = 6;
+  constexpr uint16_t phdr_count = 2;
+
+  std::vector<uint8_t> image(shoff + section_count * sizeof(Elf64_Shdr), 0);
+
+  Elf64_Ehdr ehdr{};
+  std::memcpy(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
+  ehdr.e_ident[EI_CLASS] = ELFCLASS64;
+  ehdr.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
+  ehdr.e_type = ET_DYN;
+  ehdr.e_machine = EM_AMDGPU;
+  ehdr.e_version = 1;
+  ehdr.e_phoff = sizeof(Elf64_Ehdr);
+  ehdr.e_shoff = shoff;
+  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
+  ehdr.e_ehsize = sizeof(Elf64_Ehdr);
+  ehdr.e_phentsize = sizeof(Elf64_Phdr);
+  ehdr.e_phnum = phdr_count;
+  ehdr.e_shentsize = sizeof(Elf64_Shdr);
+  ehdr.e_shnum = section_count;
+  ehdr.e_shstrndx = 5;
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+
+  std::array<Elf64_Phdr, phdr_count> phdrs{};
+  phdrs[0].p_type = PT_LOAD;
+  phdrs[0].p_flags = 0x5; // PF_R | PF_X
+  phdrs[0].p_offset = text_offset;
+  phdrs[0].p_vaddr = text_vaddr;
+  phdrs[0].p_paddr = text_vaddr;
+  phdrs[0].p_filesz = text_size;
+  phdrs[0].p_memsz = text_size;
+  phdrs[0].p_align = load_align;
+
+  phdrs[1].p_type = PT_LOAD;
+  phdrs[1].p_flags = 0x4; // PF_R
+  phdrs[1].p_offset = rodata_offset;
+  phdrs[1].p_vaddr = rodata_vaddr;
+  phdrs[1].p_paddr = rodata_vaddr;
+  phdrs[1].p_filesz = rodata_size;
+  phdrs[1].p_memsz = rodata_size;
+  phdrs[1].p_align = load_align;
+  std::memcpy(image.data() + ehdr.e_phoff, phdrs.data(), phdrs.size() * sizeof(Elf64_Phdr));
+
+  std::memcpy(image.data() + text_offset, text_words.data(), text_size);
+
+  // Two descriptors; entry offset is signed and relative to each descriptor's vaddr.
+  for (size_t i = 0; i < kKernelCount; ++i) {
+    const uint64_t kd_vaddr = rodata_vaddr + i * sizeof(KD);
+    KD desc{};
+    desc.private_segment_fixed_size = private_bytes;
+    desc.kernel_code_entry_byte_offset =
+        static_cast<int64_t>(text_vaddr) - static_cast<int64_t>(kd_vaddr);
+    AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                    granulated_sgpr_count);
+    std::memcpy(image.data() + rodata_offset + i * sizeof(KD), &desc, sizeof(desc));
+  }
+  std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
+
+  std::array<Elf64_Sym, sym_count> syms{};
+  syms[1].st_name = kd0_symbol_name;
+  syms[1].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
+  syms[1].st_shndx = 2; // .rodata
+  syms[1].st_value = rodata_vaddr;
+  syms[1].st_size = sizeof(KD);
+  syms[2].st_name = kd1_symbol_name;
+  syms[2].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
+  syms[2].st_shndx = 2; // .rodata
+  syms[2].st_value = rodata_vaddr + sizeof(KD);
+  syms[2].st_size = sizeof(KD);
   std::memcpy(image.data() + symtab_offset, syms.data(), syms.size() * sizeof(Elf64_Sym));
 
   std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
