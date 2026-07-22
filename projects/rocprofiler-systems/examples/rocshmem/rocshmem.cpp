@@ -86,6 +86,12 @@ main()
     auto* dst = static_cast<uint8_t*>(rocshmem_malloc(npes * DATA_BYTES));
     auto* sig = static_cast<uint64_t*>(rocshmem_malloc(sizeof(uint64_t)));
 
+    if(src == nullptr || dst == nullptr || sig == nullptr)
+    {
+        fprintf(stderr, "rocshmem: symmetric heap allocation failed\n");
+        return 1;
+    }
+
     memset(src, me, DATA_BYTES);
     memset(dst, 0, npes * DATA_BYTES);
     *sig = 0;

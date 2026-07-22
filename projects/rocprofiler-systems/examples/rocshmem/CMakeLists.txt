@@ -71,14 +71,6 @@ target_link_libraries(
         $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
 )
 
-# Export the binary path so CMake test configuration files (e.g.
-# rocprof-sys-rocshmem-tests.cmake) can locate the executable without
-# hard-coding a path.
-set(ROCPROFSYS_ROCSHMEM_DEMO_EXE
-    "$<TARGET_FILE:rocshmem>"
-    CACHE INTERNAL
-    "Path to rocshmem executable"
-)
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)
     install(
