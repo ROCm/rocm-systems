@@ -50,7 +50,7 @@ scratch before promotion.
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
 | **P0 Qwen3-0.6B prefill** | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown |
-| **P1 Sharktank TP1 prefill** | 🟨 current clean: exact oracle passes; 120/120 accesses; complete analysis | 🩶 historical: clean 104/104 access + 31/31 barrier accepted | 🩶 historical: clean 104/104 access + 7/7 qualified barrier accepted | 🩶 historical: clean 104/104 access + 31/31 barrier accepted |
+| **P1 Sharktank TP1 prefill** | 🟨 current clean and paired: exact oracle, 120/120 accesses, complete analysis, 1.13x; reviewed fault active | 🩶 historical: clean 104/104 access + 31/31 barrier accepted | 🩶 historical: clean 104/104 access + 7/7 qualified barrier accepted | 🩶 historical: clean 104/104 access + 31/31 barrier accepted |
 | **P1 Sharktank TP1 decode/combined** | 🟨 current clean: decode and combined oracles pass; aggregate 240/240 accesses; complete analysis | 🩶 historical: clean 208/208 access + 62/62 barrier accepted | 🩶 historical: clean 208/208 access + 14/14 qualified barrier accepted | 🩶 historical: clean 208/208 access + 62/62 barrier accepted across six sequential runs |
 | **P2 Sharktank TP2 family** | 🟨 current clean: prefill, decode, and combined oracles pass; aggregate 936/936 accesses; complete analysis | 🩶 historical: clean 840/840 access + 168/168 barrier accepted | 🩶 historical: aggregate rejected: one 140-access + 10-barrier slice executes 0 | 🩶 historical: aggregate rejected: one 140-access + 28-barrier slice lowers 0 |
 | **P3 CLIP BF16** | 🟨 current clean: cosine oracle passes; 45/45 accesses; complete analysis | 🩶 historical: clean 39/39 access + 24/24 barrier accepted | 🩶 historical: clean 39/39 access + 20/20 qualified barrier accepted | 🩶 historical: clean 39/39 access + 24/24 barrier accepted |
@@ -286,6 +286,15 @@ trap, crash, output mismatch, or GPU reset is an execution outcome rather than
 a ConSan detection.
 
 ## Progress log
+
+- 2026-07-22: TP1-prefill SuperCollider paired artifact
+  `consan-validation-gfx950-tp1-prefill-supercollider-overhead-tip-20260722-002`
+  accepts at clean `c3a15aabea`, with exactly one repetition per leg.  The
+  paired baseline is 0.811866 ms, SuperCollider is 0.920680 ms (1.13x), and
+  coverage is complete at 120/120 accesses.  Fresh inventory artifact
+  `consan-validation-gfx950-tp1-prefill-inventory-tip-20260722-002` accepts 31
+  exact-one barrier sites; semantic review and contained fault execution are
+  active before the cell can become green.
 
 - 2026-07-22: D128-pressure and MFMA-attention SuperCollider are green at
   current clean tip `499ddfe89d`.  Their paired artifacts report 186.82x and
