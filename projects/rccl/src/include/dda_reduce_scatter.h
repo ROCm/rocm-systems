@@ -15,48 +15,26 @@ struct ncclComm;
 /**
  * Check if DDA reduce-scatter is eligible for the given parameters
  */
-bool ncclReduceScatterDdaIpcEligible(
-    ncclComm* comm,
-    const void* sendbuff,
-    void* recvbuff,
-    size_t recvcount,
-    ncclDataType_t datatype,
-    ncclRedOp_t op);
+bool ncclReduceScatterDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
+                                     ncclDataType_t datatype, ncclRedOp_t op);
 
 /**
  * Execute DDA reduce-scatter operation using IPC
  */
-ncclResult_t ncclReduceScatterDdaIpc(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t recvcount,
-    ncclDataType_t datatype,
-    ncclRedOp_t op,
-    ncclComm* comm,
-    cudaStream_t stream);
+ncclResult_t ncclReduceScatterDdaIpc(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
+                                     ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
 /**
  * Check if DDA reduce-scatter is eligible for the fabric/VMM path (runtime
  * nRanks up to kDdaMaxNranks, single- or multi-node within an MNNVL clique).
  */
-bool ncclReduceScatterDdaFabricEligible(
-    ncclComm* comm,
-    const void* sendbuff,
-    void* recvbuff,
-    size_t recvcount,
-    ncclDataType_t datatype,
-    ncclRedOp_t op);
+bool ncclReduceScatterDdaFabricEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
+                                        ncclDataType_t datatype, ncclRedOp_t op);
 
 /**
  * Execute DDA reduce-scatter operation using the fabric/VMM path
  */
-ncclResult_t ncclReduceScatterDdaFabric(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t recvcount,
-    ncclDataType_t datatype,
-    ncclRedOp_t op,
-    ncclComm* comm,
-    cudaStream_t stream);
+ncclResult_t ncclReduceScatterDdaFabric(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
+                                        ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
 #endif

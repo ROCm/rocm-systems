@@ -228,8 +228,8 @@ static ncclResult_t ginAnvilConnect(void* ctx, void* handles[], int nranks, int 
   gin_anvil_sdma_handle_t h = nullptr;
   void* gpu_handles = nullptr;
   uint64_t* dirty = nullptr;
-  if (gin_anvil_sdma_create(nranks, rank, localDev, ginAnvilBootstrapAllgather, cctx->comm->bootstrap, numCh,
-                            &h, &gpu_handles, &dirty) != 0) {
+  if (gin_anvil_sdma_create(nranks, rank, localDev, ginAnvilBootstrapAllgather, cctx->comm->bootstrap, numCh, &h,
+                            &gpu_handles, &dirty) != 0) {
     WARN("GIN anvil-sdma: gin_anvil_sdma_create failed");
     delete cctx;
     return ncclSystemError;
@@ -241,8 +241,8 @@ static ncclResult_t ginAnvilConnect(void* ctx, void* handles[], int nranks, int 
   cctx->numChannels = gin_anvil_sdma_get_num_channels(h);
   cctx->sdmaChannelStride = gin_anvil_sdma_get_channel_stride(h);
 
-  INFO(NCCL_INIT, "GIN anvil-sdma: standalone SDMA queues (%d ranks, %d ch, spread=%d)", nranks,
-       cctx->numChannels, cctx->sdmaChannelStride);
+  INFO(NCCL_INIT, "GIN anvil-sdma: standalone SDMA queues (%d ranks, %d ch, spread=%d)", nranks, cctx->numChannels,
+       cctx->sdmaChannelStride);
   *collComm = cctx;
   return ncclSuccess;
 }
@@ -286,11 +286,10 @@ static ncclResult_t ginAnvilRegMrSym(void* collComm, void* data, size_t size, in
     std::lock_guard<std::mutex> lock(pluginMutex);
     auto& refcount = bufferRegRefcount[data];
     if (refcount == 0) {
-      int rc = ncclGinAnvilIpcTableRegisterVmm(lsaSelfAddr, size, devr->lsaSelf, devr->lsaSize,
-                                               (ptrdiff_t)devr->bigSize);
+      int rc =
+        ncclGinAnvilIpcTableRegisterVmm(lsaSelfAddr, size, devr->lsaSelf, devr->lsaSize, (ptrdiff_t)devr->bigSize);
       if (rc != 0) {
-        WARN("GIN anvil-sdma: IPC table register failed for %p (lsaSelf=%p) size %zu", data, lsaSelfAddr,
-             size);
+        WARN("GIN anvil-sdma: IPC table register failed for %p (lsaSelf=%p) size %zu", data, lsaSelfAddr, size);
         bufferRegRefcount.erase(data);
         free(mh);
         return ncclSystemError;
@@ -311,20 +310,18 @@ static ncclResult_t ginAnvilRegMrSym(void* collComm, void* data, size_t size, in
   }
 
   const ptrdiff_t stride = (ptrdiff_t)devr->bigSize;
-  uintptr_t* remote_vas_host =
-      (uintptr_t*)malloc(sizeof(uintptr_t) * (size_t)cctx->nranks);
+  uintptr_t* remote_vas_host = (uintptr_t*)malloc(sizeof(uintptr_t) * (size_t)cctx->nranks);
   if (!remote_vas_host) {
     CUDACHECKIGNORE(hipFree(mh->devHandle));
     free(mh);
     return ncclSystemError;
   }
   for (int pe = 0; pe < cctx->nranks; pe++) {
-    remote_vas_host[pe] =
-        (uintptr_t)lsaSelfAddr + static_cast<ptrdiff_t>(pe - devr->lsaSelf) * stride;
+    remote_vas_host[pe] = (uintptr_t)lsaSelfAddr + static_cast<ptrdiff_t>(pe - devr->lsaSelf) * stride;
   }
   if (hipMalloc(&mh->remote_vas_dev, sizeof(uintptr_t) * (size_t)cctx->nranks) != hipSuccess ||
-      hipMemcpy(mh->remote_vas_dev, remote_vas_host, sizeof(uintptr_t) * (size_t)cctx->nranks,
-                hipMemcpyHostToDevice) != hipSuccess) {
+      hipMemcpy(mh->remote_vas_dev, remote_vas_host, sizeof(uintptr_t) * (size_t)cctx->nranks, hipMemcpyHostToDevice) !=
+        hipSuccess) {
     free(remote_vas_host);
     CUDACHECKIGNORE(hipFree(mh->devHandle));
     free(mh);
@@ -343,8 +340,8 @@ static ncclResult_t ginAnvilRegMrSym(void* collComm, void* data, size_t size, in
   return ncclSuccess;
 }
 
-static ncclResult_t ginAnvilRegMrSymDmaBuf(void* collComm, void* data, size_t size, int type, uint64_t offset,
-                                           int fd, uint64_t mrFlags, void** mhandle, void** ginHandle) {
+static ncclResult_t ginAnvilRegMrSymDmaBuf(void* collComm, void* data, size_t size, int type, uint64_t offset, int fd,
+                                           uint64_t mrFlags, void** mhandle, void** ginHandle) {
   return ginAnvilRegMrSym(collComm, data, size, type, mrFlags, mhandle, ginHandle);
 }
 
@@ -380,8 +377,7 @@ static ncclResult_t ginAnvilRegisterLsaSignals(ginAnvilGinCtx* ctx, void* lsaSel
   const ptrdiff_t stride = (ptrdiff_t)devr->bigSize;
 
   if (ctx->nRanks != devr->lsaSize) {
-    WARN("GIN anvil-sdma: signal nRanks=%d != devr->lsaSize=%d (rank %d)", ctx->nRanks, devr->lsaSize,
-         ctx->rank);
+    WARN("GIN anvil-sdma: signal nRanks=%d != devr->lsaSize=%d (rank %d)", ctx->nRanks, devr->lsaSize, ctx->rank);
   }
   if (ctx->rank != devr->lsaSelf) {
     WARN("GIN anvil-sdma: ctx->rank=%d != devr->lsaSelf=%d (signal peer indexing may be wrong)", ctx->rank,
@@ -398,9 +394,8 @@ static ncclResult_t ginAnvilRegisterLsaSignals(ginAnvilGinCtx* ctx, void* lsaSel
 
   uintptr_t selfExpected = (uintptr_t)lsaSelf;
   if (hostAddrs[ctx->rank] != selfExpected) {
-    WARN("GIN anvil-sdma: signal_remote_addrs[self=%d]=%#lx != signals=%#lx (lsaSelf=%#lx stride=%zd)",
-         ctx->rank, (unsigned long)hostAddrs[ctx->rank], (unsigned long)selfExpected,
-         (unsigned long)lsaSelf, (long)stride);
+    WARN("GIN anvil-sdma: signal_remote_addrs[self=%d]=%#lx != signals=%#lx (lsaSelf=%#lx stride=%zd)", ctx->rank,
+         (unsigned long)hostAddrs[ctx->rank], (unsigned long)selfExpected, (unsigned long)lsaSelf, (long)stride);
   }
 
   uintptr_t* gatheredLocalBases = (uintptr_t*)calloc((size_t)ctx->nRanks, sizeof(uintptr_t));
@@ -433,8 +428,8 @@ static ncclResult_t ginAnvilRegisterLsaSignals(ginAnvilGinCtx* ctx, void* lsaSel
 
   if (ginAnvilSignalDebugEnabled()) {
     for (int pe = 0; pe < ctx->nRanks; pe++) {
-      INFO(NCCL_INIT, "GIN anvil-sdma: signal_remote_addrs rank=%d peer=%d -> %#lx (local signals %#lx)",
-           ctx->rank, pe, (unsigned long)hostAddrs[pe], (unsigned long)lsaSelf);
+      INFO(NCCL_INIT, "GIN anvil-sdma: signal_remote_addrs rank=%d peer=%d -> %#lx (local signals %#lx)", ctx->rank, pe,
+           (unsigned long)hostAddrs[pe], (unsigned long)lsaSelf);
     }
   }
 
@@ -442,8 +437,8 @@ static ncclResult_t ginAnvilRegisterLsaSignals(ginAnvilGinCtx* ctx, void* lsaSel
   uintptr_t remoteSelf = hostAddrs[ctx->rank];
   free(hostAddrs);
   ctx->signalsBound = true;
-  if (hipMemcpy(ctx->gpuCtxDev, &ctx->gpuCtxHost, sizeof(ncclGinAnvilSdmaGPUContext),
-                hipMemcpyHostToDevice) != hipSuccess) {
+  if (hipMemcpy(ctx->gpuCtxDev, &ctx->gpuCtxHost, sizeof(ncclGinAnvilSdmaGPUContext), hipMemcpyHostToDevice) !=
+      hipSuccess) {
     return ncclSystemError;
   }
   INFO(NCCL_INIT,
@@ -454,9 +449,8 @@ static ncclResult_t ginAnvilRegisterLsaSignals(ginAnvilGinCtx* ctx, void* lsaSel
   return ncclSuccess;
 }
 
-ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm* comm, void* resourceUserPtr,
-                                                   size_t arenaByteOffset, int nContexts,
-                                                   int nSignalsPerContext) {
+ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm* comm, void* resourceUserPtr, size_t arenaByteOffset,
+                                                   int nContexts, int nSignalsPerContext) {
   if (!comm || !resourceUserPtr || nContexts < 1 || nSignalsPerContext < 1) return ncclInvalidArgument;
 
   ncclResult_t ret = ncclSuccess;
@@ -615,7 +609,9 @@ static ncclResult_t ginAnvilDestroyContext(void* ginCtx) {
   return ncclSuccess;
 }
 
-static ncclResult_t ginAnvilGinProgress(void* ginCtx) { return ncclSuccess; }
+static ncclResult_t ginAnvilGinProgress(void* ginCtx) {
+  return ncclSuccess;
+}
 
 static ncclResult_t ginAnvilQueryLastError(void* ginCtx, bool* hasError) {
   *hasError = false;
@@ -623,27 +619,27 @@ static ncclResult_t ginAnvilQueryLastError(void* ginCtx, bool* hasError) {
 }
 
 __attribute__((visibility("default"))) ncclGin_t ncclGinAnvilSdmaPlugin = {
-    .name = "gin-anvil-sdma",
-    .init = ginAnvilInit,
-    .devices = ginAnvilDevices,
-    .getProperties = ginAnvilGetProperties,
-    .listen = ginAnvilListen,
-    .connect = ginAnvilConnect,
-    .createContext = ginAnvilCreateContext,
-    .regMrSym = ginAnvilRegMrSym,
-    .regMrSymDmaBuf = ginAnvilRegMrSymDmaBuf,
-    .deregMrSym = ginAnvilDeregMrSym,
-    .destroyContext = ginAnvilDestroyContext,
-    .closeColl = ginAnvilCloseColl,
-    .closeListen = ginAnvilCloseListen,
-    .iput = NULL,
-    .iputSignal = NULL,
-    .iget = NULL,
-    .iflush = NULL,
-    .test = NULL,
-    .ginProgress = ginAnvilGinProgress,
-    .queryLastError = ginAnvilQueryLastError,
-    .finalize = ginAnvilFinalize,
+  .name = "gin-anvil-sdma",
+  .init = ginAnvilInit,
+  .devices = ginAnvilDevices,
+  .getProperties = ginAnvilGetProperties,
+  .listen = ginAnvilListen,
+  .connect = ginAnvilConnect,
+  .createContext = ginAnvilCreateContext,
+  .regMrSym = ginAnvilRegMrSym,
+  .regMrSymDmaBuf = ginAnvilRegMrSymDmaBuf,
+  .deregMrSym = ginAnvilDeregMrSym,
+  .destroyContext = ginAnvilDestroyContext,
+  .closeColl = ginAnvilCloseColl,
+  .closeListen = ginAnvilCloseListen,
+  .iput = NULL,
+  .iputSignal = NULL,
+  .iget = NULL,
+  .iflush = NULL,
+  .test = NULL,
+  .ginProgress = ginAnvilGinProgress,
+  .queryLastError = ginAnvilQueryLastError,
+  .finalize = ginAnvilFinalize,
 };
 
 #endif  // ENABLE_ROCSHMEM_GIN

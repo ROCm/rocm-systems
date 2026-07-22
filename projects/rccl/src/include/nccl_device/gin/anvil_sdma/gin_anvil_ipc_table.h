@@ -26,10 +26,8 @@ struct ncclGinAnvilSdmaGPUContext;
 extern "C" {
 #endif
 
-int ncclGinAnvilIpcTableRegisterVmm(void* localBase, size_t length, int myRank, int nRanks,
-                                    ptrdiff_t strideBytes);
-int ncclGinAnvilIpcTableRegisterExplicit(void* localBase, const uintptr_t* remoteBases, int nRanks,
-                                         size_t length);
+int ncclGinAnvilIpcTableRegisterVmm(void* localBase, size_t length, int myRank, int nRanks, ptrdiff_t strideBytes);
+int ncclGinAnvilIpcTableRegisterExplicit(void* localBase, const uintptr_t* remoteBases, int nRanks, size_t length);
 int ncclGinAnvilIpcTableUnregister(void* localBase);
 void ncclGinAnvilIpcTableGetDevice(const ncclGinAnvilIpcBufEntry** outTable, int* outCount);
 void ncclGinAnvilIpcTableTrackContext(struct ncclGinAnvilSdmaGPUContext* hostCtx,

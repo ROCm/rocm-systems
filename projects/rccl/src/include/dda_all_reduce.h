@@ -13,39 +13,17 @@
 struct ncclComm;
 
 // IPC path (single node, fixed kDdaNranks ranks).
-bool ncclAllReduceDdaIpcEligible(
-    ncclComm* comm,
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclDataType_t datatype,
-    ncclRedOp_t op);
+bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                 ncclDataType_t datatype, ncclRedOp_t op);
 
-ncclResult_t ncclAllReduceDdaIpc(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclDataType_t datatype,
-    ncclRedOp_t op,
-    ncclComm* comm,
-    cudaStream_t stream);
+ncclResult_t ncclAllReduceDdaIpc(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                 ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
 // Fabric path (runtime nRanks up to kDdaMaxNranks, single- or multi-node).
-bool ncclAllReduceDdaFabricEligible(
-    ncclComm* comm,
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclDataType_t datatype,
-    ncclRedOp_t op);
+bool ncclAllReduceDdaFabricEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                    ncclDataType_t datatype, ncclRedOp_t op);
 
-ncclResult_t ncclAllReduceDdaFabric(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclDataType_t datatype,
-    ncclRedOp_t op,
-    ncclComm* comm,
-    cudaStream_t stream);
+ncclResult_t ncclAllReduceDdaFabric(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                    ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
 #endif
