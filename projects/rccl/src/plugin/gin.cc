@@ -132,6 +132,10 @@ static ncclResult_t ncclGinPluginInit(struct ncclComm* comm, ginPluginLib_t* plu
   }
   if (pluginLib->ncclGinPluginState == ncclGinPluginStateInitReady && pluginLib->ncclGin) {
     if (pluginLib->ncclGin->devices(&ndev) != ncclSuccess || ndev <= 0) {
+      // init() succeeded but plugin is unusable; release the context to avoid leaking it.
+      if (comm->ginContext && pluginLib->ncclGin->finalize(comm->ginContext) != ncclSuccess)
+        WARN("GIN plugin %s finalize failed while disabling after devices() check", pluginLib->name);
+      comm->ginContext = nullptr;
       pluginLib->ncclGinPluginState = ncclGinPluginStateDisabled;
     } else {
       pluginLib->ginPhysDevs = ndev;
@@ -147,6 +151,9 @@ static ncclResult_t ncclGinPluginInit(struct ncclComm* comm, ginPluginLib_t* plu
   }
   if (pluginLib->ncclRmaPluginState == ncclGinPluginStateInitReady && pluginLib->ncclRma) {
     if (pluginLib->ncclRma->devices(&ndev) != ncclSuccess || ndev <= 0) {
+      if (comm->rmaGinContext && pluginLib->ncclRma->finalize(comm->rmaGinContext) != ncclSuccess)
+        WARN("RMA plugin %s finalize failed while disabling after devices() check", pluginLib->name);
+      comm->rmaGinContext = nullptr;
       pluginLib->ncclRmaPluginState = ncclGinPluginStateDisabled;
     } else {
       pluginLib->ncclRmaPluginState = ncclGinPluginStateEnabled;

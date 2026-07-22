@@ -263,7 +263,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   auto link_info = core::Runtime::runtime_singleton_->GetLinkInfo(first_cpu->node_id(), node_id());
   xgmi_cpu_gpu_ = (link_info.info.link_type == HSA_AMD_LINK_INFO_TYPE_XGMI);
 
-  if (link_info.num_hop >= 1) {
+  if (link_info.num_hop >= 1 && !properties_.Integrated) {
     large_bar_enabled_ = true;
   }
 
@@ -434,7 +434,14 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
     amd_kernel_code_t* header = reinterpret_cast<amd_kernel_code_t*>(code_buf);
 
     int gran_sgprs = std::max(0, (int(asic_shader->num_sgprs) - 1) / 8);
-    int gran_vgprs = std::max(0, (int(asic_shader->num_vgprs) - 1) / 4);
+    // gfx1250 changed the VGPR granularity from 4 to 16: the field is now
+    // max(0, ceil(vgprs_used / 16) - 1). See SWDEV-512636 / SWDEV-510239.
+    const int vgpr_gran = (supported_isas()[0]->GetMajorVersion() == 12 &&
+                           supported_isas()[0]->GetMinorVersion() >= 5)
+                              ? 16
+                              : 4;
+    int gran_vgprs =
+        std::max(0, (int(asic_shader->num_vgprs) + vgpr_gran - 1) / vgpr_gran - 1);
 
     header->kernel_code_entry_byte_offset = sizeof(amd_kernel_code_t);
     AMD_HSA_BITS_SET(header->kernel_code_properties,
@@ -4220,8 +4227,8 @@ hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& sessi
     HSA::hsa_signal_store_screlease(pcs_data->xcc_data[xcc_id].done_sig1, 1);
     pcs_data->xcc_data[xcc_id].which_buffer = 0;
   }
-  pcs_data->consumer_exit.store(false, std::memory_order_release);
-  pcs_data->pending_flush_count.store(0, std::memory_order_release);
+  pcs_data->consumer_exit.store(false, std::memory_order_relaxed);
+  pcs_data->pending_flush_count = 0;
 
   struct ThreadData {
     GpuAgent* agent;
@@ -4316,9 +4323,16 @@ hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& sessi
   debug_print("Failed to start PC sampling session with thunkId:%d\n", session.ThunkId());
   pcs_data->session->stop();
 
-  // Stop consumer thread first
-  pcs_data->consumer_exit.store(true, std::memory_order_release);
-  pcs_data->consumer_cv.notify_one();
+  // Stop consumer thread first.
+  // Store + notify must be under same lock to prevent lost-wakeup race.
+  // The consumer's wait() predicate checks consumer_exit under this same lock, so either:
+  // 1. Consumer is waiting: we set exit flag, then notify wakes it up
+  // 2. Consumer checks predicate: it sees exit=true and doesn't wait
+  {
+    std::lock_guard<std::mutex> lock(pcs_data->consumer_mutex);
+    pcs_data->consumer_exit.store(true, std::memory_order_relaxed);
+    pcs_data->consumer_cv.notify_one();
+  }
   if (pcs_data->consumer_thread.joinable()) {
     pcs_data->consumer_thread.join();
   }
@@ -4380,8 +4394,16 @@ hsa_status_t GpuAgent::PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& sessio
   // 2. Consumer may have unprocessed notifications - that's OK, Flush handles it
   // 3. Stopping consumer first avoids wasteful concurrent access (both use same buffers/mutexes)
   // 4. Final flush reads all data from host buffers and delivers via callback
-  pcs_data->consumer_exit.store(true, std::memory_order_release);
-  pcs_data->consumer_cv.notify_one();
+  //
+  // Store + notify must be under same lock to prevent lost-wakeup race.
+  // The consumer's wait() predicate checks consumer_exit under this same lock, so either:
+  // 1. Consumer is waiting: we set exit flag, then notify wakes it up
+  // 2. Consumer checks predicate: it sees exit=true and doesn't wait
+  {
+    std::lock_guard<std::mutex> lock(pcs_data->consumer_mutex);
+    pcs_data->consumer_exit.store(true, std::memory_order_relaxed);
+    pcs_data->consumer_cv.notify_one();
+  }
   if (pcs_data->consumer_thread.joinable()) {
     pcs_data->consumer_thread.join();
   }
@@ -4824,9 +4846,16 @@ void GpuAgent::PcSamplingThreadPerXCC(pcs_data_t& pcs_data, uint32_t xcc_id,
           done_sig[which_buffer], HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
 
       if (val == -1) {
-        // Exit signal received - notify consumer and exit
-        pcs_data.pending_flush_count.fetch_add(1, std::memory_order_release);
-        pcs_data.consumer_cv.notify_one();
+        // Exit signal received - notify consumer and exit.
+        // Increment + notify must be under same lock to prevent lost-wakeup race.
+        // The consumer's wait() predicate checks pending_flush_count under this same lock, so either:
+        // 1. Consumer is waiting: we increment, then notify wakes it up
+        // 2. Consumer checks predicate: it sees our incremented count and doesn't wait
+        {
+          std::lock_guard<std::mutex> lock(pcs_data.consumer_mutex);
+          pcs_data.pending_flush_count++;
+          pcs_data.consumer_cv.notify_one();
+        }
         break;
       } else if (val != 0) {
         // Spurious wakeup - continue waiting
@@ -4850,9 +4879,16 @@ void GpuAgent::PcSamplingThreadPerXCC(pcs_data_t& pcs_data, uint32_t xcc_id,
         }
       }
 
-      // Notify consumer thread that new data is available
-      pcs_data.pending_flush_count.fetch_add(1, std::memory_order_release);
-      pcs_data.consumer_cv.notify_one();
+      // Notify consumer thread that new data is available.
+      // Increment + notify must be under same lock to prevent lost-wakeup race.
+      // The consumer's wait() predicate checks pending_flush_count under this same lock, so either:
+      // 1. Consumer is waiting: we increment, then notify wakes it up
+      // 2. Consumer checks predicate: it sees our incremented count and doesn't wait
+      {
+        std::lock_guard<std::mutex> lock(pcs_data.consumer_mutex);
+        pcs_data.pending_flush_count++;
+        pcs_data.consumer_cv.notify_one();
+      }
     }
 
     debug_print("%s (XCC %u)::Exiting\n", thread_name, xcc_id);
@@ -4948,11 +4984,13 @@ void GpuAgent::PcSamplingConsumerThread(pcs_data_t& pcs_data) {
       {
         std::unique_lock<std::mutex> lock(pcs_data.consumer_mutex);
         pcs_data.consumer_cv.wait(lock, [&pcs_data]() {
-          return pcs_data.pending_flush_count.load(std::memory_order_acquire) > 0 ||
-                 pcs_data.consumer_exit.load(std::memory_order_acquire);
+          // pending_flush_count is protected by consumer_mutex, plain read is safe.
+          // consumer_exit uses relaxed because the mutex provides synchronization.
+          return pcs_data.pending_flush_count > 0 ||
+                 pcs_data.consumer_exit.load(std::memory_order_relaxed);
         });
         // Reset pending count - we'll check all XCCs
-        pcs_data.pending_flush_count.store(0, std::memory_order_release);
+        pcs_data.pending_flush_count = 0;
       }
 
       if (pcs_data.consumer_exit.load(std::memory_order_acquire)) {

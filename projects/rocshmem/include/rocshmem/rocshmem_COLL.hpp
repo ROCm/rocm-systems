@@ -1264,6 +1264,132 @@ __host__ int rocshmem_ctx_double_prod_reduce(
     int nreduce);
 
 /**
+ * @name ROCSHMEM_CTX_REDUCE_WAVE
+ * @brief Perform an allreduce between PEs in the active set. The caller
+ * is blocked until the reduction completes.
+ *
+ * This function must be called as a wave-level collective.
+ *
+ * @param[in] ctx          The context associated with this operation.
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+ *                         heap.
+ * @param[in] nreduce      Size of the buffer to participate in the reduction.
+ *
+ * @return int (Zero on successful local completion. Nonzero otherwise.)
+ */
+__device__ ATTR_NO_INLINE int rocshmem_ctx_short_sum_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, short *dest, const short *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_short_min_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, short *dest, const short *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_short_max_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, short *dest, const short *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_short_prod_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, short *dest, const short *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_short_or_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, short *dest, const short *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_short_and_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, short *dest, const short *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_short_xor_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, short *dest, const short *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_int_sum_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, int *dest, const int *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_int_min_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, int *dest, const int *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_int_max_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, int *dest, const int *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_int_prod_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, int *dest, const int *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_int_or_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, int *dest, const int *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_int_and_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, int *dest, const int *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_int_xor_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, int *dest, const int *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_long_sum_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, long *dest, const long *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_long_min_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, long *dest, const long *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_long_max_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, long *dest, const long *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_long_prod_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, long *dest, const long *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_long_or_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, long *dest, const long *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_long_and_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, long *dest, const long *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_long_xor_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, long *dest, const long *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_longlong_sum_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, long long *dest, const long long *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_longlong_min_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, long long *dest, const long long *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_longlong_max_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, long long *dest, const long long *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_longlong_prod_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, long long *dest, const long long *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_longlong_or_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, long long *dest, const long long *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_longlong_and_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, long long *dest, const long long *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_longlong_xor_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, long long *dest, const long long *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_float_sum_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, float *dest, const float *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_float_min_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, float *dest, const float *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_float_max_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, float *dest, const float *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_float_prod_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, float *dest, const float *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_double_sum_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, double *dest, const double *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_double_min_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, double *dest, const double *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_double_max_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, double *dest, const double *source,
+    int nreduce);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_double_prod_reduce_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, double *dest, const double *source,
+    int nreduce);
+
+/**
  * @brief kernel for performing a barrier synchronization.
  * Caller enqueues the kernel on given stream
  *

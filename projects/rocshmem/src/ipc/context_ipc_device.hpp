@@ -138,11 +138,14 @@ class IPCContext : public Context {
 
   // Collectives
   template <typename T, ROCSHMEM_OP Op>
-  __device__ int reduce(rocshmem_team_t team, T *dest, const T *source, int nreduce);
+  __device__ int reduce_wg(rocshmem_team_t team, T *dest, const T *source, int nreduce);
 
   template <typename T, ROCSHMEM_OP Op>
   __device__ int reduce_scatter_wg(rocshmem_team_t team, T *dest, const T *source,
                                    int nreduce);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int reduce_wave(rocshmem_team_t team, T *dest, const T *source, int nreduce);
 
   template <typename T>
   __device__ void broadcast_wg(rocshmem_team_t team, T *dest, const T *source,
@@ -457,12 +460,23 @@ class IPCContext : public Context {
                                           int n_pes, int64_t *pSync);
 
   template <typename T, ROCSHMEM_OP Op>
-  __device__ void internal_direct_allreduce(T *dst, const T *src,
+  __device__ void internal_direct_allreduce_wg(T *dst, const T *src,
                                             int nelems, IPCTeam *team_obj);
+
   template <typename T, ROCSHMEM_OP Op>
-  __device__ void internal_ring_allreduce(T *dst, const T *src,
+  __device__ void internal_direct_allreduce_wave(T *dst, const T *src,
+                                                  int nelems, IPCTeam *team_obj);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ void internal_ring_allreduce_wg(T *dst, const T *src,
                                           int nelems, IPCTeam *team_obj,
 					  int n_seg, int seg_size, int chunk_size);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ void internal_ring_allreduce_wave(T *dst, const T *src,
+                                               int nelems, IPCTeam *team_obj,
+                                               int n_seg, int seg_size,
+                                               int chunk_size);
 
   //internal functions used by collectives routines to write/read to
   //work/sync buffers

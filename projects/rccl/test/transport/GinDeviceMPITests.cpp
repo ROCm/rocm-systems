@@ -1735,7 +1735,7 @@ __global__ void alltoallPureKernel(
     ncclWindow_t recvwin, size_t recvoffset,
     size_t count, struct ncclDevComm devComm) {
   constexpr int ginContext = 0;
-  constexpr unsigned int signalIndex = 0;
+  unsigned int signalIndex = blockIdx.x;
   ncclGin gin{devComm, ginContext};
   // Capture current signal cell so a count-sweep that reuses the same
   // kernel/devComm doesn't conflate increments from past iterations.
@@ -1746,7 +1746,7 @@ __global__ void alltoallPureKernel(
   ncclGinBarrierSession<ncclCoopCta> bar{
       ncclCoopCta(), gin, ncclTeamWorld(devComm),
       devComm.railGinBarrier, blockIdx.x};
-  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+  bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::Relaxed);
 
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   int nthreads = blockDim.x * gridDim.x;
@@ -1763,7 +1763,9 @@ __global__ void alltoallPureKernel(
         size, ncclGin_SignalInc{signalIndex});
   }
 
-  gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + devComm.nRanks);
+  int receivingCta = (devComm.rank % nthreads) / blockDim.x;
+  if (blockIdx.x == receivingCta)
+    gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + devComm.nRanks);
   gin.flush(ncclCoopCta());
 }
 

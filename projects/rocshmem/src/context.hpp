@@ -210,10 +210,13 @@ class Context {
                          long* pSync);  // NOLINT(runtime/int)
 
   template <typename T, ROCSHMEM_OP Op>
-  __device__ int reduce(rocshmem_team_t team, T* dest, const T* source, int nreduce);
+  __device__ int reduce_wg(rocshmem_team_t team, T* dest, const T* source, int nreduce);
 
   template <typename T, ROCSHMEM_OP Op>
   __device__ int reduce_scatter_wg(rocshmem_team_t team, T* dest, const T* source, int nreduce);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int reduce_wave(rocshmem_team_t team, T* dest, const T* source, int nreduce);
 
   template <typename T>
   __device__ void put(T* dest, const T* source, size_t nelems, int pe);
