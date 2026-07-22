@@ -26,6 +26,8 @@
 #include <hip/hip_ext.h>  // hipExtModuleLaunchKernel
 #include <filesystem>
 #include <fstream>
+#include <string>
+#include <vector>
 
 #define HIPRTC_CHECK(expr)                                                    \
   do {                                                                        \
@@ -1968,6 +1970,9 @@ TEST_CASE("Unit_HRR_MemcpyPeer_Direct", "[.][hrr-direct]") {
   HIP_CHECK(hipMalloc(&d1, SZ));
 
   // API under test: cross-device peer copy src_dev -> dst_dev.
+  // Issue the copy under the src-device context (matches
+  // catch/unit/memory/hipMemcpyPeer.cc).
+  HIP_CHECK(hipSetDevice(src_dev));
   HIP_CHECK(hipMemcpyPeer(d1, dst_dev, d0, src_dev, SZ));
   HIP_CHECK(hipDeviceSynchronize());
 
