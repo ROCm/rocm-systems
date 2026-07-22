@@ -60,6 +60,7 @@ option(USE_SHARED_CTX "Request support for shared ctx between WG" OFF)
 option(USE_SINGLE_NODE "Enable single node support only." OFF)
 option(USE_HDP_FLUSH "Force flush the HDP cache." OFF)
 option(USE_HDP_FLUSH_HOST_SIDE "Use a polling thread to flush the HDP cache on the host." OFF)
+option(USE_ROCPROFILER_REGISTER "Register rocSHMEM API tables with rocprofiler-register so rocprofiler-sdk tools can trace host-stream APIs." ON)
 
 option(BUILD_FUNCTIONAL_TESTS "Build the functional tests (uses MPI if available, otherwise SLR)" OFF)
 option(BUILD_EXAMPLES "Build the examples" OFF)
@@ -114,8 +115,8 @@ rocm_setup_version(VERSION ${VERSION_STRING})
 # VALIDATE VMM POSIX ALLOCATOR OPTION
 #############################################################################
 if(USE_HEAP_DEVICE_VMM_POSIX)
-  if(${ROCM_MAJOR_VERSION} LESS 7)
-    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_POSIX requires ROCm 7.0 or newer. Current ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
+  if(${ROCM_MAJOR_VERSION} LESS 7 OR (${ROCM_MAJOR_VERSION} EQUAL 7 AND ${ROCM_MINOR_VERSION} LESS 2))
+    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_POSIX requires ROCm 7.2 or newer. Current ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
   endif()
 endif()
 
@@ -171,8 +172,8 @@ endif()
 # VALIDATE VMM FABRIC ALLOCATOR OPTION
 #############################################################################
 if(USE_HEAP_DEVICE_VMM_FABRIC)
-  if(${ROCM_MAJOR_VERSION} LESS 7)
-    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_FABRIC requires ROCm 7.next or newer. Current ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
+  if(${ROCM_MAJOR_VERSION} LESS 7 OR (${ROCM_MAJOR_VERSION} EQUAL 7 AND ${ROCM_MINOR_VERSION} LESS 2))
+    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_FABRIC requires ROCm 7.2 or newer. Current ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
   endif()
 
   # VMM Fabric allocator requires both AMD SMI fabric info and HIP fabric handle support
@@ -344,6 +345,35 @@ if (NOT BUILD_TESTS_ONLY)
 
   if (USE_SDMA)
     find_package(hsakmt REQUIRED)
+    # Workaround for RoCM 7.13/14
+    # hsakmtTargets.cmake contains paths baked in from the ROCm RHEL CI build:
+    #   /usr/lib64/libc.so      — bare libc path instead of -lc (always implicit)
+    #   -L/__w/rockrel/...      — hardcoded CI search path for libdrm/libdrm_amdgpu
+    # Strip both and inject the correct search path for libdrm.
+    get_target_property(_hsakmt_iface_libs hsakmt::hsakmt INTERFACE_LINK_LIBRARIES)
+    list(FILTER _hsakmt_iface_libs EXCLUDE REGEX "(/libc\\.so|/__w/)")
+    find_library(_DRM_LIB drm HINTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+    if(_DRM_LIB)
+      get_filename_component(_drm_dir "${_DRM_LIB}" DIRECTORY)
+      list(PREPEND _hsakmt_iface_libs "-L${_drm_dir}")
+      unset(_drm_dir)
+    endif()
+    set_target_properties(hsakmt::hsakmt PROPERTIES INTERFACE_LINK_LIBRARIES "${_hsakmt_iface_libs}")
+    unset(_hsakmt_iface_libs)
+  endif()
+
+  if(USE_ROCPROFILER_REGISTER)
+    find_package(rocprofiler-register QUIET)
+    if(NOT rocprofiler-register_FOUND)
+      message(STATUS "rocprofiler-register not found - rocSHMEM tracing disabled.")
+    endif()
+  endif()
+
+  if(USE_ROCPROFILER_REGISTER)
+    find_package(rocprofiler-register QUIET)
+    if(NOT rocprofiler-register_FOUND)
+      message(STATUS "rocprofiler-register not found - rocSHMEM tracing disabled.")
+    endif()
   endif()
 
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
@@ -475,6 +505,12 @@ if (NOT BUILD_TESTS_ONLY)
       PUBLIC
         -Wl,-rpath,${ASAN_RUNTIME_DIR}
     )
+  endif()
+
+  if(rocprofiler-register_FOUND)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE ROCSHMEM_ROCPROFILER_REGISTER=1)
+    target_link_libraries(${PROJECT_NAME}
+                          PRIVATE rocprofiler-register::rocprofiler-register)
   endif()
 
   if(${ROCM_MAJOR_VERSION} LESS 7)

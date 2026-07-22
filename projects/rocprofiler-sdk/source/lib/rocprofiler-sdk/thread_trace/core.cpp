@@ -76,7 +76,7 @@ struct cbdata_t
 common::Synchronized<std::optional<int64_t>> client;
 
 // True once the HSA runtime is registered. Gates start_context() so pre-init
-// start requests are deferred and replayed by initialize().
+// start requests are deferred and replayed by start_active_contexts().
 std::atomic<bool>&
 hsa_inited()
 {
@@ -583,7 +583,7 @@ void
 DeviceThreadTracer::start_context()
 {
     // Per-agent resources don't exist until HSA is registered; the request is
-    // cached in the active-context array and replayed by initialize().
+    // cached in the active-context array and replayed by start_active_contexts().
     if(!hsa_inited().load())
     {
         ROCP_INFO << "Device thread trace start requested before hsa_init; deferring";
@@ -650,12 +650,17 @@ initialize(HsaApiTable* table)
         if(ctx->device_thread_trace) ctx->device_thread_trace->resource_init();
         if(ctx->dispatch_thread_trace) ctx->dispatch_thread_trace->resource_init();
     }
+}
 
+void
+start_active_contexts()
+{
     // HSA resources now exist; allow start_context() to program the hardware.
     hsa_inited().store(true);
 
     // Replay device contexts started before hsa_init() (their start_context()
-    // returned early above). Dispatch mode needs no replay.
+    // returned early). Must run after the queue infrastructure is initialized
+    // (see registration.cpp); starting the SQTT hardware earlier hangs the GPU.
     for(auto& ctx : context::get_active_contexts())
     {
         if(ctx->device_thread_trace) ctx->device_thread_trace->start_context();

@@ -82,6 +82,10 @@
                           "type": "boolean",
                           "description": "For Collecting rocJPEG Traces"
                      },
+		     "rocshmem_trace": {
+                          "type": "boolean",
+                          "description": "For Collecting rocSHMEM Traces"
+                     },
                      "scratch_memory_trace": {
                           "type": "boolean",
                           "description": "For Collecting Scratch Memory operations Traces"
@@ -119,12 +123,12 @@
 
 		     "runtime_trace" : {
 			     "type": "boolean",
-			     "description": "For collecting HIP (runtime), memory copy, memory allocation, marker, scratch memory, rocDecode, and Kernel dispatch traces."
+			     "description": "For collecting HIP (runtime), memory copy, memory allocation, marker, scratch memory, rocDecode, rocJPEG, rocSHMEM, and Kernel dispatch traces."
 		     },
 
                      "sys_trace" : {
                               "type": "boolean",
-                              "description": "For Collecting HIP, HSA, Marker (ROCTx), Memory copy, Memory allocation, Scratch memory, rocDecode, rocJPEG, and Kernel dispatch traces"
+                              "description": "For Collecting HIP, HSA, Marker (ROCTx), Memory copy, Memory allocation, Scratch memory, rocDecode, rocJPEG, rocSHMEM, and Kernel dispatch traces"
                      },
 
                      "mangled_kernels": {

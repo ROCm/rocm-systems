@@ -32,7 +32,14 @@ option(RTC_TESTING "Run tests using HIP RTC to compile the kernels" OFF)
 option(ENABLE_SPIRV "Build hip-tests for SPIRV" OFF)
 option(ENABLE_YAML_TAGS "Enable YAML tags for test cases" ON)
 option(STANDALONE_TESTS "Generate standalone executable per source file" OFF)
-option(ENABLE_OOB_TESTS "Build OOB tests, deliberately wrong inputs" ON)
+
+# Build tests with -Wall -Werror. Defaults ON for Linux, OFF elsewhere.
+if(UNIX)
+  set(_hiptests_werror_default ON)
+else()
+  set(_hiptests_werror_default OFF)
+endif()
+option(ENABLE_WERROR "Build tests with -Wall -Werror (Linux default ON)" ${_hiptests_werror_default})
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
@@ -124,9 +131,7 @@ if(NOT DEFINED THEROCK_SANITIZER)
 endif()
 
 set(ASAN_CONFIG_DEF)
-set(HIP_TESTS_ASAN_ENABLED OFF)
 if(ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
-  set(HIP_TESTS_ASAN_ENABLED ON)
   message(STATUS "Building catch tests with Address Sanitizer options")
   # If user is building hip-tests standalone (without TheRock) and wants to turn on sanitizer
   # We append the flags manually, otherwise we use TheRock's CXX flags which already should have
@@ -253,7 +258,10 @@ if(HIP_PLATFORM STREQUAL "amd")
     # Which results in errors about missing headers etc
     set(win_cxx_standard -std=c++17)
   endif()
-  add_compile_options(${HIP_PATH_OPT} ${win_cxx_standard} -x hip -Wall -Wextra -Wvla -Wno-deprecated -Wno-option-ignored -Wno-unused-parameter ${win_disable_warnings})
+  add_compile_options(${HIP_PATH_OPT} ${win_cxx_standard} -x hip -Wall -Wextra -Wvla -Wno-deprecated ${win_disable_warnings})
+  if(ENABLE_WERROR AND UNIX)
+    add_compile_options(-Werror)
+  endif()
 endif()
 
 # Turn off CMAKE_HIP_ARCHITECTURES Feature if cmake version is 3.21+
