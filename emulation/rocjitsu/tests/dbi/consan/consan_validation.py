@@ -140,6 +140,7 @@ class Workload:
     fault_filter: str | None = None
     targets: tuple[str, ...] | None = None
     moi_record_evidence_expected: bool = True
+    run_timeout_seconds: int = TIMEOUT_SECONDS
 
 
 PROFILES = {
@@ -616,6 +617,7 @@ WORKLOADS = (
         overhead_processes=1,
         fault_families=("barrier-drop",),
         targets=("gfx1201",),
+        run_timeout_seconds=120,
     ),
     Workload(
         id="pytorch-rdna4-sdpa",
@@ -3102,6 +3104,7 @@ def _run(args: argparse.Namespace) -> int:
     workspace = _workspace_from_environment()
     target = _target(args)
     workload = WORKLOAD_BY_ID[args.workload]
+    timeout = args.timeout if args.timeout is not None else workload.run_timeout_seconds
     doctor = _doctor(workspace, target, (workload.id,))
     if not doctor["ok"]:
         raise ValidationError("workspace doctor failed; run the doctor subcommand")
@@ -3131,7 +3134,7 @@ def _run(args: argparse.Namespace) -> int:
             profile,
             args.phase,
             artifact_root,
-            args.timeout,
+            timeout,
             row_label,
             launcher,
         )
@@ -3198,7 +3201,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     run.add_argument("--profile", choices=(*PROFILE_IDS, "all"), default="all")
     run.add_argument("--phase", choices=("clean", "overhead"), required=True)
     run.add_argument("--artifact-root", type=Path, required=True)
-    run.add_argument("--timeout", type=int, default=TIMEOUT_SECONDS)
+    run.add_argument(
+        "--timeout",
+        type=int,
+        help="override the workload timeout declared by the executable manifest",
+    )
     run.add_argument("--include-baseline", action="store_true")
     run.add_argument(
         "--launcher-json",
@@ -3244,7 +3251,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="explicit retained target-dispatch smoke command",
     )
     args = parser.parse_args(argv)
-    if getattr(args, "timeout", 1) <= 0:
+    timeout = getattr(args, "timeout", None)
+    if timeout is not None and timeout <= 0:
         parser.error("--timeout must be positive")
     if getattr(args, "health_timeout", 1) <= 0:
         parser.error("--health-timeout must be positive")

@@ -97,16 +97,19 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   constexpr uint64_t kIndirectIslandWords = 7u;
   const bool has_spill_backed_scalar_assignment = std::ranges::any_of(
       options.moi_transient_sgpr_assignments, &ConSanMoiTransientSgprAssignment::spill_backed);
-  // A stranded RDNA4 access group can need a relocatable entry host in
-  // addition to its per-access comparisons and branches. A singleton can need
-  // an indirect compare/branch stub plus fixed key setup and termination.
-  // A stranded singleton or two-site group amortizes a relocated-host arm,
-  // indirect dispatch targets, and the terminating s_endpgm over very few
-  // sites. Use the same conservative per-site envelope as the dense barrier
-  // router instead of relying on large-group amortization.
-  const uint64_t access_relay_words = arch == ROCJITSU_CODE_ARCH_GFX1250
-                                          ? 24u
-                                          : 20u + (has_spill_backed_scalar_assignment ? 1u : 0u);
+  // Spill-backed groups need room for the extra scalar-save arm, while truly
+  // large generated objects need a conservative envelope to keep every
+  // routing target reachable. Applying that spacing to every ordinary RDNA4
+  // object needlessly displaces access bodies from their compact entry and
+  // return layout. Retain the compact envelope for moderate objects.
+  constexpr size_t kLargeRdna4RelayCandidateCount = 1024u;
+  const bool needs_large_rdna4_relay =
+      candidates.size() >= kLargeRdna4RelayCandidateCount ||
+      (has_spill_backed_scalar_assignment && candidates.size() <= 2u);
+  const uint64_t access_relay_words =
+      arch == ROCJITSU_CODE_ARCH_GFX1250
+          ? 24u
+          : (needs_large_rdna4_relay ? 20u : 10u) + (has_spill_backed_scalar_assignment ? 1u : 0u);
   const bool has_unreachable_function_candidate =
       std::ranges::any_of(candidates, [&](const ConSanMoiCandidate *candidate) {
         return !candidate->in_kernel &&

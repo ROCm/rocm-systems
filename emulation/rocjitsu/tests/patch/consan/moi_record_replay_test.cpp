@@ -84,6 +84,43 @@ TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
   EXPECT_FALSE(result.warnings.empty());
 }
 
+TEST(ConSanMoi, Rdna4RecordReplayRecordsHardwareDispatchIdentity) {
+  const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.moi_dispatch_id_sgprs_automatic);
+  ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
+  const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+           patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
+  });
+  ASSERT_NE(access, result.patches.end());
+  ASSERT_TRUE(access->scratch_vgpr);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> access_words =
+      access->kind == ConSanPatchKind::InlineMoiAccessRecordStore
+          ? patched_words_at_file_offset(result, 0x100 + access->anchor_offset,
+                                         access->original_size)
+          : text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
+  EXPECT_TRUE(contains_subsequence(access_words, make_expected_scalar_offset_store_words(
+                                                     offsetof(ConSanMoiAccessRecord, generation),
+                                                     *result.resolved_moi_dispatch_id_sgpr,
+                                                     *access->scratch_vgpr)));
+  EXPECT_TRUE(contains_subsequence(
+      access_words, make_expected_scalar_offset_store_words(
+                        offsetof(ConSanMoiAccessRecord, generation) + sizeof(uint32_t),
+                        static_cast<uint16_t>(*result.resolved_moi_dispatch_id_sgpr + 1u),
+                        *access->scratch_vgpr)));
+}
+
 TEST(ConSanMoi, RecordReplayExcludesUnreachableTailOfFinalZeroSizedSymbol) {
   constexpr auto live_store =
       gfx1250::build_vds(gfx1250::kDsStoreB16Vds, {.addr = 4u, .data0 = 5u});
@@ -793,7 +830,7 @@ TEST(ConSanMoi, FirstLightProbeWritesOneNativeLdsAccessRecord) {
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineMoiAccessRecordStore);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
   EXPECT_EQ(result.patches.front().trampoline_offset, 8u);
-  EXPECT_EQ(result.patches.front().original_size, 108u * sizeof(uint32_t));
+  EXPECT_EQ(result.patches.front().original_size, 116u * sizeof(uint32_t));
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
   EXPECT_EQ(*result.patches.front().scratch_vgpr, 8u);
   EXPECT_EQ(result.resource_plan_summary.explicit_plans, 1u);
@@ -1447,7 +1484,7 @@ TEST(ConSanMoi, FirstLightProbeDerivesOwnerFromWorkitemIdWhenOwnerVgprIsUnset) {
   EXPECT_TRUE(result.modified);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineMoiAccessRecordStore);
-  EXPECT_EQ(result.patches.front().original_size, 108u * sizeof(uint32_t));
+  EXPECT_EQ(result.patches.front().original_size, 116u * sizeof(uint32_t));
 
   const auto owner_init =
       build_v_lshrrev_b32_e32(10, scalar_positive_inline_u32(5), 0, ROCJITSU_CODE_ARCH_RDNA4);
@@ -1616,7 +1653,7 @@ TEST(ConSanMoi, FirstLightProbeAddsNativeLdsImmediateOffset) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified);
   ASSERT_EQ(result.patches.size(), 1u);
-  EXPECT_EQ(result.patches.front().original_size, 112u * sizeof(uint32_t));
+  EXPECT_EQ(result.patches.front().original_size, 120u * sizeof(uint32_t));
 
   const std::vector<uint32_t> rewritten_words =
       patched_words_at_file_offset(result, 0x100, result.patches.front().original_size);
@@ -1698,8 +1735,8 @@ TEST(ConSanMoi, FirstLightRecordLinearizesBeforeDisplacedTwoAddressLoad) {
   ASSERT_EQ(result.patches.size(), 1u);
   const ConSanPatchInfo &patch = result.patches.front();
   ASSERT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
-  EXPECT_LT(patch.trampoline_size, 900u)
-      << "static Record/Replay probes must remain below the CLIP code-growth threshold";
+  EXPECT_LT(patch.trampoline_size, 932u)
+      << "dispatch-qualified static Record/Replay probes must retain the CLIP size bound";
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -1901,10 +1938,10 @@ TEST(ConSanMoi, FirstLightProbeCanPatchTwoNativeLdsAccessRecords) {
   ASSERT_EQ(result.patches.size(), 2u);
   EXPECT_EQ(result.patches[0].kind, ConSanPatchKind::InlineMoiAccessRecordStore);
   EXPECT_EQ(result.patches[0].anchor_offset, 0u);
-  EXPECT_EQ(result.patches[0].original_size, 108u * sizeof(uint32_t));
+  EXPECT_EQ(result.patches[0].original_size, 116u * sizeof(uint32_t));
   EXPECT_EQ(result.patches[1].kind, ConSanPatchKind::InlineMoiAccessRecordStore);
   EXPECT_EQ(result.patches[1].anchor_offset, kSecondSiteWord * sizeof(uint32_t));
-  EXPECT_EQ(result.patches[1].original_size, 108u * sizeof(uint32_t));
+  EXPECT_EQ(result.patches[1].original_size, 116u * sizeof(uint32_t));
 
   std::vector<uint32_t> first_words(result.patches[0].original_size / sizeof(uint32_t));
   std::vector<uint32_t> second_words(result.patches[1].original_size / sizeof(uint32_t));
@@ -2257,6 +2294,53 @@ TEST(ConSanMoi, Rdna4SpillBackedTwoSiteDenseDispatcherIncludesSharedHostArm) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
+TEST(ConSanMoi, Rdna4ModerateSpillBackedDispatcherKeepsCompactRelaySpacing) {
+  constexpr uint32_t kAccessCount = 3u;
+  const std::array<uint16_t, 4> dead = {0u, 1u, 4u, 6u};
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/20u, /*ssrc0=*/20u, ROCJITSU_CODE_ARCH_RDNA4);
+  std::vector<uint32_t> words(8u, filler);
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    words.push_back(0xD8340000u | index * sizeof(uint32_t));
+    words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+  }
+  for (uint16_t sgpr = 0; sgpr < 106u; ++sgpr) {
+    if (std::ranges::find(dead, sgpr) == dead.end())
+      words.push_back(build_s_mov_b32(/*sdst=*/20u, sgpr, ROCJITSU_CODE_ARCH_RDNA4));
+  }
+  words.resize(33'000u, filler);
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(words, "rdna4_spill_dense_moderate");
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  ASSERT_EQ(original.text_sections().size(), 1u);
+  const uint64_t original_text_size = original.text_sections().front()->size();
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  EXPECT_TRUE(result.resolved_moi_transient_sgpr_assignments.front().spill_backed);
+  const auto first_access = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(first_access, result.patches.end());
+  constexpr uint64_t kCompactSpillBackedRelayWords = 11u;
+  EXPECT_EQ(first_access->trampoline_offset,
+            original_text_size + kAccessCount * kCompactSpillBackedRelayWords * sizeof(uint32_t));
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, RecordReplaySpillBackedDenseHostDoesNotConsumeNearbyBarrier) {
   constexpr uint32_t kAccessCount = 9u;
   const std::array<uint16_t, 6> dead = {0u, 1u, 4u, 6u, 8u, 9u};
@@ -2361,11 +2445,22 @@ TEST(ConSanMoi, RecordReplayReservedRelaySpaceComposesWithBarrierEpochs) {
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
-  const auto branch =
-      compute_sopp_branch_simm16(barrier_patch->anchor_offset, barrier_patch->trampoline_offset);
+  uint64_t entry_target = barrier_patch->trampoline_offset;
+  const auto direct_branch = compute_sopp_branch_simm16(barrier_patch->anchor_offset, entry_target);
+  ASSERT_TRUE(direct_branch);
+  const uint32_t encoded_entry =
+      text_words_at_offset(patched, barrier_patch->anchor_offset, sizeof(uint32_t)).front();
+  if (encoded_entry != build_s_branch(*direct_branch, ROCJITSU_CODE_ARCH_RDNA4)) {
+    const auto island = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+      return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+             patch.anchor_offset == barrier_patch->anchor_offset;
+    });
+    ASSERT_NE(island, result.patches.end());
+    entry_target = island->trampoline_offset;
+  }
+  const auto branch = compute_sopp_branch_simm16(barrier_patch->anchor_offset, entry_target);
   ASSERT_TRUE(branch);
-  EXPECT_EQ(text_words_at_offset(patched, barrier_patch->anchor_offset, sizeof(uint32_t)).front(),
-            build_s_branch(*branch, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(encoded_entry, build_s_branch(*branch, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_TRUE(result.final_validation_passed);
 }
 
@@ -2437,7 +2532,7 @@ TEST(ConSanMoi, FirstLightProbeWritesOneLikelyGroupFlatAccessRecord) {
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineMoiAccessRecordStore);
   EXPECT_EQ(result.patches.front().anchor_offset, 28u);
   EXPECT_EQ(result.patches.front().trampoline_offset, 40u);
-  EXPECT_EQ(result.patches.front().original_size, 109u * sizeof(uint32_t));
+  EXPECT_EQ(result.patches.front().original_size, 117u * sizeof(uint32_t));
 
   const std::vector<uint32_t> rewritten_words =
       patched_words_at_file_offset(result, 0x11c, result.patches.front().original_size);

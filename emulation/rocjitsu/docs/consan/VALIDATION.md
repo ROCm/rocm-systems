@@ -181,7 +181,7 @@ python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
 ```
 
 The JSON contains all north-star workloads, four canonical profiles, admitted
-fault families, fixed timeout, forbidden exploratory controls, and the maximum
+fault families, row-declared timeouts, forbidden exploratory controls, and the maximum
 GPU parallelism. Review it before starting a campaign and retain it with the
 results.
 
@@ -301,6 +301,12 @@ stride 16,384 and offset zero are automatic runtime defaults, not environment
 settings supplied by the validation harness. `explain --json` records those
 values under `implicit_runtime_defaults`, while `workload_specific_tuning`
 remains empty.
+
+The ordinary process deadline is 30 seconds. The Qwen-vocabulary top-k row
+declares 120 seconds because its complete Record/Replay transform patches
+63,474 accesses and 7,100 barriers and takes about 90 seconds on this machine;
+that execution bound does not change instrumentation coverage or semantics.
+An explicit `--timeout` overrides the manifest only for diagnosis.
 
 ## Correct-workload overhead
 

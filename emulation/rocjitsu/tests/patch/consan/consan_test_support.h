@@ -1713,7 +1713,7 @@ void expect_moi_first_light_width(uint32_t word0, uint32_t word1, uint32_t expec
   EXPECT_EQ(result.moi_candidates.front().width_bits, expected_width_bits);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineMoiAccessRecordStore);
-  EXPECT_EQ(result.patches.front().original_size, 108u * sizeof(uint32_t));
+  EXPECT_EQ(result.patches.front().original_size, 116u * sizeof(uint32_t));
 }
 
 std::vector<uint32_t> make_padded_moi_flat_first_light_function_words() {

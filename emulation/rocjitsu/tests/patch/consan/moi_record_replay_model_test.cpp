@@ -1467,6 +1467,39 @@ TEST(ConSanMoi, RecordReplayBarrierDoesNotOrderAnotherDispatch) {
   EXPECT_EQ(diagnostics[0].second_instruction_offset, 0x20u);
 }
 
+TEST(ConSanMoi, RecordReplayDoesNotCompareAccessesFromDifferentDispatches) {
+  ConSanMoiReportHeader header = make_consan_moi_report_header(
+      /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/2,
+      /*diagnostic_capacity=*/1, /*exact_shadow_entry_capacity=*/1,
+      /*sampled_watchpoint_capacity=*/0);
+  header.access_record_count = 2;
+
+  std::array<ConSanMoiAccessRecord, 2> records{};
+  records[0].generation = 101;
+  records[0].wave_id = 0;
+  records[0].event_index = 0;
+  records[0].instruction_offset = 0x10;
+  records[0].access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Write);
+  records[0].lds_byte_count = 4;
+  records[0].cell_count = 1;
+
+  records[1] = records[0];
+  records[1].generation = 202;
+  records[1].wave_id = 1;
+  records[1].event_index = 1;
+  records[1].instruction_offset = 0x20;
+  records[1].access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Read);
+
+  std::array<ConSanMoiDiagnosticRecord, 1> diagnostics{};
+  std::array<uint64_t, 1> shadow{};
+  const ConSanMoiRecordReplayResult replay =
+      consan_moi_record_replay_access_records(header, records, diagnostics, shadow);
+
+  EXPECT_FALSE(replay.conflict);
+  EXPECT_EQ(replay.processed_access_count, 2u);
+  EXPECT_EQ(header.diagnostic_count, 0u);
+}
+
 TEST(ConSanMoi, RecordReplayBarrierEventsAdvanceOnlyTheirWorkgroup) {
   ConSanMoiReportHeader header = make_consan_moi_report_header(
       /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/4,

@@ -129,6 +129,10 @@ class ConSanValidationTest(unittest.TestCase):
             workloads["pytorch-rdna4-llm-topk"]["targets"], ("gfx1201",)
         )
         self.assertEqual(
+            workloads["pytorch-rdna4-llm-topk"]["run_timeout_seconds"], 120
+        )
+        self.assertEqual(workloads["pytorch-rdna4-sdpa"]["run_timeout_seconds"], 30)
+        self.assertEqual(
             workloads["pytorch-rdna4-sdpa"]["targets"], ("gfx1201",)
         )
         self.assertEqual(

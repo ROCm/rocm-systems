@@ -2580,9 +2580,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
                 plan.site_kind == ConSanResourceSiteKind::Atomic);
       });
   const bool needs_dispatch_id =
-      has_inline_dispatch_consumer ||
-      (options.moi_engine == ConSanMoiEngine::RecordReplay &&
-       (arch == ROCJITSU_CODE_ARCH_CDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250)) ||
+      has_inline_dispatch_consumer || options.moi_engine == ConSanMoiEngine::RecordReplay ||
       (options.moi_engine == ConSanMoiEngine::Sampled && options.moi_runtime_sample_stride > 1u &&
        arch != ROCJITSU_CODE_ARCH_GFX1250);
   if (!needs_dispatch_id || !options.moi_report_buffer_address || options.moi_dispatch_id_sgpr) {
