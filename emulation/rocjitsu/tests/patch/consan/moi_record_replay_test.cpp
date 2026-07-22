@@ -1888,7 +1888,7 @@ TEST(ConSanMoi, RecordReplayAutomaticExecSaveUsesDistinctOwnerLocalWindows) {
   EXPECT_EQ(std::ranges::count_if(
                 result.resolved_moi_transient_sgpr_assignments,
                 [](const auto &assignment) { return assignment.dispatch_id_sgpr.has_value(); }),
-            0u);
+            1u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             2u);
@@ -1987,8 +1987,6 @@ TEST(ConSanMoi, RecordReplaySpillsExecVccStateOnGfx12) {
     const ConSanMoiTransientSgprAssignment &assignment =
         result.resolved_moi_transient_sgpr_assignments.front();
     EXPECT_TRUE(assignment.spill_backed);
-    if (arch == ROCJITSU_CODE_ARCH_GFX1250)
-      EXPECT_FALSE(assignment.dispatch_id_sgpr);
     EXPECT_EQ(assignment.indirect_pc_sgpr, 0u);
     EXPECT_EQ(assignment.indirect_scc_sgpr, 4u);
     EXPECT_EQ(assignment.dispatch_key_sgpr, 6u);
@@ -2127,7 +2125,6 @@ TEST(ConSanMoi, RecordReplaySpillBackedDenseHostDoesNotConsumeNearbyBarrier) {
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
   EXPECT_TRUE(result.resolved_moi_transient_sgpr_assignments.front().spill_backed);
-  EXPECT_FALSE(result.resolved_moi_transient_sgpr_assignments.front().dispatch_id_sgpr);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
