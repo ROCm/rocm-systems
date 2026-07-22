@@ -259,6 +259,20 @@ if(NOT AMDSMI_SYSTEM_PYTHON_SITELIB)
             )
             set(_amdsmi_detected_sitelib "${Python3_SITELIB}")
         endif()
+    elseif(NOT BUILD_PYTHON_WHEEL)
+        # System-package build with no default system python3: Python3_SITELIB
+        # points at whatever interpreter cmake found (e.g. a manylinux
+        # /opt/python/... build python), a path no target host has on sys.path.
+        # The module would install "successfully" yet `import amdsmi` would fail
+        # with ModuleNotFoundError. Fail loudly instead. Wheel builds (which run
+        # in exactly such containers) are exempt and set the destination there.
+        message(
+            FATAL_ERROR
+            "Cannot detect the system python3 for the module install path: neither "
+            "/usr/libexec/platform-python nor /usr/bin/python3 exists. Set "
+            "-DAMDSMI_SYSTEM_PYTHON_SITELIB=<dir> explicitly, or build the wheel "
+            "with -DBUILD_PYTHON_WHEEL=ON."
+        )
     else()
         set(_amdsmi_detected_sitelib "${Python3_SITELIB}")
     endif()
