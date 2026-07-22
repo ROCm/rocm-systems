@@ -63,7 +63,7 @@ __global__ void PingPongTest(int loop, int skip, long long int *start_time,
         uint64_t *my_sig = &sig_addr[wg_id];
         uint64_t expected = static_cast<uint64_t>(i + 1);
         if (pe == 0) {
-          rocshmem_ctx_putmem_signal(ctx, my_data_r, my_data_s, size,
+          rocshmem_ctx_putmem_signal_nbi(ctx, my_data_r, my_data_s, size,
                                      my_sig, 1, ROCSHMEM_SIGNAL_ADD, target);
           rocshmem_ulong_wait_until(
               reinterpret_cast<unsigned long *>(my_sig),
@@ -72,7 +72,7 @@ __global__ void PingPongTest(int loop, int skip, long long int *start_time,
           rocshmem_ulong_wait_until(
               reinterpret_cast<unsigned long *>(my_sig),
               ROCSHMEM_CMP_EQ, expected);
-          rocshmem_ctx_putmem_signal(ctx, my_data_r, my_data_s, size,
+          rocshmem_ctx_putmem_signal_nbi(ctx, my_data_r, my_data_s, size,
                                      my_sig, 1, ROCSHMEM_SIGNAL_ADD, target);
         }
       } else {
