@@ -49,6 +49,14 @@ if(NOT TARGET rocjpeg-demo)
     set(IS_DISABLED ON)
 endif()
 
+# When the linked rocjpeg is ASAN-instrumented (some ROCm images build it with
+# -fsanitize=address even in non-sanitizer builds), the demo must load the ASAN runtime
+# first. Pass it via ROCPROF_PRELOAD so rocprofv3 prepends it to the child's LD_PRELOAD.
+rocprofiler_resolve_asan_preload(ROCJPEG_ASAN_PRELOAD "${rocjpeg_LIBRARY}")
+if(ROCJPEG_ASAN_PRELOAD)
+    set(ROCJPEG_ASAN_ENV "ROCPROF_PRELOAD=${ROCJPEG_ASAN_PRELOAD}")
+endif()
+
 # CI Sanitizer run gives the following error: No target "rocjpeg-demo" Adding if-statement
 # to avoid tests for now to stop error
 rocprofiler_add_integration_execute_test(
@@ -63,6 +71,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${ROCJPEG_ASAN_ENV}"
     FIXTURES_SETUP rocprofv3-test-rocjpeg-tracing
     DISABLED "${IS_DISABLED}")
 

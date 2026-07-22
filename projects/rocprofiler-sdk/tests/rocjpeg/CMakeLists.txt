@@ -45,6 +45,10 @@ if(NOT TARGET rocjpeg-demo)
     set(IS_DISABLED ON)
 endif()
 
+# Preload the ASAN runtime first when the linked rocjpeg is ASAN-instrumented (some ROCm
+# images ship it built with -fsanitize=address in non-sanitizer builds).
+rocprofiler_resolve_asan_preload(ROCJPEG_ASAN_PRELOAD "${rocjpeg_LIBRARY}")
+
 rocprofiler_add_integration_execute_test(
     rocjpeg-tracing
     COMMAND
@@ -54,7 +58,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     DISABLED ${IS_DISABLED}
-    PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>" "${PRELOAD_ENV}"
+    PRELOAD ${ROCJPEG_ASAN_PRELOAD} "$<TARGET_FILE:rocprofiler-sdk-json-tool>"
+            "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPROFILER_TOOL_OUTPUT_FILE=rocjpeg-tracing-test.json"
     FIXTURES_SETUP rocjpeg-tracing)
 

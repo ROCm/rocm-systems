@@ -190,6 +190,46 @@ function(rocprofiler_set_integration_test_name _VAR _BASE _CATEGORY)
         PARENT_SCOPE)
 endfunction()
 
+# Resolve the ASAN runtime to preload when a dependency library is ASAN-instrumented. Some
+# ROCm images (e.g. RHEL/SLES) ship rocdecode/rocjpeg built with -fsanitize=address even
+# in non-sanitizer builds. A binary that links such a library aborts at load with \"ASan
+# runtime does not come first in initial library list\" unless the ASAN runtime is
+# preloaded ahead of it. Sets ${_out} to the runtime path, or \"\" if not
+# needed/available.
+function(rocprofiler_resolve_asan_preload _out _lib)
+    set(${_out}
+        ""
+        PARENT_SCOPE)
+    if(NOT _lib OR NOT EXISTS "${_lib}")
+        return()
+    endif()
+    find_program(ROCPROFILER_READELF_EXECUTABLE NAMES readelf)
+    if(NOT ROCPROFILER_READELF_EXECUTABLE)
+        return()
+    endif()
+    execute_process(
+        COMMAND ${ROCPROFILER_READELF_EXECUTABLE} -d "${_lib}"
+        OUTPUT_VARIABLE _dyn
+        ERROR_QUIET)
+    if(NOT _dyn MATCHES "libclang_rt.asan")
+        return()
+    endif()
+    file(GLOB _candidates
+         "${ROCM_PATH}/lib/llvm/lib/clang/*/lib/linux/libclang_rt.asan-x86_64.so")
+    if(NOT _candidates)
+        message(
+            WARNING
+                "${_lib} is ASAN-instrumented but libclang_rt.asan-x86_64.so was not found under ${ROCM_PATH}/lib/llvm/lib/clang"
+            )
+        return()
+    endif()
+    list(SORT _candidates ORDER DESCENDING)
+    list(GET _candidates 0 _rt)
+    set(${_out}
+        "${_rt}"
+        PARENT_SCOPE)
+endfunction()
+
 function(rocprofiler_add_integration_execute_test NAME)
     set(_FLAG_OPTS
         "WILL_FAIL" # failure is expected in order for test to pass

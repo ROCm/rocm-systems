@@ -30,6 +30,14 @@ if(NOT TARGET rocdecode-demo)
     set(IS_DISABLED ON)
 endif()
 
+# When the linked rocdecode is ASAN-instrumented (some ROCm images build it with
+# -fsanitize=address even in non-sanitizer builds), the demo must load the ASAN runtime
+# first. Pass it via ROCPROF_PRELOAD so rocprofv3 prepends it to the child's LD_PRELOAD.
+rocprofiler_resolve_asan_preload(ROCDECODE_ASAN_PRELOAD "${rocdecode_LIBRARY}")
+if(ROCDECODE_ASAN_PRELOAD)
+    set(ROCDECODE_ASAN_ENV "ROCPROF_PRELOAD=${ROCDECODE_ASAN_PRELOAD}")
+endif()
+
 # rocdecode tracing test
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocdecode-tracing
@@ -43,6 +51,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${ROCDECODE_ASAN_ENV}"
     FIXTURES_SETUP rocprofv3-test-rocdecode-tracing
     DISABLED "${IS_DISABLED}")
 

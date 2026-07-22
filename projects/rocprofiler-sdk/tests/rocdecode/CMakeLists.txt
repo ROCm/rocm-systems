@@ -23,6 +23,10 @@ if(NOT TARGET rocdecode-demo)
     set(IS_DISABLED ON)
 endif()
 
+# Preload the ASAN runtime first when the linked rocdecode is ASAN-instrumented (some ROCm
+# images ship it built with -fsanitize=address in non-sanitizer builds).
+rocprofiler_resolve_asan_preload(ROCDECODE_ASAN_PRELOAD "${rocdecode_LIBRARY}")
+
 rocprofiler_add_integration_execute_test(
     rocdecode-tracing
     COMMAND
@@ -32,7 +36,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     DISABLED ${IS_DISABLED}
-    PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>"
+    PRELOAD ${ROCDECODE_ASAN_PRELOAD} "$<TARGET_FILE:rocprofiler-sdk-json-tool>"
     ENVIRONMENT "ROCPROFILER_TOOL_OUTPUT_FILE=rocdecode-tracing-test.json"
     FIXTURES_SETUP rocdecode-tracing)
 
