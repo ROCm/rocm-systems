@@ -288,6 +288,17 @@ a ConSan detection.
 
 ## Progress log
 
+- 2026-07-22: The owner-qualified CDNA4 scalar-planning change moves the P0
+  HIP-matmul Record/Replay frontier beyond its earlier heterogeneous-object
+  rejection.  Artifact
+  `consan-gfx950-hip-matmul-record-replay-ownerqualified-20260722-261`
+  emits and installs a 2,291,168-byte patched object, selects all 739 accesses
+  and 109 barriers, and patches 709 accesses plus every barrier.  The first
+  instrumented dispatch then causes a physical-GPU memory fault, so the cell
+  remains red and the next bounded problem is emitted-code/runtime
+  correctness.  This is progress in implementation reach, not workload
+  acceptance.
+
 - 2026-07-22: The first P0 HIP-matmul Inline Shadow assessment advances from
   gray to red.  Artifact `consan-gfx950-hip-matmul-inline-clean-20260722-258`
   analyzes all 46 kernels, then rejects before execution at the identical
