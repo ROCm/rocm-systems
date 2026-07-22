@@ -481,7 +481,11 @@ set(CPACK_DEBIAN_DEV_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "libdrm-dev, sudo, libc6, python3 (>= 3.6.8)")
 set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
-set(CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
+# The tests package ships amdsmitst, which dynamically links libamd_smi.so from
+# the main package. Keep amd-smi-lib (set by generic_package()) as the first
+# dependency and append the runtime deps, so the tests package is never
+# installable without the library it links against.
+set(CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS "${CPACK_PACKAGE_NAME}, ${CPACK_DEBIAN_PACKAGE_DEPENDS}")
 
 # $CURRENT_YEAR is used by copyright.in
 string(TIMESTAMP CURRENT_YEAR "%Y")
@@ -590,7 +594,10 @@ message(STATUS "amdsmi RPM python interpreter dependency: ${_amdsmi_py_req}")
 set(CPACK_RPM_PACKAGE_REQUIRES "libdrm-devel, sudo, ${_amdsmi_py_req}")
 set(CPACK_RPM_DEV_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
 set(CPACK_RPM_ASAN_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
-set(CPACK_RPM_TESTS_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
+# amdsmitst dynamically links libamd_smi.so; keep amd-smi-lib (set by
+# generic_package()) first and append the runtime requires so the tests RPM
+# cannot install without the library it links against.
+set(CPACK_RPM_TESTS_PACKAGE_REQUIRES "${CPACK_PACKAGE_NAME}, ${CPACK_RPM_PACKAGE_REQUIRES}")
 
 # don't terminate if bytecompile of python files fails
 set(CPACK_RPM_SPEC_MORE_DEFINE "%define _python_bytecompile_errors_terminate_build 0")
