@@ -510,6 +510,13 @@ public:
   bool debug_halted() const { return debug_halted_; }
   void set_debug_halted(bool v) { debug_halted_ = v; }
 
+  /// @brief Whether KFD has temporarily suspended this wave's queue.
+  /// @details Queue suspension freezes execution for a stable CWSR snapshot,
+  /// but unlike debug_halted it does not imply an architectural stop reason.
+  bool debug_suspended() const { return debug_suspended_; }
+  void set_debug_suspended(bool v) { debug_suspended_ = v; }
+  bool debug_paused() const { return debug_halted_ || debug_suspended_; }
+
   /// @brief Whether a future debugger resume should request single-step mode.
   bool debug_single_step() const { return single_step_; }
   void set_debug_single_step(bool v) { single_step_ = v; }
@@ -611,6 +618,7 @@ public:
     trap_interrupt_sent_ = false;
     trap_saved_exec_ = 0;
     debug_halted_ = false;
+    debug_suspended_ = false;
     single_step_ = false;
     trap_id_ = 0;
     debug_wave_id_ = 0;
@@ -681,6 +689,7 @@ private:
   bool trap_interrupt_sent_ = false; ///< Handler issued MSG_INTERRUPT for this entry.
   uint64_t trap_saved_exec_ = 0;     ///< Interrupted EXEC restored after handler completion.
   bool debug_halted_ = false;        ///< Stopped by the debugger (skipped by scheduler).
+  bool debug_suspended_ = false;     ///< Queue-suspended for a stable CWSR snapshot.
   bool single_step_ = false;         ///< Execute one instruction on resume, then re-stop.
   uint32_t trap_id_ = 0;             ///< Trap id from the last s_trap (breakpoint = 1).
   uint64_t debug_wave_id_ = 0;       ///< Stable debugger wave id (TTMP4:5); 0 until assigned.

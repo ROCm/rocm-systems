@@ -34,10 +34,12 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -423,6 +425,7 @@ public:
   ///   shared partition engine thread (CP and its CUs share one partition, asserted in
   ///   CommandProcessor::startup()); callers on any other thread would race a halt().
   bool has_active_wfs() const {
+    std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
     for (const auto &w : wfs_)
       if (!w->is_halted())
         return true;
@@ -436,13 +439,20 @@ public:
   /// @ref has_active_wfs so the engine can quiesce while a wave is stopped at
   /// a breakpoint. @retval true At least one non-halted, non-debug-halted wave.
   bool has_runnable_wfs() const {
+    std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
     for (const auto &w : wfs_)
-      if (!w->is_halted() && !w->debug_halted())
+      if (!w->is_halted() && !w->debug_paused())
         return true;
     return false;
   }
 
+  template <typename F> decltype(auto) with_wave_state_locked(F &&fn) {
+    std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
+    return std::forward<F>(fn)();
+  }
+
   bool has_active_wfs_for_process(uint32_t process_id) const {
+    std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
     for (const auto &w : wfs_)
       if (!w->is_halted() && w->process_id() == process_id)
         return true;
@@ -633,6 +643,7 @@ protected:
   std::unique_ptr<Decoder> decoder_;
   simdojo::RegisterFile<uint32_t> sgpr_file_{"sgpr"};
   std::vector<std::unique_ptr<Wavefront>> wfs_; ///< Pre-allocated wavefront slots.
+  mutable std::recursive_mutex wave_state_mutex_;
   std::unique_ptr<WavefrontScheduler> scheduler_ = std::make_unique<OldestFirstScheduler>();
   uint64_t cycle_counter_ = 0;
 

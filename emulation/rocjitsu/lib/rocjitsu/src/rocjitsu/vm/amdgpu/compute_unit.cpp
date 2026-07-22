@@ -109,6 +109,7 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
 
 Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
                                         uint32_t num_vgprs) {
+  std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
   assert(wfs_.size() == config_.num_wf_slots && "wavefront slots not properly initialized");
   // Halted wavefronts have already freed their SGPR/VGPR blocks at s_endpgm, so a
   // halted slot is immediately available. Find an idle slot.
@@ -175,6 +176,7 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
 }
 
 size_t ComputeUnitCore::num_wfs() const {
+  std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
   size_t count = 0;
   for (const auto &w : wfs_)
     if (!w->is_halted())
@@ -183,6 +185,7 @@ size_t ComputeUnitCore::num_wfs() const {
 }
 
 void ComputeUnitCore::free_wavefront_resources(Wavefront &wf) {
+  std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
   if (wf.sgpr_alloc().count > 0) {
     sgpr_file_.free(wf.sgpr_alloc().base);
     free_vgprs(wf.vgpr_alloc().base);
@@ -568,10 +571,11 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
 }
 
 bool ComputeUnitCore::step() {
+  std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
   update_wf_states();
 
   for (auto &wf : wfs_) {
-    if (wf->state() == WfState::RUNNING && !wf->debug_halted()) {
+    if (wf->state() == WfState::RUNNING && !wf->debug_paused()) {
       const bool single_step = wf->debug_single_step();
       issue_instruction(wf.get());
       if (single_step && !wf->in_trap_handler() && !wf->debug_halted() && single_step_handler_)

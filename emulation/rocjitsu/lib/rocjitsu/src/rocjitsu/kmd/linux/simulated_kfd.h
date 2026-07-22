@@ -301,7 +301,7 @@ private:
   void report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
                            uint32_t gpu_id, uint64_t ctx_base, uint32_t ctx_size,
                            uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP));
-  void resume_debug_queues(KfdProcess *proc);
+  int resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uint32_t num_queues);
   void apply_cwsr_to_wave(amdgpu::Wavefront &wf, const kmd::CwsrWaveState &state);
 
   /// @brief Address-watchpoint handler installed on every compute unit.
@@ -335,12 +335,14 @@ private:
 
   /// @brief Stop the target's running waves and refresh their CWSR areas
   /// (KFD_IOC_DBG_TRAP_SUSPEND_QUEUES).
-  void suspend_debug_queues(KfdProcess *proc);
+  int suspend_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uint32_t num_queues,
+                           uint64_t exception_mask);
 
   /// @brief Clear the CWSR area of any of the target's queues whose stopped waves
   /// have completed, so rocm-dbgapi prunes them cleanly instead of reading a
   /// stale wave against an advanced read_dispatch_id (KFD_IOC_DBG_TRAP_SUSPEND).
-  void clear_completed_debug_queues(KfdProcess *proc);
+  void clear_completed_debug_queues(KfdProcess *proc, const uint32_t *queue_ids,
+                                    uint32_t num_queues);
   /// @brief Record a debug exception on a queue and reflect it on the snapshot.
   void raise_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
                          uint32_t gpu_id, uint64_t exception_mask);

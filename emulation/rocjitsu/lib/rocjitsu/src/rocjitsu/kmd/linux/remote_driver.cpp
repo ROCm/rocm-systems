@@ -380,6 +380,8 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   uint64_t saved_dbg_snapshot_ptr = 0;
   uint32_t saved_dbg_snapshot_count = 0;
   uint32_t saved_dbg_snapshot_stride = 0;
+  uint64_t saved_dbg_queue_array_ptr = 0;
+  uint32_t saved_dbg_queue_count = 0;
   if (has_embedded_pointers(request)) {
     switch (request) {
     case AMDKFD_IOC_WAIT_EVENTS:
@@ -416,6 +418,14 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         saved_dbg_snapshot_ptr = dbg->query_exception_info.info_ptr;
         saved_dbg_snapshot_count = 1;
         saved_dbg_snapshot_stride = dbg->query_exception_info.info_size;
+        break;
+      case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+        saved_dbg_queue_array_ptr = dbg->suspend_queues.queue_array_ptr;
+        saved_dbg_queue_count = dbg->suspend_queues.num_queues;
+        break;
+      case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
+        saved_dbg_queue_array_ptr = dbg->resume_queues.queue_array_ptr;
+        saved_dbg_queue_count = dbg->resume_queues.num_queues;
         break;
       default:
         break;
@@ -478,6 +488,12 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
         inline_size = dbg->query_exception_info.info_size;
         break;
+      case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+        inline_size = static_cast<size_t>(dbg->suspend_queues.num_queues) * sizeof(uint32_t);
+        break;
+      case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
+        inline_size = static_cast<size_t>(dbg->resume_queues.num_queues) * sizeof(uint32_t);
+        break;
       default:
         break;
       }
@@ -486,8 +502,13 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       // multi-gigabyte allocation or the wire length can truncate.
       if (inline_size > UINT32_MAX - (buf.size() - sizeof(RpcHeader)))
         return -E2BIG;
-      if (inline_size > 0)
+      if (inline_size > 0) {
+        const size_t inline_offset = buf.size();
         buf.resize(buf.size() + inline_size);
+        if (saved_dbg_queue_array_ptr != 0)
+          std::memcpy(buf.data() + inline_offset,
+                      reinterpret_cast<const void *>(saved_dbg_queue_array_ptr), inline_size);
+      }
       break;
     }
     default:
@@ -585,6 +606,12 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
           dbg->query_exception_info.info_ptr = saved_dbg_snapshot_ptr;
           break;
+        case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+          dbg->suspend_queues.queue_array_ptr = saved_dbg_queue_array_ptr;
+          break;
+        case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
+          dbg->resume_queues.queue_array_ptr = saved_dbg_queue_array_ptr;
+          break;
         default:
           break;
         }
@@ -660,6 +687,17 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
           if (resp->result == 0) {
             dst = reinterpret_cast<void *>(saved_dbg_snapshot_ptr);
             copy_len = std::min(static_cast<size_t>(saved_dbg_snapshot_stride), extra);
+          }
+          break;
+        case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+        case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
+          // KFD returns a non-negative queue count on success and annotates
+          // every requested ID with ERROR/INVALID status bits in the same
+          // caller-owned array.
+          if (resp->result >= 0) {
+            dst = reinterpret_cast<void *>(saved_dbg_queue_array_ptr);
+            copy_len =
+                std::min(static_cast<size_t>(saved_dbg_queue_count) * sizeof(uint32_t), extra);
           }
           break;
         default:

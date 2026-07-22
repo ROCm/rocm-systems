@@ -239,6 +239,28 @@ public:
       uint64_t address = 0;
       uint64_t mask = 0;
       uint32_t mode = 0;
+
+      /// @brief Construct the full hardware compare state from the KFD UAPI.
+      /// @details KFD transports only the programmable low 32 mask bits. The
+      /// upper address bits are fixed compares in TCP_WATCH and must remain
+      /// set, or unrelated addresses with the same low 32 bits alias.
+      static constexpr AddressWatch from_kfd(uint64_t address, uint32_t mask, uint32_t mode) {
+        return AddressWatch{true, address, 0xFFFFFFFF00000000ULL | mask, mode};
+      }
+
+      /// @brief Return whether an access overlaps the watched address block.
+      [[nodiscard]] constexpr bool overlaps(uint64_t access_address, uint32_t bytes) const {
+        if (!active || bytes == 0)
+          return false;
+        const uint64_t block_base = address & mask;
+        const uint64_t block_size = ~mask + 1;
+        const uint64_t access_end =
+            access_address > UINT64_MAX - bytes ? UINT64_MAX : access_address + bytes;
+        const uint64_t block_end = block_size == 0 || block_base > UINT64_MAX - block_size
+                                       ? UINT64_MAX
+                                       : block_base + block_size;
+        return block_size == 0 || (access_address < block_end && block_base < access_end);
+      }
     };
     static constexpr uint32_t kMaxAddressWatches = 4;
     AddressWatch address_watches[kMaxAddressWatches];

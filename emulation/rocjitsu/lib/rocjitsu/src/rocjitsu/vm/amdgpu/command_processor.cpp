@@ -522,6 +522,41 @@ void CommandProcessor::update_queue(uint32_t queue_id, uint32_t process_id, uint
   }
 }
 
+void CommandProcessor::set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id,
+                                                 bool suspended) {
+  bool wake_command_processor = false;
+  {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    for (size_t index = 0; index < hw_queues_.size(); ++index) {
+      auto &q = hw_queues_[index];
+      if (q.queue_id == queue_id && q.process_id == process_id) {
+        if (q.debug_suspended == suspended)
+          continue;
+        q.debug_suspended = suspended;
+        if (suspended) {
+          // Existing queue work needs a resume pass only when the gate, rather
+          // than an earlier incomplete dispatch, is what prevents it from
+          // running. Resident waves are reactivated directly by KFD resume.
+          auto &state = new_queue_states_[index];
+          if (state.next_dispatch_idx < state.entries.size()) {
+            const auto &entry = state.entries[state.next_dispatch_idx];
+            const bool barrier_ready =
+                !entry.barrier_bit || barrier_satisfied(state, state.next_dispatch_idx);
+            q.debug_work_deferred =
+                barrier_ready && (entry.is_non_kernel() || !entry.fully_dispatched());
+          } else {
+            q.debug_work_deferred = false;
+          }
+        } else {
+          wake_command_processor |= std::exchange(q.debug_work_deferred, false);
+        }
+      }
+    }
+  }
+  if (wake_command_processor && engine())
+    engine()->schedule_event_now(&doorbell_event_);
+}
+
 void CommandProcessor::set_doorbell_base(uint32_t process_id, void *base) {
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
   for (auto &q : hw_queues_) {
@@ -759,7 +794,7 @@ HwQueueState *CommandProcessor::schedule_next_queue() {
   for (size_t i = 0; i < new_queue_states_.size(); ++i) {
     size_t idx = (start + i) % new_queue_states_.size();
     auto &qs = new_queue_states_[idx];
-    if (hw_queues_[idx].is_sdma)
+    if (hw_queues_[idx].is_sdma || hw_queues_[idx].debug_suspended)
       continue;
     if (qs.next_dispatch_idx < qs.entries.size()) {
       next_queue_idx_ = (idx + 1) % new_queue_states_.size();
@@ -1131,7 +1166,10 @@ void CommandProcessor::on_cu_idle() {
 
   // Retire any non-kernel entries (barriers with total_wgs==0) that are now at
   // the head, then drain again so a dependent kernel behind them can proceed.
-  for (auto &qs : new_queue_states_) {
+  for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
+    if (hw_queues_[qi].debug_suspended)
+      continue;
+    auto &qs = new_queue_states_[qi];
     while (qs.next_dispatch_idx < qs.entries.size()) {
       auto &e = qs.entries[qs.next_dispatch_idx];
       if (e.barrier_bit && !barrier_satisfied(qs, qs.next_dispatch_idx))
@@ -1156,7 +1194,10 @@ void CommandProcessor::on_cu_idle() {
   std::vector<bool> was_idle(cus_.size());
   for (size_t i = 0; i < cus_.size(); ++i)
     was_idle[i] = cus_[i]->is_idle();
-  for (auto &qs : new_queue_states_) {
+  for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
+    if (hw_queues_[qi].debug_suspended)
+      continue;
+    auto &qs = new_queue_states_[qi];
     if (qs.next_dispatch_idx < qs.entries.size()) {
       auto &entry = qs.entries[qs.next_dispatch_idx];
       if (entry.barrier_bit && !barrier_satisfied(qs, qs.next_dispatch_idx))
@@ -1182,7 +1223,7 @@ bool CommandProcessor::step() {
 
 void CommandProcessor::process_queues() {
   for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
-    if (hw_queues_[qi].is_sdma)
+    if (hw_queues_[qi].is_sdma || hw_queues_[qi].debug_suspended)
       continue;
     auto &qs = new_queue_states_[qi];
     while (qs.next_dispatch_idx < qs.entries.size()) {
@@ -1485,6 +1526,17 @@ void CommandProcessor::arm_stall_recheck(simdojo::Tick now) {
 void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdojo::Tick now) {
   if (!memory_)
     return;
+  if (queue.debug_suspended) {
+    // A command-processor event can race a debugger suspension even when this
+    // queue has no new packets. Do not turn that stale event into an endless
+    // resume/event chain: request a resume pass only when packet fetch really
+    // was deferred. Compute queues count packets; SDMA queues count bytes.
+    const uint64_t write_idx = read_gpu_u64(queue.write_ptr_va, queue.process_id);
+    const uint64_t read_idx = read_gpu_u64(queue.read_ptr_va, queue.process_id);
+    const uint64_t fetch_idx = queue.is_sdma ? read_idx : std::max(read_idx, queue.fetch_cursor);
+    queue.debug_work_deferred |= fetch_idx < write_idx;
+    return;
+  }
   if (queue.host_accessible ? (queue.doorbell_base == nullptr) : (queue.doorbell_va == 0))
     return;
 
@@ -1792,6 +1844,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
 }
 
 void CommandProcessor::handle_doorbell(simdojo::Tick now) {
+  doorbell_handle_count_.fetch_add(1, std::memory_order_relaxed);
   // Release so the doorbell poll thread's acquire-load cannot observe a stale
   // "pending" after this handler has re-fetched; pairs with the release-stores at
   // the INVALID-packet and barrier/dependency stall sites. A site that is still
@@ -1829,7 +1882,7 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
     progress = false;
 
     for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
-      if (hw_queues_[qi].is_sdma)
+      if (hw_queues_[qi].is_sdma || hw_queues_[qi].debug_suspended)
         continue;
       auto &qs = new_queue_states_[qi];
 
@@ -1928,6 +1981,8 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
     fetch_from_queue(hw_queues_[i], new_queue_states_[i], now);
   // Process any new non-kernel entries (barriers with total_wgs==0).
   for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
+    if (hw_queues_[qi].debug_suspended)
+      continue;
     auto &qs = new_queue_states_[qi];
     while (qs.next_dispatch_idx < qs.entries.size()) {
       auto &entry = qs.entries[qs.next_dispatch_idx];

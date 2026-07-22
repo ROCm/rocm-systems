@@ -173,6 +173,18 @@ bool reconstruct_embedded_pointers(uint32_t cmd, void *arg, size_t arg_size, siz
       if (args->query_exception_info.info_size > 0 && args->query_exception_info.info_ptr != 0)
         args->query_exception_info.info_ptr = reinterpret_cast<uint64_t>(extra);
       break;
+    case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+      if (!has_entries(args->suspend_queues.num_queues, sizeof(uint32_t)))
+        return false;
+      if (args->suspend_queues.num_queues > 0 && args->suspend_queues.queue_array_ptr != 0)
+        args->suspend_queues.queue_array_ptr = reinterpret_cast<uint64_t>(extra);
+      break;
+    case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
+      if (!has_entries(args->resume_queues.num_queues, sizeof(uint32_t)))
+        return false;
+      if (args->resume_queues.num_queues > 0 && args->resume_queues.queue_array_ptr != 0)
+        args->resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(extra);
+      break;
     default:
       break;
     }
