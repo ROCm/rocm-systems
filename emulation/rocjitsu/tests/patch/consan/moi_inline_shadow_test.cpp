@@ -354,8 +354,8 @@ TEST(ConSanMoi, Cdna4InlineShadowAvoidsOriginalPhysicalVccPair) {
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
   std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words, "physical_vcc_boundary");
   mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
-    // Nine allocation quanta give the original kernel 72 user SGPRs. CDNA4
-    // physically places VCC in the highest pair, s70:s71.
+    // Nine allocation quanta give the original kernel 72 SGPRs. CDNA4 keeps
+    // a six-register allocation tail and therefore places VCC at s66:s67.
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                     kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 8u);
   });
@@ -369,8 +369,10 @@ TEST(ConSanMoi, Cdna4InlineShadowAvoidsOriginalPhysicalVccPair) {
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
-  EXPECT_EQ(*result.resolved_moi_dispatch_id_sgpr, 68u);
-  EXPECT_EQ(*result.resolved_moi_exec_save_sgpr, 72u);
+  // Growing to 80 SGPRs moves VCC to s74:s75, so s72:s73 is a safe dispatch
+  // pair. The large transient window remains inside the original allocation.
+  EXPECT_EQ(*result.resolved_moi_dispatch_id_sgpr, 72u);
+  EXPECT_EQ(*result.resolved_moi_exec_save_sgpr, 2u);
 }
 
 TEST(ConSanMoi, Cdna4InlineShadowForcedSpillRotatesLocalExchangeTuple) {

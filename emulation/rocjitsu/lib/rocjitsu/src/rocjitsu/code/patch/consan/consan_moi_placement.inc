@@ -455,6 +455,33 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
   return std::min<uint32_t>(allocated, kMaxSgprs);
 }
 
+// CDNA4 places VCC six registers below the end of each encoded eight-SGPR
+// allocation granule.  The largest encoded granule is 112 registers while
+// the architectural scalar file ends at VCC s106:s107, so the decoded count
+// is clamped to 108 even though the same six-register tail rule still applies.
+[[nodiscard]] std::optional<uint16_t> cdna4_physical_vcc_base(uint32_t decoded_sgpr_count) {
+  constexpr uint32_t kSgprGranularity = 8u;
+  constexpr uint32_t kCdna4AllocationTailAfterOrdinarySgprs = 6u;
+  const uint32_t encoded_allocation = util::align_up(decoded_sgpr_count, kSgprGranularity);
+  if (encoded_allocation < kCdna4AllocationTailAfterOrdinarySgprs)
+    return std::nullopt;
+  const uint32_t base = encoded_allocation - kCdna4AllocationTailAfterOrdinarySgprs;
+  if (base > std::numeric_limits<uint16_t>::max())
+    return std::nullopt;
+  return static_cast<uint16_t>(base);
+}
+
+[[nodiscard]] bool cdna4_sgpr_window_conflicts_with_physical_vcc(uint16_t base, uint16_t width,
+                                                                 uint32_t current_sgpr_count) {
+  const auto original_vcc = cdna4_physical_vcc_base(current_sgpr_count);
+  if (!original_vcc || range_overlaps(base, width, *original_vcc, 2u))
+    return true;
+  const uint32_t required_count =
+      std::max<uint32_t>(current_sgpr_count, static_cast<uint32_t>(base) + width);
+  const auto grown_vcc = cdna4_physical_vcc_base(required_count);
+  return !grown_vcc || static_cast<uint32_t>(base) + width > *grown_vcc;
+}
+
 [[nodiscard]] std::optional<uint16_t> moi_descriptor_owner_shift(std::span<const uint8_t> image,
                                                                  uint64_t descriptor_file_offset,
                                                                  std::vector<std::string> &errors) {
@@ -1741,14 +1768,13 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
             (options.moi_dynamic_stack_spill &&
              range_overlaps(candidate, count, /*stack top=*/32u, /*stack registers=*/2u)))
           continue;
-        const bool overlaps_original_cdna4_vcc =
+        const bool conflicts_with_cdna4_vcc =
             arch == ROCJITSU_CODE_ARCH_CDNA4 && std::ranges::any_of(owners, [&](uint64_t owner) {
               const MoiKernelResourceContext *context = context_for_owner(owner);
-              return context != nullptr && context->current_sgpr_count >= 2u &&
-                     range_overlaps(candidate, count,
-                                    static_cast<uint16_t>(context->current_sgpr_count - 2u), 2u);
+              return context == nullptr || cdna4_sgpr_window_conflicts_with_physical_vcc(
+                                               candidate, count, context->current_sgpr_count);
             });
-        if (overlaps_original_cdna4_vcc)
+        if (conflicts_with_cdna4_vcc)
           continue;
         selected = candidate;
         break;
@@ -1969,17 +1995,13 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
 
   first = util::align_up(first, 2u);
   const uint16_t ordinary_sgpr_limit = moi_ordinary_sgpr_limit(arch);
-  const auto overlaps_original_cdna4_vcc = [&](uint16_t base) {
+  const auto conflicts_with_cdna4_vcc = [&](uint16_t base) {
     if (arch != ROCJITSU_CODE_ARCH_CDNA4)
       return false;
     return std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
-      if (plan.owner_descriptor_file_offsets.empty() || plan.current_sgpr_count < 2u)
+      if (plan.owner_descriptor_file_offsets.empty())
         return false;
-      // CDNA4 physically places VCC in the highest two allocated user SGPRs.
-      // Existing code may name that physical pair by logical SGPR number, so
-      // descriptor growth does not prove the old pair dead even when decoded
-      // ordinary operands stop below it.
-      return range_overlaps(base, count, static_cast<uint16_t>(plan.current_sgpr_count - 2u), 2u);
+      return cdna4_sgpr_window_conflicts_with_physical_vcc(base, count, plan.current_sgpr_count);
     });
   };
   for (uint32_t base = first; base + count <= ordinary_sgpr_limit; base += 2u) {
@@ -1987,7 +2009,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     // frame base even when those architectural roles are absent from ordinary
     // decoded operand liveness. Never assign either register to persistent
     // Inline scalar state.
-    if (overlaps_original_cdna4_vcc(static_cast<uint16_t>(base)) ||
+    if (conflicts_with_cdna4_vcc(static_cast<uint16_t>(base)) ||
         (options.moi_dynamic_stack_spill &&
          range_overlaps(static_cast<uint16_t>(base), count, /*stack top=*/32u,
                         /*stack registers=*/2u))) {
@@ -2066,7 +2088,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     };
     for (uint32_t base = 0; base + count <= ordinary_sgpr_limit; base += 2u) {
       if (unavailable_intersects(static_cast<uint16_t>(base)) ||
-          overlaps_original_cdna4_vcc(static_cast<uint16_t>(base)) ||
+          conflicts_with_cdna4_vcc(static_cast<uint16_t>(base)) ||
           (options.moi_dynamic_stack_spill &&
            range_overlaps(static_cast<uint16_t>(base), count, /*stack top=*/32u,
                           /*stack registers=*/2u)) ||
@@ -2439,6 +2461,14 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   const uint16_t dispatch_state_count = moi_dispatch_state_sgpr_count(options);
   const uint16_t ordinary_sgpr_limit = moi_ordinary_sgpr_limit(arch);
   for (uint32_t base = first; base + dispatch_state_count <= ordinary_sgpr_limit; base += 2u) {
+    if (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+        std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+          return !plan.owner_descriptor_file_offsets.empty() &&
+                 cdna4_sgpr_window_conflicts_with_physical_vcc(
+                     static_cast<uint16_t>(base), dispatch_state_count, plan.current_sgpr_count);
+        })) {
+      continue;
+    }
     if (options.moi_owner_sgpr && range_overlaps(static_cast<uint16_t>(base), dispatch_state_count,
                                                  *options.moi_owner_sgpr, 1u)) {
       continue;
@@ -2697,13 +2727,13 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
              range_overlaps(base, scalar_count, *options.moi_owner_sgpr, 1u))) {
           return true;
         }
-        return std::ranges::any_of(
-            result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
-              if (plan.owner_descriptor_file_offsets.empty() || plan.current_sgpr_count < 2u)
-                return false;
-              return range_overlaps(base, scalar_count,
-                                    static_cast<uint16_t>(plan.current_sgpr_count - 2u), 2u);
-            });
+        return std::ranges::any_of(result.resource_plans,
+                                   [&](const ConSanCandidateResourcePlan &plan) {
+                                     if (plan.owner_descriptor_file_offsets.empty())
+                                       return false;
+                                     return cdna4_sgpr_window_conflicts_with_physical_vcc(
+                                         base, scalar_count, plan.current_sgpr_count);
+                                   });
       };
       for (uint32_t base = first;
            base + scalar_count <= moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA4); ++base) {
@@ -2822,15 +2852,13 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
                  range_overlaps(base, scalar_count, *options.moi_owner_sgpr, 1u)) ||
                 range_overlaps(base, scalar_count, 32u, 2u))
               return true;
-            return std::ranges::any_of(
-                result.resource_plans, [&](const ConSanCandidateResourcePlan &scalar_plan) {
-                  if (scalar_plan.owner_descriptor_file_offsets.empty() ||
-                      scalar_plan.current_sgpr_count < 2u)
-                    return false;
-                  return range_overlaps(base, scalar_count,
-                                        static_cast<uint16_t>(scalar_plan.current_sgpr_count - 2u),
-                                        2u);
-                });
+            return std::ranges::any_of(result.resource_plans,
+                                       [&](const ConSanCandidateResourcePlan &scalar_plan) {
+                                         if (scalar_plan.owner_descriptor_file_offsets.empty())
+                                           return false;
+                                         return cdna4_sgpr_window_conflicts_with_physical_vcc(
+                                             base, scalar_count, scalar_plan.current_sgpr_count);
+                                       });
           };
           for (uint32_t base = first; base + scalar_count <= scalar_limit; ++base) {
             if (unavailable(static_cast<uint16_t>(base)))

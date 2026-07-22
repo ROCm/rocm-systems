@@ -1042,6 +1042,44 @@ TEST(ConSanMoi, Cdna4FirstLightProbeDescriptorGrowthUsesEightVgprGranules) {
             ConSanRegisterPlanReason::ExplicitMisaligned);
 }
 
+TEST(ConSanMoi, Cdna4FirstLightTransientSgprsAvoidOldAndGrownPhysicalVcc) {
+  const auto guest = build_cdna4_ds_store_b32(
+      /*vaddr=*/2, /*vdata=*/3, /*byte_offset=*/4, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(guest);
+  std::vector<uint32_t> text_words(300, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  std::copy(guest->begin(), guest->end(), text_words.begin());
+  text_words[2] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/33u, ROCJITSU_CODE_ARCH_CDNA4);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words, "physical_vcc_growth");
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    // Five allocation granules give 40 SGPRs and place VCC at s34:s35.
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 4u);
+  });
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  // s36:s40 avoids the original VCC pair. Growing to 48 SGPRs moves VCC to
+  // s42:s43, so the complete five-register window also remains ordinary.
+  EXPECT_EQ(*result.resolved_moi_exec_save_sgpr, 36u);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.kernels().size(), 1u);
+  KD descriptor{};
+  std::memcpy(&descriptor,
+              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              sizeof(descriptor));
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
+                            kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT),
+            5u);
+}
+
 TEST(ConSanMoi, Cdna4FirstLightProbeForcedSpillUsesNativePrivateWindow) {
   std::vector<uint32_t> text_words(260, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
   text_words[0] = 0xd81a0004u;
