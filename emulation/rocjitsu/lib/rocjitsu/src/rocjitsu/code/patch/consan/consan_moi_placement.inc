@@ -1872,7 +1872,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       }
     }
     const std::optional<uint16_t> dispatch_id_sgpr =
-        options.moi_dispatch_id_sgpr &&
+        options.moi_dispatch_id_sgpr && !spill_backed &&
                 component_max_referenced_sgpr_count <= *options.moi_dispatch_id_sgpr
             ? options.moi_dispatch_id_sgpr
             : std::nullopt;
@@ -2347,8 +2347,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       });
   const bool needs_dispatch_id =
       has_inline_dispatch_consumer ||
-      (options.moi_engine == ConSanMoiEngine::RecordReplay &&
-       arch == ROCJITSU_CODE_ARCH_GFX1250) ||
+      (options.moi_engine == ConSanMoiEngine::RecordReplay && arch == ROCJITSU_CODE_ARCH_GFX1250) ||
       (options.moi_engine == ConSanMoiEngine::Sampled && options.moi_runtime_sample_stride > 1u &&
        arch != ROCJITSU_CODE_ARCH_GFX1250);
   if (!needs_dispatch_id || !options.moi_report_buffer_address || options.moi_dispatch_id_sgpr) {
@@ -2374,8 +2373,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   }
 
   const auto qualify_owner_local_assignments = [&](uint16_t dispatch_base) {
-    for (ConSanMoiTransientSgprAssignment &assignment :
-         options.moi_transient_sgpr_assignments) {
+    for (ConSanMoiTransientSgprAssignment &assignment : options.moi_transient_sgpr_assignments) {
       uint32_t max_referenced_sgpr_count = 0u;
       for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
         if (std::ranges::find(plan.owner_descriptor_file_offsets,
@@ -2386,8 +2384,16 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
         max_referenced_sgpr_count =
             std::max<uint32_t>(max_referenced_sgpr_count, plan.max_referenced_sgpr_count);
       }
+      // A spill-backed component deliberately borrows otherwise live scalar
+      // state around its out-of-line body.  Extending that component with a
+      // persistent dispatch pair changes the spill protocol and can expose
+      // guest state while its scratch save is still outstanding.  Retain the
+      // zero-generation replay fallback for that uncommon component; ordinary
+      // owners still publish the runtime dispatch identity.
       assignment.dispatch_id_sgpr =
-          max_referenced_sgpr_count <= dispatch_base ? std::optional(dispatch_base) : std::nullopt;
+          !assignment.spill_backed && max_referenced_sgpr_count <= dispatch_base
+              ? std::optional(dispatch_base)
+              : std::nullopt;
     }
     result.resolved_moi_transient_sgpr_assignments = options.moi_transient_sgpr_assignments;
   };
